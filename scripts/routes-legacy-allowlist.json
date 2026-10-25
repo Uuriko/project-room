@@ -2995,6 +2995,14 @@
     },
     {
       "method": "GET",
+      "path": "/offers"
+    },
+    {
+      "method": "HEAD",
+      "path": "/offers"
+    },
+    {
+      "method": "GET",
       "path": "/openapi.json"
     },
     {
@@ -6606,6 +6614,14 @@
     {
       "method": "POST",
       "path": "/oauth/token"
+    },
+    {
+      "method": "GET",
+      "path": "/offers"
+    },
+    {
+      "method": "HEAD",
+      "path": "/offers"
     },
     {
       "method": "GET",

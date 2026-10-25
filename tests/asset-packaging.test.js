@@ -8,7 +8,6 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
 import { templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
-
 // Decision #36 (#3254, Option A): the generated agent pages are build output
 // and never committed, so a plain checkout (and every exact-commit package)
 // legitimately lacks them; the deploy build generates them first (the
@@ -18,7 +17,7 @@ import { templateAssetPaths, generatedAgentPages } from '../server/public-assets
 const absentGenerated = file => generatedAgentPages.includes(file) && !existsSync(new URL('../' + file, import.meta.url));
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { frontDoorHtml } from '../server/github-oauth.mjs';
+import { renderOffersHtml } from '../server/offers-page.mjs';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'room-assets-'));
@@ -69,7 +68,14 @@ test('every local browser import is included in the deployment allowlist', async
   }
 });
 test('the HTTP allowlist serves every packaged browser asset with exact bytes', async t => {
-  const store = new RoomStore(':memory:'), server = createRoomServer({ store });
+  // index.html on disk includes the GitHub anchor. An unconfigured server
+  // strips that anchor before serving (human-onboarding-doors). This check
+  // is the packaged bytes, so the server is given a GitHub config and the
+  // strip does not run.
+  const store = new RoomStore(':memory:'), server = createRoomServer({
+    store,
+    githubAuth: { clientId: 'fixture-client', clientSecret: 'fixture-secret' }
+  });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -77,8 +83,11 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
     const disk = await readFile(new URL('../' + path, import.meta.url));
-    // The fixture server has no GitHub auth, so the front door omits that anchor.
-    const expected = path === 'index.html' ? Buffer.from(frontDoorHtml(disk, { githubConfigured: false })) : disk;
+    // /offers.html is the packaged shell. The server aliases it to /offers
+    // and fills the shelf at read time, so an empty room is the rendered page.
+    const expected = path === 'offers.html'
+      ? Buffer.from(renderOffersHtml(disk.toString('utf8'), { offers: [] }))
+      : disk;
     assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
   // Absent generated pages are the designed package state (decision #36):

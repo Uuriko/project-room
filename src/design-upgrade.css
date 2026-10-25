@@ -1,0 +1,83 @@
+/* Design upgrade. Tokens only. Loaded with the UI module, not the first paint. */
+.design-upgrade-needs,
+.design-upgrade-dialog button,
+.design-upgrade-ack button,
+.design-upgrade-result,
+.design-upgrade-panel button {
+  min-height: var(--control-min-target-coarse);
+}
+.design-upgrade-needs:focus-visible,
+.design-upgrade-dialog button:focus-visible,
+.design-upgrade-ack button:focus-visible,
+.design-upgrade-result:focus-visible,
+.design-upgrade-panel a:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+.design-upgrade-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  margin-left: var(--space-1);
+  padding: 0 var(--space-1);
+  border-radius: var(--radius-sm);
+  background: var(--blue-strong);
+  color: var(--on-accent);
+  font-size: var(--text-xs);
+}
+.design-upgrade-dialog {
+  width: min(32rem, calc(100vw - 2rem));
+  max-height: min(70vh, 40rem);
+  box-sizing: border-box;
+  overflow: auto;
+  margin: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background: var(--panel);
+  color: var(--text);
+}
+.design-upgrade-dialog::backdrop { background: rgb(0 0 0 / 45%); }
+.design-upgrade-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.design-upgrade-head h2 { margin: 0; font-size: var(--text-lg); }
+.design-upgrade-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-2);
+}
+.design-upgrade-item {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--card);
+  overflow-wrap: anywhere;
+}
+.design-upgrade-kind { margin: 0; color: var(--muted); font-size: var(--text-xs); }
+.design-upgrade-title { margin: 0; font-size: var(--text-md); }
+.design-upgrade-note { margin: 0; color: var(--muted); font-size: var(--text-sm); }
+.design-upgrade-status,
+.design-upgrade-ack {
+  margin: 0 0 var(--space-2);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.design-upgrade-status { color: var(--text); font-weight: 600; }
+.design-upgrade-panel {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+  overflow-wrap: anywhere;
+}
+.design-upgrade-panel a { color: var(--blue); }
+.design-upgrade-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }

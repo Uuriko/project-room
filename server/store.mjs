@@ -78,6 +78,7 @@ import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates ma
 import { buildRoomDigest } from "./room-digest.mjs"; // C-06 room digest composition.
 import { roomAttention } from "./needs-me.mjs"; // C-06: per-room needs-me slice for the digest.
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
+import { MemberStatusLines, memberStatusLineSchema } from "./member-status-lines.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { InboxHandoffJournal, inboxHandoffRoomSchema, inboxHandoffSchema } from "./inbox-handoff.mjs";
@@ -1132,7 +1133,7 @@ function roomSchemaStamp() {
     wakeQueuePauseBySchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
-    telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
+    telegramLiveStatusSchema, memberStatusLineSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
     roomPublicFaceSchema, agentPublicPageSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
@@ -1452,6 +1453,7 @@ export class RoomStore {
     this.connections = this.email; // Every channel connection (email, Telegram) shares the importer.
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
     this.telegramLiveStatus = new DurableTelegramLiveStatus(this); // Task 10: durable live-delivery/send facts.
+    this.memberStatusLines = new MemberStatusLines(this);
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
     this.jevShadow = new JevShadowJournal(this); // Jev-harness shadow-decision journal (docs/JEV-GATES.md): append-only measurement, never enforced.
 this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
@@ -1789,6 +1791,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(channelJournalSchema);
       // The durable Telegram live status (task 10) is purely additive as well.
       this.db.exec(telegramLiveStatusSchema);
+      this.db.exec(memberStatusLineSchema);
       // The spam-guard quarantine journal is purely additive as well:
       // IF NOT EXISTS is idempotent, no schema version bump, and the table is
       // intentionally outside the writer fence (see unfencedAdditiveTables).

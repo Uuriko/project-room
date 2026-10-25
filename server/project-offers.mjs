@@ -185,13 +185,19 @@ export class ProjectOffers {
     if (after != null) identifier(after);
     // The unpublish predicate sits in the query (the HIDDEN_RECEIPT form used
     // by public-read-model) so a taken-down room's offers never consume a page slot.
+    // The deadline predicate sits in the query for the same reason: an offer
+    // whose deadline has passed is not open work, so it is not served as
+    // published here. The boundary matches the claim path (#3707): a deadline
+    // at or before now has passed. Deadlines are normalized to ISO form in
+    // termsOf, so a text comparison against the current ISO instant is exact.
     const rows = this.db.prepare(`SELECT o.* FROM project_offers o JOIN rooms r ON r.id=o.room_id WHERE o.status='published' AND r.archived_at IS NULL AND o.offer_id>?
-      AND NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=o.room_id) ORDER BY o.offer_id LIMIT ?`).all(after ?? '', size + 1);
+      AND NOT EXISTS (SELECT 1 FROM public_unpublish u WHERE u.kind='room' AND u.target=o.room_id)
+      AND (json_extract(o.terms,'$.deadline') IS NULL OR json_extract(o.terms,'$.deadline')>?) ORDER BY o.offer_id LIMIT ?`).all(after ?? '', new Date(this.store.now()).toISOString(), size + 1);
     return { offers: rows.slice(0, size).map(row => this.record(row)), nextCursor: rows.length > size ? rows[size - 1].offer_id : null };
   }
   read(id) {
     identifier(id);
-    const row = this.db.prepare("SELECT o.* FROM project_offers o JOIN rooms r ON r.id=o.room_id WHERE o.offer_id=? AND o.status='published' AND r.archived_at IS NULL").get(id);
+    const row = this.db.prepare("SELECT o.* FROM project_offers o JOIN rooms r ON r.id=o.room_id WHERE o.offer_id=? AND o.status='published' AND r.archived_at IS NULL AND (json_extract(o.terms,'$.deadline') IS NULL OR json_extract(o.terms,'$.deadline')>?)").get(id, new Date(this.store.now()).toISOString());
     if (!row || isUnpublished(this.db, 'room', row.room_id)) fail(404, 'offer_not_found', 'Offer not found');
     return this.record(row);
   }

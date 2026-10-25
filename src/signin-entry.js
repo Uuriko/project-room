@@ -3,7 +3,55 @@ import { createAuthSigninUI } from "./auth-signin-ui.js";
 import { applyStoredTheme } from "./account-settings-ui.js";
 import { rememberAccountHint } from "./browser-session.js";
 import { createSigninNavigation } from "./signin-navigation.js";
+import { roomIdFromHash } from "./room-deep-link.js";
 import { uiText } from "./strings.js";
+
+export const ROOM_RETURN_KEY = "project-room:signin-room:v1";
+
+function roomStorage(storage) {
+  if (storage) return storage;
+  try {
+    const store = globalThis.sessionStorage;
+    return store && typeof store.getItem === "function" ? store : null;
+  } catch { return null; }
+}
+
+export function roomIdFromRoomHash(hash) {
+  return roomIdFromHash(hash);
+}
+
+export function rememberRoomReturn(hash, storage) {
+  const id = roomIdFromHash(hash);
+  if (!id) return null;
+  try { roomStorage(storage)?.setItem(ROOM_RETURN_KEY, id); } catch { /* private mode */ }
+  return id;
+}
+
+export function readRoomReturn(storage) {
+  try {
+    const id = roomStorage(storage)?.getItem(ROOM_RETURN_KEY);
+    return id && roomIdFromHash(`#room/${id}`) ? id : null;
+  } catch { return null; }
+}
+
+export function takeRoomReturn(storage) {
+  const id = readRoomReturn(storage);
+  try { roomStorage(storage)?.removeItem(ROOM_RETURN_KEY); } catch { /* private mode */ }
+  return id;
+}
+
+export function signInToOpenLabel(id) {
+  return uiText("entry.signInToOpen", { id });
+}
+
+function restoreRememberedRoom() {
+  const roomId = readRoomReturn();
+  if (!roomId || roomIdFromHash(location.hash)) return roomId;
+  const target = new URL(location.href);
+  target.hash = `#room/${roomId}`;
+  history.replaceState(history.state, "", target.pathname + target.search + target.hash);
+  return roomId;
+}
 
 export function mountSigninEntry({ openWorkspace }) {
   const $ = selector => document.querySelector(selector);
@@ -29,7 +77,9 @@ export function mountSigninEntry({ openWorkspace }) {
     const session = await restore();
     if (!session?.authenticated) throw new Error(uiText("entry.sessionChanged"));
     rememberAccountHint();
+    restoreRememberedRoom();
     await enterWorkspace({ accountClient, signedIn: !location.search && !location.hash });
+    takeRoomReturn();
   };
   const signin = createAuthSigninUI({
     accountClient,
@@ -68,10 +118,13 @@ export function mountSigninEntry({ openWorkspace }) {
   const ensureAgent = () => agentFlight ??= import("./agent-signin-ui.js").then(({ createAgentSigninUI }) => {
     agentUi = createAgentSigninUI({
       onSignedIn: async session => {
+        const returned = readRoomReturn();
         const target = new URL(location.href);
-        target.searchParams.set("room", session.roomId);
-        history.replaceState(history.state, "", target.href);
+        target.searchParams.set("room", returned || session.roomId);
+        if (returned) target.hash = `#room/${returned}`;
+        history.replaceState(history.state, "", target.pathname + target.search + target.hash);
         await enterWorkspace();
+        takeRoomReturn();
       },
       firstRunActions: {
         greet: () => $("#message-input")?.focus(),
@@ -98,6 +151,11 @@ export function mountSigninEntry({ openWorkspace }) {
   $("#refresh-button").textContent = uiText("entry.refresh");
   $("#connection-explanation").textContent = uiText("entry.connection");
   signin.mount($("#auth-signin-ui"));
+  const openedRoom = rememberRoomReturn(location.hash);
+  if (openedRoom) {
+    const title = $("#auth-title");
+    if (title) title.textContent = signInToOpenLabel(openedRoom);
+  }
   // Integration (CX2-PERF, flagged for Codex on the integration PR): on current
   // main the wall's agent sign-in is the standalone /agent-signin page
   // (decision #37, PR #3445) — #agent-auth-step / #agent-signin-ui are not in

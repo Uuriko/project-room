@@ -23,6 +23,7 @@ import { WORK_CLAIM_ROUTES } from "./work-claims.mjs";
 import { PR_WEBHOOK_ROUTES } from "../claim-autolink.mjs";
 import { ROOM_DIGEST_ROUTES } from "./room-digest.mjs";
 import { TYPING_ROUTES } from "./typing.mjs";
+import { STATUS_LINE_ROUTES } from "./status-lines.mjs";
 import { WAKE_STATUS_ROUTES } from "./wake-status.mjs"; // plan-wake-live: wakeable / not-wakeable lists
 import { AGENT_PRESENCE_ROUTES } from "./agent-presence.mjs"; // Presence Gap 4: cross-room presence read
 import { SPEND_GRANT_ROUTES } from "./spend-grants.mjs"; // spend-primitive MVP
@@ -30,6 +31,7 @@ import { SPEND_PRICING_ROUTES } from "./spend-pricing.mjs"; // spend-pricing kil
 import { CODE_DROP_ROUTES } from "./code-drops.mjs"; // room-native patch exchange
 import { SQUAD_ROUTES } from "./squads.mjs"; // plan-squads
 import { PUBLIC_AGENT_PAGE_ROUTES } from "./public-agent-page.mjs";
+import { DESIGN_UPGRADE_ROUTES } from "./design-upgrade.mjs";
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
@@ -58,7 +60,7 @@ function unknownSchemaTypes(schema, out) {
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
 export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...DEMO_ROUTES, ...DOWNLOAD_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
-  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...PR_WEBHOOK_ROUTES]);
+  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...STATUS_LINE_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...PR_WEBHOOK_ROUTES, ...DESIGN_UPGRADE_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];

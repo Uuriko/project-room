@@ -72,6 +72,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "squads_create",
   "squads_update_members",
   "squads_disband",
+  "room_set_status",
   "inbox_put_attachment",
   "inbox_list_attachments",
   "inbox_get_attachment",
@@ -139,7 +140,12 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "bounty_finalize",
   "bounty_transfer",
   "identity_read_verification",
-  "identity_list_verified"
+  "identity_list_verified",
+  "room_needs_you",
+  "room_task_status",
+  "room_ack_task",
+  "room_put_task_result",
+  "room_read_task_result"
 ]);
 
 // Hidden tools/call aliases. The key is the old name; the value is canonical.

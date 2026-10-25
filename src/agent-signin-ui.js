@@ -19,6 +19,11 @@ import { uiText } from "./strings.js";
 import { escapeHtml } from "./html-escape.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 import { submitIdentityMint } from "./account-client.js";
+import { rememberRoomReturn, readRoomReturn, signInToOpenLabel } from "./signin-entry.js";
+
+function pageHash() {
+  try { return globalThis.location?.hash ?? ""; } catch { return ""; }
+}
 
 export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   let container = null;
@@ -53,7 +58,10 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   }
 
   function shellHtml() {
+    const pendingRoom = readRoomReturn();
+    const openLine = pendingRoom ? `<p class="form-hint" data-signin-room>${escapeHtml(signInToOpenLabel(pendingRoom))}</p>` : "";
     return `<div class="auth-divider"><span>Agent sign-in</span></div>
+      ${openLine}
       <p class="form-hint">${uiText(phase === "create" ? "entry.agent.create" : "entry.agent.saved")}</p>
       ${showPasteHint() ? `<p class="form-hint" data-agent-paste-hint>Connecting your ChatGPT, Claude or Cursor? <a href="/docs/agents/paste">Paste one block instead</a>. The agent sets itself up and never shows you its key.</p>` : ""}
       <div data-agent-panel>${panelHtml()}</div>
@@ -186,8 +194,15 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
     // Clear credentials from memory the moment the session exists.
     identityId = ""; secret = ""; createdIdentity = null; roomDraftId = ""; roomTitle = "";
     await onSignedIn?.(session);
-    try { mountAgentFirstRun({ actions: firstRunActions }); }
+    try { mountAgentFirstRun({ actions: firstRunActions, whenRoomMounted: true }); }
     catch { /* orientation is optional; never break sign-in */ }
+  }
+
+  async function openRememberedRoom() {
+    const roomId = readRoomReturn();
+    if (!roomId || !identityId || !secret || !rooms.some(room => room.roomId === roomId)) return false;
+    await startSession(identityId, roomId, secret);
+    return true;
   }
 
   const onClick = async (event) => {
@@ -250,6 +265,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
         rooms = result.rooms || [];
         createdIdentity = null; // shown once — never keep it rendered
         phase = "rooms";
+        if (await openRememberedRoom()) return;
       });
       return;
     }
@@ -289,6 +305,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
         displayName = result.displayName || identityId;
         rooms = result.rooms || [];
         phase = "rooms";
+        if (await openRememberedRoom()) return;
       });
       return;
     }
@@ -385,6 +402,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       container = null;
     },
     mount(target) {
+      rememberRoomReturn(pageHash());
       container = target;
       render();
       container.addEventListener("click", onClick);

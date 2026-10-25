@@ -363,3 +363,7 @@ authorized work-items projection through an accessor; it introduces no writer,
 board mapping, or second state store. The application retains work mutations.
 
 2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.
+
+### Needs you inbox (2026-10-25)
+
+The reference census is now 60 files. `server/design-upgrade.mjs` reads `workItems` to decide which needs_you tasks belong in the signed-in member's inbox. It does not write work items, change field fates, or touch the board mapper.

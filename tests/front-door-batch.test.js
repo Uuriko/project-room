@@ -65,7 +65,7 @@ test("B-5: the toggle's name is the name the /receipts copy uses", () => {
 test("B-8: one coarse-pointer token, applied via the token", () => {
   assert.equal(DARK["--control-min-target-coarse"], "2.75rem");
   assert.match(read("src/styles.css"), /min-height: var\(--control-min-target-coarse\)/);
-  assert.match(read("server/receipts-page.mjs"), /@media\(pointer:coarse\)\{a\{display:inline-flex;align-items:center;min-height:var\(--control-min-target-coarse\)\}/);
+  assert.match(read("server/receipts-page.mjs"), /@media\(pointer:coarse\)\{nav a,li a,h2 a,a\.block-link\{min-height:var\(--control-min-target-coarse\)\}/);
   assert.match(read("src/project-offers.css"), /min-height: var\(--control-min-target-coarse\)/);
 });
 

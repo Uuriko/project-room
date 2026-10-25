@@ -101,6 +101,11 @@ h1 {
   max-width:570px;
   margin:0
 }
+.intro-note {
+  color:var(--muted);
+  max-width:570px;
+  margin:14px 0 0
+}
 .intro {
   padding-bottom:48px
 }
@@ -207,6 +212,16 @@ h1 {
   display:block;
   margin-top:19px;
   font-size:18px;
+  color:var(--accent)
+}
+.server-offer-card .card-links {
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:19px;
+  font-size:var(--text-sm)
+}
+.server-offer-card .card-links a {
   color:var(--accent)
 }
 .offer-detail {

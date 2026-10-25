@@ -235,6 +235,14 @@ const ALLOW = {
       reward: "the tool is the volunteer-scoped subset of the route.",
     },
   },
+  room_task_status: {
+    stricter: {
+      id: "Tool: 'Read one task's canonical status'. API: id is optional because the same GET also accepts ids for a batch of at most 40. Agents read one id.",
+    },
+    narrowed: {
+      ids: "The comma-separated batch is the board card paint (GET task-status?kind&ids). Agents call room_task_status with one id.",
+    },
+  },
   room_needs_me: {
     wireTyped: {
       since: "Tool: 'Complete returned cursor, unchanged. Legacy sequence numbers also accepted.' (untyped: the cursor is a JSON object, the legacy form a number). REST: the query-string wire encoding of the same logical value; the route description documents both forms ('since is a sequence number or the previous complete returned cursor object').",

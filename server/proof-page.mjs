@@ -44,12 +44,15 @@ body{margin:0;background:var(--bg);color:var(--text);font:17px/1.55 var(--font-s
 main{max-width:42rem;margin:0 auto;padding:2rem 1.25rem 3rem}
 h1{font-size:clamp(1.6rem,5vw,2.2rem);line-height:1.15;letter-spacing:-.03em}
 a{color:var(--blue)}
+/* Nav, lists, headings, and a link that is the whole paragraph. A link inside a sentence stays inline. */
+nav a,li a,h2 a,a.block-link{display:inline-block;max-width:100%;min-height:24px}
+p a:not(.block-link){padding-block:4px}
 .card{border-top:1px solid var(--line);padding:1rem 0;overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .meta{color:var(--muted);font-size:.9rem}
 .level{color:var(--text);font-weight:600}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 img,svg,table{max-width:100%}
-@media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}}`;
+@media(pointer:coarse){nav a,li a,h2 a,a.block-link{min-height:var(--control-min-target-coarse)}}`;
 
 function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
@@ -158,7 +161,7 @@ export function roomProofView(store, slug, { cursor = null } = {}) {
 <p class="meta">${escapeHtml(PROOF_LEVELS[entry.proofLevel].note)}</p>
 </article>`;
   }).join("") || `<p>No published results yet. A result appears here when work is settled in this room and the owner has public receipts on — each one as a receipt anyone can open.</p>`;
-  const next = nextCursor ? `<p><a href="/r/${escapeHtml(slug)}/proof?cursor=${escapeHtml(nextCursor)}">Older results</a></p>` : "";
+  const next = nextCursor ? `<p><a class="block-link" href="/r/${escapeHtml(slug)}/proof?cursor=${escapeHtml(nextCursor)}">Older results</a></p>` : "";
   const honesty = PROOF_HONESTY.map(line => `<li>${escapeHtml(line)}</li>`).join("");
   // Structured data mirrors this page's visible entries — same titles,
   // same level labels, same level notes — so a machine quoting the page
@@ -188,7 +191,7 @@ export function roomProofView(store, slug, { cursor = null } = {}) {
     ogImage: `${ROOM_ORIGIN}/r/${slug}/proof/og.png`,
     ogAlt: description,
   })}
-<body><header><p><a href="/">Project Room</a> · <a href="/r/${escapeHtml(slug)}">${escapeHtml(room.title)}</a> · <a href="/receipts">Public receipts</a></p></header>
+<body><header><nav><a href="/">Project Room</a> · <a href="/r/${escapeHtml(slug)}">${escapeHtml(room.title)}</a> · <a href="/receipts">Public receipts</a></nav></header>
 <main>
 <h1>${escapeHtml(room.title)} — proof of work</h1>
 <p>Finished work from this room that the owner chose to publish. Every entry names the level of proof its record carries and links to the receipt behind it — open the receipt to check the record itself.</p>
@@ -197,9 +200,9 @@ ${items}
 ${next}
 <h2>What this page proves — and what it does not</h2>
 <ul>${honesty}</ul>
-<p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
+<p><a class="block-link" href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
-<footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+<footer><nav><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></nav></footer>
 </body></html>`;
   return { html, document };
 }

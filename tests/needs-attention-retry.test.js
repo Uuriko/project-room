@@ -276,7 +276,7 @@ test("current active admin renders the queue when the owner-only reader returns 
   client.session.member.permissions = []; // Current state, not this snapshot, authorizes the reviewer.
   const card = createNeedsAttentionCard({ client, section, getState: () => state });
   await card.refresh();
-  assert.deepEqual(calls.rollup, [null]);
+  assert.deepEqual(calls.rollup, []);
   assert.equal(calls.queue.length, 1);
   assert.equal(section.hidden, false);
   assert.equal(section._elements["#attention-count"].textContent, "1");
@@ -289,12 +289,23 @@ test("current active admin renders the queue when the owner-only reader returns 
   assert.equal(timers.size, 0);
 });
 
+test("a non-owner admin loads the queue and does not fetch the owner rollup", async t => {
+  const { section } = attentionEnvironment(t);
+  const { client, calls } = attentionClient();
+  const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+  await card.refresh();
+  assert.deepEqual(calls.rollup, []);
+  assert.equal(calls.queue.length, 1);
+  assert.match(section._elements["#attention-list"].innerHTML, /Pending member/);
+  assert.equal(section.hidden, false);
+});
+
 for (const change of ["revoked", "inactive", "state removed"]) {
   for (const stage of ["rollup", "queue"]) {
     for (const outcome of ["success", "failure"]) {
       test(`${change} authority clears the card and suppresses late ${stage} ${outcome}`, async t => {
         const { section, timers } = attentionEnvironment(t);
-        let state = attentionState();
+        let state = attentionState({ owner: stage === "rollup" });
         let inFlight = false;
         const pending = deferredAttentionRead(), entered = deferredAttentionRead();
         const hold = () => { entered.resolve(); return pending.promise; };
@@ -322,7 +333,7 @@ for (const change of ["revoked", "inactive", "state removed"]) {
         assert.equal(calls.queue.length, queueReads, "a stale owner-read completion cannot start a queue read");
         assert.equal(timers.size, 0, "a stale failure cannot schedule a retry");
         await card.refresh();
-        assert.equal(calls.rollup.length, 2, "manual refresh cannot use stale session authority");
+        assert.equal(calls.rollup.length, stage === "rollup" ? 2 : 0, "manual refresh cannot use stale session authority");
         assert.equal(calls.queue.length, queueReads);
       });
     }
@@ -480,7 +491,7 @@ for (const first of ["rollup", "queue"]) {
     const { section } = attentionEnvironment(t);
     const rollup = deferredAttentionRead(), queue = deferredAttentionRead();
     const { client, calls } = attentionClient({ read: () => rollup.promise, queue: () => queue.promise });
-    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState({ owner: true }) });
     const refresh = card.refresh();
     // Settle both even if the concurrency assertion fails on the old code.
     t.after(async () => { rollup.resolve(null); queue.resolve(accessQueue()); await refresh; });
@@ -503,7 +514,7 @@ for (const first of ["rollup", "queue"]) {
     const { section, timers } = attentionEnvironment(t);
     const rollup = deferredAttentionRead(), queue = deferredAttentionRead();
     const { client } = attentionClient({ read: () => rollup.promise, queue: () => queue.promise });
-    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState() });
+    const card = createNeedsAttentionCard({ client, section, getState: () => attentionState({ owner: true }) });
     const refresh = card.refresh();
     (first === "rollup" ? rollup : queue).reject(new Error("First read unavailable"));
     await refresh;

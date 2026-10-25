@@ -69,6 +69,15 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/spend-grants.mjs'); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/routes/spend-grants.mjs, server/mcp-room-profile.mjs, server/mcp-full-profile.mjs)
   paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
+  paths.add('server/design-upgrade.mjs');
+  paths.add('server/routes/design-upgrade.mjs');
+  paths.add('src/task-status.js');
+  paths.add('src/ack-state.js');
+  paths.add('src/task-result.js');
+  paths.add('src/design-upgrade-flag.js');
+  paths.add('src/needs-you.js');
+  paths.add('src/design-upgrade-ui.js');
+  paths.add('src/design-upgrade.css');
   paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/agent-presence.mjs'); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
@@ -82,6 +91,11 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/work-wakes.mjs'); // Opt-in pointer-only work delivery on heartbeat reads (imported by server/store.mjs)
   paths.add('server/wake-identity-resolution.mjs'); // Decision #25: shared guest-aware member<->identity resolver for the wake legs (imported by server/store.mjs and server/agent-plugin-store.mjs)
   paths.add('src/board-ui.js'); paths.add('src/board-keyboard.mjs'); paths.add('src/board-mine.js'); paths.add('src/first-room-copy.js'); paths.add('src/board.css'); // Tasks › Board (imported by src/app.js; board-mine.js by board-ui.js)
+  paths.add('src/room-tabs.js'); // Conversation / Work / Receipts (imported by src/app.js)
+  paths.add('server/member-status-lines.mjs');
+  paths.add('server/routes/status-lines.mjs');
+  paths.add('src/status-lines.js');
+  paths.add('src/agent-pause-header.js');
   paths.add('server/mcp-full-profile.mjs'); // stdio-equivalent hosted MCP tools (imported by server/mcp-room-profile.mjs)
   paths.add('server/agent-discovery.mjs');
   paths.add('server/capabilities.mjs'); // #601: build-time route-family inventory (imported by server/agent-discovery.mjs)
@@ -157,6 +171,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/agent-key-registry.mjs'); // Integration map slice 9 (imported by server/store.mjs and server/agent-identities.mjs)
   paths.add('server/signed-evidence.mjs'); // Integration map slice 5: canonical signed external evidence for work.completed (imported by server/store.mjs)
   paths.add('server/github-oauth.mjs'); // GitHub sign-in (imported by server/http.mjs)
+  paths.add('server/auth-error-page.mjs'); // Auth error HTML negotiation, DOOR-CURE-2 (imported by server/http.mjs)
   paths.add('server/retention-run.mjs'); // dry-run retention caller (imported by cloudflare/room.mjs)
   paths.add('server/retention.mjs'); // analytics retention planner (imported by server/retention-run.mjs)
   paths.add('server/audit-retention.mjs'); // audit retention planner (imported by server/retention-run.mjs)
@@ -191,6 +206,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/public-agent-page.mjs'); // Public agent page (imported by server/store.mjs)
   paths.add('server/routes/public-agent-page.mjs'); // Public agent page routes (imported by server/routes/table.mjs)
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
+  paths.add('server/offers-page.mjs'); // DOOR-CURE-3: server-rendered offers shelf (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
   paths.add('server/public-visibility.mjs'); // The one visibility definition (imported by server/public-read-model.mjs)

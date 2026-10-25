@@ -199,7 +199,11 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("room_set_status", "Set this member's status line. Same call as POST /api/rooms/{roomId}/status-lines. text is one line of at most 140 characters. Empty text clears the line. The line is stored in place and is not a room message.", schema({
+    roomId: roomIdField,
+    text: { type: "string", maxLength: 140, description: "One line, at most 140 characters. Empty clears the line." }
+  }, ["roomId", "text"]), false)
 
 ];
 
@@ -295,7 +299,40 @@ export const hostedWakeTools = [
   }, ["subscriptionId"]), false)
 ];
 
-export const hostedMcpToolDefs = [...hostedRoomTools, ...hostedInboxTools, ...hostedWakeTools, ...hostedStdioToolDefinitions()];
+export const designUpgradeMcpTools = [
+  tool("room_needs_you", "List everything in this room that needs this member: open asks, join approvals, mentions, and tasks in needs_you. count is the full list. Pass cursor from nextCursor to read the next page. limit is 1 to 50. Same read as GET /api/rooms/{roomId}/needs-you.", schema({
+    roomId: roomIdField,
+    cursor: { type: "string", minLength: 1, maxLength: 200, description: "nextCursor from the previous page. Omit for the first page." },
+    limit: { type: "integer", minimum: 1, maximum: 50, description: "Page size. Default 20." }
+  }, ["roomId"])),
+  tool("room_task_status", "Read one task's canonical status (open, claimed, running, needs_you, blocked, done), the legacy state it came from, and this member's acknowledgement. kind is claim or work. Same read as GET /api/rooms/{roomId}/task-status.", schema({
+    roomId: roomIdField,
+    kind: { type: "string", enum: ["claim", "work"] },
+    id: { ...idField, description: "Claim id or work item id." }
+  }, ["roomId", "kind", "id"])),
+  tool("room_ack_task", "Acknowledge a claim, work item, mention, or ask assigned to this member. A second call keeps the first acknowledgement time. Same write as POST /api/rooms/{roomId}/acks.", schema({
+    roomId: roomIdField,
+    kind: { type: "string", enum: ["claim", "work", "mention", "ask"] },
+    id: { ...idField, description: "Subject id: claim id, work item id, mention message id, or ask id." }
+  }, ["roomId", "kind", "id"]), false),
+  tool("room_put_task_result", "Attach this task's result. summary is required. links are optional https URLs or same-room paths, at most 8. The latest write replaces the previous result. Same write as POST /api/rooms/{roomId}/task-result.", schema({
+    roomId: roomIdField,
+    kind: { type: "string", enum: ["claim", "work"] },
+    id: { ...idField, description: "Claim id or work item id." },
+    summary: { type: "string", minLength: 1, maxLength: 2000 },
+    links: { type: "array", maxItems: 8, items: schema({
+      href: { type: "string", minLength: 1, maxLength: 300 },
+      label: { type: "string", minLength: 1, maxLength: 80 }
+    }, ["href", "label"]) }
+  }, ["roomId", "kind", "id", "summary"]), false),
+  tool("room_read_task_result", "Read the result attached to a claim or work item. A known task with no result returns result null. Same read as GET /api/rooms/{roomId}/task-result.", schema({
+    roomId: roomIdField,
+    kind: { type: "string", enum: ["claim", "work"] },
+    id: { ...idField, description: "Claim id or work item id." }
+  }, ["roomId", "kind", "id"]))
+];
+
+export const hostedMcpToolDefs = [...hostedRoomTools, ...hostedInboxTools, ...hostedWakeTools, ...hostedStdioToolDefinitions(), ...designUpgradeMcpTools];
 if (hostedMcpToolDefs.map(entry => entry.name).join() !== HOSTED_ROOM_MCP_TOOLS.join()) {
   throw new Error("hosted room MCP tool list drifted from HOSTED_ROOM_MCP_TOOLS");
 }

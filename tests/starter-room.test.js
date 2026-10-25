@@ -5,10 +5,8 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { seedStarter } from "../server/starter-room.mjs";
-import { runGuideStep } from "../server/room-guide.mjs";
 import { postReceiptCard } from "../server/receipt-cards.mjs";
-import { buildGrowthEvent } from "../src/growth-emit.js";
-import { roomUsageSummary } from "../server/usage-summary.mjs";
+import { connectAgentCard, firstTaskAcceptance, firstTaskCard, FIRST_TASK_ID, MCP_URL } from "../src/first-room-copy.js";
 
 function assertIndexedMessage(store, roomId, message) {
   const row = store.db.prepare("SELECT seq, body, record_json FROM messages WHERE room_id=? AND message_id=?").get(roomId, message.id);
@@ -19,8 +17,6 @@ function assertIndexedMessage(store, roomId, message) {
   const event = store.db.prepare("SELECT sequence FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted' AND json_extract(body,'$.data.messageId')=? ORDER BY sequence LIMIT 1").get(roomId, message.id);
   assert.equal(row.seq, event.sequence, "index retains original posting order");
 }
-
-const WELCOME = "I'm Room Guide, a demo agent. I took **See how work closes here** to show you how work closes. Pick what your own agent should do first:";
 
 function signIn(store, accountId) {
   store.createAccount(accountId);
@@ -71,43 +67,45 @@ const bearer = (origin, path, token, body) => fetch(`${origin}${path}`, {
   body: JSON.stringify(body)
 });
 
-test("intent seeds one guide and one starter set, and a retry does not add another", async t => {
+test("intent names the room and seeds two cards, and a retry does not add another", async t => {
   const { origin, store } = await serve(t);
   const session = signIn(store, "ada");
-  const body = { roomId: "bug-room", title: "Scratch", purpose: "Fix the crash.", kind: "personal", displayName: "Ada", intent: "bug" };
+  const answer = "Fix the crash";
+  const body = { roomId: "bug-room", title: "Scratch", purpose: "Fix the crash.", kind: "personal", displayName: "Ada", intent: answer };
   const post = () => fetch(`${origin}/api/account-rooms`, {
     method: "POST", headers: accountHeaders(origin, session), body: JSON.stringify(body)
   });
   const createdResponse = await post();
   const created = await createdResponse.json();
   assert.equal(createdResponse.status, 201, JSON.stringify(created));
-  assert.equal(created.room.title, "Fix a bug");
+  assert.equal(created.room.title, answer);
   const retryResponse = await post();
   const retry = await retryResponse.json();
   assert.equal(retryResponse.status, 200, JSON.stringify(retry));
   assert.equal(retry.duplicate, true);
   const before = store.room("bug-room").state;
-  seedStarter(store, "bug-room", { intent: "bug", ownerMemberId: "owner" });
+  seedStarter(store, "bug-room", { intent: answer, ownerMemberId: "owner" });
   const state = store.room("bug-room").state;
-  const guides = Object.values(state.members).filter(member => member.id === "room-guide");
-  assert.equal(guides.length, 1);
-  assert.equal(guides[0].displayName, "Room Guide");
-  assert.equal(guides[0].kind, "agent");
-  assert.equal(guides[0].agentType, "room-guide");
-  assert.equal(guides[0].system, true);
-  assert.deepEqual(guides[0].permissions, ["accept_work", "complete_work"]);
-  assert.equal(guides[0].identityId, undefined);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM credentials WHERE room_id=? AND member_id='room-guide'").get("bug-room").n, 0);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM identity_links WHERE room_id=? AND member_id='room-guide'").get("bug-room").n, 0);
-  assert.equal(store.workClaims.list("bug-room").filter(item => item.id === "starter-receipt").length, 1);
-  assert.equal(store.workClaims.list("bug-room").filter(item => (item.tags ?? []).includes("starter-choice")).length, 3);
-  assert.equal(before.messages.filter(message => message.authorId === "room-guide").length, 1);
-  assert.equal(state.messages.filter(message => message.authorId === "room-guide").length, 1);
-  assert.equal(state.room.starterSeeded.templateSlug, "agent-pair");
-  assert.equal(state.room.starterSeeded.intentKind, "bug");
+  assert.equal(state.members["room-guide"], undefined);
+  assert.equal(store.workClaims.list("bug-room").filter(item => (item.tags ?? []).includes("starter-choice")).length, 0);
+  const connect = state.messages.find(message => message.id === "mc-bug-room");
+  const task = state.messages.find(message => message.id === "mt-bug-room");
+  assert.equal(connect.body, connectAgentCard());
+  assert.equal(task.body, firstTaskCard(answer));
+  assert.equal(connect.body.split(MCP_URL).length - 1, 4);
+  assertIndexedMessage(store, "bug-room", connect);
+  assertIndexedMessage(store, "bug-room", task);
+  const claim = store.workClaims.get("bug-room", FIRST_TASK_ID);
+  assert.equal(claim.title, answer);
+  assert.deepEqual(claim.acceptanceCriteria, [firstTaskAcceptance(answer)]);
+  assert.equal(claim.state, "unclaimed");
+  assert.equal(before.messages.length, state.messages.length);
+  assert.equal(state.room.starterSeeded.templateSlug, "first-room");
+  assert.equal(state.room.starterSeeded.intentKind, "custom");
+  assert.throws(() => seedStarter(store, "bug-room", { intent: answer, ownerMemberId: "stranger" }), error => error.code === "owner_required");
 });
 
-test("a room without intent or start has no guide", async t => {
+test("a room without intent or start has no seed", async t => {
   const { origin, store } = await serve(t);
   await createRoom(origin, store, "no-intent", {
     roomId: "plain-room", title: "Plain", purpose: "No starter.", kind: "personal", displayName: "Bea"
@@ -116,105 +114,8 @@ test("a room without intent or start has no guide", async t => {
   assert.equal(state.room.title, "Plain");
   assert.equal(state.room.starterSeeded, undefined);
   assert.equal(state.members["room-guide"], undefined);
+  assert.equal(state.messages.length, 0);
   assert.equal(store.workClaims.list("plain-room").length, 0);
-});
-
-test("guide claims and closes only starter-tagged claims", async t => {
-  const { origin, store } = await serve(t);
-  await createRoom(origin, store, "guide-guard", {
-    roomId: "guard-room", title: "Guard", purpose: "Limit the guide.", kind: "personal", displayName: "Cara", intent: "bug"
-  });
-  const ownerKey = store.issueAccessKey("guard-room", "owner");
-  const other = await bearer(origin, "/api/rooms/guard-room/work-claims", ownerKey, { id: "other", title: "Other work" });
-  assert.equal(other.status, 201, await other.text());
-  const extra = await bearer(origin, "/api/rooms/guard-room/work-claims", ownerKey, { id: "extra-starter", title: "Extra starter", tags: ["starter"] });
-  assert.equal(extra.status, 201, await extra.clone().text());
-  const guideKey = store.issueAccessKey("guard-room", "room-guide");
-  const allowed = await bearer(origin, "/api/rooms/guard-room/work-claims/extra-starter/claim", guideKey, {});
-  assert.equal(allowed.status, 200, await allowed.clone().text());
-  const claimOther = await bearer(origin, "/api/rooms/guard-room/work-claims/other/claim", guideKey, {});
-  const claimBody = await claimOther.json();
-  assert.equal(claimOther.status, 403);
-  assert.equal(claimBody.error.code, "guide_starter_only");
-  const updateOther = await bearer(origin, "/api/rooms/guard-room/work-claims/other/update", guideKey, { state: "in_progress" });
-  const updateBody = await updateOther.json();
-  assert.equal(updateOther.status, 403);
-  assert.equal(updateBody.error.code, "guide_starter_only");
-});
-
-test("a choice closes the starter with a result card, then the first agent is assigned and woken", async t => {
-  const { origin, store } = await serve(t);
-  await createRoom(origin, store, "script", {
-    roomId: "script-room", title: "Scratch", purpose: "See a close.", kind: "personal", displayName: "Dan", intent: "bug"
-  });
-  const state = store.room("script-room").state;
-  const welcome = state.messages.find(message => message.authorId === "room-guide");
-  assert.equal(welcome.body, WELCOME);
-  assertIndexedMessage(store, "script-room", welcome);
-  assert.deepEqual(welcome.actions.map(action => action.claimId), ["agent-pair-agree", "agent-pair-next", "agent-pair-receipt"]);
-  assert.equal(store.workClaims.get("script-room", "starter-receipt").owner, "room-guide");
-  assert.equal(store.workClaims.get("script-room", "starter-receipt").state, "claimed");
-  const ownerKey = store.issueAccessKey("script-room", "owner");
-  const choice = await bearer(origin, "/api/rooms/script-room/commands", ownerKey, {
-    id: "pick-agree", type: "message.posted", data: { messageId: "pick-agree", body: "agent-pair-agree" }
-  });
-  assert.equal(choice.status, 201, await choice.clone().text());
-  const starter = store.workClaims.get("script-room", "starter-receipt");
-  assert.equal(starter.state, "done");
-  assert.equal(starter.deliveryMode, "result");
-  const card = store.room("script-room").state.messages.find(message => message.kind === "receipt_card" && message.claimId === "starter-receipt");
-  assert.ok(card);
-  assert.equal(card.deliveryMode, "result");
-  assert.equal(card.closedBy, "Room Guide");
-  assertIndexedMessage(store, "script-room", card);
-  const done = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='work_claim.updated' AND json_extract(body,'$.data.workClaim')='starter-receipt' AND json_extract(body,'$.data.claimState')='done'").get("script-room");
-  assert.ok(done, "the done work_claim.updated event is the claim_completed record");
-  const welcomeEvent = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.messageId')=?").get("script-room", welcome.id);
-  const welcomeBody = JSON.parse(welcomeEvent.body);
-  assert.equal(welcomeBody.data.actorKind, "system");
-  const growth = buildGrowthEvent(welcomeBody, store.room("script-room").state);
-  assert.equal(growth.actor.kind, "system");
-  assert.equal(roomUsageSummary(store, ownerKey, "script-room").members.agents, 0);
-  const identity = store.identities.create("Pair Agent");
-  store.identities.link(ownerKey, "script-room", {
-    identityId: identity.identityId, displayName: "Pair Agent", permissions: ["accept_work", "complete_work"]
-  });
-  assert.equal(store.workClaims.get("script-room", "agent-pair-agree").owner, identity.identityId);
-  const assign = store.room("script-room").state.messages.find(message => message.authorId === "room-guide" && message.body.includes("is yours"));
-  assert.equal(assign.body, "@Pair Agent Agree the change is yours.");
-  assertIndexedMessage(store, "script-room", assign);
-  assert.ok(store.db.prepare("SELECT 1 FROM agent_wake_signals WHERE agent_id=? AND room_id=? AND message_id=?").get(identity.identityId, "script-room", assign.id));
-  assert.equal(roomUsageSummary(store, ownerKey, "script-room").members.agents, 1);
-  const before = store.room("script-room").state.messages.length;
-  assert.equal(runGuideStep(store, "script-room", store.now()), null);
-  assert.equal(store.room("script-room").state.messages.length, before);
-});
-
-test("guide does not announce a chosen claim that someone else already took", async t => {
-  const { origin, store } = await serve(t);
-  await createRoom(origin, store, "taken", {
-    roomId: "taken-room", title: "Scratch", purpose: "See a close.", kind: "personal", displayName: "Gus", intent: "bug"
-  });
-  const ownerKey = store.issueAccessKey("taken-room", "owner");
-  const choice = await bearer(origin, "/api/rooms/taken-room/commands", ownerKey, {
-    id: "pick-agree-taken", type: "message.posted", data: { messageId: "pick-agree-taken", body: "agent-pair-agree" }
-  });
-  assert.equal(choice.status, 201, await choice.clone().text());
-  assert.equal(store.workClaims.get("taken-room", "starter-receipt").state, "done");
-  // Someone else takes the chosen claim before the first agent joins.
-  const taken = await bearer(origin, "/api/rooms/taken-room/work-claims/agent-pair-agree/claim", ownerKey, {});
-  assert.equal(taken.status, 200, await taken.clone().text());
-  assert.equal(store.workClaims.get("taken-room", "agent-pair-agree").owner, "owner");
-  // The first agent joins; the guide must not announce the claim as theirs or wake them for it.
-  const identity = store.identities.create("Late Agent");
-  store.identities.link(ownerKey, "taken-room", {
-    identityId: identity.identityId, displayName: "Late Agent", permissions: ["accept_work", "complete_work"]
-  });
-  assert.equal(runGuideStep(store, "taken-room", store.now()), null);
-  const assign = store.room("taken-room").state.messages.find(message => message.authorId === "room-guide" && message.body.includes("is yours"));
-  assert.equal(assign, undefined, "guide must not announce a claim held by someone else as the agent's");
-  assert.equal(store.workClaims.get("taken-room", "agent-pair-agree").owner, "owner");
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals WHERE agent_id=? AND room_id=?").get(identity.identityId, "taken-room").n, 0, "agent is not woken for a claim they do not hold");
 });
 
 test("done claims of every delivery mode get one in-room receipt card", async t => {
