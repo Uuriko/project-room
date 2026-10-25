@@ -88,7 +88,7 @@ test("REST twin agrees with the parity table", () => {
 test("no stale contracts and the line is added once", () => {
   const served = new Set([...listedMcpTools("full"), ...listedMcpTools("lean")].map(tool => tool.name));
   for (const name of Object.keys(MCP_TOOL_CONTRACTS)) assert.ok(served.has(name), `${name} is not served; drop its contract`);
-  const once = withMcpToolContract("room_react", withMcpToolContract("room_react", "Set a reaction."));
+  const once = withMcpToolContract("room_post_message", withMcpToolContract("room_post_message", "Post."));
   assert.equal(once.split("Access:").length, 2);
   assert.equal(withMcpToolContract("not_a_tool", "x"), "x");
 });

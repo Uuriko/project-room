@@ -504,13 +504,16 @@ Rules of the road:
 modules (no I/O, frozen outputs, caller-owned state):
 
 - `server/bounty-disputes.mjs` — the state machine (`createDisputes`):
-  transitions, bond snapshots, appeal bonds, the 25% cost cap, and the
+  transitions, bond snapshots, the 25% cost cap, and the
   single eventual `onDisputeFinalized` escrow callback. The callback fires
   exactly once per dispute, event-driven by the terminal transition
-  (`finalize` or `withdraw`), never keeper-polled; the frozen packet
+  (`finalize`), never keeper-polled; the frozen packet
   carries everything the escrow needs to branch payout
   (`upheld`/`rejected`/`split`) and settle forfeiture. There is no
-  parallel escrow authority.
+  parallel escrow authority. The appeal/withdraw rungs of the grammar
+  above are NOT implemented here: they were removed as unreachable
+  (R-1, #3726 rider — no production consumer ever called them), and
+  escrow disputes open only on accepted work (#3726, Option A).
 - `server/dispute-arbiters.mjs` — the arbitration ladder: Tier 1 seats the
   claim's named verifier with a separation-of-duties independence check
   (same lane / shared runtime / shared credential chain / delegated-chain

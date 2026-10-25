@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { event, EVENT_TYPES as T, ownMember, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
-import { canonicalInvitationData } from "./invitation-journal.mjs";
+import { canonicalInvitationData } from "./journal.mjs";
 
 // One complete receipt contract is shared by issuance of the joined event and audit.
 // Keep private account IDs and token material out of the shared event.
@@ -36,6 +36,9 @@ export function assertInvitationMembershipEvidence(record, linked, binding, room
   // upgrade integrity sweep.
   const expected = invitationJoinedEvent(record);
   if (joined?.data && !("displayNamePolicyVersion" in joined.data)) delete expected.data.displayNamePolicyVersion;
+  // A joined event stamped with an earlier display-name policy (v1 before r50's
+  // v2) is that era's shape too.
+  else if (joined?.data?.displayNamePolicyVersion === 1) expected.data.displayNamePolicyVersion = 1;
   if (!linked || linked.id !== record.joined_event_id || linked.room_id !== record.room_id
     || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > room.sequence
     || canonicalInvitationData(joined) !== canonicalInvitationData(expected)

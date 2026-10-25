@@ -29,7 +29,7 @@
 import { randomUUID } from "node:crypto";
 import { ChannelWebhookInbox, channelSyncLimits } from "./channel-import.mjs";
 import { channelProviders, connectionState, profileChannel } from "./channel-connection.mjs";
-import { channelJournalLimits } from "./channel-journal.mjs";
+import { channelJournalLimits } from "./journal.mjs";
 
 // A verified update should land in the inbox within about a minute; the scan
 // is a cheap indexed count, so the default cadence is 60 s. Overridable per
