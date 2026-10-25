@@ -20,6 +20,11 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
  try {
   const res = await mf.dispatchFetch(origin + '/api/auth/google/start', { redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });
   assert.equal(res.status, 302, await res.clone().text());
+  // The start response sets the account-session cookie for the slot the state
+  // is bound to; a real browser sends it back on the callback. dispatchFetch
+  // keeps no cookie jar, so propagate it explicitly (mirrors the pinned
+  // browser behavior in tests/google-oauth-http.test.js).
+  const startCookies = res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
   const url = new URL(res.headers.get('Location'));
   assert.equal(url.origin, 'https://accounts.google.com');
   assert.equal(url.searchParams.get('redirect_uri'), origin + '/api/auth/google/callback');
@@ -32,8 +37,8 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   const encode = x => Buffer.from(JSON.stringify(x)).toString('base64url');
   const input = encode({alg: 'RS256', kid: 'fixture'}) + '.' + encode({iss: 'https://accounts.google.com', aud: '123-example.apps.googleusercontent.com', sub: '123456789', email: 'synthetic@example.test', email_verified: true, iat: now, exp: now+3600});
   token = input + '.' + sign('RSA-SHA256', Buffer.from(input), keys.privateKey).toString('base64url');
-  const callback = state => mf.dispatchFetch(origin + '/api/auth/google/callback?state=' + state + '&code=synthetic-code', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1'}});
-  const completed = await callback(url.searchParams.get('state'));
+  const callback = (state, cookieHeader) => mf.dispatchFetch(origin + '/api/auth/google/callback?state=' + state + '&code=synthetic-code', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1', ...(cookieHeader ? {Cookie: cookieHeader} : {})}});
+  const completed = await callback(url.searchParams.get('state'), startCookies);
   assert.equal(completed.headers.get('X-Room-Auth-Failure'), null);
   assert.match(await completed.text(), /account=1/);
   const cookie = completed.headers.get('Set-Cookie').split(';')[0];
@@ -42,25 +47,25 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   const accountSession = await session.json();
   assert.equal(accountSession.authenticated, true);
   const connect = await mf.dispatchFetch(origin + '/api/inbox/gmail/connect', {method: 'POST', headers: {Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': accountSession.csrf, 'X-Session-Binding': accountSession.sessionBinding}, body: '{}'});
-  assert.equal(connect.status, 200, await connect.clone().text());
-  const consent = new URL((await connect.json()).authorizationUrl);
-  assert.equal(consent.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.modify');
-  const gmailReturn = await mf.dispatchFetch(origin + '/api/auth/gmail/callback?state=' + consent.searchParams.get('state') + '&code=fixture-mail-code', {redirect: 'manual', headers: {Cookie: cookie + '; ' + connect.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')}});
-  assert.equal(gmailReturn.status, 200);
-  assert.match(await gmailReturn.text(), /gmail=connected/);
+  // Account Google sign-in remains available; mailbox integration is deferred
+  // even when old Gmail environment bindings remain configured.
+  assert.equal(connect.status, 404, await connect.clone().text());
+  const gmailReturn = await mf.dispatchFetch(origin + '/api/auth/gmail/callback?state=retired&code=fixture-mail-code', {headers: {Cookie: cookie}});
+  assert.equal(gmailReturn.status, 404);
   const mailbox = await mf.dispatchFetch(origin + '/api/inbox/gmail', {headers: {Cookie: cookie, 'X-Session-Binding': accountSession.sessionBinding}});
-  assert.equal(mailbox.status, 200, await mailbox.clone().text());
-  assert.equal((await mailbox.json()).state, 'connected');
+  assert.equal(mailbox.status, 404);
   redirectProvider = true;
-  const reconnect = await mf.dispatchFetch(origin + '/api/inbox/gmail/connect', {method: 'POST', headers: {Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': accountSession.csrf, 'X-Session-Binding': accountSession.sessionBinding}, body: '{}'});
-  assert.equal(reconnect.status, 200);
-  const reconnectConsent = new URL((await reconnect.json()).authorizationUrl);
-  const deniedMail = await mf.dispatchFetch(origin + '/api/auth/gmail/callback?state=' + reconnectConsent.searchParams.get('state') + '&code=fixture-mail-code', {redirect: 'manual', headers: {Cookie: cookie + '; ' + reconnect.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')}});
-  assert.match(await deniedMail.text(), /gmail=error/);
   assert.equal(untrustedRequests, 0);
   const retry = await mf.dispatchFetch(origin + '/api/auth/google/start', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1'}});
-  const rejected = await callback(new URL(retry.headers.get('Location')).searchParams.get('state'));
+  const retryCookies = retry.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
+  const rejected = await callback(new URL(retry.headers.get('Location')).searchParams.get('state'), retryCookies);
   assert.equal(rejected.headers.get('X-Room-Auth-Failure'), 'google_provider_rejected');
   assert.equal(rejected.headers.get('X-Room-Auth-Diagnostic'), null);
+  // State binding on Workers: a callback without the starting browser's
+  // cookie fails closed before any provider call (login CSRF, RFC 6749
+  // section 10.12) instead of adopting the state's slot.
+  const unboundStart = await mf.dispatchFetch(origin + '/api/auth/google/start', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1'}});
+  const unbound = await callback(new URL(unboundStart.headers.get('Location')).searchParams.get('state'));
+  assert.equal(unbound.headers.get('X-Room-Auth-Failure'), 'google_state_invalid');
  } finally { await mf.dispose(); }
 });

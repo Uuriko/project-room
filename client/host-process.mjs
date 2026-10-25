@@ -1,6 +1,6 @@
 import { createHostEnvelope, validateHostPolicy } from "./host-context-policy.mjs";
 import { hostReplyBody, recordObservedChecks } from "./host-result.mjs";
-import { hostSubprocess, validHostCommand } from "./host-subprocess.mjs";
+import { hostSubprocess, validHostCommand, hostExecutionReadiness } from "./host-subprocess.mjs";
 import { observeHostChecks, validateHostVerification } from "./host-verification.mjs";
 import { isAbsolute, join } from "node:path";
 import { mkdirSync, realpathSync, rmdirSync } from "node:fs";
@@ -16,10 +16,11 @@ export function configuredHost(config) {
   validateHostPolicy(config.policy, config.cwd);
   if (config.env && Object.keys(config.env).length) throw new Error("Automatic host cannot receive configured environment variables");
   const settings = structuredClone(config);
-  return async ({ signal, ...input }) => {
+  const execute = async ({ signal, ...input }) => {
     if (signal?.aborted) throw new Error("Host cancelled");
     const payload = JSON.stringify(createHostEnvelope(input));
     validateHostPolicy(settings.policy, settings.cwd);
+    execute.prepare();
     let lock;
     try {
       const directory = join(homedir(), ".project-room", "host-locks");
@@ -57,4 +58,10 @@ export function configuredHost(config) {
       try { rmdirSync(lock); } catch { /* leave an unresolved lock intact */ }
     }
   };
+  execute.prepare = () => {
+    const readiness = hostExecutionReadiness(settings);
+    if (!readiness.ready) throw Object.assign(new Error(readiness.message), { code: readiness.code, readiness });
+    return readiness;
+  };
+  return execute;
 }

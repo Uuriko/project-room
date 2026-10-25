@@ -12,7 +12,7 @@
 // Zero dependencies beyond node stdlib. TAP parsing is deliberately strict:
 // anything we cannot attribute to a named test fails the run closed.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync, appendFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, appendFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { randomBytes } from "node:crypto";
@@ -267,7 +267,8 @@ function runGate() {
 export function isMainModule(argv1, moduleUrl = import.meta.url) {
   if (!argv1) return false;
   try {
-    return resolve(argv1) === fileURLToPath(moduleUrl);
+    const invoked = resolve(argv1), loaded = fileURLToPath(moduleUrl);
+    return invoked === loaded || realpathSync(invoked) === realpathSync(loaded);
   } catch {
     return false;
   }

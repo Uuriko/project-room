@@ -20,6 +20,10 @@ export const MEMBER_TEXT_TOOLS = new Set([
   "room_list_peer_dms",
   "room_list_events",
   "room_activation_pack",
+  "get_room_context",
+  "room_get_file",
+  "inbox_get_attachment",
+  "room_list_access_requests",
   "public_work_recommend",
   "public_work_read_task",
   "public_work_my_review"
@@ -176,8 +180,129 @@ export function stampInbox(inbox, viewerId) {
     directMessages: (inbox.directMessages ?? []).map(markFrom),
     mentions: (inbox.mentions ?? []).map(row => markIfOther(row, viewerId, row?.from)),
     directMentions: (inbox.directMentions ?? []).map(markFrom),
-    dmRequests: (inbox.dmRequests ?? []).map(row => markIfOther(row, viewerId, row?.requesterId))
+    dmRequests: (inbox.dmRequests ?? []).map(row => markIfOther(row, viewerId, row?.requesterId)),
+    // Bond proposals are always another identity's ask (the read excludes
+    // the viewer's own), and the proposal note is member-authored text.
+    bondProposals: (inbox.bondProposals ?? []).map(row => markAlways(row))
   });
+}
+
+// File download: the envelope carries the trust string and the attachment
+// record (member-chosen filename, uploader) is marked unless the viewer
+// uploaded it. A null author always marks: the identity-scoped inbox store
+// names no distinct author, and staged bytes are treated as untrusted.
+export function stampAttachmentGet(value, viewerId, authorId) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (!value.attachment || typeof value.attachment !== "object" || Array.isArray(value.attachment)) {
+    return withContentTrust(value);
+  }
+  return withContentTrust({ ...value, attachment: markIfOther(value.attachment, viewerId, authorId) });
+}
+
+// Access requests are inbound applications: displayName, note, referredBy and
+// decisionNote are requester and decider text. A row is the viewer's own
+// only when its identity or member id names the viewer; every other row is
+// always marked.
+export function stampAccessRequests(value, viewerIds = []) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (!Array.isArray(value.requests)) return withContentTrust(value);
+  const requests = value.requests.map(row => {
+    const author = row?.identityId ?? row?.memberId;
+    return author != null && viewerIds.includes(author) ? row : markAlways(row);
+  });
+  return withContentTrust({ ...value, requests });
+}
+
+// Room context: roster display names are member-authored (the viewer's own
+// name stays unmarked), focus work titles follow the work-record rule
+// (always marked), and a handoff's next action is its author's text.
+export function stampRoomContext(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  return withContentTrust({
+    ...value,
+    ...(Array.isArray(value.roster)
+      ? { roster: value.roster.map(member => markIfOther(member, value.viewerId, member?.id)) }
+      : {}),
+    ...(Array.isArray(value.focusWork)
+      ? { focusWork: value.focusWork.map(row => markAlways(row)) }
+      : {}),
+    ...(value.handoffToYou && typeof value.handoffToYou === "object"
+      ? { handoffToYou: markIfOther(value.handoffToYou, value.viewerId, value.handoffToYou.actorId) }
+      : {})
+  });
+}
+
+// Needs-me: every attention item is another member's text addressed to the
+// viewer (mentions, DMs, direct asks, handoffs, bond requests, landing
+// queues); the per-room work sections follow the work-record rule. The
+// envelope carries the trust string in place of a blanket untrusted flag.
+export function stampNeedsMe(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const section = entry => entry && Array.isArray(entry.top)
+    ? { ...entry, top: entry.top.map(row => markAlways(row)) }
+    : entry;
+  const sections = list => Array.isArray(list) ? list.map(section) : list;
+  return withContentTrust({
+    ...value,
+    items: (value.items ?? []).map(row => markAlways(row)),
+    ...(value.openWork ? { openWork: sections(value.openWork) } : {}),
+    ...(value.reviewAsks ? { reviewAsks: sections(value.reviewAsks) } : {}),
+    ...(value.myWork ? { myWork: sections(value.myWork) } : {}),
+    ...(value.myClaims ? { myClaims: sections(value.myClaims) } : {}),
+    ...(value.actionsNeeded ? { actionsNeeded: sections(value.actionsNeeded) } : {})
+  });
+}
+
+// Assistant reads: run records carry member-authored summaries, drafts and
+// activity notes, so each run is marked. A run-shaped action result (it
+// carries an inputs list) is marked the same way; configuration results are
+// not run records and stay unmarked beyond the envelope.
+function stampRunRecord(run) {
+  if (!run || typeof run !== "object" || Array.isArray(run)) return run;
+  const marked = markAlways(run);
+  return Array.isArray(marked.activity)
+    ? { ...marked, activity: marked.activity.map(entry => markAlways(entry)) }
+    : marked;
+}
+
+export function stampAssistantResult(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  let stamped = withContentTrust(value);
+  if (Array.isArray(stamped.runs)) stamped = { ...stamped, runs: stamped.runs.map(stampRunRecord) };
+  if (stamped.result && typeof stamped.result === "object" && Array.isArray(stamped.result.inputs)) {
+    stamped = { ...stamped, result: stampRunRecord(stamped.result) };
+  }
+  return stamped;
+}
+
+// Public work over MCP: task packets carry room-authored titles and
+// acceptance criteria. The recommendation envelope takes the trust string
+// and each packet is marked; a single packet reads like the HTTP
+// public-room document (trust string plus the document-level mark).
+export function stampPublicWorkTasks(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  if (!Array.isArray(value.recommendations)) return withContentTrust(value);
+  return withContentTrust({
+    ...value,
+    recommendations: value.recommendations.map(entry => entry && entry.task
+      ? { ...entry, task: markAlways(entry.task) }
+      : entry)
+  });
+}
+
+export function stampPublicWorkTask(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  return { ...withContentTrust(value), untrusted: true };
+}
+
+// The contributor's own review record: the decision reason is
+// reviewer-authored text handed back to the contributor.
+export function stampPublicWorkReview(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const review = value.review && typeof value.review === "object" && typeof value.review.reason === "string"
+    ? markAlways(value.review)
+    : value.review;
+  return withContentTrust(review ? { ...value, review } : value);
 }
 
 // SEC-2: Board claims over HTTP. Titles, history notes, attestation notes
