@@ -13,6 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { claimAttentionFromEvents } from "../server/updates.mjs";
+import { buildOrient } from "../server/orient.mjs";
 
 function serve(t, roomId = "commons") {
   const directory = mkdtempSync(join(tmpdir(), "room-updates-"));
@@ -525,17 +526,34 @@ test("event tail returns the newest events in ascending order and orient ranks a
   assert.equal(tail.body.next, tail.body.events.at(-1).sequence);
   const badTail = await request("/api/rooms/commons/events?tail=2&after=0", { token: ownerKey });
   assert.equal(badTail.status, 422);
-  const conversation = await request("/api/rooms/commons/orient?focus=conversation", { token: ownerKey });
-  assert.equal(conversation.status, 200);
-  assert.ok(conversation.body.updates.every(item => item.kind === "request" || item.kind === "mention" || item.kind === "dm" || item.kind === "invite_pending" || item.kind === "access_request"));
-  assert.ok(conversation.body.you.member.id === "owner");
-  assert.ok(Array.isArray(conversation.body.nextActions));
-  const work = await request("/api/rooms/commons/orient?focus=work", { token: ownerKey });
-  assert.equal(work.body.updates.some(item => item.kind === "request"), false);
-  const matched = await request("/api/rooms/commons/orient?q=zebra-token&maxTokens=50", { token: ownerKey });
-  assert.ok(matched.body.matched.lines.some(line => line.text.includes("zebra-token")));
-  assert.equal(matched.body.matched.lines[0].untrusted, true);
-  const invalid = await request("/api/rooms/commons/orient?maxTokens=0", { token: ownerKey });
-  assert.equal(invalid.status, 422);
-  assert.equal(invalid.body.error.code, "invalid_orient");
+  // The standalone /orient endpoint was deleted (register D1); the builder
+  // behind the activation-pack/context embeds carries the same behaviour.
+  const conversation = buildOrient(store, "commons", "owner", { focus: "conversation", token: ownerKey });
+  assert.ok(conversation.updates.every(item => item.kind === "request" || item.kind === "mention" || item.kind === "dm" || item.kind === "invite_pending" || item.kind === "access_request"));
+  assert.ok(conversation.you.member.id === "owner");
+  assert.ok(Array.isArray(conversation.nextActions));
+  const work = buildOrient(store, "commons", "owner", { focus: "work", token: ownerKey });
+  assert.equal(work.updates.some(item => item.kind === "request"), false);
+  const matched = buildOrient(store, "commons", "owner", { q: "zebra-token", maxTokens: 50, token: ownerKey });
+  assert.ok(matched.matched.lines.some(line => line.text.includes("zebra-token")));
+  assert.equal(matched.matched.lines[0].untrusted, true);
+  assert.throws(() => buildOrient(store, "commons", "owner", { maxTokens: 0 }),
+    error => error.code === "invalid_orient");
+});
+
+test("permission upgrades enter the authorized attention feed and disappear after a decision", async t => {
+  const f=serve(t);await f.origin;const {AccessRequests}=await import('../server/access-requests.mjs');
+  for(const [id,permissions] of [['requester',[]],['admin',['manage_members','accept_work']],['outsider',[]]])
+    f.store.command(f.ownerKey,'commons',{id:randomUUID(),type:T.MEMBER_ADDED,data:{memberId:id,displayName:`Member ${id}`,kind:'human',permissions}});
+  const keys=Object.fromEntries(['requester','admin','outsider'].map(id=>[id,f.store.issueAccessKey('commons',id)]));
+  const access=new AccessRequests(f.store);access.requestForMember(keys.requester,'commons',{permissions:['accept_work','complete_work'],requestId:'upgrade-feed'});
+  const path='/api/rooms/commons/updates?state=actionable';
+  for(const token of [f.ownerKey,keys.admin]) {
+    const {body,status}=await f.request(path,{token});assert.equal(status,200);
+    const item=body.items.find(i=>i.sourceRef?.requestId==='upgrade-feed');assert.ok(item);assert.equal(item.title,'Member requester wants more permissions');
+  }
+  assert.equal((await f.request(path,{token:keys.outsider})).body.items.some(i=>i.kind==='access_request'),false);
+  access.decide(keys.admin,'commons','upgrade-feed',{decision:'approve',permissions:['accept_work']});
+  assert.equal(f.store.room('commons').state.members.requester.permissions.includes('complete_work'),false);
+  assert.equal((await f.request(path,{token:keys.admin})).body.items.some(i=>i.sourceRef?.requestId==='upgrade-feed'),false);
 });
