@@ -443,23 +443,23 @@ Room UI design pass. Each row is an open PR whose useful change is in the G4 pul
 
 | PR | Title / idea | Branch | Head SHA | Why closed |
 |---|---|---|---|---|
-| #4852 | Add Conversation, Work, and Receipts tabs | `cursor/room-tabs-b7de` | `bfeb919725ed6d6483a797926da895c515a2fd84` | combined into the G4 room UI design pass |
-| #4850 | Show one status line per member under the room header | `cursor/status-lines-b7de` | `ce97758e35926f75ab517e9755ac8863a91e0869` | combined into the G4 room UI design pass |
-| #4839 | Show an owner Pause agents control in the room header | `cursor/pause-agents-header-b7de` | `ea6cb5a9a458892e893da370381c06b5aefa4ad1` | combined into the G4 room UI design pass |
-| #4827 | Give public links a 24px target and name the join key | `cursor/public-tap-targets-da81` | `6949c967bedc848241ade60d185a5fbe29b533a3` | superseded by #4855; Agent key label kept from #4855 |
-| #4855 | Scope public link targets to nav and lists | `cursor/public-link-targets-b7de` | `244a192c02a12ab24170b3c97e897d586eead4c3` | combined into the G4 room UI design pass |
-| #4879 | Open the first room from one question and two cards | `cursor/strat-1-first-room-da05` | `9dbb805cd80b7dfa169abd9988cb9aa324915254` | combined into the G4 room UI design pass; sign-in navigation and INDEX wording dropped because main is newer |
-| #4893 | Hide the sign-in divider when a provider anchor is stripped | `fix/signin-divider-absent-anchor` | `e88374e5691772b7f2bf667cf6d13511d03feac6` | divider rule included once; #4875 carries the same rule |
-| #4865 | Show accepted work, offline state, and keyboard paths | `cursor/board-offline-a11y-0bbc` | `a1d2652b4b7d738840c47c71139b4cec5e83d0de` | combined into the G4 room UI design pass |
-| #4819 | Lead the signed-out page with a read-only demo room | `cursor/landing-demo-room-b7de` | `908daaf4faf2f09fba0638d841469dd502ab7697` | combined into the G4 room UI design pass |
-| #4902 | Static hero CTA anchors, true heading, and /agents footer link | `door-cure-1-hero-cta-agents-link` | `285cd7f3e72d0b4eae4b1faf2d7159afe720cf3b` | combined into the G4 room UI design pass |
-| #4875 | Open the room when GitHub sign-in is not configured | `cursor/speed-0-boot-bench-a33d` | `f8bc92c88b1cf35cf5ad7f168f3216381dd28695` | combined into the G4 room UI design pass; sign-in navigation guard dropped because main already skips a missing anchor |
-| #4004 | Board-level statement that offers are agent-claimed | `jill/fix-3740-board-human-note` | `d3d35355ef438e0be84aae9549cd0f0dbd95c12f` | combined into the G4 room UI design pass |
-| #4907 | Server-render the /offers shelf | `door-cure-3-server-rendered-offers` | `5969465f350a90d5508795b15be2f3a4d7c3e924` | combined into the G4 room UI design pass |
-| #4909 | Readable HTML for browser auth failures | `jill/door-cure-2-auth-error-html` | `dcfdf1a3ccdc0339716e330be137e852d56105aa` | combined into the G4 room UI design pass |
-| #4911 | Stop serving past-deadline offers as published | `jill/door-cure-4-expired-offers` | `d2d90e83eaada203fa518a859a77702351deee0d` | combined into the G4 room UI design pass |
-| #3611 | Unconfirmed-outcome copy on board transport failure | `jill/hunt-ux-board-error-copy` | `b79f9976c70e0013fc2d4439054a5427bcab6eb6` | combined into the G4 room UI design pass |
-| #4871 | designUpgrade status, Needs you, ack, and result | `cursor/design-upgrade-flag-40cc` | `23b168f09990f79c66564c8daea65711357a5b41` | combined into the G4 room UI design pass |
+| #4852 | Add Conversation, Work, and Receipts tabs | `cursor/room-tabs-b7de` | `bfeb919725ed6d6483a797926da895c515a2fd84` | combined into #4946 (G4 room UI design pass) |
+| #4850 | Show one status line per member under the room header | `cursor/status-lines-b7de` | `ce97758e35926f75ab517e9755ac8863a91e0869` | combined into #4946 (G4 room UI design pass) |
+| #4839 | Show an owner Pause agents control in the room header | `cursor/pause-agents-header-b7de` | `ea6cb5a9a458892e893da370381c06b5aefa4ad1` | combined into #4946 (G4 room UI design pass) |
+| #4827 | Give public links a 24px target and name the join key | `cursor/public-tap-targets-da81` | `6949c967bedc848241ade60d185a5fbe29b533a3` | superseded by #4855 inside #4946; Agent key label kept from #4855 |
+| #4855 | Scope public link targets to nav and lists | `cursor/public-link-targets-b7de` | `244a192c02a12ab24170b3c97e897d586eead4c3` | combined into #4946 (G4 room UI design pass) |
+| #4879 | Open the first room from one question and two cards | `cursor/strat-1-first-room-da05` | `9dbb805cd80b7dfa169abd9988cb9aa324915254` | combined into #4946 (G4 room UI design pass); sign-in navigation and INDEX wording dropped because main is newer |
+| #4893 | Hide the sign-in divider when a provider anchor is stripped | `fix/signin-divider-absent-anchor` | `e88374e5691772b7f2bf667cf6d13511d03feac6` | divider rule included once in #4946; #4875 carries the same rule |
+| #4865 | Show accepted work, offline state, and keyboard paths | `cursor/board-offline-a11y-0bbc` | `a1d2652b4b7d738840c47c71139b4cec5e83d0de` | combined into #4946 (G4 room UI design pass) |
+| #4819 | Lead the signed-out page with a read-only demo room | `cursor/landing-demo-room-b7de` | `908daaf4faf2f09fba0638d841469dd502ab7697` | combined into #4946 (G4 room UI design pass) |
+| #4902 | Static hero CTA anchors, true heading, and /agents footer link | `door-cure-1-hero-cta-agents-link` | `285cd7f3e72d0b4eae4b1faf2d7159afe720cf3b` | combined into #4946 (G4 room UI design pass) |
+| #4875 | Open the room when GitHub sign-in is not configured | `cursor/speed-0-boot-bench-a33d` | `f8bc92c88b1cf35cf5ad7f168f3216381dd28695` | combined into #4946 (G4 room UI design pass); sign-in navigation guard dropped because main already skips a missing anchor |
+| #4004 | Board-level statement that offers are agent-claimed | `jill/fix-3740-board-human-note` | `d3d35355ef438e0be84aae9549cd0f0dbd95c12f` | combined into #4946 (G4 room UI design pass) |
+| #4907 | Server-render the /offers shelf | `door-cure-3-server-rendered-offers` | `5969465f350a90d5508795b15be2f3a4d7c3e924` | combined into #4946 (G4 room UI design pass) |
+| #4909 | Readable HTML for browser auth failures | `jill/door-cure-2-auth-error-html` | `dcfdf1a3ccdc0339716e330be137e852d56105aa` | combined into #4946 (G4 room UI design pass) |
+| #4911 | Stop serving past-deadline offers as published | `jill/door-cure-4-expired-offers` | `d2d90e83eaada203fa518a859a77702351deee0d` | combined into #4946 (G4 room UI design pass) |
+| #3611 | Unconfirmed-outcome copy on board transport failure | `jill/hunt-ux-board-error-copy` | `b79f9976c70e0013fc2d4439054a5427bcab6eb6` | combined into #4946 (G4 room UI design pass) |
+| #4871 | designUpgrade status, Needs you, ack, and result | `cursor/design-upgrade-flag-40cc` | `23b168f09990f79c66564c8daea65711357a5b41` | combined into #4946 (G4 room UI design pass) |
 
 ## Branches with no PR (deleted in cleanup)
 
