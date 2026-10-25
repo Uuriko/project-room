@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-919 rows (878 distinct codes).
+995 rows (955 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -245,6 +245,7 @@ response's own `hint`/`next` when it names something more specific.
 | `cursor_stale` | 409 | The list changed; start again without a cursor | re-read | Start the list again without a cursor. |
 | `decision_not_found` | 404 | No decision "${matchmakingId}" in this room | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `decision_source_required` | 422 | Post the rationale in the room first, then record the decision with its message id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `decision_rows_unavailable` | 503 | Decision-row export requires a database-backed store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `demigod_contract_exists` | 409 | Contract ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `demigod_contract_not_found` | 404 | Contract not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `demigod_offer_exists` | 409 | Offer profile ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -417,6 +418,7 @@ response's own `hint`/`next` when it names something more specific.
 | `insufficient_scope` | 403 | API key lacks the ${scopeName} scope | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `internal` | 500 | { status: 500, code: 'internal', message: 'Request could not be completed' }, true); } } | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `internal_error` | 500 | Route auth is not available | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `invalid_access_log` | 422 | Choose an optional limit of 1 to 500 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account` | 422 | Invalid account id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_binding` | 422 | Only a human Room member can bind to an account | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_change` | 422 | Account change requires a current revision, active state, and reason | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -460,6 +462,8 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_credential` | 422 | Invalid account credential | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credentials` | 401 | Invalid email or password | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_cursor` | 422 | Use the nextCursor returned by the previous page | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_decision_export` | 422 | The decision-row export takes no parameters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_decision_packet` | 422 | Decision packet or follow-up input failed validation; the message names the refused field or value | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_deletion` | 422 | A deletion confirmation token from GET /api/account/deletion/plan is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract` | 422 | Invalid action | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract_status` | 409 | Contract is terminal and cannot move | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -520,6 +524,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_inbox_send` | 422 | Choose an exact reply operation. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_share` | 422 | Select source paragraphs and the current room audience. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_source` | 422 | Supply a qualified channel observation. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_incident_record` | 500 | Incident record failed validation | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_input` | internal | receipt text must be a string | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_invitation` | 422 | Invitation token required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_invitation_acceptance` | 422 | Invitation token, redemption ID, and expected revision required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -587,6 +592,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_password_set` | 422 | A new password is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pause_command` | 422 | Supply action (pause or resume), memberId, requestId and, for pause, reason or null | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pause_selection` | 422 | Choose at most one member | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_performance_aggregate` | 500 | Performance aggregate failed validation | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_pin` | 422 | messageId and pinned are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_plan` | 422 | expectedSha256 and expectedSequence from the repair plan are required | fix+resend | Re-run the repair plan (POST /api/operator/projection/plan) and resubmit execute with the expectedSha256 and expectedSequence it returned; do not guess them. |
 | `invalid_policy` | 422 | AgentPluginError(422) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -618,6 +624,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_recovery_redeem` | 422 | An email, recovery code, session token, and current session revision are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_referral` | 409 | referrer is not an active member | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invalid_referral` | 422 | roomId is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_refusal` | internal | ${field} is required | n/a | thrown as RefusalJournalError by server/refusal-journal.mjs; surface callers use recordRefusalBestEffort, which swallows it so a journaling fault never masks the original refusal; original code never reaches the wire (Note: refusal-journal internal validation; not an HTTP error.) |
 | `invalid_reminder` | 422 | Supply one work item, reminder revision, action and request ID; scheduling also needs a UTC time. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_reminder_time` | 422 | Choose a future time within one year. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_reply_attempt` | 409 | Choose an exact reply operation. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -794,7 +801,9 @@ response's own `hint`/`next` when it names something more specific.
 | `missing_verdict` | 422 | finality track: ${kind} requires a terminal acceptance verdict (bounty is ${bounty.state}) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: EscrowError route map.) |
 | `ndjson_required` | 415 | Use application/x-ndjson | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `next_actions_unavailable` | 500 | Next-actions is not attached to this store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `no_adverse_decision` | 404 | No adverse decision is recorded for this contribution or bounty | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `no_bond` | 403 | fail(403, "no_bond", state === "expired" ? "The bond proposal expired. Propose again with bond.propose { to }. Co-membership is not a bond." : "No act | follow hint | Follow this error's hint and next steps. |
+| `no_distinct_human_reviewer` | 409 | No human reviewer distinct from the original decider is recorded for this work; a review request cannot be routed honestly | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `no_verified_email` | 422 | Link an email-based sign-in method before setting a password | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `nonprogressing_email_page` | 409 | The sync page did not advance. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `not_authorized` | 403 | ${role}: "${lane}" is not a current member of this room | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: EscrowError route map.) |
@@ -827,6 +836,7 @@ response's own `hint`/`next` when it names something more specific.
 | `owner_cannot_deactivate` | 403 | The room owner cannot deactivate its own membership; transfer ownership first | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_only` | 403 | Only the room owner may manage Demigod offers | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_required` | 403 | Only the room owner can read the access review | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `packet_not_found` | 404 | Contribution not found, or bounty not found for this claimant | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `passkey_origin_rejected` | 422 | Passkey sign-in needs an https origin or localhost | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `passkey_verification_failed` | 401 | Passkey registration did not verify | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `password_already_set` | 409 | This account already has a password; change it instead | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

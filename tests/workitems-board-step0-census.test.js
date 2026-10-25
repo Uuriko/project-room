@@ -24,10 +24,17 @@ import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 // pass-throughs). Generated 2026-10-15 at the Step 0 base; 55 files.
 // Amended 2026-10-16: server/owner-overview.mjs (Owner Cockpit slice 1,
 // PR #3572) recorded as a reader — 55 files.
+// Amended 2026-10-18: server/decision-rows.mjs (#3616 decision-row export,
+// PR #4051) recorded as a reference site — it reads workItems verdict state
+// for the board surface — 56 files.
 // Amended 2026-10-22: server/receipt-cards.mjs reads a claim's linked work
 // item session for receipt cost (read only).
+// Amended 2026-10-25 (merge-up of PR #4051 onto main 6f640d000): composed reference-site inventory recomputed on the merged tree — 59 files.
+// Amended 2026-10-25 (G9): server/adverse-decision-packets.mjs reads a linked
+// work item while building a subject packet; server/work-claim-routes.mjs
+// reads the claim's work item for the pinned session environment — 61 files.
 const WORKITEMS_REFERENCE_SITES = [
-  "server/agent-fleet.mjs", "server/available-work.mjs", "server/claim-scopes.mjs", "server/content-trust.mjs", "server/inbox.mjs", "server/mcp-room-profile.mjs", "server/message-redaction.mjs", "server/messages-store.mjs", "server/needs-me.mjs", "server/notifications.mjs", "server/opportunities.mjs", "server/orient.mjs", "server/owner-attention.mjs", "server/owner-overview.mjs", "server/project-offers.mjs", "server/public-read-model.mjs", "server/public-work-reviews.mjs", "server/purge-registry.mjs", "server/receipt-cards.mjs", "server/recovery.mjs", "server/reminders.mjs", "server/reply-requests.mjs", "server/return-brief.mjs", "server/room-activation-pack.mjs", "server/room-context.mjs", "server/spend-allowance.mjs", "server/store.mjs", "server/text-results.mjs", "server/updates.mjs", "server/usage-summary.mjs", "server/work-context.mjs", "server/work-discussion.mjs", "server/work-help.mjs", "server/work-item-board.mjs", "server/work-repository.mjs", "server/work-wakes.mjs", "server/writer-fence.mjs",
+  "server/adverse-decision-packets.mjs", "server/agent-fleet.mjs", "server/available-work.mjs", "server/claim-scopes.mjs", "server/content-trust.mjs", "server/decision-rows.mjs", "server/inbox.mjs", "server/mcp-room-profile.mjs", "server/message-redaction.mjs", "server/messages-store.mjs", "server/needs-me.mjs", "server/notifications.mjs", "server/opportunities.mjs", "server/orient.mjs", "server/owner-attention.mjs", "server/owner-overview.mjs", "server/project-offers.mjs", "server/public-read-model.mjs", "server/public-work-reviews.mjs", "server/purge-registry.mjs", "server/receipt-cards.mjs", "server/recovery.mjs", "server/reminders.mjs", "server/reply-requests.mjs", "server/return-brief.mjs", "server/room-activation-pack.mjs", "server/room-context.mjs", "server/spend-allowance.mjs", "server/store.mjs", "server/text-results.mjs", "server/updates.mjs", "server/usage-summary.mjs", "server/work-claim-routes.mjs", "server/work-context.mjs", "server/work-discussion.mjs", "server/work-help.mjs", "server/work-item-board.mjs", "server/work-repository.mjs", "server/work-wakes.mjs", "server/writer-fence.mjs",
   "src/app.js", "src/board-ui.js", "src/board.js", "src/conversation.js", "src/events.js", "src/growth-emit.js", "src/help-offers.js", "src/human-experience.js", "src/message-reducers.js", "src/portable-work.js", "src/reminders.js", "src/reply-requests.js", "src/result-reader.js", "src/room-layout.js", "src/room-templates.js", "src/work-help.js", "src/work-item-session.js", "src/work-packet.js", "src/work-reducers.js", "src/work-selectors.js", "src/workflow.js",
 ];
 
@@ -47,7 +54,7 @@ function referenceSites() {
   return found.sort();
 }
 
-test("step0 census: workItems reference-site inventory is pinned (59 files)", () => {
+test("step0 census: workItems reference-site inventory is pinned (61 files)", () => {
   assert.deepEqual(referenceSites(), WORKITEMS_REFERENCE_SITES);
 });
 

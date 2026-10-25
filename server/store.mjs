@@ -7,6 +7,9 @@ import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
+import { AdverseDecisionPackets, adverseDecisionPacketsSchema } from "./adverse-decision-packets.mjs";
+import { refusalJournalSchema } from "./refusal-journal.mjs";
+import { DecisionRows } from "./decision-rows.mjs"; // #3616 decision-row export + evidence access log (R-5/R-11)
 import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
 import { PublicWorkSettlement, publicWorkSettlementSchema } from "./public-work-settlement.mjs";
 import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
@@ -720,7 +723,7 @@ const shapes = {
   [T.ROOM_PUBLIC_RECEIPTS_SET]: "enabled",
   // --- PRIV-2: owner-only history setting and the export audit record. ---
   [T.ROOM_HISTORY_VISIBILITY_SET]: "historyVisibility",
-  [T.ROOM_EXPORTED]: "format",
+  [T.ROOM_EXPORTED]: "format schemaVersion rowCount requesterId",
   // --- GR2 public acquisition opt-ins. Command field allowlist only. ---
   [T.ROOM_PUBLIC_PAGE_SET]: "enabled",
   [T.ROOM_JOIN_LINK_SET]: "enabled",
@@ -820,7 +823,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "rowCount"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -1139,7 +1142,7 @@ function roomSchemaStamp() {
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
-    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
+    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema, adverseDecisionPacketsSchema, refusalJournalSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
@@ -1471,7 +1474,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.trialTasks = new TrialTasks(this);
     this.publicWorkClaims = new PublicWorkClaims(this);
     this.publicWorkReviews = new PublicWorkReviews(this);
+    this.decisionRows = new DecisionRows(this); // #3616
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
+    this.adverseDecisionPackets = new AdverseDecisionPackets(this);
     this.publicWorkSettlement = new PublicWorkSettlement(this);
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
@@ -1946,6 +1951,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.publicWorkReviews.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkReviewsSchema);
       this.publicWorkReviews.verifySchema();
+      this.adverseDecisionPackets.verifySchema({ allowAbsent: true });
+      this.db.exec(adverseDecisionPacketsSchema);
+      this.adverseDecisionPackets.verifySchema();
+      // #3617 refusal journal: unfenced (older writers have no path to it)
+      // but required at boot. Recovery audits every application table, and
+      // unfencedAdditiveTables includes refusal_journal.
+      this.db.exec(refusalJournalSchema);
       this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkSuccessorsSchema);
       this.publicWorkSuccessors.verifySchema();

@@ -59,10 +59,15 @@ signed evidence or checks (§4.4).
 ## 2. Census — every live reader and writer
 
 Method: full-text scan for `workItems` over the shipped tree at the Step 0
-base, pinned file-by-file in the Step 0 census test (55 files under
+base, pinned file-by-file in the Step 0 census test (61 files under
 `server/` + `src/`; outside those trees: `client/` 2, `machine/` 1,
 `cloudflare/` 4 check/fixture files, `scripts/` ≈60 operational and
-browser-check scripts that consume the client/store shapes).
+browser-check scripts that consume the client/store shapes). Amended
+2026-10-18: `server/decision-rows.mjs` (#3616, PR #4051) added as a
+reference site. Amended 2026-10-25 (G9): `server/adverse-decision-packets.mjs`
+reads a linked work item while building a subject packet, and
+`server/work-claim-routes.mjs` reads the claim's work item for the pinned
+session environment — the count above is 61.
 
 ### Writers of `state.workItems`
 
@@ -104,8 +109,11 @@ last three carry state with no board field (§4.5).
   `server/return-brief.mjs`, `src/reminders.js`, `src/reply-requests.js`.
 - **Work surfaces (server):** `server/work-context.mjs`,
   `server/work-discussion.mjs`, `server/work-help.mjs`,
-  `server/work-wakes.mjs`, `server/mcp-room-profile.mjs`,
+  `server/work-wakes.mjs`, `server/work-claim-routes.mjs` (pinned session
+  environment on the claim's work item), `server/mcp-room-profile.mjs`,
   `server/project-offers.mjs`, `server/public-work-reviews.mjs`,
+  `server/adverse-decision-packets.mjs` (linked work item on a subject
+  packet), `server/decision-rows.mjs`,
   `server/spend-allowance.mjs`, `server/text-results.mjs`,
   `server/usage-summary.mjs`, `server/agent-fleet.mjs`,
   `server/agent-identities.mjs`.

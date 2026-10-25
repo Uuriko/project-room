@@ -1659,6 +1659,52 @@ paths:
               schema: { type: string }
         '422':
           description: Unknown or repeated format
+  /api/rooms/{roomId}/decision-rows:
+    get:
+      summary: Export per-subject decision rows (decision-rows/1)
+      description: >-
+        Owner-only (403 owner_required for other members). One row per
+        verdict across public-work reviews, bounty verdicts and board
+        claim reviews, in the stable decision-rows/1 schema documented in
+        docs/DECISION-ROWS.md. The payload is materialised in full before
+        the response starts; each export of a live room appends a
+        room.exported audit event naming the schema version, row count
+        and requester, and writes an export row to the evidence access
+        log, before the payload is sent.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: owner_required - only the room owner exports decision rows }
+        '200':
+          description: "{ schema, roomId, generatedAt, requestedBy, rowCount, fields, rows, auditEventId }"
+          content:
+            application/json:
+              schema: { type: object }
+        '422': { description: invalid_decision_export - the export takes no parameters }
+  /api/rooms/{roomId}/decision-rows/access-log:
+    get:
+      summary: Read the evidence access log for a room
+      description: >-
+        Owner-only. Entries name the reader, the kind (export or
+        evidence_read), the surface, the record id when the read was for
+        one record, and the time; export entries also name the schema
+        version and row count. Newest first.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: limit
+          in: query
+          description: 1 to 500 (default 100); anything else is 422 invalid_access_log
+          schema: { type: integer, minimum: 1, maximum: 500, default: 100 }
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: owner_required - only the room owner reads the access log }
+        '200':
+          description: "{ roomId, entries }"
+          content:
+            application/json:
+              schema: { type: object }
+        '422': { description: invalid_access_log }
   /api/rooms/{roomId}/import:
     post:
       summary: Import a JSONL event-log export
@@ -8282,6 +8328,74 @@ paths:
         '403': { description: not_authorized }
         '404': { description: unknown_bounty }
         '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/decision-packet:
+    get:
+      summary: Read your own adverse-decision packet for a rejected bounty
+      description: |
+        The claimant of a bounty whose recorded resolution is a rejection
+        (rejectWork) reads the subject-facing packet: plain-language
+        explanation, principal factors from the recorded reason,
+        agent-participation disclosure, the data relied on (submission
+        evidence, submission hash, criteria and rubric version), a
+        correction path distinct from a dispute, the claim-time
+        agent-participation notice on record, and a human-review route
+        whose reviewer is not the original decider. Any other caller —
+        including the poster — gets 404. API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      responses:
+        '200':
+          description: The adverse-decision packet
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  packet: { type: object }
+        '401': { description: unauthenticated }
+        '404': { description: packet_not_found or no_adverse_decision }
+  /api/rooms/{roomId}/bounties/{bountyId}/decision-packet/followups:
+    post:
+      x-room-permission: member
+      summary: File a correction or human-review request on a rejected bounty's packet
+      description: |
+        Claimant-only, and a rejection must be recorded. kind=correction
+        records that data the decision relied on is wrong (fixes the
+        record; not a dispute, moves no money, no bond).
+        kind=human_review_request records a request routed to a human
+        reviewer who was not the rejector (room owner, else the designated
+        dispute decider or verifier); 409 no_distinct_human_reviewer when
+        none is recorded. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, statement]
+              properties:
+                kind: { type: string, enum: [correction, human_review_request] }
+                statement: { type: string, minLength: 1, maxLength: 2000 }
+                idempotencyKey: { type: string }
+      responses:
+        '201':
+          description: The recorded follow-up
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  followup: { type: object }
+        '401': { description: unauthenticated }
+        '404': { description: packet_not_found or no_adverse_decision }
+        '409': { description: no_distinct_human_reviewer }
+        '422': { description: invalid_decision_packet }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute:
     post:
       summary: Dispute an accepted bounty
@@ -15921,6 +16035,118 @@ paths:
             type: "string"
       security:
         - identityBearer: []
+  /api/public-work/receipts/{receiptId}/decision-packet:
+    get:
+      operationId: "getAdverseDecisionPacket"
+      summary: "Read your own adverse-decision packet, without room admission."
+      description: "Fresh saved global identity, receipt ownership required. Composes the recorded adverse decision (rejection or failed verification) into a subject-facing packet: plain-language explanation, principal factors from the recorded reason and any per-criterion outcomes on the record, agent-participation disclosure, the data relied on with a correction path distinct from a dispute, and a human-review route whose reviewer is not the original decider. Reviewer member identities are not exposed. 404 when no adverse decision is recorded."
+      responses:
+        200:
+          description: "The adverse-decision packet for this contribution."
+          content:
+            application/json:
+              schema:
+                type: "object"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this identity, or no adverse decision recorded."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+    head:
+      operationId: "headAdverseDecisionPacket"
+      summary: "Read your own adverse-decision packet, without room admission."
+      description: "Fresh saved global identity, receipt ownership required. Headers only."
+      responses:
+        200:
+          description: "The adverse-decision packet for this contribution."
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this identity, or no adverse decision recorded."
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
+  /api/public-work/receipts/{receiptId}/decision-packet/followups:
+    post:
+      x-room-permission: self
+      operationId: "fileAdverseDecisionPacketFollowup"
+      summary: "File a correction or human-review request on your own adverse-decision packet."
+      description: "Fresh saved global identity, receipt ownership required, and an adverse decision must be recorded. kind=correction records that data the decision relied on is wrong (it fixes the record; it is not a dispute and moves no money). kind=human_review_request records a request routed to a human reviewer who was not the original decider; 409 no_distinct_human_reviewer when none is recorded."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              additionalProperties: false
+              required: ["kind", "statement"]
+              properties:
+                kind: { type: "string", enum: ["correction", "human_review_request"] }
+                statement: { type: "string", minLength: 1, maxLength: 2000 }
+      responses:
+        201:
+          description: "The recorded follow-up."
+          content:
+            application/json:
+              schema:
+                type: "object"
+        400:
+          $ref: "#/components/responses/BadRequest"
+        401:
+          $ref: "#/components/responses/Unauthorized"
+          description: "Unknown, revoked or missing credential."
+        404:
+          $ref: "#/components/responses/NotFound"
+          description: "Receipt not found for this identity, or no adverse decision recorded."
+        409:
+          $ref: "#/components/responses/Conflict"
+          description: "No human reviewer distinct from the original decider is recorded."
+        422:
+          description: "Invalid fields or unsupported query."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        429:
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        - name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security:
+        - identityBearer: []
   /api/rooms/{roomId}/public-work/receipts/{receiptId}:
     get:
       operationId: "inspectPublicWorkReview"
@@ -17592,6 +17818,31 @@ components:
               type:
                 - "string"
                 - "null"
+    RecordProvenance:
+      type: "object"
+      description: "Accountability stamp written at record creation (#3612, R-1/R-9); component salvaged from superseded PR #4043 and expressed in PR #4041's stored shape. sessionInstanceId and authorizingPrincipalId are FACTS derived by the server from the authenticated context and stored rows - caller-supplied values are never stored. claimedModelVersion, claimedHarnessVersion and claimedEnvironment are CLAIMS: the producing runtime's self-report, pinned at write time under claimed* names, never presented as platform-verified. Present on records written after the stamp shipped; historical records are not backfilled."
+      properties:
+        sessionInstanceId:
+          type:
+            - "string"
+            - "null"
+          pattern: "^sess_[0-9a-f]{24}$"
+        authorizingPrincipalId:
+          type:
+            - "string"
+            - "null"
+        claimedModelVersion:
+          type:
+            - "string"
+            - "null"
+        claimedHarnessVersion:
+          type:
+            - "string"
+            - "null"
+        claimedEnvironment:
+          type:
+            - "string"
+            - "null"
     PublicWorkReceipt:
       type: "object"
       required:
@@ -17693,6 +17944,8 @@ components:
           enum:
             - "hash_only"
             - "system_checked"
+        provenance:
+          $ref: "#/components/schemas/RecordProvenance"
         createdAt:
           type: "string"
           format: "date-time"
@@ -17735,7 +17988,27 @@ components:
         duplicateOf: { type: string, nullable: true }
         label: { type: string, nullable: true }
         disputeId: { type: string, nullable: true }
-        resolution: { type: object, nullable: true }
+        evidence:
+          type: object
+          nullable: true
+          description: "The claimant's submission record; carries a #3612 provenance stamp on submissions written after the stamp shipped."
+          properties:
+            provenance: { $ref: "#/components/schemas/RecordProvenance" }
+        attestation:
+          type: object
+          nullable: true
+          description: "The verifier's acceptance attestation; carries a #3612 provenance stamp on attestations written after the stamp shipped."
+          properties:
+            provenance: { $ref: "#/components/schemas/RecordProvenance" }
+        resolution:
+          type: object
+          nullable: true
+          description: "Terminal resolution; its settlement record carries a #3612 provenance stamp on settlements written after the stamp shipped."
+          properties:
+            settlement:
+              type: object
+              properties:
+                provenance: { $ref: "#/components/schemas/RecordProvenance" }
         submissionHash:
           type: string
           nullable: true
@@ -18178,6 +18451,7 @@ components:
               summary: { type: string }
               url: { type: [string, 'null'] }
               at: { type: string, format: date-time }
+              provenance: { $ref: "#/components/schemas/RecordProvenance" }
               basis:
                 type: object
                 description: Server-recorded context for manual reviewed completion; absent on legacy reviews. Does not bind artifact bytes or client-observed context.
@@ -18206,6 +18480,7 @@ components:
               memberId: { type: string }
               at: { type: string, format: date-time }
               note: { type: [string, 'null'] }
+              provenance: { $ref: "#/components/schemas/RecordProvenance" }
         history:
           type: array
           items:

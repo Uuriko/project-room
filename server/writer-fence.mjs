@@ -33,6 +33,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "agent_invite_redeem_receipts", // G1 idempotent redeem (PRODUCT-200 D7): purely additive retry-receipt journal; older writers have no code path to it.
   "public_work_reviews", "public_work_review_requests", "public_work_review_versions", // Private review projections/journals/version history never alter existing claims, receipts or awards.
   "public_work_successors", "public_work_successor_requests", // Additive follow-up lineage and replay journal; older writers never mutate these tables.
+  "subject_notices", "adverse_decision_followups", // #3615 (R-4/R-6): subject notice records and adverse-decision follow-ups; purely additive, older writers have no code path to them.
   "public_work_settlements", // Additive escrow link for paid public work (First Shift settlement rail); money itself stays in the bounty journal, older writers have no code path to this table.
   "project_offers", "project_offer_requests", // Owner-authored public terms, additive; older writers have no routes.
   "room_assistant_config", "room_assistant_runs", "room_assistant_ops",
@@ -147,6 +148,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // have no code path to it, and the packet journal verifies its own schema
   // on open; rows never drive bans, slashes, or balances.
   "bounty_reputation_packets",
+  // #3617 (R-8): refusal_journal (server/refusal-journal.mjs) — first-class
+  // refusal records for bounty, public-work and board surfaces. Purely
+  // additive and intentionally NOT fenced: older writers have no code path
+  // to it, and rows never drive bans, slashes, or balances.
+  "refusal_journal",
   // RC-2026-09-18-049: agent_identity_verification (owner attestations) and
   // room_verification_policy (per-room gate). Purely additive and
   // intentionally NOT fenced: older writers have no code path to them, and
@@ -561,7 +567,20 @@ const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", 
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+// evidence_access_log (#3616 R-11, server/decision-rows.mjs): the decision-row
+// export + evidence-read access log. Purely additive, created lazily on first
+// export/read — a store that never served an export has no table, so it is
+// allowed by the recovery audit but never required. Older writers have no
+// code path to it.
+const DECISION_ROWS_ADDITIVE_TABLES = Object.freeze(["evidence_access_log"]);
+// #3618 records (server/records-incidents.mjs, server/records-performance.mjs):
+// incident records + their link journal and the stored performance
+// aggregate records. Purely additive, created on demand by the records
+// tooling (scripts/records-aggregates-sync.mjs) or a caller-side refresh —
+// allowed by the recovery audit but never required, same standing as
+// claim_reputation_signals above.
+const RECORDS_ADDITIVE_TABLES = Object.freeze(["incident_records", "incident_links", "performance_aggregate_records"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...DECISION_ROWS_ADDITIVE_TABLES, ...RECORDS_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

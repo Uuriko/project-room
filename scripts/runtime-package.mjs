@@ -65,6 +65,8 @@ optional.push("client/work-brief.mjs");
 optional.push("server/public-work-claims.mjs", "server/public-work-claim-fence.mjs", "client/public-work-claims.mjs");
 optional.push("server/public-work-reviews.mjs", "server/mcp-public-work.mjs", "server/public-work-successors.mjs");
 optional.push("server/public-work-settlement.mjs"); // First Shift settlement rail (imported by server/store.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs)
+optional.push("server/adverse-decision-packets.mjs"); // #3615 adverse-decision packets + subject notices (imported by server/store.mjs; imports src/events.js and server/service-error.mjs, both already registered)
+optional.push("server/decision-rows.mjs", "server/routes/decision-rows.mjs"); // #3616 decision-row export (imported by server/store.mjs; route rows registered in server/routes/table.mjs)
 optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outside-agents.mjs", "scripts/outside-agents.mjs");
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
@@ -229,6 +231,7 @@ optional.push("server/updates.mjs"); // Updates projection (imported by server/h
 optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim state machine (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-sqlite.mjs");
 optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe persisted-row envelope + move-tolerant kind codec (imported by server/work-claim-sqlite.mjs, server/dispatch-journal.mjs, server/bounty-escrow.mjs; pure, no imports)
+optional.push("server/records-provenance.mjs"); // #3612: consequential-record provenance stamps (imported by server/work-claims.mjs, server/bounty-escrow.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs, server/work-claim-routes.mjs, server/bounty-escrow-routes.mjs; pure, node:crypto only)
 optional.push("server/claim-collisions.mjs");
 optional.push("server/agent-collisions.mjs"); // overlap alerts for live claims (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
@@ -256,6 +259,7 @@ optional.push("server/bounty-receipts.mjs"); // bounty receipts slice #1: Ed2551
 optional.push("server/dispute-arbiters.mjs"); // agent work exchange slice 1: designated-verifier arbitration (imported by server/bounty-escrow.mjs)
 optional.push("server/bounty-reputation.mjs"); // integration-map slice #4: bounty -> reputation projector (imported by server/bounty-escrow.mjs)
 optional.push("server/reputation.mjs"); // B019: pure reputation tracker with typed signals + bands (imported by server/bounty-reputation.mjs)
+optional.push("server/refusal-journal.mjs"); // #3617 (R-7/R-8): refusal journal + obligation stamps (imported by server/bounty-escrow.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs, server/work-claim-routes.mjs; pure, node:crypto only)
 optional.push("server/bounty-epoch-keeper.mjs"); // #3693/#3844: automatic payout-epoch progression (imported by server/jobs.mjs and cloudflare/room.mjs; imports server/bounty-escrow.mjs)
 optional.push("server/patrol.mjs"); // ClueBot phase 1: resident per-event invariant patrol, read-only (imported by server/jobs.mjs, server/store.mjs and cloudflare/room.mjs; imports server/work-claims.mjs, server/projection-at-rest.mjs, server/messages-store.mjs)
 optional.push("server/agent-rooms.mjs"); // agent room ownership service (imported by server/http.mjs)

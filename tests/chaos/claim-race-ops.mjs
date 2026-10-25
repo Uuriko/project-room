@@ -401,11 +401,10 @@ export async function loadWeakenedClaimModule(kind) {
     }
     source = source.replace(from, to);
   }
-  // The copy lives in tests/chaos/.weak/, so re-point the relative import.
-  source = source.replace(
-    `from "./claim-coordination.mjs"`,
-    `from "../../../server/claim-coordination.mjs"`,
-  );
+  // The copy lives in tests/chaos/.weak/, so re-point every relative import
+  // back to server/. "./" runs after nothing else has rewritten these
+  // specifiers (this module has no "../" imports).
+  source = source.replaceAll(`from "./`, `from "../../../server/`);
   const weakDir = join(HERE, ".weak");
   await mkdir(weakDir, { recursive: true });
   const weakPath = join(weakDir, `work-claims-${kind}.${process.pid}.weak.mjs`);
