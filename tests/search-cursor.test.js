@@ -87,14 +87,39 @@ test("search cursor is bound to query and kind; bad cursors are 422", async t =>
   assert.equal(last.body.nextCursor, undefined, "no cursor when everything fit");
 });
 
-test("kind=all keeps its newest-page shape and offers no cursor", async t => {
-  const { get, post } = await serve(t);
-  for (let i = 0; i < 4; i += 1) post(`gamma ${i}`);
-  const res = await page(get, "gamma", "all", 2);
-  assert.equal(res.status, 200);
-  assert.equal(res.body.messages.length, 2);
-  assert.equal(res.body.total, 4);
-  assert.equal(res.body.nextCursor, undefined);
+test("kind=all walks every message and work hit, newest page first, with no duplicates", async t => {
+  const { get, post, send } = await serve(t);
+  const messages = [];
+  for (let i = 0; i < 25; i += 1) messages.push(post(`quartz note ${i}`));
+  const work = [];
+  for (let i = 0; i < 17; i += 1) {
+    const workItemId = `quartz-work-${i}`;
+    send("owner", T.WORK_PROPOSED, {
+      workItemId, title: `quartz task ${i}`, definitionOfDone: "done when done",
+      accountableMemberId: "owner", verifierMemberId: "owner", mode: "write"
+    });
+    work.push(workItemId);
+  }
+  const expected = [...messages, ...work];
+  assert.equal(expected.length, 42);
+  const seen = [];
+  let before = null;
+  let pages = 0;
+  do {
+    const res = await page(get, "quartz", "all", 10, before);
+    assert.equal(res.status, 200, JSON.stringify(res.body).slice(0, 300));
+    assert.equal(res.body.total, 42);
+    const ids = [...res.body.messages.map(hit => hit.id), ...res.body.workItems.map(hit => hit.id)];
+    assert.ok(ids.length > 0 && ids.length <= 10);
+    for (const hit of res.body.messages) assert.equal(Object.hasOwn(hit, "body"), false);
+    seen.unshift(...ids);
+    before = res.body.nextCursor ?? null;
+    pages += 1;
+    assert.ok(pages <= 6);
+  } while (before);
+  assert.equal(pages, 5);
+  assert.deepEqual(seen, expected);
+  assert.equal(new Set(seen).size, 42);
 });
 
 test("cursor anchors honor visibility: missing, private, non-matching and deleted anchors get one identical 422", async t => {

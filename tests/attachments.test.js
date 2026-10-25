@@ -29,6 +29,28 @@ test("tracker enforces per-message cap and download lifecycle", () => {
   const failed = tracker.markFailed("a3", "network timeout");
   assert.deepEqual([failed.state, failed.error], ["failed", "network timeout"]);
 });
+test("filenames separate path separators, controls, and invisible characters", () => {
+  const meta = (filename) => validateAttachment({ filename, sizeBytes: 4, mimeType: "text/plain" });
+  const refused = (filename, message) => assert.throws(() => meta(filename), error =>
+    error instanceof AttachmentError && error.code === "invalid_attachment" && error.message === message);
+  refused("a/b.txt", "filename must not contain path separators");
+  refused("a\\b.txt", "filename must not contain path separators");
+  refused("a/b\u0000.txt", "filename must not contain path separators");
+  for (const filename of ["a\u0000b.txt", "a\nb.txt", "a\tb.txt", "a\u001bb.txt"]) {
+    refused(filename, "filename must not contain control characters");
+  }
+  refused("invoice\u202Efdp.exe.txt", "filename must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+  refused("a\u2066b.txt", "filename must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+  for (const char of ["\u200B", "\u200C", "\u200D", "\u2060", "\uFEFF"]) {
+    refused(`notes${char}.txt`, "filename must not contain zero-width characters");
+  }
+  refused("notes\u{E0000}.txt", "filename must not contain Unicode tag characters (U+E0000-E007F)");
+  refused("notes\u{E007F}.txt", "filename must not contain Unicode tag characters (U+E0000-E007F)");
+  assert.equal(meta("café.txt").filename, "café.txt");
+  assert.equal(meta("İstanbul.txt").filename, "İstanbul.txt");
+  assert.equal(meta("report.pdf:Zone.Identifier").extension, "pdf");
+});
+
 test("malformed inputs are refused", () => {
   throwsCode(() => validateAttachment({ filename: "", sizeBytes: 1, mimeType: "x" }), "invalid_attachment");
   const tracker = createDownloadTracker();
@@ -36,9 +58,11 @@ test("malformed inputs are refused", () => {
 });
 
 test("validateAttachment reads the extension the way Windows saves the file (trailing dots and spaces)", () => {
-  for (const filename of ["evil.exe.", "evil.exe ", "evil.EXE. . ", "evil.bat\t", "evil.exe..."]) {
+  for (const filename of ["evil.exe.", "evil.exe ", "evil.EXE. . ", "evil.exe..."]) {
     throwsCode(() => validateAttachment({ filename, sizeBytes: 10, mimeType: "text/plain" }), "blocked_extension");
   }
+  assert.throws(() => validateAttachment({ filename: "evil.bat\t", sizeBytes: 10, mimeType: "text/plain" }), error =>
+    error instanceof AttachmentError && error.code === "invalid_attachment" && error.message === "filename must not contain control characters");
   assert.equal(validateAttachment({ filename: "notes.txt.", sizeBytes: 1, mimeType: "text/plain" }).extension, "txt");
   assert.equal(validateAttachment({ filename: "plain", sizeBytes: 1, mimeType: "text/plain" }).extension, "");
 });

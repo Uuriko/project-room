@@ -25,6 +25,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 // class object and all `instanceof` checks behave identically.
 import { ServiceError } from "./service-error.mjs";
 import { stampInbox, stampSearch, stampThread, stampWorkResult, withContentTrust } from "./content-trust.mjs";
+import { invisibleCharIssue, foldSearchText } from "./text-policy.mjs";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.mjs";
 import { createRoomFloodGuard } from "./room-flood-guard.mjs";
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
@@ -841,6 +842,7 @@ export function validateCommand(command) {
     if (body.includes("\u0000")) fail(422, "invalid_command", "body must not contain NUL (U+0000) characters");
     if (!body.isWellFormed()) fail(422, "invalid_command", "body must not contain unpaired surrogate characters");
     if (/[\u202A-\u202E\u2066-\u2069]/u.test(body)) fail(422, "invalid_command", "body must not contain bidirectional embedding, override or isolate characters (U+202A-202E, U+2066-2069)");
+    if (invisibleCharIssue(body) === "Unicode tag characters (U+E0000-E007F)") fail(422, "invalid_command", "body must not contain Unicode tag characters (U+E0000-E007F)");
     // r217 (reply-crew QA): ZWSP, Hangul filler and bare combining marks
     // passed the trim() empty check, so a blank bubble posted and counted as
     // unread. Refuse a body with no visible characters after stripping
@@ -5347,7 +5349,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (typeof query !== "string" || !query.trim() || query.length > 80) fail(422, "invalid_search", "Search is 1 to 80 characters");
     if (!["all", "messages", "work", "pinned"].includes(kind)) fail(422, "invalid_search", "kind is all, messages, work, or pinned");
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_search", "limit is 1 to 200");
-    const needle = query.trim().toLowerCase();
+    const needle = foldSearchText(query.trim());
+    if (!needle) fail(422, "invalid_search", "Search is 1 to 80 characters");
     // REST search paging: `before` is the opaque cursor a previous page
     // returned as nextCursor. It is bound to the same query and kind, so it
     // cannot carry a page from one search into another.
@@ -5357,12 +5360,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId);
       const result = { roomId, query: query.trim(), messages: [], workItems: [], total: 0 };
       const floor = this.historyFloor(roomId, auth.member.id); // PRIV-2
+      const matches = [];
       if (kind === "all" || kind === "messages" || kind === "pinned") {
         // Collect every match the caller may read first. Every filter
         // (tombstones, history floor, pins, mutes, targeted DMs) runs before
         // a cursor is resolved, so a cursor can only point at a match this
         // caller would see anyway.
-        const matches = [];
         // Archived messages are not in the projection; they are older than every
         // projected message, so they come first.
         for (const m of [...archivedMatchingRecords(this.db, roomId, needle), ...(room.state.messages ?? [])]) {
@@ -5375,8 +5378,44 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           // nor the match count (result.total, #1812) can reveal their
           // existence, count, or bodies to a third party.
           if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
-          if (m.body.toLowerCase().includes(needle)) matches.push(m);
+          if (foldSearchText(m.body).includes(needle)) matches.push(m);
         }
+      }
+      const workHits = [];
+      if (kind === "all" || kind === "work") {
+        for (const w of Object.values(room.state.workItems ?? {})) {
+          const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`;
+          if (foldSearchText(haystack).includes(needle)) workHits.push(w);
+        }
+        // Order by createdAt, NOT by object key order: JS enumerates
+        // integer-like keys ("2","10") in ascending numeric order regardless
+        // of insertion, so key order is not creation order for numeric ids
+        // (validId permits them). Stable sort keeps insertion order on ties.
+        workHits.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+      }
+      if (kind === "all") {
+        // Messages, oldest first, then work items, oldest first. The page is
+        // the newest `limit` of that list; the cursor names its first hit so
+        // the next page is strictly earlier. A kind=all search can walk every hit.
+        const combined = [
+          ...matches.map(m => ({ section: "message", id: m.id, message: m })),
+          ...workHits.map(w => ({ section: "work", id: w.id, work: w }))
+        ];
+        result.total = combined.length;
+        let stop = combined.length;
+        if (cursor) {
+          stop = combined.findIndex(hit => hit.section === cursor.section && hit.id === cursor.anchor);
+          if (stop < 0) fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
+        }
+        const start = Math.max(0, stop - limit);
+        for (const hit of combined.slice(start, stop)) {
+          if (hit.section === "message") result.messages.push(searchMessageView(hit.message, needle));
+          else result.workItems.push({ id: hit.work.id, title: hit.work.title, state: hit.work.state, accountableMemberId: hit.work.accountableMemberId });
+        }
+        if (start > 0) result.nextCursor = encodeSearchCursor(needle, kind, combined[start].id, combined[start].section);
+        return stampSearch(result, auth.member.id);
+      }
+      if (matches.length) {
         result.total = matches.length; // the full count on every page
         // The page holds the newest `limit` matches strictly older than the
         // cursor anchor (all matches without a cursor), still chronological.
@@ -5390,28 +5429,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (stop < 0) fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
         }
         const start = Math.max(0, stop - limit);
-        for (const m of matches.slice(start, stop)) {
-          result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
-        }
-        if (kind !== "all" && start > 0) result.nextCursor = encodeSearchCursor(needle, kind, result.messages[0].id);
+        for (const m of matches.slice(start, stop)) result.messages.push(searchMessageView(m, needle));
+        if (start > 0) result.nextCursor = encodeSearchCursor(needle, kind, result.messages[0].id);
+      } else if (cursor && (kind === "messages" || kind === "pinned")) {
+        fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
       }
-      if (kind === "all" || kind === "work") {
-        const workHits = [];
-        for (const w of Object.values(room.state.workItems ?? {})) {
-          const haystack = `${w.title ?? ""} ${w.description ?? ""} ${w.definitionOfDone ?? ""}`.toLowerCase();
-          if (haystack.includes(needle)) {
-            result.total += 1;
-            workHits.push(w);
-          }
-        }
-        // Keep the newest `limit` matches (still chronological), like the
-        // messages loop above: the first ones leave every newer match
-        // unreachable — there is no offset, and limit tops out at 200.
-        // Order by createdAt, NOT by object key order: JS enumerates
-        // integer-like keys ("2","10") in ascending numeric order regardless
-        // of insertion, so key order is not creation order for numeric ids
-        // (validId permits them). Stable sort keeps insertion order on ties.
-        workHits.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
+      if (kind === "work") {
+        result.total += workHits.length;
+        // Keep the newest `limit` matches (still chronological): the first
+        // ones leave every newer match unreachable — there is no offset, and
+        // limit tops out at 200.
         for (const w of workHits.slice(-limit)) {
           result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
         }
@@ -6034,6 +6061,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       refuseArchivedWrite(room.state);
       room = prepareMessageCommand(this, roomId, room, command, auth.member.id);
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
+        if (command.data.toMemberId === auth.member.id) fail(422, "invalid_command", "Can't DM yourself; post without toMemberId for a note");
         // DMs are open by default: only an explicit denial (blocked /
         // rejected / revoked) refuses. Runs before the event is built, so a
         // refused DM never persists and never wakes its target.
@@ -6160,6 +6188,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             && (dmAncestor.authorId === auth.member.id || dmAncestor.toMemberId === auth.member.id)) {
           const otherParty = dmAncestor.authorId === auth.member.id ? dmAncestor.toMemberId : dmAncestor.authorId;
           if (typeof otherParty === "string" && otherParty) {
+            if (otherParty === auth.member.id) fail(422, "invalid_command", "Can't DM yourself; post without toMemberId for a note");
             command.data.toMemberId = otherParty;
             // r232: the stamped reply is a DM, so it needs the same consent
             // check a DM with an explicit toMemberId got above; otherwise a
@@ -6917,8 +6946,10 @@ const SEARCH_CURSOR_INVALID = "Search cursor is not valid for this search; start
 function searchCursorHash(needle, kind) {
   return createHash("sha256").update(`${kind}\u0000${needle}`, "utf8").digest().subarray(0, 16).toString("base64url");
 }
-export function encodeSearchCursor(needle, kind, anchor) {
-  return Buffer.from(JSON.stringify({ v: 2, k: kind, h: searchCursorHash(needle, kind), a: anchor }), "utf8").toString("base64url");
+export function encodeSearchCursor(needle, kind, anchor, section = null) {
+  const payload = { v: 2, k: kind, h: searchCursorHash(needle, kind), a: anchor };
+  if (kind === "all") payload.s = section === "work" ? "work" : "message";
+  return Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
 }
 // A search result id is a message id (validId, at most 128 characters) or the
 // channel copy of a thread reply, which is the source id plus ":channel" (so at
@@ -6929,11 +6960,60 @@ function validSearchAnchor(anchor) {
   return typeof anchor === "string" && anchor.endsWith(SEARCH_CHANNEL_SUFFIX) && validId(anchor.slice(0, -SEARCH_CHANNEL_SUFFIX.length));
 }
 export function decodeSearchCursor(value, needle, kind) {
-  if (kind !== "messages" && kind !== "pinned") fail(422, "invalid_search_cursor", "Search cursors page kind=messages or kind=pinned only");
+  if (kind !== "messages" && kind !== "pinned" && kind !== "all") fail(422, "invalid_search_cursor", "Search cursors page kind=messages, kind=pinned, or kind=all only");
   const bad = () => fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
   if (typeof value !== "string" || !value || value.length > SEARCH_CURSOR_MAX_LENGTH || !/^[A-Za-z0-9_-]+$/.test(value)) bad();
   let parsed;
   try { parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")); } catch { bad(); }
-  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.v !== 2 || parsed.k !== kind || parsed.h !== searchCursorHash(needle, kind) || !validSearchAnchor(parsed.a)) bad();
-  return { anchor: parsed.a };
+  const sectionOk = kind === "all" ? parsed?.s === "message" || parsed?.s === "work" : parsed?.s == null;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || parsed.v !== 2 || parsed.k !== kind || parsed.h !== searchCursorHash(needle, kind) || !sectionOk || !validSearchAnchor(parsed.a)) bad();
+  return kind === "all" ? { anchor: parsed.a, section: parsed.s } : { anchor: parsed.a };
+}
+
+const SEARCH_SNIPPET_CHARS = 160;
+
+// About 160 characters of the original text centered on the folded match.
+// The full body stays on the message route.
+function searchSnippet(body, needle) {
+  const text = typeof body === "string" ? body : String(body ?? "");
+  const chars = Array.from(text);
+  const folded = foldSearchText(text);
+  const at = folded.indexOf(needle);
+  if (at < 0) return chars.slice(0, SEARCH_SNIPPET_CHARS).join("");
+  const foldLen = count => foldSearchText(chars.slice(0, count).join("")).length;
+  let lo = 0;
+  let hi = chars.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (foldLen(mid) <= at) lo = mid;
+    else hi = mid - 1;
+  }
+  const matchStart = lo;
+  const endAt = at + needle.length;
+  lo = matchStart;
+  hi = chars.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (foldLen(mid) < endAt) lo = mid + 1;
+    else hi = mid;
+  }
+  const matchEnd = Math.max(lo, matchStart + 1);
+  let from = matchStart;
+  let to = matchEnd;
+  while (to - from < SEARCH_SNIPPET_CHARS && (from > 0 || to < chars.length)) {
+    if (from > 0) from -= 1;
+    if (to - from < SEARCH_SNIPPET_CHARS && to < chars.length) to += 1;
+  }
+  if (to - from > SEARCH_SNIPPET_CHARS) to = from + SEARCH_SNIPPET_CHARS;
+  return chars.slice(from, to).join("");
+}
+
+function searchMessageView(message, needle) {
+  return {
+    id: message.id,
+    authorId: message.authorId,
+    snippet: searchSnippet(message.body, needle),
+    createdAt: message.createdAt,
+    workItemId: message.workItemId
+  };
 }

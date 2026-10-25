@@ -56,7 +56,7 @@ const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 const MCP_SERVER_CARD_DOC = discoveryDoc(MCP_SERVER_CARD_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
-import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
+import { mcpAttachmentBodyBytes, fileUploadLimitMessage } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
@@ -3738,6 +3738,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!exact(data, ["messageId"]) || typeof data.messageId !== "string") reject(422, "invalid_message", "messageId is required");
           return json(res, 200, store.roomAttachments.commit(selected.token, roomId, { id: fileId, messageId: data.messageId }));
         }
+        const oversize = fileUploadLimitMessage(req.headers["content-length"]);
+        if (oversize) { req.resume(); reject(413, "attachment_too_large", oversize); }
         const data = await body(req, { limit: mcpAttachmentBodyBytes });
         if (!data || typeof data.id !== "string" || typeof data.filename !== "string" || typeof data.mediaType !== "string" || typeof data.data !== "string"
           || !exact(data, ["id", "filename", "mediaType", "data"])) {
