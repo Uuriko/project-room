@@ -78,7 +78,13 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
         const candidates = recovering.length ? recovering : assigned.filter(run => run.status === "queued" && !run.attemptId && !run.sourceDeleted);
         candidates.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.id.localeCompare(b.id));
         const run = candidates.find(row => (db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? 0) <= Date.now());
-        if (!run) { if (!candidates.length) state("watching_room"); await pause(pollMs); continue; }
+        if (!run) {
+          // A live authenticated runtime can still be unselected in its room.
+          // Report the missing setup without changing claims or owned recovery.
+          if (!candidates.length) state(snapshot.assistant?.coordinatorMemberId === connection.memberId
+            ? "watching_room" : "assistant_not_selected");
+          await pause(pollMs); continue;
+        }
         try {
           if (!rpc) { rpc = await connect(scopedCodexThreads(db, connection)); state("protocol_qualified", { providerAuthentication: "unverified" }); }
           if (controller.signal.aborted) break;

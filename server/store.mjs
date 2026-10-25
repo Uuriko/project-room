@@ -34,7 +34,7 @@ import {
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
-  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
+  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES, ownMember
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -108,6 +108,7 @@ import { GuestInvites, guestInviteSchema, guestSelfServeSchema, guestInviteAutho
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
 import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
@@ -157,6 +158,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { wakeForAgent } from "./sleeper-wake.mjs";
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
@@ -5030,93 +5032,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
-      const { members, ownerId } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
-      const now = this.now();
-      const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
-      const working = new Map();
-      const heartbeats = new Map();
-      for (const item of Object.values(room.state.workItems ?? {})) {
-        const session = sessionRecord(item);
-        if (session.worker_member_id && session.heartbeat_at) {
-          const prev = heartbeats.get(session.worker_member_id);
-          if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
-        }
-        const worker = sessionWorker(item, now);
-        const heartbeatAt = timestamp(session.heartbeat_at);
-        if (!worker || !["processing", "active"].includes(session.status)
-          || !Number.isFinite(heartbeatAt) || heartbeatAt > now
-          || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
-        if (!working.has(worker)) working.set(worker, []);
-        working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
-      }
-      const lastCommandAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? GROUP BY actor`
-      ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
-      const addedAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
-      ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
-      const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
-      // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
-      // #660: raw host status per member. status is "online"|"offline"|null
-      // (null = no registered host); identityId is the linked agent identity.
-      const hostStatusOf = memberId => {
-        const m = members[memberId];
-        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
-        const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return { identityId: null, status: null, lastSeenAt: null };
-        const status = this.agentHeartbeats.statusOf(link.identityId);
-        // Unregistered (no host) stays null so RC-051 clients keep the
-        // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
-        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
-      };
-      const agentPresence = memberId => {
-        const host = hostStatusOf(memberId);
-        if (host.status === null) return null;
-        return { status: host.status, lastSeenAt: host.lastSeenAt };
-      };
-      const listed = Object.values(members)
-        .filter(m => m && m.active !== false)
-        .map(m => {
-          const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
-          const host = hostStatusOf(m.id);
-          const workingOn = working.get(m.id) ?? [];
-          const isWatching = watching.has(m.id);
-          return {
-            memberId: m.id, displayName: m.displayName, kind: m.kind,
-            watching: isWatching, workingOn,
-            lastSeenAt, statusMessage: m.statusMessage ?? null,
-            presence: agentPresence(m.id),
-            // #660: derived working state + owner/scope projection (additive).
-            state: presenceState({
-              kind: m.kind,
-              hasActiveSession: workingOn.length > 0,
-              watching: isWatching,
-              hostStatus: host.status,
-              hostLastSeenAt: host.lastSeenAt,
-              lastCommandAt: timestamp(lastCommandAt.get(m.id)),
-              // Enrollment is retained in legacy lastSeenAt, but is not activity.
-              lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
-                timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
-              now,
-            }),
-            isOwner: m.id === ownerId,
-            scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
-            ownerIdentityId: m.kind === "agent" ? host.identityId : null,
-            // plan-dir-card: the member's linked directory card id (the
-            // member chip lazy-loads the card from
-            // /api/rooms/{roomId}/members/{memberId}/card). Null when the
-            // member has no visible card.
-            cardAgentId: m.kind === "agent" && host.identityId
-              ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
-              : null,
-          };
-        })
-        .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
+      const listed = this.presenceMembers(roomId, watcherMemberIds);
       // Suggested DM targets require current connection/execution observations.
       const onlineIds = listed.filter(m => m.watching
         || m.state === "listening" || m.state === "working").map(m => m.memberId);
@@ -5124,6 +5040,144 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         members: listed,
         next: Object.freeze(presenceNext(roomId, onlineIds)),
       };
+    });
+  }
+  // The per-room presence rows presence() serves, factored out so the
+  // cross-room read (agentPresence) derives a shared room's row through
+  // exactly this code — one derivation, two surfaces. The caller supplies
+  // the room's live SSE watcher member ids ([] for a read with no stream,
+  // so watching reads false there).
+  presenceMembers(roomId, watcherMemberIds) {
+    const { members, ownerId } = this.roomAuthority(roomId);
+    const room = this.room(roomId);
+    const now = this.now();
+    const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
+    const working = new Map();
+    const heartbeats = new Map();
+    for (const item of Object.values(room.state.workItems ?? {})) {
+      const session = sessionRecord(item);
+      if (session.worker_member_id && session.heartbeat_at) {
+        const prev = heartbeats.get(session.worker_member_id);
+        if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
+      }
+      const worker = sessionWorker(item, now);
+      const heartbeatAt = timestamp(session.heartbeat_at);
+      if (!worker || !["processing", "active"].includes(session.status)
+        || !Number.isFinite(heartbeatAt) || heartbeatAt > now
+        || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
+      if (!working.has(worker)) working.set(worker, []);
+      working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
+    }
+    const lastCommandAt = new Map(this.db.prepare(
+      `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+       FROM events WHERE room_id=? GROUP BY actor`
+    ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
+    const addedAt = new Map(this.db.prepare(
+      `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+       FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+    ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
+    const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
+    // RC-2026-09-18-051: additive host presence for agent members.
+    const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+    // #660: raw host status per member. status is "online"|"offline"|null
+    // (null = no registered host); identityId is the linked agent identity.
+    const hostStatusOf = memberId => {
+      const m = members[memberId];
+      if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
+      const link = identityLinkOf.get(roomId, memberId);
+      if (!link) return { identityId: null, status: null, lastSeenAt: null };
+      const status = this.agentHeartbeats.statusOf(link.identityId);
+      // Unregistered (no host) stays null so RC-051 clients keep the
+      // "no presence field or absent" contract. Roster still lists the member.
+      if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
+      return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+    };
+    const agentPresence = memberId => {
+      const host = hostStatusOf(memberId);
+      if (host.status === null) return null;
+      return { status: host.status, lastSeenAt: host.lastSeenAt };
+    };
+    const listed = Object.values(members)
+      .filter(m => m && m.active !== false)
+      .map(m => {
+        const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
+        const host = hostStatusOf(m.id);
+        const workingOn = working.get(m.id) ?? [];
+        const isWatching = watching.has(m.id);
+        return {
+          memberId: m.id, displayName: m.displayName, kind: m.kind,
+          watching: isWatching, workingOn,
+          lastSeenAt, statusMessage: m.statusMessage ?? null,
+          presence: agentPresence(m.id),
+          // #660: derived working state + owner/scope projection (additive).
+          state: presenceState({
+            kind: m.kind,
+            hasActiveSession: workingOn.length > 0,
+            watching: isWatching,
+            hostStatus: host.status,
+            hostLastSeenAt: host.lastSeenAt,
+            lastCommandAt: timestamp(lastCommandAt.get(m.id)),
+            // Enrollment is retained in legacy lastSeenAt, but is not activity.
+            lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
+              timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
+            now,
+          }),
+          isOwner: m.id === ownerId,
+          scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
+          ownerIdentityId: m.kind === "agent" ? host.identityId : null,
+          // plan-dir-card: the member's linked directory card id (the
+          // member chip lazy-loads the card from
+          // /api/rooms/{roomId}/members/{memberId}/card). Null when the
+          // member has no visible card.
+          cardAgentId: m.kind === "agent" && host.identityId
+            ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
+            : null,
+        };
+      })
+      .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
+    return listed;
+  }
+  // Presence Gap 4: the cross-room presence read behind
+  // GET /api/agents/{identityId}/presence. Returns the target identity's
+  // per-room presence row for exactly the rooms where the CALLER holds
+  // standing — a live member seat, or ownership of record (the room
+  // authority's owner member names the caller's identity). The
+  // intersection is computed here, in the derivation: the target's seats
+  // (identityRoomSeats: identity_links + guest_members) are joined
+  // against the caller's standing room by room, and a room the caller
+  // cannot stand in contributes no row — so the response cannot
+  // distinguish an identity that exists but shares no room with the
+  // caller from one that does not exist at all: both read as an empty
+  // rooms list. A room-scoped
+  // credential (boundRoomId) narrows standing to its bound room. Each
+  // row is the row presenceMembers() derives for that member (watching
+  // false: this read holds no stream), with roomId attached.
+  agentPresence(caller, targetIdentityId) {
+    return this.readTransaction(() => {
+      const empty = { identityId: targetIdentityId, rooms: [] };
+      if (!caller || typeof caller.identityId !== "string" || typeof targetIdentityId !== "string") return empty;
+      const targetSeats = identityRoomSeats(this.db, targetIdentityId);
+      if (targetSeats.length === 0) return empty;
+      const callerSeatByRoom = new Map(
+        identityRoomSeats(this.db, caller.identityId).map(seat => [seat.roomId, seat]));
+      const roomRowOf = this.db.prepare("SELECT archived_at AS archivedAt FROM rooms WHERE id=?");
+      const rooms = [];
+      for (const seat of targetSeats) {
+        if (caller.boundRoomId && seat.roomId !== caller.boundRoomId) continue;
+        const roomRow = roomRowOf.get(seat.roomId);
+        if (!roomRow || roomRow.archivedAt) continue;
+        const { members, ownerId } = this.roomAuthority(seat.roomId);
+        const callerSeat = callerSeatByRoom.get(seat.roomId);
+        const callerMember = callerSeat ? ownMember(members, callerSeat.memberId) : null;
+        const memberStanding = !!callerMember && callerMember.active !== false;
+        const ownerMember = ownerId ? ownMember(members, ownerId) : null;
+        const ownerStanding = !!ownerMember && ownerMember.identityId === caller.identityId;
+        if (!memberStanding && !ownerStanding) continue;
+        const row = this.presenceMembers(seat.roomId, [])
+          .find(entry => entry.memberId === seat.memberId);
+        if (row) rooms.push({ roomId: seat.roomId, ...row });
+      }
+      return { identityId: targetIdentityId, rooms };
     });
   }
   capabilities(token, roomId, bindingOrOptions = null, options = {}) {
@@ -6261,7 +6315,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+        const { woken, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
         if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
@@ -6538,7 +6592,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+      const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: identityId, signal });

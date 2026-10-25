@@ -4,7 +4,7 @@
 // Object entrypoint, so jobs points at that route.
 
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;

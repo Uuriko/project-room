@@ -1472,13 +1472,14 @@ export class AgentPluginStore {
     };
     if (!sub.enabled) return skip();
     // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
-    // identity lost its room link between fan-out and dispatch is skipped,
+    // identity lost its room seat between fan-out and dispatch is skipped,
     // not sent. Fail closed at the last moment too. The delivery stays
-    // pending, so a re-linked identity still receives it on a later drain.
-    const link = this.db.prepare(
-      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?")
-      .get(row.room_id, row.agent_id);
-    if (!link && row.room_id) return skip();
+    // pending, so a re-seated identity still receives it on a later drain.
+    // The seat lookup goes through the shared guest-aware resolver
+    // (identity_links first, guest_members fallback) — the same one the
+    // fan-out uses (#3777) — so a trial seat's queued delivery is not
+    // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
+    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id)) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
     // payload?.data: a stored payload that parses to a non-object (or an
@@ -1636,8 +1637,9 @@ export class AgentPluginStore {
   async #drainWebhookDeliveriesOnce({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
     const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
     // Only rows that can actually be attempted fill the batch. Deliveries of a
-    // disabled subscription or of an identity no longer linked to the event's
-    // room stay pending but are left out here; otherwise a large skipped
+    // disabled subscription or of an identity no longer seated in the event's
+    // room (identity_links or guest_members — the resolver's two seats,
+    // #3881) stay pending but are left out here; otherwise a large skipped
     // backlog occupies every LIMIT-sized batch and live deliveries wait behind
     // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
     // subscription was removed (s is NULL) are still selected so they
@@ -1648,7 +1650,8 @@ export class AgentPluginStore {
        WHERE d.state IN ('pending','failed') AND d.next_attempt_at <= ?
        ${agentId ? "AND d.agent_id = ?" : ""}
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
-         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
+         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id)
+         OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
     const isolated = [];

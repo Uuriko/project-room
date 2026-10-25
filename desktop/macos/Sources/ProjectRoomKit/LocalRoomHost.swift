@@ -268,6 +268,7 @@ public final class LocalRoomHost {
                 else {
                     switch value["phase"] as? String {
                     case "running": text = "Working on a shared ask"
+                    case "assistant_not_selected": text = "Not selected as this room’s assistant"
                     case "watching_room", "protocol_qualified", "settled":
                         text = value["protocol"] as? String == "qualified" && ["present", "not_required"].contains(value["credentials"] as? String ?? "") ? "Listening · model execution not verified" : "Connecting · checking agent setup"
                     case "recovery_pending": text = "Waiting for execution reconciliation"

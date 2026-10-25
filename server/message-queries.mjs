@@ -79,11 +79,25 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
       return;
     }
     const ids = live.map(m => m.id);
-    const seqs = liveSeqs(ids);
+    // Merge adapter (MERGEUP-4265): the PR's cached liveSeqs map is copied
+    // before main's prefix-archive fallback runs, so the fallback can never
+    // mutate the per-store cache.
+    const seqs = new Map(liveSeqs(ids));
+    // Prefix archives certify only their prefix. Later working-set records may
+    // not have message-table rows yet; their posting events remain authoritative.
+    const missing = ids.filter(id => !seqs.has(id));
+    const postedId = "CASE WHEN json_type(body,'$.data.messageId')='text' AND json_extract(body,'$.data.messageId')<>'' THEN json_extract(body,'$.data.messageId') ELSE json_extract(body,'$.id') END";
+    for (let start = 0; start < missing.length; start += 256) {
+      const rows = store.db.prepare(`SELECT ${postedId} AS id, MIN(sequence) AS seq
+        FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted'
+        AND (${postedId}) IN (SELECT value FROM json_each(?))
+        GROUP BY (${postedId})`).all(roomId, JSON.stringify(missing.slice(start,start+256)));
+      for (const row of rows) seqs.set(row.id,row.seq);
+    }
     const order = (a,b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
     let cursor = null;
     if (afterId !== null) {
-      const row = store.db.prepare(`SELECT message_id,seq FROM messages WHERE room_id=? AND message_id=?
+      const row = seqs.has(afterId) ? {message_id:afterId,seq:seqs.get(afterId)} : store.db.prepare(`SELECT message_id,seq FROM messages WHERE room_id=? AND message_id=?
         AND (seq<=? OR message_id IN (SELECT value FROM json_each(?)))`).get(roomId, afterId, marker.throughSeq, JSON.stringify(ids));
       if (!row) throw new RangeError('Unknown message cursor');
       cursor = {seq:row.seq,id:row.message_id};

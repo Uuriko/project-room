@@ -601,6 +601,7 @@ const client = new RoomClient({
     for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel", "people-panel"]) $(`#${id}`).open = false;
     $("#room-about").open = true;
     agentPauses = new Map(); armedRemoval = null;
+    $("#message-delivery").replaceChildren(); $("#message-delivery").hidden = true;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
     for (const id of ["review-criteria", "review-summary", "review-next", "decision-review-label", "decision-review-by", "decision-review-text", "decision-review-version"]) setText(`#${id}`, "");
@@ -1330,7 +1331,7 @@ const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? ["", s
 // Keep ordinary conversation readable; exact IDs remain in details and decision
 // controls. Duplicate names retain the full ID so attribution stays unambiguous.
 let displayNames = createMemberDisplayNames({});
-const displayName = id => humanExperience?.assistantName(id) || displayNames(id);
+const displayName = id => displayNames(id);
 const name = displayName; // Ordinary summaries use the same duplicate-aware attribution as authors.
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
@@ -1351,12 +1352,15 @@ function setConnectionStatus(text) {
     ? "Connection interrupted · reconnecting; displayed history may be stale"
     : text;
   const status = $("#connection-status");
+  const wasInterrupted = status.dataset.interrupted === "true";
+  status.dataset.interrupted = String(/^(Connection interrupted|Room service unavailable|Reconnecting)/.test(normalized));
   const connected = normalized === "Connected to room service · no peer read or processing receipt";
   const visible = connected ? "Connected" : normalized;
   status.dataset.state = connected ? "connected"
     : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
   $("#connection-explanation").textContent = normalized;
+  if (state && wasInterrupted !== (status.dataset.interrupted === "true")) queueMicrotask(() => { if (state) render(); });
 }
 function accountRoomCreateFailure(error) {
   if (["email_unverified", "pilot_limit"].includes(error?.code)) return uiText(`error.${error.code}`);
@@ -1490,7 +1494,13 @@ function roomHandoffLocation(roomId) {
   // already attach both ?room= and #room/ so hash-dropping browsers survive.
   return `${location.pathname}?room=${encodeURIComponent(roomId)}`;
 }
+function showServiceOutage(unavailable) {
+  $("#signin-methods").hidden = unavailable;
+  $("#signin-entry-routes").hidden = unavailable;
+  $("#auth-title").textContent = unavailable ? uiText("connection.outageTitle") : "PROJECT ROOM";
+}
 function configureAuthPanel(roomId = selectedRoomFromLocation()) {
+  showServiceOutage(false);
   $("#auth-title").textContent = "PROJECT ROOM";
   // Fresh auth paint clears any stale magic-link failure banner (QAX-002).
   setFormStatus($("#auth-link-error"), "");
@@ -1986,15 +1996,16 @@ function render() {
     // R350-n1: nothing left to pause once the identity signed out for good; Remove stays.
     return `<div class="member-actions" data-member-actions="${esc(m.id)}">${agent ? `<button type="button" class="text-button" data-member-pause="${esc(m.id)}" data-pause-action="${paused ? "resume" : "pause"}" title="${paused ? "Let queued wakes start again" : "Queued wakes will not start; a running attempt finishes"}"${m.identityRevoked === true ? " hidden" : ""}>${paused ? "Resume" : "Pause"}</button>` : ""}<button type="button" class="text-button member-remove${armed ? " armed" : ""}" data-member-remove="${esc(m.id)}" aria-pressed="${armed}">${armed ? "Confirm remove" : "Remove"}</button>${armed ? `<button type="button" class="text-button" data-member-remove-cancel="${esc(m.id)}">Keep</button>` : ""}</div>`;
   };
-  const presenceStale = presenceUnrefreshed || presenceObservationAged();
+  const connectionStale = $("#connection-status").dataset.interrupted === "true";
+  const presenceStale = connectionStale || presenceUnrefreshed || presenceObservationAged();
   const presenceRow = m => {
     // #660: prefer the server-derived presence entry when we have one; it
     // carries the authoritative working state plus owner/scope projection.
     const serverPresence = m.active === false ? null : presenceStates.get(m.id);
     const merged = serverPresence ? { ...m, ...serverPresence } : m;
     const agent = m.kind === "agent" && m.active !== false;
-    const presence = agent && presenceStale ? "unknown" : memberPresence(merged, railCtx);
-    const availability = agent && presenceStale ? (presenceUnrefreshed ? "Availability not refreshed" : "Availability needs refresh") : presenceLabel(presence);
+    const presence = (connectionStale || agent && presenceStale) ? "unknown" : memberPresence(merged, railCtx);
+    const availability = connectionStale ? uiText("connection.staleAvailability") : agent && presenceStale ? (presenceUnrefreshed ? "Availability not refreshed" : "Availability needs refresh") : presenceLabel(presence);
     // Keep names readable; duplicate names retain their IDs and every exact
     // identity remains available in the member disclosure and action choices.
     const handle = m.kind === "agent" ? memberHandle(m, displayName(m.id)) : displayName(m.id);
@@ -2091,7 +2102,7 @@ function render() {
   // visible and historical identities inspectable without crowding the rail.
   const removedAgentsHtml = removedAgents.length
     ? `<details class="removed-agents"><summary data-focus-key="removed-agents">Removed agents (${removedAgents.length})</summary>${removedAgents.map(presenceRow).join("")}</details>` : "";
-  const presenceNote = presenceUnrefreshed ? "Availability could not refresh. Try again." : presenceStale ? "Availability needs refresh. Reports older than 60 seconds need another check." : "";
+  const presenceNote = connectionStale ? uiText("connection.stalePresenceNote") : presenceUnrefreshed ? "Availability could not refresh. Try again." : presenceStale ? "Availability needs refresh. Reports older than 60 seconds need another check." : "";
   const checked = presenceCheckedAt ? `${presenceStale ? "Last successful check" : "Last checked"}: ${time(new Date(presenceCheckedAt).toISOString())}` : "";
   const presenceRefresh = `<div class="presence-refresh"><button type="button" class="text-button" data-refresh-presence data-focus-key="refresh-presence">Refresh availability</button><span class="presence-check-note">${esc([presenceNote, checked].filter(Boolean).join(" "))}</span></div>`;
   renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${removedAgentsHtml}`);
@@ -3011,6 +3022,7 @@ function switchThread(threadId, focusComposer = false) {
     $("#also-send-to-channel").checked = false;
   }
   updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
+  persistDrafts();
   if (leavingResultQuestion) renderReturnBrief();
   if (focusComposer) $("#message-input").focus();
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
@@ -4140,6 +4152,15 @@ $("#refresh-button").addEventListener("click", async () => {
     if (!client.session) {
       const requestedRoom = selectedRoomFromLocation();
       if (requestedRoom) {
+        // Retry the same room-cookie route used at startup before requiring
+        // an account. Agent and guest sessions do not have account cookies.
+        try {
+          const restored = await client.restore();
+          if (restored?.roomId === requestedRoom) return;
+          client.endAccess();
+        } catch (error) {
+          if (![401, 403].includes(error.status)) throw error;
+        }
         const account = await ensureAccountSession();
         if (!account?.authenticated) throw Object.assign(new Error("Account sign-in required"), { status: 401 });
         await client.restore(requestedRoom);
@@ -4158,6 +4179,7 @@ $("#refresh-button").addEventListener("click", async () => {
     if (!roomId) {
       const signedOut = [401, 403].includes(error.status);
       setFormStatus($("#auth-error"), signedOut ? "" : unreachableRoomMessage(error), true);
+      showServiceOutage(!signedOut);
       setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
       return;
     }
@@ -4224,6 +4246,14 @@ $("#message-form").addEventListener("submit", e => {
     }
     if (generation !== client.generation || !state) return;
     if (!ownsSendingDraft()) return;
+    const delivery = $("#message-delivery");
+    const savedMessageId = data.messageId || sendingCommand.id;
+    const visible = state.messages.some(message => message.id === savedMessageId);
+    delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
+    const link = document.createElement("a");
+    link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
+    delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
+    delivery.hidden = false;
     await commitComposerFiles(data.messageId);
     if (!ownsSendingDraft()) return;
     if (generation !== client.generation || !state) return;
@@ -7827,6 +7857,7 @@ const ready = (async () => {
     : unreachableRoomMessage(error), !deletedNotice);
   setConnectionStatus(signedOut ? "Not connected · sign in required" : "Room service unavailable · not connected");
   $("#identity-label").textContent = signedOut ? "Not signed in" : "Session unavailable";
+  showServiceOutage(!signedOut);
   $("#auth-panel").hidden = false;
   // Q3-C: leave focus at the top so the first Tab stop is the skip link.
 });

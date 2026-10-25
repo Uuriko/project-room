@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { gmailImportToken } from './gmail-import-authority.mjs';
 import { normalizeGmailMessage } from './channel-adapters/gmail.mjs';
-import { ServiceError } from './store.mjs';
+import { ServiceError } from './service-error.mjs';
 const api = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const fail = code => { throw new ServiceError(409, code, 'Gmail sync will retry.'); };
 // A bounded history tick, usable without a browser session. Only existing
