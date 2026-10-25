@@ -36,6 +36,10 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
+// A webhook whose next_attempt_at is already past must not wait a full
+// minute. One second lets the platform take another request, then the
+// alarm reads the row's real next attempt (the 10s / 20s / 40s backoff).
+export const WEBHOOK_ALARM_FLOOR_MS = 1000;
 // Slow jobs ride the */30 safety-net cron, whose phase can land a few
 // seconds before the job's own anchor. Without slack the job waits a
 // whole extra cron period; 60s absorbs that cron-vs-anchor phase race.
@@ -737,16 +741,31 @@ export function lastRanFrom(stored) {
 // Fast jobs only. Slow jobs ride the safety-net cron so an idle hour stays
 // at two Durable Object wakes. A due time already in the past is pushed out
 // by one cadence so a finished tick cannot schedule an immediate loop.
+// webhook-dispatch is the exception: its row already names the next attempt,
+// and a minute floor made that time a lie (a +10s retry woke about a minute later).
 export function earliestFutureAlarm(jobs, { env, store, now, lastRan, runtime = "worker" }) {
   let earliest = null;
   for (const job of jobs) {
     if (job.slow || !job.runtimes.includes(runtime) || !jobEnabled(job, env, store)) continue;
     let next = jobNextDue(job, store, now, lastRan?.[job.name]);
     if (next == null) continue;
-    if (next <= now) next = now + job.cadenceMs;
+    if (next <= now) next = now + (job.name === "webhook-dispatch" ? WEBHOOK_ALARM_FLOOR_MS : job.cadenceMs);
     if (earliest == null || next < earliest) earliest = next;
   }
   return earliest;
+}
+
+// Alarm instant for one arm. A thrown tick waits out retryDelayMs so a
+// failing drain cannot tight-loop. A delivery that already named a later
+// future attempt keeps that sooner time.
+export function alarmSchedule({ jobs, env, store, now, lastRan, runtime = "worker", retryDelayMs = 0 }) {
+  let when = earliestFutureAlarm(jobs, { env, store, now, lastRan, runtime });
+  if (retryDelayMs > 0) {
+    const retryAt = now + retryDelayMs;
+    const namedFuture = when != null && when > now + WEBHOOK_ALARM_FLOOR_MS;
+    when = namedFuture ? Math.min(when, retryAt) : retryAt;
+  }
+  return when;
 }
 
 function finiteInterval(value, fallback) {

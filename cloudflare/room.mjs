@@ -33,7 +33,7 @@ import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
-import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { ALARM_RETRY_MS, JOBS, alarmSchedule, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -550,22 +550,29 @@ export class ProjectRoom extends DurableObject {
   // Nothing queued deletes a leftover alarm so an idle room is not woken.
   async #armJobAlarm({ retryDelayMs = 0 } = {}) {
     if (this.paused || !this.store) return { armed: false, alarmAt: null };
-    const now = Date.now();
+    // Read storage first. The due time is computed after those awaits so a
+    // drain that committed a next_attempt_at while this arm was waiting
+    // is the time that gets armed, not a stale minute floor.
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
-    let when = earliestFutureAlarm(JOBS, {
-      env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker"
-    });
-    if (retryDelayMs > 0) {
-      const retryAt = now + retryDelayMs;
-      when = when == null ? retryAt : Math.min(when, retryAt);
-    }
     const current = await this.ctx.storage.getAlarm();
+    const now = Date.now();
+    const when = alarmSchedule({
+      jobs: JOBS, env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker", retryDelayMs
+    });
     if (when == null) {
       if (current != null) await this.ctx.storage.deleteAlarm();
       return { armed: false, alarmAt: null };
     }
     if (current != null && current <= when) return { armed: false, alarmAt: current };
     await this.ctx.storage.setAlarm(when);
+    const latest = alarmSchedule({
+      jobs: JOBS, env: this.env, store: this.store, now: Date.now(), lastRan: lastRanFrom(stored), runtime: "worker", retryDelayMs
+    });
+    if (latest != null && latest < when) {
+      const installed = await this.ctx.storage.getAlarm();
+      if (installed == null || installed > latest) await this.ctx.storage.setAlarm(latest);
+      return { armed: true, alarmAt: latest };
+    }
     return { armed: true, alarmAt: when };
   }
   // Fast safety-net RPC. Slow jobs each get their own invocation below.
