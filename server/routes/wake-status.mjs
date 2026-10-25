@@ -30,12 +30,16 @@ const coarsen = wakeable => entry => Object.freeze({ agentId: entry.agentId, wak
 // through guest_members and never receive an identity_links row, so both
 // helpers resolve through the shared wake resolver - a guest caller is
 // a member of its own room and guest seats appear in the room's lists.
-function roomMemberIdentityIds(store, roomId) {
-  return identityIdsForWakeRoom(store.db, roomId);
+// Both helpers take the request's single store-clock capture: the
+// resolver gates its guest leg on the shared live-seat predicate, and
+// one `now` per request keeps the gate and the roster consistent — a
+// seat expiring mid-request is wholly in or wholly out of the answer.
+function roomMemberIdentityIds(store, roomId, now) {
+  return identityIdsForWakeRoom(store.db, roomId, now);
 }
 
-function isRoomMember(store, roomId, identityId) {
-  return isWakeRoomMember(store.db, roomId, identityId);
+function isRoomMember(store, roomId, identityId, now) {
+  return isWakeRoomMember(store.db, roomId, identityId, now);
 }
 
 export function authenticateWakeStatus(ctx) {
@@ -57,14 +61,15 @@ export async function readWakeStatus(ctx) {
     // Room mode: wakeability for the room's members. Room access keys are
     // bound to their room; identity credentials must be members of it.
     // Never-registered members read as not wakeable (null stamp).
+    const now = ctx.store.now();
     if (auth.roomId && auth.roomId !== roomId)
       ctx.reject(403, "room_mismatch", "A room access key can only read its bound room");
-    if (!auth.roomId && !isRoomMember(ctx.store, roomId, auth.identityId))
+    if (!auth.roomId && !isRoomMember(ctx.store, roomId, auth.identityId, now))
       ctx.reject(403, "room_membership_required", "Join the room to read its wake status");
     // CX5-FIX: room mode attributes activity per room — identity-level
     // activity counts, room-scoped activity counts only for its own room.
     const list = ctx.store.agentHeartbeats.wakeStatusListForRoom(roomId);
-    const members = new Set(roomMemberIdentityIds(ctx.store, roomId));
+    const members = new Set(roomMemberIdentityIds(ctx.store, roomId, now));
     const wakeable = [], notWakeable = [];
     for (const entry of list.wakeable) if (members.has(entry.agentId)) wakeable.push(coarsen(true)(entry));
     for (const entry of list.notWakeable) if (members.has(entry.agentId)) notWakeable.push(coarsen(false)(entry));
