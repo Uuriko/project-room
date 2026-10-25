@@ -27,9 +27,11 @@ export function createSigninNavigation({ getUI, active }) {
     $("#signin-methods").hidden = auxiliary;
     $("#signin-entry-routes").hidden = auxiliary;
     $("#google-signin").hidden = view === "welcome";
-    $("#github-signin").hidden = view === "welcome";
+    // An unconfigured server strips the GitHub anchor from the served page.
+    // Setting hidden on a missing node throws and leaves the room unopened.
+    if ($("#github-signin")) $("#github-signin").hidden = view === "welcome";
     if (unavailableProviders.has("google")) $("#google-signin").hidden = true;
-    if (unavailableProviders.has("github")) $("#github-signin").hidden = true;
+    if (unavailableProviders.has("github") && $("#github-signin")) $("#github-signin").hidden = true;
     $("#terms-notice").hidden = view === "welcome";
   }
   function withReplay(value, action) {

@@ -68,7 +68,14 @@ test('every local browser import is included in the deployment allowlist', async
   }
 });
 test('the HTTP allowlist serves every packaged browser asset with exact bytes', async t => {
-  const store = new RoomStore(':memory:'), server = createRoomServer({ store });
+  // index.html on disk includes the GitHub anchor. An unconfigured server
+  // strips that anchor before serving (human-onboarding-doors). This check
+  // is the packaged bytes, so the server is given a GitHub config and the
+  // strip does not run.
+  const store = new RoomStore(':memory:'), server = createRoomServer({
+    store,
+    githubAuth: { clientId: 'fixture-client', clientSecret: 'fixture-secret' }
+  });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`;

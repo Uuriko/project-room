@@ -16,9 +16,10 @@ function stubElement() {
   };
 }
 
-function mountNavigation(t) {
+function mountNavigation(t, missing = () => false) {
   const nodes = new Map();
   const node = selector => {
+    if (missing(selector)) return null;
     if (!nodes.has(selector)) nodes.set(selector, stubElement());
     return nodes.get(selector);
   };
@@ -47,4 +48,15 @@ test("an unavailable provider stays hidden across view syncs while the other anc
   navigation.sync("password-login");
   assert.equal(node("#google-signin").hidden, false, "back to methods: Google returns");
   assert.equal(node("#github-signin").hidden, true, "GitHub stays hidden — its route would 503");
+});
+
+test("a stripped GitHub anchor does not throw, and Google still follows the view", t => {
+  const { navigation, node } = mountNavigation(t, selector => selector === "#github-signin");
+  navigation.sync("password-login");
+  assert.equal(node("#google-signin").hidden, false);
+  navigation.setProviderUnavailable("github");
+  navigation.sync("welcome");
+  assert.equal(node("#google-signin").hidden, true);
+  navigation.sync("password-login");
+  assert.equal(node("#google-signin").hidden, false);
 });
