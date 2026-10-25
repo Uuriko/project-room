@@ -49,7 +49,9 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createOAuthProvider } from "../server/oauth-provider.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-const WWW_AUTHENTICATE_TODAY = 'Bearer realm="project-room", charset="UTF-8"';
+// AGENT-DOOR-AUTH stage 3: the challenge gained the RFC 9728 §5.1
+// resource_metadata parameter, exactly as the stage-1 pin anticipated.
+const wwwAuthenticateStage3 = origin => `Bearer realm="project-room", resource_metadata="${origin}/.well-known/oauth-protected-resource", charset="UTF-8"`;
 const ANON_MCP_TOOLS = [
   "room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet",
   "public_work_recommend", "public_work_read_task", "room_identity_mint",
@@ -348,7 +350,7 @@ test("/mcp: anonymous discovery is public, identity secret reaches the room prof
   assert.equal(anonCall.status, 401);
   assert.equal(anonCall.body.error.code, -32001);
   assert.equal(anonCall.body.error.data.reason, "auth_required");
-  assert.equal(anonCall.headers.get("www-authenticate"), WWW_AUTHENTICATE_TODAY);
+  assert.equal(anonCall.headers.get("www-authenticate"), wwwAuthenticateStage3(f.origin));
 
   const identityList = await f.rpc("tools/list", undefined, f.identity.secret);
   assert.equal(identityList.status, 200);
@@ -365,8 +367,8 @@ test("/mcp: anonymous discovery is public, identity secret reaches the room prof
   // minted one comes from a standalone provider), so the door's -32001
   // is unchanged. A token this server's provider verifies reaches the
   // OAuth subset instead — pinned in tests/agent-door-auth-mcp.test.js.
-  // No data envelope on this path, and the challenge header carries no
-  // resource_metadata parameter.
+  // No data envelope on this path; since stage 3 the challenge header
+  // carries the resource_metadata parameter (RFC 9728 §5.1).
   for (const [label, token] of [["minted oat_", oat], ["fabricated oat_", "oat_" + "B".repeat(43)]]) {
     const listed = await f.rpc("tools/list", undefined, token);
     assert.equal(listed.status, 401, label);
@@ -374,13 +376,13 @@ test("/mcp: anonymous discovery is public, identity secret reaches the room prof
     assert.equal(listed.body.error.message, "Hosted room tools require a live identity or room token", label);
     assert.equal(listed.body.error.data, undefined, label);
     const challenge = listed.headers.get("www-authenticate");
-    assert.equal(challenge, WWW_AUTHENTICATE_TODAY, label);
-    assert.equal(challenge.includes("resource_metadata"), false, label);
+    assert.equal(challenge, wwwAuthenticateStage3(f.origin), label);
+    assert.equal(challenge.includes("resource_metadata"), true, label);
 
     const called = await f.rpc("tools/call", { name: "room_check_access", arguments: { roomId: "commons" } }, token);
     assert.equal(called.status, 401, label);
     assert.equal(called.body.error.code, -32001, label);
-    assert.equal(called.headers.get("www-authenticate"), WWW_AUTHENTICATE_TODAY, label);
+    assert.equal(called.headers.get("www-authenticate"), wwwAuthenticateStage3(f.origin), label);
   }
 });
 

@@ -159,9 +159,15 @@ export function mcpRpcStatus(reply) {
 }
 
 // RFC 7235: a 401 response MUST carry WWW-Authenticate. QA5-gb-AX-4.
-export function mcpAuthHeaders(reply) {
+// AGENT-DOOR-AUTH stage 3 (RFC 9728 §5.1): when the caller supplies the
+// protected-resource metadata URL, the challenge gains exactly the
+// resource_metadata parameter; without it the shape is byte-identical
+// to the pre-stage-3 challenge.
+export function mcpAuthHeaders(reply, resourceMetadataUrl) {
   if (mcpRpcStatus(reply) !== 401) return {};
-  return { "WWW-Authenticate": "Bearer realm=\"project-room\", charset=\"UTF-8\"" };
+  const metadata = typeof resourceMetadataUrl === "string" && resourceMetadataUrl.length > 0
+    ? `, resource_metadata="${resourceMetadataUrl}"` : "";
+  return { "WWW-Authenticate": `Bearer realm="project-room"${metadata}, charset="UTF-8"` };
 }
 
 export function mcpJoinCorsHeaders() {
@@ -255,7 +261,7 @@ export async function roomMcpFetchPost(request, options = {}) {
     });
   }
   if (!reply) return new Response(null, { status: 202, headers });
-  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
+  return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply, `${url.origin}/.well-known/oauth-protected-resource`), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
 export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress } = {}) {
@@ -323,7 +329,7 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
   const bytes = Buffer.from(JSON.stringify(reply));
   res.writeHead(mcpRpcStatus(reply), {
     ...cors,
-    ...mcpAuthHeaders(reply),
+    ...mcpAuthHeaders(reply, `${url.origin}/.well-known/oauth-protected-resource`),
     ...legacyMcpHeaders(req.headers.authorization),
     "Content-Type": "application/json; charset=utf-8",
     "Content-Length": bytes.length,
