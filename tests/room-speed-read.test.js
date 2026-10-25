@@ -7,6 +7,8 @@ import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { buildRoomBootstrap } from "../server/room-bootstrap.mjs";
+import { fitWindowedSnapshot, SNAPSHOT_WINDOW_BYTES } from "../server/snapshot-window.mjs";
 
 const WINDOW_BYTES = 30 * 1024;
 const HARD_CEILING = 64 * 1024;
@@ -83,4 +85,17 @@ test("a 2000-message room opens as a window under 30 KB, and bootstrap matches i
   assert.equal(value?.bootstrapVersion, 1, JSON.stringify(rpc.error ?? rpc.result ?? rpc).slice(0, 400));
   assert.deepEqual(value.snapshot.state.messages.map(message => message.id), snapshot.state.messages.map(message => message.id));
   assert.ok(Buffer.byteLength(JSON.stringify(value.snapshot)) <= HARD_CEILING);
+});
+
+test("the shared window fitter and bootstrap builder are the modules the read uses", () => {
+  assert.equal(typeof buildRoomBootstrap, "function");
+  const messages = Array.from({ length: 40 }, (_, index) => ({ id: `m${index}`, body: "x".repeat(800) }));
+  const eventLog = messages.map(message => ({ type: "message.posted", data: { body: message.body, messageId: message.id } }));
+  const fitted = fitWindowedSnapshot({
+    messagesWindow: { mode: "recent", limit: messages.length, omitted: 0, older: "conversation" },
+    state: { messages, eventLog }
+  });
+  assert.ok(Buffer.byteLength(JSON.stringify(fitted)) <= SNAPSHOT_WINDOW_BYTES);
+  assert.ok(fitted.state.messages.length >= 1);
+  assert.ok(fitted.state.messages.length < messages.length);
 });
