@@ -18,6 +18,15 @@
         "openWorldHint": true
       }
     },
+    "room_health": {
+      "inputSchema": "99334726611ccf58",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_identity_mint": {
       "inputSchema": "c178e41fcf61c3a3",
       "annotations": {

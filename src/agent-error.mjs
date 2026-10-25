@@ -311,6 +311,22 @@ export const ERROR_REGISTRY = {
     ],
     catalog: { http: 428, retry: "fix", recovery: "Do the SHA-256 proof-of-work from the 428 body, or redeem a member-issued invite code (no proof needed)." },
   },
+  // Durable Object transport boundary (cloudflare/room.mjs roomUnavailableResponse).
+  // The generic 5xx branch would send the caller to room_check_access, which
+  // cannot answer while the object is down.
+  room_unavailable: {
+    status: "failed",
+    hint: "Project Room is temporarily unavailable. Wait for Retry-After, then read /api/health before repeating a write.",
+    next: [
+      path("/api/health"),
+      command("Wait for the Retry-After interval (30 seconds), then retry. If the failed call was a write whose outcome is unconfirmed, check its status before repeating it.")
+    ],
+    catalog: {
+      http: 503,
+      retry: "wait",
+      recovery: "Wait for the Retry-After interval (30 seconds), then retry. If the failed call was a write whose outcome is unconfirmed, check its status before repeating it."
+    }
+  },
 };
 
 // Resolve a registry-owned code's envelope. Returns null for codes the

@@ -39,7 +39,9 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerHealthResponse } from './health-probe.mjs';
+import { loadWorkerRoomHealth, maybeRoomHealthMcp } from './room-health-mcp.mjs';
+import { readWriterPermitHeal } from '../server/writer-permit-heal.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
@@ -81,6 +83,7 @@ function roomUnavailableResponse(request) {
     headers: {
       'Content-Type': api ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8',
       'Cache-Control': 'no-store', 'Retry-After': '30',
+      'Link': '</api/health>; rel="status"',
       'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex, nofollow'
     }
   });
@@ -323,7 +326,11 @@ export class ProjectRoom extends DurableObject {
   }
   async readJobHealth() {
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
-    return { ...view, publicReports: countOpenPublicReports(this.store) };
+    return {
+      ...view,
+      publicReports: countOpenPublicReports(this.store),
+      writerPermitResets: readWriterPermitHeal(this.store?.db)
+    };
   }
 
   // Task 9 — auto-drain RPC for the Worker's cron trigger. Scans the webhook
@@ -722,15 +729,27 @@ export default {
         return finish(workerErrorResponse({ httpStatus: 403, code: 'origin_denied', message: 'Request origin is not allowed', headers: { 'Cache-Control': 'no-store' } }), 'worker');
       }
     }
-    // Liveness is the Worker. It does not construct or query the Durable Object.
+    // Liveness probes invite-only-pilot. A miss is 503 degraded with
+    // Retry-After and a status link. /api/version/worker does not probe.
     if ((healthPath === '/api/health' || isHealthAliasPath(url.pathname)) && (request.method === 'GET' || request.method === 'HEAD')) {
       // #3272: report the mailer state exactly as the DO's server does —
       // magicLinkMailerFromEnv(env) non-null is the same derivation the
       // Durable Object constructor uses to build its mailer (above), so the
-      // Worker liveness answer and the handler can never disagree about
-      // whether email gates are enforced or relaxed.
+      // Worker answer and the handler can never disagree about whether
+      // email gates are enforced or relaxed.
       const emailVerification = magicLinkMailerFromEnv(env) ? 'enforced' : 'relaxed-no-mailer';
-      return finish(workerLivenessResponse(request, { mode, deployment, emailVerification }), 'worker');
+      const probed = await durableObjectHealth({
+        timeoutMs: HEALTH_PROBE_TIMEOUT_MS,
+        start: async () => {
+          const result = await env.ROOM.getByName('invite-only-pilot').probeStorage();
+          if (!result?.ok) throw new Error('storage probe failed');
+          return new Response(JSON.stringify({ status: 'ok', emailVerification: result.emailVerification }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+        },
+        waitUntil: ctx?.waitUntil?.bind(ctx),
+        onSnapshot: (snapshot, timing) => ({ response: workerHealthResponse(request, { mode, deployment, emailVerification, snapshot, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),
+        onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' })
+      });
+      return finish(probed.response, probed.servedBy);
     }
     // Readiness is SELECT 1 on invite-only-pilot, bounded by the probe budget.
     // A cold constructor must not turn this check into room_unavailable.
@@ -748,6 +767,13 @@ export default {
       });
       return finish(probed.response, probed.servedBy);
     }
+    const emailVerification = magicLinkMailerFromEnv(env) ? 'enforced' : 'relaxed-no-mailer';
+    const healthMcp = await maybeRoomHealthMcp(request, () => loadWorkerRoomHealth({
+      mode, deployment, emailVerification,
+      probe: () => env.ROOM.getByName('invite-only-pilot').probeStorage(),
+      jobs: () => env.ROOM.getByName('invite-only-pilot').readJobHealth()
+    }));
+    if (healthMcp) return finish(healthMcp, 'worker');
     let response;
     try {
       response = await env.ROOM.getByName('invite-only-pilot').fetch(new Request(request, { headers }));

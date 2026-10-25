@@ -166,14 +166,24 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     for (const bot of ['GPTBot', 'OAI-SearchBot', 'ChatGPT-User', 'ClaudeBot', 'Claude-SearchBot', 'PerplexityBot', 'Meta-ExternalAgent']) {
       assert.match(robotsBody, new RegExp(`User-agent: ${bot}`), bot);
     }
-    const healthShape = async path => json(await call(path));
-    const leftoverHealth = await healthShape('/room/health');
-    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
-    assert.deepEqual(leftoverHealth, await healthShape('/api/health'));
-    assert.deepEqual(await healthShape('/api/healthz'), leftoverHealth);
-    assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
-    assert.deepEqual(await healthShape('/room/healthz'), leftoverHealth);
-    assert.deepEqual(await healthShape('/room/api/healthz'), leftoverHealth);
+    const healthShape = async path => {
+      const body = await json(await call(path));
+      assert.equal(body.status, 'ok', path);
+      assert.equal(body.mode, 'cloudflare-staging', path);
+      assert.equal(body.emailVerification, 'relaxed-no-mailer', path);
+      assert.equal(body.emailVerificationScope, 'worker', path);
+      assert.equal(body.deployment, undefined, path);
+      assert.equal(body.do.status, 'ok', path);
+      assert.equal(body.do.statusCode, 200, path);
+      assert.equal(typeof body.do.ms, 'number', path);
+      return body;
+    };
+    await healthShape('/room/health');
+    await healthShape('/api/health');
+    await healthShape('/api/healthz');
+    await healthShape('/healthz');
+    await healthShape('/room/healthz');
+    await healthShape('/room/api/healthz');
     // #3274: the Worker's origin guard for operational GETs answers with the
     // standard error envelope, not a bare { error: { code, message } }.
     const foreignOrigin = await call('/api/health', { headers: { Origin: 'https://foreign.example' } });

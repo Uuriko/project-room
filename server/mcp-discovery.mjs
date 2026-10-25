@@ -12,9 +12,10 @@ import { capabilityVisibleTo } from "./capability-visibility.mjs";
 import { withOpenWorldHint } from "./content-trust.mjs";
 import { LEAN_MCP_TOOLS, actionMetaToolDefs } from "./mcp-action-search.mjs";
 import { withMcpToolContract } from "./mcp-tool-contracts.mjs";
+import { ROOM_HEALTH_MCP_TOOL } from "./room-health.mjs";
 
 export function livePublicMcpTools() {
-  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools, ...anonymousIdentityMintMcpTools].map(withOpenWorldHint);
+  return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools, ...anonymousIdentityMintMcpTools, ROOM_HEALTH_MCP_TOOL].map(withOpenWorldHint);
 }
 
 // Same list tools/list returns. Default is the core profile (short blurbs,

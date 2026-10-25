@@ -34,6 +34,8 @@ import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { workHelpContext } from "../src/work-help.js";
 import { HOSTED_ROOM_MCP_TOOLS, HOSTED_MCP_FOLLOW_UPS, ROOM_MCP_SERVER_NAME, ROOM_MCP_SERVER_VERSION, canonicalMcpToolName, PUBLIC_WORK_MCP_TOOLS } from "../src/room-mcp-join.js";
 import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.mjs";
+import { isRoomHealthMcpCall, roomHealthFromStore, roomHealthMcpReply } from "./room-health.mjs";
+import { nodeJobHealth } from "./jobs.mjs";
 import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { AccessRequests } from "./access-requests.mjs";
@@ -1061,6 +1063,9 @@ function resolveMcpIdentity(store, secret, userAgent) {
 export function createHostedRoomMcp(store, { agentRooms } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
+    // Public health. No secret. Answered before auth so a bearer is optional
+    // and a down room is reported by the Worker before this handler runs.
+    if (isRoomHealthMcpCall(message)) return roomHealthMcpReply(message, roomHealthFromStore(store, { jobs: nodeJobHealth() }));
     // Anonymous enrollment: mint an identity secret without leaving MCP.
     // Handled before auth parsing — a presented credential is ignored and a
     // fresh anonymous identity is minted, mirroring POST /api/agent-identities.

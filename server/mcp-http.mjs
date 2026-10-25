@@ -13,6 +13,7 @@ import {
 import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mcpTransportError } from "./mcp-arg-errors.mjs";
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
+import { isRoomHealthMcpCall } from "./room-health.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
 
 export { isRoomMcpPath, MCP_VERSION };
@@ -94,7 +95,7 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
     const name = message.params?.name;
     const args = message.params?.arguments ?? {};
     // Public-work tools are callable here without a room, so a typo of one must suggest it (QA5R-AX-1).
-    const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...IDENTITY_MINT_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...HOSTED_ROOM_MCP_TOOLS];
+    const known = [...MCP_JOIN_TOOLS.map(tool => tool.name), ...IDENTITY_MINT_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...HOSTED_ROOM_MCP_TOOLS, "room_health"];
     if (isHostedMcpToolName(name)) return mcpCallError(requestId, { reason: "auth_required", tool: name });
     const selected = MCP_JOIN_TOOLS.find(tool => tool.name === name);
     if (!selected) {
@@ -140,6 +141,10 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
     if (message?.method === "tools/call" && isIdentityMintMcpTool(message.params?.name)) {
       if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams, userAgent, remoteAddress });
       return mcpTransportError(-32603, "Identity mint requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
+    }
+    if (isRoomHealthMcpCall(message)) {
+      if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams, userAgent, remoteAddress });
+      return mcpTransportError(-32603, "Room health requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ path: "/api/health" }, { command: "GET /api/health" }] });
     }
     return handleMcpJoinRpc(message, { mcpUrl });
   }

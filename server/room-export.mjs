@@ -488,7 +488,7 @@ function insertOrder(names) {
 // replay. Replay skips these and reports the row counts; the export itself
 // still holds the rows.
 export const REPLAY_SKIPPED_TABLES = Object.freeze([
-  "room_runtime_version", "room_writer_permit",
+  "room_runtime_version", "room_writer_permit", "room_writer_permit_heal",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
   "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"

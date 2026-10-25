@@ -655,10 +655,10 @@ test("anonymous MCP catalog is seven tools (four join + two public-work + identi
   assert.equal(MCP_JOIN_TOOLS.length, 4);
   assert.equal(anonymousPublicWorkMcpTools.length, 2);
   assert.equal(anonymousIdentityMintMcpTools.length, 1);
-  assert.equal(tools.length, 7);
+  assert.equal(tools.length, 8);
   assert.deepEqual(tools.map(t => t.name).sort(), [
     ...MCP_JOIN_TOOLS.map(t => t.name),
-    "public_work_read_task", "public_work_recommend", "room_identity_mint",
+    "public_work_read_task", "public_work_recommend", "room_health", "room_identity_mint",
   ].sort());
   // QA5-gb: the packet once called this anonymous catalog "four tools".
   const text = llmsTxt();
