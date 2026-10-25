@@ -1,8 +1,9 @@
-// Closed panel bodies and dialog contents are in the document at parse time.
-// Detach them until the person opens that panel, so the first paint does not
-// build every form. The details or dialog element stays, which is what
-// getElementById and the settings grouper look up. Listeners already bound
-// on a detached node survive the move back.
+// Dialog contents are in the document at parse time. Detach them until the
+// dialog is shown, so the first paint does not build every form. The dialog
+// element stays, which is what getElementById and the settings grouper look
+// up. Closed details stay mounted: the top bar and People address those nodes
+// while the disclosure is closed. Listeners already bound on a detached node
+// survive the move back.
 
 const PARKED = new WeakMap();
 const parkedRoots = new Set();
@@ -18,14 +19,18 @@ const nativeElQueryAll = elProto?.querySelectorAll;
 function park(root, keep) {
   if (PARKED.has(root)) return;
   const all = [...root.childNodes];
+  // A fragment keeps a parent, so after() and before() on a parked field
+  // still insert. node.remove() would leave the field parentless and drop
+  // that insert.
+  const fragment = root.ownerDocument.createDocumentFragment();
   let removed = 0;
   for (const node of all) {
     if (keep?.(node)) continue;
-    node.remove();
+    fragment.append(node);
     removed += 1;
   }
   if (!removed) return;
-  PARKED.set(root, { all });
+  PARKED.set(root, { all, fragment });
   parkedRoots.add(root);
 }
 
@@ -34,15 +39,39 @@ function restore(root) {
   if (!saved) return;
   PARKED.delete(root);
   parkedRoots.delete(root);
-  // Put removed nodes back in their original order. Leave a node that is
-  // already there: moving the summary during pointerdown cancels the click
-  // that opens the details, and the control inside stays hidden.
+  // Replay the fragment, which is the removed nodes plus anything inserted
+  // beside them, and leave a node that is already in that spot. Moving a
+  // summary during pointerdown cancels the click that opens the details.
+  const block = [...saved.fragment.childNodes];
   let previous = null;
-  for (const node of saved.all) {
+  let index = 0;
+  const place = node => {
     const expected = previous ? previous.nextSibling : root.firstChild;
     if (node !== expected) root.insertBefore(node, expected);
     previous = node;
+  };
+  for (const node of saved.all) {
+    if (node.parentNode === root) {
+      if (previous && node !== previous.nextSibling) root.insertBefore(node, previous.nextSibling);
+      previous = node;
+      continue;
+    }
+    while (index < block.length && block[index] !== node) {
+      place(block[index]);
+      index += 1;
+    }
+    place(node);
+    index += 1;
   }
+  while (index < block.length) {
+    place(block[index]);
+    index += 1;
+  }
+}
+
+function parkedElements(saved) {
+  const nodes = saved.fragment ? [...saved.fragment.childNodes] : saved.all;
+  return nodes.filter(node => node.nodeType === 1);
 }
 
 function parkedFragments(doc) {
@@ -51,9 +80,7 @@ function parkedFragments(doc) {
     if (root.ownerDocument !== doc) continue;
     const saved = PARKED.get(root);
     if (!saved) continue;
-    for (const node of saved.all) {
-      if (node.nodeType === 1 && node.parentNode !== root) nodes.push(node);
-    }
+    for (const node of parkedElements(saved)) nodes.push(node);
   }
   return nodes;
 }
@@ -106,7 +133,7 @@ function fragmentVisibleTo(scope, root) {
   for (const ancestor of parkedRoots) {
     if (ancestor === root) continue;
     const saved = PARKED.get(ancestor);
-    if (!saved?.all.some(node => node === root || (node.nodeType === 1 && node.contains?.(root)))) continue;
+    if (!parkedElements(saved).some(node => node === root || node.contains?.(root))) continue;
     if (scope === ancestor || scope.contains(ancestor)) return true;
   }
   return false;
@@ -117,8 +144,7 @@ function firstInParked(doc, selector, scope) {
     if (root.ownerDocument !== doc || !fragmentVisibleTo(scope, root)) continue;
     const saved = PARKED.get(root);
     if (!saved) continue;
-    for (const node of saved.all) {
-      if (node.nodeType !== 1 || node.parentNode === root) continue;
+    for (const node of parkedElements(saved)) {
       const found = matchesParked(node, selector, root);
       if (found.length) return found[0];
     }
@@ -132,10 +158,7 @@ function allInParked(doc, selector, scope) {
     if (root.ownerDocument !== doc || !fragmentVisibleTo(scope, root)) continue;
     const saved = PARKED.get(root);
     if (!saved) continue;
-    for (const node of saved.all) {
-      if (node.nodeType !== 1 || node.parentNode === root) continue;
-      found.push(...matchesParked(node, selector, root));
-    }
+    for (const node of parkedElements(saved)) found.push(...matchesParked(node, selector, root));
   }
   return found;
 }
@@ -209,14 +232,10 @@ function patchPrototypes() {
 export function installLazyPanels(doc = globalThis.document) {
   if (!doc?.documentElement || doc.documentElement.dataset.panelsLazy === "1") return;
   doc.documentElement.dataset.panelsLazy = "1";
-  const details = [...doc.querySelectorAll("details")];
-  const inAuth = new Set(details.filter(element => element.closest("#auth-panel")));
-  // Park closed details before dialog contents, so a details element inside
-  // a dialog is keyed while it is still in that dialog.
-  for (const element of details) {
-    if (inAuth.has(element) || element.open) continue;
-    park(element, node => node.nodeName === "SUMMARY");
-  }
+  // Dialog bodies are the forms and fields a person has not opened. A closed
+  // details element already hides its body and keeps it in the document, which
+  // is what the top bar, People, and in-page lookups address. Detaching those
+  // nodes made the same lookups miss.
   for (const dialog of doc.querySelectorAll("dialog")) {
     if (dialog.id === "settings-dialog") continue;
     park(dialog);

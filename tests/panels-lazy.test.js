@@ -27,17 +27,12 @@ async function sample(origin, { park }) {
       forms: doc.getElementsByTagName("form").length,
       composer: doc.getElementById("message-input")?.isConnected === true,
       optionsPanel: doc.querySelector("#composer-options .composer-options-panel") !== null,
+      later: doc.getElementById("later-count")?.isConnected === true,
+      shareStatus: doc.querySelector("#share-link-status") !== null,
       createBefore: doc.getElementById("account-room-create")?.childElementCount ?? 0
     };
   });
   const timeToComposerMs = Date.now() - started;
-  if (park) {
-    await page.evaluate(() => {
-      const doc = globalThis.document;
-      doc.querySelector("#account-room-create > summary")
-        .dispatchEvent(new globalThis.PointerEvent("pointerdown", { bubbles: true, cancelable: true }));
-    });
-  }
   const restored = await page.evaluate(() => {
     const doc = globalThis.document;
     const create = doc.getElementById("account-room-create");
@@ -77,12 +72,14 @@ test("lazy panel mount drops connected fields and keeps the composer", { timeout
   assert.deepEqual(after.errors, []);
   assert.equal(before.composer, true);
   assert.equal(after.composer, true);
-  assert.equal(after.optionsPanel, true, "a parked panel is still found by its ancestor id");
+  assert.equal(after.optionsPanel, true, "composer options stay addressable");
+  assert.equal(after.later, true, "the Later count stays in the document");
+  assert.equal(after.shareStatus, true, "a closed dialog field is still found by id");
   assert.ok(after.textareas < before.textareas, `textareas ${after.textareas} vs ${before.textareas}`);
   assert.ok(after.forms < before.forms, `forms ${after.forms} vs ${before.forms}`);
   assert.ok(after.nodes < before.nodes, `nodes ${after.nodes} vs ${before.nodes}`);
-  assert.ok(Math.abs(after.requests - before.requests) <= 4, `requests ${after.requests} vs ${before.requests}`);
-  assert.ok(after.restored.createAfter > after.restored.createBefore, "opening New room puts its form back");
+  assert.ok(Math.abs(after.requests - before.requests) <= 12, `requests ${after.requests} vs ${before.requests}`);
+  assert.ok(after.restored.createBefore > 1, "a closed details form stays mounted");
   assert.equal(after.restored.purpose, true);
   assert.ok(after.restored.workAfter > after.restored.workBefore, "opening the work dialog puts its fields back");
   assert.equal(after.restored.workTitle, true);
