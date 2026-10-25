@@ -2171,14 +2171,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // a share card or embedded badge only travels if unfurlers and
           // image proxies may cache it. The TTL is minutes, the read above
           // re-checks the owner toggle on every origin fetch, and both
-          // images restate the receipt's own public verdict line.
-          res.setHeader("Cache-Control", "public, max-age=300");
+          // images restate the receipt's own public verdict line. The
+          // public header is set only after the image exists: it used to
+          // be set before rendering, so a render failure answered 500
+          // carrying Cache-Control: public, max-age=300 and platforms
+          // cached the failure itself (DOOR-CURE-10). A failed render now
+          // keeps this block's no-store. The renderer loads its assets
+          // through loadAsset — the Worker has no host filesystem for
+          // og/, and the disk-path read is what failed there.
           if (receiptCard[2] === "badge.svg") {
             const svg = Buffer.from(receiptBadgeSvg(receipt));
+            res.setHeader("Cache-Control", "public, max-age=300");
             res.writeHead(200, { "Content-Type": "image/svg+xml; charset=utf-8", "Content-Length": svg.length });
             return res.end(req.method === "HEAD" ? undefined : svg);
           }
-          const png = Buffer.from(await renderOgPng(receiptOgFields(receipt)));
+          const png = Buffer.from(await renderOgPng(receiptOgFields(receipt), { assetLoader: loadAsset }));
+          res.setHeader("Cache-Control", "public, max-age=300");
           res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
           return res.end(req.method === "HEAD" ? undefined : png);
         }
@@ -2344,7 +2352,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               `${counts.artifactHashRecorded} artifact-hash ${counts.artifactHashRecorded === 1 ? "record" : "records"}`,
             ],
             footer: "Project Room proof · hashes are stored values, not re-verified",
-          }));
+          }, { assetLoader: loadAsset }));
           res.setHeader("Cache-Control", "public, max-age=300");
           res.writeHead(200, { "Content-Type": "image/png", "Content-Length": png.length });
           return res.end(req.method === "HEAD" ? undefined : png);

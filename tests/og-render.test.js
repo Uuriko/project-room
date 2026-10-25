@@ -47,6 +47,38 @@ test("control characters are stripped and do not change the image", async () => 
   assert.deepEqual(dirty, clean);
 });
 
+test("an injected asset loader renders the identical card (the Worker path)", async () => {
+  // DOOR-CURE-10: in the Cloudflare Worker there is no host filesystem
+  // holding og/ — the renderer must take its assets from the caller's
+  // loader (the server's ASSETS pipeline) and produce the same bytes.
+  const seen = [];
+  const assetLoader = async path => {
+    seen.push(path);
+    return readFileSync(new URL(`../${path}`, import.meta.url));
+  };
+  const png = await renderOgPng({
+    title: "Ship the receipt",
+    subtitle: "Closed by Ada",
+    badges: ["CI passing", "Merged"],
+    footer: "Made in Project Room",
+  }, { assetLoader });
+  assert.equal(createHash("sha256").update(png).digest("hex"), GOLDEN);
+  assert.deepEqual(seen.sort(), ["og/atlas-inter-24.png", "og/atlas-inter-32.png", "og/atlas-inter-48.png", "og/atlas.json", "og/base-receipt.png"]);
+});
+
+test("a failing asset loader fails the render instead of falling back to disk", async () => {
+  await assert.rejects(
+    renderOgPng({ title: "Ship the receipt" }, { assetLoader: async () => { throw new Error("asset unavailable"); } }),
+    /asset unavailable/);
+});
+
+test("the OG asset files ride the public asset catalog so the pipeline can serve them", async () => {
+  const { publicAssetPaths } = await import("../server/public-assets.mjs");
+  for (const path of ["og/atlas.json", "og/atlas-inter-24.png", "og/atlas-inter-32.png", "og/atlas-inter-48.png", "og/base-receipt.png"]) {
+    assert.ok(publicAssetPaths.includes(path), `${path} must be a public asset`);
+  }
+});
+
 test("a three-line title renders within the loose time bound", async () => {
   const started = performance.now();
   const png = await renderOgPng({
