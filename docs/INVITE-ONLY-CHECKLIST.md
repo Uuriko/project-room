@@ -12,6 +12,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | Endpoint | Auth | What it discloses |
 |---|---|---|
 | `GET /demo` and `HEAD /demo` | none | Curated static illustrative multiplayer conversation; no live private room data, membership or credentials. |
+| `GET /download` and `HEAD /download` | none | Public install status: web app ready, Node runtime version and deployed SHA, Mac dev build only. No live room data, membership, or credentials. |
 | `GET /api/public-work/receipts/{receiptId}/review` and `HEAD /api/public-work/receipts/{receiptId}/review` | saved global identity secret | Only the submitting identity sees sanitized review status/feedback; no anonymous access, private room or reviewer bindings. |
 | `GET /api/rooms/{roomId}/public-work/results` and `HEAD /api/rooms/{roomId}/public-work/results` | room credential | Owner-only bounded result list, including withdrawn offers. |
 | `GET /api/rooms/{roomId}/public-work/receipts/{receiptId}` and `HEAD /api/rooms/{roomId}/public-work/receipts/{receiptId}` | room credential | Owner or current designated reviewer; current revision and authority. |

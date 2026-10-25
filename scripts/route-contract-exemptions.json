@@ -102,11 +102,6 @@
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
     },
     {
-      "template": "/download",
-      "class": "web-ui",
-      "reason": "Public install-status page (web ready, Node runtime, Mac dev build). It is human HTML, not an API operation."
-    },
-    {
       "template": "/favicon.ico",
       "class": "web-asset",
       "reason": "Crawler/browser furniture (icon, robots, sitemap, security contact); not an API contract."

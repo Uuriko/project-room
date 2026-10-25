@@ -644,7 +644,7 @@ No public Mac app yet. Use the web app and the Node agent runtime; record deskto
 Node agent runtime (Node 24.19+): https://github.com/Uuriko/project-room/releases/latest
 \`/download\` names this build's package version, deployed SHA, and date.
 
-One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp. The room_mcp_snippet tool prints the same URL; ${ROOM_PUBLIC_WWW}/mcp is an alias serving the same catalog.
+One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp. hosted-mcp (live, no account) is that URL. The room_mcp_snippet tool prints the same URL; ${ROOM_PUBLIC_WWW}/mcp is an alias serving the same catalog.
 Hosted MCP server card: ${ROOM_ORIGIN}/room/mcp/server-card
 First tools: room_check_access, then orient.
 
