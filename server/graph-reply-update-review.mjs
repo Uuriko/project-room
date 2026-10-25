@@ -1,7 +1,7 @@
 // Post-write inspection and review qualification. No provider I/O or send grant.
 import { emailDigest, requireEmail } from "./email-envelope.mjs";
 import { compareReplyUpdateEnvelope, compareReplyEnvelope, replyObservationReviewable } from "./graph-reply-draft.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (code, message) => { throw new ServiceError(409, code, message); };
 const same = (a, b) => emailDigest(a) === emailDigest(b);

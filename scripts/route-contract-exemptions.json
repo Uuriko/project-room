@@ -262,9 +262,19 @@
       "reason": "Door mirror of /skills: the edge entry (deploy/room-entry.mjs) serves the same handler at both prefixes; the contract lives on the root template."
     },
     {
+      "template": "/r/{}/proof/og.png",
+      "class": "web-asset",
+      "reason": "Per-room proof page Open Graph share card: a PNG rendered from the proof document's public counts for link unfurlers and crawlers; browser furniture like the sitemap, not an API contract."
+    },
+    {
       "template": "/receipts",
       "class": "discovery-doc",
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/receipts/{}/{}",
+      "class": "web-asset",
+      "reason": "Per-receipt share assets (og.png card and badge.svg) rendered from the receipt's own public fields for link unfurlers, crawlers, and embeds; browser furniture like the sitemap, not an API contract."
     },
     {
       "template": "/robots.txt",

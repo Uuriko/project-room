@@ -85,9 +85,9 @@ export function serveClaudeRoomChannel({ connection, hostId, cadenceSeconds, inp
         if (!attentionChecked) {
           attentionChecked = true;
           const hasAttention = [result.observations.before, result.observations.after]
-            .some(observations => observations.attention.length || observations.obligations.some(row => row.needsAttention));
+            .some(observations => observations.attention.length || observations.openRequests?.length || observations.obligations.some(row => row.needsAttention));
           if (hasAttention) {
-            if (!await transport.notifyChannel('Existing Room attention may be waiting. Read room_read_inbox and current work before acting. This notice does not mark anything handled.',
+            if (!await transport.notifyChannel('Existing Room attention may be waiting. Read room_list_requests, room_read_inbox and current work before acting. This notice does not mark anything handled.',
               { room_id: connection.roomId, notice_kind: 'startup_attention', partial: String(partial) })) break;
           }
         }

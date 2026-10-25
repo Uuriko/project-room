@@ -107,13 +107,15 @@ test("a non-owner agent gets 403 owner_required; a sponsor sees only their own a
 test("room_orient carries the calling agent's own state, badges and budget", async t => {
   const f = await setup(t);
   seedFleet(f);
-  const reviewer = await f.get("reviewer", "/api/rooms/commons/orient");
+  // The standalone /orient endpoint was deleted (register D1); the builder
+  // payload rides inside the activation pack's orient embed.
+  const reviewer = await f.get("reviewer", "/api/rooms/commons/activation-pack");
   assert.equal(reviewer.status, 200, JSON.stringify(reviewer.body));
-  assert.equal(reviewer.body.you.state, "working");
-  assert.deepEqual(reviewer.body.you.badges, []);
-  assert.equal(reviewer.body.you.budget, null);
-  const owner = await f.get("owner", "/api/rooms/commons/orient");
-  assert.equal(owner.body.you.state, undefined, "humans get no fleet state");
+  assert.equal(reviewer.body.orient.you.state, "working");
+  assert.deepEqual(reviewer.body.orient.you.badges, []);
+  assert.equal(reviewer.body.orient.you.budget, null);
+  const owner = await f.get("owner", "/api/rooms/commons/activation-pack");
+  assert.equal(owner.body.orient.you.state, undefined, "humans get no fleet state");
 });
 
 test("primary state precedence is fixed", () => {

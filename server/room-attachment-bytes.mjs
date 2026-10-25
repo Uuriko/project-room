@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Room file bytes on the existing room_attachments table.
 //
 // attachment-schema.mjs owns the table, the byte caps, and the staged /
@@ -181,10 +182,10 @@ export class RoomAttachmentBytes {
   }
 
   messageIndex(roomId) {
-    const byId = new Map(this.store.room(roomId).state.messages.map(entry => [entry.id, entry]));
+    const byId = messageRepository(this.store, roomId);
     // A file committed onto an archived DM must keep the DM's visibility rule:
     // a missing message would read as room-wide.
-    return { get: id => byId.get(id) ?? this.store.archivedMessage(roomId, id) };
+    return byId;
   }
 
   list(token, roomId) {
@@ -275,7 +276,7 @@ export class RoomAttachmentBytes {
       }
       if (row.state === "committed") fail(409, "attachment_conflict", "That file is already committed to a message");
       if (row.state !== "staged") fail(410, "attachment_unavailable", "Only a staged room file can be committed");
-      const message = this.store.room(roomId).state.messages.find(entry => entry.id === messageId);
+      const message = messageRepository(this.store, roomId).get(messageId);
       if (!message || message.deletedAt) fail(404, "message_not_found", "Message not found");
       if (message.authorId !== auth.member.id) {
         fail(403, "attachment_forbidden", "Commit a file only onto a message you posted");
