@@ -10,6 +10,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { alarmAlreadyScheduled } from "../server/job-alarm-arm.mjs";
+import { jobHealthSignal } from "../server/job-health-signal.mjs";
 import { jobHealthResponse } from "../cloudflare/job-heartbeat.mjs";
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -53,12 +54,19 @@ test("a long-failing job does not mask healthy jobs, and a stale cron is still r
     lastSuccessAt: "2026-10-11T19:30:55.702Z",
     lastError: "scanError: integrity messages_parity failed (messages_parity_failed)",
   });
-  const quiet = await bodyOf(board([
+  const quietView = board([
     parity,
     job({ name: "webhook-dispatch" }),
     job({ name: "claim-prs" }),
     job({ name: "patrol" }),
-  ]));
+  ]);
+  const quiet = await bodyOf(quietView);
+  const signaled = jobHealthSignal(quietView);
+  assert.equal(quiet.body.status, signaled.status);
+  assert.equal(
+    quiet.body.jobs.find(entry => entry.name === "integrity").quarantined,
+    signaled.jobs.find(entry => entry.name === "integrity").quarantined,
+  );
   assert.equal(quiet.http, 200);
   assert.equal(quiet.body.status, "ok");
   const quarantined = quiet.body.jobs.find(entry => entry.name === "integrity");
