@@ -203,6 +203,19 @@ export function verifySignedEvidence(evidence, { registry, seen = null } = {}) {
         signerIdentityId: r.signerIdentityId, contentHash: r.contentHash };
     }
   }
+  // A7: a signature that verifies only against a key revoked before
+  // issuedAt is a revoked-key refusal, not a bad signature. Without this
+  // pass, a second in-window key's presence made the loop above fall
+  // through to bad_signature and masked the revocation — the refusal was
+  // correct, its reason was wrong.
+  for (const row of rows) {
+    if (!inWindow(row) || row.revokedAt === null || row.revokedAt === undefined || issuedMs < row.revokedAt) continue;
+    if (typeof row.publicKey !== "string" || !isValidPublicKey(row.publicKey)) continue;
+    const pubkeyHex = Buffer.from(row.publicKey, "base64").toString("hex");
+    if (verifyBytes(bytes, r.signature, pubkeyHex)) {
+      return invalid("revoked_key", `the signing key for ${r.signerIdentityId} was revoked before ${r.issuedAt}`);
+    }
+  }
   return invalid("bad_signature", "Ed25519 verification failed against every key valid at issuedAt");
 }
 

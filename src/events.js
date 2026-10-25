@@ -1,3 +1,4 @@
+import { canAdministerRoom } from './room-administration.js';
 import { createWorkReducers } from "./work-reducers.js";
 import { createMessageReducers, isRedactedBody } from "./message-reducers.js";
 import { assertMemberDisplayNameAvailable } from "./display-name-guard.js";
@@ -394,7 +395,7 @@ export function spendPricingEnabled(state) {
 
 function setSpendPricing(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
-  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set spend pricing");
+  if (!canAdministerRoom(state, actor.id)) throw new Error("Only a Room administrator may set spend pricing");
   const { enabled } = incoming.data ?? {};
   if (typeof enabled !== "boolean") throw new Error("enabled must be a boolean");
   if (Object.keys(incoming.data ?? {}).some(key => key !== "enabled")) throw new Error("spend pricing takes only enabled");
@@ -806,10 +807,16 @@ function validateEnvelope(incoming) {
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
     // work_claim.updated deletion receipts name stranded dependents: claim ids.
     if (key === "dependents" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !validId(v)))) throw new Error(`Invalid ${key}`);
+    // Receipt-card cost: exactly { spentCents, capCents, model }, each recorded
+    // or null. Cents are non-negative integers; model is 1-100 characters.
+    if (key === "cost" && (!value || typeof value !== "object" || Array.isArray(value)
+      || Object.keys(value).length !== 3 || !["spentCents", "capCents", "model"].every(field => field in value)
+      || [value.spentCents, value.capCents].some(c => c !== null && !(Number.isSafeInteger(c) && c >= 0))
+      || (value.model !== null && (typeof value.model !== "string" || !value.model.trim() || value.model.length > 100)))) throw new Error(`Invalid ${key}`);
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1257,12 +1264,10 @@ function requireScopedMemberAdministration(state, actorId, targetId, currentTarg
   if (actorId === state.room.ownerId) return;
   if (targetId === state.room.ownerId) throw new Error("Only the Room owner may change owner authority");
   const actor = requireMember(state, actorId);
-  // #643: a delegated administrator may exercise its admin bits but never
-  // bestow them. Without this rule the "can't grant what you don't hold"
-  // check below would permit re-delegation, since the delegated admin
-  // holds the bits. It can still approve access requests and change
-  // non-admin permissions.
-  if (actor.delegatedAdmin && nextPermissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
+  // Delegated agents may grant existing humans permissions they hold.
+  // Delegating administrative authority onward to agents remains owner-controlled.
+  // The subset check below also prevents granting or removing unheld authority.
+  if (actor.delegatedAdmin && currentTarget?.kind !== "human" && nextPermissions.some(p => AGENT_ADMIN_PERMISSIONS.includes(p))) {
     throw new Error("Delegated administrators cannot re-delegate");
   }
   const affected = new Set([...(currentTarget?.permissions ?? []), ...nextPermissions]);

@@ -113,7 +113,7 @@ last three carry state with no board field (§4.5).
   `src/conversation.js`, `src/growth-emit.js`, `src/help-offers.js`,
   `src/human-experience.js`, `src/portable-work.js`, `src/room-layout.js`,
   `src/room-templates.js`, `src/work-help.js`, `src/work-packet.js`,
-  `src/work-recipes.js`, `src/work-selectors.js`.
+  `src/work-selectors.js`.
 
 Direct `state.workItems` reads concentrate in `server/store.mjs` (≈42
 sites: validation, search, sessions, integrity) and `src/app.js` (≈40: the
@@ -353,3 +353,13 @@ Item-backed board acceptance controls open canonical work; API attempts to appro
 through board bundles return a conflict with the canonical context/command paths.
 Native board deliveries retain their existing workflow. See
 [cutover qualification](WORK-CUTOVER-PLAN.md).
+
+### Result reader extraction (2026-10-19)
+
+The reference census now has 58 files. `src/result-reader.js` owns the
+read-only result view previously embedded in `src/app.js`: selected receipt,
+current/earlier labeling, and discussion eligibility. It reads the existing
+authorized work-items projection through an accessor; it introduces no writer,
+board mapping, or second state store. The application retains work mutations.
+
+2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.

@@ -11,7 +11,7 @@ The product test: two people and an authorized agent turn a conversation into an
 accepted result, change direction, survive a disconnect, and return without
 reconstructing the project or losing control.
 
-## Current execution prompt: reconcile architecture with deployed storage
+## Architecture integration prompt: reconcile with deployed storage
 
 Integrate candidate `93727acb` (#4114) with deployed main `14e4320b` (#4123)
 in an isolated checkout. Produce one coherent, testable architecture candidate,
@@ -91,6 +91,105 @@ rehearsal and the human productivity pilot are not silently marked complete by
 this integration.
 
 ## Active list — six outcomes
+
+## Current execution: work continuity (2026-10-18)
+
+### Next execution: qualify and integrate the existing slice
+
+Finish the existing architecture/continuity candidates before adding features.
+This sequence owns the immediate work; it does not replace C1–C8 or count
+unmeasured acceptance criteria as completed.
+
+| Step | Concrete task | Acceptance / evidence | Execution status |
+|---|---|---|---|
+| Q1 | Reconcile PR heads, remote refs, CI results and active release ownership | Every result names its exact revision; stale checks are not reused | Git confirms #4114 baseline repair `93727acb`; initial PR API still reports `b9c4afed`. Release hold remains active |
+| Q2 | Integrate local validation tooling with the continuity tree | One existing PR (#4118), no third feature queue; clean merge of baseline repair | Local `4c7678a5` and `93727acb` integrated on the qualification branch |
+| Q3 | Finish the cheap preflight contract | Missing imports/new uncovered server modules refuse before workers; abnormal child termination fails; generic dependency checker stays reusable | Complete: shared package verifier plus manifest-drift gate; refusal/termination subprocess tests pass |
+| Q4 | Freeze runtime/tooling edits and qualify once on Node 24 | Focused failures fixed first; affected tests, lint, package checks, CI-mode checks and one full suite; exact baseline failures retained | Complete locally: 11,126 pass / 24 exact baseline failures / 8 skipped; lint and contract checks pass. Earlier manifest failure repaired and rechecked |
+| Q5 | Publish the same tested tree to #4118 | Updated PR scope, full qualification evidence, clean source checkpoint and release-owner handoff | Source checkpoint qualified for #4118; published head and live CI tracked on the PR. No force push or policy-role release |
+| Q6 | Land and qualify the supported product journey | Exact required CI, coordinated merge/release, production smoke, physical sleep/wake and comparative pilot evidence | Separate open gates; automation cannot substitute for physical/human observations |
+
+Development loop: preflight first, focused tests while changing code, then one
+full run after the code stops changing. Metadata/documentation updates do not
+justify rerunning unrelated expensive experiments. A new failing invariant or
+runtime change does. Compare CI to the candidate's merged tree as well as its
+head so generated-baseline conflicts are found before another CI queue cycle.
+Keep a published candidate separate from production status and never interpret
+queued checks or absence of a result as approval.
+
+The preflight checks installed dependencies, existing module-coverage rules and
+all allowlisted runtime imports and candidate-manifest drift. It warns about Node-major differences from CI,
+does not install or switch runtimes, and leaves cold-package and full-suite
+qualification intact. The Node engine range remains unchanged.
+
+This section owns the next concrete tasks; the six outcomes below remain the scope.
+The release candidate is PR #4114; `93727acb` preserves the existing fresh-base i18n ratchet, and `b9c4afed` adds direct storage-module tests to
+repair the coverage gate at `0ddf0908`, without changing its runtime. New continuity
+work is isolated on `codex/work-brief-continuity-20261018`. Final local qualification is recorded in [validation evidence](work-brief-validation.json).
+
+| Task | Feature / work | Completion evidence | State |
+|---|---|---|---|
+| C1 | Finish #4114 exact-head CI, qualify merged revision, release and smoke-test | Required checks, deployed SHA, workflow and data continuity smoke | Waiting on hosted CI and shared RELEASE-PAUSE; no merge/deploy |
+| C2 | Trace work context, preparation, interruption, result and acceptance ownership | Existing interfaces mapped; missing contracts identified | Audited: selectedWorkContext owns reads; work-preparation composes them; private cache owns discussion continuation; work-actions owns revision-fenced commands |
+| C3 | Derive a compact versioned work brief from existing authorized context | Stable content version, explicit omissions/provenance, stale-change classification and privacy tests | Implemented; synthetic freshness/privacy tests pass |
+| C4 | Connect the brief to selected-work reads and resumable preparation | Same version in MCP brief and private resumed output; restart and permission-change tests | Implemented; MCP preserves compact Markdown and adds only a digest; CLI --brief skips discussion |
+| C5 | Bind execution observations to the brief used; surface stale context on return | Real supported-host interruption/redirect/result journey; no duplicate effect, changed context visible | Exact input digest and optional work-brief version journaled atomically before runtime start. Linked-work request adapter tested; real native model + journal reopen passed. Physical sleep/wake and complete user pilot remain open |
+| C6 | Make the existing human result/return view expose relevant freshness and next action | Browser test for review, changed requirements and resumption; keyboard/mobile checks | Reused existing stale-draft, work-change and handoff surfaces; 9 desktop/mobile browser checks pass. No redundant new UI added |
+| C7 | Compare minimal, selected and broad context on representative tasks | Reproducible task inputs, correctness/recovery/bytes/cost results; human-effort claims require human trials | Payload/freshness qualification implemented: 123 / 4027 / 65850 bytes. Model-quality and independent-human comparisons remain unmeasured |
+| C8 | Integrate continuity, remove superseded paths and verify production journey | Exact-head qualification, coordinated merge/release, evidence ledger and residual limitations | Pending; depends on C1 and C3–C7 |
+
+The #4114 repair directly exercises batched entity hydration and corrupt/missing
+entity refusal, archived/live cursor ordering and viewer filtering, replay
+migration preservation, idempotent migration and transactional rollback. It does
+not loosen the coverage gate or extend its grandfather list.
+
+The brief is derived data, never a new authority or semantic summary. It must not
+fetch arbitrary evidence links, include private conversations, infer acceptance,
+or claim that a digest is a signature. References retain their source identifiers.
+Unrelated room activity should not invalidate the brief, while task, charter,
+authority and result changes must. Reading a brief does not authorize execution.
+Physical sleep/wake remains a separate unfulfilled hardware qualification.
+
+Release coordination: live muse-room confirms an active non-expiring RELEASE-PAUSE.
+The default connector is bound to build-together; the existing own identity was
+used explicitly against muse-room to verify the source lease
+`codex-work-brief-continuity-1018`. No other agent's identity or release role was used.
+
+### Continuity feature usage and limits
+
+`node scripts/agent-work-preflight.mjs PRIVATE_CONNECTION_DIRECTORY WORK_ID --brief`
+returns only the selected work brief. `--resume` retains the existing private
+discussion continuation and includes a fresh brief. Neither mode starts work.
+`client/work-brief.mjs` exports `createWorkBrief` and `compareWorkBriefs`; changed
+sections identify requirements, authority, instructions, progress, evidence,
+source metadata or linked conversations. Same-version observations are not proof
+that omitted conversation or externally linked evidence is still current.
+
+MCP's existing `brief: true` response adds `briefVersion` without duplicating the
+structured brief alongside Markdown. A regression test caught that duplication
+making the compact response larger than selected context; the output was fixed
+and the original size assertion retained.
+
+The native runtime journals only the exact input digest, byte count and optional
+brief version, not another copy of private prompt text. `contextObservation(binding)`
+requires current authorization; legacy attempts report unavailable observations.
+The addressed-request runner fetches a fresh authorized brief for linked work,
+but a conversation association never grants work-transition authority.
+
+Reproduce synthetic payload/freshness checks with
+`node scripts/qualify-work-brief.mjs /absolute/report.json`.
+[Measured fixture](work-brief-qualification.json) and
+[real native-host qualification](work-brief-native-host.json) distinguish what was
+measured from the outstanding productivity study. The measured 94% payload reduction
+compares the synthetic selected brief with the broad context fixture, not complete
+MCP envelopes, model quality, execution latency or human productivity.
+
+The [shared room benchmark](work-brief-room-bench.json), run once against
+`0ddf0908` with 1,000 messages and bodies at rest, classifies every metric as
+inconclusive (`~`). This is not evidence of either a speedup or equivalent
+performance; write p95 moved from 5.79 to 8.02 ms with wide intervals. Preserve
+the full table in the continuity PR. The room benchmark does not measure native
+runtime journal overhead or model reasoning quality.
 
 | ID | Outcome and bounded scope | Finish condition |
 |---|---|---|
@@ -221,3 +320,35 @@ reader/caller census, atomic entity/event/effect writes, privacy/order parity, m
 and recovery, then remove superseded serialization. Attach the existing user send/edit/
 return journey and a fresh-agent read to that slice. Baseline first, exact-tree evidence
 at completion. This advances F1, F3 and F4 without starting three independent products.
+
+## Current execution: continuity on the reconciled architecture
+
+Integrate PR #4118 `d611d138` with qualified architecture source `aa69cf95`.
+Preserve both histories and every retained C1–C8 acceptance task. Resolve planning
+text by retaining both execution records, regenerate the manifest from the combined
+package, and inspect runtime-package unions for dropped modules. Do not change the
+storage behavior already qualified on #4114 or expand into new feature lanes.
+
+1. Check #4114 exact-head hosted results and diagnose new failures if any. Keep
+   pending checks explicit; a clean merge is not hosted qualification.
+2. Merge the new base, run preflight and focused brief/cache/preparation/native
+   runtime/packaging tests, then lint and affected checks against the actual stacked
+   base. Run the required full suite once after the merge is stable.
+3. Preserve context version/omission semantics and exact runtime input provenance.
+   Verify new base modules remain packaged and bounded snapshot migration tests
+   still pass. Use existing source-identical performance evidence where justified;
+   do not repeat a benchmark merely to replace inconclusive results.
+4. Publish the refreshed #4118 head and source-bound qualification. Explain the
+   stacked diff and its large-diff justification. Keep #4114's hosted gate separate,
+   and leave production release and physical sleep/wake unclaimed.
+
+Continuity integration checkpoint: #4118 includes architecture `aa69cf95`; only
+planning text and the generated manifest conflicted. 51 focused tests pass. Full
+Node24 qualification: 11,174 passed, 24 exact recorded Mac host failures, 8 skipped.
+The affected run found nine baseline host failures and a fixed-delay relay-test
+failure; replacing that delay with the existing bounded wait produced 17 passing
+machine tests. Lint has zero errors. Server/Worker/browser source and Room benchmark
+code are unchanged from #4114; its performance evidence is reused with that scope,
+not represented as another measured speedup. Current main's later `f18cd508`
+escrow/heartbeat change remains outside this pinned stack. Exact-head hosted checks,
+release reconciliation, sleep/wake and the human pilot remain open.
