@@ -221,6 +221,8 @@ response's own `hint`/`next` when it names something more specific.
 | `code_drop_corrupt` | 500 | Stored bytes do not match the drop | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `code_drop_forbidden` | 403 | Only the author or the room owner can replace a code drop | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `code_drop_not_found` | 404 | Code drop not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `code_failed` | 404 | Pair not found | re-list | A wrong pairing code counts toward the room lock. Use the displayed code, or wait if the room is locked. |
+| `code_locked` | 429 | Too many incorrect codes | wait | Wait for the pairing-code lock to clear, then try the displayed code again. |
 | `collision_forbidden` | 403 | Only the lock holder may release it. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: collab STATUS_BY_CODE.) |
 | `collision_invalid` | 422 | fail("collision_invalid", error.message); } }; const identity = (value, field) => { try { return identityOf(value, field); } catch (error) { fail("col | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
 | `collision_lock_expired` | 409 | The draft lock expired; acquire it again. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. (Note: collab STATUS_BY_CODE.) |
@@ -487,9 +489,12 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_email_code` | 401 | That code is not valid | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_email_code` | 422 | A verification code is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_email_request` | 422 | An email address is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_event` | 422 | The pairing event was refused | fix+resend | Read the message, fix the pair or merge, and resend. |
 | `invalid_event_cursor` | 422 | reject(422, "invalid_event_cursor", "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last se | follow hint | Follow this error's hint and next steps. |
 | `invalid_evidence` | internal | ${label} must be a 1..${max}-character string | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_expiry` | 422 | Magic-link codes expire within 24 hours | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `expired_token` | 400 | expired_token | no | The pairing request expired. Start a new pair. |
+| `expired_token` | 410 | This pair expired | no | The pairing request expired. Start a new pair. |
 | `invalid_export` | 500 | fail("invalid_export", message); }; const checkColumns = columns => { check(Array.isArray(columns) && columns.length > 0, "columns must be a non-empty | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_face` | 422 | enabled (boolean) is the accepted field | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_feed_cursor` | 422 | after must be a message cursor | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -532,6 +537,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_jev_shadow` | 422 | ${field} is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_jev_shadow_query` | 422 | gate, escalate and limit are the accepted query parameters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_join` | 422 | Invitation link and agent name required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_join_policy` | 422 | mode must be approve, closed, or auto:<profile> | fix+resend | Send approve, closed, or auto:chat, auto:contribute, auto:review, or auto:collaborate. |
 | `invalid_json` | internal | invalid JSON at offset ${i}: ${msg} | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_json_value` | internal | cannot canonicalize ${typeof value} | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_key` | internal | seed must be 64 lowercase hex characters (32-byte Ed25519 seed) | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
@@ -551,6 +557,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_matchmaking_input` | 422 | reject(422, "invalid_matchmaking_input", error.message); const guard = thunk => { try { return thunk(); } catch (error) { if (error instanceof Error & | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_max_depth` | 422 | maxDepth must be an integer 1..${MAX_MAX_DEPTH} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_member` | 422 | Choose one member | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_merge` | 422 | keepMemberId and retireMemberId are required | fix+resend | Name the agent to keep and the agent to retire, then resend. |
 | `invalid_mention_query` | 422 | state, after, memberId and view are the accepted query parameters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_mention_timeout` | 422 | timeoutMs must be an integer between ${MENTION_TIMEOUT_MS_MIN} and ${MENTION_TIMEOUT_MS_MAX} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_message` | 422 | messageId is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -572,6 +579,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_owed_query` | 422 | limit must be an integer from 1 to 100 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_page` | 422 | Send access, slug, blurb, and enabled | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pagination` | 422 | limit must be an integer from 1 to 200 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_pair` | 422 | displayName must be 1-80 characters | fix+resend | Send a display name and, when deciding, approve or deny with a known profile. |
 | `invalid_passkey` | 422 | A verified credential record is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_passkey_challenge` | 401 | Challenge expired or already used; start the ceremony again | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_passkey_origin` | 422 | An expected origin is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -751,6 +759,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invite_unavailable` | 404 | fail(404, "invite_unavailable", "Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check  | fix | The invite code has the wrong format (two letters, a dash, then 16 characters — no I, L, O, or U) or is not live. Check the code; ask the owner for a fresh invite. |
 | `invite_unavailable` | 410 | v1 guest-invite credentials refresh through a fresh owner code, not this endpoint. | fix | The invite code has the wrong format (two letters, a dash, then 16 characters — no I, L, O, or U) or is not live. Check the code; ask the owner for a fresh invite. |
 | `join_changed` | 409 | This join belongs to an earlier browser identity or name | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
+| `join_closed` | 403 | This room is not accepting agents | no | The room join policy is closed. Ask the owner to open it. Do not retry until it changes. |
 | `join_session_lost` | 409 | fail(409, "join_session_lost", "Your earlier join used another browser session. Return to that session or sign in with the same account. No additional | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `json_required` | 415 | Use application/json | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `key_already_registered` | 409 | This public key is already registered for the identity | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
@@ -829,6 +838,7 @@ response's own `hint`/`next` when it names something more specific.
 | `owner_equivalent_forbidden` | 403 | Only the room owner can mint an owner-level invite | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_only` | 403 | Only the room owner may manage Demigod offers | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_required` | 403 | Only the room owner can read the access review | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `pair_closed` | 409 | This pair is no longer pending | no | The pair was already decided or the agent is gone. Start a new pair only if this member is not already connected. |
 | `passkey_origin_rejected` | 422 | Passkey sign-in needs an https origin or localhost | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `passkey_verification_failed` | 401 | Passkey registration did not verify | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `password_already_set` | 409 | This account already has a password; change it instead | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

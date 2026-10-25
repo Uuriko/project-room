@@ -171,6 +171,11 @@ const PROBES = {
   // Access-request status: identityId query param is required, so a bare probe gets 422.
   "GET /api/access-requests/{}": [undefined, 422],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
+  "GET /api/agent-invites/redeem": [undefined, 200],
+  "GET /api/pair": [undefined, 422],
+  "POST /api/pair": [{}, 422],
+  "GET /pair": [undefined, 422],
+  "GET /pair/{}": [undefined, 200],
   // Invite preview (#3259: POST-only, code in the body): a bare probe (no
   // code) gets 422 invalid_invite. The retired GET form is not an open
   // route and so has no probe here; its 405 is pinned in

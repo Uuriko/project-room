@@ -409,6 +409,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   };
   // Literals stay in this file so scripts/open-routes.mjs sees the legal API.
   const legalApiPaths = new Set(["/api/reports/public/challenge", "/api/reports/public", "/api/account/terms", "/api/operator/unpublish", "/api/health/jobs"]);
+  // Open pairing door, served from the route table: "/api/pair"
   // The Worker reads ROOM_SECURITY_CONTACT from its binding in edge-public.
   // Logging process.env here would warn on every isolate that has no env var.
   if (!isWorkersRuntime()) warnMissingSecurityContactCheck();
@@ -3390,8 +3391,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           displayName: redeemedInvite.displayName ?? data.displayName, card: null });
         return json(res, 201, redeemedInvite);
       }
+      if (url.pathname === "/api/agent-invites/redeem" && req.method === "GET") {
+        rate(`invite-redeem:${remoteAddress}`, 20);
+        return json(res, 200, store.invites.availability(url.searchParams.get("code") ?? ""));
+      }
       if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
-        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
       }
       // Signed referral invites: the owner, or a member who can invite, mints
       // a bearer token and carries it out-of-band — the server never sends it.

@@ -129,7 +129,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -806,7 +806,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -944,6 +944,15 @@
       "inputSchema": "7e9ced24c319704f",
       "annotations": {
         "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_merge_members": {
+      "inputSchema": "d4341a4572f425c3",
+      "annotations": {
+        "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -1328,7 +1337,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "5a81992641ec2856",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2335,7 +2344,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "5a81992641ec2856",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2519,7 +2528,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

@@ -79,6 +79,22 @@ function toolResult(value, isError = false, redactions = []) {
   };
 }
 
+function notMemberPair(store, secret, args, error) {
+  if (!(error instanceof ServiceError) || error.status !== 401 || error.code !== "unauthenticated") return null;
+  if (!validId(args?.roomId)) return null;
+  const who = store.identities?.resolveGlobalIdentitySecret?.(secret);
+  if (!who) return null;
+  try {
+    const linked = store.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(args.roomId, who.identityId);
+    if (linked) return null;
+  } catch {
+    return null;
+  }
+  const mapped = new ServiceError(403, "not_member", "This identity is not a member of that room");
+  mapped.next = { action: "pair", method: "POST", path: "/api/pair", tool: "room_join", roomId: args.roomId };
+  return mapped;
+}
+
 function failureValue(error) {
   if (error instanceof ServiceError || (error && Number.isInteger(error.status) && typeof error.code === "string")) {
     return {
@@ -176,11 +192,18 @@ function validRoomArgs(name, args) {
   if (name === "room_join") {
     const link = args.linkToken !== undefined;
     const code = args.inviteCode !== undefined;
+    const pairing = args.roomId !== undefined || args.pairId !== undefined;
     const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.trim().length > 0 && args.displayName.length <= 80;
-    return link !== code && nameOk
+    const keyOk = args.publicKey === undefined || typeof args.publicKey === "string" && args.publicKey.length >= 1 && args.publicKey.length <= 128;
+    const proofOk = args.keyProof === undefined || typeof args.keyProof === "string" && args.keyProof.length >= 1 && args.keyProof.length <= 200;
+    const pairOk = args.pairId === undefined || validId(args.pairId);
+    const classic = link !== code && !pairing;
+    const door = !link && !code && pairing && pairOk;
+    return (classic || door) && nameOk && keyOk && proofOk
       && (!link || typeof args.linkToken === "string" && args.linkToken.length > 0 && args.linkToken.length <= 200)
       && (!code || typeof args.inviteCode === "string" && args.inviteCode.length > 0 && args.inviteCode.length <= 80);
   }
+  if (name === "room_merge_members") return validId(args.keepMemberId) && validId(args.retireMemberId);
   if (name === "get_room_context") return args.since_version === undefined || typeof args.since_version === "string" && /^[a-f0-9]{64}$/.test(args.since_version);
   if (name === "room_list_events") {
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
@@ -432,6 +455,11 @@ function credentialRedactions(name, value) {
     mcpRedaction(value?.roomToken, "structuredContent.roomToken"),
     mcpRedaction(value?.identitySecret, "structuredContent.identitySecret"),
     mcpRedaction(value?.secret, "structuredContent.secret"),
+    mcpRedaction(value?.token, "structuredContent.token"),
+    mcpRedaction(value?.deviceSecret, "structuredContent.deviceSecret"),
+    mcpRedaction(value?.userCode, "structuredContent.userCode"),
+    mcpRedaction(value?.connection?.token, "structuredContent.connection.token"),
+    mcpRedaction(value?.connection?.identitySecret, "structuredContent.connection.identitySecret"),
   ];
 }
 
@@ -494,7 +522,20 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_join") {
     const displayName = args.displayName ?? identity.displayName;
     if (args.linkToken !== undefined) return store.shareLinks.joinAgent(secret, args.linkToken, displayName);
-    return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
+    if (args.inviteCode !== undefined) return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
+    if (args.pairId !== undefined) return store.pairing.pollHeld(args.pairId, identity.identityId);
+    const started = store.pairing.start({
+      roomId: args.roomId, displayName,
+      publicKey: args.publicKey ?? null, keyProof: args.keyProof ?? null,
+      address: `mcp:${identity.identityId}`, holdFor: identity.identityId
+    });
+    if (started.connection) return started.connection;
+    const view = { ...started };
+    delete view.deviceSecret;
+    return view;
+  }
+  if (name === "room_merge_members") {
+    return store.pairing.merge(secret, args.roomId, { keepMemberId: args.keepMemberId, retireMemberId: args.retireMemberId });
   }
   if (name === "room_check_access" && args.roomId === undefined) {
     const allowed = mcpRoomAllowlist(store, secret);
@@ -992,8 +1033,10 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       // handler with the inner tool name, so it is covered here too.
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
     } catch (error) {
-      let value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
-      if (error?.status === 409 && /stale/i.test(String(error?.message ?? "")) && typeof args?.roomId === "string") {
+      const mapped = notMemberPair(store, secret, args, error) ?? error;
+      let value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(mapped) : failureValue(mapped);
+      if (mapped.next) value.next = mapped.next;
+      if (mapped === error && error?.status === 409 && /stale/i.test(String(error?.message ?? "")) && typeof args?.roomId === "string") {
         value = { ...value, reason: "stale_revision", next: [{ tool: "room_read_work", arguments: {
           roomId: args.roomId, ...(typeof args.workItemId === "string" ? { workItemId: args.workItemId } : {})
         } }] };
@@ -1035,7 +1078,7 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 // Heartbeat, wake and webhook tools never reach callRoomTool; they run through
 // callWakeTool under the mcp:wake gate and are unchanged here.
 const MCP_ROOM_WRITE_TOOLS = new Set([
-  "room_create", "room_join",
+  "room_create", "room_join", "room_merge_members",
   "squads_create", "squads_update_members", "squads_disband",
   "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",

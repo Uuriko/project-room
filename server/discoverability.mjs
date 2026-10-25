@@ -162,6 +162,29 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
+  route("/api/pair", ["GET", "POST"], "none", "Start agent pairing. A proved key or a valid room credential reconnects the existing member.", "startPair",
+    { operationIds: { GET: "startPair", POST: "startPairPost" },
+      requestBodies: { POST: { required: true, content: { "application/json": { schema: {
+        type: "object", additionalProperties: true, properties: {
+          room: { type: "string", description: "Room id. roomId is also accepted." },
+          roomId: { type: "string" },
+          name: { type: "string", maxLength: 80, description: "Display name. displayName is also accepted." },
+          displayName: { type: "string", maxLength: 80 },
+          publicKey: { type: "string", description: "Ed25519 public key, canonical base64." },
+          keyProof: { type: "string", description: "Ed25519 signature over the pair proof bytes. Required to reconnect immediately by key." },
+          credential: { type: "string", description: "Existing room credential. Reconnects that member instead of creating one." },
+        },
+      } } } } },
+      query: [
+        { name: "room", in: "query", required: false, schema: { type: "string" } },
+        { name: "name", in: "query", required: false, schema: { type: "string" } },
+        { name: "publicKey", in: "query", required: false, schema: { type: "string" } },
+        { name: "keyProof", in: "query", required: false, schema: { type: "string" } },
+      ] }),
+  route("/api/pair/{pairId}", ["GET"], "none", "Poll a pairing request with the device secret. Pending, slow, denied, and expired answers are RFC 8628 codes.", "pollPair",
+    { query: [{ name: "secret", in: "query", required: false, schema: { type: "string" }, description: "Device secret. Authorization Bearer is also accepted." }] }),
+  route("/pair", ["GET"], "none", "Same pairing door as GET /api/pair.", "startPairPage"),
+  route("/pair/{userCode}", ["GET"], "none", "Approval page for one pairing code. Unknown codes disclose no room history.", "pairApprovalPage"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity",
     { requestBodies: { POST: IDENTITY_MINT_BODY } }),
@@ -343,7 +366,7 @@ function jsonRpcErrorResponse(status) {
 // POST routes that answer 200, not 201: they create nothing. The served spec
 // must match the live status (schemathesis drift FO-DRIFT-3: claims/validate
 // answered 200 while the generated spec documented only 201).
-const POST_NON_CREATE_PATHS = new Set(["/api/needs-me", "/api/claims/validate"]);
+const POST_NON_CREATE_PATHS = new Set(["/api/needs-me", "/api/claims/validate", "/api/pair"]);
 
 function successResponse(status, description) {
   return { description: description ?? (status === "201"
