@@ -441,11 +441,11 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 
 | PR | Title / idea | Branch | Head SHA | Why closed |
 |---|---|---|---|---|
-| #3663 | fix(wake): cadence-aware wakeability window (#3592) | `jill/fix-3592-cadence-wakeability` | `656043582695c0f140be069c02917aa827c4d874` | combined into the G3 pull request |
-| #4804 | FIX-3778: auto-subscribe wakeUrl registrations so wakeUrl-only hosts receive wake pings | `jill/backlog-do-3778` | `5bfa6766b8125b237c3691cfabf73fba91234768` | combined into the G3 pull request |
-| #4920 | Live-seat predicate composition: #4766 merged up + one shared guestSeatLive | `jill/live-seat-composition` | `aad72a3e08fd81a347e05fc29c9c7397c3127724` | combined into the G3 pull request |
-| #3593 | fix(boot): instance lock binds holder identity (pid + start ticks) | `jill/hunt-chaos-instance-lock` | `24e24f11a4514000be550aca485384984f810459` | combined into the G3 pull request |
-| #3574 | feat(push): decision push class for decision asks (B-3 step 3, E63) | `jill/attention-decision-push` | `0739e8cab554f9689e6eccf2481dd8495c566e86` | combined into the G3 pull request |
+| #3663 | fix(wake): cadence-aware wakeability window (#3592) | `jill/fix-3592-cadence-wakeability` | `656043582695c0f140be069c02917aa827c4d874` | combined into #4945 |
+| #4804 | FIX-3778: auto-subscribe wakeUrl registrations so wakeUrl-only hosts receive wake pings | `jill/backlog-do-3778` | `5bfa6766b8125b237c3691cfabf73fba91234768` | combined into #4945 |
+| #4920 | Live-seat predicate composition: #4766 merged up + one shared guestSeatLive | `jill/live-seat-composition` | `aad72a3e08fd81a347e05fc29c9c7397c3127724` | combined into #4945 |
+| #3593 | fix(boot): instance lock binds holder identity (pid + start ticks) | `jill/hunt-chaos-instance-lock` | `24e24f11a4514000be550aca485384984f810459` | combined into #4945 |
+| #3574 | feat(push): decision push class for decision asks (B-3 step 3, E63) | `jill/attention-decision-push` | `0739e8cab554f9689e6eccf2481dd8495c566e86` | combined into #4945 |
 
 ## Branches with no PR (deleted in cleanup)
 
