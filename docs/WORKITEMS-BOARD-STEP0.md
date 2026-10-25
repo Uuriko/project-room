@@ -363,3 +363,7 @@ authorized work-items projection through an accessor; it introduces no writer,
 board mapping, or second state store. The application retains work mutations.
 
 2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.
+
+### Receipts list cost (2026-10-25)
+
+`server/work-claim-routes.mjs` reads `state.workItems` when the member receipts list is built, and only to attach published cost: `spentCents` when it was measured, otherwise null. It does not write work items or change the board mapping. The reference-site census is 59 files.
