@@ -149,9 +149,9 @@ events); it returns counts only and shares the read-family rate limit.
 the caller's own membership, cursor and preferences (`docs/NOTIFICATIONS.md`);
 it writes nothing. Any path under /api/rooms/:id/board/v2/ (the old claims,
 board, events, notes, findings, decisions, mirror-map, and health templates,
-and any other suffix) requires a room credential and then answers 410
-`board_v2_retired`. `next` points at the work-claims board. The retired lane
-and guest write rules no longer run.
+and any other suffix) is not served: it is **404** `not_found` before room
+auth. The `board_vtwo_*` tables are not dropped. The OpenAPI document still
+lists those paths until that file can drop them.
 
 Two read routes are owner-only in the store layer rather than member-visible:
 `GET /api/rooms/:id/diagnostics-export` (sanitized support bundle) and

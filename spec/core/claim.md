@@ -80,6 +80,6 @@ Work items have a second reservation. `claim.acquired` stores `repository`, `ref
 
 `docs/WORK-CLAIMS.md` describes `progressMessageId` as required on renew. The route treats the field as optional: the checks above run when it is present, and a renew that omits it is accepted.
 
-Board v2 routes answer HTTP 410 `board_v2_retired` and point at `/work-claims`. Source: `server/http.mjs`.
+Board v2 routes are not served (HTTP 404 `not_found`). The `board_vtwo_*` tables remain. Source: `server/http.mjs`. `docs/openapi.yaml` still lists the paths.
 
 `docs/ROOM-PROTOCOL.md` still describes fenced chat claims (`submitted`, `working`, lease strings in a comment). That prose is not the board machine.

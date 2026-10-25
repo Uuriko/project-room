@@ -57,9 +57,10 @@ test("every OpenAPI path is a route template the server serves, and every served
   // server/agent-plugin-routes.mjs and the next-actions surface in
   // server/next-actions-routes.mjs and the Worker surface in cloudflare/room.mjs,
   // parameters reduced to {} on both sides.
-  const { failures, served, documented } = routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, openapi });
+  const { failures, served, documented, deferred } = routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, openapi });
   assert.deepEqual(failures, []);
-  assert.ok(served >= 60 && served === documented, `served ${served}, documented ${documented}`);
+  assert.equal(deferred, 11);
+  assert.ok(served >= 60 && served + deferred === documented, `served ${served}, deferred ${deferred}, documented ${documented}`);
 });
 
 test("documented error categories and codes exist in the implementation", () => {

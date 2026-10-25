@@ -189,3 +189,39 @@ test("C6 grouping handles empty history and unknown event types", () => {
   assert.equal(briefHistoryGroup(item(1, "member.added", {}), "owner"), "other");
   assert.deepEqual(BRIEF_HISTORY_GROUPS, ["outcome", "question", "blocker", "decision", "other"]);
 });
+
+test("a caught-up reader does not request a return brief", async () => {
+  const { view, client, pending } = fixture();
+  client.sequence = 8;
+  await view.refreshIfUnread(0);
+  assert.equal(pending.length, 0);
+  assert.equal(view.brief.caughtUp, true);
+  assert.equal(view.brief.history.cursor, 8);
+  assert.deepEqual(view.brief.history.items, []);
+  assert.equal(view.message, "");
+});
+
+test("unread catch-up still requests a return brief", async () => {
+  const { view, pending } = fixture();
+  const flight = view.refreshIfUnread(2);
+  assert.equal(pending.length, 1);
+  pending[0].resolve(page());
+  await flight;
+  assert.equal(view.brief.history.items.length, 2);
+  assert.equal(view.brief.caughtUp, undefined);
+});
+
+test("an in-flight acknowledgement is not replaced by a caught-up brief", async () => {
+  const { view, client, pending } = fixture();
+  client.sequence = 4;
+  const flight = view.refresh();
+  view.chain.acknowledging = true;
+  await view.refreshIfUnread(0);
+  assert.equal(view.brief, null);
+  assert.equal(view.chain.acknowledging, true);
+  assert.equal(pending.length, 1);
+  view.chain.acknowledging = false;
+  pending[0].resolve(page());
+  await flight;
+  assert.equal(view.brief.history.items.length, 2);
+});

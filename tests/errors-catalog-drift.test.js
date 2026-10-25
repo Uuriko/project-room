@@ -150,10 +150,8 @@ test("pinned doc statements: retry semantics match the catalog", () => {
   assert.equal(catalogRetry("rate_limited"), "wait");
   // Operator-only gaps: do not retry the send.
   assert.equal(catalogRetry("mail_not_configured"), "no");
-  // Retired surface: named recovery, no retry.
-  assert.equal(catalogRetry("board_v2_retired"), "no");
-  const rows = catalogRows();
-  assert.ok(rows.get("board_v2_retired")?.some(r => r.status === "410"), "board_v2_retired must be documented as HTTP 410");
+  assert.equal(catalogRetry("board_v2_retired"), null, "board v2 is unserved; the catalog must not keep the retired code");
+  assert.equal(catalogRows().has("board_v2_retired"), false);
 });
 
 test("pinned doc statements: family recovery rules are present", () => {

@@ -25,7 +25,8 @@ test("the served route templates and the documented paths agree", () => {
   const result = routeDocsDrift(shared);
   assert.deepEqual(result.failures, []);
   assert.ok(result.served >= 60, `served ${result.served}`);
-  assert.equal(result.documented, result.served);
+  assert.equal(result.deferred, 11, "board/v2 templates stay documented until docs/openapi.yaml can drop them");
+  assert.equal(result.documented, result.served + result.deferred);
 });
 
 // RC-2026-09-26-002: the Worker-served surface (cloudflare/room.mjs) is a

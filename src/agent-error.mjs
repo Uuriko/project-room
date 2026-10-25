@@ -356,7 +356,6 @@ const AX_NAMED_RECOVERIES = {
   attachment_unavailable: ["That attachment is no longer available. Re-upload it or use a current attachment.", "Re-upload the attachment or reference a current one."],
   bad_cursor: ["The cursor is not valid. Use the opaque nextCursor from a previous response, or restart without a cursor.", "Restart the list without a cursor, or pass the nextCursor from a previous response."],
   bad_request: ["The request itself was refused — the message names the problem. Fix it and resend.", "Fix the problem named in the message and resend."],
-  board_v2_retired: ["Board v2 is retired. Use the work-claims board instead.", "Use the work-claims board; do not retry the retired board-v2 path."],
   bond_active: ["This pair already has an active bond. Revoke it before proposing a new one.", "Revoke the active bond first, then propose the new one."],
   card_owned_by_another_identity: ["That card belongs to another identity. Act with the owning identity, or use your own card.", "Use your own card, or act through the owning identity."],
   channel_archived: ["This channel is archived and accepts no new messages. Do not retry this post; post in an active channel, or ask the owner to unarchive it.", "Post in an active channel, or ask the owner to unarchive this one."],

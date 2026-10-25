@@ -103,6 +103,7 @@
   "src/room-instructions.js",
   "src/room-layout.js",
   "src/room-mcp-join.js",
+  "src/room-overview.js",
   "src/room-roster.js",
   "src/room-setup-prompt.js",
   "src/room-templates.js",

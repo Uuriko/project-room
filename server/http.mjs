@@ -64,8 +64,7 @@ import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "./room-entry.mjs";
 import { GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
-// Board v2 is retired. Any /board/v2 path answers 410 board_v2_retired.
-// The board_vtwo_* tables stay in place; nothing here drops them.
+// Board v2 routes are not served. The board_vtwo_* tables stay in the store.
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 import { guestInviteContract } from "./guest-invites.mjs";
@@ -4004,16 +4003,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const creditsTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/transfer$/.exec(url.pathname);
       const creditsEpochMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/epoch\/close$/.exec(url.pathname);
       const creditsMatch = creditsBalancesMatch ?? creditsHistoryMatch ?? creditsTransferMatch ?? creditsEpochMatch;
-      // Board v2 is retired. One prefix answers every path under /board/v2
-      // with 410. A regex literal would have to be one fully expanded
-      // template per route (scripts/open-routes.mjs), so this pattern is a
-      // RegExp and the route gates keep the retired templates themselves.
-      // :roomId still selects the auth context. /board/v2extra does not match.
-      const boardV2Match = new RegExp("^/api/rooms/([^/]{1,384})/board/v2(?:/|$)").exec(url.pathname);
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!publicWorkRoomReviewMatch && !projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
-        && !feedbackMatch && !bountyMatch && !creditsMatch && !boardV2Match
+        && !feedbackMatch && !bountyMatch && !creditsMatch
         && !dmConsentDecideMatch && !dmConsentBlockMatch && !dmConsentRevokeMatch && !dmConsentUnblockMatch && !publicFaceRotateMatch
         && !peerDmThreadMatch && !operatorAgentMatch
         && !mentionAckMatch && !mentionSettingsMatch && !savedDeleteMatch && !memberDeactivateMatch
@@ -4021,7 +4014,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         && !agentGrantsMatch && !agentGrantDeleteMatch && !agentCapabilitiesMatch
         && !matchmakingMatch) reject(404, "not_found", "Not found");
       const roomId = pathId((publicWorkRoomReviewMatch ?? projectOfferActionMatch ?? match ?? revokeMatch ?? threadMatch ?? accessDecideMatch ?? delegationGrantMatch ?? delegationRevokeMatch ?? delegationListMatch ?? ownerDelegateGrantMatch ?? ownerDelegateRevokeMatch ?? ownerDelegateListMatch ?? ownershipTransferMatch ?? collabMatch ?? workClaimMatch
-        ?? feedbackMatch ?? bountyMatch ?? creditsMatch ?? boardV2Match
+        ?? feedbackMatch ?? bountyMatch ?? creditsMatch
         ?? dmConsentDecideMatch ?? dmConsentBlockMatch ?? dmConsentRevokeMatch ?? dmConsentUnblockMatch ?? publicFaceRotateMatch
         ?? peerDmThreadMatch ?? operatorAgentMatch
         ?? mentionAckMatch ?? mentionSettingsMatch ?? savedDeleteMatch ?? memberDeactivateMatch
@@ -4312,14 +4305,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             if (isGuestAgentMemberId(current.member.id) && !["GET", "HEAD"].includes(req.method)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
             return current;
           }, helpers: { json, reject, body } });
-      }
-      // Board v2 is retired. Authenticated callers get 410 and a pointer at
-      // the work-claims board. The board_vtwo_* tables are not dropped.
-      if (boardV2Match) {
-        return json(res, 410, {
-          error: { code: "board_v2_retired", message: "Board v2 is retired. Use the work-claims board." },
-          next: [{ href: `/api/rooms/${boardV2Match[1]}/work-claims` }]
-        });
       }
       // Escrowed bounties + credit ledger (agent work exchange, slice 1):
       // room-scoped bounty lifecycle and derived-balance credit routes share
@@ -5404,7 +5389,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "return-brief" && req.method === "GET") {
         const horizon = url.searchParams.get("horizon"), after = url.searchParams.get("after"), cursor = url.searchParams.get("cursor"), limit = url.searchParams.get("limit");
         const brief = store.returnBrief(selected.token, roomId, { horizon: horizon === null ? null : Number(horizon), after: after === null ? null : Number(after), cursor: cursor === null ? null : Number(cursor), limit: limit === null ? undefined : Number(limit), expectedSessionBinding: fence });
-        if (brief?.history) brief.history.items = redactEventRows(brief.history.items, store.redactionMessages(roomId));
+        const history = brief?.history;
+        // First page only. A continuation keeps its body even when that page is empty.
+        if (horizon === null && history && history.items.length === 0 && !history.hasMore && history.cursor >= history.evaluatedThrough) {
+          res.writeHead(204);
+          return res.end();
+        }
+        if (history) history.items = redactEventRows(history.items, store.redactionMessages(roomId));
         return json(res, 200, brief);
       }
       if (route === "cursor" && req.method === "POST") {

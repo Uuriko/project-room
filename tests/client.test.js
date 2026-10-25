@@ -443,3 +443,21 @@ test('unknown event hints and reconnects still fetch snapshots even when room se
   await f.client.refresh();
   assert.equal(f.reads(), before + 1, 'manual refresh');
 });
+
+test("a caught-up return brief reads the empty response and stays on the current sequence", async () => {
+  let jsonCalls = 0;
+  const client = new RoomClient({
+    fetcher: async () => ({ ok: true, status: 204, json: async () => { jsonCalls++; return {}; } })
+  });
+  client.session = identity();
+  client.sequence = 12;
+  const brief = await client.returnBrief();
+  assert.equal(jsonCalls, 0);
+  assert.equal(brief.caughtUp, true);
+  assert.equal(brief.roomId, "commons");
+  assert.equal(brief.viewerId, "human");
+  assert.equal(brief.history.cursor, 12);
+  assert.equal(brief.history.evaluatedThrough, 12);
+  assert.deepEqual(brief.history.items, []);
+  assert.equal(brief.history.hasMore, false);
+});
