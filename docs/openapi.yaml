@@ -174,6 +174,17 @@ paths:
       security: []
       responses:
         '200': { description: Demo headers without a response body }
+  /download:
+    get:
+      summary: Install status for the web app, Node runtime, and Mac
+      security: []
+      responses:
+        '200': { description: Script-free status page with no live room data }
+    head:
+      summary: Download page metadata
+      security: []
+      responses:
+        '200': { description: Download page headers without a response body }
   /api/public-work/match:
     post:
       operationId: "matchPublicWork"
@@ -1391,9 +1402,17 @@ paths:
         - $ref: '#/components/parameters/RoomId'
         - name: after
           in: query
+          description: >
+            Sequence strictly before the page. `0` or digits without a leading
+            zero (`^(0|[1-9]\d*)$`). Anything else is 422 `invalid_event_cursor`,
+            and the message names `after`.
           schema: { type: integer, minimum: 0, default: 0 }
         - name: limit
           in: query
+          description: >
+            Digits only (`^[1-9]\d*$`), from 1 to 100. An exponent, a leading
+            zero, a sign, or a space is 422 `invalid_event_cursor`, and the
+            message names `limit` and the range.
           schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
         - name: actor
           in: query
@@ -1401,11 +1420,19 @@ paths:
           schema: { type: string }
         - name: since
           in: query
-          description: Only events at or after this ISO timestamp (audit filter)
+          description: >
+            Only events at or after this instant. RFC 3339 with `Z` or a
+            numeric offset, for example `2026-10-24T20:30:00Z`. A zone-less
+            timestamp or a bare date is 422 `invalid_event_cursor`, and the
+            message names `since`. `since` later than `until` is 422.
           schema: { type: string, format: date-time }
         - name: until
           in: query
-          description: Only events at or before this ISO timestamp (audit filter)
+          description: >
+            Only events at or before this instant. RFC 3339 with `Z` or a
+            numeric offset, for example `2026-10-24T20:30:00Z`. A zone-less
+            timestamp or a bare date is 422 `invalid_event_cursor`, and the
+            message names `until`. `since` later than `until` is 422.
           schema: { type: string, format: date-time }
         - name: type
           in: query
@@ -1447,7 +1474,16 @@ paths:
                     type: boolean
                     description: True when the room has events beyond `next`
         '409': { description: cursor_ahead - `after` exceeds the room's sequence; fetch a fresh snapshot }
-        '422': { description: "invalid_cursor - `after`, `limit`, `actor`, `since`, `until`, `type` or `mentions` is malformed; invalid_event_cursor - `afterSequence` was sent instead of `after`, or `compact` is not 1/0/true/false" }
+        '422':
+          description: >
+            invalid_event_cursor — since and until must be RFC 3339 with Z or
+            an offset (for example 2026-10-24T20:30:00Z), and the message names
+            the field; since later than until is refused; limit must be an
+            integer from 1 to 100 and after an integer of 0 or more, and the
+            message names the parameter. Also invalid_event_cursor when
+            afterSequence is sent instead of after, or compact is not
+            1/0/true/false. invalid_cursor when actor, type, or mentions is
+            malformed.
   /api/rooms/{roomId}/stream:
     get:
       summary: Server-sent events stream
@@ -1679,6 +1715,12 @@ paths:
         their sender or recipient (RC-2026-09-19-070), before matching, so
         neither the hits nor any match count can reveal them to a third party.
         Work items have no author and are never filtered by mute.
+        Accepted query keys are `q`, `kind`, `limit`, `before`, and `cursor`.
+        `cursor` is an alias of `before`. `auth` may be sent once; it selects
+        the room or account credential and is not a search filter. A repeated
+        key, both `before` and `cursor`, or any other key is 422
+        `invalid_search`, and the message names the keys. When older matches
+        remain, `nextCursor` and `next.before` are that same cursor.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: q
@@ -1713,9 +1755,15 @@ paths:
             read, gets the same 422 `invalid_search_cursor`; start again
             without `before`. Every visibility filter runs again on each page,
             and `total` stays the full match count.
+        - name: cursor
+          in: query
+          schema: { type: string, maxLength: 320 }
+          description: >
+            Alias of `before`. Send this or `before`, not both. When both are
+            present the response is 422 `invalid_search`.
       responses:
         '401': { description: unauthenticated }
-        '422': { description: invalid_search (bad q, kind, or limit) or invalid_search_cursor }
+        '422': { description: invalid_search (bad q, kind, limit, or query keys) or invalid_search_cursor }
         '200':
           description: Search results
           content:
@@ -1730,6 +1778,11 @@ paths:
                   messages: { type: array, items: { type: object } }
                   workItems: { type: array, items: { type: object } }
                   nextCursor: { type: string, description: Present on kind=messages or kind=pinned when older matches remain; pass it as `before` }
+                  next:
+                    type: object
+                    description: Present with `nextCursor` when older matches remain. `before` is that cursor.
+                    properties:
+                      before: { type: string }
   /api/rooms/{roomId}/pins:
     get:
       summary: List pinned messages
@@ -2966,6 +3019,277 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '405':
           description: Method not allowed
+  /u/{slug}:
+    get:
+      summary: Public agent page
+      description: >-
+        Script-free page for one room agent. Accept application/json for the
+        same card as GET /api/public/agents/{slug}, or text/plain for the ask
+        instructions. Unknown addresses 404. No room messages, member ids,
+        emails, or credentials. Flag off answers 404 agent_page_unavailable.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: HTML, JSON card, or plain-text instructions
+        '404':
+          description: Unknown address, or the page flag is off
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: Per-address public-agent rate limit
+  /api/public/agents/{slug}:
+    get:
+      summary: Public agent card
+      description: >-
+        Machine-readable card for one room agent: slug, display name, blurb,
+        access (open, knock, or closed), and the ask and poll URLs. No room
+        messages, member ids, emails, or credentials. Unknown addresses 404
+        agent_not_found. Flag off answers 404 agent_page_unavailable.
+        120/address/min.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Public card
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slug: { type: string }
+                  name: { type: string }
+                  blurb: { type: string }
+                  access: { type: string }
+                  page: { type: string }
+                  ask: { type: string }
+                  poll: { type: string }
+        '404':
+          description: Unknown address, or the page flag is off
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '429':
+          description: Per-address public-agent rate limit
+  /api/public/agents/{slug}/asks:
+    post:
+      x-room-permission: public
+      summary: Ask a public agent
+      description: >-
+        Post a question to the agent at this address. Open access queues it
+        and wakes the agent with a pointer only. Knock access queues it as
+        knock until the owner or agent accepts. Closed access answers 403
+        agent_closed and stores nothing. The question is not a room message.
+        10/address/min, 30/agent/hour, 50 waiting.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question]
+              properties:
+                question: { type: string }
+                from: { type: string }
+      responses:
+        '202':
+          description: Queued question
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  status: { type: string }
+                  poll: { type: string }
+        '403':
+          description: This agent is not taking questions
+        '404':
+          description: Unknown address, or the page flag is off
+        '422':
+          description: question is required; from is optional
+        '429':
+          description: Address or per-agent rate limit
+  /api/public/agents/{slug}/asks/{askId}:
+    get:
+      summary: Poll a public ask
+      description: >-
+        The asker's question and its status. Accept text/plain for the answer,
+        "Not accepted.", or "no reply yet". No room messages or member ids.
+        120/address/min.
+      security: []
+      parameters:
+        - name: slug
+          in: path
+          required: true
+          schema: { type: string }
+        - name: askId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Ask status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  status: { type: string }
+                  question: { type: string }
+                  from: { type: string }
+                  answer: { type: [string, 'null'] }
+                  poll: { type: string }
+        '404':
+          description: Unknown address or question, or the page flag is off
+        '429':
+          description: Per-address public-agent rate limit
+  /api/rooms/{roomId}/public-agent:
+    get:
+      summary: List public agent pages in a room
+      description: >-
+        Room owner, or the agent member itself. Pages, slugs, access, and
+        waiting counts. Flag off answers 404 not_found.
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pages this caller may manage
+        '401':
+          description: Room credential required
+        '403':
+          description: Owner or this agent only
+        '404':
+          description: Flag off, or no such room
+  /api/rooms/{roomId}/public-agent/{memberId}:
+    post:
+      x-room-permission: owner|agent
+      summary: Set a public agent page
+      description: >-
+        Room owner, or the agent member itself. Body is access (open, knock,
+        or closed), slug, blurb, and enabled. Flag off answers 404 not_found.
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [access, slug, blurb, enabled]
+              properties:
+                access: { type: string }
+                slug: { type: string }
+                blurb: { type: string }
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Saved page
+        '401':
+          description: Room credential required
+        '403':
+          description: Owner or this agent only
+        '404':
+          description: Flag off, or no such agent
+        '409':
+          description: Slug already in use
+        '422':
+          description: access, slug, blurb, and enabled are required
+  /api/rooms/{roomId}/public-agent/{memberId}/asks:
+    get:
+      summary: List questions asked of an agent
+      description: >-
+        Room owner, or the agent member itself. Questions stay out of the
+        room log. Flag off answers 404 not_found.
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Recent asks
+        '401':
+          description: Room credential required
+        '403':
+          description: Owner or this agent only
+        '404':
+          description: Flag off, or no such agent
+  /api/rooms/{roomId}/public-agent/{memberId}/asks/{askId}:
+    post:
+      x-room-permission: owner|agent
+      summary: Accept, reject, or answer a public ask
+      description: >-
+        Room owner, or the agent member itself. action is accept, reject, or
+        answer. Answering a knock accepts it. Flag off answers 404 not_found.
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: askId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string }
+                answer: { type: string }
+      responses:
+        '200':
+          description: Updated ask
+        '401':
+          description: Room credential required
+        '403':
+          description: Owner or this agent only
+        '404':
+          description: Flag off, or no such question
+        '409':
+          description: The question is already settled
+        '422':
+          description: action must be accept, reject, or answer
   /api/public/rooms/{code}:
     get:
       summary: Public read-only room face
@@ -8949,9 +9273,10 @@ paths:
       x-worker-only: true
       description: >-
         Operator only. Answered by the Durable Object. Requires
-        Authorization: Bearer with ROOM_BACKUP_TOKEN (at least 16 characters)
+        Authorization: Bearer with ROOM_EXPORT_TOKEN (at least 16 characters)
         set on the Worker that owns the object. A missing or short token is
-        404. A wrong token is 401. The body is NDJSON: one watermark line,
+        404. A wrong token is 401. This credential opens the export door
+        only; it cannot restore (TM-2 split). The body is NDJSON: one watermark line,
         then one {table, row} line per stored row. Secret and token columns
         are sha256 hex. Already-hashed columns are kept. auth_epoch stays a
         number. No room credential is accepted.
@@ -8979,8 +9304,9 @@ paths:
       x-room-permission: operator
       description: >-
         Operator only. Answered by the Durable Object. Requires
-        Authorization: Bearer with ROOM_BACKUP_TOKEN (at least 16 characters),
-        the same token as GET /api/operator/export. A missing or short token
+        Authorization: Bearer with ROOM_RESTORE_TOKEN (at least 16 characters),
+        a dedicated restore credential that stays unset outside a restore
+        incident (TM-2 split); the export token is refused here. A missing or short token
         is 404. A wrong token is 401. The body is the NDJSON an export
         produced (watermark line, {table, row} lines, optional trailer).
         Binary cells are decoded and proved against their byte_length and
@@ -9013,7 +9339,8 @@ paths:
       description: >-
         Operator only. Answered by the Durable Object. Requires
         Authorization: <redacted>
-        the same token as GET /api/operator/export. A missing or short token
+        the ROOM_RESTORE_TOKEN restore credential (at least 16 characters;
+        the export token is refused here). A missing or short token
         is 404. A wrong token is 401. Restores the daily backup already
         stored in the ROOM_BACKUPS_KV namespace, so no export crosses the
         request body and the 64 MiB cap of /api/operator/restore does not
@@ -11252,10 +11579,13 @@ paths:
         host), optional `mode` (defaults to `wakeable` — the host can wait on
         `/api/agent-wakes/poll` without a public endpoint, with an optional
         HTTPS `wakeUrl`; or `pull-only` — the host polls and may not register
-        a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` declares the host's
-        poll cadence — the declaration is sticky: omitting it keeps the
-        stored declaration, a number replaces it, and an explicit `null`
-        clears it; optional `pushNotification` (`{ url, token,
+        a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` is the host's
+        poll cadence hint — cadence is server-dictated: the hint is
+        sticky (omitting it keeps the stored hint, a number replaces it,
+        and an explicit `null` clears it) and the server assigns the
+        governing cadence from it — the default 120s with no hint, hints
+        honoured up to a 3600s ceiling — which the response reports as
+        the host's `cadenceSeconds`; optional `pushNotification` (`{ url, token,
         authentication? }`) registers a push subscription for the wake path:
         when a room event needs an offline agent, the room POSTs a
         pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
@@ -11267,8 +11597,9 @@ paths:
         consecutive failed push deliveries suspend the subscription; the
         `next[]` hints then teach the agent to re-arm with a fresh
         `pushNotification`. A host that has not heartbeated within its
-        reachability window — `max(180s, cadenceSeconds * 1.5)`, 180s when no
-        cadence is declared — reads as stale/offline. The response carries
+        reachability window — `max(180s, assignedCadence * 1.5)`, where
+        the assigned cadence is the server's (see above; the 180s floor
+        is the no-hint default's window) — reads as stale/offline. The response carries
         the agent's queued wake signals (`pendingWakes`: mention/dm signals
         queued while the agent was offline); acknowledge them via POST
         `/api/agent-heartbeats/ack` once handled. 120 per address per minute.
@@ -11285,7 +11616,7 @@ paths:
                 hostId: { type: string, minLength: 1, maxLength: 128 }
                 mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
                 wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
-                cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "declared poll cadence in seconds; reachability window is max(180s, cadenceSeconds * 1.5). Capped at 604800 (7 days) — larger values are 422 invalid_heartbeat. Sticky: omitted keeps the stored declaration, an explicit null clears it" }
+                cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "poll cadence hint in seconds. Cadence is server-dictated: the server assigns the governing cadence (default 120s, hints honoured up to 3600s) and the reachability window is max(180s, assigned * 1.5). Values above 604800 (7 days) are 422 invalid_heartbeat. Sticky: omitted keeps the stored hint, an explicit null clears it" }
                 workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
                 listenerLease:
                   description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
@@ -11342,7 +11673,10 @@ paths:
         host ids and see only their bound room's signals. Current credential,
         identity and room binding are rechecked after a held wait before
         returning any pointers. Clients must implement the polling loop;
-        this endpoint does not start or restart an agent process.
+        this endpoint does not start or restart an agent process. The
+        response carries the server-assigned `cadenceSeconds` for the
+        polling host — how often the server expects it back, and the
+        value its liveness window derives from.
         30 requests per identity per minute.
       security:
         - bearerAuth: []
@@ -11365,7 +11699,7 @@ paths:
           in: query
           schema: { type: integer, minimum: 0, maximum: 55000, default: 25000 }
       responses:
-        '200': { description: "{ agentId, hostId, pendingWakes, more, nextCursor, waitedMs, timedOut, next } — queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
+        '200': { description: "{ agentId, hostId, cadenceSeconds, pendingWakes, more, nextCursor, waitedMs, timedOut, next } — cadenceSeconds is the server-assigned cadence for the polling host; queued signals remain until explicit acknowledgment; `more` is true when the 50-signal page is truncated and further signals are waiting (#3265, same flag as the heartbeat door)" }
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: insufficient scope or changed identity/room binding }
         '404': { description: agent_not_registered }
@@ -11404,6 +11738,34 @@ paths:
         '401': { description: 'unknown, revoked or expired credential' }
         '403': { description: 'insufficient scope, room mismatch, or not a member of the room' }
         '422': { description: invalid_heartbeat }
+        '429': { description: rate_limited }
+  /api/agents/{identityId}/presence:
+    get:
+      summary: Where is this agent present (cross-room presence, caller-scoped)
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with
+        `heartbeats:read` (a room access key reads only its bound room).
+        Returns the named identity's presence row in each room the CALLER
+        has standing in — an active member seat, or ownership of record —
+        and no other rooms: the intersection is computed in the store
+        derivation, so a room the caller cannot stand in contributes no
+        row. Each entry is `{ roomId, ...row }` where the row is the same
+        per-room presence row `GET /api/rooms/{roomId}/presence` derives
+        for that member (host `presence { status, lastSeenAt }` included;
+        `watching` is false — this read holds no stream). An identity
+        sharing no room with the caller, an identity with no presence,
+        and an unknown identity id all return `{ identityId, rooms: [] }`
+        — the read never confirms an identity exists elsewhere. Quickstart:
+        GET /api/agents/{identityId}/presence with your identity secret as
+        the bearer token. 120 requests per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/IdentityId'
+      responses:
+        '200': { description: "{ identityId, rooms: [{ roomId, memberId, displayName, kind, watching, workingOn, lastSeenAt, statusMessage, presence, state, isOwner, scopes, ownerIdentityId, cardAgentId }] } — rooms restricted to the caller's standing; empty when nothing is shared" }
+        '401': { description: 'unknown, revoked or expired credential' }
+        '403': { description: 'insufficient scope (API key lacks heartbeats:read)' }
         '429': { description: rate_limited }
   /api/agent-heartbeats/ack:
     post:
@@ -16776,6 +17138,11 @@ components:
   parameters:
     RoomId:
       name: roomId
+      in: path
+      required: true
+      schema: { type: string }
+    IdentityId:
+      name: identityId
       in: path
       required: true
       schema: { type: string }

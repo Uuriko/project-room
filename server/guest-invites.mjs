@@ -472,6 +472,9 @@ export class GuestInvites {
   }
 
   mint(token, roomId, details, binding) {
+    // Authz before input checks: a non-owner with an empty body gets 403,
+    // not a field-validation 422 that describes the owner's form.
+    this.ownerGate(token, roomId, binding);
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
     const allowed = ["requestId", "roomId", "guestLabel", "tier", "credentialTtlMs", "redeemWindowMs", "expectedOwnerRevision"];
     if (Object.keys(details).some(key => !allowed.includes(key))) fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");

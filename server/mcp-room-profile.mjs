@@ -735,11 +735,12 @@ async function callWakeTool(store, secret, identity, name, args) {
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
     const mode = name === "wake_register" ? "wakeable" : name === "wake_clear" ? "pull-only" : args.mode;
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
-    // Cadence is sticky: wake_register/heartbeat_set pass the caller's
-    // value through untouched (omitted = preserve the stored declaration,
-    // a number = replace, explicit null = clear). wake_clear has no
+    // The cadence hint is sticky: wake_register/heartbeat_set pass the
+    // caller's value through untouched (omitted = preserve the stored
+    // hint, a number = replace, explicit null = clear); the store
+    // assigns the governing cadence from it. wake_clear has no
     // cadenceSeconds field by design, so it sends an explicit null —
-    // clearing the declaration is part of what "clear" means for this
+    // clearing the hint is part of what "clear" means for this
     // tool, now expressed as the documented clear instead of as the
     // side effect of an omitted field.
     const cadenceSeconds = name === "wake_clear" ? null : args.cadenceSeconds;

@@ -39,6 +39,31 @@ export class StoreTestRoom {
   async fetch(request) {
     const store = this.store;
     const path = new URL(request.url).pathname;
+    if (path === '/stale-writer-permit') {
+      // P0 2026-10-24: prod committed room_writer_permit at the writer
+      // version with no write in flight, and every cold start then refused
+      // with "Database writer fence requires operator reconciliation".
+      store.initialize(initialRoom('permit'));
+      const permit = () => this.ctx.storage.sql.exec('SELECT version FROM room_writer_permit').one().version;
+      assert.equal(permit(), 0);
+      // Failure shapes that must never leave the permit raised.
+      store.transaction(() => { assert.throws(() => store.transaction(() => { store.createAccount('iso-1'); throw new Error('iso'); }, { isolated: true }), /iso/); });
+      assert.equal(permit(), 0, 'caught isolated throw');
+      assert.throws(() => store.transaction(() => { store.db.prepare('INSERT INTO accounts(id,created_at) VALUES(?,?)').run('z'.repeat(3e6), 1); }), /storage limit/);
+      assert.equal(permit(), 0, 'platform row limit');
+      assert.throws(() => store.transaction(async () => { store.createAccount('async-1'); await null; }), /synchronous/);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      assert.equal(permit(), 0, 'async transaction body');
+      // The prod state: permit committed at the writer version.
+      this.ctx.storage.sql.exec(`UPDATE room_writer_permit SET version=${STORE_SCHEMA_VERSION} WHERE singleton=1`);
+      assert.equal(permit(), STORE_SCHEMA_VERSION);
+      // A cold start on the same storage must open and write, not refuse.
+      const cold = new RoomStore(null, { database: new DurableDatabase(this.ctx.storage), storagePlatform: durableStorage, integrity: 'deferred' });
+      cold.createAccount('after-reset');
+      assert.ok(cold.account('after-reset'));
+      assert.equal(permit(), 0, 'stale permit reset');
+      return Response.json({ ok: true });
+    }
     if (path === '/isolated-transactions') {
       store.initialize(initialRoom('isolated'));
       const owner = store.issueAccessKey('isolated', 'owner');
