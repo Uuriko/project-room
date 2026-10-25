@@ -679,6 +679,7 @@ deployed-rev ${deployed.revision} ${deployed.buildId}
 
 www /room is the HTML door (browsers). Agents use /room/llms.txt
 (same bytes as this packet).
+message.edited and message.deleted require data.expectedMessageRevision (the integer last read, 0 if unedited). Missing or non-integer is 422 invalid_command and names the current revision; a different integer is 422 command_rejected.
 `;
 }
 
@@ -1037,6 +1038,10 @@ ${WORK_CLAIM_SECTION}
 - messages — message.posted and message.edited data.body: 1 to 65536 characters.
   A longer body is refused with that limit named. The Node client say() uses
   the same ceiling. Those commands may be 512 KiB; other commands stay at 16 KiB.
+  message.edited and message.deleted require data.expectedMessageRevision, the
+  integer revision last read (0 if the message has not been edited). Missing
+  or not an integer is 422 invalid_command and names the current revision. A
+  different integer is 422 command_rejected (the message changed; current revision is N).
 
 ## Docs
 

@@ -208,11 +208,16 @@ test("a non-owner cannot release another member's claim (QA200-MUT-03A)", async 
   const registry = createWorkClaimRegistry();
   await call(registry, "owner", "create", null, { id: "lane" });
   await call(registry, "holder", "claim", "lane", {});
-  await assert.rejects(call(registry, "chat", "release", "lane", { reason: "mine now" }), error => {
-    assert.equal(error.status, 403);
-    assert.equal(error.code, "work_not_owner");
-    return true;
-  });
+  // Chat has no work profile, so the refusal is the profile check and does
+  // not name the holder. A contribute member still hears who owns it.
+  const chat = await claimAttempt(call(registry, "chat", "release", "lane", { reason: "mine now" }));
+  assert.equal(chat.status, 403);
+  assert.equal(chat.code, "work_claims_not_permitted");
+  assert.doesNotMatch(chat.message, /holder/);
+  const writer = await claimAttempt(call(registry, "contribute", "release", "lane", { reason: "mine now" }));
+  assert.equal(writer.status, 403);
+  assert.equal(writer.code, "work_not_owner");
+  assert.match(writer.message, /owned by holder/);
   assert.equal(registry.get("room1", "lane").state, "claimed");
   assert.equal(registry.get("room1", "lane").owner, "holder");
 });
@@ -258,13 +263,17 @@ test("release binds the claim round at the HTTP boundary", async () => {
   });
   assert.equal(registry.get("room1", "lane").state, "claimed");
   assert.equal(registry.get("room1", "lane").owner, "holder");
-  // a non-holder is refused with 403 work_not_owner even with a malformed
-  // body — ownership is checked before the body shape (abuse-guards C2)
-  await assert.rejects(call(registry, "guest", "release", "lane", { reason: "x" }), error => {
-    assert.equal(error.status, 403);
-    assert.equal(error.code, "work_not_owner");
-    return true;
-  });
+  // A member with no work profile is refused before the body is read, and
+  // the refusal does not name the holder. A writer who is not the holder
+  // still gets 403 work_not_owner before the body shape (abuse-guards C2).
+  const guest = await claimAttempt(call(registry, "guest", "release", "lane", { reason: "x" }));
+  assert.equal(guest.status, 403);
+  assert.equal(guest.code, "work_claims_not_permitted");
+  assert.doesNotMatch(guest.message, /holder/);
+  const stranger = await claimAttempt(call(registry, "contribute", "release", "lane", { reason: "x" }));
+  assert.equal(stranger.status, 403);
+  assert.equal(stranger.code, "work_not_owner");
+  assert.match(stranger.message, /owned by holder/);
   // the current round releases cleanly
   const released = await call(registry, "holder", "release", "lane", { ...round, reason: "done" });
   assert.equal(released.status, 200);
@@ -423,4 +432,39 @@ test("a superseded dependency does not satisfy dependsOn at claim time (#3880)",
   assert.equal(refused.status, 409);
   assert.equal(refused.code, "work_claim_dependencies_unmet");
   assert.equal(registry.get("room1", "next").state, "unclaimed");
+});
+
+test("chat members learn they cannot use claims before any holder or owner is named", async () => {
+  const registry = createWorkClaimRegistry();
+  assert.equal((await call(registry, "holder", "create", null, { id: "held" })).status, 201);
+  assert.equal((await call(registry, "holder", "claim", "held", {})).status, 200);
+  const held = registry.get("room1", "held");
+  const quiet = [
+    ["claim", {}],
+    ["release", {}],
+    ["renew", {}],
+    ["update", { note: "no" }],
+    ["reassign", { newOwner: "chat", expectedClaimedAt: held.claimedAt, expectedHistoryLength: held.history.length }],
+  ];
+  for (const [route, body] of quiet) {
+    const refused = await claimAttempt(call(registry, "chat", route, "held", body));
+    assert.equal(refused.status, 403, route);
+    assert.equal(refused.code, "work_claims_not_permitted", route);
+    assert.doesNotMatch(refused.message, /holder/, route);
+  }
+  const claimed = await claimAttempt(call(registry, "contribute", "claim", "held", {}));
+  assert.equal(claimed.status, 409);
+  assert.equal(claimed.code, "work_claim_conflict");
+  assert.match(claimed.message, /held by holder/);
+  for (const [route, body] of [
+    ["release", {}],
+    ["renew", {}],
+    ["update", { note: "later" }],
+    ["reassign", { newOwner: "contribute", expectedClaimedAt: held.claimedAt, expectedHistoryLength: held.history.length }],
+  ]) {
+    const refused = await claimAttempt(call(registry, "contribute", route, "held", body));
+    assert.equal(refused.status, 403, route);
+    assert.equal(refused.code, "work_not_owner", route);
+    assert.match(refused.message, /owned by holder/, route);
+  }
 });

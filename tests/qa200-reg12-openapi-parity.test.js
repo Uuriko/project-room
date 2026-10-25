@@ -51,3 +51,19 @@ test("docs/openapi.yaml: POST /api/agent-heartbeats cadenceSeconds documents the
   assert.ok(cadence, "documents cadenceSeconds");
   assert.equal(cadence.maximum, 604800, "documents the server's 7-day (604800s) upper bound");
 });
+
+test("docs/openapi.yaml: work-claim leaseHours minimum is 0.25 and maximum stays 168", () => {
+  const lease = path => doc.paths?.[path]?.post?.requestBody?.content?.["application/json"]?.schema?.properties?.leaseHours;
+  for (const path of [
+    "/api/rooms/{roomId}/work-claims/{claimId}/claim",
+    "/api/rooms/{roomId}/work-claims/{claimId}/renew",
+  ]) {
+    const field = lease(path);
+    assert.ok(field, path);
+    assert.equal(field.minimum, 0.25, path);
+    assert.equal(field.maximum, 168, path);
+    assert.equal(field.exclusiveMinimum, undefined, path);
+  }
+  const commands = doc.paths?.["/api/rooms/{roomId}/commands"]?.post?.description ?? "";
+  assert.match(commands, /expectedMessageRevision is required \(current revision is N\)/);
+});

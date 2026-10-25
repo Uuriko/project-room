@@ -1334,6 +1334,12 @@ paths:
         is refused with that limit named (`body must be at most 65536 characters`).
         The client `say()` uses the same ceiling. Those two commands may be up
         to 512 KiB (413 `too_large`); every other command stays at 16 KiB.
+        `message.edited` and `message.deleted` require `data.expectedMessageRevision`,
+        the integer revision last read (`0` when the message has never been
+        edited). Missing or not an integer is 422 `invalid_command`:
+        `expectedMessageRevision is required (current revision is N)`. A
+        different integer is 422 `command_rejected`: `Message changed; refresh
+        before editing (current revision is N)`.
         Replies
         are pinned to the thread root's channel. A public thread reply may set
         `alsoSendToChannel: true` to also land as a top-level message in the
@@ -5895,7 +5901,7 @@ paths:
         it (never "release it first"); foreign claimants are told who holds
         it).
         `leaseHours` sets the claim lease in hours (default: the room's
-        configured default, else 24h; max 168h). `null` opts out of leases
+        configured default, else 24h; minimum 0.25, maximum 168). `null` opts out of leases
         and is only accepted from the room owner or a member with
         manage_claims. The item records `claimedAt` and `leaseExpiresAt`.
         Declared files are an exclusive lease: overlap with another live
@@ -5916,7 +5922,7 @@ paths:
               type: object
               properties:
                 note: { type: string }
-                leaseHours: { type: [number, 'null'], exclusiveMinimum: 0, maximum: 168 }
+                leaseHours: { type: [number, 'null'], minimum: 0.25, maximum: 168 }
                 files:
                   type: array
                   items: { type: string, maxLength: 512 }
@@ -7275,7 +7281,7 @@ paths:
               type: object
               properties:
                 progressMessageId: { type: string }
-                leaseHours: { type: number }
+                leaseHours: { type: number, minimum: 0.25, maximum: 168 }
                 note: { type: string }
       responses:
         '200':
