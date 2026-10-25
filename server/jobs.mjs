@@ -36,6 +36,11 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
+// A recorded failure retries after this cap instead of the job's full
+// cadence. It matches the alarm retry so a one-second node loop cannot
+// spin, and it is shorter than the safety-net cron, so the next cron
+// tick always finds the job due.
+export const JOB_RETRY_LEASE_MS = ALARM_RETRY_MS;
 // Slow jobs ride the */30 safety-net cron, whose phase can land a few
 // seconds before the job's own anchor. Without slack the job waits a
 // whole extra cron period; 60s absorbs that cron-vs-anchor phase race.
@@ -713,12 +718,19 @@ export function jobNextDue(job, store, now, lastRanAt) {
   return last + job.cadenceMs;
 }
 
-export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs) {
+export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs, failed = false) {
   if (typeof job.nextDueAt === "function") {
     const next = jobNextDue(job, store, now, lastRanAt);
     return next != null && next <= now;
   }
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
+  // A recorded failure retries after the capped lease. Queue-timed jobs
+  // keep their own nextDueAt schedule above, and a success still waits
+  // the full cadence (with slack for slow jobs).
+  if (failed === true) {
+    const span = Number.isFinite(cadenceMs) ? Math.max(0, cadenceMs) : 0;
+    return last + Math.min(span, JOB_RETRY_LEASE_MS) <= now;
+  }
   // Only slow jobs get slack: they run from the safety-net cron, so a tick
   // landing a few seconds before the anchor would otherwise skip a period.
   const slack = job.slow ? SLOW_JOB_DUE_SLACK_MS : 0;
@@ -747,6 +759,16 @@ export function earliestFutureAlarm(jobs, { env, store, now, lastRan, runtime = 
     if (earliest == null || next < earliest) earliest = next;
   }
   return earliest;
+}
+
+// The alarm to store. A time already in the past is not a held lease:
+// the platform has stopped firing it, and keeping it blocks every later
+// setAlarm. Keep a stored alarm only while it is still ahead and no
+// later than the candidate. Null deletes a leftover alarm.
+export function nextJobAlarm(current, when, now) {
+  if (when == null) return null;
+  if (Number.isFinite(current) && current > now && current <= when) return current;
+  return when;
 }
 
 function finiteInterval(value, fallback) {
@@ -884,7 +906,8 @@ export function startNodeScheduler({
         if (job.name === "channel-drain" && !channelEnabled) continue;
         if (!jobEnabled(job, env, store)) continue;
         const cadenceMs = overrides.get(job.name) ?? job.cadenceMs;
-        if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs)) continue;
+        const failedBefore = (records.get(job.name)?.consecutiveFailures ?? 0) > 0;
+        if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs, failedBefore)) continue;
         // #3767: the budget window opens at this job's own start, not at
         // the pass start — the Worker builds each runner's deadline when
         // the job runs. A pass-relative deadline let early jobs burn the

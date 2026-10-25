@@ -160,7 +160,7 @@
     "cloudflare/build-assets.mjs": "sha256:7a204a775ed8aac33ff23d1d1c210de1a29efe84a47455db7e303e6fd4aff4d4",
     "cloudflare/package.json": "sha256:6f0e5ae7c18da9972a53fd5b1c2aa60fd7aa930e4b80640c7eb0519eb1792b8d",
     "cloudflare/pnpm-lock.yaml": "sha256:e85e6e33177fe8779a9baea1fe99b3575edc4a1b29da6ed7415b7d2023ca157f",
-    "cloudflare/room.mjs": "sha256:42581c72d2e958c11654c0f5b231eb4e2d4c40e3d4ac14de14d54abd1e92f27c",
+    "cloudflare/room.mjs": "sha256:36d546fd47811a8fb9e386bcf996b60d63af707df10758022f3bf7de2ce080f2",
     "cloudflare/storage.mjs": "sha256:74497e5eb39a649c519b37063d4358d0b813a4f84d06dab36a5a9562d44b1f8d",
     "cloudflare/wrangler.jsonc": "sha256:cd7454570a9f0aa54fef87933b587c5d1bfaed78069dcf16c5dcd3fc23fcb57b",
     "scripts/deploy-recovery.mjs": "sha256:7c3ada6d04b9a6944ed2e65354ef27b92ad356bca0829f4d5a76ce6884898b98"
