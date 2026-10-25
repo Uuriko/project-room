@@ -437,6 +437,27 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 | #4858 | Wake webhook retries at the delivery's next attempt | `cursor/webhook-retry-schedule-da81` | `dba5f8413752ea1b5991b5cf671de28eac28ff1d` | conflicts with main and is stale; idea recorded in docs/ARCHIVED-WORK.md |
 | #4889 | Cure: guard signin-navigation sync() against absent provider anchors | `cure/signin-navigation-absent-anchor` | `efaa8a9ecc75b3fec780510f9ab94fb926f1e909` | contained in #4922 |
 
+## G5 combined
+
+Source heads recorded when the front-door work was rebased onto current main. Branches stay in place.
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #3730 | docs(wake): correct packet polling-without-hostId claim (#3640) | `jill/fix-3640-llms-polling` | `1f9cc56b92b920974e3c2a1f856bc9e4e88c7038` | combined into the G5 front-door PR |
+| #4760 | docs: front-door cluster — 428 PoW snippet, production-only rehearsal receipt, access-request body, wants-work enum | `jill/backlog-do-p1-frontdoor` | `de844f1e59a482e5d5adb173f3f968ec0a5b125e` | combined into the G5 front-door PR |
+| #4762 | llms packets describe the serving deployment's origin (#3655) | `jill/backlog-do-3655` | `0939e2b6efc3dd771cf03c4cddc3ea6ca1765c5e` | combined into the G5 front-door PR |
+| #4767 | docs(discovery): llms packet text fixes — payment honesty, claim body, starter, ordering + llms-full superset guard | `jill/backlog-do-llms-text` | `0783e1b89cd281ae06cc6368a3269616a2c03ba6` | combined into the G5 front-door PR |
+| #4811 | Serve Agent Skills discovery index at /.well-known/agent-skills/ | `fix/agent-skills-discovery-index` | `036ef1b18b51eea15f3f8411d8ee38d807f6ef11` | combined into the G5 front-door PR |
+| #4829 | One scoped snippet for Add agent, and a short llms.txt | `cursor/agent-onboarding-snippet-b7de` | `d33da15b41cdc62ea3ebd5a5408eed5a39ec0503` | combined into the G5 front-door PR |
+| #4840 | Name empty message bodies and refuse hidden characters | `cursor/message-body-text-da81` | `40e3c92540dfcd95acbee33067b60335cd1b5dea` | combined into the G5 front-door PR |
+| #4845 | List every missing room-create field in one 422 | `cursor/room-create-missing-fields-da81` | `b37c9d0926e7d47f7b0a5d36c7dd03dacd2e2e5a` | combined into the G5 front-door PR |
+| #4873 | Fix QA9 command contracts, claim permission order, and invite redeem | `cursor/q9-contracts-permission-order-132a` | `2b462b6c5a3f2a50f37b7446b257f4822d16ccaa` | combined into the G5 front-door PR |
+| #4892 | Add optional agent join profile on redeem and member routes | `cursor/agent-join-profile-b978` | `b8b7e46560a2b437dea0d338b61a710619a40fa4` | combined into the G5 front-door PR |
+| #4896 | Name the offending key when a strict request is refused | `cursor/strict-body-next-102b` | `0fbf5e8c0987d251b7c796b856a1c9a48383f24a` | combined into the G5 front-door PR |
+| #4906 | DOOR-CURE-5 remainder: lot discovery on llms.txt + served OpenAPI | `jill/door-cure-5-lot-discovery` | `8a72e8f9df764a4ec12605c9e30fc5110ed954a2` | combined into the G5 front-door PR |
+| #4912 | DOOR-CURE-7: llms.txt golden path names the identity mint (row 14) | `door-cure-7-golden-path-mint` | `4c2a9a1eb57d16d9b02a348313dd394a442a27b2` | combined into the G5 front-door PR |
+| #4914 | DOOR-CURE-8: claim 401 stranger leg + brief admission contradiction (rows 15+16) | `door-cure-8-claim-guidance` | `6b575c1ae0f514aabe8c2702bb9c4d06b138aff0` | combined into the G5 front-door PR |
+
 ## Branches with no PR (deleted in cleanup)
 
 | Branch | Head SHA |
