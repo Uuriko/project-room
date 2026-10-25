@@ -8,6 +8,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
 import { templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
+import { frontDoorHtml } from '../server/github-oauth.mjs';
 
 // Decision #36 (#3254, Option A): the generated agent pages are build output
 // and never committed, so a plain checkout (and every exact-commit package)
@@ -75,7 +76,17 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
   for (const path of assetPaths.filter(file => !absentGenerated(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
-    assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(new URL('../' + path, import.meta.url)), path);
+    const disk = await readFile(new URL('../' + path, import.meta.url));
+    // An unconfigured server strips the GitHub anchor from the front door.
+    // The source file still carries it for a configured deploy.
+    const expected = path === 'index.html'
+      ? Buffer.from(frontDoorHtml(disk.toString('utf8'), { githubConfigured: false }))
+      : disk;
+    if (path === 'index.html') {
+      assert.equal(disk.includes('id="github-signin"'), true);
+      assert.equal(expected.includes('id="github-signin"'), false);
+    }
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
   // Absent generated pages are the designed package state (decision #36):
   // the server answers 404 for them, never a 500.
