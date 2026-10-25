@@ -67,7 +67,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { createDisputes, DisputeError } from "./bounty-disputes.mjs";
 import { createArbiters } from "./dispute-arbiters.mjs";
 import { claimEligibility, reputationSummary, routingVisibility, PROBATION_MAX_CLAIM_CREDITS, PROBATION_MAX_CLAIM_MILLIS } from "./bounty-reputation.mjs";
-import { issueBountyReceipt, canonicalJson as receiptCanonicalJson, parseStrict as parseReceiptStrict, RECEIPT_TYPES } from "./bounty-receipts.mjs";
+import { issueBountyReceipt, canonicalJson as receiptCanonicalJson, parseStrict as parseReceiptStrict, RECEIPT_TYPES, RECEIPT_TYPE_BY_SHORT } from "./bounty-receipts.mjs";
 import { encodeRow, decodeRow } from "./persisted-row.mjs";
 
 // Replay-safe row kind for dispute receipt records (RC-2026-09-27-2730).
@@ -3231,6 +3231,7 @@ export class BountyEscrow {
           amountMillis: Math.abs((credit ?? first).amount),
           entries: entries.map(e => e.entry_id),
           signedReceiptIds: Object.freeze([...new Set(entries.map(e => e.receipt_id).filter(Boolean))]),
+          signedReceiptLinks: Object.freeze([...new Set(entries.map(e => e.receipt_id).filter(Boolean))].map(id => Object.freeze({ receiptId: id, type: RECEIPT_TYPE_BY_SHORT[id.split(":")[1]] ?? null, href: `/receipts/signed/${id}` }))),
           hash: first.hash, prevHash: first.prev_hash,
         }));
       }

@@ -79,9 +79,46 @@ export function verdictLineOf(receipt) {
 
 // What this record proves, no more. Moved verbatim from receipts-page so
 // the page and the JSON-LD description state the same facts.
-export function receiptProvenNote(receipt) {
-  if (receipt.source === "bounty-lot")
+// The signed branch of the proven note (proof layer S4; B3 §2.3).
+// Claimable slots, and only these: presence + format + link (from the
+// projection's signedReceiptLinks), the signer fingerprint (ONLY from
+// a body actually resolved at render time — an ID alone never yields
+// one), the key-history state (from the same resolution), and the
+// read-time verification outcome (ONLY when a verification run is
+// present). Absent any resolved body the caller falls back to the
+// unsigned wording verbatim: a stamped ID with no body renders NO
+// signed claim. The word "verified" appears only inside the read-time
+// slot. Single source: the receipt page renders these same sentences.
+export function signedProvenSentences(receipt, signedInfo = null) {
+  if (receipt?.source !== "bounty-lot" || !Array.isArray(signedInfo)) return null;
+  const links = receipt.lot?.signedReceiptLinks?.length
+    ? receipt.lot.signedReceiptLinks
+    : (receipt.lot?.signedReceiptIds ?? []).map(receiptId => ({ receiptId, href: `/receipts/signed/${receiptId}` }));
+  const sentences = [];
+  for (const link of links) {
+    const info = signedInfo.find(entry => entry && entry.receiptId === link.receiptId);
+    if (!info || !info.fingerprint) continue; // no resolved body ⇒ no sentence for this link
+    const historySentence = info.keyHistoryStatus === "active"
+      ? "Key history: published — the signer key is active."
+      : info.keyHistoryStatus === "superseded"
+      ? `Key history: published — the signer key is superseded${info.successor ? ` by ${info.successor}` : ""}.`
+      : info.keyHistoryStatus === "revoked"
+      ? `Key history: published — the signer key is revoked${info.compromiseTime ? ` (compromise declared at ${info.compromiseTime})` : ""}.`
+      : "Key history not published — signer identity not pinned.";
+    const verificationSentence = info.verificationOutcome
+      ? `Signature and journal linkage re-verified at read time: ${info.verificationOutcome}.`
+      : "Signature not re-checked on this page.";
+    sentences.push(`This record carries a signed receipt, readable at ${link.href}. Signer key: escrow-keeper, fingerprint ${info.fingerprint}. ${historySentence} ${verificationSentence}`);
+  }
+  return sentences.length ? sentences.join(" ") : null;
+}
+
+export function receiptProvenNote(receipt, signedInfo = null) {
+  if (receipt.source === "bounty-lot") {
+    const signed = signedProvenSentences(receipt, signedInfo);
+    if (signed) return `What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. ${signed}`;
     return "What this record proves: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
+  }
   if (receipt.mergedAt && receipt.pullRequest)
     return "What this record proves: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
   return "What this record proves: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";

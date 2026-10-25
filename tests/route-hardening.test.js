@@ -367,3 +367,17 @@ test("pins: a deleted message is 409 on both write paths, and POST /pins answers
   const replayedBody = await replayed.json();
   assert.equal(replayedBody.changed, false); assert.equal(replayedBody.event.duplicate, true); assert.equal(replayedBody.event.sequence, pinnedBody.event.sequence);
 });
+
+test("probe 8 (S4): the signed-receipt route is mounted by the table; the legacy lot face is intact", async t => {
+  const f = await serve(t);
+  const unknownId = "room-bounty-receipt:pr:" + "3".repeat(32);
+  const served = await f.request(`/receipts/signed/${unknownId}`);
+  assert.equal(served.status, 404, "an unknown signed receipt ID 404s through the mounted route");
+  assert.equal((await served.json()).error.code, "not_found");
+  const posted = await f.request(`/receipts/signed/${unknownId}`, { method: "POST", data: {} });
+  assert.equal(posted.status, 405, "a non-GET method on the signed path meets the route table's 405, not a legacy fallthrough");
+  assert.match(posted.headers.get("allow") ?? "", /GET/, "the 405 names GET in Allow (route-table mount)");
+  const lot = await f.request(`/receipts/lot_${"a".repeat(16)}`);
+  assert.equal(lot.status, 404, "the legacy lot detail face still answers");
+  assert.equal((await lot.json()).error.code, "not_found");
+});
