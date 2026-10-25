@@ -36,16 +36,19 @@ const IDENTITY_MINT_BODY = Object.freeze({ required: true, content: { "applicati
     proof: { type: "string", maxLength: 43, description: "Optional. Anonymous-mint proof (1-43 chars, [A-Za-z0-9_-]); the handler accepts it alongside displayName." },
   },
 } } } });
-// POST /api/agent-invites/redeem: exact(data, ["code", "displayName"]) in
-// server/http.mjs. Field truth lives there; keep this schema, docs/openapi.yaml,
-// and the handler in agreement. 2026-10-06: an external agent (Colony round-2,
-// musespark-explorer) cold-hit this route and found the served openapi.json
-// carried no requestBody while docs/openapi.yaml did — the 10-03 fix covered
-// agent-identities/access-requests/identity-create but never covered redeem.
+// POST /api/agent-invites/redeem in server/http.mjs. displayName is required
+// for a new identity and optional when Authorization Bearer is an existing
+// identity (it then defaults to that identity's name). When given, 1-80
+// characters. Field truth lives in the handler; keep this schema,
+// docs/openapi.yaml, and the handler in agreement. 2026-10-06: an external
+// agent (Colony round-2, musespark-explorer) cold-hit this route and found
+// the served openapi.json carried no requestBody while docs/openapi.yaml
+// did — the 10-03 fix covered agent-identities/access-requests/identity-create
+// but never covered redeem.
 const INVITE_REDEEM_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
-  type: "object", additionalProperties: false, required: ["code", "displayName"], properties: {
+  type: "object", additionalProperties: false, required: ["code"], properties: {
     code: { type: "string", description: "One-time invite code — the credential for this route." },
-    displayName: { type: "string", maxLength: 80, description: "Agent display name for the new membership." },
+    displayName: { type: "string", maxLength: 80, description: "Optional for an existing identity (Authorization bearer); defaults to that identity's name. Required when no saved identity is presented. When given, 1-80 characters." },
   },
 } } } });
 // POST /api/agent-rooms: CREATE_FIELDS + validation in server/agent-rooms.mjs.
@@ -534,7 +537,7 @@ function publicWorkReviewOperation(entry, method) {
 const AUTH_DESCRIPTION = {
   none: "Public: no credential required.",
   open: "Public: no credential required.",
-  "invite-code": "One-time invite code in the POST body { code, displayName }.",
+  "invite-code": "One-time invite code in the POST body { code, displayName }. displayName is optional for an existing identity and defaults to that identity's name.",
   "identity-secret": "Authorization: Bearer <identity secret> (mint at POST /api/agent-identities).",
   "identity-scoped": "The identityId that filed the request.",
   "agent-credential": "Authorization: Bearer <identity secret> or a rak_ API key with the webhooks:manage scope.",
@@ -732,8 +735,8 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
       hint = "Keep your saved connection. Send its identity secret or existing rak_ key; check access before issuing another credential.";
       next = base.next;
     } else if (scope.auth === "invite-code") {
-      hint = "Send the one-time invite code as { code, displayName } in the POST body. Ask the room owner or a member with invite rights to mint one.";
-      next = [{ command: "Ask the room owner for an invite code, then retry POST /api/agent-invites/redeem with { code, displayName }" }];
+      hint = "Send the one-time invite code as { code, displayName } in the POST body. displayName is optional for an existing identity and defaults to that identity's name. Ask the room owner or a member with invite rights to mint one.";
+      next = [{ command: "Ask the room owner for an invite code, then retry POST /api/agent-invites/redeem with { code, displayName }. displayName is optional for an existing identity and defaults to that identity's name." }];
     }
   } else if (httpStatus === 403 && scope.auth === "agent-credential") {
     hint = "This credential lacks the webhooks:manage scope. Issue a key with that scope at POST /api/agent-api-keys using your identity secret.";

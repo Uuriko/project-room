@@ -90,9 +90,10 @@ invariantSuite([
       assert.ok(burned.redeemed_at != null, "the successful retry burns the invite");
       assert.equal(burned.redeemed_identity_id, ctx.retry.identityId, "the burn names the retried identity");
       assert.equal(linksFor(f, ctx.retry.identityId), 1, "exactly one membership link lands");
-      // member.added + the referral.completed journal event, one identity, one link, one referral row.
+      // member.added only. The referral row is the ledger; invite joins do not
+      // append referral.completed to the room log.
       const after = snapshot(f);
-      assert.equal(after.events, ctx.before.events + 2, "member.added + referral journal events land exactly once");
+      assert.equal(after.events, ctx.before.events + 1, "member.added lands once and no referral.completed event is written");
       assert.equal(after.links, ctx.before.links + 1, "exactly one identity link lands");
       assert.equal(after.identities, ctx.before.identities + 1, "exactly one identity lands");
       assert.equal(after.referrals, ctx.before.referrals + 1, "exactly one referral row lands");

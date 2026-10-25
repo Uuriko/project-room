@@ -3368,8 +3368,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // blamed the caller for sending *less* when the body carried an *extra*
         // field — a recovery trap for a cold client. Port the access-request
         // diagnoseArguments pattern so the 422 names the offending field.
+        // A presented bearer is an existing identity: displayName is optional
+        // and redeem() defaults it to that identity's name. No bearer still
+        // requires displayName (a new identity has no name to copy).
+        const identitySecret = bearer(req);
         const diagnosis = diagnoseArguments({
-          required: ["code", "displayName"],
+          required: identitySecret ? ["code"] : ["code", "displayName"],
           properties: { code: { type: "string" }, displayName: { type: "string" }, requestId: { type: "string" } },
           additionalProperties: false,
         }, data);
@@ -3378,7 +3382,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
           if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
           for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName} with an optional requestId.`);
+          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send {code, displayName} with an optional requestId. displayName is optional for an existing identity and defaults to that identity's name.`);
         }
         // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept
         // requestId makes an uncertain retry safe — the retry replays the
@@ -3388,7 +3392,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!validId(data.requestId)) reject(422, "invalid_invite", "Send a valid request id for retry-safe redemption.");
           requestId = data.requestId;
         }
-        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req), requestId });
+        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret, requestId });
         // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("agent-invite:redeem", { roomId: redeemedInvite.roomId, identityId: redeemedInvite.identityId,

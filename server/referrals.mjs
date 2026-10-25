@@ -3,8 +3,10 @@
 // A referral is recorded exactly once per join — the PRIMARY KEY on
 // (room_id, referee_member_id) makes double-counting impossible, so retries
 // and re-approvals are safe. The referrals table is the queryable source of
-// truth for the referral board and leaderboard; each recording also journals
-// a referral.completed room event as the timeline-visible audit record.
+// truth for the referral board and leaderboard. Invite joins already name the
+// referrer on member.added (referredBy); they do not also append
+// referral.completed to the room log. Access-request joins still journal that
+// event. Older referral.completed events stay replayable.
 //
 // Two paths create referrals:
 // - invite: redeeming an agent invite attributes the join to the invite's
@@ -73,10 +75,12 @@ export class Referrals {
     if (existing) return { roomId, referrerMemberId, refereeMemberId, completedAt: existing.completedAt, via: existing.via, duplicate: true };
     this.db.prepare("INSERT INTO referrals(room_id, referrer_member_id, referee_member_id, completed_at, via) VALUES(?,?,?,?,?)")
       .run(roomId, referrerMemberId, refereeMemberId, at, via);
-    // Timeline-visible audit record, same transaction: a referral is never
-    // recorded without its journal event. Archived rooms keep the table row
-    // without a timeline event — there is no live audience to notify.
-    this.emitReferralCompleted(roomId, { referrerMemberId, refereeMemberId, via, at });
+    // Invite joins already carry referredBy on member.added. A second
+    // referral.completed event is noise in the room history and projections.
+    // The referrals table is the ledger. Access-request joins have no other
+    // room event that names the matched referrer, so they still journal one.
+    // Archived rooms skip the timeline event — there is no live audience.
+    if (via !== "invite") this.emitReferralCompleted(roomId, { referrerMemberId, refereeMemberId, via, at });
     return { roomId, referrerMemberId, refereeMemberId, completedAt: at, via, duplicate: false };
   }
 

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { createHash, scryptSync } from "node:crypto";
-import { RoomStore } from "../server/store.mjs";
+import { PILOT_LIMITS, RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
@@ -898,6 +898,70 @@ test("revoke answers 200 for a revoked or expired invite and 404 for an unknown 
   const expiredAgain = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: expiring.json.inviteId }, ownerKey);
   assert.equal(expiredAgain.status, 200);
   assert.equal(expiredAgain.json.status, "expired");
+});
+
+test("an existing identity omits displayName and joins under its own name", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const me = store.identities.create("Saved Name");
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], displayName: "Invite Label" });
+  assert.equal(minted.status, 201);
+  // A bearer that does not resolve is 401, not a missing-displayName 422,
+  // and it does not burn the code.
+  const unknown = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code }, `pri_${"a".repeat(43)}`);
+  assert.equal(unknown.status, 401);
+  assert.equal(unknown.json.error.code, "unauthenticated");
+  const joined = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code }, me.secret);
+  assert.equal(joined.status, 201, JSON.stringify(joined.json));
+  assert.equal(joined.json.displayName, "Saved Name");
+  assert.equal(joined.json.identityId, me.identityId);
+  assert.equal(joined.json.identitySecret, undefined);
+  assert.equal(store.room("commons").state.members[joined.json.memberId].displayName, "Saved Name");
+  // A supplied name still has to be 1-80 characters, and a refusal does not burn the code.
+  const other = store.identities.create("Other Saved");
+  const pending = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  const tooLong = await post(origin, "/api/agent-invites/redeem", { code: pending.json.code, displayName: "x".repeat(81) }, other.secret);
+  assert.equal(tooLong.status, 422);
+  assert.equal(tooLong.json.error.code, "invalid_invite_name");
+  const requestId = randomUUID();
+  const named = await post(origin, "/api/agent-invites/redeem", { code: pending.json.code, displayName: "Chosen Name", requestId }, other.secret);
+  assert.equal(named.status, 201, JSON.stringify(named.json));
+  assert.equal(named.json.displayName, "Chosen Name");
+  // A retry that omits displayName is different content: the default would
+  // be the identity's name, not the name already journaled.
+  const conflict = await post(origin, "/api/agent-invites/redeem", { code: pending.json.code, requestId }, other.secret);
+  assert.equal(conflict.status, 409);
+  assert.equal(conflict.json.error.code, "invite_redeem_idempotency_conflict");
+});
+
+test("an omitted displayName replays when the first redeem also omitted it", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const me = store.identities.create("Replay Name");
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], displayName: "Invite Label" });
+  const requestId = randomUUID();
+  const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, requestId }, me.secret);
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  assert.equal(first.json.displayName, "Replay Name");
+  const retry = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, requestId }, me.secret);
+  assert.equal(retry.status, 201, JSON.stringify(retry.json));
+  assert.equal(retry.json.duplicate, true);
+  assert.equal(retry.json.memberId, first.json.memberId);
+  assert.equal(retry.json.displayName, "Replay Name");
+  assert.equal(Object.values(store.room("commons").state.members).filter(member => member.displayName === "Replay Name").length, 1);
+});
+
+test("invite redeem admits on the last event slot and refuses at the cap", async t => {
+  const { store, ownerKey } = await serve(t);
+  const last = store.invites.create(ownerKey, "commons", { permissions: ["accept_work"] }).code;
+  store.db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(PILOT_LIMITS.eventsPerRoom - 1, "commons");
+  const joined = store.invites.redeem(last, { displayName: "Last Slot" });
+  assert.equal(joined.displayName, "Last Slot");
+  assert.equal(store.room("commons").sequence, PILOT_LIMITS.eventsPerRoom);
+  const full = store.invites.create(ownerKey, "commons", { permissions: ["accept_work"] }).code;
+  assert.throws(() => store.invites.redeem(full, { displayName: "Past Cap" }), error =>
+    error.status === 409 && error.code === "pilot_limit" && error.message === "Bounded pilot capacity reached; no data was changed");
+  assert.equal(store.room("commons").sequence, PILOT_LIMITS.eventsPerRoom);
+  assert.equal(store.db.prepare("SELECT redeemed_at FROM agent_invite_codes WHERE code_hash=?").get(slowHash(full)).redeemed_at, null);
+  assert.equal(Object.values(store.room("commons").state.members).some(member => member.displayName === "Past Cap"), false);
 });
 
 test("three credential replays of a burned invite leave one live room key", async t => {
