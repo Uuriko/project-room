@@ -48,3 +48,13 @@ test("an unavailable provider stays hidden across view syncs while the other anc
   assert.equal(node("#google-signin").hidden, false, "back to methods: Google returns");
   assert.equal(node("#github-signin").hidden, true, "GitHub stays hidden — its route would 503");
 });
+
+test("sync still runs when the served page has no GitHub sign-in anchor", t => {
+  const { navigation, node } = mountNavigation(t);
+  const query = globalThis.document.querySelector;
+  globalThis.document.querySelector = selector => selector === "#github-signin" ? null : query(selector);
+  assert.doesNotThrow(() => navigation.sync("password-login"));
+  assert.equal(node("#google-signin").hidden, false);
+  assert.doesNotThrow(() => navigation.sync("welcome"));
+  assert.equal(node("#google-signin").hidden, true);
+});
