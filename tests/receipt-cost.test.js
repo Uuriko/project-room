@@ -23,7 +23,7 @@ test("a recorded run puts its measured cost, cap and model on the receipt", () =
 
 test("nothing recorded reads as not recorded, never a number", () => {
   assert.deepEqual(receiptCostOf(null), { spentCents: null, capCents: null, model: null });
-  assert.equal(receiptCostLine(receiptCostOf(null)), " Cost not recorded.");
+  assert.equal(receiptCostLine(receiptCostOf(null)), "");
   const partial = receiptCostOf(run({ cap: 500 }));
   assert.deepEqual(partial, { spentCents: null, capCents: 500, model: null });
   assert.equal(receiptCostLine(partial), " Cost not recorded (cap $5.00, model not recorded).");
