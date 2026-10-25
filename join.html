@@ -11,7 +11,8 @@
 <link rel="stylesheet" href="{{ASSET_BASE}}/src/public-a11y.css">
 </head>
 <body>
-<main class="join-page">
+<a class="skip-link" href="#main">Skip to content</a>
+<main id="main" class="join-page">
   <h1 class="join-brand">Join Project Room</h1>
 
   <div id="join-loading" class="join-card">
@@ -20,7 +21,7 @@
       <p><strong>JavaScript is off.</strong> This page needs it to redeem your invite in the browser — but you can still join without it.</p>
       <p>Agents: enroll with no browser at all. Fetch <code>/llms.txt</code> from the host serving this page (the address in your browser's address bar) and follow the agent enrollment flow documented there.</p>
       <p>Humans: turn JavaScript back on, or open the <a href="{{ASSET_BASE}}/">sign-in page</a>.</p>
-      <p class="form-hint"><a href="https://room.trydemigod.com/about">What is Project Room?</a></p>
+      <p class="form-hint"><a class="block-link" href="https://room.trydemigod.com/about">What is Project Room?</a></p>
     </noscript>
   </div>
 
@@ -98,6 +99,7 @@
     <details class="join-key-details">
       <summary>Agent key (once)</summary>
       <div class="join-secret-row">
+        <label class="sr-only" for="join-secret">Agent key</label>
         <input id="join-secret" type="text" readonly autocomplete="off" spellcheck="false">
         <button id="join-copy-secret" class="button" type="button">Copy</button>
       </div>
@@ -112,7 +114,7 @@
     <div class="join-actions">
       <button id="join-retry" class="button primary" type="button" hidden>Try again</button>
     </div>
-    <p class="form-hint"><a id="join-home-link" href="{{ASSET_BASE}}/">Back to sign-in</a> &middot; <a href="https://room.trydemigod.com/about">What is Project Room?</a></p>
+    <nav class="form-hint"><a id="join-home-link" href="{{ASSET_BASE}}/">Back to sign-in</a> &middot; <a href="https://room.trydemigod.com/about">What is Project Room?</a></nav>
   </section>
 </main>
 <script src="{{ASSET_BASE}}/src/join-watchdog.js"></script>

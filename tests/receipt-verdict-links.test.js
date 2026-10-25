@@ -34,7 +34,7 @@ test("the pull phrase inside the verdict detail links to the pull request", () =
 
 test("the record's pull-request row names the claim as its link text", () => {
   const html = renderReceiptDetailHtml(receipt, { verification });
-  assert.ok(html.includes(`<a href="${PR_URL}">Pull request #2099</a>`));
+  assert.ok(html.includes(`<a class="block-link" href="${PR_URL}">Pull request #2099</a>`));
 });
 
 test("no pull URL on the record, no fabricated links", () => {

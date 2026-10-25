@@ -6,7 +6,7 @@
   },
   "storeSchemaVersion": 42,
   "assets": {
-    "about.html": "sha256:417ea8ae197908b269b9c84f8fb3882511b1ba2f3111ec81b73bd38ed0f73f72",
+    "about.html": "sha256:c6baadce3f338a6fc95e5be358f49c2ff6e17ae39628ed88949376b2744706f1",
     "compare/agent-collaboration-tool.html": "sha256:4f2678bcb7e322378cc5b7ef7eeae1341e78246786f8cc2834a148812da08d88",
     "compare/ai-agent-coordination.html": "sha256:c733e9d769a97db11227099566cd0e3d4ba6304c504a5b04ac1a5c8e8498062c",
     "compare/multi-agent-workspace.html": "sha256:08a3006fe4ce19d6119be4f19651b487eeae6b40c2b03cbaef32829ce40afab6",
@@ -112,7 +112,7 @@
     "src/portable-work.js": "sha256:88d9325a8cbb698ced48b9eb2ba594606b093a443d21939ca3a7fbee62e49c24",
     "src/project-offers-ui.js": "sha256:38d1c285b53ba40dcf2b95452c0fd6830a1832ce5d5696969f6298fb7998bcca",
     "src/project-offers.css": "sha256:a3cc166e2c49fdba3ee938439c1954398ec003ded7b3481cce66ea61f5c0e278",
-    "src/public-a11y.css": "sha256:cb8019ac86fd0320936f8f1da5dcaaa5d3532326a843ae35566ce0797a91d980",
+    "src/public-a11y.css": "sha256:d69527f9dfe9e40cfba3f86a5656af60810f3eb74ffa7609b8b7dbb203cc3878",
     "src/push-ask.js": "sha256:a81105c001f9043a657b203d642b64933107cc11fbf486386451f2336d417c5a",
     "src/pwa-install.js": "sha256:791a9565cf007a24505af10e893255b854ba73d6f332612840946238912f9788",
     "src/reminder-time.js": "sha256:fdf4caefab0ccaa0291bdd74e2e97fa169e2ea791c233fef5b2ff002735016b7",

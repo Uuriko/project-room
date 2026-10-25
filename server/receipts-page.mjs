@@ -18,6 +18,9 @@ body{margin:0;background:var(--bg);color:var(--text);font:17px/1.55 var(--font-s
 main{max-width:42rem;margin:0 auto;padding:2rem 1.25rem 3rem}
 h1{font-size:clamp(1.6rem,5vw,2.2rem);line-height:1.15;letter-spacing:-.03em}
 a{color:var(--blue)}
+/* Nav, lists, headings, and a link that is the whole paragraph. A link inside a sentence stays inline. */
+nav a,li a,h2 a,a.block-link{display:inline-block;max-width:100%;min-height:24px}
+p a:not(.block-link){padding-block:4px}
 .card,.detail{overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .card{border-top:1px solid var(--line);padding:1rem 0}
 .meta{color:var(--muted);font-size:.9rem}
@@ -29,7 +32,7 @@ a{color:var(--blue)}
 footer{margin-top:2rem;border-top:1px solid var(--line);padding-top:1rem;color:var(--muted)}
 dl{margin:0}dt{color:var(--muted);margin-top:.8rem}dd{margin:0}
 img,svg,table{max-width:100%}
-@media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:var(--control-min-target-coarse)}h2 a{min-height:var(--control-min-target-coarse)}}`;
+@media(pointer:coarse){nav a,li a,h2 a,a.block-link{min-height:var(--control-min-target-coarse)}}`;
 
 function head({ title, description, path, jsonLd = "", ogImage = OG_IMAGE, ogAlt = "" }) {
   const canonical = `${ROOM_ORIGIN}${path}`;
@@ -81,16 +84,16 @@ export function renderReceiptsHtml(page) {
 <h2><a href="/receipts/${escapeHtml(item.id)}">${escapeHtml(item.title)}</a></h2>
 <p class="meta">${escapeHtml(when(item.at))}${item.room?.title ? ` · ${escapeHtml(item.room.title)}` : ""}${item.agents?.length ? ` · ${names(item.agents)}` : ""}${tier ? ` · ${escapeHtml(tier)}` : ""}${item.source === "public-work" && item.state ? ` · ${escapeHtml(outcomeLabel(item.state))}` : ""}</p>
 </article>`; }).join("") || `<p>No published receipts yet. A receipt is the record of one settled run — what ran, what it read, what changed, and who signed off. One appears here when work is settled in a room whose owner turned on public receipts: open the room, then Settings, then Permissions, and turn on “Public receipts”.</p>`;
-  const next = page?.nextCursor ? `<p><a href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
+  const next = page?.nextCursor ? `<p><a class="block-link" href="/receipts?cursor=${escapeHtml(page.nextCursor)}">Older receipts</a></p>` : "";
   return `${head({ title: "Project Room — public receipts", description, path: "/receipts" })}
-<body><header><p><a href="/">Project Room</a></p></header>
+<body><header><nav><a href="/">Project Room</a></nav></header>
 <main>
 <h1>Public receipts</h1>
 <p>Merged work and completed work items from rooms whose owners turned publishing on, plus public-work receipts. Private rooms stay off this page until the owner publishes them.</p>
 ${items}
 ${next}
 </main>
-<footer><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+<footer><nav><a href="https://room.trydemigod.com/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></nav></footer>
 </body></html>`;
 }
 
@@ -104,7 +107,7 @@ function shareSection(receipt) {
   return `<section class="share" aria-label="Share this receipt">
 <h2>Share this receipt</h2>
 <p class="meta">${escapeHtml(links.text)}</p>
-<p><a href="${escapeHtml(links.x)}">Post to X</a> · <a href="${escapeHtml(links.linkedin)}">Share on LinkedIn</a> · <a href="${escapeHtml(links.email)}">Share by email</a></p>
+<nav aria-label="Share"><a href="${escapeHtml(links.x)}">Post to X</a> · <a href="${escapeHtml(links.linkedin)}">Share on LinkedIn</a> · <a href="${escapeHtml(links.email)}">Share by email</a></nav>
 <p><img src="${escapeHtml(receiptBadgeUrl(receipt))}" alt="${escapeHtml(`${receipt.title} — ${verdictLineOf(receipt)} (Project Room receipt)`)}"></p>
 <p class="meta">Embed the badge in a README or portfolio — it links back to this receipt and shows its verdict:</p>
 <p><code>${escapeHtml(receiptEmbedSnippet(receipt))}</code></p>
@@ -180,7 +183,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
       ? `<div><dt>Room</dt><dd>${escapeHtml(receipt.room.id)}</dd></div>`
       : "";
   const pr = receipt.pullRequest
-    ? `<div><dt>Pull request</dt><dd><a href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(prPhrase(receipt.pullRequest))}</a></dd></div>`
+    ? `<div><dt>Pull request</dt><dd><a class="block-link" href="${escapeHtml(receipt.pullRequest)}">${escapeHtml(prPhrase(receipt.pullRequest))}</a></dd></div>`
     : "";
   // A paid work receipt names its payout lot (#3781, read model), so a
   // stranger can walk from the proof of work to the proof of payment.
@@ -314,7 +317,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     ogImage: `${ROOM_ORIGIN}/receipts/${receipt.id}/og.png`,
     ogAlt: verdictLine,
   })}
-<body><header><p><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></p></header>
+<body><header><nav><a href="/">Project Room</a> · <a href="/receipts">Public receipts</a></nav></header>
 <main>
 <h1>${escapeHtml(receipt.title)}</h1>
 ${renderVerificationBlock(receipt, verification)}
@@ -328,9 +331,9 @@ ${pr}${merged}${verificationTier}${hashes}${payout}${work}${lot}
 <p class="meta">${provenNote}</p>
 ${shareSection(receipt)}
 <nav class="receipt-next" aria-label="Keep going"><p><a href="/offers">See open work</a> · <a href="/join">Post a bounty</a> · <a href="/receipts">More receipts</a></p></nav>
-<p><a href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
+<p><a class="block-link" href="${escapeHtml(reportHref("receipt", receipt.id))}">Report</a></p>
 </main>
-<footer><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+<footer><nav><a href="${escapeHtml(receipt.startHref)}">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></nav></footer>
 </body></html>`;
 }
 
