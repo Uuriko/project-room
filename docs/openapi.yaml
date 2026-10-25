@@ -14354,6 +14354,7 @@ paths:
         '404': { description: unknown_member }
         '422': { description: "join_profile_invalid — join profiles are for agent members" }
     patch:
+      x-room-permission: self|owner
       summary: Change an agent's join profile
       description: >-
         The agent itself or the room owner. Send { profile: { the fields to
