@@ -104,6 +104,19 @@ export const FEE_DENOMINATOR = 100; // 1% of the award to the room pool, on rele
 export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the bounty (<=25% total dispute cost, per v2)
 const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
+// Idempotency replay-cache retention (IDEMPOTENCY-CAP): a version=2 row is
+// deletable once it is older than the retention window. The window is an
+// age floor, not a target: every legitimate replay path is a client retry
+// (HTTP door, MCP door) on a session horizon of hours to days, and no
+// server-side scheduler replays these keys (the epoch keeper transitions
+// bounties directly and is idempotent by state machine). 90 days is more
+// than 6x the longest escrow window a replay could ride on
+// (DISPUTE_TIMEOUT_MS, 14 days). The count leg bounds a high-volume room
+// to the newest MAX rows, but never deletes a row younger than the 30-day
+// count floor, so it can only shorten retention under extreme volume.
+export const IDEMPOTENCY_RETENTION_MS = 90 * 24 * 3600 * 1000;
+export const IDEMPOTENCY_MAX_ROWS_PER_ROOM = 20_000;
+export const IDEMPOTENCY_COUNT_FLOOR_MS = 30 * 24 * 3600 * 1000;
 export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
 export const MAX_CREDITS = 1000000;
 const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
@@ -3314,6 +3327,58 @@ export class BountyEscrow {
       return this._disputes.get(disputeId);
     });
   }
+}
+
+// Prune the idempotency replay cache (IDEMPOTENCY-CAP). Deletes only
+// version=2 rows: legacy version-NULL rows are never pruned, because
+// idemExecute refuses any key that matches one (idempotency_actor_mismatch)
+// and deleting the row would silently turn that refusal into a fresh
+// execution; the legacy set is finite (pre-scope history) and bounded.
+// The bounty_journal is untouched: money history stays fully auditable,
+// only the recorded response bodies used for replay are dropped.
+//
+// The one accepted behavioural change: a replay that arrives after its row
+// was pruned executes as a fresh operation instead of returning the
+// recorded response. The age floor (90 days) and the count floor (30 days,
+// count leg only) keep that outside every legitimate retry horizon.
+//
+// Batched like the sibling cache prunes (pruneOAuthProvider,
+// pruneAbuseRateBuckets): at most `limit` rows per call, so the hourly
+// retention tick bounds the cost of any single run to one bounded scan
+// plus `limit` row deletes; a backlog drains over successive ticks.
+export function pruneBountyIdempotency(db, { now, limit = 500 } = {}) {
+  if (!Number.isSafeInteger(now) || !Number.isSafeInteger(limit) || limit < 1) {
+    throw new TypeError("pruneBountyIdempotency requires a timestamp and a positive limit");
+  }
+  const present = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='bounty_idempotency'").get();
+  if (!present) return { pruned: 0, byAge: 0, byCount: 0 };
+  let remaining = limit;
+  const ageCutoff = new Date(now - IDEMPOTENCY_RETENTION_MS).toISOString();
+  const byAge = db.prepare(
+    `DELETE FROM bounty_idempotency WHERE rowid IN (
+       SELECT rowid FROM bounty_idempotency WHERE version=2 AND created_at < ? LIMIT ?)`
+  ).run(ageCutoff, remaining).changes ?? 0;
+  remaining -= byAge;
+  let byCount = 0;
+  if (remaining > 0) {
+    const floorCutoff = new Date(now - IDEMPOTENCY_COUNT_FLOOR_MS).toISOString();
+    const over = db.prepare(
+      `SELECT room_id AS roomId, COUNT(*) AS n FROM bounty_idempotency
+       WHERE version=2 GROUP BY room_id HAVING n > ?`).all(IDEMPOTENCY_MAX_ROWS_PER_ROOM);
+    for (const { roomId, n } of over) {
+      if (remaining <= 0) break;
+      const excess = Math.min(n - IDEMPOTENCY_MAX_ROWS_PER_ROOM, remaining);
+      const deleted = db.prepare(
+        `DELETE FROM bounty_idempotency WHERE rowid IN (
+           SELECT rowid FROM bounty_idempotency
+           WHERE room_id=? AND version=2 AND created_at < ?
+           ORDER BY created_at, rowid LIMIT ?)`
+      ).run(roomId, floorCutoff, excess).changes ?? 0;
+      byCount += deleted;
+      remaining -= deleted;
+    }
+  }
+  return { pruned: byAge + byCount, byAge, byCount };
 }
 
 export { EscrowError, DisputeError };
