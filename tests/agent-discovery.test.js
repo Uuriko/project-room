@@ -561,7 +561,7 @@ test("advertised door root redirects to the app; packets stay at /room/llms.txt"
   const workspace = await fetch(`${base}/`);
   assert.equal(workspace.status, 200);
   assert.match(workspace.headers.get("content-type"), /text\/html/);
-  assert.match(await workspace.text(), /message-input/);
+  assert.match(await workspace.text(), /id="auth-panel"/);
   const packet = await fetch(`${base}/room/llms.txt`);
   assert.equal(packet.status, 200);
   assert.match(packet.headers.get("content-type"), /text\/plain/);

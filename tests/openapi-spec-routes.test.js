@@ -10,6 +10,8 @@ import { parse } from "yaml";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
+import { ifNoneMatch, strongEtag } from "../server/openapi-document.mjs";
+import { OPENAPI_DOCUMENT_ROUTES } from "../server/routes/openapi-document.mjs";
 
 function missingRoutes(document, routes) {
   const missing = [];
@@ -46,20 +48,33 @@ test("OpenAPI yaml and json are public, cacheable, and OpenAPI 3.1", async t => 
   assert.match(json.headers.get("content-type") || "", /^application\/json\b/);
   assert.match(yaml.headers.get("cache-control") || "", /public,\s*max-age=300/);
   assert.match(json.headers.get("cache-control") || "", /public,\s*max-age=300/);
-  const etag = yaml.headers.get("etag");
-  assert.ok(etag && etag === json.headers.get("etag"), "both representations share one strong etag");
-  assert.equal(etag, etag.trim());
-  assert.doesNotMatch(etag, /^W\//);
-  const document = await json.json();
+  const yamlText = await yaml.text();
+  const jsonText = await json.text();
+  const document = JSON.parse(jsonText);
+  assert.deepEqual(document, parse(yamlText));
   assert.equal(document.openapi, "3.1.0");
-  assert.equal(parse(await yaml.text()).openapi, "3.1.0");
+  const yamlEtag = yaml.headers.get("etag");
+  const jsonEtag = json.headers.get("etag");
+  assert.equal(yamlEtag, strongEtag(yamlText));
+  assert.equal(jsonEtag, strongEtag(jsonText));
+  assert.equal(ifNoneMatch(yamlEtag, yamlEtag), true);
+  assert.equal(ifNoneMatch(`W/${yamlEtag}`, yamlEtag), true);
+  assert.equal(ifNoneMatch('"other"', yamlEtag), false);
+  assert.doesNotMatch(yamlEtag, /^W\//);
+  assert.doesNotMatch(jsonEtag, /^W\//);
   const head = await fetch(`${origin}/api/openapi.json`, { method: "HEAD" });
   assert.equal(head.status, 200);
   assert.equal(await head.text(), "");
-  const cached = await fetch(`${origin}/api/openapi.yaml`, { headers: { "if-none-match": etag } });
+  const cached = await fetch(`${origin}/api/openapi.yaml`, { headers: { "if-none-match": yamlEtag } });
   assert.equal(cached.status, 304);
   assert.equal(await cached.text(), "");
   assert.deepEqual(missingRoutes(document, ROUTES), []);
+  assert.deepEqual(OPENAPI_DOCUMENT_ROUTES.map(row => `${row.method} ${row.path}`), [
+    "GET /api/openapi.yaml",
+    "HEAD /api/openapi.yaml",
+    "GET /api/openapi.json",
+    "HEAD /api/openapi.json",
+  ]);
 });
 
 test("the route check fails when a served path is removed", () => {

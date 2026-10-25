@@ -8,7 +8,7 @@ import { frontDoorHtml, githubConfig } from '../server/github-oauth.mjs';
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
-import { ifNoneMatch, openApiDocumentFromYaml } from '../server/openapi-document.mjs';
+import { ifNoneMatch } from '../server/openapi-document.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
 import { agentErrorBody, errorCategory } from '../src/agent-error.mjs';
 import { randomBytes } from 'node:crypto';
@@ -218,24 +218,21 @@ function openApiBody(origin) {
 
 async function openApiSpecResponse(request, env, url) {
   if (request.method !== 'GET' && request.method !== 'HEAD') return null;
-  const bytes = await loadCachedAsset(env, 'docs/openapi.yaml');
-  if (!bytes) return null;
-  let document;
-  try { document = openApiDocumentFromYaml(bytes); }
-  catch { return null; }
-  const headers = baseHeaders(url);
   const yaml = url.pathname.endsWith('.yaml');
-  const body = yaml ? document.yamlBytes : document.jsonBytes;
+  const bytes = await loadCachedAsset(env, yaml ? 'docs/openapi.yaml' : 'docs/openapi.json');
+  if (!bytes) return null;
+  const headers = baseHeaders(url);
+  const etag = await assetEtag(bytes);
   headers.set('Cache-Control', 'public, max-age=300');
-  headers.set('ETag', document.etag);
+  headers.set('ETag', etag);
   headers.set('X-Robots-Tag', 'all');
-  if (ifNoneMatch(request.headers.get('if-none-match'), document.etag)) {
+  if (ifNoneMatch(request.headers.get('if-none-match'), etag)) {
     headers.set('Content-Length', '0');
     return new Response(null, { status: 304, headers });
   }
   headers.set('Content-Type', `${yaml ? 'application/yaml' : 'application/json'}; charset=utf-8`);
-  headers.set('Content-Length', String(body.byteLength));
-  return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers });
+  headers.set('Content-Length', String(bytes.byteLength));
+  return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
 }
 
 function openApiResponse(request, url) {
