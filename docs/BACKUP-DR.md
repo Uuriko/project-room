@@ -3,7 +3,7 @@
 How Project Room survives losing the Durable Object's SQLite — and what it
 honestly cannot survive yet.
 
-## Current state (2026-10-14, verified against production)
+## Current state (2026-10-14, verified against production; restore proof refreshed 2026-10-16)
 
 - **Nightly backups are running.** The `room-backup` job writes one
   whole-store NDJSON export per day to Workers KV (binding `ROOM_BACKUPS_KV`,
@@ -20,7 +20,11 @@ honestly cannot survive yet.
   there is no second backup target. Enabling R2 (account action, then the
   `ROOM_BACKUPS` binding in BACKUPS.md) is the standing fix.
 - **Operator export works.** `GET /api/operator/export` streams the same
-  NDJSON when `ROOM_BACKUP_TOKEN` is configured on the owning script.
+  NDJSON when `ROOM_EXPORT_TOKEN` is configured on the owning script.
+  TM-2 split the backup credential: the restore doors below answer only
+  to `ROOM_RESTORE_TOKEN` (unset outside a restore incident, so they
+  answer 404 in normal operation), and the retired `ROOM_BACKUP_TOKEN`
+  opens nothing. See BACKUPS.md, "Split backup credentials".
 - **Restore paths:**
   - *File replay (the working route today):* `scripts/replay-room-export.mjs`
     loads an export into a **new** Node sqlite store. Rehearsed end-to-end on
@@ -31,11 +35,11 @@ honestly cannot survive yet.
     token, 409 non-empty store, 413 over 64 MiB, 422 malformed export).
     **It cannot restore the current backup:** the 2026-10-14 backup is
     87,606,592 bytes — over the 64 MiB cap (#3409).
-  - *KV-native restore (the #3409 fix; on main, effective in production on
-    the next deploy):*
+  - *KV-native restore (the #3409 fix; deployed to production in revision
+    `7ca2e955` on 2026-10-16):*
     `POST /api/operator/restore-from-backup` restores the daily backup
-    already stored in the `ROOM_BACKUPS_KV` namespace — same operator token
-    and fail-closed posture, no size cap: the manifest and parts are pulled
+    already stored in the `ROOM_BACKUPS_KV` namespace — same restore token
+    (`ROOM_RESTORE_TOKEN`) and fail-closed posture, no size cap: the manifest and parts are pulled
     and verified (per-part and whole-backup sha256) one at a time and
     replayed in bounded batches, and the same trailer, foreign-key,
     watermark, recovery, and invitation audits must pass before the restore
@@ -45,6 +49,20 @@ honestly cannot survive yet.
     on 2026-10-15 against a 90,688,789-byte production-shaped backup (the
     live backup that day was 89,652,872 bytes): the KV restore and file
     replay of the same backup both verified, ~30s each (#3409).
+    Re-proven 2026-10-16 at the live backup's new size and shape: a
+    110,191,252-byte fixture — larger than that day's live backup
+    (92,129,237 bytes) — whose bytes are message data (1,100 real
+    `message.posted` commands, 1,210 events across 22 rooms), written to
+    KV at the production 16 MiB part size (7 parts), restored verified
+    (`contentVerification: "full"`) in ~11s, with 201 tables' row counts
+    and a re-export's trailer digests compared independently of the
+    restore's own verdict, and the restored store reopened and read back.
+    The standing regression test is
+    `tests/restore-from-backup.test.js` ("event-dominated backup above the
+    cap"); `RESTORE_PROOF_TARGET_BYTES` re-runs it above any future backup
+    size. The live KV artifact itself stays operator-only (reading it
+    needs a wrangler login); the runbook below replays the real artifact
+    by file with `scripts/restore-room-backup.mjs --kv`.
 
 ## Disaster-recovery defects — status (2026-10-15)
 
@@ -59,15 +77,17 @@ impossible or unprovable have all been addressed on `main`:
 - **#3324 — fixed, closed 2026-10-15.** Open-store restores no longer
   import the exported public-claim writer permit; regression tests cover
   both the buffered and the KV streaming restore paths.
-- **#3325 — fix in PR #3536.** Restore verification pinned only the event
-  log; trailer version 2 adds per-table content digests over the rows as
-  exported, verified by all three restore paths, which now report an
-  explicit content-verification level (full / events-only /
-  watermark-only) instead of one bare `verified` flag.
+- **#3325 — fixed, closed 2026-10-15 (PR #3536).** Restore verification
+  pinned only the event log; trailer version 2 adds per-table content
+  digests over the rows as exported, verified by all three restore paths,
+  which now report an explicit content-verification level (full /
+  events-only / watermark-only) instead of one bare `verified` flag.
 
-Until the KV-native endpoint is deployed to production, the recovery
-route for a DO loss is file replay into a new Node sqlite store (above),
-not the restore endpoints.
+The KV-native endpoint is deployed (above), so a DO loss can be
+recovered in place — a fresh DO starts empty, and
+`POST /api/operator/restore-from-backup` replays the KV backup into it —
+as well as by file replay into a new Node sqlite store (above), which
+remains the route that needs no Cloudflare runtime.
 
 ## Honest RPO / RTO
 
@@ -85,9 +105,13 @@ not the restore endpoints.
 The NDJSON export hashes every secret column (sha256). A restore recovers
 **data**, never working credentials:
 
-1. Every agent API key, token, webhook secret and push subscription secret
-   in the restored store is a hash of the original. **All of them must be
-   re-issued** after a restore before agents can act again.
+1. Every sanitized secret cell (webhook secrets, push key material and
+   tokens, join tokens, verifiers, encrypted payloads — the exact list is
+   `EXPORT_SECRET_COLUMNS` in `server/room-export.mjs`) is substituted on
+   restore — NULL, or an empty string where the column is NOT NULL — never
+   the export's sha256 placeholder as a live value. The restore result's
+   `sanitizedCells` counts every substitution per table and column. **All
+   of them must be re-issued** after a restore before agents can act again.
 2. A restore resurrects authority exactly as it was **at backup time**.
    Anything revoked between the backup and the loss (keys, share links,
    memberships, delegations) comes back looking current. The operator must
@@ -99,7 +123,10 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
 ## Restore runbook (operator)
 
 1. Obtain the NDJSON: reassemble the day's KV parts per the manifest in
-   BACKUPS.md, or `GET /api/operator/export` with the operator token.
+   BACKUPS.md, or `GET /api/operator/export` with the export token.
+   For a DO-native restore, first arm the restore token for the incident
+   (`wrangler secret put ROOM_RESTORE_TOKEN --env production` on the
+   owning script) and delete it again when the restore completes.
 2. Replay into a new store. From the nightly KV copy,
    `node scripts/restore-room-backup.mjs --kv <YYYY-MM-DD> --to <new sqlite path>`
    checks each part's sha256 and the whole file's sha256 against the manifest
@@ -112,9 +139,43 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
 (The request-body endpoint runbook applies only to exports under the 64 MiB
 cap: confirm the DO store is empty — the endpoints refuse a non-empty store
 with 409 — then POST the NDJSON with
-`Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
-backup, use the KV-native endpoint above (once deployed) with the backup's
-key instead.)
+`Authorization: Bearer <ROOM_RESTORE_TOKEN>`. For the current over-cap
+backup, use the KV-native endpoint above with the backup's key instead.)
+
+## Corrupt-projection maintenance procedure (operator)
+
+A room whose stored projection no longer parses does **not** block boot
+(#4126): the node server quarantines the room — the boot log carries a
+`corrupt projection quarantined: room <id> (...)` line and the record is
+readable as `store.corruptRoomReports()` — while every healthy room boots
+and serves. The corrupt room's own reads keep failing loudly until it is
+repaired. A `projection_checkpoints` row that no longer parses is ignored
+the same way: rebuilds fall back to a full event-history replay.
+
+1. **Repair in-server first.** With the server up, run the operator
+   projection repair (`POST /api/operator/projection/plan`, then
+   `.../execute` with the plan's digests): it rebuilds the room's
+   materialisation from its journal without touching events or
+   checkpoints, and clears the room's patrol park. The quarantine record
+   clears on the next repair pass once the bytes parse again.
+2. **Maintenance connection (only when the in-server door cannot run).**
+   The writer fence refuses writes from a raw connection by design; the
+   sanctioned escape hatch is to register the writer function on your
+   maintenance connection, then make the one targeted repair:
+
+   ```js
+   import { DatabaseSync } from "node:sqlite";
+   import { registerWriter } from "../server/writer-fence.mjs";
+   const db = new DatabaseSync("<store path>");
+   registerWriter(db);
+   // Exactly one targeted fix, e.g. drop a torn checkpoint so the next
+   // boot replays the full history:
+   db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run("<room id>");
+   db.close();
+   ```
+
+   Never edit `events`. If the journal itself is torn, the room's path is
+   the restore runbook above, not SQL surgery.
 
 ## What was deliberately not done
 
@@ -124,5 +185,7 @@ key instead.)
   (above); it is an endpoint, not a manual runbook procedure.
 - No automated production restore drill: rehearsing against the live DO
   would risk the live room. The Miniflare drill in
-  `cloudflare/store.check.mjs` and the 2026-10-07 file-replay rehearsal are
-  the standing proofs instead.
+  `cloudflare/store.check.mjs`, the 2026-10-07 file-replay rehearsal, and
+  the production-scale KV restore test in
+  `tests/restore-from-backup.test.js` (2026-10-16, above) are the
+  standing proofs instead.

@@ -16,6 +16,7 @@
 import { getTier } from "./autonomy-tiers.mjs";
 import { claimUpdatedAt } from "./work-claims.mjs";
 import { isRunningSession, sessionRecord } from "../src/work-item-session.js";
+import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 export const FLEET_STATES = Object.freeze(["removed", "halted", "read_only", "over_budget", "paused", "waiting_for_you", "stuck", "working", "idle"]);
 const ACTIVE_CLAIM_STATES = new Set(["claimed", "in_progress", "blocked"]);
@@ -45,8 +46,13 @@ function lastEventsByActor(db, roomId, actorIds) {
   const latest = db.prepare(`SELECT json_extract(body,'$.actorId') AS actor, max(sequence) AS seq FROM events
     WHERE room_id=? GROUP BY actor`).all(roomId).filter(row => actorIds.includes(row.actor));
   if (!latest.length) return new Map();
-  const rows = db.prepare(`SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.at') AS at
-    FROM events WHERE room_id=? AND sequence IN (${latest.map(() => "?").join(",")})`).all(roomId, ...latest.map(row => row.seq));
+  // One sequence per agent that has acted: chunked, because the Worker's SQL
+  // takes at most 100 binds and a long-lived room passes 99 agents.
+  const rows = [];
+  for (const chunk of sqlChunks(latest.map(row => row.seq))) {
+    rows.push(...db.prepare(`SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.at') AS at
+      FROM events WHERE room_id=? AND sequence IN (${sqlPlaceholders(chunk)})`).all(roomId, ...chunk));
+  }
   const bySeq = new Map(rows.map(row => [row.seq, row]));
   return new Map(latest.map(row => [row.actor, bySeq.get(row.seq) ?? null]));
 }
@@ -149,14 +155,16 @@ export function fleetScope(state, viewerId) {
 
 // Rows for every agent the scope allows. `room` is store.room(roomId) so the
 // caller controls the single projection read.
-export function fleetRows(store, roomId, room, { memberIds = null } = {}) {
+export function fleetRows(store, roomId, room, { memberIds = null, boardList = null } = {}) {
   const { state } = room;
   const nowMs = store.now();
   const agents = Object.values(state.members ?? {})
     .filter(member => member && member.kind === "agent" && (!memberIds || memberIds.includes(member.id)))
     .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   let claims = [];
-  try { claims = store.workClaims?.list?.(roomId) ?? []; } catch { claims = []; }
+  // boardList: a caller's per-request memoized board list (PERF-10X L4) —
+  // when supplied, the rows share the board the caller already decoded.
+  try { claims = (boardList ? boardList(roomId) : store.workClaims?.list?.(roomId)) ?? []; } catch { claims = []; }
   const lastEvents = lastEventsByActor(store.db, roomId, agents.map(member => member.id));
   const wakes = wakeState(store.db, roomId);
   return agents.map(member => {
@@ -220,7 +228,7 @@ export function fleetFor(store, auth, roomId) {
 }
 
 // The calling agent's own summary for room_orient (`you`).
-export function fleetSelf(store, roomId, room, memberId) {
-  const [row] = fleetRows(store, roomId, room, { memberIds: [memberId] });
+export function fleetSelf(store, roomId, room, memberId, { boardList = null } = {}) {
+  const [row] = fleetRows(store, roomId, room, { memberIds: [memberId], boardList });
   return row ? { state: row.state, badges: row.badges, budget: row.budget } : null;
 }

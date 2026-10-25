@@ -17,8 +17,11 @@
 //   board claim  — not invalidated (no premiseFlag, not supersededBy),
 //                  state "unclaimed", kind "work", every dependsOn done,
 //                  and (when a viewer is named) the viewer may write claims.
-//   public task  — the facade packet's claim.state is "unclaimed" (no
-//                  submitted receipt, no live owner after lease release).
+//   public task  — the facade packet's own claimable verdict (#3707):
+//                  claim.state "unclaimed" AND the submission deadline
+//                  has not passed. claim.state alone is the weaker rule
+//                  the facade moved past — it offers tasks the claim
+//                  operation refuses with 409 (#3879).
 // Work items are not a separate source: decision #10 migrated them onto
 // the board (server/work-item-board.mjs), so an accepted work item IS a
 // board claim here — one definition, no dual-source divergence.
@@ -84,6 +87,29 @@ function viewerMayClaim(state, viewerId) {
   return mayWriteWorkClaims({ member: { ...member, id: viewerId }, ownerId: state?.room?.ownerId ?? null });
 }
 
+// Per-request board-list memo (PERF-10X L4, Lane 3 item #3): one decoded
+// board per request, shared by every consumer in that request. The board
+// list is the expensive read (a full SELECT + JSON decode of every claim
+// row), and the composite reads (orient / activation-pack / context) each
+// used to decode it two to three times — once directly, once through
+// AvailableWork, and once again through next-actions / the fleet badge.
+// The memo is lazy (nothing is listed until a consumer asks), scoped to
+// the object the caller creates, and never outlives it: builders create
+// one when the caller did not supply one, so a memo can never go stale
+// across requests. A failed list memoizes as an empty board, matching
+// every consumer's own catch-to-empty behaviour today.
+export function memoizeBoardList(store) {
+  const cache = new Map();
+  return roomId => {
+    if (!cache.has(roomId)) {
+      let board = [];
+      try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
+      cache.set(roomId, board);
+    }
+    return cache.get(roomId);
+  };
+}
+
 // All available board items from a board the caller already listed —
 // orientation builders list the board once for their own-claims sections,
 // and a list() read is the expensive part (needs-me measured 80-175ms at
@@ -105,10 +131,11 @@ export function availableClaimsFromBoard(board, roomId, { viewerId = null, state
 // #5) with no second source to diverge or double-count. The `now`
 // option is accepted for caller compatibility and no longer consulted:
 // board availability is a property of the stored rows.
-export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50 } = {}) {
+export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50, boardList = null } = {}) {
   const { state } = store.room(roomId);
   let board = [];
-  try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
+  if (boardList) board = boardList(roomId);
+  else try { board = store.workClaims?.list?.(roomId) ?? []; } catch { board = []; }
   const claims = availableClaimsFromBoard(board, roomId, { viewerId, state });
   return { items: claims.slice(0, limit), total: claims.length };
 }
@@ -117,31 +144,36 @@ export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50
 // orientation surfaces have carried since #3020 (plus source/claimAction).
 // buildOrient and buildActivationPack both consume this — one definition,
 // so the two surfaces cannot diverge again.
-export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 50 } = {}) {
+export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 50, boardList = null } = {}) {
   let board = [];
-  try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return []; }
+  if (boardList) board = boardList(roomId);
+  else try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return []; }
   let state = null;
   try { state = store.room(roomId)?.state ?? null; } catch { state = null; }
   return availableClaimsFromBoard(board, roomId, { viewerId, state }).slice(0, limit);
 }
 
-// Cross-room public pool: published public-work tasks whose packet claim
-// state is "unclaimed". Scans the facade's own paginated list so the
-// availability classification stays the facade's (packet()).
+// Cross-room public pool: published public-work tasks the facade itself
+// calls claimable. Scans the facade's own paginated list so the
+// availability classification stays the facade's (packet()). The scan
+// always walks the whole pool: total is the pool-wide claimable count
+// (the availableWorkInRoom contract), not the limit-capped page size.
 export function availablePublicTasks(store, { limit = 50 } = {}) {
   const facade = store.publicWorkClaims;
   if (!facade?.list) return { items: [], total: 0 };
   const items = [];
+  let total = 0;
   let after = "";
-  while (items.length < limit) {
+  for (;;) {
     const page = facade.list({ limit: 100, after });
     const tasks = page?.tasks ?? [];
     for (const packet of tasks) {
-      if (packet?.claim?.state === "unclaimed") items.push(publicTaskItem(packet));
-      if (items.length >= limit) break;
+      if (packet?.claimable !== true) continue;
+      total += 1;
+      if (items.length < limit) items.push(publicTaskItem(packet));
     }
     if (!page?.nextCursor || tasks.length === 0) break;
     after = page.nextCursor;
   }
-  return { items, total: items.length };
+  return { items, total };
 }

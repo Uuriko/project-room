@@ -20,7 +20,7 @@
 .inbox-thread-depth-5 { margin-left: 80px; }
 .inbox-thread-depth-6 { margin-left: 96px; }
 @media (max-width: 940px) {
-  .app-shell:has(#workspace-nav:not([hidden])) { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
+  .app-shell:has(> #workspace-nav:not([hidden])) { padding-bottom: calc(4.5rem + env(safe-area-inset-bottom)); }
 }
 .join-page { max-width: 34rem; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
 .join-card { background: var(--card, #fff); border: 1px solid var(--border, #e2e2e2); border-radius: 12px; padding: 1.5rem; }
