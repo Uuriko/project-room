@@ -143,6 +143,11 @@ function securityTxtResponse(request, url, contact) {
 }
 
 export function classifyEdgePath(pathname) {
+  // DOOR-CURE-3: /offers is server-rendered by the Durable Object from
+  // the live published set (like /receipts), so the edge must not claim
+  // it as a static asset. The /room/offers alias keeps the static path
+  // via roomMarketingPath below (alias-door divergence, D1 row 37).
+  if (pathname === '/offers') return null;
   if (pathname === '/.well-known/security.txt' || pathname === '/room/.well-known/security.txt') return 'security-txt';
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);

@@ -1,7 +1,22 @@
 /* Keep authentication usable in small windows and with a phone keyboard. */
 #auth-panel.auth-panel {
-  width: min(100% - 2rem, 25rem);
+  width: min(100% - 2rem, 56rem);
   margin: clamp(1rem, 5vh, 3rem) auto 2rem;
+}
+.landing-split { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(16rem, 24rem); gap: var(--space-5); align-items: start; }
+.landing-demo { margin: 0 0 var(--space-4); padding: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--card); }
+.landing-demo h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); }
+.landing-kicker { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--text-sm); }
+.landing-demo p { margin: 0 0 var(--space-3); color: var(--muted); }
+.landing-log { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: grid; gap: var(--space-3); }
+.landing-log li { display: grid; gap: var(--space-1); }
+.landing-who { color: var(--text); font-weight: 600; }
+.landing-actions { display: flex; flex-wrap: wrap; gap: var(--space-3); align-items: center; }
+.landing-actions .button { min-height: 44px; display: inline-flex; align-items: center; text-decoration: none; }
+.static-hero .landing-demo { margin-top: var(--space-4); }
+@media (max-width: 800px) {
+  .landing-split { grid-template-columns: minmax(0, 1fr); }
+  #auth-panel.auth-panel { width: min(100% - 2rem, 28rem); }
 }
 #auth-panel .signin-logo { display: block; margin: 0 auto var(--space-3); border-radius: var(--radius-lg); }
 #auth-panel #auth-title { margin-bottom: var(--space-5); }

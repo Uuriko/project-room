@@ -228,8 +228,9 @@ export function createNeedsAttentionCard(options) {
     try {
       // Independent authorized reads overlap instead of waiting in sequence.
       // Promise.all also observes both failures if either read rejects first.
+      const ownerRollup = !hasRoomState || viewer().owner;
       let [report, queue] = await Promise.all([
-        client.needsAttention(cursor, { includeShadow: includeShadow() }),
+        ownerRollup ? client.needsAttention(cursor, { includeShadow: includeShadow() }) : null,
         hasRoomState ? client.request(client.path("/access-requests?status=pending")) : null,
       ]);
       if (!owns(ticket, session, generation)) return;

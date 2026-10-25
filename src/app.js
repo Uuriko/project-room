@@ -35,6 +35,7 @@ import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { pauseHeaderModel, renderPauseHeader } from "./agent-pause-header.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
@@ -42,6 +43,7 @@ import { createNeedsAttentionCard, installMemberPermissions } from "./needs-atte
 import { createOwnerCockpit } from "./owner-cockpit.js";
 // JDOT-MEMBER-PERMS-UI end
 import { mountUpdates } from "./updates-ui.js";
+import { renderStatusLines, STATUS_LINE_POLL_MS } from "./status-lines.js";
 import { installReminders } from "./reminders.js";
 import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
@@ -59,10 +61,119 @@ import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
 import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
-import { paintClaimChat } from "./board-ui.js";
+import { paintClaimChat, claimUpdateText, collapseClaimUpdates } from "./board-ui.js";
+import { partitionConversation, readRoomTabsFlag, receiptEntries, updateLine, updatesLabel } from "./room-tabs.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 import "./entry-started.js";
+
+const CONNECTED_STREAM = "Connected to room service · no peer read or processing receipt";
+const RECONNECTING_EXPLANATION = "Connection interrupted · reconnecting; displayed history may be stale";
+
+export function connectionView({ online = true, streamText = "" } = {}) {
+  const signedOut = /^Not connected · (account )?sign.in required$/.test(streamText);
+  if (online === false) return { visible: "Offline", explanation: "Offline", state: "other", interrupted: true };
+  const reconnecting = /^(Reconnecting|Connection interrupted)/.test(streamText);
+  if (reconnecting) return { visible: "Reconnecting", explanation: RECONNECTING_EXPLANATION, state: "other", interrupted: true };
+  const connected = streamText === CONNECTED_STREAM;
+  const interrupted = /^(Connection interrupted|Room service unavailable|Reconnecting)/.test(streamText);
+  return { visible: connected ? "Connected" : streamText, explanation: streamText, state: connected ? "connected" : signedOut ? "signed-out" : "other", interrupted };
+}
+
+export function composerNotices({ delivery = "", interruption = "" } = {}, event, next = {}) {
+  if (event === "send-start") return { delivery: "", interruption };
+  if (event === "send-success") return { delivery: next.delivery ?? delivery, interruption: "" };
+  if (event === "interrupted") return { delivery, interruption: next.interruption ?? interruption };
+  return { delivery, interruption };
+}
+
+export function presenceRefreshOn({ event, hadDrop = false } = {}) {
+  if (event === "online") return true;
+  return event === "stream-connected" && hadDrop === true;
+}
+
+export function slashFocusesSearch(event, { inField = false, dialogOpen = false } = {}) {
+  if (!event || event.key !== "/" || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.keyCode === 229) return false;
+  return !inField && !dialogOpen;
+}
+
+export function composerShortcut(event) {
+  if (!event || event.repeat || event.isComposing || event.keyCode === 229) return false;
+  if (!event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return false;
+  return event.code === "KeyC" || event.key === "C" || event.key === "c";
+}
+
+export function applyMessageRoving(list) {
+  if (!list?.querySelectorAll) return;
+  const rows = [...list.querySelectorAll(":scope > .message")];
+  if (!rows.length) {
+    if (list.tabIndex === -1) list.tabIndex = 0;
+    return;
+  }
+  let current = rows.findIndex(row => Number(row.tabIndex) === 0);
+  if (current < 0 && typeof document !== "undefined") current = rows.findIndex(row => row.contains?.(document.activeElement));
+  if (current < 0) current = 0;
+  list.tabIndex = -1;
+  for (const [index, row] of rows.entries()) {
+    row.tabIndex = index === current ? 0 : -1;
+    for (const node of row.querySelectorAll?.(["a", "button", "summary", "input", "textarea", "select"].join(", ")) ?? []) node.tabIndex = -1;
+  }
+}
+
+export function onMessageListKey(event, list) {
+  const key = event?.key;
+  const action = key === "ArrowDown" ? "next" : key === "ArrowUp" ? "previous" : key === "Enter" ? "open" : "";
+  if (!action || !list?.querySelectorAll) return false;
+  const active = event.target;
+  if (active?.matches?.(["input", "textarea", "select"].join(",")) || active?.isContentEditable) return false;
+  const rows = [...list.querySelectorAll(":scope > .message")];
+  if (!rows.length) return false;
+  const index = rows.findIndex(row => row === active || row.contains?.(active));
+  if (index < 0) return false;
+  if (action === "open") {
+    if (active !== rows[index]) return false;
+    const more = rows[index].querySelector?.("details.message-more, .message-more");
+    if (more) {
+      event.preventDefault();
+      more.open = true;
+      const summary = more.querySelector?.("summary") ?? more;
+      summary.tabIndex = 0;
+      summary.focus?.();
+      return true;
+    }
+    const button = rows[index].querySelector?.("[data-message-action]");
+    if (!button) return false;
+    event.preventDefault();
+    button.tabIndex = 0;
+    button.focus?.();
+    return true;
+  }
+  const target = action === "next" ? Math.min(rows.length - 1, index + 1) : Math.max(0, index - 1);
+  event.preventDefault();
+  for (const [i, row] of rows.entries()) row.tabIndex = i === target ? 0 : -1;
+  rows[target].focus?.();
+  return true;
+}
+
+export function installSkipToComposer(doc = globalThis.document) {
+  if (!doc?.querySelector || doc.querySelector("#skip-to-composer")) return doc?.querySelector?.("#skip-to-composer") ?? null;
+  const link = doc.createElement("a");
+  link.id = "skip-to-composer";
+  link.className = "skip-link";
+  link.href = "#message-input";
+  link.textContent = uiText("a11y.skipComposer");
+  link.setAttribute("aria-keyshortcuts", "Alt+Shift+C");
+  const skip = doc.querySelector("#skip-link");
+  if (skip?.insertAdjacentElement) skip.insertAdjacentElement("afterend", link);
+  else (doc.body ?? doc.documentElement)?.prepend?.(link);
+  doc.querySelector("#message-input")?.setAttribute?.("aria-keyshortcuts", "Alt+Shift+C");
+  link.addEventListener?.("click", event => {
+    event.preventDefault();
+    doc.querySelector("#message-input")?.focus?.();
+  });
+  return link;
+}
+
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
 
@@ -127,6 +238,7 @@ $("#skip-link").addEventListener("click", event => {
     : "#auth-title";
   $(target).focus();
 });
+installSkipToComposer(document);
 const setText = (selector, text) => { const node = $(selector); if (node.textContent !== text) node.textContent = text; };
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
 function consumeInvitationFragment() {
@@ -325,6 +437,14 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+let roomTab = "conversation";
+let conversationFolded = false;
+let roomTabUpdates = 0;
+let roomUpdatesOpen = false;
+let foldedUpdateMessages = [];
+let receiptsLoadedFor = "";
+let receiptsFlight = "";
+let syncBoardPanel = () => {};
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -377,6 +497,8 @@ let roomActionsContext = null;
 // roster (memberId -> { pausedAt, reason }); armedRemoval is the one agent whose
 // Remove button is waiting for its confirming second click.
 let agentPauses = new Map(), armedRemoval = null, memberActionBusy = false;
+let pauseHeaderArmed = false, pauseHeaderFetched = null;
+let statusLineKey = "", statusLineTimer = null;
 const invitation = {
   phase: "idle", version: 0, secret: null, preview: null, redemptionId: null,
   opener: null, openerSelection: null
@@ -401,6 +523,27 @@ let roomFilesByMessage = new Map();
 const messageFileDownloads = new Map();
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
+// DESIGN-UPGRADE begin. Flag designUpgrade. Inbox mounts in the topbar.
+// The UI module loads only after GET /design-upgrade says this room is on.
+let designUpgradeHandle = null;
+let designUpgradeToken = 0;
+function queueDesignUpgrade() {
+  const token = ++designUpgradeToken;
+  designUpgradeHandle?.teardown();
+  designUpgradeHandle = null;
+  const roomId = state?.room?.id;
+  const generation = roomGeneration;
+  if (!roomId || !session?.member?.id) return;
+  client.request(client.path("/design-upgrade")).then(flag => {
+    if (token !== designUpgradeToken || state?.room?.id !== roomId || roomGeneration !== generation) return;
+    if (!flag?.enabled) return;
+    return import("./design-upgrade-ui.js").then(mod => {
+      if (token !== designUpgradeToken || state?.room?.id !== roomId || roomGeneration !== generation) return;
+      designUpgradeHandle = mod.mountDesignUpgrade({ client });
+    });
+  }).catch(() => {});
+}
+// DESIGN-UPGRADE end
 const client = new RoomClient({
   accountClient,
   auditView: "activity",
@@ -426,6 +569,7 @@ const client = new RoomClient({
     catchUpBoundary = Number.isSafeInteger(snapshot.catchUpCursor) ? Math.max(snapshot.cursor, snapshot.catchUpCursor) : snapshot.cursor;
     roomGeneration = client.generation;
     const roomId = state.room?.id ?? identity.roomId;
+    if (presenceBoundary) queueDesignUpgrade();
     if (roomId !== activeChannelRoomId) { activeChannelRoomId = roomId; restoreActiveChannel(); }
     const roomTitle = state.room?.title ?? roomId;
     $("#room-title").textContent = roomTitle;
@@ -512,6 +656,10 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    roomTab = "conversation"; conversationFolded = false; roomTabUpdates = 0; roomUpdatesOpen = false; foldedUpdateMessages = [];
+    receiptsLoadedFor = ""; receiptsFlight = "";
+    syncRoomTabs();
+    queueDesignUpgrade();
     pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
@@ -601,6 +749,8 @@ const client = new RoomClient({
     for (const id of ["work-options", "connection-details", "rb-history-section", "rb-involving-section", "decision-section", "usage-panel", "people-panel"]) $(`#${id}`).open = false;
     $("#room-about").open = true;
     agentPauses = new Map(); armedRemoval = null;
+    pauseHeaderArmed = false; pauseHeaderFetched = null;
+    stopStatusLines();
     $("#message-delivery").replaceChildren(); $("#message-delivery").hidden = true;
     setFormStatus($("#new-work-status"), ""); setFormStatus($("#action-error"), ""); setFormStatus($("#composer-status"), ""); setFormStatus($("#room-about-status"), ""); briefReconcileNote = "";
     $("#action-dialog").close(); $("#new-work-form").hidden = true; $("#reply-bar").hidden = true;
@@ -1347,20 +1497,29 @@ const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(chara
 const recordHref = (kind, id) => `#pr-record/${kind}/${encodeURIComponent(id)}`;
 const workDomId = id => recordDomId("work", id);
 const workHref = id => recordHref("work", id);
-function setConnectionStatus(text) {
-  const normalized = /^(Reconnecting|Connection interrupted)/.test(text)
-    ? "Connection interrupted · reconnecting; displayed history may be stale"
-    : text;
+let lastStreamStatus = "";
+let browserOnline = typeof navigator === "undefined" || navigator.onLine !== false;
+let sawStreamDrop = false;
+function paintConnectionStatus() {
+  const view = connectionView({ online: browserOnline, streamText: lastStreamStatus });
   const status = $("#connection-status");
+  if (!status) return;
   const wasInterrupted = status.dataset.interrupted === "true";
-  status.dataset.interrupted = String(/^(Connection interrupted|Room service unavailable|Reconnecting)/.test(normalized));
-  const connected = normalized === "Connected to room service · no peer read or processing receipt";
-  const visible = connected ? "Connected" : normalized;
-  status.dataset.state = connected ? "connected"
-    : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
-  if (status.textContent !== visible) status.textContent = visible;
-  $("#connection-explanation").textContent = normalized;
-  if (state && wasInterrupted !== (status.dataset.interrupted === "true")) queueMicrotask(() => { if (state) render(); });
+  status.dataset.interrupted = String(view.interrupted);
+  status.dataset.state = view.state;
+  if (status.textContent !== view.visible) status.textContent = view.visible;
+  const explanation = $("#connection-explanation");
+  if (explanation) explanation.textContent = view.explanation;
+  if (/^(Reconnecting|Connection interrupted|Room service unavailable)/.test(lastStreamStatus)) sawStreamDrop = true;
+  if (state && wasInterrupted !== view.interrupted) queueMicrotask(() => { if (state) render(); });
+  if (!view.interrupted && view.state === "connected" && presenceRefreshOn({ event: "stream-connected", hadDrop: sawStreamDrop })) {
+    sawStreamDrop = false;
+    queueMicrotask(() => { if (state) void refreshPresenceStates(); });
+  }
+}
+function setConnectionStatus(text) {
+  lastStreamStatus = text;
+  paintConnectionStatus();
 }
 function accountRoomCreateFailure(error) {
   if (["email_unverified", "pilot_limit"].includes(error?.code)) return uiText(`error.${error.code}`);
@@ -1966,8 +2125,42 @@ function renderContent(selector, html) {
   container.innerHTML = html; container._content = html;
   restoreDisclosures(container, saved);
 }
+function stopStatusLines() {
+  if (statusLineTimer !== null) clearInterval(statusLineTimer);
+  statusLineTimer = null;
+  statusLineKey = "";
+  const root = $("#status-lines");
+  if (!root) return;
+  root.replaceChildren();
+  root.hidden = true;
+}
+function syncStatusLines() {
+  const root = $("#status-lines");
+  if (!root || !state?.room?.id || !session) return;
+  const key = [client.generation, state.room.id].join(":");
+  if (statusLineKey === key) return;
+  if (statusLineTimer !== null) clearInterval(statusLineTimer);
+  statusLineKey = key;
+  const generation = client.generation, roomId = state.room.id;
+  const pull = () => {
+    client.request(client.path("/status-lines")).then(view => {
+      if (generation !== client.generation || state?.room?.id !== roomId) return;
+      renderStatusLines(root, view?.lines);
+    }).catch(error => {
+      if (generation !== client.generation || state?.room?.id !== roomId) return;
+      if (error?.status === 404) {
+        if (statusLineTimer !== null) clearInterval(statusLineTimer);
+        statusLineTimer = null;
+        renderStatusLines(root, []);
+      }
+    });
+  };
+  pull();
+  statusLineTimer = setInterval(pull, STATUS_LINE_POLL_MS);
+}
 function render() {
   ownerOffersUI.sync();
+  syncStatusLines();
   conversation = conversationIndex(state.messages);
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   // R350-n1: a seat whose identity signed out for good can't read a direct message.
@@ -1979,6 +2172,7 @@ function render() {
   setText("#presence-count", `${active.length} ${active.length === 1 ? "member" : "members"}`);
   const railCtx = { workItems: state.workItems, messages: state.messages, now: Date.now() };
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
+  syncAgentPauseHeader(ownerView);
   const adminControl = m => !ownerView || m.id === state.room.ownerId || m.active === false ? "" : `<p class="form-hint">Room admins can invite and manage members. Ownership stays with you.</p><button type="button" class="text-button" data-member-admin="${esc(m.id)}"${memberActionBusy ? " disabled" : ""}>${m.permissions.includes("manage_members") ? "Remove admin role" : "Make room admin"}</button>`;
   // H4: agents that joined through a room link arrive with no permissions, so
   // they never appear as assignees. The click handler leaves owner-connected
@@ -2294,6 +2488,125 @@ function renderTyping(typists) {
   el.textContent = `${who} ${names.length + extra === 1 ? "is" : "are"} typing…`;
   el.hidden = false;
 }
+function roomTabsOn() {
+  return readRoomTabsFlag(globalThis.location?.search ?? "", globalThis.sessionStorage ?? null);
+}
+function placeBoardPanel(inWork) {
+  const panel = $("#board-panel");
+  const pane = $("#room-work-pane");
+  const dialog = $("#board-dialog");
+  if (!panel || !pane || !dialog) return;
+  if (inWork) {
+    if (dialog.open) dialog.close();
+    if (panel.parentElement !== pane) pane.append(panel);
+    if (!panel.open) panel.open = true;
+    syncBoardPanel();
+    return;
+  }
+  if (panel.parentElement !== dialog) dialog.append(panel);
+}
+function paintFoldedUpdates(list) {
+  list.replaceChildren();
+  const members = state?.members ?? {};
+  for (const message of foldedUpdateMessages) {
+    const row = document.createElement("li");
+    row.textContent = updateLine(message, members);
+    list.append(row);
+  }
+  for (const group of collapseClaimUpdates(state?.eventLog)) {
+    const row = document.createElement("li");
+    row.textContent = claimUpdateText(group.event, members);
+    list.append(row);
+  }
+}
+function syncRoomTabs() {
+  const on = Boolean(state) && roomTabsOn();
+  const tab = on ? roomTab : "conversation";
+  const nav = $("#room-tabs");
+  if (nav) nav.hidden = !on;
+  document.body.classList.toggle("room-tab-work", on && tab === "work");
+  document.body.classList.toggle("room-tab-receipts", on && tab === "receipts");
+  for (const id of ["conversation", "work", "receipts"]) {
+    const button = $(`#room-tab-${id}`);
+    if (button) button.setAttribute("aria-selected", id === tab ? "true" : "false");
+  }
+  const conversation = !on || tab === "conversation";
+  const chip = $("#room-updates");
+  const label = conversation ? updatesLabel(roomTabUpdates) : "";
+  if (chip) chip.hidden = !label;
+  const button = $("#room-updates-chip");
+  if (button && label) {
+    button.textContent = label;
+    button.setAttribute("aria-expanded", roomUpdatesOpen ? "true" : "false");
+  }
+  const lines = $("#room-updates-list");
+  if (lines) {
+    const open = Boolean(conversation && label && roomUpdatesOpen);
+    lines.hidden = !open;
+    if (open) paintFoldedUpdates(lines);
+  }
+  const workPane = $("#room-work-pane");
+  const receiptsPane = $("#room-receipts-pane");
+  if (workPane) workPane.hidden = !(on && tab === "work");
+  if (receiptsPane) receiptsPane.hidden = !(on && tab === "receipts");
+  placeBoardPanel(on && tab === "work");
+  if (on && tab === "receipts") void loadRoomReceipts();
+}
+function selectRoomTab(next) {
+  if (next !== "conversation" && next !== "work" && next !== "receipts") return;
+  roomTab = next;
+  if (!state || next === "conversation") renderMessages();
+  else syncRoomTabs();
+}
+async function loadRoomReceipts() {
+  const roomId = state?.room?.id;
+  const status = $("#room-receipts-status");
+  const list = $("#room-receipts-list");
+  const retry = $("#room-receipts-retry");
+  if (!roomId || !status || !list) return;
+  if (receiptsLoadedFor === roomId || receiptsFlight === roomId) return;
+  receiptsFlight = roomId;
+  status.textContent = uiText("tabs.receipts.loading");
+  list.replaceChildren();
+  if (retry) retry.hidden = true;
+  try {
+    const response = await fetch(`/api/public/receipts?room=${encodeURIComponent(roomId)}&limit=20`, { credentials: "same-origin" });
+    const body = await response.json().catch(() => null);
+    if (state?.room?.id !== roomId) return;
+    if (!response.ok || !body) throw new Error("receipts");
+    const entries = receiptEntries(body);
+    receiptsLoadedFor = roomId;
+    status.textContent = entries.length ? "" : uiText("tabs.receipts.empty");
+    for (const entry of entries) {
+      const row = document.createElement("li");
+      const link = document.createElement("a");
+      link.href = entry.href;
+      link.textContent = entry.title;
+      row.append(link);
+      list.append(row);
+    }
+  } catch {
+    if (state?.room?.id !== roomId) return;
+    receiptsLoadedFor = "";
+    status.textContent = uiText("tabs.receipts.error");
+    if (retry) retry.hidden = false;
+  } finally {
+    if (receiptsFlight === roomId) receiptsFlight = "";
+  }
+}
+$("#room-tabs")?.addEventListener("click", event => {
+  const tab = event.target.closest("[data-room-tab]");
+  if (!tab || !$("#room-tabs").contains(tab)) return;
+  selectRoomTab(tab.dataset.roomTab);
+});
+$("#room-updates-chip")?.addEventListener("click", () => {
+  roomUpdatesOpen = !roomUpdatesOpen;
+  syncRoomTabs();
+});
+$("#room-receipts-retry")?.addEventListener("click", () => {
+  receiptsLoadedFor = "";
+  void loadRoomReceipts();
+});
 function renderMessages() {
   const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
   const sameView = list.dataset.view === view;
@@ -2316,7 +2629,20 @@ function renderMessages() {
   if (owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
   const showPager = !currentThreadId && owesHistory;
   const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
-  const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
+  let { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
+  const foldConversation = Boolean(state) && !currentThreadId && roomTabsOn() && roomTab === "conversation";
+  conversationFolded = foldConversation;
+  if (foldConversation) {
+    const part = partitionConversation(allMessages, state.members);
+    const again = windowTimeline(part.messages, shownLimit);
+    messages = again.messages;
+    hiddenCount = again.hidden;
+    foldedUpdateMessages = part.updates;
+    roomTabUpdates = part.updates.length + collapseClaimUpdates(state.eventLog).length;
+  } else {
+    foldedUpdateMessages = [];
+    roomTabUpdates = 0;
+  }
   const revealing = timelineRevealing; timelineRevealing = false;
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
   const pageScroll = list.scrollHeight <= list.clientHeight;
@@ -2381,7 +2707,7 @@ function renderMessages() {
   // messages, and hiding older cards would make that work unreachable from the
   // timeline (the crowded reconnect gate pins all 81 cards). Cards older than the
   // first shown message simply render above it, after the pager.
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
+  const workEntries = currentThreadId || !state || foldConversation ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const ordered = [];
   // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
   const mentionable = state ? Object.values(state.members) : [];
@@ -2480,7 +2806,8 @@ function renderMessages() {
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
   const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  if (!messages.length && !workEntries.length && !(foldConversation && roomTabUpdates)) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  else if (!messages.length && !workEntries.length) list.replaceChildren();
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -2527,7 +2854,9 @@ function renderMessages() {
     const now = settledFocus.getBoundingClientRect();
     if (now.top < 0 || now.bottom > innerHeight) settledFocus.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
+  applyMessageRoving(list);
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
+  syncRoomTabs();
 }
 function draftFeedbackHTML(message) {
   if (!message.proposal) return "";
@@ -3773,7 +4102,13 @@ async function submit(form, fn, { failureHint } = {}) {
     && generation === client.generation;
   form.setAttribute("aria-busy", "true"); controls.forEach(e => e.disabled = true);
   const local = form.querySelector(".form-status");
-  if (form.id === "message-form") setComposerError("");
+  if (form.id === "message-form") {
+    const delivery = $("#message-delivery");
+    if (delivery && composerNotices({ delivery: delivery.hidden ? "" : "saved", interruption: drafts.get(composerKey()).error }, "send-start").delivery === "") {
+      delivery.replaceChildren();
+      delivery.hidden = true;
+    }
+  }
   else if (local) setFormStatus(local, "");
   try { await fn(current); }
   catch (error) {
@@ -4236,7 +4571,10 @@ $("#message-form").addEventListener("submit", e => {
     try {
       if (sharedRequest) {
         await humanExperience.submit(sendingCommand, askRoom, stagedFileIds);
-        if (generation === client.generation && state) maybeShowGuestUpgradeHint();
+        if (generation === client.generation && state) {
+          setComposerError(composerNotices({ interruption: drafts.get(composerKey()).error }, "send-success").interruption);
+          maybeShowGuestUpgradeHint();
+        }
         return;
       }
       await client.send(sendingCommand);
@@ -4249,7 +4587,10 @@ $("#message-form").addEventListener("submit", e => {
     const delivery = $("#message-delivery");
     const savedMessageId = data.messageId || sendingCommand.id;
     const visible = state.messages.some(message => message.id === savedMessageId);
-    delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
+    const savedCopy = visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending");
+    const notices = composerNotices({ interruption: drafts.get(composerKey()).error }, "send-success", { delivery: savedCopy });
+    setComposerError(notices.interruption);
+    delivery.replaceChildren(document.createTextNode(notices.delivery));
     const link = document.createElement("a");
     link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
     delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
@@ -4435,6 +4776,7 @@ function expandTimelineTo(id) {
     renderMessages();
   }
 }
+$("#message-list").addEventListener("keydown", event => { onMessageListKey(event, $("#message-list")); });
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-timeline-earlier]")) {
     if (client.loadHistory()) return; // older history first; it renders on arrival
@@ -4659,6 +5001,29 @@ $("#mention-list")?.addEventListener("mousedown", e => {
   e.preventDefault();
   chooseMention(state.members[option.dataset.mentionId]);
 });
+function formatPauseSince(ms) {
+  const date = new Date(ms);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString([], { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+}
+function pauseHeaderMembers() {
+  return Object.values(state.members).filter(member => member.id !== session.member.id && member.id !== state.room.ownerId);
+}
+function syncAgentPauseHeader(ownerView) {
+  const root = $("#agent-pause-header");
+  if (!root) return;
+  if (!ownerView) pauseHeaderArmed = false;
+  renderPauseHeader(root, pauseHeaderModel({
+    owner: ownerView,
+    members: ownerView ? pauseHeaderMembers() : [],
+    paused: [...agentPauses.values()],
+    armed: pauseHeaderArmed
+  }), formatPauseSince);
+  if (ownerView && pauseHeaderFetched !== client.generation) {
+    pauseHeaderFetched = client.generation;
+    void refreshAgentPauses();
+  }
+}
 // C6: the owner's pause roster is one read when People opens and after each
 // action; the row buttons never appear for non-owners or inactive agents.
 async function refreshAgentPauses() {
@@ -4778,6 +5143,43 @@ $("#presence-list").addEventListener("click", async e => {
     if (generation === client.generation && state) notice(error.message || "Action not saved. Try again.", true);
   } finally { memberActionBusy = false; }
 });
+$("#agent-pause-header")?.addEventListener("click", async event => {
+  const resume = event.target.closest("[data-pause-resume]");
+  const keep = event.target.closest("[data-pause-keep]");
+  const all = event.target.closest("[data-pause-all]");
+  if (!resume && !keep && !all) return;
+  event.preventDefault();
+  if (!state || !session || !ownsRoomActions(null) || state.room.ownerId !== session.member.id || !can("manage_members")) return;
+  if (keep) { pauseHeaderArmed = false; render(); $("#agent-pause-all")?.focus(); return; }
+  if (all && !pauseHeaderArmed) { pauseHeaderArmed = true; render(); $("#agent-pause-all")?.focus(); return; }
+  if (memberActionBusy) return;
+  const model = pauseHeaderModel({ owner: true, members: pauseHeaderMembers(), paused: [...agentPauses.values()], armed: true });
+  const targets = resume ? [resume.dataset.pauseResume] : model.targets;
+  if (!resume && targets.length === 0) { pauseHeaderArmed = false; notice(uiText("pause.header.empty")); render(); return; }
+  memberActionBusy = true;
+  const generation = client.generation;
+  const post = (action, memberId) => client.request(client.path("/agent-pause"), { method: "POST", data: { action, memberId, requestId: crypto.randomUUID(), ...(action === "pause" ? { reason: null } : {}) } });
+  try {
+    let view = null;
+    if (resume) view = await post("resume", targets[0]);
+    else for (const memberId of targets) {
+      view = await post("pause", memberId);
+      if (generation !== client.generation || !state) return;
+      if (view?.paused) agentPauses = new Map(view.paused.map(row => [row.memberId, row]));
+    }
+    if (generation !== client.generation || !state) return;
+    if (view?.paused) agentPauses = new Map(view.paused.map(row => [row.memberId, row]));
+    pauseHeaderArmed = false;
+    if (resume) {
+      const resumed = state.members[targets[0]]?.displayName;
+      if (resumed) notice(uiText("pause.header.resumed", { name: resumed }));
+    } else notice(uiText("pause.header.done"));
+    render();
+    $("#agent-pause-all")?.focus();
+  } catch (error) {
+    if (generation === client.generation && state) { notice(error.message || uiText("pause.header.failed"), true); render(); }
+  } finally { memberActionBusy = false; }
+});
 $("#presence-list").addEventListener("click", e => {
   if (!shouldAddressPresenceClick(e.target)) return;
   const row = e.target.closest(".presence-member");
@@ -4852,10 +5254,32 @@ document.addEventListener("keydown", event => {
 let attentionKeyPrefix = null;
 let attentionKeyTimer = 0;
 document.addEventListener("keydown", event => {
+  if (composerShortcut(event) && !$("#main").hidden) {
+    event.preventDefault();
+    $("#message-input")?.focus();
+    return;
+  }
   if ($("#main").hidden || event.target?.closest?.("dialog")) return;
   if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.keyCode === 229) return;
   if (event.target?.closest?.("input, textarea, select, [contenteditable]")) { attentionKeyPrefix = null; return; }
+  if (slashFocusesSearch(event)) {
+    event.preventDefault();
+    $("#message-search")?.focus();
+    return;
+  }
   const key = event.key?.toLowerCase();
+  if (pauseHeaderArmed && event.key === "Escape") {
+    pauseHeaderArmed = false;
+    if (state) render();
+    $("#agent-pause-all")?.focus();
+    event.preventDefault();
+    return;
+  }
+  if (event.shiftKey && key === "p" && $("#agent-pause-header") && !$("#agent-pause-header").hidden) {
+    event.preventDefault();
+    $("#agent-pause-all")?.click();
+    return;
+  }
   if (attentionKeyPrefix === "g") {
     attentionKeyPrefix = null;
     clearTimeout(attentionKeyTimer);
@@ -7027,6 +7451,15 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pageshow", event => {
   if (event.persisted && document.visibilityState === "visible") void refreshPresenceStates();
 });
+window.addEventListener("online", () => {
+  browserOnline = true;
+  paintConnectionStatus();
+  if (presenceRefreshOn({ event: "online" })) void refreshPresenceStates();
+});
+window.addEventListener("offline", () => {
+  browserOnline = false;
+  paintConnectionStatus();
+});
 $("#presence-list").addEventListener("click", event => {
   if (event.target.closest("[data-refresh-presence]")) void refreshPresenceStates();
 });
@@ -7904,7 +8337,10 @@ const ready = (async () => {
     $("#board-panel").open = true;
     board.sync();
   };
-  $("#tasks-board-open").addEventListener("click", openBoard);
+  $("#tasks-board-open").addEventListener("click", opener => {
+    if (state && roomTabsOn()) { selectRoomTab("work"); return; }
+    openBoard(opener);
+  });
   // JDOT-COH-NAV begin
   $("#board-close").addEventListener("click", () => { navigationBoardEpoch++; $("#board-dialog").close(); $("#board-panel").open = false; });
   $("#board-dialog").addEventListener("cancel", () => { navigationBoardEpoch++; });
@@ -7934,9 +8370,22 @@ const ready = (async () => {
     ? { id: "board", label: "Board", words: "tasks board claims ci review lease land", always: true } : entry);
   const priorChoose = chooseRoomAction;
   // JDOT-COH-NAV begin
-  chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
+  chooseRoomAction = id => {
+    if (id === "board") {
+      const opener = roomActionsContext?.opener;
+      closeRoomActions(false);
+      if (state && roomTabsOn()) { selectRoomTab("work"); return; }
+      openBoard(opener);
+      return;
+    }
+    priorChoose(id);
+  };
   // JDOT-COH-NAV end
-  const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
+  syncBoardPanel = () => { board.sync(); };
+  const paintChat = () => {
+    if (!state || conversationFolded) return;
+    paintClaimChat(state, $("#message-list"));
+  };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
   const priorMessages = renderMessages;
@@ -7948,4 +8397,4 @@ return ready;
 }
 
 // Cached HTML from before the entry split still names this module directly.
-if (document.querySelector('script[type="module"][src$="/src/app.js"]')) startApp();
+if (typeof document !== "undefined" && document.querySelector('script[type="module"][src$="/src/app.js"]')) startApp();

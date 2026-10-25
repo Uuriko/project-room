@@ -42,6 +42,21 @@
    floor follows the door — a bare .button renders ~34px tall. */
 #join-request-submit { min-height: 44px; }
 h1.join-brand { text-align: center; margin: 0 0 1.5rem; font-size: 1rem; font-weight: 650; opacity: .85; }
+/* Nav and list links, and a link that is the whole paragraph, are 24px
+   targets. A link inside a sentence stays inline. */
+.join-page nav a,
+.join-page li a,
+.join-page a.block-link {
+  display: inline-block;
+  max-width: 100%;
+  min-height: 24px;
+}
+.join-page .form-hint a:not(.block-link) { padding-block: 4px; }
+@media (pointer: coarse) {
+  .join-page nav a,
+  .join-page li a,
+  .join-page a.block-link { min-height: var(--control-min-target-coarse); }
+}
 /* BU-14: claim-card headings carry tabindex="-1" as the programmatic focus
    target after board re-renders (src/board-ui.js focus stick) and for j/k
    keyboard card navigation (src/board-keyboard.mjs). Keep the ring visible

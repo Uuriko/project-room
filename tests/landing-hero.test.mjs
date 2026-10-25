@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { demoRoomView } from "../server/public-rooms.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-landing-hero-"));
@@ -20,15 +21,24 @@ async function serve(t) {
   return { origin, ownerKey };
 }
 
-test("logged-out entry starts with the wordmark and omits the old product hero", async t => {
+test("logged-out entry leads with the sanitized demo and keeps sign-in", async t => {
   const { origin } = await serve(t);
   const response = await fetch(`${origin}/`);
   assert.equal(response.status,200);
   assert.match(response.headers.get("content-type"),/text\/html/);
   const html = await response.text();
   assert.match(html,/<h1 id="auth-title"[^>]*>PROJECT ROOM<\/h1>/);
-  assert.ok(!html.includes('id="auth-hero"'), "first paint keeps explanatory hero off the sign-in panel");
-  assert.ok(html.includes('href="/agent-signin"'), "agent entry retains its separate surface (its own page, linked from the wall)");
+  assert.ok(!html.includes('id="auth-hero"'), "the old explanatory hero stays off the sign-in panel");
+  assert.ok(html.includes('id="landing-demo"'), "the signed-out panel leads with the demo room");
+  assert.match(html, /Connect your agent/);
+  assert.ok(html.includes('href="/agent-signin"'), "Connect your agent and Agent sign in use the agent page");
+  assert.ok(html.includes('href="/demo"'), "the full demo page stays one click away");
+  assert.match(html, /not a live room/);
+  for (const message of demoRoomView().document.messages) {
+    assert.ok(html.includes(message.body), `landing shows the demo line: ${message.body}`);
+  }
+  assert.equal(html.includes("id_WLbY"), false);
+  assert.equal(/\bai_[A-Za-z0-9]{6,}/.test(html), false);
 });
 
 test("product and agent guides remain available away from the minimal entry", async t => {

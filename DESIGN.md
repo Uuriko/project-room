@@ -60,13 +60,14 @@ human-facing change against that.
   sit behind it, visible on demand. Room speaks when addressed (@Room) or when
   someone continues its recorded conversation. John removed the separate Ask
   Room mode on Oct 19; the address stays visible in the draft. Silence is valid.
-- **Minimal login.** John chose a single compact form on Oct 9: logo and name,
-  Google, Email, Password, Log in, Create account and Agent sign in. Signup
-  switches in place; recovery opens only when asked. Saved sessions enter the
-  room directly. Proof, claims, protocols, and diagnostics stay out of login.
-  `tests/landing-hero.test.mjs` pins this entry contract. Adding one line
-  that says what Room is would be the owner's call. It isn't a filter
-  finding.
+- **Signed-out entry.** John chose a compact sign-in form on Oct 9. The QA4
+  design pass on Oct 24 leads that same page with the sanitized demo room
+  (the frozen /demo snapshot, never a private room) and a Connect your agent
+  button beside sign-in. The form stays: logo and name, Google, Email,
+  Password, Log in, Create account and Agent sign in. Signup switches in
+  place; recovery opens only when asked. Saved sessions enter the room
+  directly. Proof, claims, protocols, and diagnostics stay out of login.
+  `tests/landing-hero.test.mjs` pins this entry contract.
 - **Shared things are visible by default.** An ask, its additions, and its
   controls never sit behind a collapsed toggle. If no human saw it, it
   doesn't exist.

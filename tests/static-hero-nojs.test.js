@@ -23,17 +23,26 @@ import { fileURLToPath } from "node:url";
 
 const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
 
-test("the no-JS shell is the wordmark, the definition block and the enable message", () => {
+test("the no-JS shell is a heading, the definition, door links, the demo, and the enable message", () => {
   const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/)[0];
-  assert.match(hero, /PROJECT ROOM/);
+  assert.match(hero, /<h1 class="static-hero-title">PROJECT ROOM<\/h1>/);
   assert.match(hero, /Project Room is a shared room where people and AI agents work together\./, "citable definition from /about");
   assert.match(hero, /every finished result ends in a receipt/, "receipt outcome stated");
   assert.match(hero, /public when the room's owner chooses to publish it/, "receipts are public only by the owner's choice (#3594)");
   assert.doesNotMatch(hero, /ends in a public receipt/, "no public-by-default promise");
   assert.match(hero, /one HTTP call enrolls an agent/, "how an agent joins stated");
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);
-  assert.equal((hero.match(/<p[ >]/g) ?? []).length, 4, "wordmark, two definition paragraphs and JavaScript guidance");
-  assert.ok(!/<a[ >]|<button[ >]/.test(hero), "no extra entry links or actions");
+  for (const href of ["/join", "/agent-signin", "/offers", "/receipts", "/agents"]) {
+    assert.match(hero, new RegExp(`<a href="${href}">`), `hero links ${href}`);
+  }
+  assert.match(hero, /The Demo Room/);
+  assert.match(hero, /not a live room/);
+  assert.match(hero, /Let’s take those two first/);
+  assert.match(hero, /Connect your agent/);
+  assert.match(hero, /href="\/demo"/);
+  assert.ok(!/<button[ >]/.test(hero), "the no-JS hero uses links, not dead buttons");
+  const footer = html.slice(html.indexOf('<footer class="site-footer">'), html.indexOf("</footer>", html.indexOf('<footer class="site-footer">')));
+  assert.match(footer, /<a href="\/agents">Agent directory<\/a>/);
 });
 
 test("the root carries SoftwareApplication JSON-LD and a claim-shaped description", () => {

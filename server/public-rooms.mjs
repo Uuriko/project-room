@@ -59,6 +59,9 @@ body{margin:0;background:#10141a;color:#e8eef6;font:17px/1.55 system-ui,sans-ser
 main{max-width:42rem;margin:0 auto;padding:2rem 1.25rem 3rem}
 h1{font-size:clamp(1.6rem,5vw,2.2rem);line-height:1.15;letter-spacing:-.03em}
 a{color:#8eb6ff}
+/* Nav, lists, headings, and a link that is the whole paragraph. A link inside a sentence stays inline. */
+nav a,li a,h2 a,a.block-link{display:inline-block;max-width:100%;min-height:24px}
+p a:not(.block-link){padding-block:4px}
 .card{border-top:1px solid #2a3340;padding:1rem 0;overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .meta{color:#9aa6b2;font-size:.9rem}
 footer{margin-top:2rem;border-top:1px solid #2a3340;padding-top:1rem;color:#9aa6b2}
@@ -86,7 +89,7 @@ function head({ title, description, path }) {
 </head>`;
 }
 
-const shell = heading => `<body><header><p><a href="/">Project Room</a>${heading ? ` · ${heading}` : ""}</p></header>`;
+const shell = heading => `<body><header><nav><a href="/">Project Room</a>${heading ? ` · ${heading}` : ""}</nav></header>`;
 
 const ROOM_RECEIPT_PAGE = 5;
 const ROOM_RECEIPT_SCAN = 200;
@@ -166,7 +169,7 @@ ${shell(`<a href="/templates">Templates</a>`)}
 <p>${escapeHtml(room.purpose)}</p>
 <p class="meta">${room.counts.humans} ${room.counts.humans === 1 ? "person" : "people"} · ${room.counts.agents} ${room.counts.agents === 1 ? "agent" : "agents"}</p>
 ${nameLine}
-<p><a href="${escapeHtml(join.href)}">${join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
+<p><a class="block-link" href="${escapeHtml(join.href)}">${join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
 <details><summary>Join with your AI</summary>
 <p>Paste these instructions into your agent. It will help you join and, if you choose, connect your computer.</p>
 <button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
@@ -175,17 +178,17 @@ ${nameLine}
 
 
 <p>Joining does not share your computer. You choose that separately.</p>
-<p><a href="/r/${escapeHtml(slug)}.json">Agent join instructions</a></p>
+<p><a class="block-link" href="/r/${escapeHtml(slug)}.json">Agent join instructions</a></p>
 </details>
 <script>${SETUP_COPY_SCRIPT}</script>
 <h2>Open tasks</h2>
 ${taskLine}
 <h2>Public receipts</h2>
 ${receiptLine}
-${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
-<p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
+${room.receiptsEnabled ? `<p><a class="block-link" href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
+<p><a class="block-link" href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
-<footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+<footer><nav><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></nav></footer>
 </body></html>`;
   return { html, document };
 }
@@ -208,7 +211,7 @@ const DEMO_ROOM = Object.freeze({
     Object.freeze({ from: "Leo", body: "Please prioritize the mobile issues. We have a release coming up." }),
     Object.freeze({ from: "Room", body: "I am grouping the reports and checking which ones affect mobile. I have included Leo's priority." }),
     Object.freeze({ from: "Room", body: "Here is the triage summary: three bugs, five questions and four requests. Two mobile bugs should come first." }),
-    Object.freeze({ from: "Mara", body: "Looks good. Let's take those two first." }),
+    Object.freeze({ from: "Mara", body: "Looks good. Let’s take those two first." }),
   ]),
   tasks: Object.freeze(["Fix the two mobile bugs", "Draft the weekly changelog"]),
   receipts: Object.freeze(["Support triage summary", "Changelog draft"]),
@@ -254,7 +257,7 @@ ${taskLine}
 ${receiptLine}
 <p><a href="${escapeHtml(start)}">Start your own room</a> — sign in to join a real room.</p>
 </main>
-<footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+<footer><nav><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></nav></footer>
 </body></html>`;
   return { html, document };
 }
@@ -273,7 +276,7 @@ ${shell("")}
 <p>Each template starts a room with a purpose, channels, and a few tasks. Sign in to create it. Your messages stay in the room.</p>
 ${cards}
 </main>
-<footer><a href="/agents">Agent directory</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+<footer><nav><a href="/agents">Agent directory</a><p>${LEGAL_FOOTER_LINKS}</p></nav></footer>
 </body></html>`;
   return {
     html,
@@ -294,9 +297,9 @@ ${shell(`<a href="/templates">Templates</a>`)}
 <p>${escapeHtml(template.purpose)}</p>
 <h2>Starter tasks</h2>
 <ul>${tasks}</ul>
-<p><a href="${escapeHtml(start)}">Start this room</a></p>
+<p><a class="block-link" href="${escapeHtml(start)}">Start this room</a></p>
 </main>
-<footer><a href="/templates">All templates</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+<footer><nav><a href="/templates">All templates</a><p>${LEGAL_FOOTER_LINKS}</p></nav></footer>
 </body></html>`;
   return {
     html,
@@ -324,10 +327,10 @@ export function agentDirectoryView(store, { ref = "", cursor = null } = {}) {
 <h2>${escapeHtml(agent.name)}</h2>
 <p>${escapeHtml(agent.description)}</p>
 <p class="meta">${agent.skills.length ? escapeHtml(agent.skills.join(", ")) : "No skills listed"} · ${agent.receiptCount} public ${agent.receiptCount === 1 ? "receipt" : "receipts"} · ${agent.roomCount} public ${agent.roomCount === 1 ? "room" : "rooms"}</p>
-<p><a href="${escapeHtml(agent.inviteHref)}">Invite to my room</a></p>
-<p><a href="${escapeHtml(reportHref("agent", agent.agentId))}">Report</a></p>
+<p><a class="block-link" href="${escapeHtml(agent.inviteHref)}">Invite to my room</a></p>
+<p><a class="block-link" href="${escapeHtml(reportHref("agent", agent.agentId))}">Report</a></p>
 </article>`).join("") : `<p>No agents have published a public card yet.</p>`;
-  const more = nextHref ? `<p><a href="${escapeHtml(nextHref)}">More agents</a></p>` : "";
+  const more = nextHref ? `<p><a class="block-link" href="${escapeHtml(nextHref)}">More agents</a></p>` : "";
   const html = `${head({ title: "Project Room — agents", description, path: "/agents" })}
 ${shell(`<a href="/templates">Templates</a>`)}
 <main>
@@ -336,7 +339,7 @@ ${shell(`<a href="/templates">Templates</a>`)}
 ${list}
 ${more}
 </main>
-<footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
+<footer><nav><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></nav></footer>
 </body></html>`;
   return {
     html,
