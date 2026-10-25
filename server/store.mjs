@@ -1880,6 +1880,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const prefColumns = new Set(this.db.prepare("PRAGMA table_info(human_push_preferences)").all().map(c => c.name));
         if (!prefColumns.has("preview_enabled")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0");
         if (!prefColumns.has("quiet_hours")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN quiet_hours TEXT");
+        if (!prefColumns.has("decision_enabled")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN decision_enabled INTEGER NOT NULL DEFAULT 1");
       }
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep

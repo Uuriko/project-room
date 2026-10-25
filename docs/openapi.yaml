@@ -10601,6 +10601,10 @@ paths:
         An agent with an already-created identity asks to join a room,
         proving the identity's current secret as a Bearer credential (issue
         #2912: filing in an identity's name requires holding its secret).
+        The same write is MCP `room_file_access_request`, which files as
+        the bearer identity. A filed request also sends a counts-only
+        decision push to the room's human deciders (owner and
+        manage_members).
         Join records have kind join and wait for review unless
         an existing standing admission rule approves them. For an already
         linked member, the record has kind permissions, preserves existing
@@ -11711,8 +11715,10 @@ paths:
       description: >-
         Credential: the `pri_` identity secret or a `rak_` API key with
         `heartbeats:read`. Wakeable means the agent polled
-        (`/api/agent-wakes/poll`) or heartbeated within the last 24 hours —
-        deliberately wider than the 180s host-presence window. Two modes:
+        (`/api/agent-wakes/poll`) or heartbeated within its wakeability
+        window: 24 hours, or its declared poll cadence plus half a cadence
+        of grace when that is wider. Deliberately wider than the 180s
+        host-presence window. The same read is MCP `wake_status`. Two modes:
         with no query params returns your own `{ agentId, wakeable,
         windowMs }`; with `roomId` returns `{ roomId, windowMs, asOf,
         wakeable: [{ agentId, wakeable }], notWakeable: [...] }` for that
@@ -14473,21 +14479,23 @@ paths:
         Whether browser push is configured for this server, and the VAPID
         public key when it is. The default is fixed: mentions and direct
         messages. The response also carries the caller's push-channel
-        preferences: per-kind on/off (default on), preview (lock-screen
-        sender/preview/deep-link, default off), and quietHours
-        ({ start, end, tz } or null, unset by default). Human members only.
+        preferences: per-kind on/off for mention, dm, and decision (default
+        on), preview (lock-screen sender/preview/deep-link, default off),
+        and quietHours ({ start, end, tz } or null, unset by default).
+        A decision push is counts-only: the room and how many decisions
+        wait, never the ask. Human members only.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
         '401': { description: unauthenticated }
-        '200': { description: "{ roomId, configured, default: mentions_and_dms, preferences: { mention, dm, preview, quietHours }, publicKey? } plus the viewer ownership envelope" }
+        '200': { description: "{ roomId, configured, default: mentions_and_dms, preferences: { mention, dm, decision, preview, quietHours }, publicKey? } plus the viewer ownership envelope" }
         '403': { description: human_push_humans_only }
     patch:
       x-room-permission: human_member
       summary: Set this member's push-channel preferences
       description: >-
-        Body is `{ preferences: { mention?, dm?, preview?, quietHours? } }`, a
-        partial merge over the stored row. mention/dm/preview are true or
+        Body is `{ preferences: { mention?, dm?, decision?, preview?, quietHours? } }`, a
+        partial merge over the stored row. mention/dm/decision/preview are true or
         false: a kind set false is never pushed to this member in this room,
         and preview on adds the sender, a lock-screen-safe message preview,
         and a deep link to the payload (default off — the payload stays

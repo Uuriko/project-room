@@ -21,6 +21,7 @@
 // full permissions, rak_ API key with the heartbeats:read scope, or a
 // room access token) — no duplicated credential logic.
 
+import { HeartbeatError } from "../agent-heartbeats.mjs";
 import { createHeartbeatActor, translateWith, requiredScope } from "../agent-plugin-routes.mjs";
 import { identityIdsForWakeRoom, isWakeRoomMember } from "../wake-identity-resolution.mjs";
 
@@ -47,41 +48,40 @@ export function authenticateWakeStatus(ctx) {
   return heartbeatActor(ctx.req, requiredScope("heartbeats:read"));
 }
 
+// Shared by GET /api/wake-status and the wake_status MCP tool. roomId null
+// is the caller's own status. Throws HeartbeatError on a room refusal so
+// both doors translate the same codes.
+export function wakeStatusDocument(store, auth, roomId) {
+  if (roomId === null || roomId === undefined) {
+    const status = store.agentHeartbeats.wakeStatusOf(auth.identityId);
+    return { agentId: status.agentId, wakeable: status.wakeable, windowMs: status.windowMs };
+  }
+  const now = store.now();
+  if (auth.roomId && auth.roomId !== roomId)
+    throw new HeartbeatError(403, "room_mismatch", "A room access key can only read its bound room");
+  if (!auth.roomId && !isRoomMember(store, roomId, auth.identityId, now))
+    throw new HeartbeatError(403, "room_membership_required", "Join the room to read its wake status");
+  const list = store.agentHeartbeats.wakeStatusListForRoom(roomId);
+  const members = new Set(roomMemberIdentityIds(store, roomId, now));
+  const wakeable = [], notWakeable = [];
+  for (const entry of list.wakeable) if (members.has(entry.agentId)) wakeable.push(coarsen(true)(entry));
+  for (const entry of list.notWakeable) if (members.has(entry.agentId)) notWakeable.push(coarsen(false)(entry));
+  const seen = new Set([...wakeable, ...notWakeable].map(entry => entry.agentId));
+  for (const identityId of members) {
+    if (!seen.has(identityId)) notWakeable.push(Object.freeze({ agentId: identityId, wakeable: false }));
+  }
+  return {
+    roomId, windowMs: list.windowMs, asOf: list.asOf,
+    wakeable: Object.freeze(wakeable), notWakeable: Object.freeze(notWakeable),
+  };
+}
+
 export async function readWakeStatus(ctx) {
   const auth = authenticateWakeStatus(ctx);
   ctx.rate(`wake-status-read:${auth.identityId}`, 120);
   return translateWith(ctx.reject)(async () => {
     const roomId = ctx.url.searchParams.get("roomId");
-    // Caller-only mode: your own wakeability, always allowed.
-    if (roomId === null) {
-      const status = ctx.store.agentHeartbeats.wakeStatusOf(auth.identityId);
-      return ctx.json(ctx.res, 200,
-        { agentId: status.agentId, wakeable: status.wakeable, windowMs: status.windowMs });
-    }
-    // Room mode: wakeability for the room's members. Room access keys are
-    // bound to their room; identity credentials must be members of it.
-    // Never-registered members read as not wakeable (null stamp).
-    const now = ctx.store.now();
-    if (auth.roomId && auth.roomId !== roomId)
-      ctx.reject(403, "room_mismatch", "A room access key can only read its bound room");
-    if (!auth.roomId && !isRoomMember(ctx.store, roomId, auth.identityId, now))
-      ctx.reject(403, "room_membership_required", "Join the room to read its wake status");
-    // CX5-FIX: room mode attributes activity per room — identity-level
-    // activity counts, room-scoped activity counts only for its own room.
-    const list = ctx.store.agentHeartbeats.wakeStatusListForRoom(roomId);
-    const members = new Set(roomMemberIdentityIds(ctx.store, roomId, now));
-    const wakeable = [], notWakeable = [];
-    for (const entry of list.wakeable) if (members.has(entry.agentId)) wakeable.push(coarsen(true)(entry));
-    for (const entry of list.notWakeable) if (members.has(entry.agentId)) notWakeable.push(coarsen(false)(entry));
-    // Members who never registered a host never polled: not wakeable too.
-    const seen = new Set([...wakeable, ...notWakeable].map(entry => entry.agentId));
-    for (const identityId of members) {
-      if (!seen.has(identityId)) notWakeable.push(Object.freeze({ agentId: identityId, wakeable: false }));
-    }
-    return ctx.json(ctx.res, 200, {
-      roomId, windowMs: list.windowMs, asOf: list.asOf,
-      wakeable: Object.freeze(wakeable), notWakeable: Object.freeze(notWakeable),
-    });
+    return ctx.json(ctx.res, 200, wakeStatusDocument(ctx.store, auth, roomId));
   })();
 }
 

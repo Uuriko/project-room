@@ -769,6 +769,15 @@
         "openWorldHint": false
       }
     },
+    "room_file_access_request": {
+      "inputSchema": "d5a9a5fdd3a5fc59",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_get_file": {
       "inputSchema": "08502609b54ff943",
       "annotations": {
@@ -1286,6 +1295,15 @@
       "inputSchema": "a97dd4e696fbdec2",
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "wake_status": {
+      "inputSchema": "04f9590decf55951",
+      "annotations": {
+        "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -2266,6 +2284,15 @@
       "inputSchema": "a97dd4e696fbdec2",
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "wake_status": {
+      "inputSchema": "04f9590decf55951",
+      "annotations": {
+        "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false

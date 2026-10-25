@@ -49,6 +49,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   bond_list: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/bonds" },
   heartbeat_set: { access: "write, T1 read-only tier or room member; hidden from guest", cost: WRITE, rest: "POST /api/agent-heartbeats" },
   heartbeat_get: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-heartbeats" },
+  wake_status: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/wake-status" },
+  room_file_access_request: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/access-requests" },
   heartbeat_ack: { access: "write, T1 read-only tier or room member; hidden from guest", cost: WRITE, rest: "POST /api/agent-heartbeats/ack" },
   wake_register: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-heartbeats (mode wakeable)" },
   wake_clear: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-heartbeats (mode pull-only)" },

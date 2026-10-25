@@ -87,6 +87,7 @@ test("rich-push preference columns converge on a pre-#1779 database", () => {
     assert.equal(prefs.dm, true, "the stored dm switch survives convergence");
     assert.equal(prefs.preview, false, "old rows read preview off (the privacy-contract default)");
     assert.equal(prefs.quietHours, null, "old rows read quiet hours as unset");
+    assert.equal(prefs.decision, true, "old rows read the decision class on (the class default)");
   } finally {
     reopened.close();
     rmSync(dir, { recursive: true, force: true });

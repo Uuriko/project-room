@@ -153,6 +153,20 @@ export const wakeRoomActivitySchema = `
     PRIMARY KEY(agent_id, room_id)
   );
 `;
+// Issue #3592: the raw cadence hint, kept apart from agent_push_configs.
+// BUILD-HEARTBEAT-CADENCE stores only the assigned cadence there (capped at
+// MAX_ASSIGNED_CADENCE_SECONDS), which can never widen the 24h wakeability
+// window. This table keeps the declaration the host actually sent so
+// wakeableWindowFor can still read it. Lazy, and outside
+// agentHeartbeatSchema, so verifySchema's DDL-text compare stays intact.
+// Presence and reachability keep using the assignment.
+export const declaredCadenceSchema = `
+  CREATE TABLE IF NOT EXISTS agent_declared_cadences (
+    agent_id TEXT NOT NULL, host_id TEXT NOT NULL,
+    cadence_seconds REAL NOT NULL, updated_at INTEGER NOT NULL,
+    PRIMARY KEY(agent_id, host_id)
+  );
+`;
 export const SCOPED_LISTENER_HOST_PATTERN = /^(?:rk_[a-f0-9]{64}|ak_[a-f0-9]{32})_/;
 export const isScopedListenerHostId = hostId =>
   typeof hostId === "string" && SCOPED_LISTENER_HOST_PATTERN.test(hostId);
@@ -409,12 +423,32 @@ export class AgentHeartbeats {
   // its longest declared check-in interval has run out. Missing-table
   // tolerant like the other read paths — a database without
   // agent_push_configs reads as no declarations.
+  // Idempotent DDL for the raw-hint table (no-op once it exists).
+  ensureDeclaredCadenceSchema() {
+    this.db.exec(declaredCadenceSchema);
+    return this;
+  }
+
+  // Slowest positive cadence across the raw-hint table and any legacy
+  // agent_push_configs value. The push-config column holds the assigned
+  // cadence on current writes (never above the 3600s ceiling, so it cannot
+  // widen wakeability) and the raw declaration on rows written before
+  // assignment existed. Missing tables read as no declaration.
   declaredCadenceOf(agentId) {
+    const stored = this._maxCadence(
+      "SELECT MAX(cadence_seconds) AS cadenceSeconds FROM agent_push_configs WHERE agent_id=?",
+      agentId);
+    const declared = this._maxCadence(
+      "SELECT MAX(cadence_seconds) AS cadenceSeconds FROM agent_declared_cadences WHERE agent_id=?",
+      agentId);
+    const values = [stored, declared].filter(value => typeof value === "number" && value > 0);
+    return values.length ? Math.max(...values) : null;
+  }
+
+  _maxCadence(sql, ...params) {
     try {
-      const row = this.db.prepare(
-        "SELECT MAX(cadence_seconds) AS cadenceSeconds FROM agent_push_configs WHERE agent_id=?")
-        .get(agentId);
-      return row?.cadenceSeconds ?? null;
+      const value = this.db.prepare(sql).get(...params)?.cadenceSeconds ?? null;
+      return typeof value === "number" && Number.isFinite(value) ? value : null;
     } catch (error) {
       if (!isMissingTable(error)) throw error;
       return null;
@@ -425,14 +459,22 @@ export class AgentHeartbeats {
   // slowest declared cadence. Agents with no declaration are absent;
   // agents whose hosts all store a null cadence map to null.
   declaredCadences() {
-    try {
-      return new Map(this.db.prepare(
-        "SELECT agent_id AS agentId, MAX(cadence_seconds) AS cadenceSeconds FROM agent_push_configs GROUP BY agent_id")
-        .all().map(row => [row.agentId, row.cadenceSeconds]));
-    } catch (error) {
-      if (!isMissingTable(error)) throw error;
-      return new Map();
-    }
+    const map = new Map();
+    const absorb = sql => {
+      try {
+        for (const row of this.db.prepare(sql).all()) {
+          const value = row.cadenceSeconds;
+          if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) continue;
+          const prev = map.get(row.agentId);
+          if (prev === undefined || value > prev) map.set(row.agentId, value);
+        }
+      } catch (error) {
+        if (!isMissingTable(error)) throw error;
+      }
+    };
+    absorb("SELECT agent_id AS agentId, MAX(cadence_seconds) AS cadenceSeconds FROM agent_push_configs GROUP BY agent_id");
+    absorb("SELECT agent_id AS agentId, MAX(cadence_seconds) AS cadenceSeconds FROM agent_declared_cadences GROUP BY agent_id");
+    return map;
   }
 
   // plan-wake-live: wakeable = the agent polled or heartbeated within
@@ -681,6 +723,27 @@ export class AgentHeartbeats {
       ON CONFLICT(agent_id, host_id) DO UPDATE SET
         cadence_seconds=excluded.cadence_seconds, updated_at=excluded.updated_at`)
       .run(agentId, hostId, cadence, at);
+    // The assignment above is what presence reads. Wakeability (#3592)
+    // needs the raw hint, which the ceiling would throw away: an explicit
+    // number records it, an explicit null clears it, and omission leaves
+    // the standing declaration in place (a bare heartbeat must not collapse
+    // the widened window back to 24h).
+    if (cadenceSeconds === null) {
+      try {
+        this.db.prepare("DELETE FROM agent_declared_cadences WHERE agent_id=? AND host_id=?")
+          .run(agentId, hostId);
+      } catch (error) {
+        if (!isMissingTable(error)) throw error;
+      }
+    } else if (typeof cadenceSeconds === "number") {
+      this.ensureDeclaredCadenceSchema();
+      this.db.prepare(`INSERT INTO agent_declared_cadences
+        (agent_id, host_id, cadence_seconds, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(agent_id, host_id) DO UPDATE SET
+          cadence_seconds=excluded.cadence_seconds, updated_at=excluded.updated_at`)
+        .run(agentId, hostId, cadenceSeconds, at);
+    }
     if (push) {
       this.db.prepare(`UPDATE agent_push_configs
         SET push_url=?, push_token=?, push_auth_json=?, push_failures=0, push_suspended=0, updated_at=?

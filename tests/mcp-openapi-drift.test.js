@@ -174,6 +174,12 @@ const ALLOW = {
       threadId: "'or reads one when threadId is set' — omitted lists threads (GET /api/rooms/{roomId}/peer-dms), set reads one (GET …/peer-dms/{threadId}, where it is required).",
     },
   },
+  room_file_access_request: {
+    // "Same write as POST /api/access-requests." The bearer is the filing identity.
+    narrowed: {
+      identityId: "Tool: 'The bearer is the filing identity; do not send an identityId.' API: identityId is required in the body and proved against the same secret.",
+    },
+  },
   wake_register: {
     // "Same store call as POST /api/agent-heartbeats with mode wakeable."
     fixed: { mode: "wakeable" },

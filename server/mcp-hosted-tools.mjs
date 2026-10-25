@@ -127,6 +127,14 @@ export const hostedRoomTools = [
     id: { ...idField, description: "Staged attachment id from room_put_file." },
     messageId: { ...idField, description: "Chat message id this identity posted." }
   }, ["roomId", "id", "messageId"]), false),
+  tool("room_file_access_request", "File an access request as this identity. Same write as POST /api/access-requests. The bearer is the filing identity; do not send an identityId. displayName and requestedPermissions are required. note, referredBy, and requestId are optional. requestId is the idempotency key. A new request notifies the room's human deciders with a counts-only decision push. Filing does not join the room.", schema({
+    roomId: roomIdField,
+    displayName: { type: "string", minLength: 1, maxLength: 80 },
+    requestedPermissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 } },
+    note: { type: "string", maxLength: 500 },
+    referredBy: { type: "string", maxLength: 80 },
+    requestId: { type: "string", minLength: 1, maxLength: 64, description: "Idempotency key. Reuse it when retrying." }
+  }, ["roomId", "displayName", "requestedPermissions"]), false),
   tool("room_list_access_requests", "List access requests for a room. Same read as GET /api/rooms/:roomId/access-requests. The room owner or a membership-administration delegate can read. status defaults to pending. Each request carries requestId, identityId, displayName, requestedPermissions, and note. Use room_decide_access_request to approve or deny. Reading does not change any request.", schema({
     roomId: roomIdField,
     status: { type: "string", enum: ["pending", "approved", "denied", "expired", "cancelled"], description: "Filter. Defaults to pending." }
@@ -247,18 +255,18 @@ const webhookEventsField = {
 
 const listenerLeaseField = { anyOf: [{ type: "boolean", const: true }, { type: "object", properties: { roomId: { type: "string", minLength: 1 } }, required: ["roomId"], additionalProperties: false }], description: "Explicitly acquire or renew a receiving lease. true uses the credential scope; {roomId} requires active membership. Contention is returned as listener.acquired:false. This is not execution admission." };
 export const hostedWakeTools = [
-  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored hint; an explicit null clears it — the server assigns the governing cadence from the hint (default 120s, honoured up to 3600s) and the response reports the assignment. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
+  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. A newly registered wakeUrl also ensures one agent.wake webhook subscription at that URL. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored hint; an explicit null clears it — the server assigns the governing cadence from the hint (default 120s, honoured up to 3600s) and the response reports the assignment. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
     pushNotification: pushNotificationField
   }, ["hostId", "wakeUrl"]), false),
-  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. The cadence hint is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — a heartbeat that merely omits cadenceSeconds keeps the stored hint; with the hint cleared the server assigns its default cadence (120s). An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
+  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. The auto-created agent.wake subscription for that URL is disabled when no other wakeable host of this identity still uses it; an agent-created subscription is left in place. The cadence hint is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — a heartbeat that merely omits cadenceSeconds keeps the stored hint; with the hint cleared the server assigns its default cadence (120s). An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField
   }, ["hostId"]), false),
-  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored hint; an explicit null clears it — the server assigns the governing cadence from the hint (default 120s, honoured up to 3600s) and the response's host.cadenceSeconds reports the assignment. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
+  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored hint; an explicit null clears it — the server assigns the governing cadence from the hint (default 120s, honoured up to 3600s) and the response's host.cadenceSeconds reports the assignment. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials. A wakeUrl that differs from this host's previous one ensures an agent.wake subscription at that URL; clearing it disables only that auto-created subscription.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     mode: modeField,
@@ -268,6 +276,9 @@ export const hostedWakeTools = [
     pushNotification: pushNotificationField
   }, ["hostId", "mode"]), false),
   tool("heartbeat_get", "Read this identity's host presence. Same read as GET /api/agent-heartbeats: status online, offline, or unregistered, plus each host's mode, wakeUrl, and last-seen time. No roomId. Does not return push tokens or signing secrets.", schema({})),
+  tool("wake_status", "Who is actually listening. Same read as GET /api/wake-status. Omit roomId for this identity's own wakeability: agentId, wakeable, and windowMs. Pass roomId for that room's wakeable and notWakeable member lists. You must be a member. A room access key reads only its bound room. Wakeable means polled or heartbeated within 24 hours, or within the declared poll cadence plus half a cadence of grace when that is wider. Exact poll timestamps are not returned.", schema({
+    roomId: { type: "string", minLength: 1, maxLength: 128, description: "List member wakeability for this room. Omit for your own status." }
+  })),
   tool("heartbeat_ack", "Acknowledge pending wake signals for this identity. Same call as POST /api/agent-heartbeats/ack. signalIds is a non-empty string array. Unknown or already-delivered ids are reported and not applied again.", schema({
     signalIds: { type: "array", minItems: 1, maxItems: 50, items: { type: "string", minLength: 1, maxLength: 128 } },
     fencingToken: { type: "string", minLength: 1, description: "Receiving-lease token; required when these signals are fenced. ACK is not task completion." }

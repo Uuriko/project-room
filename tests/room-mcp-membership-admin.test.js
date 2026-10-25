@@ -43,7 +43,7 @@ async function listTools(origin, secret) {
   return (await response.json()).result?.tools ?? [];
 }
 
-const ADMIN_TOOLS = ["room_list_access_requests", "room_decide_access_request", "room_create_agent_invite", "room_list_agent_invites", "room_revoke_agent_invite"];
+const ADMIN_TOOLS = ["room_file_access_request", "room_list_access_requests", "room_decide_access_request", "room_create_agent_invite", "room_list_agent_invites", "room_revoke_agent_invite"];
 
 test("owner mints, lists, and revokes agent invites over MCP", async t => {
   const { origin, store, rooms } = await serve(t);
@@ -90,6 +90,26 @@ test("non-owner member cannot mint invites or list access requests over MCP", as
   assert.ok(mint.body.error || mint.isError, "chat member has no invite grant");
   const list = await call(origin, "room_list_access_requests", { roomId: room.roomId }, guest.secret);
   assert.ok(list.body.error || list.isError, "chat member cannot read access requests");
+});
+
+test("an identity files its own access request over MCP", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Nia Cole");
+  const room = rooms.create(owner.secret, { roomId: "file-den", title: "File den", purpose: "File over MCP", kind: "personal", displayName: "Nia Cole" });
+  const requester = store.identities.create("Kit Arden");
+  const filed = await call(origin, "room_file_access_request", {
+    roomId: room.roomId, displayName: "Kit Arden", requestedPermissions: ["steer"], requestId: "file-kit-1"
+  }, requester.secret);
+  assert.equal(filed.isError, false, JSON.stringify(filed.body));
+  assert.equal(filed.value.identityId, requester.identityId);
+  assert.equal(filed.value.status, "pending");
+  const extra = await call(origin, "room_file_access_request", {
+    roomId: room.roomId, identityId: owner.identityId, displayName: "Kit Arden", requestedPermissions: ["steer"]
+  }, requester.secret);
+  assert.ok(extra.body.error || extra.isError, "identityId is not a tool argument");
+  const pending = await call(origin, "room_list_access_requests", { roomId: room.roomId }, owner.secret);
+  assert.equal(pending.value.requests.length, 1);
+  assert.equal(pending.value.requests[0].requestId, "file-kit-1");
 });
 
 test("owner lists and decides access requests over MCP", async t => {
