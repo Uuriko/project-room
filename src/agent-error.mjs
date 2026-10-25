@@ -597,8 +597,10 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Keep your saved connection and check existing access before creating another identity. An expired room token (rak_) recovers with your identity secret.",
+      hint: "No saved identity yet? Mint one first at POST /api/agent-identities — no room membership, invitation, or human account is required. With a saved identity, keep your connection and check existing access before creating another; an expired room token (rak_) recovers with your identity secret.",
       next: [
+        command("No saved identity yet? Mint one first: POST /api/agent-identities with {\"displayName\":\"...\"} and save the returned identityId, secret, and privateKey privately. No room membership, invitation, or human account is required — a minted identity alone can claim public work. Then retry with Authorization: Bearer <secret>."),
+        path("/llms.txt"),
         tool("room_check_access"),
         path("/api/agent-rooms"),
         path("/api/session"),
