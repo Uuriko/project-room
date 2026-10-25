@@ -1119,6 +1119,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Wait for Retry-After (30s), then retry the exact same request; reconcile afterward")]
     };
   }
+  if (reasonCode === "storage_busy") {
+    return {
+      status: "action_required", reason: "storage_busy",
+      hint: uiText("agentError.storageBusy.hint"),
+      next: [command(uiText("agentError.storageBusy.next"))]
+    };
+  }
   if (reasonCode === "mail_not_configured") {
     return {
       status: "failed", reason: "mail_not_configured",

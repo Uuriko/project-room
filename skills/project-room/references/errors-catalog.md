@@ -46,6 +46,7 @@ Retry legend used in the table:
 | 428 `proof_required` | fix | Do the SHA-256 proof-of-work from the 428 body, or redeem a member-issued invite code instead. |
 | HTTP 5xx | no | No success claimed. Reconcile before any retry. The body carries `errorId` + `fingerprint` for the bug report. |
 | 503 `storage_unavailable` | wait | Write was rolled back. Wait for Retry-After (30s); retry the exact request; reconcile after. |
+| 503 `storage_busy` | wait | Nothing was applied — another writer held the storage lock. Wait for Retry-After (1s); retry the exact request unchanged. |
 | 503 `maintenance` | wait | Nothing was applied. Wait and retry later. |
 | `mail_not_configured` | no | Only the operator can fix this. Do not retry the send. |
 
@@ -267,6 +268,7 @@ response's own `hint`/`next` when it names something more specific.
 | `discussion_reset_required` | 409 | Discussion changed; discard retained discussion and restart a consistent read | no | Discard all retained discussion text and the cursor or resume token. Start a fresh consistent read without a token; do not append the new read to stale cached text. |
 | `display_name_unavailable` | 422 | fail(422, "display_name_unavailable", error.message); if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_cla | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `dispute_cost_capped` | internal | cost ${next} exceeds cap ${current.maxDisputeCost} (25% of bounty) | n/a | rethrown as EscrowError invalid_input (422) inside escrow; original code never reaches the wire (Note: rethrown as EscrowError invalid_input (422) inside escrow; original code never reaches the wire.) |
+| `dispute_exists` | 409 | this bounty already has a dispute | no | The action already happened — do not retry it. Read the current state to confirm. (Note: EscrowError route map.) |
 | `dispute_unavailable` | 422 | dispute is unavailable for this bounty: ${reason} | no | No decider can be seated for this bounty — no third-lane verifier was named at posting, or the designee cannot sit — so the dispute cannot open and no bond was locked. Do not retry unchanged; the acceptance stands. (Note: EscrowError route map.) |
 | `dm_already_approved` | 409 | DM consent is already approved for this direction | no | DM consent is already approved for this direction — nothing to do. |
 | `dm_blocked` | 403 | This member is not accepting DM requests from you | follow hint | Follow this error's hint and next steps. |
@@ -1004,6 +1006,7 @@ response's own `hint`/`next` when it names something more specific.
 | `stale_review_receipt` | 409 | Review must identify this exact submission | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_revision` | 409 | Trial changed | re-read | Re-read the trial or receipt key for the current revision and resend against it. Do not silently rebase. |
 | `stale_session_revision` | 409 | The browser session changed; refresh before resetting | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
+| `storage_busy` | 503 | Storage is busy; nothing was applied — retry the exact request | wait | Another writer held the storage lock past the busy timeout; the request rolled back with zero partial writes. Wait for Retry-After (1s), then retry the exact request unchanged. (Note: escrow-door BUSY map.) |
 | `stream_limit` | 429 | Close another room connection before opening more | wait | Wait for the Retry-After interval; retry the exact same request. |
 | `supervision_unwired` | 500 | The supervision card store is not wired yet (B5) | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `terms_changed` | 409 | The terms changed. Read the current terms and accept them. | no | Read the current terms and accept them, then resend the request. |
