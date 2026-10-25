@@ -2899,9 +2899,13 @@ paths:
       description: >-
         Anonymous, counts-only weekly aggregates for the stranger door
         (no login): joins per public-directory-listed room (from the
-        member.added and member.joined_via_invitation events) and agent
-        identity mints (from agent_identities.created_at), bucketed by
-        Monday 00:00 America/Los_Angeles weeks, oldest first. Example:
+        member.added and member.joined_via_invitation events), bucketed by
+        Monday 00:00 America/Los_Angeles weeks, oldest first. The public
+        response omits identity mint counts. A room owner presenting a
+        room access token or account session receives those counts and
+        Cache-Control private, no-store. Everyone else receives
+        Cache-Control public, max-age=600; the aggregate is reused for
+        ten minutes per weeks value. Example:
         GET /api/public/door-funnel (the optional weeks query parameter
         is clamped to 1..12, default 12). Totals only: no member ids,
         handles, emails, identity links, or joiner data ever leave,
@@ -2936,7 +2940,9 @@ paths:
                         joins:
                           type: object
                           additionalProperties: { type: integer }
-                        mints: { type: integer }
+                        mints:
+                          type: integer
+                          description: Owner-authenticated read only. Omitted from the public response.
                   directory:
                     type: object
                     properties:

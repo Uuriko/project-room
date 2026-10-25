@@ -9,8 +9,11 @@
 //     server/access-review.mjs already derives per-member join times from;
 //   mints: agent_identities.created_at (INTEGER ms, NOT NULL), already used
 //     internally for time-windowed mint counts.
-// This module only aggregates those existing rows. No schema change, no
-// stored state, computed at request time over a window capped at 12 weeks.
+// This module only aggregates those existing rows. No schema change. The
+// aggregate is computed at request time over a window capped at 12 weeks
+// and reused for ten minutes per weeks value, so a public poll does not
+// rescan the event log on every request. Identity mint counts stay on the
+// cached aggregate and are returned only for an owner-authenticated read.
 //
 // Existence-hiding rules: counts only. No member id, identity id, display
 // name, or joiner data ever leaves; rooms appear only when they are already
@@ -40,6 +43,7 @@ export const DOOR_FUNNEL_SCHEMA = "project-room-door-funnel/1";
 export const DOOR_FUNNEL_MAX_WEEKS = 12;
 export const DOOR_FUNNEL_DEFAULT_WEEKS = 12;
 export const DOOR_FUNNEL_TIME_ZONE = "America/Los_Angeles";
+export const DOOR_FUNNEL_CACHE_MS = 10 * 60 * 1000;
 
 const JOIN_TYPES = Object.freeze(["member.added", "member.joined_via_invitation"]);
 const DAY_MS = 86_400_000;
@@ -179,41 +183,75 @@ export function computeDoorFunnel(db, { listedRooms = [], weeks = DOOR_FUNNEL_DE
   return out;
 }
 
+// One cache per store, keyed by the clamped weeks count. A fresh store (each
+// test fixture) starts empty; the long-lived room store reuses a result until
+// DOOR_FUNNEL_CACHE_MS has passed on the caller's clock.
+const funnelCache = new WeakMap();
+
+function cachedFunnel(store, count, now, compute) {
+  let bucket = funnelCache.get(store);
+  if (!bucket) {
+    bucket = new Map();
+    funnelCache.set(store, bucket);
+  }
+  const hit = bucket.get(count);
+  if (hit && now >= hit.at && now - hit.at < DOOR_FUNNEL_CACHE_MS) return hit.full;
+  const full = compute();
+  bucket.set(count, { at: now, full });
+  return full;
+}
+
+function withoutMints(full) {
+  return {
+    ...full,
+    weeks: full.weeks.map(week => {
+      const { mints: _mints, ...rest } = week;
+      return rest;
+    }),
+  };
+}
+
 // The store-facing read used by the HTTP route. The listed-room set and the
 // directory counts come from the public directory at request time — the
 // same already-public data GET /api/public/rooms/directory serves.
-export function readDoorFunnel(store, { weeks = DOOR_FUNNEL_DEFAULT_WEEKS, now = Date.now() } = {}) {
+// `includeMints` is the owner-authenticated read. The public read omits
+// global identity mint counts; both share the cached aggregate.
+export function readDoorFunnel(store, { weeks = DOOR_FUNNEL_DEFAULT_WEEKS, now = Date.now(), includeMints = false } = {}) {
   if (!store || !store.db) throw unavailable("a store with a db handle is required");
   if (!store.roomDirectory || typeof store.roomDirectory.list !== "function") {
     throw unavailable("the public room directory is not attached to this store");
   }
-  let listed;
-  try {
-    listed = [];
-    let after = null;
-    for (let page = 0; page < 20; page++) {
-      const result = store.roomDirectory.list({ after, limit: 100 });
-      listed.push(...(result?.rooms ?? []));
-      after = result?.nextCursor ?? null;
-      if (!after) break;
+  const count = clampDoorFunnelWeeks(weeks);
+  const full = cachedFunnel(store, count, now, () => {
+    let listed;
+    try {
+      listed = [];
+      let after = null;
+      for (let page = 0; page < 20; page++) {
+        const result = store.roomDirectory.list({ after, limit: 100 });
+        listed.push(...(result?.rooms ?? []));
+        after = result?.nextCursor ?? null;
+        if (!after) break;
+      }
+    } catch (error) {
+      if (error instanceof ServiceError) throw error;
+      throw unavailable(error?.message ?? String(error));
     }
-  } catch (error) {
-    if (error instanceof ServiceError) throw error;
-    throw unavailable(error?.message ?? String(error));
-  }
-  const weekRows = computeDoorFunnel(store.db, { listedRooms: listed, weeks, now });
-  return {
-    schema: DOOR_FUNNEL_SCHEMA,
-    generatedAt: new Date(now).toISOString(),
-    weeks: weekRows,
-    directory: {
-      listedRooms: listed.length,
-      totalMembers: listed.reduce((sum, room) => sum + (Number.isFinite(room?.memberCount) ? room.memberCount : 0), 0),
-      rooms: listed.map(room => ({ roomId: room.roomId, memberCount: room.memberCount })),
-    },
-    classifier: {
-      available: false,
-      reason: "No fleet marker exists in the join data (member kind, sponsor, or identity fields do not separate operator fleets from outside joiners), so joins are reported as totals only; no fleet/outside split is claimed.",
-    },
-  };
+    const weekRows = computeDoorFunnel(store.db, { listedRooms: listed, weeks: count, now });
+    return {
+      schema: DOOR_FUNNEL_SCHEMA,
+      generatedAt: new Date(now).toISOString(),
+      weeks: weekRows,
+      directory: {
+        listedRooms: listed.length,
+        totalMembers: listed.reduce((sum, room) => sum + (Number.isFinite(room?.memberCount) ? room.memberCount : 0), 0),
+        rooms: listed.map(room => ({ roomId: room.roomId, memberCount: room.memberCount })),
+      },
+      classifier: {
+        available: false,
+        reason: "No fleet marker exists in the join data (member kind, sponsor, or identity fields do not separate operator fleets from outside joiners), so joins are reported as totals only; no fleet/outside split is claimed.",
+      },
+    };
+  });
+  return includeMints ? full : withoutMints(full);
 }

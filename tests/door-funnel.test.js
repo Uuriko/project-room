@@ -1,8 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { readDoorFunnel, computeDoorFunnel, clampDoorFunnelWeeks, DOOR_FUNNEL_MAX_WEEKS } from "../server/door-funnel.mjs";
-import { DOOR_FUNNEL_ROUTES, handleDoorFunnel } from "../server/routes/door-funnel.mjs";
+import { readDoorFunnel, computeDoorFunnel, clampDoorFunnelWeeks, DOOR_FUNNEL_MAX_WEEKS, DOOR_FUNNEL_CACHE_MS } from "../server/door-funnel.mjs";
+import { DOOR_FUNNEL_ROUTES, DOOR_FUNNEL_PUBLIC_CACHE, handleDoorFunnel } from "../server/routes/door-funnel.mjs";
 
 // Wednesday 2026-10-21 11:00 America/Los_Angeles. Los Angeles Mondays in
 // scope: Oct 5 / Oct 12 / Oct 19, each starting 07:00Z (PDT).
@@ -61,8 +61,30 @@ test("weekly joins aggregate per listed room from the join events", () => {
 });
 
 test("mints are counted from agent_identities.created_at in the same weeks", () => {
-  const out = readDoorFunnel(storeOf(seededDb(), LISTED), { weeks: 3, now: NOW });
+  const out = readDoorFunnel(storeOf(seededDb(), LISTED), { weeks: 3, now: NOW, includeMints: true });
   assert.deepEqual(out.weeks.map(w => w.mints), [0, 1, 2]);
+});
+
+test("the public read omits identity mint counts", () => {
+  const out = readDoorFunnel(storeOf(seededDb(), LISTED), { weeks: 3, now: NOW });
+  for (const week of out.weeks) assert.equal(Object.hasOwn(week, "mints"), false);
+  assert.ok(!JSON.stringify(out).includes("mints"));
+});
+
+test("a computed funnel is reused for ten minutes per weeks value", () => {
+  const db = seededDb();
+  const store = storeOf(db, LISTED);
+  const first = readDoorFunnel(store, { weeks: 3, now: NOW, includeMints: true });
+  join(db, "room-a", "2026-10-20T16:30:00.000Z");
+  const second = readDoorFunnel(store, { weeks: 3, now: NOW + 60_000, includeMints: true });
+  assert.deepEqual(second.weeks.map(week => week.joins), first.weeks.map(week => week.joins));
+  assert.equal(second.generatedAt, first.generatedAt);
+  const otherWindow = readDoorFunnel(store, { weeks: 2, now: NOW + 60_000, includeMints: true });
+  assert.equal(otherWindow.generatedAt, new Date(NOW + 60_000).toISOString());
+  assert.equal(otherWindow.weeks.at(-1).joins["room-a"], first.weeks[2].joins["room-a"] + 1);
+  const later = readDoorFunnel(store, { weeks: 3, now: NOW + DOOR_FUNNEL_CACHE_MS, includeMints: true });
+  assert.equal(later.weeks[2].joins["room-a"], first.weeks[2].joins["room-a"] + 1);
+  assert.notEqual(later.generatedAt, first.generatedAt);
 });
 
 test("weeks parameter clamps to 1..12 with 12 as the default", () => {
@@ -80,7 +102,9 @@ test("empty store renders the full shape with zeros, never absence", () => {
   assert.equal(out.schema, "project-room-door-funnel/1");
   assert.equal(out.generatedAt, "2026-10-21T18:00:00.000Z");
   assert.deepEqual(out.weeks.map(w => w.joins), [{ "room-a": 0, "room-b": 0 }, { "room-a": 0, "room-b": 0 }]);
-  assert.deepEqual(out.weeks.map(w => w.mints), [0, 0]);
+  assert.equal(out.weeks.some(week => Object.hasOwn(week, "mints")), false);
+  const withMints = readDoorFunnel(storeOf(makeDb(), LISTED), { weeks: 2, now: NOW, includeMints: true });
+  assert.deepEqual(withMints.weeks.map(w => w.mints), [0, 0]);
   assert.deepEqual(out.directory, { listedRooms: 2, totalMembers: 117, rooms: LISTED });
 });
 
@@ -101,7 +125,12 @@ test("existence-hiding: no member, identity, or joiner data anywhere in the outp
     assert.ok(!text.includes(secret), `leaked ${secret}`);
   }
   assert.deepEqual(Object.keys(out).sort(), ["classifier", "directory", "generatedAt", "schema", "weeks"]);
-  for (const week of out.weeks) assert.deepEqual(Object.keys(week).sort(), ["joins", "mints", "startsAt"]);
+  for (const week of out.weeks) assert.deepEqual(Object.keys(week).sort(), ["joins", "startsAt"]);
+  const owner = readDoorFunnel(storeOf(seededDb(), LISTED), { weeks: 3, now: NOW, includeMints: true });
+  const ownerText = JSON.stringify(owner);
+  for (const secret of ["mbr_secret_1", "Secret Joiner", "ai_secretidentity", "ai_mint_", "Minty Secret", "owner_secret", "secret_hash"]) {
+    assert.ok(!ownerText.includes(secret), `owner read leaked ${secret}`);
+  }
 });
 
 test("anonymous-readable shape: the read takes no credential and claims no fleet/outside split", () => {
@@ -136,7 +165,7 @@ function routeCtx(store, search = "") {
   const calls = [];
   return {
     calls,
-    res: {},
+    res: { headers: {}, setHeader(name, value) { this.headers[name.toLowerCase()] = value; } },
     store,
     remoteAddress: "203.0.113.9",
     url: new URL(`https://example.test/api/public/door-funnel${search}`),
@@ -162,7 +191,58 @@ test("the handler rate-limits by remote address, then serves the funnel read", (
   assert.equal(out.status, 200);
   assert.equal(out.body.schema, "project-room-door-funnel/1");
   assert.equal(out.body.weeks.length, DOOR_FUNNEL_MAX_WEEKS);
+  assert.equal(out.body.weeks.some(week => Object.hasOwn(week, "mints")), false);
+  assert.equal(ctx.res.headers["cache-control"], DOOR_FUNNEL_PUBLIC_CACHE);
   assert.deepEqual(out.body.directory, { listedRooms: 2, totalMembers: 117, rooms: LISTED });
+});
+
+test("a room owner receives mint counts on a private response; another member does not", () => {
+  const store = storeOf(seededDb(), LISTED);
+  store.roomAuthority = () => ({ ownerId: "owner-1" });
+  store.authenticate = token => {
+    if (token === "owner-token") return { roomId: "room-a", member: { id: "owner-1" } };
+    if (token === "member-token") return { roomId: "room-a", member: { id: "member-2" } };
+    const error = new Error("unknown");
+    error.status = 401;
+    throw error;
+  };
+  const ownerCtx = routeCtx(store, "?weeks=3");
+  ownerCtx.req = { headers: { authorization: "Bearer owner-token" } };
+  ownerCtx.bearer = () => "owner-token";
+  const owner = handleDoorFunnel(ownerCtx);
+  assert.deepEqual(owner.body.weeks.map(week => week.mints), [0, 1, 2]);
+  assert.equal(ownerCtx.res.headers["cache-control"], "private, no-store");
+  assert.equal(ownerCtx.res.headers.vary, "Authorization, Cookie");
+
+  const memberCtx = routeCtx(store, "?weeks=3");
+  memberCtx.req = { headers: { authorization: "Bearer member-token" } };
+  memberCtx.bearer = () => "member-token";
+  const member = handleDoorFunnel(memberCtx);
+  assert.equal(member.body.weeks.some(week => Object.hasOwn(week, "mints")), false);
+  assert.equal(memberCtx.res.headers["cache-control"], DOOR_FUNNEL_PUBLIC_CACHE);
+
+  const rejectedCtx = routeCtx(store, "?weeks=3");
+  rejectedCtx.req = { headers: { authorization: "Bearer nope" } };
+  rejectedCtx.bearer = () => "nope";
+  const rejected = handleDoorFunnel(rejectedCtx);
+  assert.equal(rejected.status, 200);
+  assert.equal(rejected.body.weeks.some(week => Object.hasOwn(week, "mints")), false);
+
+  const cookieStore = storeOf(seededDb(), LISTED);
+  cookieStore.authenticate = () => { const error = new Error("no token"); error.status = 401; throw error; };
+  cookieStore.roomAuthority = () => ({ ownerId: "owner-1" });
+  cookieStore.authenticateAccountSession = () => ({ account: { id: "acct-1" } });
+  const prepare = cookieStore.db.prepare.bind(cookieStore.db);
+  cookieStore.db.prepare = sql => String(sql).includes("member_accounts")
+    ? { all: () => [{ roomId: "room-a", memberId: "owner-1" }] }
+    : prepare(sql);
+  const cookieCtx = routeCtx(cookieStore, "?weeks=3");
+  cookieCtx.req = { headers: { cookie: "account_session=slot-1" } };
+  cookieCtx.cookie = () => "slot-1";
+  cookieCtx.accountCookieName = "account_session";
+  const cookieOwner = handleDoorFunnel(cookieCtx);
+  assert.deepEqual(cookieOwner.body.weeks.map(week => week.mints), [0, 1, 2]);
+  assert.equal(cookieCtx.res.headers["cache-control"], "private, no-store");
 });
 
 test("the handler passes the weeks query parameter through the clamp", () => {
