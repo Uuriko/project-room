@@ -16,6 +16,7 @@ import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
 import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
+import { wakeStatusDocument } from "./routes/wake-status.mjs";
 import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
@@ -208,6 +209,13 @@ function validRoomArgs(name, args) {
       && validAttachmentData(args.data);
   }
   if (name === "room_list_files") return true;
+  if (name === "room_file_access_request") {
+    const noteOk = args.note === undefined || typeof args.note === "string" && args.note.length <= 500;
+    const referredOk = args.referredBy === undefined || typeof args.referredBy === "string" && args.referredBy.length <= 80;
+    const requestOk = args.requestId === undefined || typeof args.requestId === "string" && /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(args.requestId);
+    const nameOk = typeof args.displayName === "string" && args.displayName.trim().length > 0 && args.displayName.length <= 80;
+    return validId(args.roomId) && nameOk && validPermissionList(args.requestedPermissions) && noteOk && referredOk && requestOk;
+  }
   if (name === "room_list_access_requests") return args.status === undefined || typeof args.status === "string" && args.status.length <= 32;
   if (name === "room_decide_access_request") {
     const permsOk = args.permissions === undefined || validPermissionList(args.permissions);
@@ -307,6 +315,7 @@ function validWakeArgs(name, args) {
   const selected = WAKE_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (name === "heartbeat_get" || name === "webhook_list") return true;
+  if (name === "wake_status") return args.roomId === undefined || typeof args.roomId === "string" && args.roomId.length > 0 && args.roomId.length <= 128;
   if (["wake_register", "wake_clear", "heartbeat_set"].includes(name) && !validListenerLease(args.listenerLease)) return false;
   if (name === "wake_register") {
     return validHostId(args.hostId) && validUrlString(args.wakeUrl)
@@ -483,6 +492,17 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     const displayName = args.displayName ?? identity.displayName;
     if (args.linkToken !== undefined) return store.shareLinks.joinAgent(secret, args.linkToken, displayName);
     return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
+  }
+  if (name === "room_file_access_request") {
+    const input = {
+      identityId: identity.identityId,
+      displayName: args.displayName,
+      requestedPermissions: args.requestedPermissions,
+    };
+    if (args.note !== undefined) input.note = args.note;
+    if (args.referredBy !== undefined) input.referredBy = args.referredBy;
+    if (args.requestId !== undefined) input.requestId = args.requestId;
+    return new AccessRequests(store).request(args.roomId, input, secret);
   }
   if (name === "room_check_access" && args.roomId === undefined) {
     const allowed = mcpRoomAllowlist(store, secret);
@@ -767,6 +787,10 @@ async function callWakeTool(store, secret, identity, name, args) {
     const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
     return auth.scopedKey ? scopedKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(agentId);
   }
+  if (name === "wake_status") {
+    const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+    return wakeStatusDocument(store, auth, args.roomId ?? null);
+  }
   if (name === "heartbeat_ack") {
     // R273-1: with or without a fencingToken, ack inside the credential's own
     // scope like POST /api/agent-heartbeats/ack, so a room-scoped key cannot
@@ -1013,7 +1037,7 @@ const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",
-  "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
+  "room_decide_access_request", "room_file_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
   "bond_propose", "bond_accept", "bond_decline", "bond_revoke",
   "dm_posted",
 ]);

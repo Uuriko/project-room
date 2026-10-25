@@ -1880,6 +1880,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const prefColumns = new Set(this.db.prepare("PRAGMA table_info(human_push_preferences)").all().map(c => c.name));
         if (!prefColumns.has("preview_enabled")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN preview_enabled INTEGER NOT NULL DEFAULT 0");
         if (!prefColumns.has("quiet_hours")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN quiet_hours TEXT");
+        if (!prefColumns.has("decision_enabled")) this.db.exec("ALTER TABLE human_push_preferences ADD COLUMN decision_enabled INTEGER NOT NULL DEFAULT 1");
       }
       // Gap #2 (PR #562): explicit account_id/source_id columns converge on
       // existing databases via ALTER TABLE; old rows backfill NULL and keep
@@ -4692,9 +4693,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // secret hash at creation time. If the secret was rotated or revoked
     // since, the session is rejected.
     if (row.identity_secret_hash !== null && row.identity_secret_hash !== undefined) {
-      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(row.room_id, row.member_id);
-      if (!linkRow) fail(401, "unauthenticated", "Agent session identity link not found");
-      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash, revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(linkRow.identityId);
+      // Guest-aware (#3908 F-9): createJoinSession binds a trial seat's
+      // session to its guest identity's secret, so the binding check
+      // resolves through the shared wake resolver (identity_links first,
+      // guest_members fallback) - an identity_links-only lookup would
+      // refuse every bound guest session as link-less.
+      const linkIdentityId = identityIdForWakeMember(this.db, row.room_id, row.member_id);
+      if (!linkIdentityId) fail(401, "unauthenticated", "Agent session identity link not found");
+      const secretRow = this.db.prepare("SELECT secret_hash AS secretHash, revoked_at AS revokedAt FROM agent_identities WHERE identity_id=?").get(linkIdentityId);
       if (!secretRow || secretRow.revokedAt !== null || secretRow.secretHash !== row.identity_secret_hash) {
         fail(401, "unauthenticated", "Agent identity secret was rotated or revoked; sign in again");
       }
@@ -4735,9 +4741,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // invalidates the session — the same binding createAgentSession uses
       // (RC-2026-09-23-106). Members with no identity link keep the legacy
       // null binding.
-      const linkRow = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
-      const secretRow = linkRow
-        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkRow.identityId)
+      // Guest-aware (#3908 F-9): a trial seat's join session binds to its
+      // guest identity's current secret hash the same way - the member
+      // resolves through the shared wake resolver, not identity_links
+      // alone (authenticate resolves it back through the same resolver).
+      const linkIdentityId = identityIdForWakeMember(this.db, roomId, memberId);
+      const secretRow = linkIdentityId
+        ? this.db.prepare("SELECT secret_hash AS secretHash FROM agent_identities WHERE identity_id=?").get(linkIdentityId)
         : null;
       const token = this.insertCredential(roomId, memberId, "session", null, expiresAt, secretRow?.secretHash ?? null);
       return { token, expiresAt };
@@ -5178,10 +5188,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const empty = { identityId: targetIdentityId, rooms: [] };
       if (!caller || typeof caller.identityId !== "string" || typeof targetIdentityId !== "string") return empty;
-      const targetSeats = identityRoomSeats(this.db, targetIdentityId);
+      const now = this.now();
+      const targetSeats = identityRoomSeats(this.db, targetIdentityId, { liveGuestsOnly: true, now });
       if (targetSeats.length === 0) return empty;
       const callerSeatByRoom = new Map(
-        identityRoomSeats(this.db, caller.identityId).map(seat => [seat.roomId, seat]));
+        identityRoomSeats(this.db, caller.identityId, { liveGuestsOnly: true, now }).map(seat => [seat.roomId, seat]));
       const roomRowOf = this.db.prepare("SELECT archived_at AS archivedAt FROM rooms WHERE id=?");
       const rooms = [];
       for (const seat of targetSeats) {
@@ -6604,7 +6615,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+      const identityId = identityIdForWakeMember(this.db, roomId, memberId, this.now());
       // #3345: a mention target with no identity link on either table can
       // never be woken — that used to be a silent `continue`; it is now a
       // counted, journaled loss (the member exists; the fabric cannot

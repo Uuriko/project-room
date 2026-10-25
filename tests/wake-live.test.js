@@ -1,7 +1,9 @@
 // plan-wake-live: wake follows the agent.
 // - lastPolledAt recorded durably per agent on poll AND heartbeat activity.
-// - wakeable = polled/heartbeated within 24h (WAKEABLE_WINDOW_MS), a
-//   deliberately wider window than the 180s host-presence window.
+// - wakeable = polled/heartbeated within the agent's wakeability window:
+//   24h (WAKEABLE_WINDOW_MS), widened past a slower declared poll cadence
+//   (issue #3592) — a deliberately wider window than the 180s host-presence
+//   window.
 // - GET /api/wake-status answers "who is actually listening", scoped to the
 //   caller and their rooms: no params returns your own wakeability;
 //   ?roomId= returns that room's wakeable / not-wakeable member lists
@@ -33,6 +35,16 @@
 //    are never served. Regression: route miswiring, scope drift on the
 //    new path, or a global agent list leaking presence to any
 //    heartbeats:read credential.
+// 6. cadence-aware window (issue #3592) — contract: an agent whose hosts
+//    declare a poll cadence slower than 16h is judged against cadence x
+//    1.5, not the flat 24h; cadences up to 16h and undeclared agents keep
+//    exactly the 24h window. All three read surfaces (wakeStatusOf,
+//    wakeStatusList, wakeStatusListForRoom) share the one computation.
+//    Regression: restoring the flat WAKEABLE_WINDOW_MS comparison in any
+//    surface marks a healthy 48h-cadence agent not wakeable for half of
+//    every cycle — the mention warning cries wolf and push targeting
+//    built on these lists skips a listener that is checking in exactly
+//    as configured.
 //
 // Synthetic fixtures only — loopback HTTP, no external calls or real credentials.
 import test from "node:test";
@@ -124,6 +136,85 @@ test("wakeStatusList partitions registered agents into wakeable and notWakeable"
   assert.deepEqual(list.notWakeable.map(e => e.agentId), ["ai_idle"]);
   assert.equal(typeof list.wakeable[0].lastPolledAt, "number");
   assert.equal(typeof list.notWakeable[0].lastPolledAt, "number");
+});
+
+const HOUR_MS = 3600 * 1000;
+
+test("a 48h-cadence agent stays wakeable across its whole cycle (issue #3592)", t => {
+  const { hb, advance } = unit(t);
+  hb.heartbeat({ agentId: "ai_slow", hostId: "h", cadenceSeconds: 48 * 3600 });
+  const s0 = hb.wakeStatusOf("ai_slow");
+  assert.equal(s0.windowMs, 72 * HOUR_MS, "window is the declared cadence plus half a cadence of grace");
+  advance(36 * HOUR_MS); // mid-cycle — past the flat 24h the old rule used
+  assert.equal(hb.wakeStatusOf("ai_slow").wakeable, true, "still wakeable mid-cycle");
+  advance(36 * HOUR_MS - 1); // 72h - 1ms after the stamp
+  assert.equal(hb.wakeStatusOf("ai_slow").wakeable, true, "wakeable just inside the widened window");
+  advance(2);
+  assert.equal(hb.wakeStatusOf("ai_slow").wakeable, false, "not wakeable past cadence + grace");
+});
+
+test("the maximum 7d cadence widens the window to 10.5 days (issue #3592)", t => {
+  const { hb, advance } = unit(t);
+  hb.heartbeat({ agentId: "ai_weekly", hostId: "h", cadenceSeconds: 7 * 24 * 3600 });
+  assert.equal(hb.wakeStatusOf("ai_weekly").windowMs, 10.5 * 24 * HOUR_MS);
+  advance(7 * 24 * HOUR_MS); // one full declared cycle after the stamp
+  assert.equal(hb.wakeStatusOf("ai_weekly").wakeable, true, "wakeable a full cycle later");
+  advance(3.5 * 24 * HOUR_MS + 1); // past cadence + grace
+  assert.equal(hb.wakeStatusOf("ai_weekly").wakeable, false, "not wakeable past 10.5 days");
+});
+
+test("declared everyday cadences keep exactly the 24h window (issue #3592)", t => {
+  const { hb, advance } = unit(t);
+  hb.heartbeat({ agentId: "ai_five_min", hostId: "h", cadenceSeconds: 300 });
+  assert.equal(hb.wakeStatusOf("ai_five_min").windowMs, WAKEABLE_WINDOW_MS,
+    "a 300s declaration does not move the window");
+  hb.heartbeat({ agentId: "ai_16h", hostId: "h", cadenceSeconds: 16 * 3600 });
+  assert.equal(hb.wakeStatusOf("ai_16h").windowMs, WAKEABLE_WINDOW_MS,
+    "16h x 1.5 is exactly the 24h base — the widest cadence that changes nothing");
+  advance(WAKEABLE_WINDOW_MS - 1);
+  assert.equal(hb.wakeStatusOf("ai_five_min").wakeable, true, "still wakeable just inside 24h");
+  advance(2);
+  assert.equal(hb.wakeStatusOf("ai_five_min").wakeable, false, "flips at exactly 24h, as before");
+});
+
+test("the slowest declared cadence across an agent's hosts governs (issue #3592)", t => {
+  const { hb, advance } = unit(t);
+  hb.heartbeat({ agentId: "ai_two", hostId: "fast", cadenceSeconds: 300 });
+  hb.heartbeat({ agentId: "ai_two", hostId: "slow", cadenceSeconds: 48 * 3600 });
+  assert.equal(hb.wakeStatusOf("ai_two").windowMs, 72 * HOUR_MS,
+    "poll stamps are per agent, so the slowest host declaration sets the window");
+  advance(36 * HOUR_MS);
+  assert.equal(hb.wakeStatusOf("ai_two").wakeable, true);
+});
+
+test("wakeStatusList judges each agent by its own cadence-aware window (issue #3592)", t => {
+  const { hb, advance } = unit(t);
+  hb.heartbeat({ agentId: "ai_slow", hostId: "h", cadenceSeconds: 48 * 3600 });
+  hb.heartbeat({ agentId: "ai_plain", hostId: "h" });
+  advance(36 * HOUR_MS); // both stamps are 36h old
+  const list = hb.wakeStatusList();
+  assert.equal(list.windowMs, WAKEABLE_WINDOW_MS, "list-level windowMs stays the base window");
+  assert.deepEqual(list.wakeable.map(e => e.agentId), ["ai_slow"],
+    "the 48h-cadence agent is wakeable at 36h");
+  assert.deepEqual(list.notWakeable.map(e => e.agentId), ["ai_plain"],
+    "the undeclared agent is judged by the flat 24h, unchanged");
+});
+
+test("wakeStatusListForRoom applies the cadence-aware window to room-scoped activity (issue #3592)", t => {
+  const { hb, advance, at } = unit(t);
+  hb.heartbeat({ agentId: "ai_slow", hostId: "h", cadenceSeconds: 48 * 3600 });
+  advance(60 * HOUR_MS);
+  hb.recordPollActivity("ai_slow", at(), "room-a"); // scoped listening, 60h in
+  advance(36 * HOUR_MS);
+  // The identity stamp is now 96h old — past even the widened 72h window;
+  // the room-a stamp is 36h old — inside it. Only the room path can
+  // qualify the agent, and only for room-a.
+  const roomA = hb.wakeStatusListForRoom("room-a");
+  assert.ok(roomA.wakeable.some(e => e.agentId === "ai_slow"),
+    "room-scoped listening on a 48h cadence counts for its room at 36h");
+  const roomB = hb.wakeStatusListForRoom("room-b");
+  assert.ok(!roomB.wakeable.some(e => e.agentId === "ai_slow"),
+    "the same activity never leaks into another room");
 });
 
 test("wake-statusOf an unknown agent is not wakeable with null lastPolledAt", t => {
@@ -340,6 +431,28 @@ test("statusOf on a DB without any heartbeat tables reads as unregistered, never
   assert.deepEqual(s.hosts, []);
 });
 
+test("wakeability on a DB without agent_push_configs reads the base window, never crashes", t => {
+  // Issue #3592: the cadence readers behind the wakeability window are
+  // missing-table tolerant like every other read path — a database from
+  // before agent_push_configs existed (read-only opens never migrate)
+  // reads as no declarations: the flat 24h window, exactly as before.
+  const db = new DatabaseSync(":memory:");
+  db.exec(agentHeartbeatSchema);
+  db.exec("DROP TABLE agent_push_configs");
+  t.after(() => db.close());
+  db.prepare(`INSERT INTO agent_hosts
+    (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?)`).run("ai_legacy", "h", "wakeable", null, T0, T0, T0);
+  db.prepare("INSERT INTO agent_wake_polls (agent_id, last_polled_at) VALUES (?,?)")
+    .run("ai_legacy", T0);
+  const hb = new AgentHeartbeats({ db, now: () => T0 });
+  const s = hb.wakeStatusOf("ai_legacy");
+  assert.equal(s.windowMs, WAKEABLE_WINDOW_MS);
+  assert.equal(s.wakeable, true);
+  const list = hb.wakeStatusList();
+  assert.deepEqual(list.wakeable.map(e => e.agentId), ["ai_legacy"]);
+});
+
 test("wakeStatusList on a DB without any heartbeat tables lists nobody, never crashes", t => {
   // The DROP-TABLE fallback assumed agent_hosts exists; on a pre-heartbeat
   // database it threw "no such table: agent_hosts", 500ing room-mode
@@ -351,4 +464,61 @@ test("wakeStatusList on a DB without any heartbeat tables lists nobody, never cr
   const list = hb.wakeStatusList();
   assert.deepEqual(list.wakeable, []);
   assert.deepEqual(list.notWakeable, []);
+});
+
+test("pausedRoomsOf surfaces a guest seat's pause through guest_members (#3908 F-9)", t => {
+  const { db, hb } = unit(t);
+  db.exec(`
+    CREATE TABLE identity_links (room_id TEXT NOT NULL, identity_id TEXT NOT NULL, member_id TEXT NOT NULL, linked_at INTEGER NOT NULL);
+    CREATE TABLE guest_members (member_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, guest_identity_id TEXT NOT NULL, tier TEXT NOT NULL, invite_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE wake_queue_pause (room_id TEXT NOT NULL, member_id TEXT NOT NULL, paused_at INTEGER NOT NULL, reason TEXT, PRIMARY KEY(room_id, member_id));
+    CREATE TABLE wake_queue_pause_by (room_id TEXT NOT NULL, member_id TEXT NOT NULL, paused_by TEXT NOT NULL, paused_role TEXT NOT NULL, PRIMARY KEY(room_id, member_id));
+    INSERT INTO identity_links VALUES ('room-a', 'ai_linked', 'mem-linked', 1);
+    INSERT INTO guest_members VALUES ('mem-guest', 'room-b', 'ai_guest', 'contributor', 'inv-1', 1);
+    INSERT INTO wake_queue_pause VALUES ('room-a', 'mem-linked', 1750000000000, 'linked pause');
+    INSERT INTO wake_queue_pause VALUES ('room-b', 'mem-guest', 1750000000000, 'guest pause');
+    INSERT INTO wake_queue_pause_by VALUES ('room-b', 'mem-guest', 'mem-guest', 'self');
+  `);
+  const guest = hb.pausedRoomsOf("ai_guest");
+  assert.equal(guest.length, 1, "the guest identity's pause surfaces");
+  assert.equal(guest[0].roomId, "room-b");
+  assert.equal(guest[0].reason, "guest pause");
+  assert.equal(guest[0].heldBy, "self");
+  const linked = hb.pausedRoomsOf("ai_linked");
+  assert.equal(linked.length, 1, "the linked identity's pause still surfaces");
+  assert.equal(linked[0].roomId, "room-a");
+  assert.equal(linked[0].heldBy, "owner", "a pause with no setter record reads owner-held");
+});
+
+test("GET /api/wake-status?roomId= admits a guest caller and lists the guest seat (#3908 F-8)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const guest = await keyedAgent(f, origin, "wake-guest-agent");
+  const linked = await keyedAgent(f, origin, "wake-guest-linked");
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: linked.identity.identityId, memberId: linked.identity.identityId,
+    displayName: "wake guest linked", permissions: ["write_external"],
+  });
+  // The guest seat lives in guest_members only - no identity_links row.
+  // Fixture cure (the insert below names invite 'inv-wake-guest'; the
+  // guest_members FK requires its parent row to exist).
+  f.store.db.prepare("INSERT INTO guest_invites(id, code_hash, room_id, tier, credential_ttl_ms, guest_label, minted_by_member_id, issue_request_id, created_at, redeem_by, status) VALUES ('inv-wake-guest', '0000000000000000000000000000000000000000000000000000000000000000', 'commons', 'contributor', 3600000, 'wake guest fixture', 'owner', 'req-wake-guest', 1, 2000000000000, 'redeemed')")
+    .run();
+  f.store.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES ('mem-wake-guest', 'commons', ?, 'contributor', 'inv-wake-guest', 1)")
+    .run(guest.identity.identityId);
+  // F-8 fixture cure (live-seat composition): in a database that HAS the
+  // credentials table, a guest seat is judged by the shared live-seat
+  // predicate — the direct insert above seats a credential-less guest,
+  // which the gated room enumeration now reads as a dead seat. Mint the
+  // seat's live access credential alongside, as #4808's own adjustment
+  // did in tests/guest-wake-dispatch.test.js. Assertions unchanged.
+  f.store.db.prepare("INSERT INTO credentials(hash, room_id, member_id, kind, parent_hash, expires_at, revoked, account_id, account_auth_epoch) VALUES ('h-wake-guest', 'commons', 'mem-wake-guest', 'access', NULL, 9999999999999, 0, NULL, NULL)")
+    .run();
+  const res = await get(origin, "/api/wake-status?roomId=commons", guest.credential);
+  assert.equal(res.status, 200, "a guest member can read its own room's wake status");
+  const doc = await res.json();
+  assert.ok(doc.notWakeable.some(e => e.agentId === guest.identity.identityId),
+    "the guest seat appears in the room's wake lists");
+  assert.ok(doc.notWakeable.some(e => e.agentId === linked.identity.identityId),
+    "linked members still appear");
 });

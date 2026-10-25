@@ -31,7 +31,7 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
-import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
+import { guestSeatLiveSql, memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -316,6 +316,12 @@ export class AgentPluginStore {
     if (keyColumns.size > 0 && !keyColumns.has("last_used_ua")) {
       this.db.exec("ALTER TABLE agent_api_keys ADD COLUMN last_used_ua TEXT");
     }
+    // FIX-3778: subscription provenance — "wake-auto" marks a subscription
+    // the server created for a registered wakeUrl, so wake lifecycle code
+    // can disable exactly those and never an agent-created subscription.
+    // Same additive backfill pattern as provenance above: the CREATE TABLE
+    // text is unchanged, legacy rows backfill NULL and read as agent-created.
+    this.ensureSubOriginColumn();
     this.keys.clear();
     this.cards.clear();
     this.subs.clear();
@@ -363,6 +369,8 @@ export class AgentPluginStore {
         secret: row.secret,
         enabled: row.enabled === 1,
         createdAt: row.created_at,
+        // Legacy rows (no origin value) were agent-created.
+        origin: row.origin ?? "agent",
         journalJson: row.journal_json ?? "[]",
         deliveries: [],
         deliveriesLoaded: false,
@@ -951,8 +959,10 @@ export class AgentPluginStore {
   // subscription of the identity that listens for wake pings. Deliveries
   // flush fire-and-forget after the request path returns (setDispatchKick),
   // with the cron tick as the restart-safe backstop; the agent sees each
-  // delivery in its journal. No subscription, no delivery — the heartbeat
-  // queue alone carries the wake.
+  // delivery in its journal. FIX-3778: registering a wakeUrl ensures an
+  // agent.wake subscription at that URL (ensureWakeSubscription), so a
+  // wakeUrl-only host is reached through this fan-out; with no
+  // subscription at all, the heartbeat queue alone carries the wake.
   deliverWakePing({ identityId, signal }) {
     // R282-1: a revoked identity's secret is dead, so its wake must be too.
     if (this.identityRevoked(identityId)) return Object.freeze({ deliveries: Object.freeze([]) });
@@ -962,12 +972,21 @@ export class AgentPluginStore {
       const deliveries = [];
       const wakePing = buildWakePing({ agentId: identityId, signal });
       const eventId = signal?.signalId ?? null;
+      // FIX-3778 duplicate rule: exactly one POST per (signal, URL). A
+      // URL already targeted by a subscription delivery — including the
+      // auto-created wake subscription at the host's wakeUrl — is never
+      // targeted again for this signal, by any later subscription or by
+      // the wakeUrl adjunct loop below.
+      const targetedUrls = new Set();
       for (const row of rows) {
         let events = [];
         try { events = JSON.parse(row.eventsJson); } catch { continue; }
         if (!events.includes(WAKE_PING_EVENT) && !events.includes("*")) continue;
+        const subUrl = this.subs.get(row.subscriptionId)?.url ?? null;
+        if (subUrl !== null && targetedUrls.has(subUrl)) continue;
         deliveries.push(this.buildWebhookDelivery(row.subscriptionId,
           { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null }));
+        if (subUrl !== null) targetedUrls.add(subUrl);
       }
       // Event-push: when the agent registered wakeable hosts with wakeUrls,
       // the same wake ping is also POSTed to each distinct wakeUrl via the
@@ -978,10 +997,12 @@ export class AgentPluginStore {
       // not thrown.
       if (deliveries.length > 0) {
         for (const wake of this.wakeUrlTargets(identityId)) {
+          if (targetedUrls.has(wake.wakeUrl)) continue;
           try {
             deliveries.push(this.buildWebhookDelivery(deliveries[0].subscriptionId,
               { eventType: WAKE_PING_EVENT, data: wakePing, eventId, roomId: null,
                 url: wake.wakeUrl, idempotencySuffix: `wake-url:${wake.hostId}` }));
+            targetedUrls.add(wake.wakeUrl);
           } catch { /* skip invalid wakeUrl; the subscription-URL delivery still stands */ }
         }
       }
@@ -1010,6 +1031,15 @@ export class AgentPluginStore {
 
   // ---- Per-agent webhook subscriptions ----
 
+  // FIX-3778: idempotent additive origin column (see load()). Returns
+  // false when the subs table does not exist yet (nothing to alter).
+  ensureSubOriginColumn() {
+    const columns = new Set(this.db.prepare("PRAGMA table_info(agent_webhook_subs)").all().map(c => c.name));
+    if (columns.size === 0) return false;
+    if (!columns.has("origin")) this.db.exec("ALTER TABLE agent_webhook_subs ADD COLUMN origin TEXT");
+    return true;
+  }
+
   setWebhookLookup(lookup) {
     this.webhookLookup = typeof lookup === "function" ? lookup : null;
     return this;
@@ -1024,7 +1054,11 @@ export class AgentPluginStore {
   // HTTP and MCP await assertWebhookUrl before this write. The pure
   // module still rejects IP literals and metadata names; the DNS lookup
   // stays outside the transaction.
-  subscribeWebhook({ identityId, url, events, secret = null }) {
+  subscribeWebhook({ identityId, url, events, secret = null, origin = null }) {
+    // FIX-3778: origin is "wake-auto" only for subscriptions the server
+    // creates for a registered wakeUrl; every other caller is an agent
+    // creating its own subscription ("agent").
+    const effectiveOrigin = origin === "wake-auto" ? "wake-auto" : "agent";
     return this.mutate(() => {
       // R277-1: a dropped 201 makes the client retry the same subscribe,
       // which used to leave a second subscription and double every
@@ -1036,6 +1070,16 @@ export class AgentPluginStore {
       for (const existing of this.subs.values()) {
         if (existing.agentId !== identityId || existing.url !== url) continue;
         if ([...existing.events].sort().join("\u0000") !== wantedEvents) continue;
+        // FIX-3778 adoption: an explicit agent subscribe for the same
+        // (url, event set) as an auto-created wake subscription makes that
+        // subscription the agent's own — wake lifecycle code must never
+        // disable it from then on.
+        if (effectiveOrigin === "agent" && existing.origin === "wake-auto") {
+          existing.origin = "agent";
+          if (this.ensureSubOriginColumn()) {
+            this.db.prepare("UPDATE agent_webhook_subs SET origin='agent' WHERE subscription_id=?").run(existing.subscriptionId);
+          }
+        }
         if (!existing.enabled) {
           this.webhooks.setEnabled(existing.subscriptionId, { agentId: identityId, enabled: true });
           this.db.prepare("UPDATE agent_webhook_subs SET enabled=1 WHERE subscription_id=?").run(existing.subscriptionId);
@@ -1056,15 +1100,65 @@ export class AgentPluginStore {
       const signingSecret = secret ?? randomBytes(32).toString("base64url");
       const view = this.webhooks.subscribe({ agentId: identityId, url, events, secret: signingSecret });
       const sub = this.subs.get(view.subscriptionId);
-      this.db.prepare(`INSERT INTO agent_webhook_subs
-        (subscription_id, agent_id, url, events_json, secret, enabled, created_at, journal_json)
-        VALUES (?, ?, ?, ?, ?, 1, ?, '[]')`)
-        .run(sub.subscriptionId, sub.agentId, sub.url, JSON.stringify([...sub.events]), sub.secret, sub.createdAt);
+      sub.origin = effectiveOrigin;
+      if (this.ensureSubOriginColumn()) {
+        this.db.prepare(`INSERT INTO agent_webhook_subs
+          (subscription_id, agent_id, url, events_json, secret, enabled, created_at, journal_json, origin)
+          VALUES (?, ?, ?, ?, ?, 1, ?, '[]', ?)`)
+          .run(sub.subscriptionId, sub.agentId, sub.url, JSON.stringify([...sub.events]), sub.secret, sub.createdAt, effectiveOrigin);
+      } else {
+        this.db.prepare(`INSERT INTO agent_webhook_subs
+          (subscription_id, agent_id, url, events_json, secret, enabled, created_at, journal_json)
+          VALUES (?, ?, ?, ?, ?, 1, ?, '[]')`)
+          .run(sub.subscriptionId, sub.agentId, sub.url, JSON.stringify([...sub.events]), sub.secret, sub.createdAt);
+      }
       // RC-2026-09-27-2729 (UFO-steal slice 2): the raw signing secret is
       // never returned over HTTP — not even once. The view carries the
       // opaque `secretRef` sentinel instead; the agent holds no raw token.
       // Inbound-delivery verification moved server-side (verifyWebhookDelivery).
       return { subscription: view };
+    });
+  }
+
+  // FIX-3778 (ruling on #3778): registration of a wakeUrl IS a subscription.
+  // Ensures an enabled agent.wake subscription at the wakeUrl, created
+  // through subscribeWebhook so signing, journaling and dispatch all reuse
+  // the one working path. If the agent already has its own subscription at
+  // this URL whose events cover agent.wake (exact or "*"), that
+  // subscription already delivers the wake — no auto subscription is
+  // created and the agent's subscription is never touched, whatever its
+  // enabled state (an agent-disabled endpoint stays disabled). A revoked
+  // identity gets no new subscription. Returns the subscription view, or
+  // null when no auto subscription was needed or permitted.
+  ensureWakeSubscription({ identityId, url }) {
+    if (this.identityRevoked(identityId)) return null;
+    for (const sub of this.subs.values()) {
+      if (sub.agentId !== identityId || sub.url !== url || sub.origin === "wake-auto") continue;
+      if (sub.events.includes(WAKE_PING_EVENT) || sub.events.includes("*")) return null;
+    }
+    const { subscription } = this.subscribeWebhook({
+      identityId, url, events: [WAKE_PING_EVENT], origin: "wake-auto",
+    });
+    return subscription;
+  }
+
+  // FIX-3778 lifecycle: disable the auto-created wake subscription for a
+  // URL the identity's hosts no longer use. Only a subscription marked
+  // origin "wake-auto" with exactly the auto event set is eligible — an
+  // agent-created subscription (including one that adopted an auto
+  // subscription via an explicit subscribe) is never disabled here.
+  // Returns true when a subscription was disabled.
+  disableWakeAutoSubscription({ identityId, url }) {
+    return this.mutate(() => {
+      for (const sub of this.subs.values()) {
+        if (sub.agentId !== identityId || sub.url !== url || sub.origin !== "wake-auto") continue;
+        if ([...sub.events].join("\u0000") !== WAKE_PING_EVENT || !sub.enabled) continue;
+        this.webhooks.setEnabled(sub.subscriptionId, { agentId: identityId, enabled: false });
+        this.db.prepare("UPDATE agent_webhook_subs SET enabled=0 WHERE subscription_id=?").run(sub.subscriptionId);
+        sub.enabled = false;
+        return true;
+      }
+      return false;
     });
   }
 
@@ -1645,7 +1739,9 @@ export class AgentPluginStore {
     // subscription was removed (s is NULL) are still selected so they
     // dead-letter as before. A guest seat counts as seated here only
     // while it holds a live access credential (the resolver's liveness
-    // gate, mirrored in SQL), so a disconnected guest's rows stay out.
+    // gate, generated from the shared predicate — guestSeatLiveSql in
+    // server/wake-identity-resolution.mjs — so the SQL cannot drift
+    // from the JS judgement), so a disconnected guest's rows stay out.
     const due = this.db.prepare(
       `SELECT d.* FROM agent_webhook_deliveries d
        LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
@@ -1654,8 +1750,7 @@ export class AgentPluginStore {
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
          OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id)
          OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id
-           AND EXISTS (SELECT 1 FROM credentials c WHERE c.room_id = g.room_id AND c.member_id = g.member_id
-             AND c.kind = 'access' AND c.revoked = 0 AND c.expires_at > ?)))))
+           AND ${guestSeatLiveSql("g.room_id", "g.member_id")}))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, now, limit] : [now, now, limit]));
     const isolated = [];

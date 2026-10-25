@@ -7,6 +7,7 @@ import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
 import { PublicWorkSettlement, publicWorkRewardMillis } from './public-work-settlement.mjs';
 import { isUnpublished } from './legal-store.mjs'; // operator unpublish hides a room or receipt from every public read
+import { guestSeatLive } from './wake-identity-resolution.mjs'; // the shared live-seat predicate, for the member exception below
 
 export const publicWorkClaimsSchema = `
 CREATE TABLE IF NOT EXISTS public_work_tasks (
@@ -686,7 +687,18 @@ export class PublicWorkClaims {
     if (typeof memberId === "string" && memberId) {
       const members = this.store.roomAuthority(roomId)?.members ?? {};
       const member = members[memberId];
-      if (member && member.active !== false) return;
+      if (member && member.active !== false) {
+        // The member exception is additionally judged for guest seats
+        // by the shared live-seat predicate: a guest whose access
+        // credential was revoked or has expired (swept or not) no
+        // longer reads receipts or artifacts through membership alone.
+        // Non-guest members are never passed to the predicate.
+        let guestRow;
+        try {
+          guestRow = this.db.prepare('SELECT 1 AS seated FROM guest_members WHERE room_id=? AND member_id=?').get(roomId, memberId);
+        } catch { guestRow = undefined; }
+        if (!guestRow || guestSeatLive(this.db, roomId, memberId, this.store.now())) return;
+      }
     }
     fail(403, 'receipts_private', 'This room keeps its work receipts private');
   }

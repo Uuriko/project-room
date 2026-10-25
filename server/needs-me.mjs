@@ -646,8 +646,11 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // with the same membership truth as everywhere else. archivedAt rides
   // from the rooms row; a seat whose room row is gone reads as archived
   // (the old INNER JOIN dropped it the same way).
+  // Guest seats are judged live by the shared predicate
+  // (liveGuestsOnly): a revoked or expired-unswept guest seat's room
+  // contributes no needs-me entries, however fresh its row looks.
   const seats = identityRoomSeats(store.db, identity.identityId,
-    { after: parsed.roomAfter ?? "", limit: MAX_ROOMS + 1 });
+    { after: parsed.roomAfter ?? "", limit: MAX_ROOMS + 1, liveGuestsOnly: true, now: store.now() });
   const roomRows = seats.length ? store.db.prepare(
     `SELECT id, archived_at AS archivedAt FROM rooms WHERE id IN (${seats.map(() => "?").join(",")})`
   ).all(...seats.map(seat => seat.roomId)) : [];

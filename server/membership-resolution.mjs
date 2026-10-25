@@ -27,6 +27,19 @@
 // Both lookups are defensive against pre-schema databases (a missing
 // table reads as "no seats", never a throw), matching the wake
 // resolver's posture.
+//
+// Live-guest filtering is opt-in per caller (liveGuestsOnly below):
+// the surfaces whose seat question is liveness-shaped — the needs-me
+// inbox, the agent-rooms list, the cross-room presence read — pass it
+// and judge each guest seat by the shared live-seat predicate
+// (server/wake-identity-resolution.mjs): a guest seat whose access
+// credential was revoked or has expired, swept or not, is not
+// enumerated. Callers that enumerate for other purposes keep the
+// default and see every seat exactly as before. The filter runs
+// inside this primitive, before the after/limit pagination, so every
+// caller's page arithmetic is computed on the filtered set.
+
+import { guestSeatLive } from "./wake-identity-resolution.mjs";
 
 function seatRows(db, sql, identityId) {
   try {
@@ -40,8 +53,13 @@ function seatRows(db, sql, identityId) {
 // seat "link" (identity_links) or "guest" (guest_members), ordered by
 // roomId. `after` is an exclusive roomId cursor and `limit` caps the
 // page, mirroring the keyset pagination the surfaces used in SQL.
-export function identityRoomSeats(db, identityId, { after = "", limit = null } = {}) {
+// With `liveGuestsOnly`, guest seats are additionally judged by the
+// shared live-seat predicate at `now` (the caller's one store-clock
+// capture; the wall clock when a caller passes none) and dead guest
+// seats are dropped; link seats are never judged by it.
+export function identityRoomSeats(db, identityId, { after = "", limit = null, liveGuestsOnly = false, now = null } = {}) {
   if (!db || typeof identityId !== "string" || !identityId) return [];
+  const judgedAt = now ?? Date.now();
   const byRoom = new Map();
   for (const row of seatRows(db,
     "SELECT room_id AS roomId, member_id AS memberId FROM identity_links WHERE identity_id=?",
@@ -52,6 +70,7 @@ export function identityRoomSeats(db, identityId, { after = "", limit = null } =
     "SELECT room_id AS roomId, member_id AS memberId FROM guest_members WHERE guest_identity_id=?",
     identityId)) {
     if (!byRoom.has(row.roomId)) {
+      if (liveGuestsOnly && !guestSeatLive(db, row.roomId, row.memberId, judgedAt)) continue;
       byRoom.set(row.roomId, { roomId: row.roomId, memberId: row.memberId, seat: "guest" });
     }
   }

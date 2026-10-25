@@ -437,6 +437,16 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 | #4858 | Wake webhook retries at the delivery's next attempt | `cursor/webhook-retry-schedule-da81` | `dba5f8413752ea1b5991b5cf671de28eac28ff1d` | conflicts with main and is stale; idea recorded in docs/ARCHIVED-WORK.md |
 | #4889 | Cure: guard signin-navigation sync() against absent provider anchors | `cure/signin-navigation-absent-anchor` | `efaa8a9ecc75b3fec780510f9ab94fb926f1e909` | contained in #4922 |
 
+## G3 combined
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #3663 | fix(wake): cadence-aware wakeability window (#3592) | `jill/fix-3592-cadence-wakeability` | `656043582695c0f140be069c02917aa827c4d874` | combined into #4945 |
+| #4804 | FIX-3778: auto-subscribe wakeUrl registrations so wakeUrl-only hosts receive wake pings | `jill/backlog-do-3778` | `5bfa6766b8125b237c3691cfabf73fba91234768` | combined into #4945 |
+| #4920 | Live-seat predicate composition: #4766 merged up + one shared guestSeatLive | `jill/live-seat-composition` | `aad72a3e08fd81a347e05fc29c9c7397c3127724` | combined into #4945 |
+| #3593 | fix(boot): instance lock binds holder identity (pid + start ticks) | `jill/hunt-chaos-instance-lock` | `24e24f11a4514000be550aca485384984f810459` | combined into #4945 |
+| #3574 | feat(push): decision push class for decision asks (B-3 step 3, E63) | `jill/attention-decision-push` | `0739e8cab554f9689e6eccf2481dd8495c566e86` | combined into #4945 |
+
 ## Branches with no PR (deleted in cleanup)
 
 | Branch | Head SHA |

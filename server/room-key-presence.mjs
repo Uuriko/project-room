@@ -2,6 +2,8 @@ import { ownMember } from "../src/events.js";
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
+import { identityIdForWakeMember } from "./wake-identity-resolution.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
 
 const refuse = (code, message) => { throw new ServiceError(403, code, message); };
 
@@ -17,9 +19,23 @@ export function roomKeyPresenceAuth(store, secret) {
   if (auth.credentialScope !== "room" || auth.kind !== "access" || auth.member?.kind !== "agent") {
     refuse("room_key_heartbeat_refused", "A room access key can register pull-only presence only for its own agent member");
   }
-  const identityId = store.identities.identityIdForMember(auth.roomId, auth.member.id);
+  // Link seats keep identityIdForMember's contract: exactly one unrevoked
+  // identity_links row. Two links for the same member, or a revoked
+  // identity, refuse. Guest seats have no identity_links row (decision
+  // #25). Those resolve through the shared wake resolver, which judges
+  // the seat live, and enumerate through membership-resolution so the
+  // one guest seat counts.
+  let identityId = store.identities.identityIdForMember(auth.roomId, auth.member.id);
+  if (!identityId) {
+    const linkCount = store.db.prepare(
+      "SELECT COUNT(*) AS n FROM identity_links WHERE room_id=? AND member_id=?"
+    ).get(auth.roomId, auth.member.id)?.n ?? 0;
+    if (linkCount === 0) {
+      identityId = identityIdForWakeMember(store.db, auth.roomId, auth.member.id, store.now());
+    }
+  }
   if (!identityId || auth.member.identityId !== identityId) refuse("room_key_heartbeat_refused", "This room member is not a linked identity");
-  const rooms = store.identities.roomsForIdentity(identityId);
+  const rooms = identityRoomSeats(store.db, identityId);
   if (rooms.length !== 1 || rooms[0].roomId !== auth.roomId || rooms[0].memberId !== auth.member.id) {
     refuse("room_key_heartbeat_refused", "A room access key can register presence only for an identity linked to this room alone");
   }

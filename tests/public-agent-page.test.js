@@ -194,3 +194,91 @@ test("public and owner routes stay dark when the flag is off", async t => {
   assert.equal(code(list), "not_found");
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_public_asks").get().n, 0);
 });
+
+
+// ---------------------------------------------------------------------------
+// Live-seat composition cells (Cluster 8 lane B8, surface S4): the public
+// page of a GUEST seat is judged by the shared live-seat predicate, not
+// only by the projection's active flag. Appended by the composition; the
+// cross-surface set lives in tests/guest-disconnect-wake-regression.test.js.
+// ---------------------------------------------------------------------------
+
+async function seatGuestForPage(f, origin, name) {
+  const { generateKeyPair, signCard } = await import("../server/agent-card-signing.mjs");
+  const ownerKey = f.store.issueAccessKey("commons", "owner");
+  const mint = await call(origin, "/api/rooms/commons/guest-invites", {
+    method: "POST", secret: ownerKey,
+    body: { requestId: randomUUID(), guestLabel: `guest ${name}`, expectedOwnerRevision: 0, credentialTtlMs: 3600_000 },
+  });
+  assert.ok(mint.json?.code, `mint returns a code: ${mint.text.slice(0, 200)}`);
+  const identity = f.store.identities.create(name);
+  const kp = generateKeyPair();
+  const cardBody = { name, description: "public page live-seat guest", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: kp.publicKey,
+    signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: kp.privateKey }) };
+  const redeemed = await call(origin, "/api/guest-invites/redeem", {
+    method: "POST", secret: identity.secret, body: { inviteCode: mint.json.code, card },
+  });
+  assert.ok(redeemed.json?.member?.id, `redeem seats a member: ${redeemed.text.slice(0, 200)}`);
+  return { identity, memberId: redeemed.json.member.id, ownerKey };
+}
+function configureGuestPage(f, memberId, slug) {
+  f.store.db.prepare(`INSERT INTO agent_public_pages(room_id, member_id, slug, access, blurb, enabled, created_at, updated_at)
+    VALUES ('commons', ?, ?, 'open', 'live-seat page', 1, 1, 1)`).run(memberId, slug);
+}
+
+test("S4×T3: an expired-unswept guest seat's page goes dark — card, page, ask, poll", async t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const origin = await listen(t, f.store, true);
+  const guest = await seatGuestForPage(f, origin, "PageExpiry");
+  configureGuestPage(f, guest.memberId, "page-expiry");
+  const live = await call(origin, "/api/public/agents/page-expiry");
+  assert.equal(live.status, 200, "the live guest's card serves");
+  // Expiry, unswept: expiry moved into the past, nothing revoked, the
+  // member projection still reads active — the state the pre-composition
+  // _publicRow misjudged as presentable.
+  f.store.db.prepare("UPDATE credentials SET expires_at=1 WHERE room_id='commons' AND member_id=? AND kind='access'")
+    .run(guest.memberId);
+  const member = f.store.roomAuthority("commons")?.members?.[guest.memberId];
+  assert.ok(member && member.active !== false, "the projection still reads the member active");
+  const card = await call(origin, "/api/public/agents/page-expiry");
+  assert.equal(card.status, 404);
+  assert.equal(code(card), "agent_not_found");
+  const page = await call(origin, "/u/page-expiry");
+  assert.equal(page.status, 404, "the HTML page is dark too");
+  const ask = await call(origin, "/api/public/agents/page-expiry/asks", {
+    method: "POST", body: { name: "Visitor", question: "are you there?" },
+  });
+  assert.equal(ask.status, 404, "ask intake closes with the card");
+  const poll = await call(origin, "/api/public/agents/page-expiry/asks/ask-anything");
+  assert.equal(poll.status, 404, "the poll is gated by the same judgement");
+});
+
+test("S4×T1: a disconnected guest seat's page goes dark", async t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const origin = await listen(t, f.store, true);
+  const guest = await seatGuestForPage(f, origin, "PageDisconnect");
+  configureGuestPage(f, guest.memberId, "page-disconnect");
+  assert.equal((await call(origin, "/api/public/agents/page-disconnect")).status, 200);
+  f.store.guestInvites.disconnect(guest.ownerKey, "commons", guest.memberId);
+  const card = await call(origin, "/api/public/agents/page-disconnect");
+  assert.equal(card.status, 404);
+  assert.equal(code(card), "agent_not_found");
+});
+
+test("S4×T4 (decision D-2 pin): identity revocation alone does not darken a live guest seat's page", async t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const origin = await listen(t, f.store, true);
+  const guest = await seatGuestForPage(f, origin, "PageRevoked");
+  configureGuestPage(f, guest.memberId, "page-revoked");
+  assert.equal((await call(origin, "/api/public/agents/page-revoked")).status, 200);
+  f.store.db.prepare("UPDATE agent_identities SET revoked_at=1 WHERE identity_id=?")
+    .run(guest.identity.identityId);
+  const card = await call(origin, "/api/public/agents/page-revoked");
+  assert.equal(card.status, 200,
+    "revoked_at is OUT of the predicate (D-2): the seat's live credential still seats it; " +
+    "the recorded follow-on is IDENTITY-RESOLVER-HARDENING, and changing this cell must be deliberate");
+});

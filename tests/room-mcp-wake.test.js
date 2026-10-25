@@ -302,6 +302,26 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
   assert.equal(extra.body.error.data.reason, "invalid_arguments");
 });
 
+test("wake_status reports the cadence-aware window over MCP", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Window owner");
+  const created = roomFor(store, rooms, owner);
+  const cadenceSeconds = 48 * 3600;
+  const registered = await call(origin, "wake_register", {
+    hostId: "slow-host", wakeUrl: WAKE_URL, cadenceSeconds
+  }, owner.secret);
+  assert.equal(registered.body.error, undefined, JSON.stringify(registered.body.error));
+  const own = await call(origin, "wake_status", {}, owner.secret);
+  assert.equal(own.body.error, undefined, JSON.stringify(own.body));
+  assert.equal(own.value.agentId, owner.identityId);
+  assert.equal(own.value.wakeable, true);
+  assert.equal(own.value.windowMs, cadenceSeconds * 1500);
+  const room = await call(origin, "wake_status", { roomId: created.roomId }, owner.secret);
+  assert.equal(room.value.roomId, created.roomId);
+  assert.ok(room.value.wakeable.some(entry => entry.agentId === owner.identityId));
+  assert.equal(room.raw.includes(owner.secret), false);
+});
+
 test("a session cookie without a bearer secret gets the anonymous MCP catalog", async t => {
   const { origin, store } = await serve(t);
   store.initialize(initialRoom("commons"));

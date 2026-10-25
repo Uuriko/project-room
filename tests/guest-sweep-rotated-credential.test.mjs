@@ -109,3 +109,49 @@ test("the expiry sweep still deactivates a guest whose only credential expired",
     "a guest with no live credential is still swept");
   assert.equal((await postChat(request, guest.token, "expired")).status, 401);
 });
+
+test("the expiry sweeps judge a seat by its latest-expiring unrevoked credential (#3908 F-7)", async t => {
+  const { store, request, ownerKey, advance } = await serve(t);
+  const identity = store.identities.create(`Double-${randomUUID().slice(0, 6)}`);
+  const keys = generateKeyPair();
+  const cardBody = { name: "Double", description: "sweep probe", capabilities: ["chat"] };
+  const card = { ...cardBody, publicKey: keys.publicKey,
+    signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
+  const redeem = async (code, expected = 201) => {
+    const res = await request("/api/guest-invites/redeem", {
+      method: "POST", token: identity.secret, data: { inviteCode: code, card },
+    });
+    // A re-redemption into a seat the identity already holds is the
+    // route's idempotent duplicate: 200, not 201 (server/http.mjs:
+    // result.duplicate ? 200 : 201).
+    assert.equal(res.status, expected);
+    return res.json();
+  };
+  const invited = await mintInvite(request, ownerKey, { credentialTtlMs: ONE_HOUR });
+  const first = await redeem(invited.code);
+  const memberId = first.member.id;
+
+  advance(30 * 60 * 1000);
+  // Re-redemption inserts a second, later-expiring credential row WITHOUT
+  // revoking the first: two unrevoked rows coexist, the older expiring
+  // first. An arbitrary-row sweep reads the older (expired) row and kills
+  // a live seat; the fix judges by the latest expiry at every site.
+  const invited2 = await mintInvite(request, ownerKey, { credentialTtlMs: ONE_HOUR });
+  const second = await redeem(invited2.code, 200);
+  assert.equal(second.member.id, memberId, "re-redemption reuses the seat");
+
+  advance(31 * 60 * 1000); // first row now expired, second still live
+  assert.equal(store.guestAgentLinks.liveCount(ROOM), 1,
+    "liveCount judges the seat by its latest-expiring credential");
+  store.guestAgentLinks.sweepExpired(ownerKey, ROOM);
+  assert.equal(store.room(ROOM).state.members[memberId].active, true,
+    "the GuestAgentLinks sweep keeps a seat whose latest credential is live");
+
+  // The GuestInvites sweep (run by the next redeem in the room) agrees.
+  const invited3 = await mintInvite(request, ownerKey, { credentialTtlMs: ONE_HOUR });
+  await redeemGuest(request, store, invited3.code, "Trigger2");
+  assert.equal(store.room(ROOM).state.members[memberId].active, true,
+    "the GuestInvites sweep keeps the seat too");
+  assert.equal((await postChat(request, second.token, "double token, still here")).status, 201,
+    "the later credential survives both sweeps");
+});
