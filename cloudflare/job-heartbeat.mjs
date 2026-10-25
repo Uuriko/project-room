@@ -1,4 +1,4 @@
-import { JOBS as REGISTRY, JOB_BUDGET_MS, jobDisabledReason, jobEnabled, jobNextDue } from "../server/jobs.mjs";
+import { JOBS as REGISTRY, JOB_BUDGET_MS, ONE_QUARANTINE_ACTION, jobDisabledReason, jobEnabled, jobFailureAction, jobNextDue, nextFailingSinceAt } from "../server/jobs.mjs";
 
 // Per-job cron heartbeat. Every scheduled job records lastRunAt, lastSuccessAt
 // and a redacted lastError in the Durable Object, and GET /api/health/jobs reads
@@ -105,6 +105,10 @@ export function sanitizeFailureDetail(detail) {
   return Object.keys(out).length ? out : null;
 }
 
+function quarantineEventIdOf(value) {
+  return typeof value === "string" && DETAIL_RECORD_ID.test(value) ? value : null;
+}
+
 // Numbers and booleans only: summaries must never carry ids, bodies or secrets.
 export function compactSummary(result) {
   if (!result || typeof result !== 'object') return null;
@@ -150,13 +154,14 @@ export async function runCronJobs(runners, {
       // no other job's result carries the field.
       const unobserved = !failure && (result?.unobserved === 1 || result?.unobserved === true);
       outcomes.push({ job: name, ok: !failure, at: startedAt, durationMs, error: failure, summary: compactSummary(result), failure: failure ? sanitizeFailureDetail(result?.failureDetail) : null,
+        quarantineEventId: quarantineEventIdOf(result?.quarantineEventId),
         ...(unobserved ? { unobserved: true } : {}) });
     } catch (error) {
       const message = errorText(job, error);
       const durationMs = now() - startedAt;
       console.info(JSON.stringify({ event: 'room.cron_job', job: name, ok: false, durationMs }));
       log(`[${name}] cron tick failed: ${message}`);
-      outcomes.push({ job: name, ok: false, at: startedAt, durationMs, error: message, summary: null, failure: sanitizeFailureDetail(error?.failureDetail) });
+      outcomes.push({ job: name, ok: false, at: startedAt, durationMs, error: message, summary: null, failure: sanitizeFailureDetail(error?.failureDetail), quarantineEventId: null });
     }
   }
   return outcomes;
@@ -190,10 +195,14 @@ export function applyOutcomes(previous, outcomes) {
     const record = outcome.ok
       ? outcome.unobserved
         ? { ...prior, lastRunAt: at, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at }
-        : { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
+        : { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, failingSinceAt: null, lastDurationMs: outcome.durationMs ?? null, lastSummary: compactSummary(outcome.summary), lastSummaryAt: at, lastFailure: null }
       : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: redactError(outcome.error), consecutiveFailures: (prior.consecutiveFailures ?? 0) + 1,
+        failingSinceAt: nextFailingSinceAt(prior, at),
         lastDurationMs: outcome.durationMs ?? null, lastFailure: sanitizeFailureDetail(outcome.failure),
         ...(failureSummary ? { lastSummary: failureSummary, lastSummaryAt: at } : {}) };
+    if (!outcome.unobserved && Object.hasOwn(outcome, "quarantineEventId")) {
+      record.quarantineEventId = quarantineEventIdOf(outcome.quarantineEventId);
+    }
     // Overdue streak (guardian census F1): track consecutive observed
     // ticks whose summary reports overdue work, and when the current
     // streak began. Only a tick that actually carried a summary speaks:
@@ -243,8 +252,17 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     // That is a stall, not a wait — degrade so the surface (and anything
     // polling it) can see it; still not a 503: no tick has failed, the
     // work is late, and the streak fields below carry its age.
-    const degraded = enabled && !stale && !failing && record.lastSummary?.rateLimited === true ? 'github_rate_limited'
-      : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.overdueStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_overdue' : null;
+    const summary = record.lastSummary;
+    // Exactly one quarantined event, with no parked room and no other
+    // error count, is degraded. The event id is public. The room is not.
+    const oneQuarantine = enabled && !stale && !failing
+      && summary?.quarantinedEvents === 1
+      && (summary.blockedRooms ?? 0) === 0
+      && !(Number(summary.errors) > 0);
+    const degraded = enabled && !stale && !failing && summary?.rateLimited === true ? 'github_rate_limited'
+      : enabled && !stale && !failing && job.name === 'escrow-epochs' && (record.overdueStreak ?? 0) >= OVERDUE_DEGRADE_TICKS ? 'escrow_overdue'
+      : oneQuarantine ? 'one_quarantined_event' : null;
+    const jobStatus = !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok';
     return {
       name: job.name,
       periodSeconds: job.periodSeconds,
@@ -276,20 +294,30 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       stale,
       degraded,
       reason,
-      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
+      failingSince: jobStatus === 'failing' ? iso(record.failingSinceAt ?? record.lastSuccessAt ?? record.lastErrorAt) : null,
+      action: jobStatus === 'failing' ? jobFailureAction(job.name, record.lastFailure?.code ?? null)
+        : degraded === 'one_quarantined_event' ? ONE_QUARANTINE_ACTION : null,
+      quarantineEventId: degraded === 'one_quarantined_event' ? quarantineEventIdOf(record.quarantineEventId) : null,
+      status: jobStatus
     };
   });
-  const active = jobs.filter(job => job.status !== 'disabled');
-  // #3894: a required job (room-backup) disabled by a dropped binding is
-  // a configuration failure, not healthy idle: the deployment cannot do
-  // the safety work at all, and "disabled" is also what an intentional
-  // disable looks like. It fails the rollup while keeping its honest
-  // per-job 'disabled' status and reason. Ordinary disabled jobs
-  // (work-gated, feature-gated) stay out of the rollup as before.
-  const requiredDisabled = jobs.some(job => job.status === 'disabled' && job.required);
-  const status = active.some(job => job.stale) ? 'stale' : requiredDisabled || active.some(job => job.status === 'failing') ? 'failing'
-    : active.some(job => job.status === 'degraded') ? 'degraded' : 'ok';
-  return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
+  return { schema: 'room.job-health/1', status: rollupJobStatus(jobs), generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
+}
+
+// Overall status is the worst status among the jobs the deployment has
+// to keep healthy: every enabled job, plus a required job that is
+// disabled (a missing backup binding). A disabled job that is not
+// required does not count. Stale is worse than failing, failing is
+// worse than degraded, and degraded is worse than ok.
+const STATUS_RANK = Object.freeze({ ok: 0, degraded: 1, failing: 2, stale: 3 });
+export function rollupJobStatus(jobs) {
+  let worst = 'ok';
+  for (const job of jobs ?? []) {
+    if (!job || job.status === 'disabled') continue;
+    if ((STATUS_RANK[job.status] ?? 0) > STATUS_RANK[worst]) worst = job.status;
+  }
+  if ((jobs ?? []).some(job => job && job.status === 'disabled' && job.required) && STATUS_RANK.failing > STATUS_RANK[worst]) worst = 'failing';
+  return worst;
 }
 
 export function jobHealthResponse(view, { head = false } = {}) {

@@ -232,6 +232,34 @@ export function classifyIntegrityError(error) {
   return { code, subcheck, errorClass, recordClass: INTEGRITY_RECORD_CLASS[subcheck] ?? "unknown" };
 }
 
+// One sentence an operator can act on. Stable codes only; the line never
+// carries a room id, an event id, or a secret.
+export const ONE_QUARANTINE_ACTION = "One event is quarantined. Repair that event or leave it quarantined; this does not fail the job.";
+
+export function jobFailureAction(name, code) {
+  if (name === "integrity" && code === "messages_backfill_failed") {
+    return "Repair the parked messages backfill. A single quarantined event is degraded and does not fail this job.";
+  }
+  if (name === "integrity" && code === "messages_parity_failed") {
+    return "Repair the messages parity mismatch, then let the next integrity tick confirm it.";
+  }
+  if (name === "integrity") return "Repair the integrity check named by lastErrorCode, then let the next tick confirm it.";
+  if (name === "store-growth") return "A store-growth gauge is over its limit. Relief needs a verified backup less than a day old.";
+  if (name === "room-backup") return "Restore the backup binding or fix the backup write. See docs/BACKUP-DR.md.";
+  return "Repair the check named by lastErrorCode, then let the next tick confirm it.";
+}
+
+// The first failing tick stamps the streak. A streak that already exists
+// keeps its stamp. A record written before the stamp existed anchors to
+// the last success, so a long-standing failure does not look new.
+export function nextFailingSinceAt(prior, at) {
+  if ((prior?.consecutiveFailures ?? 0) > 0) {
+    if (Number.isFinite(prior.failingSinceAt)) return prior.failingSinceAt;
+    if (Number.isFinite(prior.lastSuccessAt)) return prior.lastSuccessAt;
+  }
+  return at;
+}
+
 function integrityFailure(error) {
   const failure = classifyIntegrityError(error);
   return {
@@ -513,6 +541,17 @@ export const JOBS = Object.freeze([
         if (Number.isSafeInteger(observed.quarantined) && observed.quarantined > 0) extra.quarantinedEvents = observed.quarantined;
         if (reason) extra.blockReason = reason;
         if (component) extra.blockComponent = component;
+        // Exactly one quarantined event, and no parked room, is degraded
+        // rather than failing. The public view may name that event. It
+        // does not name the room.
+        if (blockedRooms === 0 && observed.quarantined === 1 && !summaryFailed(integrity)) {
+          try {
+            const eventId = store.db.prepare(
+              "SELECT event_id FROM messages_backfill_blocks WHERE skipped=1 AND event_id IS NOT NULL LIMIT 1"
+            ).get()?.event_id;
+            if (typeof eventId === "string" && SAFE_RECORD_ID.test(eventId)) extra.quarantineEventId = eventId;
+          } catch { /* the count is already on the summary; the id stays off the public view */ }
+        }
         integrity = { ...integrity, ...extra };
         const backfillDetail = integrity?.failureDetail?.subcheck === "messages_backfill"
           || integrity?.failureDetail?.code === "messages_backfill_failed";
@@ -860,9 +899,10 @@ export function startNodeScheduler({
     // breaks the streak and clears the grade.
     const exhausted = grade === BUDGET_EXHAUSTED_NO_PROGRESS;
     records.set(name, ok
-      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: durationMs, lastSummaryAt: at, lastFailure: null,
+      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, failingSinceAt: null, lastDurationMs: durationMs, lastSummaryAt: at, lastFailure: null,
         lastGrade: grade, consecutiveNoProgressExhaustions: exhausted ? (prior.consecutiveNoProgressExhaustions ?? 0) + 1 : 0 }
-      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error ?? prior.lastError ?? null, consecutiveFailures: prior.consecutiveFailures + 1, lastDurationMs: durationMs, lastFailure: failure,
+      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error ?? prior.lastError ?? null, consecutiveFailures: prior.consecutiveFailures + 1,
+        failingSinceAt: nextFailingSinceAt(prior, at), lastDurationMs: durationMs, lastFailure: failure,
         lastGrade: null, consecutiveNoProgressExhaustions: 0 });
   };
   // ctxBase is scheduler-lifetime state, not a per-tick template: jobs may
@@ -958,7 +998,9 @@ export function startNodeScheduler({
           lastSummaryAt: iso(rec.lastSummaryAt),
           lastGrade: rec.lastGrade ?? null,
           consecutiveNoProgressExhaustions: rec.consecutiveNoProgressExhaustions ?? 0,
-          consecutiveFailures: rec.consecutiveFailures ?? 0
+          consecutiveFailures: rec.consecutiveFailures ?? 0,
+          failingSince: (rec.consecutiveFailures ?? 0) > 0 ? iso(rec.failingSinceAt ?? rec.lastSuccessAt ?? rec.lastErrorAt) : null,
+          action: (rec.consecutiveFailures ?? 0) > 0 ? jobFailureAction(job.name, rec.lastFailure?.code ?? null) : null
         };
       });
     },

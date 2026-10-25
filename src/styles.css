@@ -1828,3 +1828,25 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
   .composer-row:focus-within { border-color: Highlight; }
   select:focus, input:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { border-color: Highlight; outline-color: Highlight; }
 }
+
+/* iOS Safari zooms a focused field whose computed size is under 16px.
+   --text-md is 1rem, which is 16px at the default root. Desktop rules
+   above keep their sizes; this floor applies only under 768px. The class
+   selectors match rules that set a smaller size or font: inherit. */
+@media (max-width: 768px) {
+  input,
+  select,
+  textarea,
+  .account-room-form input,
+  .account-room-form textarea,
+  .account-room-form select,
+  .spend-allowance-form input,
+  .inbox-connection-form input,
+  .inbox-connection-form select,
+  .inbox-filters select,
+  .inbox-quarantine-header select,
+  .composer-toolbar select,
+  .agent-secret-row input {
+    font-size: var(--text-md);
+  }
+}

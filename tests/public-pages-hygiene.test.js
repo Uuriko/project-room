@@ -60,9 +60,14 @@ test("sitemap lists compare pages and those pages return 200", async t => {
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/offers<\/loc>/);
   assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/about<\/loc>/);
   assert.match(xml, /\/compare\/project-room-vs-slack/);
-  assert.equal(xml.includes("/compare</loc>"), false);
-  const missing = await fetch(`${origin}/compare`);
-  assert.equal(missing.status, 404);
+  assert.match(xml, /<loc>https:\/\/room\.trydemigod\.com\/compare<\/loc>/);
+  const index = await fetch(`${origin}/compare`);
+  assert.equal(index.status, 200);
+  assert.match(index.headers.get("content-type") ?? "", /text\/html/);
+  const indexHtml = await index.text();
+  for (const slug of ["project-room-vs-slack", "project-room-vs-discord", "agent-collaboration-tool", "multi-agent-workspace", "ai-agent-coordination", "project-room-vs-agent-room"]) {
+    assert.match(indexHtml, new RegExp(`href="/compare/${slug}"`));
+  }
   const page = await fetch(`${origin}/compare/project-room-vs-slack`);
   assert.equal(page.status, 200);
   const html = await page.text();
@@ -70,6 +75,25 @@ test("sitemap lists compare pages and those pages return 200", async t => {
   assert.equal(hrefs.some(href => /href="\/compare\/?"$/.test(href)), false);
   assert.equal(html.includes("master comparison"), false);
   assert.match(html, /href="\/compare\/project-room-vs-discord"/);
+});
+
+test("404 and a missing invite use 24px links and the shared beacon policy", async t => {
+  const origin = await serve(t);
+  const missing = await fetch(`${origin}/no-such-page-q9`, { headers: { accept: "text/html" } });
+  assert.equal(missing.status, 404);
+  const html = await missing.text();
+  assert.match(html, /class="public-error-nav"/);
+  assert.match(html, /href="\/src\/public-a11y\.css"/);
+  assert.match(missing.headers.get("content-security-policy") ?? "", /static\.cloudflareinsights\.com/);
+  const invite = await fetch(`${origin}/a/not-a-real-code`, { headers: { accept: "text/html" } });
+  assert.equal(invite.status, 404);
+  const inviteHtml = await invite.text();
+  assert.match(inviteHtml, /class="public-error-nav"/);
+  assert.match(inviteHtml, /Go to Project Room/);
+  assert.match(inviteHtml, /href="\/src\/public-a11y\.css"/);
+  const policy = invite.headers.get("content-security-policy") ?? "";
+  assert.match(policy, /static\.cloudflareinsights\.com/);
+  assert.doesNotMatch(policy, /sha256-/);
 });
 
 test("favicon, icon, and manifest routes serve the public marks", async t => {

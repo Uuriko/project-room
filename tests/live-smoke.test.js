@@ -123,7 +123,7 @@ test("public-page CSP regressions remain hard failures after the analytics repai
       }; }, async close() {}
     }; }, async close() {}
   };
-  const paths = ["/about", "/receipts", ...PUBLIC_PAGES.filter(path => path.startsWith("/compare/"))];
+  const paths = ["/about", "/receipts", ...PUBLIC_PAGES.filter(path => path === "/compare" || path.startsWith("/compare/"))];
   const report = await browserSmoke({ browserFactory: async () => browser, pages: paths, viewports: [390] });
   assert.equal(report.ok, false);
   assert.deepEqual(report.findings.filter(f => f.code === "csp_console").map(f => [f.detail.split("@")[0], f.severity, f.known]),

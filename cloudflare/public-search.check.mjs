@@ -76,7 +76,7 @@ test('actual Worker public search routes load packaged HTML and preserve private
       const response = await call(present, path); assert.match(response.headers.get('x-robots-tag'), /noindex/, path);
     }
     for (const file of publicAssetPaths.filter(path => path.startsWith('compare/') && path.endsWith('.html'))) {
-      const canonical = '/' + file.slice(0, -5);
+      const canonical = file === 'compare/index.html' ? '/compare' : '/' + file.slice(0, -5);
       const page = await call(present, canonical); assert.equal(page.status, 200, canonical); assert.equal(page.headers.get('x-robots-tag'), 'all', canonical);
       assertPublicPolicy(page, origin);
       assert.match(await page.text(), new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
@@ -91,7 +91,7 @@ test('actual Worker public search routes load packaged HTML and preserve private
     // The outer Worker must retain browser origin across its canonical-origin
     // rewrite for both edge-served marketing and DO-served public HTML.
     const publicPaths = ['/about', '/receipts', '/templates', '/docs/agents',
-      ...publicAssetPaths.filter(path => path.startsWith('compare/') && path.endsWith('.html')).map(file => '/' + file.slice(0, -5))];
+      ...publicAssetPaths.filter(path => path.startsWith('compare/') && path.endsWith('.html')).map(file => file === 'compare/index.html' ? '/compare' : '/' + file.slice(0, -5))];
     for (const path of ['/receipts', '/templates', '/agents']) {
       const response = await call(present, path); assert.equal(response.status, 200, path);
       assertPublicPolicy(response, origin);

@@ -76,7 +76,7 @@ test("public doors are indexable while credentials and unknown pages keep privat
     assert.match(response.headers.get("x-robots-tag"), /noindex/, path);
   }
   for (const file of publicAssetPaths.filter(path => path.startsWith("compare/") && path.endsWith(".html"))) {
-    const canonical = "/" + file.slice(0, -5);
+    const canonical = file === "compare/index.html" ? "/compare" : "/" + file.slice(0, -5);
     const page = await fetch(origin + canonical);
     assert.equal(page.status, 200, canonical);
     assertPublicPolicy(page, origin);
@@ -85,7 +85,7 @@ test("public doors are indexable while credentials and unknown pages keep privat
     assert.match(html, new RegExp('rel="canonical" href="https://room.trydemigod.com' + canonical + '"'));
     assert.match(page.headers.get("link") ?? "", new RegExp(`<https://room\\.trydemigod\\.com${canonical}>; rel="canonical"`));
     for (const block of html.matchAll(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/g)) JSON.parse(block[1]);
-    assert.match(html, /"@type":"FAQPage"/);
+    if (file !== "compare/index.html") assert.match(html, /"@type":"FAQPage"/);
   }
   for (const path of ["/receipts", "/templates", "/agents"]) {
     const response = await fetch(origin + path, { headers: { "x-forwarded-host": "csp-denied.example", forwarded: "host=csp-denied.example;proto=https" } });
