@@ -10,6 +10,14 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 4. Run checks relevant to the change. Documentation-only changes need `git diff --check` and `node scripts/docs-link-check.mjs`; they do not need a new test or the full local application suite. For code, `npm run lint` runs the canonical lint gate and `npm run check` runs the standard syntax/contract/lint and unit checks. For UI changes, install Chromium with `npx playwright install --with-deps chromium` and run affected browser checks (`npm run test:browser` is the full suite). Workers changes also need [cloudflare/README.md](cloudflare/README.md). Run tests via `scripts/test-env.sh` so TMPDIR points at the worktree-local `.tmp/`. Hosted CI still must pass on the final head before landing.
 5. Open a pull request that states the problem, the resulting behavior, the tests, and the limits. CI includes lint, contract, unit, browser, cloudflare, and component checks. Required CI must pass on the final revision. Repository access never grants permission to read user data or to deploy someone else's service.
 
+## Generated files
+
+Do not hand-edit these. Pull-request checks rebuild them from that pull request's sources. A stale copy does not fail the check.
+
+- `scripts/CANDIDATE-MANIFEST.json` is untracked. CI and deploy regenerate it from the tree. A deploy uploads `candidate-manifest-<commit>` recording the manifest that build used (`sourceCommit` plus `manifestSha256` of the compact JSON).
+- Runtime package pins are generated when `scripts/runtime-package.mjs` loads inside this repository. The inputs are imports reachable from the required entry points, `server/public-assets.mjs`, and the baseline `scripts/runtime-historical-pins.json`. Import a new module from code that is already packaged and it is pinned. Add a path to the baseline only when a new file must ship and nothing imports it. There is no `optional.push` list to update.
+- `plugins/project-room/skills/project-room/references/errors-catalog.md` is a copy of `skills/project-room/references/errors-catalog.md`. Edit the file under `skills/`. Other plugin skill files are still exact copies (`node scripts/skills-sync.mjs`). A push to `main` rewrites the plugin error catalog.
+
 ## Replay and release
 
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.

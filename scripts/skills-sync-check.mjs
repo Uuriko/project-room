@@ -2,12 +2,12 @@
 // Repair with: node scripts/skills-sync.mjs
 import { pathToFileURL } from "node:url";
 import { resolve } from "node:path";
-import { skillDrift } from "./skills-sync.mjs";
+import { errorsCatalogDrift, skillDrift } from "./skills-sync.mjs";
 
 export function reportSkillDrift() {
-  const failures = skillDrift();
+  const failures = [...skillDrift(), ...errorsCatalogDrift()];
   if (failures.length === 0) {
-    console.log("skills-sync-check: OK");
+    console.log("skills-sync-check: OK (errors catalog checked against skills/; the plugin copy is generated on main)");
     return 0;
   }
   for (const failure of failures) console.error(`skills-sync-check: ${failure}`);

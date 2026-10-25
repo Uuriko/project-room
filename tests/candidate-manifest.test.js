@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { manifestDrift } from "../scripts/candidate-manifest.mjs";
@@ -78,24 +79,29 @@ test("drift refuses malformed manifests without reading sections", () => {
   assert.ok(manifestDrift({}, { contractVersion: 2, runtime: {}, storeSchemaVersion: 1, assets: {}, deployment: {}, packages: {} }).includes("contractVersion"));
 });
 
-test("frozen deployment manifest pins the recovery helper and production workflow bytes", () => {
-  const manifest = JSON.parse(readFileSync(new URL("../scripts/CANDIDATE-MANIFEST.json", import.meta.url), "utf8"));
+test("regenerated deployment pins match the recovery helper and production workflow bytes", async () => {
+  const { buildCandidateManifest } = await import("../scripts/candidate-manifest.mjs");
   const root = new URL("..", import.meta.url).pathname;
+  const manifest = buildCandidateManifest(root);
   const files = ["scripts/deploy-recovery.mjs", ".github/workflows/deploy-prod.yml"];
   const actual = pinFiles(root, files);
   for (const file of files) assert.equal(manifest.deployment[file], actual[file], file);
 });
 
-test("committed candidate manifest has zero drift from the tree", async () => {
-  // Bug sweep lane 14 F3 (#3902): before this test, only the two deployment
-  // files above tied the committed manifest to the tree; the other 150+
-  // pins drifted undetectably (17 stale at the time of the fix, including
-  // deployment:cloudflare/room.mjs). Rebuild from the real tree and require
-  // an exact match across every section. Repair drift with:
-  //   node scripts/candidate-manifest.mjs --write
-  const { buildCandidateManifest } = await import("../scripts/candidate-manifest.mjs");
+test("regenerated candidate manifest matches the source bytes it names", async t => {
+  // The manifest is not a committed artifact. Regeneration re-hashes every
+  // path the manifest names and must agree with the tree. A stale
+  // scripts/CANDIDATE-MANIFEST.json is ignored.
+  const { verifyGeneratedManifest, candidateManifestRecord } = await import("../scripts/candidate-manifest.mjs");
   const root = new URL("..", import.meta.url).pathname;
-  const committed = JSON.parse(readFileSync(join(root, "scripts/CANDIDATE-MANIFEST.json"), "utf8"));
-  const drift = manifestDrift(buildCandidateManifest(root), committed);
-  assert.deepEqual(drift, [], `candidate manifest drift (run: node scripts/candidate-manifest.mjs --write): ${drift.join(", ")}`);
+  const stale = join(root, "scripts/CANDIDATE-MANIFEST.json");
+  writeFileSync(stale, "{}\n");
+  t.after(() => rmSync(stale, { force: true }));
+  const { drift, manifest } = verifyGeneratedManifest(root);
+  assert.deepEqual(drift, []);
+  assert.equal(manifest.contractVersion, 1);
+  const record = candidateManifestRecord(root, "a".repeat(40));
+  assert.equal(record.manifestSha256, "sha256:" + createHash("sha256").update(JSON.stringify(record.manifest)).digest("hex"));
+  assert.deepEqual(record.manifest, manifest);
+  assert.throws(() => candidateManifestRecord(root, "HEAD"), /40 lowercase hex/);
 });

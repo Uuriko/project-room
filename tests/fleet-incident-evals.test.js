@@ -133,7 +133,7 @@ test("E1 #3627×#3747: at the pilot cap, verify of a delivered claim lands, neve
 });
 
 // ---------------------------------------------------------------- E2 ----
-test("E2 #3716: the two front-door optional.push registrations survive in the runtime-package allowlist", () => {
+test("E2 #3716: the two front-door modules survive in the generated runtime-package allowlist", () => {
   // Dropped by the Wave-2 auto-merge; without them the packaged runtime
   // 404s the /about live-facts route and script the PR itself added.
   assert.ok(allowed.has("server/routes/front-door.mjs"),

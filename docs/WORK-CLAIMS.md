@@ -509,5 +509,6 @@ On top of that, the board adds power-user card navigation:
   heading j/k navigation targets.
 
 Wiring: `src/board-keyboard.mjs` (`attachBoardKeyboard`), loaded alongside
-`src/board-ui.js` from `src/app.js` and registered as a runtime public
-asset in `scripts/runtime-package.mjs`.
+`src/board-ui.js` from `src/app.js`. It is a public asset in
+`server/public-assets.mjs`. The runtime package pins that list plus the
+import closure, so there is no separate registration to edit.

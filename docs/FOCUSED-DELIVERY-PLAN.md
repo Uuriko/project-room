@@ -118,7 +118,8 @@ Keep a published candidate separate from production status and never interpret
 queued checks or absence of a result as approval.
 
 The preflight checks installed dependencies, existing module-coverage rules and
-all allowlisted runtime imports and candidate-manifest drift. It warns about Node-major differences from CI,
+all allowlisted runtime imports. It regenerates the candidate manifest from
+the tree and compares that result to the tree's own bytes. It warns about Node-major differences from CI,
 does not install or switch runtimes, and leaves cold-package and full-suite
 qualification intact. The Node engine range remains unchanged.
 

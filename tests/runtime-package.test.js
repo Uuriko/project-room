@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createHash } from "node:crypto";
-import { createRuntimePackage, verifyRuntimePackage, verifyRuntimeImports, verifyRuntimeSource, publicAssets, allowed, generatedAgentPages } from "../scripts/runtime-package.mjs";
+import { createRuntimePackage, verifyRuntimePackage, verifyRuntimeImports, verifyRuntimeSource, publicAssets, allowed, generatedAgentPages, pinsFromSource } from "../scripts/runtime-package.mjs";
 import { importClosure } from "../scripts/runtime-import-closure.mjs";
 import { assetPaths } from "../cloudflare/build-assets.mjs";
 import { candidateRuntimeFixture } from "../scripts/candidate-runtime-fixture.mjs";
@@ -222,7 +222,15 @@ test("every module in the server import closure is in the runtime-package allowl
   const closure = importClosure("server.mjs", repository);
   const missing = [...closure].filter(path => !allowed.has(path)).sort();
   assert.deepEqual(missing, [],
-    `Imported but not allowlisted for the runtime package. Add to scripts/runtime-package.mjs: ${missing.join(", ")}`);
+    `Imported but not in the generated runtime pin set: ${missing.join(", ")}`);
+});
+
+test("imported server modules are pinned without a historical baseline entry", () => {
+  const historical = JSON.parse(readFileSync(join(repository, "scripts/runtime-historical-pins.json"), "utf8"));
+  assert.equal(pinsFromSource, true);
+  assert.equal(historical.includes("server/routes/front-door.mjs"), false);
+  assert.equal(allowed.has("server/routes/front-door.mjs"), true);
+  assert.equal(allowed.has("src/front-door.js"), true);
 });
 
 test("uncommitted candidate packages cold in an isolated synthetic commit, including request observer dependencies", t => {

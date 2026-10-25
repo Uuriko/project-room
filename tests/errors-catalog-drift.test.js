@@ -8,9 +8,8 @@
 //   2. the catalog names a code the server no longer emits (stale row), or
 //   3. a pinned doc statement no longer matches live behavior.
 //
-// Regenerate the catalog after server error changes:
-//   node ~/workspace/project-room-qa/product200-docs/skill/A6/gen-docs.mjs
-// (sources: resolve-final.mjs extraction + catalog.tsv evidence).
+// Edit skills/project-room/references/errors-catalog.md when server error
+// codes change. The plugin copy is generated from that file; do not edit it.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";

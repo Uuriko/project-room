@@ -1,6 +1,8 @@
-// Frozen candidate manifest: pin runtime, assets, schema and package hashes so
-// tests and deployment preparation refer to the same bytes. Deterministic: the
-// same tree always produces the same manifest, so drift is a byte comparison.
+// Candidate manifest: pin runtime, assets, schema and package hashes so a
+// deploy can record the bytes it shipped. Deterministic: the same tree always
+// produces the same manifest. Pull requests do not commit this file. CI and
+// deploy regenerate it from the checkout and compare that result to the
+// checkout's own bytes. A stale scripts/CANDIDATE-MANIFEST.json is not a gate.
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,6 +67,28 @@ export function buildCandidateManifest(root) {
   };
 }
 
+// Rebuild the manifest from the tree and re-hash every path it names.
+// scripts/CANDIDATE-MANIFEST.json is not read: a stale committed copy cannot fail this.
+export function verifyGeneratedManifest(root) {
+  const manifest = buildCandidateManifest(root);
+  const rebuilt = {
+    ...manifest,
+    assets: pinFiles(root, Object.keys(manifest.assets)),
+    deployment: pinFiles(root, Object.keys(manifest.deployment)),
+    packages: pinFiles(root, Object.keys(manifest.packages)),
+  };
+  return { manifest, drift: manifestDrift(manifest, rebuilt) };
+}
+
+// Compact JSON is the hashed form. The record file is pretty-printed around it.
+export function candidateManifestRecord(root, sourceCommit = null) {
+  if (sourceCommit !== null && !/^[0-9a-f]{40}$/.test(sourceCommit))
+    throw new Error("source commit must be 40 lowercase hex characters");
+  const { manifest, drift } = verifyGeneratedManifest(root);
+  if (drift.length) throw new Error(`Candidate manifest does not match its sources: ${drift.join(", ")}`);
+  return { sourceCommit, manifestSha256: sha256(JSON.stringify(manifest)), manifest };
+}
+
 const EXPECTED_KEYS = ["contractVersion", "runtime", "storeSchemaVersion", "assets", "deployment", "packages"];
 export function manifestDrift(expected, actual) {
   const drift = [];
@@ -83,10 +107,24 @@ export function manifestDrift(expected, actual) {
 
 const isMain = process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href;
 if (isMain) {
-  const root = process.cwd(), manifest = buildCandidateManifest(root);
-  if (process.argv.includes("--write")) {
-    const { writeFileSync } = await import("node:fs");
-    writeFileSync(join(root, MANIFEST_PATH), JSON.stringify(manifest, null, 2) + "\n");
-    console.log(`froze ${MANIFEST_PATH}: schema ${manifest.storeSchemaVersion}, ${Object.keys(manifest.assets).length} assets, ${Object.keys(manifest.deployment).length} deployment files`);
-  } else console.log(JSON.stringify(manifest, null, 2));
+  const root = process.cwd();
+  const { writeFileSync } = await import("node:fs");
+  const recordAt = process.argv.indexOf("--record");
+  if (recordAt !== -1) {
+    const out = process.argv[recordAt + 1];
+    if (!out || out.startsWith("--")) throw new Error("Usage: candidate-manifest.mjs --record FILE [--commit SHA]");
+    const commitAt = process.argv.indexOf("--commit");
+    const record = candidateManifestRecord(root, commitAt === -1 ? null : process.argv[commitAt + 1]);
+    writeFileSync(out, JSON.stringify(record, null, 2) + "\n");
+    console.log(`${record.manifestSha256}${record.sourceCommit ? " " + record.sourceCommit : ""}`);
+  } else {
+    const { manifest, drift } = verifyGeneratedManifest(root);
+    if (drift.length) {
+      console.error(`Candidate manifest does not match its sources: ${drift.join(", ")}`);
+      process.exitCode = 1;
+    } else if (process.argv.includes("--write")) {
+      writeFileSync(join(root, MANIFEST_PATH), JSON.stringify(manifest, null, 2) + "\n");
+      console.log(`wrote ${MANIFEST_PATH} for local inspection (${Object.keys(manifest.assets).length} assets). Pull requests do not commit it.`);
+    } else console.log(JSON.stringify(manifest, null, 2));
+  }
 }
