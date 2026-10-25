@@ -10730,6 +10730,30 @@ paths:
         '409': { description: room_exists, request_conflict, or pilot_limit }
         '422': { description: invalid_room_request }
         '429': { description: rate_limited }
+  /api/agent-rooms/{roomId}/token/rotate:
+    post:
+      x-room-permission: self
+      summary: Replace this identity's onboarding token for one room
+      description: >-
+        Requires the pri_ identity secret. One transaction revokes that
+        identity's live onboarding credential for the room and returns the
+        replacement. Redeeming an agent invite again does not mint a room
+        token; a linked identity uses this route instead. A room token is
+        not an identity secret and is refused.
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: roomId
+          required: true
+          schema: { type: string, maxLength: 64 }
+      responses:
+        '200':
+          description: "{ roomId, mcpToken }. mcpToken.credential is the new rak_ onboarding credential, shown once."
+        '401': { description: unauthenticated (unknown identity secret, or a room token presented as one) }
+        '404': { description: room_not_found (this identity is not linked to the room) }
+        '422': { description: invalid_room_request }
+        '429': { description: rate_limited }
   /api/oauth/sessions:
     get:
       summary: List the account's active OAuth sessions

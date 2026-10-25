@@ -3052,12 +3052,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // no identitySecret field: it already holds the durable
           // credential, and a presented credential is never echoed back.
           const mintedSecret = typeof redeemed.identitySecret === "string" ? redeemed.identitySecret : null;
+          const mcpToken = redeemed.mcpToken ?? null;
           return json(res, 201, {
             identityId: redeemed.identityId,
-            roomToken: redeemed.mcpToken.credential,
+            roomToken: mcpToken?.credential ?? null,
             credentialKind: "room_token",
             ...(mintedSecret ? { identitySecret: mintedSecret } : {}),
-            mcpToken: redeemed.mcpToken,
+            mcpToken,
             roomId: redeemed.roomId,
             memberId: redeemed.memberId,
             displayName: redeemed.displayName,
@@ -3070,9 +3071,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               mintedSecret
                 ? "Save identitySecret now — it is your identity's durable credential, shown once, and it never expires"
                 : "Your identity secret remains your durable credential — it never expires, and this response does not echo a presented credential back",
-              "Save roomToken too — it is room-scoped, expires in 30 days, and is shown once; use it as Authorization: Bearer on /mcp for this room",
+              mcpToken
+                ? "Save roomToken too — it is room-scoped, expires in 30 days, and is shown once; use it as Authorization: Bearer on /mcp for this room"
+                : `This replay did not include a room token. POST /api/agent-rooms/${encodeURIComponent(redeemed.roomId)}/token/rotate with the identity secret to revoke the old onboarding token and issue a new one.`,
               "roomToken is room-scoped: identity-wide routes such as /api/agent-rooms and /api/needs-me refuse it and take identitySecret instead; use room_check_access and room_needs_me on /mcp for room-scoped checks",
-              "If roomToken expires, do NOT mint a replacement identity: POST /api/join again with your original inviteCode and Authorization: Bearer <identitySecret> to receive a fresh room token — same membership, same display name (duplicate: true). identitySecret also authenticates room routes directly",
+              mcpToken
+                ? "If roomToken expires, do NOT mint a replacement identity: POST /api/agent-rooms/" + encodeURIComponent(redeemed.roomId) + "/token/rotate with the identity secret. Redeeming the invite again does not mint another room token. identitySecret also authenticates room routes directly"
+                : "Do not redeem this invite again to mint another room token. POST /api/agent-rooms/" + encodeURIComponent(redeemed.roomId) + "/token/rotate with the identity secret.",
               `Orient: GET /api/rooms/${redeemed.roomId}/activation-pack`,
               `Read the room: GET /api/rooms/${redeemed.roomId}?view=work`
             ]
@@ -3559,6 +3564,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // creates a room and becomes its owner. The pri_ secret travels in
       // the bearer header (never a JSON body); per-address rate limit
       // before the body is read, per-identity budget inside the module.
+      // Token rotation lives in the route table (server/routes/agent-room-token.mjs).
       if (url.pathname === "/api/agent-rooms" && req.method === "GET") {
         rate(`agent-room-list:${remoteAddress}`, 60);
         return json(res, 200, agentRooms.list(bearer(req), url.searchParams.get("after") ?? ""));
