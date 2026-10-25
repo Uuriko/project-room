@@ -11,6 +11,8 @@
 // a tool this agent may not use is absent, never present-but-denying.
 import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
 import { capabilityVisibleTo } from "./capability-visibility.mjs";
+import { isFamilyTool } from "../src/room-mcp-join.js";
+import { familyToolDefs, foldedDeprecation, isFoldedMcpTool } from "./mcp-folded-catalog.mjs";
 
 export const SEARCH_ACTIONS_TOOL = "room_search_actions";
 export const RUN_ACTION_TOOL = "room_run_action";
@@ -51,8 +53,8 @@ export const actionMetaToolDefs = Object.freeze([
   }
 ]);
 
-// The lean default under discussion: read, post, needs-me, answer a formal
-// request, access, join, stop wakes, plus search and run for everything else.
+// Default tools/list. An allowlist, so a later read such as room_map stays
+// off it and is found with room_search_actions. Do not add it here.
 export const LEAN_MCP_TOOLS = Object.freeze([
   "room_needs_me",
   "room_read_messages",
@@ -96,7 +98,9 @@ export function validRunActionArgs(args) {
 
 // Name words count three times as much as description words; ties keep
 // catalog order, so the result is deterministic.
-export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, tools = hostedMcpToolDefs } = {}) {
+const searchableTools = [...hostedMcpToolDefs, ...familyToolDefs];
+
+export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, tools = searchableTools } = {}) {
   const terms = [...new Set(words(query))];
   const visible = agent ? tools.filter(tool => capabilityVisibleTo(agent, tool)) : tools;
   const scored = [];
@@ -117,7 +121,8 @@ export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, to
     summary: firstSentence(tool.description),
     readOnly: tool.annotations?.readOnlyHint === true,
     rest: restRouteOf(tool),
-    inputSchema: tool.inputSchema
+    inputSchema: tool.inputSchema,
+    ...(isFoldedMcpTool(tool.name) ? { deprecated: foldedDeprecation(tool.name) } : {})
   }));
   return {
     query,
@@ -130,5 +135,6 @@ export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, to
 }
 
 export function isRunnableAction(name) {
-  return typeof name === "string" && !ACTION_META_TOOL_NAMES.includes(name) && hostedMcpToolDefs.some(tool => tool.name === name);
+  return typeof name === "string" && !ACTION_META_TOOL_NAMES.includes(name)
+    && (hostedMcpToolDefs.some(tool => tool.name === name) || isFamilyTool(name));
 }

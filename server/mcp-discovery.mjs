@@ -12,15 +12,19 @@ import { capabilityVisibleTo } from "./capability-visibility.mjs";
 import { withOpenWorldHint } from "./content-trust.mjs";
 import { LEAN_MCP_TOOLS, actionMetaToolDefs } from "./mcp-action-search.mjs";
 import { withMcpToolContract } from "./mcp-tool-contracts.mjs";
+import { familyToolDefs, isFoldedMcpTool } from "./mcp-folded-catalog.mjs";
+
+export const DEFAULT_MCP_PROFILE = "lean";
 
 export function livePublicMcpTools() {
   return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools, ...anonymousIdentityMintMcpTools].map(withOpenWorldHint);
 }
 
-// Same list tools/list returns. Default is the core profile (short blurbs,
-// snake_case names). profile "full" is the whole catalog. aliases adds the
-// hidden dotted names. The server card uses the default so it matches a
-// bearer tools/list with no profile argument.
+// Same list tools/list returns. Default is the lean profile: the 10 names in
+// LEAN_MCP_TOOLS, with no join tools appended. profile "core" is the previous
+// list. profile "full" is the folded catalog. aliases adds the hidden dotted
+// names of tools that are still listed. The server card uses the default so
+// it matches a bearer tools/list with no profile argument.
 // The optional agent descriptor (see server/capability-visibility.mjs)
 // filters BEFORE listing: withheld, never refused. A capability the
 // agent's grants/tiers do not admit is ABSENT from the returned catalog —
@@ -42,45 +46,61 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
   automation: focusMembers("automation")
 });
 
-export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
-  const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
+function withoutFocus(entry) {
+  if (!entry || !Object.hasOwn(entry, "focus")) return entry;
+  const { focus, ...rest } = entry;
+  return rest;
+}
+
+export function listedMcpTools(profile = DEFAULT_MCP_PROFILE, aliases = false, agent = null, focus = undefined) {
+  const outside = focus === "public_work" || ((profile === "core" || profile === "lean") && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
   if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
-  // profile "lean" (opt-in): a short front door plus room_search_actions and
-  // room_run_action for the long tail. The meta tools are listed only here;
-  // they stay callable on every profile.
+  // Lean is an allowlist. room_map and every other hosted action stay off it;
+  // room_search_actions and room_run_action reach them, including after a
+  // later tool lands. The meta tools are listed only here; they stay callable
+  // on every profile. Folded names stay callable and searchable, and leave
+  // profile=full and focus views. One family tool replaces each family.
   const leanDefs = [...hostedMcpToolDefs, ...actionMetaToolDefs];
+  const families = familyToolDefs
+    .filter(entry => focusedNames ? (entry.focus ?? []).includes(focus) : profile === "full")
+    .map(withoutFocus);
   const source = focusedNames
-    ? hostedMcpToolDefs.filter(entry => focusedNames.has(entry.name))
+    ? [...hostedMcpToolDefs.filter(entry => focusedNames.has(entry.name) && !isFoldedMcpTool(entry.name)), ...families]
     : profile === "lean"
     ? LEAN_MCP_TOOLS.map(name => leanDefs.find(entry => entry.name === name))
     : profile === "full"
-    ? hostedMcpToolDefs
+    ? [...hostedMcpToolDefs.filter(entry => !isFoldedMcpTool(entry.name)), ...families]
     : CORE_MCP_TOOLS.map(name => hostedMcpToolDefs.find(entry => entry.name === name));
+  if (source.some(entry => !entry)) throw new Error(`MCP profile ${profile} names a tool with no definition`);
   const tools = source.map(entry => {
-    const base = (profile === "core" || profile === "lean") && CORE_MCP_BLURBS[entry.name] ? CORE_MCP_BLURBS[entry.name] : entry.description;
+    const presented = withoutFocus(entry);
+    const base = (profile === "core" || profile === "lean") && CORE_MCP_BLURBS[presented.name] ? CORE_MCP_BLURBS[presented.name] : presented.description;
     // Core and lean stay under their byte budget (tests/mcp-core-profile.test.js);
     // the full profile carries the access/cost/REST line (AUX-08).
-    const description = profile === "full" ? withMcpToolContract(entry.name, base) : base;
-    const alias = mcpToolAlias(entry.name);
+    const description = profile === "full" ? withMcpToolContract(presented.name, base) : base;
+    const alias = mcpToolAlias(presented.name);
     return {
-      ...entry,
+      ...presented,
       description,
       ...(aliases && alias ? { aliases: [alias] } : {})
     };
   });
-  const joinTools = profile === "full" ? MCP_JOIN_TOOLS.map(entry => ({ ...entry, description: withMcpToolContract(entry.name, entry.description) })) : MCP_JOIN_TOOLS;
+  const includeJoins = !(profile === "lean" && focus === undefined);
+  const joinTools = !includeJoins ? []
+    : profile === "full" ? MCP_JOIN_TOOLS.map(entry => ({ ...entry, description: withMcpToolContract(entry.name, entry.description) }))
+    : MCP_JOIN_TOOLS;
   const listed = [...tools, ...joinTools];
   return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(withOpenWorldHint);
 }
 
-// The card's enrolled tier is the member catalog: the default (core) list a
+// The card's enrolled tier is the member catalog: the default (lean) list a
 // bearer with a current room membership gets from tools/list with no profile
 // argument. It is NOT the non-member list — an identity with no memberships
 // is served the public-work lobby list at the door (the "public_work" focus
 // branch above), which is a different subject (#3769).
 export function liveEnrolledMcpTools() {
-  return listedMcpTools("core", false, null);
+  return listedMcpTools(DEFAULT_MCP_PROFILE, false, null);
 }
 
 export function liveMcpServerCardJson() {

@@ -13,10 +13,6 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
-const WAKE_TOOLS = [
-  "wake.register", "wake.clear", "heartbeat.set", "heartbeat.get", "heartbeat.ack",
-  "wake.pause", "wake.resume", "webhook.subscribe", "webhook.list", "webhook.unsubscribe"
-];
 const PUBLIC_DNS = { resolve4: async () => ["93.184.216.34"], resolve6: async () => [] };
 const PRIVATE_DNS = { resolve4: async () => ["10.1.2.3"], resolve6: async () => [] };
 const WAKE_URL = "https://host.example.test/wake";
@@ -88,7 +84,12 @@ test("wake tools stay behind a live identity secret", async t => {
     assert.equal(keyed.body.result, undefined, name);
   }
   const names = (await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json()).result.tools.map(tool => tool.name);
-  for (const name of WAKE_TOOLS) assert.equal(names.includes(name.replaceAll(".", "_")), true, name);
+  for (const name of ["heartbeat_set", "heartbeat_get", "heartbeat_ack", "wake_pause", "wake_resume", "webhook"]) {
+    assert.equal(names.includes(name), true, name);
+  }
+  for (const name of ["wake_register", "wake_clear", "webhook_subscribe", "webhook_list", "webhook_unsubscribe"]) {
+    assert.equal(names.includes(name), false, name);
+  }
   assert.equal(names.includes("room_join_packet"), true);
 });
 
@@ -331,7 +332,8 @@ test("a session cookie without a bearer secret gets the anonymous MCP catalog", 
   const bearer = store.identities.create("Cookie contrast");
   const withBearer = await rpc(origin, "tools/list", { profile: "full" }, bearer.secret);
   const names = (await withBearer.json()).result.tools.map(tool => tool.name);
-  assert.equal(names.includes("wake_register"), true);
+  assert.equal(names.includes("wake_register"), false);
+  assert.equal(names.includes("heartbeat_set"), true);
 });
 
 test("wake.register and heartbeat.set reject cadenceSeconds above the 7-day bound", async t => {

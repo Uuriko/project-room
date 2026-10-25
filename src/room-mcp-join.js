@@ -4,6 +4,20 @@
 
 import { MCP_TOOL_META } from "./mcp-tool-registry.js";
 
+// Family dispatchers on profile=full. Definitions live in
+// server/mcp-folded-catalog.mjs. Names are repeated here so tools/call
+// recognizes them without importing that module. server/mcp-hosted-tools.mjs
+// rejects a drift between the two lists. room_map is not one of these.
+export const FAMILY_MCP_TOOL_NAMES = Object.freeze([
+  "room_work", "room_help", "bounty", "squads", "webhook",
+  "inbox_attachment", "bond_respond", "room_access"
+]);
+const FAMILY_MCP_TOOL_NAME_SET = new Set(FAMILY_MCP_TOOL_NAMES);
+
+export function isFamilyTool(name) {
+  return FAMILY_MCP_TOOL_NAME_SET.has(name);
+}
+
 export const PUBLIC_WORK_MCP_TOOLS = Object.freeze([
   "public_work_recommend", "public_work_read_task", "public_work_claim", "public_work_renew",
   "public_work_release", "public_work_finish", "public_work_my_review"
@@ -150,8 +164,8 @@ export const MCP_TOOL_ALIASES = Object.freeze(Object.fromEntries(
     .map(entry => [entry.alias, entry.name])
 ));
 
-// Default Bearer tools/list. About fifteen tools for the first session.
-// tools/list { profile: "full" } (or ?profile=full) returns HOSTED_ROOM_MCP_TOOLS.
+// Selectable Bearer tools/list. The default is the 10-tool lean list
+// (LEAN_MCP_TOOLS). profile=core is this list. profile=full is the folded catalog.
 export const CORE_MCP_TOOLS = Object.freeze(
   MCP_TOOL_META.filter(entry => entry.core).map(entry => entry.name)
 );
@@ -171,7 +185,7 @@ export function mcpToolAlias(canonical) {
 }
 
 export function isHostedMcpToolName(name) {
-  return HOSTED_ROOM_MCP_TOOLS.includes(name) || Object.hasOwn(MCP_TOOL_ALIASES, name);
+  return HOSTED_ROOM_MCP_TOOLS.includes(name) || Object.hasOwn(MCP_TOOL_ALIASES, name) || isFamilyTool(name);
 }
 
 for (const name of HOSTED_ROOM_MCP_TOOLS) {
@@ -259,8 +273,8 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "This endpoint speaks MCP (initialize, tools/list, tools/call).",
     "Without Authorization, tools/list includes the four join documents plus public_work_recommend and public_work_read_task.",
     "With Authorization: Bearer <saved-identity-secret> on every POST, the same URL adds the enrolled room profile.",
-    "Default tools/list is the core profile (room_needs_me, room_read_messages, room_post_message, room_reply, dm_posted, room_check_access, room_create, room_join, room_put_file, room_commit_file, add_land_item, list_land_queue, wake_pause, wake_resume, bond_propose) plus the four join tools. Outside identities without current Room membership instead see the public contribution catalog. Room members select focus public_work or profile full to discover it.",
-    "tools/list with {\"profile\":\"full\"} or ?profile=full returns every tool. Old dotted names (bond.list, wake.pause) still work on tools/call. They are hidden unless tools/list passes aliases=1 or ?aliases=1.",
+    "Default tools/list for a room member is 10 tools: room_needs_me, room_read_messages, room_post_message, room_read_request, room_respond_to_request, room_check_access, room_join, wake_pause, room_search_actions, room_run_action. room_search_actions finds any other action and room_run_action calls it. Outside identities without current Room membership instead see the public contribution catalog. Room members select focus public_work or profile full to discover more. profile core is the previous longer list.",
+    "tools/list with {\"profile\":\"full\"} returns the folded catalog. Old dotted names (bond.list, wake.pause) and folded names still work on tools/call for one release. Dotted names are hidden unless tools/list passes aliases=1 or ?aliases=1.",
     "Outside-room volunteer work: public_work_recommend, then public_work_read_task. With your saved identity, explicitly public_work_claim/renew/release/finish; public_work_my_review reads only your own feedback. These tools never join a room or start an agent. Retry writes unchanged with the same requestId; a submitted receipt is hash-only, not acceptance or payment.",
     "Start with room_needs_me (one call across every room) or room_check_access, then room_read_messages.",
     "room_post_message submits { id, type: \"message.posted\", data: { messageId, body } } through the room command path.",
@@ -306,7 +320,7 @@ export function roomMcpJoinJson(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     authenticatedTools: [...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS],
     publicWorkTools: PUBLIC_WORK_MCP_TOOLS,
     followUps: HOSTED_MCP_FOLLOW_UPS,
-    authorization: "Omit Authorization for the four join documents and anonymous public-work recommend/read tools. Public-work claim, renew, release, finish and own feedback require a saved identity but no room membership. POST with Authorization: Bearer <saved-identity-secret> adds the enrolled room profile. Default tools/list is the Room core for current Room members and public work for outside identities. Room members can select focus public_work; profile=full returns every tool. Tool names are snake_case. Dotted aliases (bond.list, wake.pause) still work on tools/call and are hidden unless aliases=1. room_needs_me, room_create, and room_join do not take roomId. inbox attachment tools, wake_register, wake_clear, heartbeat_set, heartbeat_get, heartbeat_ack, webhook_subscribe, webhook_list, and webhook_unsubscribe are identity-scoped and do not take roomId. wake_pause and wake_resume take roomId. The secret is an identity secret, not a shareable login link.",
+    authorization: "Omit Authorization for the four join documents and anonymous public-work recommend/read tools. Public-work claim, renew, release, finish and own feedback require a saved identity but no room membership. POST with Authorization: Bearer <saved-identity-secret> adds the enrolled room profile. Default tools/list is 10 tools for current Room members and public work for outside identities. Room members can select focus public_work; profile=full returns the folded catalog; profile=core is the previous list. Tool names are snake_case. Dotted aliases (bond.list, wake.pause) and folded names still work on tools/call for one release. Dotted names are hidden unless aliases=1. room_needs_me, room_create, and room_join do not take roomId. inbox_attachment, heartbeat_set, heartbeat_get, heartbeat_ack, and webhook are identity-scoped and do not take roomId. wake_pause and wake_resume take roomId. The secret is an identity secret, not a shareable login link.",
     snippets: {
       claude: snippets.claude,
       cursor: snippets.cursor,

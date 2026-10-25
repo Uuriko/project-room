@@ -11,10 +11,16 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import {
-  CORE_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
+  PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
 } from "../src/room-mcp-join.js";
+import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
+import { FOLDED_MCP_TOOLS, familyToolDefs } from "../server/mcp-folded-catalog.mjs";
 
-const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
+const foldedNames = new Set(Object.keys(FOLDED_MCP_TOOLS));
+const fullFront = [
+  ...HOSTED_ROOM_MCP_TOOLS.filter(name => !foldedNames.has(name)),
+  ...familyToolDefs.map(tool => tool.name)
+];
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-core-"));
@@ -51,7 +57,7 @@ function namesOf(body) {
   return body.result.tools.map(tool => tool.name);
 }
 
-test("default tools/list is the short core profile and every listed name is legal", async t => {
+test("default tools/list is the 10-tool lean profile and every listed name is legal", async t => {
   const { origin, store, rooms } = await serve(t);
   const ada = store.identities.create("Ada");
   const carol = store.identities.create("Carol");
@@ -62,10 +68,9 @@ test("default tools/list is the short core profile and every listed name is lega
   const listed = await rpc(origin, "tools/list", undefined, ada.secret);
   const body = await listed.json();
   const names = namesOf(body);
-  assert.equal(body.result.profile, "core");
-  assert.deepEqual(names, [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
-  // Core still names bond_propose; the rest of the bond lifecycle is
-  // advertised from the conversation focus (see the focus test below).
+  assert.equal(body.result.profile, "lean");
+  assert.deepEqual(names, [...LEAN_MCP_TOOLS]);
+  assert.equal(names.includes("room_map"), false);
   assert.ok(names.every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(names.includes("bond.list"), false);
   assert.equal(names.includes("room_read_board"), false);
@@ -86,18 +91,24 @@ test("default tools/list is the short core profile and every listed name is lega
   // profile stays small for cold agents, with headroom for one more flag.
   assert.ok(coreBytes < 17 * 1024, `core tools/list is ${coreBytes} bytes`);
 
-  const aliased = await rpc(origin, "tools/list", { aliases: 1 }, ada.secret);
+  const aliased = await rpc(origin, "tools/list", { profile: "core", aliases: 1 }, ada.secret);
   const aliasBody = await aliased.json();
   assert.ok(namesOf(aliasBody).every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(aliasBody.result.tools.find(tool => tool.name === "bond_propose").aliases[0], "bond.propose");
   assert.equal(aliasBody.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
   assert.equal(aliasBody.result.tools.some(tool => tool.name === "bond.list"), false);
+  const leanAliased = await rpc(origin, "tools/list", { aliases: 1 }, ada.secret);
+  const leanAliasBody = await leanAliased.json();
+  assert.equal(leanAliasBody.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
+  assert.equal(leanAliasBody.result.tools.some(tool => tool.name === "bond_propose"), false);
 
   const queried = await rpc(origin, "tools/list", undefined, ada.secret, "?aliases=1&profile=full");
   const queryBody = await queried.json();
   assert.equal(queryBody.result.profile, "full");
   assert.ok(namesOf(queryBody).every(name => MCP_TOOL_NAME_RE.test(name)));
-  assert.deepEqual(namesOf(queryBody).slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
+  assert.deepEqual(namesOf(queryBody).slice(0, fullFront.length), fullFront);
+  assert.equal(namesOf(queryBody).includes("room_propose_work"), false);
+  assert.equal(namesOf(queryBody).includes("room_work"), true);
   assert.equal(queryBody.result.tools.find(tool => tool.name === "bond_list").aliases[0], "bond.list");
   assert.equal(queryBody.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
   assert.equal(queryBody.result.tools.some(tool => tool.name.includes(".")), false);
@@ -311,7 +322,9 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   const initial = await invoke(pointer.tool, pointer.arguments);
   const stale = initial.value.responseActions.find(action => action.arguments.responseOutcome === "answered");
   assert.ok(advertised.has(stale.tool), "the discovered response must also be advertised");
-  await invoke("room_reply", { roomId: room.roomId, requestId: "core-clarification", replyToId: "core-question", body: "One clarification first." });
+  const clarification = await call(origin, "room_reply", { roomId: room.roomId, requestId: "core-clarification", replyToId: "core-question", body: "One clarification first." }, recipient.secret);
+  assert.equal(clarification.body.error, undefined);
+  assert.equal(clarification.body.result.isError, undefined);
   assert.equal(store.room(room.roomId).state.replyRequests["core-question"].status, "open", "ordinary chat does not answer the formal request");
   const refused = await invoke(stale.tool, { ...stale.arguments, requestId: "core-stale-answer", body: "Stale answer" });
   assert.equal(refused.body.result.isError, true);
@@ -340,27 +353,28 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   assert.equal(review.result.focus, "review");
   assert.equal(review.result._meta.focus.permissionsChanged, false);
   assert.match(review.result._meta.focus.reset, /profile=full/);
-  for (const name of ["room_check_access", "room_needs_me", "get_room_context", "room_read_request", "room_request_reply", "room_post_message", "room_read_result", "room_record_verification"]) {
+  for (const name of ["room_check_access", "room_needs_me", "get_room_context", "room_read_request", "room_request_reply", "room_post_message", "room_read_result", "room_work"]) {
     assert.ok(namesOf(review).includes(name), `Review needs ${name}`);
   }
-  for (const name of ["room_propose_work", "wake_register", "room_put_file"]) assert.ok(!namesOf(review).includes(name));
+  for (const name of ["room_propose_work", "room_record_verification", "wake_register", "room_put_file"]) assert.ok(!namesOf(review).includes(name));
   const work = await (await rpc(origin, "tools/list", undefined, owner.secret, "?focus=work")).json();
   assert.equal(work.result.focus, "work");
-  for (const name of ["room_begin_work", "room_record_handoff", "room_acquire_claim", "room_link_work_claim_pr"]) assert.ok(namesOf(work).includes(name));
+  for (const name of ["room_begin_work", "room_work", "room_link_work_claim_pr"]) assert.ok(namesOf(work).includes(name));
+  for (const name of ["room_record_handoff", "room_acquire_claim"]) assert.ok(!namesOf(work).includes(name));
   const conversation = await (await rpc(origin, "tools/list", { focus: "conversation" }, owner.secret)).json();
   assert.ok(namesOf(conversation).includes("room_read_messages"));
   assert.ok(!namesOf(conversation).includes("room_record_verification"));
-  // The full bond lifecycle is advertised through the conversation focus.
-  // bond_accept, bond_decline, and bond_revoke are callable on tools/call
-  // but were invisible in every discovery view except profile=full —
-  // Fo (2026-10-01) found 15 of 17 bonds stuck in "proposed" for exactly
-  // this reason. The conversation focus already carried bond_list and
-  // dm_posted; the three missing lifecycle tools now join it.
-  for (const name of ["bond_accept", "bond_decline", "bond_revoke", "bond_list"]) {
+  // bond_respond is the conversation-focus door for accept, decline, and
+  // revoke. The old names stay callable on tools/call for one release.
+  for (const name of ["bond_respond", "bond_list"]) {
     assert.ok(namesOf(conversation).includes(name), `conversation focus advertises ${name}`);
   }
+  for (const name of ["bond_accept", "bond_decline", "bond_revoke"]) {
+    assert.ok(!namesOf(conversation).includes(name), `${name} is folded out of the list`);
+  }
   const automation = await (await rpc(origin, "tools/list", { focus: "automation", aliases: 1 }, owner.secret)).json();
-  assert.ok(namesOf(automation).includes("webhook_subscribe"));
+  assert.ok(namesOf(automation).includes("webhook"));
+  assert.ok(!namesOf(automation).includes("webhook_subscribe"));
   assert.equal(automation.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
   const precedence = await (await rpc(origin, "tools/list", { focus: "review" }, owner.secret, "?focus=work")).json();
   assert.equal(precedence.result.focus, "review");
@@ -372,10 +386,11 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   assert.equal(invalidQuery.error.data.reason, "invalid_arguments");
   const defaultAgain = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
   assert.equal(defaultAgain.result.focus, undefined);
-  assert.deepEqual(namesOf(defaultAgain), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  assert.deepEqual(namesOf(defaultAgain), [...LEAN_MCP_TOOLS]);
   const full = await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json();
   assert.equal(full.result.focus, undefined);
-  assert.ok(namesOf(full).includes("room_propose_work"));
+  assert.ok(namesOf(full).includes("room_work"));
+  assert.ok(!namesOf(full).includes("room_propose_work"));
   // Discovery must not issue commands, set tiers, or persist a selected mode.
   assert.equal(JSON.stringify(store.room(roomId).state), before);
   const readonly = await (await rpc(origin, "tools/list", { focus: "review" }, reader.secret)).json();

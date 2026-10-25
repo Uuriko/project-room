@@ -28,27 +28,21 @@ import {
 } from "../server/agent-discovery.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
+import { CORE_MCP_TOOLS } from "../src/room-mcp-join.js";
 
 // The four anonymous join readers, in packet order.
 const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
-// The 18 essential tools the packet names for the member core profile.
-const CORE_18 = [
-  "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
-  "room_list_requests", "room_read_request", "room_respond_to_request",
-  "dm_posted", "room_check_access", "room_create", "room_join",
-  "room_put_file", "room_commit_file", "add_land_item", "list_land_queue",
-  "wake_pause", "wake_resume", "bond_propose",
-];
-
-// Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
+// Every snake_case tool the hosted-mcp bullet promises is still listed.
 const BULLET_TOOLS = [
-  "bond_propose", "bond_accept", "bond_decline", "bond_revoke", "bond_list",
+  "room_needs_me", "room_read_messages", "room_post_message", "room_read_request",
+  "room_respond_to_request", "room_check_access", "room_join", "wake_pause",
+  "bond_propose", "bond_respond", "bond_list",
   "dm_posted", "room_list_peer_dms",
   "room_put_file", "room_list_files", "room_get_file", "room_discard_file", "room_commit_file",
-  "wake_register", "wake_clear", "heartbeat_set", "heartbeat_get", "heartbeat_ack",
-  "wake_pause", "wake_resume", "webhook_subscribe", "webhook_list", "webhook_unsubscribe",
-  "inbox_put_attachment", "inbox_list_attachments", "inbox_get_attachment", "inbox_discard_attachment",
+  "heartbeat_set", "heartbeat_get", "heartbeat_ack", "wake_resume", "webhook",
+  "inbox_attachment",
 ];
 
 const PUBLIC_WORK_ANON = ["public_work_recommend", "public_work_read_task"];
@@ -133,12 +127,12 @@ test("outside identity gets the packet's seven public-work tools plus four join 
   assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
 });
 
-test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {
+test("member default tools/list is the packet's 10 tools", async () => {
   const names = await toolsList(undefined, memberSecret);
-  // Packet: "18 essential tools ... plus the 4 public join readers, so about 22 total".
-  assert.equal(names.length, 22, `core profile must be 22 tools, got ${names.length}`);
-  assert.deepEqual(names.slice(0, 18), CORE_18);
-  assert.deepEqual(names.slice(18), JOIN_READERS);
+  assert.deepEqual(names, [...LEAN_MCP_TOOLS]);
+  const core = await toolsList({ profile: "core" }, memberSecret);
+  assert.deepEqual(core.slice(0, CORE_MCP_TOOLS.length), [...CORE_MCP_TOOLS]);
+  assert.deepEqual(core.slice(CORE_MCP_TOOLS.length), JOIN_READERS);
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {
@@ -162,13 +156,11 @@ test("canonical MCP URL is one URL across packet, card, and skill", () => {
     "packet keeps the www door as a documented alias");
 });
 
-test("Routes compact core set names the same tools as the 18-tool paragraph", () => {
+test("Routes default tools/list names the same 10 tools as the packet", () => {
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
-    const match = packet.match(/Their compact core set: ([^.]+)\./);
-    assert.ok(match, `${label} must have a compact core set list`);
+    const match = packet.match(/Their default tools\/list: ([^.]+)\./);
+    assert.ok(match, `${label} must have a default tools/list`);
     const listed = match[1].split(/,\s*/).map(s => s.trim());
-    const missing = CORE_18.filter(n => !listed.includes(n));
-    assert.deepEqual(missing, [],
-      `${label} compact core set is missing tools the 18-tool paragraph promises: ${missing.join(",")}`);
+    assert.deepEqual(listed, [...LEAN_MCP_TOOLS]);
   }
 });

@@ -13,27 +13,20 @@ import { CORE_REST_TWINS, CORE_REST_EXEMPT } from "./mcp-core-rest-parity.test.j
 import { GUEST_WRITABLE_TOOLS, T1_WRITABLE_TOOLS } from "../server/capability-visibility.mjs";
 
 export const KNOWN_UNCOVERED = Object.freeze(new Set([
-  "bounty_accept", "bounty_claim", "bounty_dispute",
-  "bounty_finalize", "bounty_fund", "bounty_list", "bounty_post", "bounty_read_balances", "bounty_read_history",
-  "bounty_submit", "bounty_transfer", "bounty_watch", "get_room_context", 
-  "inbox_discard_attachment",
-  "inbox_get_attachment", "inbox_list_attachments", "inbox_put_attachment", "public_work_claim",
+  "get_room_context", "public_work_claim",
   "public_work_finish", "public_work_my_review", "public_work_read_task", "public_work_recommend",
-  "public_work_release", "public_work_renew", "remove_land_item", "report_tip", "room_accept_work",
-  "room_acquire_claim", "room_activation_pack", "room_assistant_action", "room_assistant_context",
-  "room_begin_work", "room_block_work", "room_cancel_request", "room_clear_halt", "room_close_work_claim",
-  "room_create_agent_invite", "room_decide_access_request", "room_decline_help_offer", "room_discard_file",
-  "room_get_file", "room_introduce_outside_agent", "room_link_work_claim_pr", "room_list_access_requests",
-  "room_list_agent_invites", "room_list_events", "room_list_files", "room_list_outside_agents",
-  "room_list_peer_dms", "room_list_work", "room_member_card", "room_offer_help", "room_post_draft",
-  "room_propose_work", "room_read_board", "room_read_inbox", "room_read_result", "room_read_work",
-  "room_read_work_discussion", "room_record_completion", "room_record_handoff", "room_record_verification",
-  "room_release_claim", "room_release_help_offer", "room_renew_claim", "room_request_history",
-  "room_request_reply", "room_resolve_blocker", "room_revoke_agent_invite", "room_select_help_offer",
-  "room_set_member_claim_cap", "room_start_work", "room_submit_text_result", "room_supersede_work",
-  "room_withdraw_help_offer", "room_work_claim_provenance", 
-  
-  ]));
+  "public_work_release", "public_work_renew", "remove_land_item", "report_tip",
+  "room_activation_pack", "room_assistant_action", "room_assistant_context",
+  "room_begin_work", "room_cancel_request", "room_close_work_claim",
+  "room_discard_file",
+  "room_get_file", "room_introduce_outside_agent", "room_link_work_claim_pr",
+  "room_list_events", "room_list_files", "room_list_outside_agents",
+  "room_list_peer_dms", "room_list_work", "room_member_card", "room_post_draft",
+  "room_read_board", "room_read_inbox", "room_read_result", "room_read_work",
+  "room_request_history",
+  "room_request_reply",
+  "room_set_member_claim_cap", "room_work_claim_provenance"
+]));
 
 const CONTRACT_RE = /Access: (read|write|same as)[^.]*\. Cost: [^.]+\. REST: .+\.$/s;
 

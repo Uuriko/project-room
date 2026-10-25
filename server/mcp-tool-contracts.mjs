@@ -43,25 +43,20 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_search_actions: { access: `read, ${ANY}; lists only actions this identity may call`, cost: READ, rest: "none; REST discovery is docs/openapi.yaml" },
   room_run_action: { access: "same as the wrapped action", cost: "same as the wrapped action", rest: "the wrapped action's own REST twin" },
   // AUX-08b batch 1: bonds, heartbeats and wakes, identity trust reads, squads, webhooks.
-  bond_accept: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (bond.accept)` },
-  bond_decline: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (bond.decline)` },
-  bond_revoke: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (bond.revoke)` },
   bond_list: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/bonds" },
+  bond_respond: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS}` },
   heartbeat_set: { access: "write, T1 read-only tier or room member; hidden from guest", cost: WRITE, rest: "POST /api/agent-heartbeats" },
   heartbeat_get: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-heartbeats" },
   heartbeat_ack: { access: "write, T1 read-only tier or room member; hidden from guest", cost: WRITE, rest: "POST /api/agent-heartbeats/ack" },
-  wake_register: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-heartbeats (mode wakeable)" },
-  wake_clear: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-heartbeats (mode pull-only)" },
   identity_list_verified: { access: `read, ${MEMBER}`, cost: READ, rest: "none; the per-identity twin is GET /api/agent-identities/{id}/verification" },
   identity_read_verification: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-identities/{id}/verification" },
-  squads_list: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/squads" },
-  squads_get: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/squads/{squadId}" },
-  squads_create: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads" },
-  squads_update_members: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/members" },
-  squads_disband: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/disband" },
-  webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
-  webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
-  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" }
+  squads: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "GET /api/rooms/{roomId}/squads" },
+  webhook: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
+  room_work: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: COMMANDS },
+  room_help: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: COMMANDS },
+  bounty: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "GET /api/rooms/{roomId}/bounties" },
+  inbox_attachment: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "none; no HTTP upload route" },
+  room_access: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "GET /api/rooms/{roomId}/access-requests" }
 });
 
 export function mcpToolContractLine(name) {

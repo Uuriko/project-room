@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 import { LEAN_MCP_TOOLS, searchActions, isRunnableAction } from "../server/mcp-action-search.mjs";
+import { deprecatedCallCounts, resetDeprecatedCallCounts } from "../server/mcp-alias-usage.mjs";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 
 async function serve(t) {
@@ -45,13 +46,19 @@ async function member(t) {
 const stable = body => JSON.parse(JSON.stringify(body, (key, value) => key === "operationId" ? undefined : value));
 const size = tools => JSON.stringify(tools).length;
 
-test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
-  const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
-  assert.equal(core.length, 22, "default core is unchanged until the flip is agreed");
-  assert.equal(full.length, 117, "full is unchanged");
+test("lean is the default: 10 tools, full drops folded names, room_map stays off lean", () => {
+  const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean"), def = listedMcpTools();
+  assert.deepEqual(def.map(tool => tool.name), lean.map(tool => tool.name));
+  assert.equal(core.length, 22, "profile core stays the previous list");
+  assert.equal(lean.length, 10);
+  assert.equal(LEAN_MCP_TOOLS.includes("room_map"), false, "room_map is a later read; search reaches it");
+  assert.ok(full.length < 117, `full catalog shrank, got ${full.length}`);
+  assert.ok(!full.some(tool => tool.name === "squads_list"));
+  assert.ok(full.some(tool => tool.name === "squads"));
+  assert.ok(full.some(tool => tool.name === "room_work"));
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
-  for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
+  assert.deepEqual(names, [...LEAN_MCP_TOOLS]);
   assert.ok(lean.every(Boolean) && names.every(name => typeof name === "string"));
   assert.ok(size(lean) < size(core) * 0.75, `lean ${size(lean)} B should be well under core ${size(core)} B`);
 });
@@ -78,6 +85,7 @@ test("run_action refuses itself, search, join and public-work tools, and unknown
     assert.equal(isRunnableAction(name), false, name);
   }
   assert.equal(isRunnableAction("squads_list"), true);
+  assert.equal(isRunnableAction("squads"), true);
 });
 
 test("over MCP: lean list, search, then run a long-tail action with the same result as a direct call", async t => {
@@ -88,11 +96,19 @@ test("over MCP: lean list, search, then run a long-tail action with the same res
 
   const found = await rpc(origin, "tools/call", { name: "room_search_actions", arguments: { query: "list squads" } }, secret);
   assert.equal(found.result.isError, undefined);
-  assert.ok(found.result.structuredContent.matches.some(match => match.name === "squads_list"));
+  const squadsList = found.result.structuredContent.matches.find(match => match.name === "squads_list");
+  assert.ok(squadsList);
+  assert.match(squadsList.deprecated, /Deprecated/);
 
+  resetDeprecatedCallCounts();
   const direct = await rpc(origin, "tools/call", { name: "squads_list", arguments: { roomId: "ada-den" } }, secret);
   const viaRun = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "squads_list", arguments: { roomId: "ada-den" } } }, secret);
+  const viaFamily = await rpc(origin, "tools/call", { name: "squads", arguments: { action: "list", roomId: "ada-den" } }, secret);
+  assert.equal(deprecatedCallCounts().squads_list, 2, "a direct folded call and run_action are noted; the family re-entry is not");
   assert.deepEqual(stable(viaRun.result), stable(direct.result), "run_action returns exactly what the direct call returns");
+  assert.deepEqual(stable(viaFamily.result), stable(direct.result), "the family tool returns exactly what the folded name returns");
+  const badFamily = await rpc(origin, "tools/call", { name: "squads", arguments: { action: "nope", roomId: "ada-den" } }, secret);
+  assert.equal(badFamily.error.data.reason, "invalid_arguments");
 
   // Argument checks still apply inside run_action.
   const badInner = await rpc(origin, "tools/call", { name: "room_run_action", arguments: { name: "squads_list", arguments: { roomId: "ada-den", bogus: 1 } } }, secret);

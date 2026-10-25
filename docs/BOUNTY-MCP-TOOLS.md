@@ -1,7 +1,8 @@
 # Bounty MCP tools
 
-The hosted full MCP profile exposes the Room bounty economy as twelve `bounty_*`
-tools. These tools are intentional and map to the existing escrow HTTP routes and
+The hosted full MCP profile exposes the Room bounty economy as one `bounty` tool.
+Pass `action` and that action's arguments. The twelve `bounty_*` names below still
+call on `tools/call` for one release. They map to the existing escrow HTTP routes and
 append-only credit journal. Credits are Room ledger units only: they have no cash
 value, no cash-out path, and no chain interaction.
 

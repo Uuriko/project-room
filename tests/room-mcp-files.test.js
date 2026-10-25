@@ -182,7 +182,7 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
   issueSpendGrant(store.db, created.roomId, peer.identityId, {
     grantedBy: created.ownerMemberId ?? owner.identityId, capCents: "100000", perTxCapCents: "10000", nowMs: Date.now(),
   });
-  const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
+  const names = (await (await rpc(origin, "tools/list", { profile: "core" }, owner.secret)).json()).result.tools.map(tool => tool.name);
   assert.equal(names.includes("room_commit_file"), true);
   const posted = await call(origin, "room_post_message", {
     roomId: created.roomId, id: "chat-1", messageId: "msg-1", body: "file lands here"
