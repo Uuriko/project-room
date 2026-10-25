@@ -49,12 +49,23 @@ export function parseFailingTests(output) {
 export const FIXTURE_FAILURE_NAMES = new Set(["probe fails deterministically"]);
 
 /**
+ * The failures a reporting surface may show: the parsed list minus the
+ * deliberate fixture names. The receipt (scripts/unit-ci.mjs) and the PR
+ * comment both report through this one filter, so every structured surface
+ * agrees with the JUnit sidecar, which never contains the fixture.
+ * Non-array input passes through unchanged.
+ */
+export function receiptFailures(failures) {
+  return Array.isArray(failures) ? failures.filter((f) => !FIXTURE_FAILURE_NAMES.has(f)) : failures;
+}
+
+/**
  * Compose the PR comment body for a failed unit shard. When no failure names
  * were captured, falls back to the old "see the job log" pointer so the
  * comment never goes out empty.
  */
 export function formatFailureComment({ shard, total, failures: reported, runUrl, title }) {
-  const failures = Array.isArray(reported) ? reported.filter((f) => !FIXTURE_FAILURE_NAMES.has(f)) : reported;
+  const failures = receiptFailures(reported);
   const head = title ?? `## Unit test failures, shard ${shard}/${total}\n`;
   if (!Array.isArray(failures) || failures.length === 0) {
     return (
