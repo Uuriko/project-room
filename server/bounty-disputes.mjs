@@ -45,7 +45,9 @@ const REASON_CODES = Object.freeze([
 ]);
 const OUTCOMES = Object.freeze(["upheld", "rejected", "split", "frivolous"]);
 const TERMINAL = new Set(["resolved"]);
-const MIN_BOND_RATIO = 0.05; // open bond = max($1, 5% of bounty)
+const MIN_BOND_RATIO = 0.05; // machine-level floor only: open bond >= max($1, 5% of bounty).
+// NOT the production bond rule (#3307): the sole production caller,
+// BountyEscrow.disputeBounty, requires exactly 25% of the bounty.
 
 class DisputeError extends Error {
   constructor(code, message) { super(message); this.name = "DisputeError"; this.code = code; }
@@ -106,8 +108,10 @@ export function createDisputes({ store, onDisputeFinalized } = {}) {
   };
 
   // Open a dispute against a bounty. bountyAmount is in the bounty's own units.
-  // Economic disputes post a bond (max($1, 5% of bounty), snapshotted at open
-  // and never repriced); coordination disputes carry bond: "none".
+  // Economic disputes post a bond (machine floor: max($1, 5% of bounty);
+  // the production caller disputeBounty requires exactly 25% — #3307),
+  // snapshotted at open and never repriced); coordination disputes carry
+  // bond: "none".
   const open = ({ disputeId, bountyId, bountyAmount, raisedBy, reason, kind = "economic", bond }) => {
     checkId(disputeId);
     nonEmptyString(bountyId, "bountyId");

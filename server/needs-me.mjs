@@ -1,4 +1,6 @@
+import { messageRepository } from "./message-repository.mjs";
 import { sessionWatermark } from "./read-cursor.mjs";
+import { stampNeedsMe } from "./content-trust.mjs";
 // Cross-room "what needs me" for one identity.
 //
 // One read replaces listing rooms and then opening each inbox. Items are
@@ -213,9 +215,9 @@ function roomDmsOf(store, roomId, memberId, after, state) {
   // not surface at all (its logged body is already scrubbed, so it showed
   // as an empty item inviting a reply to a tombstone), and an edited DM
   // must show its current body, not the pre-edit text. Messages missing
-  // from the projection (e.g. archived out of it) fall back to the logged
-  // body, as deriveNotifications does.
-  const currentById = new Map((state?.messages ?? []).map(message => [message.id, message]));
+  // from the working set are resolved through normalized archived records.
+  // Only genuinely absent legacy records fall back to the logged body.
+  const currentById = messageRepository(store, roomId, state);
   const items = [];
   // Scan in batches: a deleted DM must not consume one of the
   // MAX_PER_KIND + 1 slots, or the caller's overflow check (kind length >
@@ -346,6 +348,38 @@ function mentionHorizon(store, roomId, memberId, after, through) {
     if (/no such table/i.test(error?.message ?? "")) return through;
     throw error;
   }
+}
+
+// The per-room attention slice of collectNeedsMe, exported for the room
+// digest (server/room-digest.mjs): the same kinds, the same 140-char clip,
+// the same horizon and retired-mark rules, restricted to seq > after in one
+// room. Items keep the collectNeedsMe shape ({ kind, roomId, seq, id,
+// summary, next }); the digest strips `next` when it composes its rows.
+export function roomAttention(store, roomId, memberId, identityId, after) {
+  const authority = store.roomAuthority(roomId);
+  const member = authority.members?.[memberId];
+  if (!member || member.active === false) return [];
+  if (!(authority.sequence > after)) return [];
+  const state = store.room(roomId).state;
+  let through = mentionHorizon(store, roomId, memberId, after, sessionWatermark(after, authority.sequence));
+  const pendingBonds = identityId ? store.bonds.pendingProposalsFor(identityId) : [];
+  const kinds = [
+    mentionsOf(store, roomId, memberId, after, through),
+    roomDmsOf(store, roomId, memberId, after, state),
+    peerDmsOf(store, roomId, identityId, after),
+    bondRequestsOf(store, roomId, pendingBonds, after),
+    directAsksOf(store, roomId, memberId, after, state),
+    handoffsOf(store, roomId, memberId, after, state)
+  ];
+  const candidates = [];
+  for (const kind of kinds) {
+    if (kind.length > MAX_PER_KIND) through = Math.min(through, kind[MAX_PER_KIND].seq - 1);
+    for (const item of kind) push(candidates, item);
+  }
+  const retired = retiredNeedsMeKeys(store, roomId, memberId);
+  return candidates
+    .filter(item => item.seq <= through && !retired.has(`${item.kind}:${item.id}`))
+    .sort((a, b) => a.seq - b.seq);
 }
 
 // One read of the claim board, shared by a room's work sections. Each used
@@ -717,5 +751,5 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, untrusted: true };
+  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore });
 }
