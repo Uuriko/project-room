@@ -27,9 +27,12 @@ export function createSigninNavigation({ getUI, active }) {
     $("#signin-methods").hidden = auxiliary;
     $("#signin-entry-routes").hidden = auxiliary;
     $("#google-signin").hidden = view === "welcome";
-    $("#github-signin").hidden = view === "welcome";
+    // The served front door omits this anchor when GitHub is not configured.
+    // Assigning .hidden on a missing node throws and the auth UI never mounts.
+    const githubSignin = $("#github-signin");
+    if (githubSignin) githubSignin.hidden = view === "welcome";
     if (unavailableProviders.has("google")) $("#google-signin").hidden = true;
-    if (unavailableProviders.has("github")) $("#github-signin").hidden = true;
+    if (githubSignin && unavailableProviders.has("github")) githubSignin.hidden = true;
     $("#terms-notice").hidden = view === "welcome";
   }
   function withReplay(value, action) {

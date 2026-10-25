@@ -73,7 +73,7 @@ test("GET / leaves GitHub sign-in out until GitHub is configured", async t => {
   // stashes a pending invite. app.js null-checks the anchor.
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const navigation = readFileSync(new URL("../src/signin-navigation.js", import.meta.url), "utf8");
-  assert.match(navigation, /\$\("#github-signin"\)\.hidden = view === "welcome";/);
+  assert.match(navigation, /if \(githubSignin\) githubSignin\.hidden = view === "welcome";/);
   const stash = app.match(/githubButton\.addEventListener\("click", stashInviteForOAuth\)/);
   assert.ok(stash, "GitHub anchor stashes a pending invite like Google does");
 });

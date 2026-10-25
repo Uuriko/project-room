@@ -36,6 +36,7 @@ import {
   TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
   MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES, ownMember
 } from "../src/events.js";
+import { declaredProfileWantsWake, wakeAttentionKind } from "../src/agent-join-profile.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { buildReturnBrief, resolveHistoryWindow, RETURN_BRIEF_DEFAULT_LIMIT } from "./return-brief.mjs";
@@ -6337,15 +6338,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        const { woken, signal } = wakeForAgent(this, {
-          agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
-        });
-        if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
-        // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
-        // offline agent's push subscription (the inbox pull carries the
-        // body). Fire-and-forget; never fails the command.
-        if (woken) this.agentHeartbeats.pushNotify({ identityId: incoming.data.toIdentityId,
-          eventType: "dm.posted", roomId, id: incoming.data.messageId ?? incoming.id, ts: this.now() });
+        // A stored mentions-and-own-claims profile does not include identity
+        // DMs. No resolved member keeps the wake (the link is the address).
+        const dmMember = this.roomMemberForIdentity(roomId, incoming.data.toIdentityId);
+        if (dmMember && !declaredProfileWantsWake(dmMember, "other")) {
+          recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+            event: "suppressed_policy", kind: "dm", subjectId: incoming.data.toIdentityId });
+        } else {
+          const { woken, signal } = wakeForAgent(this, {
+            agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
+          });
+          if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
+          // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
+          // offline agent's push subscription (the inbox pull carries the
+          // body). Fire-and-forget; never fails the command.
+          if (woken) this.agentHeartbeats.pushNotify({ identityId: incoming.data.toIdentityId,
+            eventType: "dm.posted", roomId, id: incoming.data.messageId ?? incoming.id, ts: this.now() });
+        }
       }
       // RC-2026-09-24-203: push doorbell for bond proposals. Both parties
       // (not the proposer, who is online by definition) get a pointer-only
@@ -6585,10 +6594,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return next;
   }
 
+  roomMemberForIdentity(roomId, identityId) {
+    if (typeof identityId !== "string" || identityId.length === 0) return null;
+    try {
+      const memberId = this.db.prepare(
+        "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?"
+      ).get(roomId, identityId)?.memberId;
+      if (!memberId) return null;
+      return ownMember(this.room(roomId)?.state?.members, memberId) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   // Wake-on-mention for message.posted: resolve @mentions and the DM target
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
+  // A stored join profile with events mentions-and-own-claims keeps
+  // mentions and drops room DMs. An omitted profile does not filter.
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
@@ -6604,6 +6628,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
+      if (!declaredProfileWantsWake(ownMember(state.members, memberId), wakeAttentionKind(kind))) {
+        recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+          event: "suppressed_policy", kind, subjectId: memberId });
+        continue;
+      }
       const identityId = identityIdForWakeMember(this.db, roomId, memberId);
       // #3345: a mention target with no identity link on either table can
       // never be woken — that used to be a silent `continue`; it is now a
