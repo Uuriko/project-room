@@ -185,6 +185,30 @@ paths:
       security: []
       responses:
         '200': { description: Download page headers without a response body }
+  /receipts/signed/{receiptId}:
+    get:
+      summary: One signed bounty receipt body, exactly as issued
+      description: "Public read of a single signed escrow receipt by its receiptId. Served only while the receipt's lot sits on a public, opted-in receipt face and the receipt is not operator-unpublished; every other state answers the identical 404, so the face is never an existence oracle."
+      security: []
+      parameters:
+        - name: receiptId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^room-bounty-receipt:(el|bl|at|pr|rf):[0-9a-f]{32}$' }
+      responses:
+        '200': { description: The signed receipt body exactly as issued (Cache-Control no-store, X-Robots-Tag noindex, strong ETag over the canonical body) }
+        '404': { description: Not found — unknown, malformed, gated, unpublished, or unresolvable; indistinguishable by design }
+    head:
+      summary: Signed receipt metadata
+      security: []
+      parameters:
+        - name: receiptId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^room-bounty-receipt:(el|bl|at|pr|rf):[0-9a-f]{32}$' }
+      responses:
+        '200': { description: Signed receipt headers without a response body }
+        '404': { description: Not found }
   /api/public-work/match:
     post:
       operationId: "matchPublicWork"

@@ -21,6 +21,7 @@ import { AGENT_FLEET_ROUTES } from "./agents.mjs";
 import { WANTS_WORK_ROUTES } from "./wants-work.mjs"; // BOARD-WAKE-2
 import { WORK_CLAIM_ROUTES } from "./work-claims.mjs";
 import { PR_WEBHOOK_ROUTES } from "../claim-autolink.mjs";
+import { SIGNED_RECEIPT_ROUTES } from "./signed-receipts.mjs";
 import { ROOM_DIGEST_ROUTES } from "./room-digest.mjs";
 import { TYPING_ROUTES } from "./typing.mjs";
 import { WAKE_STATUS_ROUTES } from "./wake-status.mjs"; // plan-wake-live: wakeable / not-wakeable lists
@@ -58,7 +59,7 @@ function unknownSchemaTypes(schema, out) {
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
 export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...DEMO_ROUTES, ...DOWNLOAD_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
-  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...PR_WEBHOOK_ROUTES]);
+  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...PR_WEBHOOK_ROUTES, ...SIGNED_RECEIPT_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];

@@ -5,7 +5,7 @@ import { escapeHtml } from "./html-escape.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
-import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, verdictLineOf } from "./receipt-share.mjs";
+import { jsonLdScriptTag, receiptBadgeUrl, receiptEmbedSnippet, receiptJsonLd, receiptShareLinks, signedProvenSentences, verdictLineOf } from "./receipt-share.mjs";
 
 // These script-free pages share the marketing policy; the HTTP boundary adds
 // the exact served-origin analytics endpoint. App/export policies stay separate.
@@ -171,7 +171,7 @@ export function renderVerificationBlock(receipt, verification) {
 </section>`;
 }
 
-export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
+export function renderReceiptDetailHtml(receipt, { verification = null, signedInfo = null } = {}) {
   const verdictLine = verdictLineOf(receipt);
   const description = `${receipt.title} — ${verdictLine}. A public receipt from Project Room.`;
   const room = receipt.room?.title
@@ -277,7 +277,7 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
       l.rubricHash ? `<div><dt>Rubric hash</dt><dd><code>sha256:${escapeHtml(l.rubricHash)}</code>${l.rubricVersion ? ` · version ${escapeHtml(l.rubricVersion)}` : ""}</dd></div>` : "",
       l.submissionHash ? `<div><dt>Submission hash</dt><dd><code>sha256:${escapeHtml(l.submissionHash)}</code></dd></div>` : "",
       l.journalHash ? `<div><dt>Ledger entry hash</dt><dd><code>sha256:${escapeHtml(l.journalHash)}</code></dd></div>` : "",
-      l.signedReceiptIds?.length ? `<div><dt>Signed receipt</dt><dd>${l.signedReceiptIds.map(entry => `<code>${escapeHtml(entry)}</code>`).join("<br>")}</dd></div>` : "",
+      l.signedReceiptIds?.length ? `<div><dt>Signed receipt</dt><dd>${(l.signedReceiptLinks?.length ? l.signedReceiptLinks : l.signedReceiptIds.map(id => ({ receiptId: id, type: null, href: null }))).map(link => `${link.href ? `<a href="${escapeHtml(link.href)}"><code>${escapeHtml(link.receiptId)}</code></a>` : `<code>${escapeHtml(link.receiptId)}</code>`}${link.type ? ` — ${escapeHtml(link.type)}` : ""}`).join("<br>")} · ${verification?.checks?.some(check => check.id === "signature") ? "signature: re-verified at read time (see verification block)" : "signature not checked on this page"}</dd></div>` : "",
       l.memo ? `<div><dt>Memo</dt><dd>${escapeHtml(l.memo)}</dd></div>` : "",
     ];
     return rows.join("");
@@ -293,10 +293,13 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   // public-work receipts), never identity-verified. Hashes are stored
   // sha256: values, never re-verified at read time. The JSON envelope is
   // unsigned (docs/RECEIPTS-PAGE.md).
+  const signedSentences = receipt.source === "bounty-lot" ? signedProvenSentences(receipt, signedInfo) : null;
   const provenNote = verification
     ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked."
     : receipt.source === "bounty-lot"
-    ? "Verification tier: human verdict. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? (signedSentences
+      ? `Verification tier: human verdict. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. ${signedSentences}`
+      : "Verification tier: human verdict. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.")
     : receipt.source === "public-work" && receipt.review?.decidedAt
     ? "Verification tier: human verdict. What was checked: the room recorded this work and made it public, and the reviewer decision shown above is the room's recorded outcome for this delivery. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.mergedAt && receipt.pullRequest

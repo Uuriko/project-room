@@ -18,17 +18,25 @@
 import { parsePullRequestUrl, pullRequestOutcomeFromApi } from "./claim-coordination.mjs";
 import { journalEntryHash } from "./bounty-escrow.mjs";
 import { rederivePublicReceipt } from "./public-read-model.mjs";
+import { verifyBountyReceipt } from "./bounty-receipts.mjs";
+import { receiptKeyHistory, signerFingerprint, signerKeyEntry, signedReceiptCandidateById } from "./signed-receipt-read.mjs";
 
 export const RECEIPT_VERIFICATION_SCHEMA = "project-room-receipt-verification/1";
 
 const MAX_BODY_CHARS = 65_536;
 
 // What no check here even attempts — stated so ran checks can't borrow scope.
-const NEVER_CHECKED = [
+const NEVER_CHECKED_ALWAYS = [
   "Whether the work itself is any good — no check here judges quality",
   "The real-world identity of the named people — names are as the room recorded them",
-  "A signature on this record — public receipts are unsigned, so there is none to check",
 ];
+// A receipt carrying signed receipt IDs gets the signature leg below
+// instead of this line. The line survives only for records with no
+// signed receipt to check: the old universal wording ("public receipts
+// are unsigned") claimed no signature existed even on records that
+// carry one (proof layer S4, B3 §3.2).
+const SIGNATURE_NOT_CHECKED_LINE =
+  "A signature on this record — this record carries no signed receipt, so there is none to check";
 
 const COMPARED_FIELDS = ["title", "agents", "humans", "pullRequest", "mergedAt", "hashes", "at"];
 const sameField = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
@@ -144,6 +152,107 @@ async function checkPullRequest(receipt, { fetchImpl, token }) {
       : `GitHub reports pull request #${parsed.number} still open — not merged, as this record shows.` };
 }
 
+// The signature leg (proof layer S4; B3 §3.2). For each signed receipt
+// ID stamped on the lot: five checks, never collapsed — integrity (the
+// signature itself), signer identity (pinned against the published key
+// history, when one exists), journal linkage (the entries the receipt
+// was signed over still re-hash), time (always not-checked for the
+// native format: issuedAt is the signer's assertion and no independent
+// witness is carried), and key status (observed from the history). An
+// ID stamped on the ledger with no admitted body is `missing`, not
+// silent. Identity degrades exactly as designed while no key history
+// is published (S5's reader fills the receiptKeyHistory seam):
+// not-checked, never pass, never contradicted.
+function checkSignatures(store, receipt, keyHistory) {
+  const checks = [];
+  const journal = { entryHash: entryId => {
+    const row = store.db.prepare("SELECT * FROM bounty_journal WHERE entry_id=?").get(entryId);
+    if (!row) throw new Error(`journal entry ${entryId} is not in this store`);
+    return journalEntryHash(row);
+  } };
+  for (const receiptId of receipt.lot?.signedReceiptIds ?? []) {
+    const label = `Signed receipt ${receiptId}`;
+    const resolved = signedReceiptCandidateById(store, receiptId);
+    if (!resolved) {
+      checks.push({ id: "signature", label, status: "missing",
+        detail: "A receipt ID is stamped on the ledger entries, but no signed body is stored to check." });
+      continue;
+    }
+    const { body } = resolved;
+    const result = verifyBountyReceipt(body, { journal });
+    const reason = String(result.reason ?? "");
+    const reasonClass = reason.split(":")[0] || "invalid";
+    const entry = signerKeyEntry(body, keyHistory);
+    const fingerprint = signerFingerprint(body.issuer?.pubkey);
+    // Integrity: the signature stage. Journal and signer findings are
+    // scored by their own checks, not folded into this one.
+    if (result.ok || reason.startsWith("unexpected_signer") || reason.startsWith("journal_mismatch")) {
+      checks.push({ id: "signature", label, status: "pass",
+        detail: "The signed bytes are unaltered since issuance — the signature verifies over the receipt's canonical form." });
+    } else {
+      checks.push({ id: "signature", label, status: "contradicted",
+        detail: `The stored signed body fails verification (${reasonClass}) — it was altered after signing, or never validly signed.` });
+    }
+    // Signer identity: pinned only when the published history names
+    // this key (fingerprint + ref + role) and the signature itself
+    // verified (a journal finding does not impeach the signer).
+    const signerOk = result.ok || reason.startsWith("journal_mismatch");
+    if (reason.startsWith("unexpected_signer")) {
+      checks.push({ id: "signer-identity", label, status: "contradicted",
+        detail: "The signature is valid, but not from the signer key this record names." });
+    } else if (!entry) {
+      checks.push({ id: "signer-identity", label, status: "not-checked",
+        detail: keyHistory == null
+          ? "Key history not published — signer identity not pinned."
+          : "The published key history does not pin this key — the signature is self-consistent only." });
+    } else if (entry.status === "revoked" && entry.compromiseTime && body.issuedAt >= entry.compromiseTime && signerOk) {
+      checks.push({ id: "signer-identity", label, status: "contradicted",
+        detail: `This receipt was issued at ${body.issuedAt}, after the compromise declared for its signer key at ${entry.compromiseTime}.` });
+    } else if (!signerOk) {
+      checks.push({ id: "signer-identity", label, status: "not-checked",
+        detail: "The signature does not verify, so the signer cannot be confirmed against the pinned key." });
+    } else {
+      checks.push({ id: "signer-identity", label, status: "pass",
+        detail: `Signed by the published escrow-keeper key ${fingerprint} (pinned by the published key history).${entry.status === "revoked" ? ` Signed before the declared compromise at ${entry.compromiseTime ?? "an unpublished time"}.` : ""}` });
+    }
+    // Journal linkage.
+    if (result.ok) {
+      checks.push({ id: "signature-journal", label, status: "pass",
+        detail: "Both journal entries re-hash to the hashes the receipt was signed over." });
+    } else if (reason.startsWith("unexpected_signer")) {
+      checks.push({ id: "signature-journal", label, status: "not-checked",
+        detail: "The signer is not the named key, so journal linkage is not scored for this body." });
+    } else if (reason.startsWith("journal_mismatch")) {
+      const named = /entry (\S+)/.exec(reason)?.[1];
+      checks.push({ id: "signature-journal", label, status: "contradicted",
+        detail: `Journal entry ${named ?? "named in the receipt"} no longer re-hashes to the hash this receipt was signed over.` });
+    } else {
+      checks.push({ id: "signature-journal", label, status: "not-checked",
+        detail: "Journal linkage was not re-checked because the signature itself did not verify." });
+    }
+    // Time: always not-checked for the native format.
+    checks.push({ id: "signature-time", label, status: "not-checked",
+      detail: "No independently witnessed time is carried — issuedAt is the signer's assertion." });
+    // Key status: observed from the published history, when one exists.
+    if (!entry) {
+      checks.push({ id: "signature-status", label, status: "not-checked",
+        detail: keyHistory == null
+          ? "Status unchecked — no key history or status record was consulted."
+          : "The published key history does not carry this key, so its status is not published." });
+    } else if (entry.status === "superseded") {
+      checks.push({ id: "signature-status", label, status: "observed",
+        detail: `Signing key superseded${entry.successor ? ` by ${entry.successor}` : ""}; this receipt still verifies.` });
+    } else if (entry.status === "revoked") {
+      checks.push({ id: "signature-status", label, status: "observed",
+        detail: "The signer key is published as revoked; the issue-time window is scored under signer identity." });
+    } else {
+      checks.push({ id: "signature-status", label, status: "observed",
+        detail: "The signer key is a published active escrow-keeper key." });
+    }
+  }
+  return checks;
+}
+
 const VERDICTS = {
   "server-verified": {
     label: "Server-verified",
@@ -171,10 +280,12 @@ const VERDICTS = {
 // `receipt` is the public shape (server/receipts-live.mjs publicReceiptById).
 // fetchImpl/token are injected the same way claim-pr-sync's are, so tests
 // and the Worker resolve GitHub access identically.
-export async function verifyPublicReceipt(store, receipt, { fetchImpl = fetch, token = null, nowMs = Date.now() } = {}) {
+export async function verifyPublicReceipt(store, receipt, { fetchImpl = fetch, token = null, nowMs = Date.now(), keyHistory } = {}) {
   const checks = receipt.source === "bounty-lot"
     ? checkJournal(store, receipt)
     : checkSourceRecord(store, receipt);
+  if (receipt.source === "bounty-lot" && (receipt.lot?.signedReceiptIds?.length ?? 0) > 0)
+    checks.push(...checkSignatures(store, receipt, keyHistory === undefined ? receiptKeyHistory() : keyHistory));
   if (receipt.pullRequest) checks.push(await checkPullRequest(receipt, { fetchImpl, token }));
 
   const contradicted = checks.some(check => check.status === "contradicted");
@@ -200,7 +311,8 @@ export async function verifyPublicReceipt(store, receipt, { fetchImpl = fetch, t
       checked: checks.filter(check => check.status !== "not-checked").map(check => check.label),
       notChecked: [
         ...checks.filter(check => check.status === "not-checked").map(check => check.label),
-        ...NEVER_CHECKED,
+        ...NEVER_CHECKED_ALWAYS,
+        ...((receipt.lot?.signedReceiptIds?.length ?? 0) > 0 ? [] : [SIGNATURE_NOT_CHECKED_LINE]),
       ],
       by: "the Project Room server, at read time",
     },
