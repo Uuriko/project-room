@@ -16,16 +16,22 @@
 // resolver; the duplication is the price of keeping both interfaces
 // honest, and it is paid here, once, not in the handler.
 //
-// Admission, two tiers (B3 §1.3 vs §3.2 reconciled):
+// Admission, two tiers (B3 §1.3 serving vs §3.3 verify, reconciled):
 //   - Candidate admission (this module's candidate resolver, consumed
-//     by the receipt-verify signature leg): strict shape only — a body
-//     whose shape validates is a candidate even if its signature does
-//     not, so the verify leg can report the tamper as `contradicted`
-//     instead of never seeing the body.
+//     by the receipt-verify signature leg): the body is structurally
+//     present (the escrow lookup's own gate: receiptId match, signature
+//     string, canonicalisable) and verification reaches a classifiable
+//     outcome — ok, `bad_signature`, or `invalid_receipt`. §3.3 row 1
+//     scores the last two `contradicted` (naming the reason class), so
+//     they must admit here: a flipped amount fails the validator's
+//     shape stage on an internal-consistency rule, not the signature
+//     stage, and treating it as absent would report a stored, damaged
+//     body as `missing` — the tamper would vanish. Anything else
+//     (number ban, unparseable) is not a candidate.
 //   - Serving admission (signedReceiptBodyById): shape + signature.
 //     A body that fails is treated as ABSENT, never served raw or
 //     partially: this is what makes a planted tampered body read as
-//     404 on the serving face.
+//     404 on the serving face (§1.3's rule, unchanged).
 // Bodies are returned exactly as issued (the parsed object);
 // serialisation order is not load-bearing because verification
 // re-canonicalises (B3 §1.1).
@@ -62,11 +68,13 @@ export function signedReceiptCandidateById(store, receiptId) {
   // Stamp/body cross-check (B3 §1.2 step 4): identity fields must agree.
   if (body.receiptId !== receiptId || body.roomId !== stamp.roomId
     || body.lotId !== stamp.lotId || body.bountyId !== stamp.bountyId) return null;
-  // Candidate admission: shape validates (verifyBountyReceipt reaches
-  // the signature stage, or passes outright). A bad_signature result
-  // still admits — classifying it is the verify leg's whole job.
+  // Candidate admission: verification reaches a classifiable outcome
+  // (ok / bad_signature / invalid_receipt — see the header note).
   const probe = verifyBountyReceipt(body, {});
-  if (!probe.ok && !String(probe.reason ?? "").startsWith("bad_signature")) return null;
+  if (!probe.ok) {
+    const reasonClass = String(probe.reason ?? "").split(":")[0];
+    if (reasonClass !== "bad_signature" && reasonClass !== "invalid_receipt") return null;
+  }
   return { body, source: found.source, mismatch: found.mismatch === true, stamp };
 }
 
