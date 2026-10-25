@@ -24,6 +24,11 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
     return !button || button.hidden;
   });
   assert.equal(await page.locator('#github-signin').count(), 0);
+  await page.waitForFunction(() => {
+    const divider = document.querySelector('.signin-divider');
+    return divider && getComputedStyle(divider).display === 'none';
+  });
+  assert.equal(await page.locator('.signin-divider').isVisible(), false, 'divider is not rendered when the provider anchor is stripped');
   await page.goto(`http://127.0.0.1:${server.address().port}/?room=commons`);
   await signInFixture(page, fixture.store.issueAccountAccessKey(accountId));
   await page.locator('#main').waitFor();
