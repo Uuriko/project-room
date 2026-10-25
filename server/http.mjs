@@ -22,12 +22,12 @@ import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js"
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
-import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
+import { buildActivationPack, briefActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
 import { buildOrient } from "./orient.mjs"; // Orient builder (jill lane, RC-2026-09-28). The standalone /orient endpoint was deleted (register D1); the builder survives inside the activation pack, the context response, and the MCP room profile.
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
-import { handleAgentConnect } from "./routes/agent-connect.mjs";
+import { handleAgentConnect, joinPageForAgentCode, joinPathAgentCode, agentInvitePreview, withAgentInviteLink } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
@@ -77,7 +77,7 @@ import { attentionReport } from "./owner-attention.mjs";
 import { ownerOverview } from "./owner-overview.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
-import { jevShadowReport } from "./jev-shadow-journal.mjs";
+import { jevShadowReport } from "./journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
@@ -95,7 +95,7 @@ import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLI
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
-import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
+import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP, PUBLIC_ROOM_SETUP_CSP } from "./public-rooms.mjs";
 import { roomProofView } from "./proof-page.mjs";
 // --- end GR2 ---
 // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
@@ -117,7 +117,7 @@ import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planA
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
-  GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
+  frontDoorHtml, GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
@@ -334,8 +334,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
-  googleAuth = null, gmailAuth = null, directSendFetch = null,
+  googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
+  jobHealth = nodeJobHealth, // job records for the owner overview; the Worker passes its heartbeat view
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   githubAuth = null,
@@ -343,7 +344,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
-  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "" }) {
+  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
+  publicAgentPages = false }) {
   // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
   // (server/boot-config.mjs) runs here, in the shared boot path every entry
   // converges on — the node entry (server.mjs), the Worker entry
@@ -381,7 +383,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // The sign-in helper is created lazily so its PKCE/state table lives as long
   // as this server instance (one per Durable Object in production).
   let googleSignIn = null;
-  const gmail = gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
+  const gmail = enableDeferredInbox && gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
   // Magic-link mailer (slice 3). Unconfigured by default: the routes say so
   // honestly (mail_not_configured) and never pretend a code was sent.
   const magicMailer = magicLinkMailer ?? createMagicLinkMailer();
@@ -1236,6 +1238,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // 405 Allow on a known path. The inbox mount and the auth group keep
       // their own session and method checks. Anything else falls through
       // to the legacy chain below until that chain is empty.
+      // The private email workspace is excluded from v1. Preserve stored data
+      // and isolated compatibility fixtures without exposing import/send flows.
+      if (!enableDeferredInbox && (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")
+        || url.pathname.startsWith("/api/auth/gmail/"))) reject(404, "not_found", "Not found");
       if (await dispatchRoute({
         req, res, url, store, remoteAddress, loopback, operationId,
         // JDOT-MEMBER-PERMS begin: share quotas across request aliases.
@@ -1252,6 +1258,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         gmail, channelWebhooks, telegram, telegramStatus,
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
+        publicAgentPages,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
@@ -2220,7 +2227,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
         return res.end(req.method === "HEAD" ? undefined : xml);
       }
-      // --- GR2 public acquisition pages. Script-free. Indexable when the URL has no query. ---
+      // --- GR2 public acquisition pages. Hash-authorized copy helper; indexable without a query. ---
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const proofPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof(\.json)?$/.exec(url.pathname);
@@ -2230,7 +2237,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
-        const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60") => {
+        const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60", policy = PUBLIC_PAGE_CSP) => {
           if (!url.search) res.setHeader("X-Robots-Tag", "all");
           res.setHeader("Cache-Control", cacheControl);
           res.setHeader("Link", publicPageLinks(url, canonical));
@@ -2240,7 +2247,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return res.end(req.method === "HEAD" ? undefined : body);
           }
           // JDOT-PUBLIC-CSP-RUM begin: public-page policy
-          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_PAGE_CSP));
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), policy));
           // JDOT-PUBLIC-CSP-RUM end
           const body = Buffer.from(html);
           res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
@@ -2252,6 +2259,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (templateDetail) {
           const page = templatePage(templateDetail[1], { ref });
+          // Same posture as an unknown room page: a slug that matches the
+          // template route but is not a template gets the styled public 404
+          // for browsers. /templates/<slug>.json and non-HTML clients keep JSON.
+          if (!page && !templateDetail[2] && acceptPrefersHtml(req.headers.accept)) {
+            const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+            res.setHeader("X-Robots-Tag", "noindex");
+            res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+            return res.end(req.method === "HEAD" ? undefined : body);
+          }
           if (!page) reject(404, "not_found", "Not found");
           return sendPage(200, page.html, templateDetail[2] ? page.document : null, `/templates/${templateDetail[1]}`);
         }
@@ -2299,7 +2315,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // (the owner flipping public receipts off must bite immediately).
           return sendPage(200, proof.html, proofPage[2] ? proof.document : null, `/r/${proofPage[1]}/proof`, "no-store");
         }
-        const page = publicRoomView(store, roomPage[1], { ref });
+        const page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin() });
         // A browser opening /r/<slug> for a room that is unknown or not
         // published gets the same styled 404 as any other public path, not
         // the JSON API envelope; /r/<slug>.json and non-HTML clients keep JSON.
@@ -2314,7 +2330,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // titles, so like the receipts routes it must never sit in a shared
         // cache — a response cached while public would keep disclosing a
         // room's receipts after the owner switches privacy off.
-        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`, "no-store");
+        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`, "no-store", PUBLIC_ROOM_SETUP_CSP);
       }
       if (acquisition) reject(405, "method_not_allowed", "Method not allowed");
       // --- end GR2 ---
@@ -2350,8 +2366,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        // The front door keeps the GitHub anchor in source. Omit it from the
+        // served bytes unless this server was given a GitHub auth config.
+        const payload = path === "index.html"
+          ? Buffer.from(frontDoorHtml(data, { githubConfigured: Boolean(githubAuth) }))
+          : data;
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
-        return res.end(req.method === "HEAD" ? undefined : data);
+        return res.end(req.method === "HEAD" ? undefined : payload);
         }
       }
       if (url.pathname === "/api/account-rooms" && req.method === "GET") {
@@ -2367,7 +2388,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
         if (url.searchParams.getAll("window").length > 1) reject(422, "invalid_overview_query", "window must be a single value");
-        return json(res, 200, ownerOverview({ store, accessRequests, jobHealth: nodeJobHealth }, token, binding, Date.now(),
+        return json(res, 200, ownerOverview({ store, accessRequests, jobHealth }, token, binding, Date.now(),
           { window: url.searchParams.get("window") ?? "7d", after: url.searchParams.get("after") }));
       }
       if (url.pathname === "/api/account-rooms" && req.method === "POST") {
@@ -3087,8 +3108,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const joinPageMatch = /^\/(?:room\/)?join(?:\/([^/]{1,128}))?\/?$/.exec(url.pathname);
       if (joinPageMatch) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        // An agent invite code asked for without HTML gets the /a/ steps.
+        // The lookup is a scrypt hash (agent-invites codeHash), so it shares
+        // /a/<code>'s per-address limit, and the preview it reads is handed
+        // to the /a/ handler so one GET hashes the code once.
+        const agentCode = joinPathAgentCode(url.pathname);
+        if (agentCode) rate(`agent-connect:${remoteAddress}`, 30);
+        const livePreview = agentCode ? agentInvitePreview(store, agentCode) : null;
+        const liveCode = livePreview ? agentCode : null;
+        if (liveCode && !acceptPrefersHtml(req.headers.accept)) {
+          const agentUrl = new URL(url);
+          agentUrl.pathname = `/a/${encodeURIComponent(liveCode)}`;
+          if (handleAgentConnect(req, agentUrl, { res, store, remoteAddress, rate: () => {}, reject, origin: expectedOrigin(), preview: livePreview })) return;
+        }
         const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
-        const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        let page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        if (liveCode) page = joinPageForAgentCode(page, liveCode);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
       }
@@ -4332,6 +4367,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
+        if (snapshotView === "work") delete snapshot.state.agentHalts;
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and
@@ -4428,7 +4464,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // cursor). Rides the standard room credential funnel above; unknown
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
-        return json(res, 200, buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) }));
+        const view = url.searchParams.get("view");
+        if (view !== null && view !== "brief") reject(422, "invalid_view", "view=brief is the only accepted view; omit it for the full pack");
+        const pack = buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) });
+        if (view !== "brief") return json(res, 200, pack);
+        const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
+        const { members } = store.presence(selected.token, roomId, watchers, fence);
+        return json(res, 200, briefActivationPack(pack, members, store.now(), viewerId));
       }
       if (route === "verification-policy" && req.method === "GET") {
         // RC-2026-09-18-049: read the room's verified-agents gate policy.
@@ -4535,12 +4577,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if ((!keys.includes("permissions") && !keys.includes("profile"))
             || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
             reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
-          return json(res, 201, store.invites.create(selected.token, roomId, data, fence,
+          return json(res, 201, withAgentInviteLink(store.invites.create(selected.token, roomId, data, fence,
             // Funnel: on a deployment without a configured mailer no account can
             // ever complete email verification, so the email_unverified gate
             // would deadlock invite mint permanently instead of nudging the
             // owner to verify. Where mail is configured the gate still applies.
-            { emailVerificationUnachievable: !magicMailer.isConfigured() }));
+            { emailVerificationUnachievable: !magicMailer.isConfigured() }), expectedOrigin()));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_invite", "inviteId is required");

@@ -33,7 +33,7 @@ import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trus
 import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
-import { markIfOther, stampBoard, withContentTrust } from "./content-trust.mjs";
+import { markIfOther, stampAssistantResult, stampBoard, withContentTrust } from "./content-trust.mjs";
 
 const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work"]);
 const roomIdField = { type: "string", minLength: 1, maxLength: 128, description: "Room id this identity is linked to." };
@@ -239,7 +239,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (isAssistantTool(name)) {
     const assistant = new RoomAssistant(store);
     const authorize = () => store.authenticate(secret, roomId);
-    return { value: withContentTrust(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, rest, authorize, secret)), isError: false };
+    return { value: stampAssistantResult(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, rest, authorize, secret)), isError: false };
   }
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };
@@ -346,7 +346,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     }), isError: false };
   }
   if (name === "room_read_board") {
-    const snapshot = store.snapshot(secret, roomId);
+    const snapshot = store.snapshot(secret, roomId, null, "work");
     const now = typeof store.now === "function" ? store.now() : Date.now();
     const { claims, ...claimsPage } = buildWorkClaimPage(store.workClaims.list(roomId), roomId,
       auth.member.id, new URLSearchParams(rest), now);
