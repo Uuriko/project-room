@@ -4,6 +4,7 @@
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
 import { publicAssetPaths } from '../server/public-assets.mjs';
+import { etagMatches, HTML_ENTRY_CACHE, IMMUTABLE_CLIENT_CACHE, resolveHashedClientAsset } from '../server/client-assets.mjs';
 import { frontDoorHtml, githubConfig } from '../server/github-oauth.mjs';
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
@@ -147,7 +148,7 @@ export function classifyEdgePath(pathname) {
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);
   if (doc && doc !== skillsDoc) return 'discovery';
-  if (assets.has(pathname) || roomMarketingPath(pathname)) return 'asset';
+  if (resolveHashedClientAsset(pathname) || assets.has(pathname) || roomMarketingPath(pathname)) return 'asset';
   return null;
 }
 
@@ -181,13 +182,6 @@ async function assetEtag(bytes) {
     assetEtags.set(bytes, etag);
   }
   return etag;
-}
-export function etagMatches(header, etag) {
-  if (typeof header !== 'string' || !header) return false;
-  return header.split(',').some(tag => {
-    const value = tag.trim().replace(/^W\//, '');
-    return value === '*' || value === etag;
-  });
 }
 
 async function loadCachedAsset(env, file) {
@@ -254,7 +248,24 @@ function githubSignInConfigured(env, origin) {
   catch { return false; }
 }
 
+async function hashedAssetResponse(request, env, url, hashed) {
+  const headers = baseHeaders(url);
+  headers.set('Cache-Control', IMMUTABLE_CLIENT_CACHE);
+  headers.set('Link', discoveryLinks(url));
+  const bytes = await loadCachedAsset(env, hashed.file);
+  if (!bytes) {
+    headers.set('X-Robots-Tag', 'noindex, nofollow');
+    headers.set('Content-Type', 'text/plain; charset=utf-8');
+    return new Response(request.method === 'HEAD' ? null : 'Not found\n', { status: 404, headers });
+  }
+  headers.set('Content-Type', `${hashed.type}; charset=utf-8`);
+  headers.set('Content-Length', String(bytes.byteLength));
+  return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
+}
+
 async function assetResponse(request, env, url) {
+  const hashed = resolveHashedClientAsset(url.pathname);
+  if (hashed) return hashedAssetResponse(request, env, url, hashed);
   const headers = baseHeaders(url);
   const servedPath = roomMarketingPath(url.pathname) ?? url.pathname;
   const canonical = publicSearchCanonical(servedPath, publicAssetPaths);
@@ -292,12 +303,12 @@ async function assetResponse(request, env, url) {
   const contentType = (type.startsWith('image/') && !type.includes('svg')) || type.startsWith('font/') ? type : (type.includes('charset') ? type : `${type}; charset=utf-8`);
   const bodyBytes = file === 'index.html' ? await frontDoorBody(bytes, githubConfigured) : bytes;
   headers.set('Content-Type', contentType);
-  // Static assets were no-store, so every visit re-downloaded the ~1.9 MB app
-  // shell (app.js, styles, emoji catalog). Binary images and fonts get the
-  // same one-day cache the Node server gives them. Scripts, styles and SVG
-  // keep unhashed names, so they revalidate on every load (no-cache) against a
-  // content ETag and an unchanged file costs a 304. HTML stays no-store.
-  const policy = assetCachePolicy(type);
+  // Hashed bundles are answered above and cached for a year. Unhashed
+  // scripts, styles and SVG still revalidate (no-cache) against a content
+  // ETag. index.html is no-cache so a deploy's new bundle names are picked
+  // up, and a 304 can answer when the shell has not changed. Other HTML
+  // stays no-store. Images and fonts keep a one-day cache.
+  const policy = file === 'index.html' ? HTML_ENTRY_CACHE : assetCachePolicy(type);
   if (policy) {
     headers.set('Cache-Control', policy);
     const etag = await assetEtag(bodyBytes);
