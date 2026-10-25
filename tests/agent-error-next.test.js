@@ -53,6 +53,18 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assert.ok(key.next.some(step => step.path === "/api/session"));
   const denied = agentErrorAx({ httpStatus: 403, code: "owner_required", message: "Only the signed-in room owner can manage agent connections" });
   assertAx(denied, { reason: "owner_required" });
+  assert.equal(denied.hint, "Only the room owner can do that.");
+  assert.equal(denied.hint.includes("guest invite"), false);
+  const exportDenied = agentErrorAx({ httpStatus: 403, code: "owner_required", message: "Only the room owner can export the room" });
+  assert.equal(exportDenied.hint, "Only the room owner can export this room.");
+  assert.equal(exportDenied.hint.includes("guest invite"), false);
+  const attentionDenied = agentErrorAx({ httpStatus: 403, code: "owner_required", message: "Only the room owner can view the attention rollup" });
+  assert.equal(attentionDenied.hint, "Only the room owner can view the attention rollup.");
+  const inviteDenied = agentErrorAx({ httpStatus: 403, code: "owner_required", message: "Only the room owner can mint a guest invite. Use Add agent for a durable key." });
+  assert.equal(inviteDenied.hint, "Only the room owner can mint a guest invite or Add agent.");
+  const permissionDenied = agentErrorAx({ httpStatus: 403, code: "permission_denied", message: "Only the Room owner may archive the room" });
+  assert.equal(permissionDenied.reason, "permission_denied");
+  assert.equal(permissionDenied.hint.includes("silently rebase"), false);
   const wrongOrigin = agentErrorAx({ httpStatus: 403, code: "origin_denied", message: "Request origin is not allowed" });
   assertAx(wrongOrigin, { reason: "origin_denied" });
   assert.equal(wrongOrigin.hint, "Use the configured service Origin or omit the Origin header.");

@@ -334,14 +334,27 @@ const REGISTRY_FIXTURES = [
       assert.match(ax.hint, /SHA-256/);
       assert.match(nextTextOf(ax), /agent-invites\/redeem/);
     }],
+  ["permission_denied", { httpStatus: 403, message: "Only the Room owner may archive the room" },
+    ax => {
+      assert.equal(ax.reason, "permission_denied");
+      assert.match(ax.hint, /who may/);
+      assert.doesNotMatch(ax.hint, /silently rebase|guest invite/);
+    }],
+  ["work_already_accepted", { httpStatus: 409, message: "Already accepted by Ada at rev 1", workItemId: "task" },
+    ax => {
+      assert.match(ax.hint, /Ada/);
+      assert.match(ax.hint, /rev 1/);
+      assert.equal(ax.next[0].tool, "room_read_work");
+      assert.doesNotMatch(ax.hint, /silently rebase/);
+    }],
 ];
 
 test("registry-migrated codes: shipped envelope equals the registry resolution (E4-REG)", () => {
   assert.ok(ERROR_REGISTRY && typeof ERROR_REGISTRY === "object", "ERROR_REGISTRY must be exported from src/agent-error.mjs");
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
-  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
-    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
+  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "permission_denied", "proof_required",
+    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work", "work_already_accepted"],
     "the migrated set is the joining-path set; growing it is a deliberate edit here too");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {
     const shipped = agentErrorAx({ code, ...ctx });

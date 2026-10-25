@@ -79,7 +79,11 @@ test("store: archiving closes commands, import and every join path with 409 room
     headers: { Authorization: "Bearer " + key, "Content-Type": "application/json" }, body: JSON.stringify(command) });
   const invite = f.store.invites.create(f.keys.owner, "commons", { permissions: ["accept_work"], displayName: "Late agent" });
   let res = await post(f.keys.guest, { id: randomUUID(), type: T.ROOM_ARCHIVED, data: {} });
-  assert.equal(res.status, 422); assert.equal((await res.json()).error.code, "command_rejected");
+  const deniedArchive = await res.json();
+  assert.equal(res.status, 403);
+  assert.equal(deniedArchive.error.code, "permission_denied");
+  assert.equal(deniedArchive.category, "access");
+  assert.equal(deniedArchive.hint.includes("silently rebase"), false);
   res = await post(f.keys.owner, { id: randomUUID(), type: T.ROOM_ARCHIVED, data: { note: "x" } });
   assert.equal(res.status, 422); assert.equal((await res.json()).error.code, "invalid_command");
   const before = f.store.room("commons").sequence;

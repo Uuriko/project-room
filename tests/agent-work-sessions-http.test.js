@@ -55,6 +55,9 @@ test("work-sessions next[] teaches register-work-item when none are open", async
   assert.equal(step.method, "POST");
   assert.equal(step.path, `/api/rooms/${roomId}/work-claims`);
   assert.ok(step.description.includes("id"), "names the claim id field");
+  assert.ok(step.description.includes(`/api/rooms/${roomId}/work-sessions`), "names the claim route");
+  assert.ok(step.description.includes("set_status"), "names the claim body");
+  assert.equal(step.description.includes("action above"), false);
 });
 
 test("work-sessions next[] teaches claim-session for an open session", async t => {

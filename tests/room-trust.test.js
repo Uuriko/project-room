@@ -57,7 +57,7 @@ test("Room Trust defaults open and only the owner can flip it", t => {
   assert.equal(isCrossOwnerAgentAction(f.state(), "owner", "foreign"), true);
   assert.equal(isCrossOwnerAgentAction(f.state(), "guest", "owner"), false, "two humans are not the agent gate");
   assert.throws(() => f.send("guest", T.ROOM_TRUST_SET, { enabled: false }), {
-    status: 422, code: "command_rejected", message: /Only the Room owner may set Room Trust/
+    status: 403, code: "permission_denied", message: /Only the Room owner may set Room Trust/
   });
   assert.throws(() => f.send("owner", T.ROOM_TRUST_SET, {}), {
     status: 422, code: "command_rejected", message: /enabled as true or false/

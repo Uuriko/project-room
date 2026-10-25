@@ -827,6 +827,7 @@ response's own `hint`/`next` when it names something more specific.
 | `password_too_short` | 422 | password below minimum length (via reject(422, policy.code)) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `payload_too_large` | 422 | ${tooLongField[1]} must be at most 4096 characters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `peer_not_found` | 404 | That ID cannot resolve to an available agent peer in this room. Use get_room_context to find linked room members. | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `permission_denied` | 403 | Only the Room owner may archive the room | no | You can't do that. The message names who may. Ask them, or use their credential. |
 | `pilot_limit` | 409 | Bounded pilot capacity reached; no data was changed | no | Room projection limit reached; no data changed. Ask the room owner to raise the limit, or try later. |
 | `plan_changed` | 409 | Room changed during account deletion; request a fresh plan (${error.message}) | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `plugin_origin_unavailable` | 503 | The service has no HTTPS origin to describe itself with | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
@@ -1061,6 +1062,7 @@ response's own `hint`/`next` when it names something more specific.
 | `webhook_signature` | 401 | Bad webhook signature | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `webhook_unconfigured` | 503 | The PR webhook is enabled but its secret is not configured | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `webhook_url_not_public` | 500 | fail("webhook_url_not_public", message); function assertPublicHost(hostname) { const name = hostname.toLowerCase().replace(/\.$/, ""); if (!name) fail | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `work_already_accepted` | 409 | Already accepted by Ada at rev 1 | no | Already accepted. Read the current work and the acceptor; do not accept again. |
 | `work_assignee_unknown_member` | 422 | assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `work_claim_conflict` | 409 | Work "${item.id}" is already ${item.state} | follow hint | Follow this error's hint and next steps. |
 | `work_claim_conflict` | 422 | Only an active, unsuperseded claim can receive a PR link | follow hint | Follow this error's hint and next steps. (Note: work-claim-routes map.) |

@@ -42,6 +42,14 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
   automation: focusMembers("automation")
 });
 
+// A room key (rak_) cannot create or join rooms. Hide those tools from
+// tools/list. Callers that already hold an identity secret still see them.
+export const ROOM_KEY_HIDDEN_MCP_TOOLS = new Set(["room_create", "room_join"]);
+
+export function omitRoomKeyHiddenTools(tools) {
+  return tools.filter(tool => !ROOM_KEY_HIDDEN_MCP_TOOLS.has(tool.name));
+}
+
 export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
   const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
   if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
