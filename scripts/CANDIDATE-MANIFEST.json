@@ -61,7 +61,7 @@
     "server/connect-snippets.mjs": "sha256:f410492dbce80b22683e1dbddb9a88b1a8a6a03be5b790ecf8d2d72a6ba2b49f",
     "skills/project-room-setup/SKILL.md": "sha256:44d201c16af5d71c7c453b94ea00ec7690e7e2051b4087442aaf9920b25ced12",
     "src/access-presets.js": "sha256:62f9670c0fae93e7de8e4d7c0ee17540edfd880677601458e9d21400a4f28a2c",
-    "src/account-client.js": "sha256:4442f7fa06af665df658344d6cc6660fb9b213d0c07eb2d7e25b5db8b06dedd8",
+    "src/account-client.js": "sha256:de62b356f08da3ff8ab5142a81a7b369ea8b5edd4b5ff79421ed8e280c0e53c4",
     "src/account-settings-ui.js": "sha256:576f241edeeff78273771785998e305790163ff18d4ed1e516bef87b6c1f46f7",
     "src/agent-connections.js": "sha256:6214a8af668dbec85ba5142c2fd284ef54ded0036e113bb2316a8edb880b4eeb",
     "src/agent-first-run.js": "sha256:6589f26941f8f2514f531712d58e791f0ef7cc2df7026e3034a88f9ddb940db7",
@@ -76,7 +76,8 @@
     "src/board.css": "sha256:48ae65eb6537a829a0dd8f90b02f660b83941ffc48ddd09295b58c4f30162ea5",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
-    "src/client.js": "sha256:fda938799fd66621b5f8b07badb617507afbb475d452eefeba3401a9fb10864f",
+    "src/client-transport.js": "sha256:43ed28a0b759de9d2d41e5f423728aeb48c8ab712570a8f62f4160c9c8151e16",
+    "src/client.js": "sha256:beae94f945a51cae2a93d805aff54004d2f59b2aee23b6a9cce203f0d1d1168a",
     "src/clipboard.js": "sha256:849b3e4c3cfbb4e5859bf052674496c3d2e140ebd0ef2da540abd442db0a4ae6",
     "src/composer-files.js": "sha256:863047fdeb020d583dbbd9789f4d728f25a4224a6e468f5e4d0b2a11c3ee9568",
     "src/conversation-intent.js": "sha256:518fa45e3c1a14e2a28c11bb29e98f821aea18549a8b8321b88a84b8eb39a591",
@@ -134,7 +135,7 @@
     "src/service-origin.js": "sha256:cb4ac28e46f80308f243d39b6ad68412c55a2cacb5bb79a50215d1e362e51414",
     "src/session-expiry.js": "sha256:1a288b04f564674b402a97704aa0c501ce0cea29398b875f3192188e26ee9575",
     "src/share-invite-code.js": "sha256:9c6aa5325048ca5d4d7cb982e47aa4b8c1bb1e0225ce0d4bc08fe0c7ee674021",
-    "src/share-links.js": "sha256:25857b0e3f7d9527df58ae31b1f2c87f4b0d3cca9ee8db9b29177ac54b7dae75",
+    "src/share-links.js": "sha256:49db8685f0d971768bbcebd354617a3867b65f0fb21945ea7f55f31b4ff59746",
     "src/signin-entry.js": "sha256:c797b5df7ed8961ce43bb812725d6ac27ec38401ef4d320e74480d40f05c7b42",
     "src/signin-navigation.js": "sha256:f9163f13e9db2fab4e5312efab59e126871b1730668d1932501a2e96fab1b930",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",
@@ -151,8 +152,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:ed50070e82de9b7bd313da460fdf67da4ef540e12675c57f2a7bf827fd5fa097",
-    "strings/en.json": "sha256:4a66abb675ecd9a5d438c88c12bf6e4f4d9296cb2dec91509502313e5cd54633"
+    "strings/en.js": "sha256:54d2896f92d390b33568fd8ce483a9ec7f2b7ba56437ca432fe8a83858be9eb8",
+    "strings/en.json": "sha256:a2ad2ae553d4db437d3599c4dd0785b1ec41767bcebd0b532579ab0ca2547c33"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:ebdfd3d7cc7118098ad4e3280a0af4567d4c2d8322e88483f0cdcebc15245512",

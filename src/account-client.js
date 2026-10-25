@@ -1,4 +1,4 @@
-import { humanErrorMessage } from "./error-copy.js";
+import { createWriteRetries, settleResponse, unansweredWrite, writeMethod } from "./client-transport.js";
 
 export const IDENTITY_MINT_POW_BITS = 12;
 export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
@@ -90,17 +90,25 @@ export class AccountClient {
     this.fetcher = fetcher;
     this.session = null;
     this.generation = 0;
+    this.writes = createWriteRetries();
   }
   async request(path, { method = "GET", data, credentials = "same-origin", session = null, headers: extraHeaders = {} } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
+    const writing = writeMethod(method);
+    const claim = writing ? this.writes.claim(method, path, data) : null;
     try {
       const response = await this.fetcher(path, { method, credentials, signal: controller.signal,
-        headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(session?.csrf ? { "X-CSRF-Token": session.csrf } : {}), ...(session?.sessionBinding ? { "X-Session-Binding": session.sessionBinding } : {}), ...extraHeaders },
+        headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(claim ? { "Idempotency-Key": claim.key } : {}), ...(session?.csrf ? { "X-CSRF-Token": session.csrf } : {}), ...(session?.sessionBinding ? { "X-Session-Binding": session.sessionBinding } : {}), ...extraHeaders },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-      const body = await response.json();
-      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; if (body?.proof) error.proof = body.proof; throw error; }
+      const body = await settleResponse(response, { write: writing });
+      this.writes.settle(claim, false);
       return body;
+    } catch (error) {
+      const unanswered = writing && (error?.unconfirmed === true || unansweredWrite(error));
+      this.writes.settle(claim, Boolean(unanswered));
+      if (unanswered && error?.code !== "maybe_saved") throw unansweredWrite(error);
+      throw error;
     } finally { clearTimeout(timer); }
   }
   owns(generation, session) { return generation === this.generation && this.session === session; }

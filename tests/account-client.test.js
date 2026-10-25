@@ -247,7 +247,10 @@ test("invitation preview omits credentials and acceptance is bound to the curren
   const preview = await client.previewInvitation("invitation-secret");
   assert.equal(preview.id, "invite-one");
   assert.equal(calls[0].options.credentials, "omit");
-  assert.deepEqual(calls[0].options.headers, { "Content-Type": "application/json" });
+  assert.equal(calls[0].options.headers["Content-Type"], "application/json");
+  assert.equal(typeof calls[0].options.headers["Idempotency-Key"], "string");
+  assert.equal(calls[0].options.headers["X-CSRF-Token"], undefined);
+  assert.equal(calls[0].options.headers["X-Session-Binding"], undefined);
   assert.deepEqual(JSON.parse(calls[0].options.body), { invitationToken: "invitation-secret" });
 
   const accepted = await client.acceptInvitation({ invitationToken: "invitation-secret", redemptionId: "redemption-one", expectedRevision: 0 });

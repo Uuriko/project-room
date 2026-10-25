@@ -412,6 +412,8 @@ export default {
   "error.status.503": "The service is temporarily unavailable. Try again in a moment.",
   "error.status.504": "That took too long. Try again.",
   "error.unknown": "Something went wrong. Please try again.",
+  "error.roomBusy": "The room is busy. Retry in a moment.",
+  "error.maybeSaved": "Maybe saved. Retry the same request.",
   "signin.login-options": "<button type=\"button\" class=\"text-button\" data-forgot-password>Forgot password?</button>",
   "signin.passkey.action": "<button type=\"button\" class=\"text-button\" data-passkey-signin>Use a passkey</button>",
   "signin.magic.action": "<button type=\"button\" class=\"text-button\" data-recovery-option=\"magic\" data-email-method=\"magic\">Email me a sign-in link</button>",
