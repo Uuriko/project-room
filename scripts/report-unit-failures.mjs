@@ -8,6 +8,7 @@
  * writes the markdown comment body to --body-file (or stdout).
  *
  * Usage: node scripts/report-unit-failures.mjs --shard=1/3 [--body-file=path]
+ *        node scripts/report-unit-failures.mjs --all [--body-file=path]
  * Env: GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID (for the run link).
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -43,19 +44,54 @@ function latestReceipt(dir, index, total) {
   return best ? JSON.parse(readFileSync(best, "utf8")) : null;
 }
 
+function latestAllReceipt(dir) {
+  let best = null;
+  let bestAttempt = -1;
+  let names;
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return null;
+  }
+  for (const name of names) {
+    const match = /^unit-all-attempt-(\d+)\.json$/.exec(name);
+    if (!match) continue;
+    const attempt = Number(match[1]);
+    if (attempt > bestAttempt) {
+      bestAttempt = attempt;
+      best = join(dir, name);
+    }
+  }
+  return best ? JSON.parse(readFileSync(best, "utf8")) : null;
+}
+
 function main() {
+  const all = process.argv.includes("--all");
   const shardArg = arg("--shard");
-  if (!shardArg) throw new Error("Usage: report-unit-failures.mjs --shard=1/3 [--body-file=path]");
-  const { index, total } = parseShard(shardArg);
-  if (total !== SHARD_COUNT) throw new Error(`expected ${SHARD_COUNT} shards`);
-  const receipt = latestReceipt("test-results", index, total);
-  const failures = Array.isArray(receipt?.failures) ? receipt.failures : [];
+  if (all === Boolean(shardArg)) throw new Error("Usage: report-unit-failures.mjs --shard=1/3 | --all [--body-file=path]");
+  let comment;
+  if (all) {
+    const receipt = latestAllReceipt("test-results");
+    comment = {
+      failures: Array.isArray(receipt?.failures) ? receipt.failures : [],
+      title: "## Unit test failures\n",
+    };
+  } else {
+    const { index, total } = parseShard(shardArg);
+    if (total !== SHARD_COUNT) throw new Error(`expected ${SHARD_COUNT} shards`);
+    const receipt = latestReceipt("test-results", index, total);
+    comment = {
+      shard: index,
+      total,
+      failures: Array.isArray(receipt?.failures) ? receipt.failures : [],
+    };
+  }
   const { GITHUB_SERVER_URL, GITHUB_REPOSITORY, GITHUB_RUN_ID } = process.env;
   const runUrl =
     GITHUB_SERVER_URL && GITHUB_REPOSITORY && GITHUB_RUN_ID
       ? `${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}`
       : "";
-  const body = formatFailureComment({ shard: index, total, failures, runUrl });
+  const body = formatFailureComment({ ...comment, runUrl });
   const bodyFile = arg("--body-file");
   if (bodyFile) writeFileSync(bodyFile, body);
   else process.stdout.write(body);

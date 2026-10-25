@@ -97,8 +97,13 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(about.headers.get('x-test-do-fetches'), '0');
     assert.equal(about.headers.get('x-robots-tag'), 'all');
     assert.match(about.headers.get('content-security-policy'), /default-src 'none'/);
-    assert.match(about.headers.get('content-security-policy'), /script-src https:\/\/static\.cloudflareinsights\.com/);
-    assert.equal(about.headers.get('content-security-policy').split('; ').find(d => d.startsWith('connect-src ')), `connect-src https://cloudflareinsights.com ${origin}/cdn-cgi/rum`);
+    // /about is the one public page with a first-party script: its policy
+    // path-pins src/front-door.js and its /api/public/front-door feed ahead
+    // of the shared beacon sources — the shape cloudflare/public-search.check.mjs
+    // and tests/public-search-http.test.js pin by full directive map. Every
+    // other public page keeps the insights-only policy asserted there.
+    assert.match(about.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
+    assert.equal(about.headers.get('content-security-policy').split('; ').find(d => d.startsWith('connect-src ')), `connect-src ${origin}/api/public/front-door https://cloudflareinsights.com ${origin}/cdn-cgi/rum`);
     assert.doesNotMatch(about.headers.get('content-security-policy'), /connect-src 'self'|script-src 'self'|\*/);
     assert.match(about.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
     assert.equal(await about.text(), 'about-page');
@@ -209,7 +214,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(health.headers.get('x-test-do-probes'), '0');
     assert.match(health.headers.get('server-timing'), /total;dur=/);
     const healthBody = await health.json();
-    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging', emailVerification: 'relaxed-no-mailer' });
+    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
 
     const ready = await call('/api/ready', { ip: '192.0.2.9' });
     assert.equal(ready.status, 200, await ready.clone().text());
@@ -217,6 +222,8 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(ready.headers.get('x-test-do-probes'), '1');
     const readyBody = await ready.json();
     assert.equal(readyBody.status, 'ready');
+    assert.equal(readyBody.emailVerification, 'relaxed-no-mailer');
+    assert.equal(readyBody.emailVerificationScope, 'durable-object');
     assert.equal(readyBody.do.status, 'ok');
     assert.equal(readyBody.do.statusCode, 200);
     assert.equal(typeof readyBody.do.ms, 'number');

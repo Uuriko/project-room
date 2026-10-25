@@ -109,3 +109,64 @@ test("a mention that times out stays delivered and is not read", t => {
   assert.equal(expired.receipts[0].acked, false);
   assert.ok(expired.receipts[0].decidedAt);
 });
+
+for (const readBeforeReply of [false, true]) test(`acknowledgment and late response survive deadline/restart (read first: ${readBeforeReply})`, t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-mention-history-"));
+  const filename = join(directory, "room.sqlite");
+  let now = Date.parse("2026-10-20T00:00:00Z");
+  let store = new RoomStore(filename, { now: () => now });
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom("commons"));
+  const owner = store.issueAccessKey("commons", "owner");
+  const send = (key, id, type, data) => store.command(key, "commons", { id, type, data });
+  send(owner, "add", "member.added", { memberId: "alice", displayName: "Alice", kind: "agent", permissions: [] });
+  const alice = store.issueAccessKey("commons", "alice");
+  store.setMentionTimeout(owner, "commons", 60_000, null);
+  const request = send(owner, "request", "message.posted", { messageId: "request", body: "@Alice review" });
+  store.acknowledgeMention(alice, "commons", request.event.id, null);
+  const ackAt = listMentionReceipts(store, owner, "commons").receipts[0].acknowledgedAt;
+  now += 60_000;
+  store.close(); store = new RoomStore(filename, { now: () => now });
+  if (readBeforeReply) {
+    const expired = listMentionReceipts(store, owner, "commons").receipts[0];
+    assert.equal(expired.state, "timed_out");
+    assert.equal(expired.read, true);
+    assert.equal(expired.acked, true);
+    assert.equal(expired.acknowledgedAt, ackAt);
+  }
+  send(alice, "response", "message.posted", { messageId: "response", replyToId: "request", body: "Reviewed" });
+  const result = listMentionReceipts(store, owner, "commons").receipts[0];
+  assert.equal(result.state, "timed_out", "deadline classification is independent of status reads");
+  assert.equal(result.read, true); assert.equal(result.acked, true);
+  assert.equal(result.acknowledgedAt, ackAt);
+  assert.equal(result.respondedAt, new Date(now).toISOString());
+});
+
+test("legacy acknowledgment upgrades without inventing a timestamp; late ACK retains evidence", t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-mention-upgrade-"));
+  const filename = join(directory, "room.sqlite");
+  let now = Date.parse("2026-10-20T00:00:00Z");
+  let store = new RoomStore(filename, { now: () => now });
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom("commons"));
+  const owner = store.issueAccessKey("commons", "owner");
+  store.command(owner, "commons", { id: randomUUID(), type: "member.added",
+    data: { memberId: "alice", displayName: "Alice", kind: "agent", permissions: [] } });
+  const alice = store.issueAccessKey("commons", "alice");
+  store.setMentionTimeout(owner, "commons", 60_000, null);
+  const posted = store.command(owner, "commons", { id: randomUUID(), type: "message.posted", data: { body: "@Alice check" } });
+  store.acknowledgeMention(alice, "commons", posted.event.id, null);
+  // Recreate the prior additive schema: state exists, observation history does not.
+  store.db.exec("DROP TABLE mention_observations; DELETE FROM room_schema_stamp;");
+  store.close(); store = new RoomStore(filename, { now: () => now, integrity: "deferred" });
+  now += 60_000;
+  let receipt = listMentionReceipts(store, owner, "commons").receipts[0];
+  assert.equal(receipt.state, "timed_out"); assert.equal(receipt.read, true);
+  assert.equal(receipt.acknowledgedAt, null, "migration must not invent a historical ACK time");
+  store.acknowledgeMention(alice, "commons", posted.event.id, null);
+  receipt = listMentionReceipts(store, owner, "commons").receipts[0];
+  assert.equal(receipt.state, "timed_out"); assert.equal(receipt.acked, true);
+  assert.equal(receipt.acknowledgedAt, new Date(now).toISOString());
+  now += 1000; store.acknowledgeMention(alice, "commons", posted.event.id, null);
+  assert.equal(listMentionReceipts(store, owner, "commons").receipts[0].acknowledgedAt, receipt.acknowledgedAt);
+});

@@ -50,14 +50,16 @@ const expectConserved = escrow => {
 const post = (escrow, overrides = {}) => escrow.postBounty(ROOM,
   { poster: JILL, title: "T", criteria: "C", amount: 10, deadline: isoFuture(3_600_000), ...overrides }).bounty;
 
-// Post -> fund -> claim -> submit (no accept): a dispute then freezes a
-// still-locked award, so settlement must attribute before it can split/pay.
-function runToSubmitted(escrow, { amount = 10, verifier = null } = {}) {
+// Post -> fund -> claim -> submit -> accept: since #3726 a dispute opens
+// only on accepted work, so the award is already attributed when it freezes.
+function runToAccepted(escrow, { amount = 10, verifier = null } = {}) {
   const bounty = post(escrow, { amount, verifierId: verifier });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
   escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
   return escrow.getBounty(ROOM, bounty.bountyId);
 }
 
@@ -91,12 +93,12 @@ const failFirstJournalAppend = (escrow, bountyId) => {
   return { fired: () => fired, restore: () => { escrow._append = original; } };
 };
 
-// Drive a submitted bounty into an adjudicating dispute, fail the first
+// Drive an accepted bounty into an adjudicating dispute, fail the first
 // settlement journal write during decideDispute, and assert both stores
 // rolled back together. Returns everything the retry assertions need.
 function driveToFailedSettlement(outcome, reasonCodes) {
   const { escrow, db } = makeEscrow();
-  const bounty = runToSubmitted(escrow, { amount: 10, verifier: INSTINCT });
+  const bounty = runToAccepted(escrow, { amount: 10, verifier: INSTINCT });
   const { dispute } = escrow.disputeBounty(ROOM, bounty.bountyId,
     { challenger: CODEX, bond: 2.5, grounds: "partial credit" });
   assert.equal(escrow.getDispute(ROOM, dispute.disputeId).state, "adjudicating");
@@ -138,13 +140,14 @@ function driveToFailedSettlement(outcome, reasonCodes) {
   assert.equal(escrow._disputeRecords.get(dispute.disputeId).state, persisted.state,
     "the raw _disputeRecords Map entry must match the persisted snapshot too");
 
-  // Money is exactly where the dispute left it: award still locked with
-  // the poster, challenger bond still locked, nothing attributed/vested.
+  // Money is exactly where the dispute left it: award still attributed to
+  // the worker (acceptance stands), challenger bond still locked, nothing
+  // vested or refunded.
   assert.equal(bal(escrow, JILL).payable, 90);
-  assert.equal(bal(escrow, JILL).locked, 10);
+  assert.equal(bal(escrow, JILL).locked, 0);
   assert.equal(bal(escrow, CODEX).payable, 97.5);
   assert.equal(bal(escrow, CODEX).locked, 2.5);
-  assert.equal(bal(escrow, GROK).attributed, 0);
+  assert.equal(bal(escrow, GROK).attributed, 10);
   assert.equal(bal(escrow, GROK).approved, 0);
   expectConserved(escrow);
   return { escrow, db, bounty, dispute };

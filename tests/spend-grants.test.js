@@ -780,10 +780,10 @@ test("every priced tool advertises its price in its description", async t => {
   for (const [name, cents] of Object.entries(PRICED_MCP_TOOLS)) {
     const def = hostedMcpToolDefs.find(entry => entry.name === name);
     assert.ok(def, `${name} must exist in the hosted tool catalog`);
-    assert.match(def.description, /^\[paid: room-credits\] /,
+    assert.match(def.description, /^\[paid: room-cents\] /,
       `${name}: description must open with the machine-readable paid prefix`);
-    assert.match(def.description, new RegExp(`\\b${cents} credits?\\b`),
-      `${name}: description must name its ${cents}-credit price`);
+    assert.match(def.description, new RegExp(`\\b${cents} cents?\\b`),
+      `${name}: description must name its ${cents}-cent price`);
   }
   assert.equal(priceForTool("room_list_files"), null, "unpriced tools stay free");
   assert.equal(priceForTool("no_such_tool"), null);
