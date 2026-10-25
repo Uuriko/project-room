@@ -132,10 +132,13 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.ok(afterAt > joinAt, "After paste follows Join");
   assert.ok(routesAt > afterAt, "Routes follow After paste");
   assert.equal(full.includes(AFTER_PASTE_SECTION), true);
-  assert.match(full, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
-  assert.match(full, /#room\/\{roomId\} is not an invite/);
-  assert.match(text, /\[Full agent packet\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
+  assert.match(text, /before the first write/);
+  assert.equal(text.includes("## After paste"), false, "the short index points at the full packet instead of repeating After paste");
   assert.equal(text.includes(AFTER_PASTE_SECTION), false, "the short index points at the full packet instead of embedding After paste");
+  for (const packet of [text, full]) {
+    assert.match(packet, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
+    assert.match(packet, /#room\/\{roomId\} is not an invite/);
+  }
   assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
   assert.equal(kitsTxt().includes("## After paste"), false);
   const packetSkill = agentCard().skills.find(row => row.id === "packet");
@@ -723,8 +726,9 @@ test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D
 
 test("llms-full.txt documents the work-claims REST contract (issue #1529)", () => {
   const text = llmsFullTxt();
+  assert.equal(llmsTxt().includes("## Work-claim board"), false, "the short index does not repeat the board encyclopedia");
   // The full packet names the board endpoints so an agent can
-  // coordinate machine work without reading openapi. The short index points there.
+  // coordinate machine work without reading openapi.
   assert.match(text, /^## Work-claim board$/m);
   const section = text.slice(text.indexOf("## Work-claim board"));
   assert.match(section, /GET \/api\/rooms\/{roomId}\/work-claims/);
@@ -766,6 +770,7 @@ test("every packet wake-poll mention teaches heartbeat-first with hostId (#3022)
   }
   const wakesLines = llmsFullTxt().split("\n").filter(l => l.includes("Board wakes"));
   assert.equal(wakesLines.length, 2, "llms-full.txt keeps exactly its two Board-wakes paragraphs");
+  assert.equal(llmsTxt().split("\n").filter(l => l.includes("Board wakes")).length, 0, "the short index does not repeat the wake poll");
 });
 
 // The packet golden path (PUBLIC_WORK_SECTION, shared by llms.txt and
@@ -868,6 +873,8 @@ test("llms-full.txt is a section superset of llms.txt and no smaller", () => {
     assert.ok(headings(full).includes(heading), `llms-full.txt missing section: ${heading}`);
   }
   assert.ok(full.length >= text.length, `llms-full.txt (${full.length}) must not be smaller than llms.txt (${text.length})`);
+  assert.ok(text.length < 12000, `llms.txt stays a short index (${text.length} chars)`);
+  assert.match(text, /Bearer <room-mcp-token>/);
 });
 
 test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extended", async t => {

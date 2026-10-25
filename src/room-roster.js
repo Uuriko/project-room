@@ -220,6 +220,35 @@ export function grokBuildToml({ nodePath, adapterPath, configDir }) {
   ].join("\n");
 }
 
+// One paste for a host that speaks remote MCP. The credential is the scoped
+// token Create access already minted (rak_ when an identity is linked, otherwise
+// the room access key). It is not minted here, and an identity secret is refused.
+const SCOPED_CREDENTIAL = /^(?:rak_[A-Za-z0-9_-]{16,128}|[A-Za-z0-9_-]{43})$/;
+export function connectSnippet({ origin, credential } = {}) {
+  const base = String(origin ?? "").replace(/\/$/, "");
+  if (!/^https?:\/\/[^/\s]+$/.test(base)) return "";
+  if (typeof credential !== "string" || !SCOPED_CREDENTIAL.test(credential) || credential.startsWith("pri_")) return "";
+  return JSON.stringify({
+    mcpServers: {
+      "project-room": {
+        url: `${base}/mcp`,
+        headers: { Authorization: `Bearer ${credential}` }
+      }
+    }
+  }, null, 2) + "\n";
+}
+
+// Connected means the scoped key was used. Read means a read horizon or a post.
+// First post means this member has a message. A post counts as a read.
+export function connectChecks({ lastUsedAt = null, readAt = null, posted = false } = {}) {
+  const didPost = posted === true;
+  return [
+    { id: "connected", done: Boolean(lastUsedAt) },
+    { id: "read", done: Boolean(readAt) || didPost },
+    { id: "post", done: didPost },
+  ];
+}
+
 export function mcpJson({ nodePath, adapterPath, configDir }) {
   grokBuildToml({ nodePath, adapterPath, configDir });
   return JSON.stringify({
