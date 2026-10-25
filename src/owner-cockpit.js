@@ -5,6 +5,17 @@ import { uiText } from "./strings.js";
 // and executes the #662 decide actions verbatim against the existing
 // per-room decide endpoint (account-mode room credentials). No client-side
 // currency math exists here because the document never mixes currencies.
+// #3343 slice 2 — the Money snapshot + full views and the Roster render
+// the server's money/roster sections the same way: Panel C (cents) and
+// Panel R (milli-credits) are separate blocks with separate units, spend
+// marked agent-reported, and "unknown" spend rendered as the word, never
+// as a zero the server did not send.
+//
+// #3340 — the account-home Needs Attention badge + per-room deep lines in
+// this same shell are fed by that same overview document: the badge count
+// is the document's Decisions total verbatim (the one attentionReport-based
+// count; nothing here recounts the underlying per-room sources), and the
+// per-room lines group the Decisions items the document already carries.
 
 const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -29,12 +40,165 @@ export function formatAge(ageMs) {
   return `waiting ${days}d ${hours % 24}h`;
 }
 
+// #3340: the badge count is the overview Decisions total, taken verbatim.
+// It is never derived from items.length (the items array is capped by the
+// server) and never recomputed from per-room sources.
+export function attentionBadgeCount(doc) {
+  const total = doc?.decisions?.total;
+  return Number.isSafeInteger(total) && total > 0 ? total : 0;
+}
+
+export function perRoomAttention(doc) {
+  const lines = [];
+  const byRoom = new Map();
+  for (const item of doc?.decisions?.items ?? []) {
+    if (!item || typeof item.roomId !== "string" || item.roomId.length === 0) continue;
+    let line = byRoom.get(item.roomId);
+    if (!line) {
+      line = { roomId: item.roomId, roomName: item.roomName ?? item.roomId, count: 0 };
+      byRoom.set(item.roomId, line);
+      lines.push(line);
+    }
+    line.count++;
+  }
+  return lines;
+}
+
+export function attentionLinesTruncated(doc) {
+  const total = doc?.decisions?.total;
+  const shown = Array.isArray(doc?.decisions?.items) ? doc.decisions.items.length : 0;
+  return Number.isSafeInteger(total) && total > shown;
+}
+
+export function roomAttentionHref(roomId) {
+  return `./?room=${encodeURIComponent(roomId)}`;
+}
+
+export function roomAttentionLinesHtml(doc) {
+  const lines = perRoomAttention(doc);
+  if (lines.length === 0) return "";
+  const rows = lines.map(line => uiText("cockpit.attentionRoomHtml", {
+    href: esc(roomAttentionHref(line.roomId)),
+    name: esc(line.roomName),
+    count: line.count,
+    verb: line.count === 1 ? "needs" : "need",
+  }));
+  if (attentionLinesTruncated(doc)) {
+    rows.push(uiText("cockpit.attentionTruncatedHtml", {
+      shown: doc.decisions.items.length,
+      total: doc.decisions.total,
+    }));
+  }
+  return rows.join("");
+}
+
+const cents = value => typeof value === "number" ? `$${(value / 100).toFixed(2)}` : "unknown";
+const millis = value => typeof value === "number" ? `${value} mcr` : "unknown";
+
+export function renderMoney(money) {
+  if (!money) return "";
+  const { cents: panelC, credits: panelR } = money;
+  const roomLines = panelC.rooms.map(room => {
+    const bar = room.burnFraction === null ? ""
+      : uiText("cockpit.moneyBurnBar", { percent: Math.round(room.burnFraction * 100) });
+    const headroom = room.headroomCents === null
+      ? uiText("cockpit.moneyHeadroomUnknown")
+      : uiText("cockpit.moneyHeadroom", { amount: cents(room.headroomCents) });
+    return uiText("cockpit.moneyRoomHtml", {
+      name: esc(room.roomName ?? room.roomId),
+      committed: cents(room.committedCents),
+      spent: cents(room.spentCents),
+      reserved: cents(room.reservedCents),
+      held: cents(room.heldCents),
+      headroom,
+      bar,
+      burn: cents(room.burnRateCentsPerDay),
+    });
+  }).join("");
+  const outcome = panelC.costPerAcceptedOutcome;
+  const outcomeLine = outcome.status === "ok"
+    ? uiText("cockpit.moneyOutcomeHtml", { label: esc(outcome.label) })
+    : uiText(outcome.status === "unknown" ? "cockpit.moneyOutcomeUnknown" : "cockpit.moneyOutcomeNone");
+  const unreported = panelC.totals.unreportedAttempts > 0
+    ? uiText("cockpit.moneyUnreportedHtml", {
+      count: panelC.totals.unreportedAttempts,
+      noun: panelC.totals.unreportedAttempts === 1 ? "attempt" : "attempts",
+    }) : "";
+  const taskLines = panelC.tasks.map(task => uiText("cockpit.moneyTaskHtml", {
+    title: esc(task.title),
+    spend: cents(task.spendCents),
+    room: esc(task.roomName ?? task.roomId),
+    attempts: task.attempts,
+    noun: task.attempts === 1 ? "attempt" : "attempts",
+  })).join("");
+  const creditLines = panelR.rooms.map(room => uiText("cockpit.moneyCreditHtml", {
+    name: esc(room.roomName ?? room.roomId),
+    locked: millis(room.lockedMillis),
+    pool: millis(room.poolBalanceMillis),
+    disputed: millis(room.disputedMillis),
+  })).join("");
+  return uiText("cockpit.moneyHtml", {
+    rooms: roomLines,
+    outcome: outcomeLine,
+    unreported,
+    tasks: taskLines,
+    credits: creditLines || uiText("cockpit.moneyCreditsEmpty"),
+  });
+}
+
+export function renderRoster(roster) {
+  if (!roster) return "";
+  if (roster.total === 0) return uiText("cockpit.rosterEmptyHtml");
+  const counts = roster.counts;
+  const summaryLine = uiText("cockpit.rosterSummary", {
+    total: counts.total,
+    agents: counts.total === 1 ? "agent" : "agents",
+    working: counts.working,
+    stalled: counts.stalled,
+    offline: counts.offline,
+  });
+  const rows = roster.rows.slice(0, 5).map(row => {
+    const receipt = row.lastReceipt
+      ? uiText("cockpit.rosterReceiptHtml", {
+        href: `./?room=${encodeURIComponent(row.roomId)}`,
+        id: esc(String(row.lastReceipt.receiptId).slice(0, 24)),
+      }) : "";
+    const work = row.currentWork ? ` — ${esc(row.currentWork.title)}` : "";
+    return uiText("cockpit.rosterRowHtml", {
+      state: esc(row.workState),
+      name: esc(row.displayName),
+      work,
+      room: esc(row.roomName ?? row.roomId),
+      tier: esc(row.autonomyTier),
+      cost: cents(row.periodCostCents),
+      receipt,
+    });
+  }).join("");
+  return uiText("cockpit.rosterHtml", { summary: esc(summaryLine), rows });
+}
+
 export function createOwnerCockpit({ accountClient, section, decide }) {
   const summary = section.querySelector("#cockpit-summary");
+  const badge = section.querySelector("#cockpit-attention-badge");
+  const roomLines = section.querySelector("#cockpit-room-lines");
   const decisionsBox = section.querySelector("#cockpit-decisions");
   const exceptionsBox = section.querySelector("#cockpit-exceptions");
+  const moneyBox = section.querySelector("#cockpit-money");
+  const rosterBox = section.querySelector("#cockpit-roster");
   const stubsBox = section.querySelector("#cockpit-room-stubs");
   let epoch = 0, busy = false;
+
+  function renderAttentionBadge(doc) {
+    if (badge) {
+      const count = doc ? attentionBadgeCount(doc) : 0;
+      badge.textContent = count > 0 ? String(count) : "";
+      badge.hidden = count === 0;
+      if (typeof badge.setAttribute === "function") {
+        badge.setAttribute("aria-label", count > 0 ? uiText("cockpit.attentionWaiting", { count }) : "Needs attention");
+      }
+    }
+    if (roomLines) roomLines.innerHTML = doc ? roomAttentionLinesHtml(doc) : "";
+  }
 
   function renderItem(item) {
     const label = KIND_LABEL[item.kind] ?? item.kind;
@@ -76,13 +240,15 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
   }
 
   function render(doc) {
+    renderAttentionBadge(doc);
     const { decisions, exceptions, rooms } = doc;
     const notesOpen = exceptionsBox.querySelector("details")?.open;
     const notices = exceptions.items.filter(item => item.severity === "info");
     const actionable = exceptions.items.filter(item => item.severity !== "info");
-    section.hidden = decisions.total === 0 && exceptions.total === 0 && !(doc.roomErrors?.length) && !(doc.jobs?.length);
+    const showLedger = Boolean(doc.money) || Boolean(doc.roster);
+    section.hidden = decisions.total === 0 && exceptions.total === 0 && !(doc.roomErrors?.length) && !(doc.jobs?.length) && !showLedger;
     const heading = section.querySelector("h3");
-    if (heading) heading.hidden = !decisions.total && !actionable.length && !doc.roomErrors?.length;
+    if (heading) heading.hidden = !decisions.total && !actionable.length && !doc.roomErrors?.length && !showLedger;
     section.setAttribute("aria-labelledby", heading?.hidden ? "cockpit-notes-title" : "owner-cockpit-title");
     const parts = [`${decisions.waiting} waiting`];
     if (decisions.oldestAgeMs > 0) parts.push(`oldest ${formatAge(decisions.oldestAgeMs).replace("waiting ", "")}`);
@@ -97,6 +263,8 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
       : (actionable.length ? `<h4>Exceptions</h4>` + actionable.map(renderException).join("") : "")
         + (notices.length ? uiText("human.roomNotesHtml", { open: notesOpen ? "open" : "", content: notices.map(renderException).join("") }) : ""))
       + renderJobs(doc.jobs);
+    if (moneyBox) moneyBox.innerHTML = renderMoney(doc.money);
+    if (rosterBox) rosterBox.innerHTML = renderRoster(doc.roster);
     stubsBox.innerHTML = (doc.roomErrors ?? []).map(stub =>
       `<p class="form-hint">Couldn't read room ${esc(stub.roomId)} (${esc(stub.error)}) — it is excluded from these totals.</p>`).join("");
     for (const button of decisionsBox.querySelectorAll("[data-cockpit-decide]")) {
@@ -131,12 +299,15 @@ export function createOwnerCockpit({ accountClient, section, decide }) {
       section.hidden = error?.code === "owner_required" || error?.status === 403;
       if (!section.hidden) {
         section.hidden = false;
+        renderAttentionBadge(null);
         const heading = section.querySelector("h3");
         if (heading) heading.hidden = false;
         section.setAttribute("aria-labelledby", "owner-cockpit-title");
         summary.textContent = "Couldn't load what needs you. Refresh to retry.";
         decisionsBox.innerHTML = "";
         exceptionsBox.innerHTML = "";
+        if (moneyBox) moneyBox.innerHTML = "";
+        if (rosterBox) rosterBox.innerHTML = "";
         stubsBox.innerHTML = "";
       }
       return;

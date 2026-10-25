@@ -437,6 +437,21 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 | #4858 | Wake webhook retries at the delivery's next attempt | `cursor/webhook-retry-schedule-da81` | `dba5f8413752ea1b5991b5cf671de28eac28ff1d` | conflicts with main and is stale; idea recorded in docs/ARCHIVED-WORK.md |
 | #4889 | Cure: guard signin-navigation sync() against absent provider anchors | `cure/signin-navigation-absent-anchor` | `efaa8a9ecc75b3fec780510f9ab94fb926f1e909` | contained in #4922 |
 
+## G10 combined
+
+PRs folded into the G10 owner-cockpit and operator read-model pull request. Each row keeps the head SHA the combined branch was ported from.
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #4008 | Owner inbox #3340: account-home Needs Attention badge + per-room deep links from overview Decisions totals | `jill/build-3340-attention-badge` | `0f5448e0ec2e47db0e98e9753551fcfb916c7acd` | Combined into the G10 pull request. The candidate manifest was regenerated rather than hand-merged. |
+| #4010 | Owner Cockpit slice 2: Money + Roster on /api/owner/overview (#3343) | `jill/build-3343-owner-money-roster` | `1e08a6453ec5939d3480797f2ca8f8e12b8c21c5` | Combined into the G10 pull request. `stateGroup` and `POOL_ACCOUNT` are exported so the overview can import them. |
+| #4022 | COMP-DEEP #1: verdict inbox — attention set + sectioned read (server) | `jill/cd01-verdict-inbox-server` | `93c03132073749d1ab2c002105f224ae44cb79fb` | Combined into the G10 pull request. The read is a route-table row, not a new legacy-chain path. Follow totals stay null until claim-follows.mjs exists. |
+| #4756 | feat(door): public door-funnel aggregates read (DOOR-FUNNEL-READ) | `jill/door-funnel-read` | `83c63e6b5cf60173d8045b35731aadf5022f4755` | Combined into the G10 pull request. This is the door-funnel contract that landed: route-table read, owner-only mint counts, ten-minute cache. Login-panel and sign-in cure commits were already superseded on main and were not reapplied. |
+| #4764 | Teach patrol the PR-outcome settle (claim_legality + receipt_linkage) | `jill/build-patrol-settle` | `063fea8f6dd09fe2ab07d83fc81b7cac90b016c0` | Combined into the G10 pull request. Only the patrol settle and its tests were taken. The login-panel baseline and sign-in cure commits were already superseded on main. |
+| #4805 | feat(routes): publication declarations for public routes + registry gate (#3674) | `jill/backlog-do-3674` | `179480b4fd277d79f647301fcb5728c8d8e5fa23` | Combined into the G10 pull request. Declarations also cover public routes main added after this PR's base, plus the door funnel. |
+| #4886 | Add repro hold check and per-agent audit read model | `cursor/repro-and-agent-audit-6187` | `a74d90d45675ea746b97d6238bcdf79f7861a4f8` | Combined into the G10 pull request. Both modules stay pure reads; reachability keeps them until a route wires them. |
+| #4890 | FUNNEL-COUNT-1 (Option B): door funnel counts at the Node boundary — GET /api/public/door-funnel | `funnel-count-1-door-funnel` | `b37c978b1d61fb24174dee3918e78c50bdcd3279` | Superseded by the #4756 read on the same path inside the G10 pull request. The counter writes on every GET, uses ISO weeks, and returns public mint counts; the kept read does not write, uses Monday America/Los_Angeles weeks, and omits mints unless the caller is a room owner. |
+
 ## Branches with no PR (deleted in cleanup)
 
 | Branch | Head SHA |
