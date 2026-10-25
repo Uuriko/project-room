@@ -31,7 +31,7 @@ export function createNextActionsRoutes({ store, json, reject, body, rate, roomC
       return await handler(...args);
     } catch (error) {
       if (error instanceof NextActionsError) reject(422, error.code, error.message);
-      if (error && typeof error.status === "number") reject(error.status, error.code ?? "next_actions_error", error.message);
+      if (error && typeof error.status === "number") reject(error.status, error.code ?? "next_actions_error", error.message, error.headers ?? null, error.strictInput);
       throw error;
     }
   };
@@ -88,7 +88,7 @@ export function createNextActionsRoutes({ store, json, reject, body, rate, roomC
           if (key !== "kind" && key !== "reason" && !unknown.includes(key)) unknown.push(key);
         }
       }
-      if (unknown.length) reject(422, "invalid_input", `unknown fields: ${unknown.join(", ")}`);
+      if (unknown.length) reject(422, "invalid_input", `unknown fields: ${unknown.join(", ")}`, null, { offending: unknown, accepted: ["kind", "reason"] });
       return json(res, 200, na.putSuppressions(selected.token, roomId, { suppressions, binding: fence }));
     }
     if (route === "next-actions-dismissals" && req.method === "GET") {
