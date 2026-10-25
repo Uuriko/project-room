@@ -1,6 +1,6 @@
 import { validateCharterContext } from "../src/room-charter.js";
 import { createHash } from "node:crypto";
-import { validId } from "../src/events.js";
+import { validId, MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
 import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
@@ -8,6 +8,7 @@ import { CONTENT_TRUST } from "../server/content-trust.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
+const replyBody = { type: "string", minLength: 1, maxLength: MAX_MESSAGE_BODY_CHARS, pattern: "\\S" };
 const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const token = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" };
 const limit = { type: "integer", minimum: 1, maximum: 50 };
@@ -23,7 +24,7 @@ const definitions = [
   ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
     { requestId: id, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["requestId", "toMemberId", "body"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
-    { requestId: id, replyToId: id, body: text, toMemberId: id, workItemId: id }, ["requestId", "replyToId", "body"]],
+    { requestId: id, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["requestId", "replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
     { requestId: id, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
       contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: text }],
@@ -59,7 +60,8 @@ export function buildReplyCommand(identity, name, args) {
   if (name === "room_respond_to_request") data.replyToId = data.responseToRequestId;
   if (type === "message.posted") replyPostMode(data);
   const command = { id: requestId, type, data };
-  if (Buffer.byteLength(JSON.stringify(command)) > 16384) throw Object.assign(new Error("Reply action exceeds the command limit"), { code: "reply_action_too_large" });
+  const commandLimit = name === "room_reply" ? MAX_MESSAGE_COMMAND_BYTES : 16384;
+  if (Buffer.byteLength(JSON.stringify(command)) > commandLimit) throw Object.assign(new Error("Reply action exceeds the command limit"), { code: "reply_action_too_large" });
   return command;
 }
 export function recordedReplyAction(name, args, command, receipt) {
@@ -73,7 +75,26 @@ export function recordedReplyAction(name, args, command, receipt) {
 }
 export async function submitReplyAction(client, identity, name, args, { signal } = {}) {
   const command = buildReplyCommand(identity, name, args), receipt = await client.command(command, { signal });
-  if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
+  let confirmed = confirmsAgentCommand(receipt, command, identity);
+  // A reply to a private thread inherits its recipient during server admission.
+  // Keep the submitted bytes unchanged on retries. Only accept that one added
+  // field after checking both the complete receipt and an authorized parent read.
+  const recipient = receipt?.event?.data?.toMemberId;
+  if (!confirmed && name === "room_reply" && !Object.hasOwn(command.data, "toMemberId") && validId(recipient)
+      && confirmsAgentCommand(receipt, { ...command, data: { ...command.data, toMemberId: recipient } }, identity)) {
+    try {
+      const timeout = AbortSignal.timeout(5000);
+      const parent = await client.messageThread(command.data.replyToId, { signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+      const message = parent?.thread;
+      if (parent?.roomId === identity.roomId && message?.id === command.data.replyToId
+          && validId(message.authorId) && validId(message.toMemberId)
+          && [message.authorId, message.toMemberId].includes(identity.memberId)) {
+        const otherParty = message.authorId === identity.memberId ? message.toMemberId : message.authorId;
+        confirmed = recipient === otherParty;
+      }
+    } catch { /* A recorded write with unavailable corroboration remains uncertain. */ }
+  }
+  if (!confirmed) return { status: "unconfirmed", requestId: command.id,
     message: "Outcome unknown. Keep and retry the exact original input; do not create a replacement requestId." };
   return recordedReplyAction(name, args, command, receipt);
 }

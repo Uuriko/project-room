@@ -72,5 +72,5 @@ Recorded chrome scope:
 Original stay-outs: Quill wake infrastructure; Steal A MCP implementation and
 Steal C short-code mint (#667, main `2015af9a`); #628 shareable login links;
 Phase 0 board/Handoff #8/#9; Beronel KYC, meeting TTL and Commons Space/bank;
-Compute/dasha-lobby Worker except door copy; and people-data mining. Those scope
+and the Compute/dasha-lobby Worker except door copy. Those scope
 records are provenance, not a current installation checklist.

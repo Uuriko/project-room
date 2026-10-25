@@ -418,13 +418,18 @@ export class MachineBot {
 
   async ensureLease(source, workId, slot, machineId) {
     const id = claimId(`botl-${slot}`);
+    // The lease reserves the slot through its file lease (files below),
+    // and its link to the work item lives in this loop's own state —
+    // deliberately NOT dependsOn: on the board that field has one
+    // definition (a completion prerequisite the claim route now
+    // enforces, #3880), and this lease must be held while the work it
+    // serves is still in progress.
     const created = await this.api.createClaim(source.roomId, {
       id,
       title: `Lease ${slot}`,
       kind: "work",
       reviewPolicy: "self_attested",
       files: [slotLabel(machineId, slot)],
-      dependsOn: [workId],
       note: "bot lease",
     });
     if (!created.ok) return null;

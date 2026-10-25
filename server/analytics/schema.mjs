@@ -1,6 +1,9 @@
 // Additive analytics tables. Outside the writer fence and not created from
 // the store constructor. The tail, the export and the readers call
 // ensureAnalyticsSchema. No schema version bump: CREATE TABLE IF NOT EXISTS only.
+import { tableExists } from "../db-util.mjs";
+
+export { tableExists };
 
 export const ANALYTICS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS analytics_events (
@@ -80,10 +83,6 @@ export function setDaily(db, day, metric, value) {
 
 export function dailyValue(db, day, metric) {
   return db.prepare("SELECT value FROM analytics_daily WHERE day=? AND metric=?").get(day, metric)?.value ?? 0;
-}
-
-export function tableExists(db, name) {
-  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 }
 
 export function columnExists(db, table, column) {
