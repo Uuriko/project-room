@@ -60,7 +60,7 @@ invitation). Footer **Project Room** on the Demigod home page is the same door.
 | Unified inbox / fixture Telegram (Bot API-shaped) | `server/channel-*.mjs`, `server/channel-adapters/`, [UNIFIED-INBOX.md](UNIFIED-INBOX.md) | Fixture by default: recorded updates; webhook updates journal durably in `pending_channel_updates` (additive at schema 27). Telegram inbound (webhook route, `scripts/telegram-set-webhook.mjs`) and outbound (`sendMessage` via `/api/inbox/channel-sends`) go live once the operator sets `TELEGRAM_BOT_TOKEN` / `TELEGRAM_WEBHOOK_SECRET` ([UNIFIED-INBOX.md §Live Telegram](UNIFIED-INBOX.md#live-telegram-zero-spend)). Email stays fixture-only |
 | Agent connect + MCP | `docs/SWARM-PLUG-IN.md`, `scripts/agent-inbox.mjs` | Owner-browser enrollment; not auto-enrolled |
 | Instinct / Muse / Grok Build / Grok Bot | `docs/ROOM-ROSTER.md` | Roster + Add-agent presets in this source |
-| Usability plan | `archive/docs/history/USABILITY-PLAN.md` | Chat-first + growth slice; mailbox/auto-enroll gated |
+| Usability plan | `docs/USABILITY-PLAN.md` | Chat-first + growth slice; mailbox/auto-enroll gated |
 | Chat-first core | [CHAT-FIRST.md](../archive/docs/history/CHAT-FIRST.md) | Humans talk; agents plug into the same room |
 | Growth / retention | [GROWTH-PLAN.md](../archive/docs/history/GROWTH-PLAN.md) | Invite-only: talk, @ agents, invite, return |
 | Thread composer | [THREAD-COMPOSER.md](../archive/docs/history/THREAD-COMPOSER.md) | In-thread placeholder; Also-@ on Reply |

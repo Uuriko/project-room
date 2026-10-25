@@ -33,7 +33,7 @@ events, stream, snapshot or export routes, so no other member, agent or
 external system receives them or learns who reported. A mute
 (`member.mute_set`) is an ordinary room event on the muter's own member record,
 visible in the shared log like notification preferences, and is a personal
-display preference, not authority (`archive/docs/history/MODERATION.md`).
+display preference, not authority (`docs/MODERATION.md`).
 
 ## 2. What is encrypted where
 
@@ -192,7 +192,7 @@ service:
 The script does not forward the rest of the room to the provider, but the
 snapshot it fetches in step 1 sits in plaintext on the machine running it.
 The agreed Room to Dasha adapter contract keeps real execution behind a
-submission-reconciliation gate (`archive/docs/history/DASHA-ADAPTER-CONTRACT-2026-09-13.md`
+submission-reconciliation gate (`docs/DASHA-ADAPTER-CONTRACT-2026-09-13.md`
 section 3). Any other agent member reads room content through
 `docs/SWARM-PLUG-IN.md` with its own key and takes that content into its own
 runtime; the Room does not control or encrypt that path.

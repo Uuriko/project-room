@@ -1,6 +1,6 @@
 import { validateCharterContext } from "../src/room-charter.js";
 import { createHash } from "node:crypto";
-import { validId } from "../src/events.js";
+import { validId, MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
 import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
@@ -8,6 +8,7 @@ import { CONTENT_TRUST } from "../server/content-trust.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
+const replyBody = { type: "string", minLength: 1, maxLength: MAX_MESSAGE_BODY_CHARS, pattern: "\\S" };
 const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const token = { type: "string", minLength: 1, maxLength: 4096, pattern: "^[A-Za-z0-9_-]+$" };
 const limit = { type: "integer", minimum: 1, maximum: 50 };
@@ -23,7 +24,7 @@ const definitions = [
   ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
     { requestId: id, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["requestId", "toMemberId", "body"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
-    { requestId: id, replyToId: id, body: text, toMemberId: id, workItemId: id }, ["requestId", "replyToId", "body"]],
+    { requestId: id, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["requestId", "replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
     { requestId: id, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
       contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: text }],
@@ -59,7 +60,8 @@ export function buildReplyCommand(identity, name, args) {
   if (name === "room_respond_to_request") data.replyToId = data.responseToRequestId;
   if (type === "message.posted") replyPostMode(data);
   const command = { id: requestId, type, data };
-  if (Buffer.byteLength(JSON.stringify(command)) > 16384) throw Object.assign(new Error("Reply action exceeds the command limit"), { code: "reply_action_too_large" });
+  const commandLimit = name === "room_reply" ? MAX_MESSAGE_COMMAND_BYTES : 16384;
+  if (Buffer.byteLength(JSON.stringify(command)) > commandLimit) throw Object.assign(new Error("Reply action exceeds the command limit"), { code: "reply_action_too_large" });
   return command;
 }
 export function recordedReplyAction(name, args, command, receipt) {

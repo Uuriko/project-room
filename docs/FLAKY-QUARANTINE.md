@@ -18,9 +18,9 @@ A flaky test — one that fails non-deterministically while the product is fine 
    `reason` is the failure signature, not a vibe — enough that a stranger can reproduce the flake. `repair_by` is at most 14 days after `quarantined_at`. `owner` is a lane or handle; it may be filled in by the repair lane within the 14-day window if unknown at quarantine time.
 3. **While quarantined, the test runs in the non-blocking lane.** Quarantined tests are executed by `scripts/run-quarantined-tests.mjs` (`npm run test:quarantined`), which reads `tests/quarantine.json`. Entries identify tests either by file plus test name (`"file > test name"`) or by a bare file. The runner executes each test with `QUARANTINE_RUN=1`. A failing test produces a non-zero exit status from the local runner.
 
-   In CI, `.github/workflows/zero-bug-quarantine.yml` defines two jobs:
-   - **`quarantine-check`**: validates the quarantine registry on pull requests and pushes to `main`.
-   - **`quarantined-tests`**: executes the quarantined tests on pushes to `main`. The job sets `continue-on-error: true`, making the CI execution lane non-blocking so test failures report honestly without failing the pipeline.
+   In CI, `.github/workflows/pr-gates.yml` runs both:
+   - **quarantine contract** (step in the `gates` job): validates the quarantine registry on pull requests and pushes to `main`.
+   - **`quarantined-tests`**: executes the quarantined tests nightly and on manual dispatch. The job sets `continue-on-error: true`, so a failure reports without failing the workflow.
 
    Quarantined tests can be run locally using:
    ```sh
@@ -30,7 +30,7 @@ A flaky test — one that fails non-deterministically while the product is fine 
 
 ## The enforcement
 
-The `quarantine-check` job runs `scripts/quarantine-check.mjs` in CI on every PR and every push to `main`. It exits non-zero when any entry violates the contract:
+The `gates` job runs `scripts/quarantine-check.mjs` in CI on every PR and every push to `main`. It exits non-zero when any entry violates the contract:
 
 - **past `repair_by`** — the 14 days are up, the test is not fixed, and nobody re-admitted or deleted it;
 - **`quarantined_at` older than 14 days with no `owner`** — an ownerless flake quietly becoming permanent;
