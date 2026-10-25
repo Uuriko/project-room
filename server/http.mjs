@@ -4380,12 +4380,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", messageLimit);
         if (snapshotView === "full") {
-          // RC-2026-09-19-070: strip targeted DMs from both carriers in the
-          // full snapshot — the audit tail (state.eventLog, the named P0) and
-          // the live projection (state.messages, which the client renders as
-          // the timeline). Pins reference messages by id, so pins of hidden
-          // DMs are dropped too — otherwise the pin would reveal the DM's
-          // existence. The work view carries none of these.
+          // RC-2026-09-19-070: strip targeted DMs from the live projection
+          // (state.messages, which the client renders as the timeline). Pins
+          // reference messages by id, so pins of hidden DMs are dropped too
+          // — otherwise the pin would reveal the DM's existence. The work
+          // view carries none of these.
+          // The event log is the same messages again. Member snapshots omit
+          // eventLog, seenEvents, and seenIdempotencyKeys. eventTail tells
+          // the client to read GET /events?tail=100 instead. In-process
+          // store.snapshot() still carries the log.
           const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
           const visibleIds = new Set(visibleMessages.map(message => message.id));
           // The window trims after DM filtering, so hidden DMs never count
@@ -4393,10 +4396,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const windowed = messageLimit !== null ? visibleMessages.slice(-messageLimit) : visibleMessages;
           const nextState = { ...snapshot.state,
             messages: windowed,
-            eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
             pins: messageLimit !== null ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
+          delete nextState.eventLog;
+          delete nextState.seenEvents;
+          delete nextState.seenIdempotencyKeys;
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
           snapshot.state = redactSnapshotState(nextState);
+          snapshot.eventTail = "events";
           if (messageLimit !== null) {
             const omitted = snapshot.messagesWindow?.omitted ?? 0;
             snapshot.messagesPage = messagesPageOf(windowed, messageSeqs(store.db, roomId, windowed[0] ? [windowed[0].id] : []), omitted > 0);

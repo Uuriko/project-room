@@ -1,7 +1,10 @@
 import { hasSessionHint } from "./browser-session.js";
 import { uiText } from "./strings.js";
+import { installLazyPanels } from "./panels-lazy.js";
 // Static imports must finish before the readable fallback yields to startup.
 import "./entry-started.js";
+// The landing page does not load app.js. Park closed panels before first paint.
+installLazyPanels();
 
 let flight = null, dispose = () => {};
 const resumeKey = "project-room:signin-entry:v1";

@@ -50,22 +50,24 @@ function checkedRequests(requests, expected) {
   }
 }
 
-test("pinned attention uses 12 GETs for cold, steady, reopened and exact-ack observations", async t => {
+test("pinned attention uses 16 GETs for cold, steady, reopened and exact-ack observations", async t => {
   const f = await fixture(t), before = f.store.snapshot(f.token, "commons");
-  const first = await f.pull(); checkedRequests(f.requests, 12);
-  const expected = ["/api/rooms/commons", "/api/rooms/commons/events?after=0&limit=1", `/api/rooms/commons/events?after=${before.sequence - 1}&limit=1`];
+  const first = await f.pull(); checkedRequests(f.requests, 16);
+  // The member snapshot no longer carries the log, so each observation also
+  // reads /events?tail=1 and checks that head against the sequence anchor.
+  const expected = ["/api/rooms/commons", "/api/rooms/commons/events?tail=1", "/api/rooms/commons/events?after=0&limit=1", `/api/rooms/commons/events?after=${before.sequence - 1}&limit=1`];
   assert.deepEqual(f.requests.filter(r => r.path !== "/api/session").map(r => r.path), [...expected, ...expected]);
-  assert.deepEqual((await f.pull()).items, first.items); checkedRequests(f.requests, 12);
-  assert.deepEqual((await f.pull({ client: f.makeClient() })).items, first.items); checkedRequests(f.requests, 12);
-  assert.equal((await f.pull({ noticeId: first.items[0].id })).status, "acknowledged"); checkedRequests(f.requests, 12);
-  assert.equal((await f.pull({ noticeId: first.items[0].id })).status, "already_acknowledged"); checkedRequests(f.requests, 12);
+  assert.deepEqual((await f.pull()).items, first.items); checkedRequests(f.requests, 16);
+  assert.deepEqual((await f.pull({ client: f.makeClient() })).items, first.items); checkedRequests(f.requests, 16);
+  assert.equal((await f.pull({ noticeId: first.items[0].id })).status, "acknowledged"); checkedRequests(f.requests, 16);
+  assert.equal((await f.pull({ noticeId: first.items[0].id })).status, "already_acknowledged"); checkedRequests(f.requests, 16);
   assert.deepEqual(f.store.snapshot(f.token, "commons"), before);
 });
 
 test("advanced checkpoints remain separate reads, not a universal request cap", async t => {
   const f = await fixture(t); await f.pull();
   f.send("message.posted", { body: "An unrelated later event" });
-  await f.pull(); checkedRequests(f.requests, 14);
+  await f.pull(); checkedRequests(f.requests, 18);
   let snapshots = 0;
   const client = f.makeClient(async (url, options) => {
     if (new URL(url).pathname === "/api/rooms/commons") {
@@ -73,7 +75,7 @@ test("advanced checkpoints remain separate reads, not a universal request cap", 
     }
     return fetch(url, options);
   });
-  await f.pull({ client }); checkedRequests(f.requests, 16); assert.equal(snapshots, 2);
+  await f.pull({ client }); checkedRequests(f.requests, 20); assert.equal(snapshots, 2);
 });
 
 test("second-pass changed creation or checkpoint anchors refuse before acknowledgement", async t => {
@@ -85,7 +87,7 @@ test("second-pass changed creation or checkpoint anchors refuse before acknowled
       const response = await fetch(url, options);
       if (snapshots !== 2 || !response.ok) return response;
       const value = await response.json(), after = new URL(url).searchParams.get("after");
-      if (subject === "snapshot-tail" && path === "/api/rooms/commons") value.state.eventLog.at(-1).id = "changed-snapshot-tail";
+      if (subject === "snapshot-tail" && path.endsWith("/events") && new URL(url).searchParams.get("tail") === "1") value.events.at(-1).event.id = "changed-snapshot-tail";
       if (subject !== "snapshot-tail" && path.endsWith("/events") && after === String(subject === "creation" ? 0 : before.state.sequence - 1)) value.events[0].event.id = "changed-history";
       return Response.json(value);
     });
@@ -128,7 +130,7 @@ test("cancelled shared-anchor response cannot acknowledge; retry reads fresh anc
   });
   await assert.rejects(f.pull({ client, signal: controller.signal, noticeId: first.items[0].id }), { code: "stopped" });
   assert.equal(tails, 2); assert.deepEqual(f.local(), before);
-  assert.deepEqual((await f.pull()).items, first.items); checkedRequests(f.requests, 12);
+  assert.deepEqual((await f.pull()).items, first.items); checkedRequests(f.requests, 16);
 });
 
 test("synthetic v1 single-event observations deduplicate within a pass, never across passes", async t => {

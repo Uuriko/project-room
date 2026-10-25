@@ -96,8 +96,19 @@ export class AssignmentWatcher {
         || (snapshot.viewerAccountId !== null && !validId(snapshot.viewerAccountId))
         || (snapshot.viewerAccountId === null ? snapshot.viewerAuthEpoch !== null
           : !Number.isSafeInteger(snapshot.viewerAuthEpoch) || snapshot.viewerAuthEpoch < 0)
-        || !snapshot.state.workItems || !Array.isArray(snapshot.state.eventLog)) throw new WatchError("invalid_snapshot");
-    const lastEvent = snapshot.state.eventLog.at(-1);
+        || !snapshot.state.workItems
+        || (snapshot.eventTail === "events" ? snapshot.state.eventLog !== undefined && !Array.isArray(snapshot.state.eventLog) : !Array.isArray(snapshot.state.eventLog))) throw new WatchError("invalid_snapshot");
+    // The member snapshot no longer carries the log. The head event comes
+    // from /events?tail=1, then the anchor read checks it against that sequence.
+    let lastEvent;
+    if (snapshot.eventTail === "events") {
+      if (typeof this.client.eventTail !== "function") throw new WatchError("invalid_snapshot");
+      const page = await this.client.eventTail(1, { signal: this.signal });
+      this.#active();
+      const row = page?.events?.at(-1);
+      if (!row || row.sequence !== snapshot.sequence) throw new WatchError("history_changed");
+      lastEvent = row.event;
+    } else lastEvent = snapshot.state.eventLog.at(-1);
     if (!validId(lastEvent?.id) || lastEvent.roomId !== this.roomId) throw new WatchError("invalid_snapshot");
     const created = await anchor(1);
     if (created.type !== EVENT_TYPES.ROOM_CREATED) throw new WatchError("history_changed");

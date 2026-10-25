@@ -40,9 +40,10 @@ const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_clai
 // Any other event type, and any covered event whose preconditions fail,
 // keeps the refresh() read path below (see tryDelta).
 const DELTA_EVENT_TYPES = new Set(["message.posted", "message.edited", "message.deleted", "message.redacted"]);
-// The server's activity audit tail (store.snapshot): the last 100 events,
-// filtered to decisions and work-bearing events. Mirrored so a locally
-// advanced snapshot carries the same Record tail a fresh read would serve.
+// The server's activity audit tail: the last 100 events, filtered to
+// decisions and work-bearing events. Member snapshots omit that log
+// (eventTail: "events"); the client reads GET /events and filters locally.
+// A locally advanced snapshot carries the same Record tail a fresh read would.
 const ACTIVITY_TAIL_TYPES = /^(work\.|work_claim\.|verification\.|owner_decision\.)/;
 const activityTailEvent = event => event?.type === "decision.recorded" || ACTIVITY_TAIL_TYPES.test(event?.type ?? "") || event?.data?.workItemId !== undefined;
 // Mirror of the server's read-time redaction for the one message a delta
@@ -391,12 +392,19 @@ export class RoomClient {
           else if (flight.fullSequence > covered) covered = flight.fullSequence;
           if (partial && holding?.partial) this.partialReads++;
           if (snapshot.sequence >= this.sequence) {
+            // Fetch the tail before publishing. A failed read must not advance
+            // the held sequence, or the next refresh would skip the snapshot.
+            if (snapshot.eventTail === "events") {
+              await this.hydrateEventTail(snapshot);
+              if (generation !== this.generation || !this.session) return;
+              if (auditView !== this.auditView) { flight.revisit = true; continue; }
+            }
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
               partial, owesFull: !complete && (partial || Boolean(holding?.owesFull)) };
             this.live = { generation, session, snapshot };
-            this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
+            if (snapshot.eventTail !== "events") this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
             this.onSnapshot(snapshot, this.session);
           }
         } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
@@ -601,6 +609,29 @@ export class RoomClient {
     this.live = { generation, session, snapshot };
     this.onSnapshot(snapshot, session);
     return true;
+  }
+  // Member snapshots name eventTail "events" and omit the log. Install the
+  // same shape the reducer and the Record panel already read: an unfiltered
+  // raw tail, the activity filter when that view is on, and empty seen maps.
+  // Mention chips are stream-only; a snapshot tail never carried them.
+  async hydrateEventTail(snapshot) {
+    const page = await this.request(this.path("/events?tail=100"), { auditView: "full" });
+    const events = [];
+    for (const row of page?.events ?? []) {
+      const event = row?.event;
+      if (!event || typeof event !== "object") continue;
+      if (Object.hasOwn(event, "mentions")) {
+        const copy = { ...event };
+        delete copy.mentions;
+        events.push(copy);
+      } else events.push(event);
+    }
+    const tail = events.slice(-100);
+    this.rawTail = tail;
+    const state = snapshot.state ??= {};
+    state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
+    state.seenEvents = {};
+    state.seenIdempotencyKeys = {};
   }
   // History held from this session's last snapshot, for windowed refreshes.
   heldMessages() {

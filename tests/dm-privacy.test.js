@@ -1,7 +1,7 @@
 // RC-2026-09-19-070: DMs are fully private to the two parties. The
 // sender+recipient-only filter is enforced at the HTTP layer on all four
-// read surfaces — the room snapshot (state.eventLog AND state.messages),
-// /search, /messages/:id/thread, and /work-discussion — so non-participants
+// read surfaces — the room snapshot (state.messages), /events, /search,
+// /messages/:id/thread, and /work-discussion — so non-participants
 // (including the room owner) see no DM existence, count, or metadata.
 // The /export event walk carries the same filter as the /events route.
 import test from "node:test";
@@ -52,7 +52,7 @@ const snapshotHasDm = snapshot =>
   (snapshot.state.messages ?? []).some(m => m.id === "dm-1")
   || (snapshot.state.eventLog ?? []).some(e => e?.data?.messageId === "dm-1");
 
-test("snapshot: participants see the DM in messages and the event log", async t => {
+test("snapshot: participants see the DM in messages; the event tail is /events", async t => {
   const f = await seed(t);
   for (const [label, key] of [["producer", f.keys.producer], ["reviewer", f.keys.reviewer]]) {
     const res = await f.get("/api/rooms/commons", key);
@@ -60,8 +60,13 @@ test("snapshot: participants see the DM in messages and the event log", async t 
     const snapshot = await res.json();
     assert.ok(snapshotHasDm(snapshot), `${label} should see the DM`);
     assert.equal(snapshot.state.messages.find(m => m.id === "dm-1").body, DM_BODY);
-    assert.ok(snapshot.state.eventLog.some(e => e?.data?.messageId === "dm-1" && e.data.body === DM_BODY),
-      `${label} should see the DM event in the audit tail`);
+    assert.equal(Object.hasOwn(snapshot.state, "eventLog"), false, `${label} snapshot has no embedded log`);
+    assert.equal(Object.hasOwn(snapshot.state, "seenEvents"), false);
+    assert.equal(Object.hasOwn(snapshot.state, "seenIdempotencyKeys"), false);
+    assert.equal(snapshot.eventTail, "events");
+    const tail = await f.get("/api/rooms/commons/events?tail=100", key).then(r => r.json());
+    assert.ok(tail.events.some(row => row.event?.data?.messageId === "dm-1" && row.event.data.body === DM_BODY),
+      `${label} should see the DM on /events`);
   }
 });
 
@@ -74,6 +79,9 @@ test("snapshot: non-participants and the room owner see no DM existence, count, 
     assert.equal(snapshotHasDm(snapshot), false, `${label} must not see the DM`);
     assert.equal(JSON.stringify(snapshot).includes(DM_BODY), false, `${label} must not see the DM body anywhere`);
     assert.equal(JSON.stringify(snapshot).includes(DM_WORK_BODY), false, `${label} must not see the work DM body anywhere`);
+    const tail = await f.get("/api/rooms/commons/events?tail=100", key).then(r => r.json());
+    assert.equal(JSON.stringify(tail).includes(DM_BODY), false, `${label} must not see the DM on /events`);
+    assert.equal(JSON.stringify(tail).includes(DM_WORK_BODY), false, `${label} must not see the work DM on /events`);
     // Sanity: public traffic is unaffected.
     assert.ok(snapshot.state.messages.some(m => m.id === "public-1" && m.body === PUBLIC_BODY),
       `${label} should still see public messages`);

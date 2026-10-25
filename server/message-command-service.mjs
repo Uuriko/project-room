@@ -5,6 +5,7 @@
 import { EVENT_TYPES as T } from '../src/events.js';
 import { affectedMessageIds, captureMessageCertification, advanceMessageCertification, syncMessageRows, archivedMessageRow, archivedMessageCommandContext } from './messages-store.mjs';
 import { storedProjection } from './projection-at-rest.mjs';
+import { projectAppendedMessages, sameProjectionShape } from './append-projection.mjs';
 import { ServiceError } from './service-error.mjs';
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -81,14 +82,42 @@ export function assertMessageCommandReferences(store, roomId, state, command, ac
 // RoomStore persists the returned carrier alongside its event and receipt, then
 // invokes persistEntities before any observer can see the transaction. Pending
 // references are safe only because both writes share that transaction.
+function appendedMessages(previous, next) {
+  const older = previous?.messages, newer = next?.messages;
+  if (!Array.isArray(older) || !Array.isArray(newer) || newer.length <= older.length) return null;
+  for (let i = 0; i < older.length; i++) if (older[i] !== newer[i]) return null;
+  return newer.slice(older.length);
+}
+
 export function prepareMessageWrite(store, { roomId, previous, state, event, sequence }) {
   const certificate = store.maintainMessageCertification
     ? captureMessageCertification(store.db, {roomId,sequence:previous.sequence,event,state:previous.state}) : null;
-  const projection = store.messageEntityProjection && certificate
-    ? storedProjection(store.db,roomId,state,{messageEntities:true,pendingMessageIds:affectedMessageIds(event)})
-    : store.storedProjection(roomId,state);
+  // message.posted only pushes onto messages. When nothing else in the
+  // projection changed, splice the new messages into the previous document
+  // instead of stringifying every message again. Edits, reply-request
+  // bookkeeping, bodies at rest, and entity refs fall through.
+  let projection = null;
+  let messagesEnd;
+  const added = event?.type === T.MESSAGE_POSTED && !store.bodiesAtRest && !(store.messageEntityProjection && certificate)
+    ? appendedMessages(previous?.state, state) : null;
+  if (added && sameProjectionShape(previous?.state, state)) {
+    const previousText = store.committedProjectionText?.(roomId, previous?.sequence);
+    if (typeof previousText === "string") {
+      const appended = projectAppendedMessages(previousText, added, store.projectionMessagesEnd?.(roomId, previous?.sequence));
+      if (appended) {
+        projection = appended.text;
+        messagesEnd = appended.messagesEnd;
+      }
+    }
+  }
+  if (typeof projection !== "string") {
+    projection = store.messageEntityProjection && certificate
+      ? storedProjection(store.db,roomId,state,{messageEntities:true,pendingMessageIds:affectedMessageIds(event)})
+      : store.storedProjection(roomId,state);
+  }
   return {
     projection,
+    messagesEnd,
     persistEntities() {
       syncMessageRows(store.db, {roomId,sequence,event,state});
       advanceMessageCertification(store.db,certificate,{sequence,event,state});

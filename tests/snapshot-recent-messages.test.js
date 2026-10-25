@@ -89,6 +89,26 @@ test("the default snapshot is the newest 50 visible messages plus a cursor", asy
     "the first conversation page is the recent window");
 });
 
+test("a 46-message member snapshot omits the event log", async t => {
+  const f = await fixture(t);
+  f.store.roomFlood = { consume() {} };
+  const body = `fixture ${"word ".repeat(40)}`;
+  for (let i = 0; i < 46; i++) f.post(f.keys.producer, `${body}${i}`);
+  const response = await f.get();
+  assert.equal(response.status, 200);
+  const snapshot = await response.json();
+  assert.equal(snapshot.state.messages.filter(message => message.body.startsWith("fixture ")).length, 46);
+  assert.equal(Object.hasOwn(snapshot.state, "eventLog"), false);
+  assert.equal(Object.hasOwn(snapshot.state, "seenEvents"), false);
+  assert.equal(Object.hasOwn(snapshot.state, "seenIdempotencyKeys"), false);
+  assert.equal(snapshot.eventTail, "events");
+  const tail = await (await f.get("/events?tail=100")).json();
+  const posted = tail.events.filter(row => row.event?.type === "message.posted" && String(row.event.data?.body ?? "").startsWith("fixture "));
+  assert.equal(posted.length, 46);
+  const raw = JSON.stringify(snapshot);
+  t.diagnostic(JSON.stringify({ messages: 46, bytes: Buffer.byteLength(raw), gzip: gzipSync(raw).length }));
+});
+
 test("a small room's default snapshot is the whole history with nothing older", async t => {
   const f = await fixture(t);
   f.post(f.keys.producer, "hello");
@@ -128,14 +148,22 @@ test("negotiated chat activity avoids duplicate message bodies while preserving 
   assert.equal(lean.auditView, 'activity'); assert.equal(lean.auditVersion, 1);
   assert.deepEqual(lean.state.messages, full.state.messages);
   assert.deepEqual(lean.state.workItems, full.state.workItems);
-  assert.deepEqual(lean.state.eventLog, full.state.eventLog.filter(e => e.type === 'decision.recorded' || e.data?.workItemId !== undefined));
+  for (const snap of [full, lean]) {
+    assert.equal(Object.hasOwn(snap.state, "eventLog"), false);
+    assert.equal(Object.hasOwn(snap.state, "seenEvents"), false);
+    assert.equal(Object.hasOwn(snap.state, "seenIdempotencyKeys"), false);
+    assert.equal(snap.eventTail, "events");
+  }
+  const tail = await (await f.get("/events?tail=100")).json();
+  const events = tail.events.map(row => row.event);
+  assert.ok(events.some(event => event.type === "decision.recorded" && event.data.statement === "Invitation-only pilot."));
+  assert.ok(events.some(event => event.type === "work.proposed" && event.data.workItemId === "lean-work"));
   assert.equal(lean.sequence, full.sequence); assert.equal(lean.cursor, full.cursor);
-  assert.ok(Buffer.byteLength(JSON.stringify(lean)) < Buffer.byteLength(JSON.stringify(full)) * .7, 'fixture payload drops substantially without losing projected messages');
   const fullBody = JSON.stringify(full), leanBody = JSON.stringify(lean);
   t.diagnostic(JSON.stringify({ workload: '30 seeded messages plus decision/work activity', fullBytes: Buffer.byteLength(fullBody), activityBytes: Buffer.byteLength(leanBody), fullGzipBytes: gzipSync(fullBody).length, activityGzipBytes: gzipSync(leanBody).length }));
   assert.equal(Object.hasOwn(full, 'auditView'), false, 'legacy response remains unchanged');
   const restored = await (await f.get('?messages=recent')).json();
-  assert.deepEqual(restored.state.eventLog, full.state.eventLog, 'full Record read remains available');
+  assert.equal(Object.hasOwn(restored.state, "eventLog"), false, "a later full read still omits the embedded log");
 });
 
 test("activity negotiation preserves private-message filtering and rejects invalid versions", async t => {
