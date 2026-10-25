@@ -443,14 +443,14 @@ Source PRs folded into the public receipts face and signed receipts PR. Heads be
 
 | PR | Title / idea | Branch | Head SHA | Why closed |
 |---|---|---|---|---|
-| #4923 | F-4: stop naming unpublished receipts on the public lot face | `jill/cure-f4-unpublish-link` | `e27379d4be8d07419a8acb84c4553df7e8c48a6a` | combined into the G8 public receipts PR; branch left in place |
-| #4924 | F-2: gate the work-receipt lot cross-reference behind lotReceiptVisible | `jill/cure-f2-receipt-lot-gate` | `dee6cca5d64d0849fda09e495d4a7e941f97367d` | combined into the G8 public receipts PR; branch left in place |
-| #4927 | F-3: pwr_ write-time parity with the recorded public-receipts setting | `jill/cure-f3-pwr-write-parity` | `20074cbfd1a176e92ae4f2b7a3e04afb759ddd75` | combined into the G8 public receipts PR; branch left in place |
-| #4761 | docs: RECEIPTS-PAGE — name the owner commands behind the public-receipts and public-page settings | `jill/backlog-do-3675-receipts` | `6dccb1879dfa851dc5d720d6686dd27fe76f838b` | combined into the G8 public receipts PR; branch left in place |
-| #4916 | S0: receipt keygen tool (scripts/receipt-keygen.mjs) | `jill/s0-receipt-keygen` | `fcc8e6bf5b3b377dbe1fc8cb499c2b4945cd93b7` | combined into the G8 public receipts PR; branch left in place |
-| #4919 | proof S2a: unified signed-receipt lookup getSignedReceipt (legs A/C/D/E) | `proof/s2a-signed-receipt-lookup` | `20a53bb5f2f5670643d535ee5fb6c05ebf2eb800` | combined into the G8 public receipts PR; branch left in place |
-| #4921 | proof S4-prep: signed-receipt serving surfaces over the S2a lookup | `proof/s4-signed-receipt-serving` | `999a0a6c1390b343aa26e7cc819d760dcb1e4e4d` | combined into the G8 public receipts PR; branch left in place (stacked on #4919) |
-| #4917 | DOOR-CURE-10: receipt og.png — asset-pipeline loading, never public-cache a failed render | `door-cure-10-receipt-og` | `06607e6d2744f812af5c9f8ea8c92f893eb62ef9` | combined into the G8 public receipts PR; branch left in place |
+| #4923 | F-4: stop naming unpublished receipts on the public lot face | `jill/cure-f4-unpublish-link` | `e27379d4be8d07419a8acb84c4553df7e8c48a6a` | combined into #4938; branch left in place |
+| #4924 | F-2: gate the work-receipt lot cross-reference behind lotReceiptVisible | `jill/cure-f2-receipt-lot-gate` | `dee6cca5d64d0849fda09e495d4a7e941f97367d` | combined into #4938; branch left in place |
+| #4927 | F-3: pwr_ write-time parity with the recorded public-receipts setting | `jill/cure-f3-pwr-write-parity` | `20074cbfd1a176e92ae4f2b7a3e04afb759ddd75` | combined into #4938; branch left in place |
+| #4761 | docs: RECEIPTS-PAGE — name the owner commands behind the public-receipts and public-page settings | `jill/backlog-do-3675-receipts` | `6dccb1879dfa851dc5d720d6686dd27fe76f838b` | combined into #4938; branch left in place |
+| #4916 | S0: receipt keygen tool (scripts/receipt-keygen.mjs) | `jill/s0-receipt-keygen` | `fcc8e6bf5b3b377dbe1fc8cb499c2b4945cd93b7` | combined into #4938; branch left in place |
+| #4919 | proof S2a: unified signed-receipt lookup getSignedReceipt (legs A/C/D/E) | `proof/s2a-signed-receipt-lookup` | `20a53bb5f2f5670643d535ee5fb6c05ebf2eb800` | combined into #4938; branch left in place |
+| #4921 | proof S4-prep: signed-receipt serving surfaces over the S2a lookup | `proof/s4-signed-receipt-serving` | `999a0a6c1390b343aa26e7cc819d760dcb1e4e4d` | combined into #4938; branch left in place (stacked on #4919) |
+| #4917 | DOOR-CURE-10: receipt og.png — asset-pipeline loading, never public-cache a failed render | `door-cure-10-receipt-og` | `06607e6d2744f812af5c9f8ea8c92f893eb62ef9` | combined into #4938; branch left in place |
 
 ## Branches with no PR (deleted in cleanup)
 
