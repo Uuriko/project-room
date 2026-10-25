@@ -27,13 +27,13 @@ function parseArgs(argv) {
   return { mode, host, cadenceSeconds, webhookUrl };
 }
 
-function webhookCall(url, token) {
+function webhookCall(url, token, roomId) {
   let parsed;
   try { parsed = new URL(url); } catch { throw new ConnectionError('invalid_config'); }
   if (parsed.protocol !== 'https:' || parsed.username || parsed.password || (token && url.includes(token))) throw new ConnectionError('invalid_config');
   return {
     jsonrpc: '2.0', method: 'tools/call',
-    params: { name: 'webhook_subscribe', arguments: { url: parsed.href, events: ['agent.wake'] } }
+    params: { name: 'webhook_subscribe', arguments: { url: parsed.href, events: ['agent.wake'], roomId } }
   };
 }
 
@@ -53,7 +53,7 @@ export async function listen(argv = process.argv.slice(2), io = {}) {
   if (!env.ROOM_AGENT_CONFIG) throw new ConnectionError('usage_error');
   const connection = agentConnectionFromEnvironment(env);
   if (mode === 'webhook') {
-    await writeLine(output, webhookCall(webhookUrl, connection.token));
+    await writeLine(output, webhookCall(webhookUrl, connection.token, connection.roomId));
     return;
   }
   if (mode === 'channel') {

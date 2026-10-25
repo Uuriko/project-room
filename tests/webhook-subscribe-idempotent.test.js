@@ -5,7 +5,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs"; import { tmpdir } from "node:os"; import { join } from "node:path";
-import { RoomStore } from "../server/store.mjs"; import { createRoomServer } from "../server/http.mjs"; import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { RoomStore } from "../server/store.mjs"; import { createRoomServer } from "../server/http.mjs"; import { AgentRooms } from "../server/agent-rooms.mjs"; import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 function serve(t) {
   const d = mkdtempSync(join(tmpdir(), "webhook-idempotent-")); const store = new RoomStore(join(d, "room.sqlite")); installFakeWebhookDns(store);
   const s = createRoomServer({ store });
@@ -17,6 +17,9 @@ function serve(t) {
 async function setup(t) {
   const { o, store } = await serve(t);
   const agent = store.identities.create("Wren");
+  const owner = store.identities.create("Ada");
+  new AgentRooms(store).create(owner.secret, { roomId: "hook-room", title: "Hooks", purpose: "dedupe", kind: "personal", displayName: "Ada" });
+  store.identities.link(owner.secret, "hook-room", { identityId: agent.identityId, displayName: "Wren", permissions: [] });
   const subs = () => store.db.prepare("SELECT subscription_id AS id FROM agent_webhook_subs WHERE agent_id=?").all(agent.identityId);
   const post = (url, body) => fetch(`${o}/api/agent-webhooks`, { method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${agent.secret}` }, body: JSON.stringify(body) });

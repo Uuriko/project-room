@@ -1,8 +1,8 @@
 // R274-1 (John's Tab): hosted MCP webhook_subscribe/webhook_list/webhook_unsubscribe
 // must hold an API key to the webhooks:manage scope, like /api/agent-webhooks.
-// A webhook subscription is identity-wide: it fans out every room the identity
-// is linked in, so a key scoped to one room (mcp:wake + mcp:room:<id>) must not
-// be able to subscribe a URL to its other rooms' messages.
+// A key without webhooks:manage cannot subscribe. A subscription that can
+// be created delivers one room; the room-scope case lives in
+// tests/webhook-room-scope.test.js.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -53,7 +53,7 @@ test("room-scoped key cannot webhook_subscribe over MCP (HTTP parity), so other 
 
 test("room-scoped key cannot list or remove the identity's webhook subscriptions over MCP", async t => {
   const { o, peer, scopedKey, subs } = await setup(t);
-  const made = await mcp(o, "webhook_subscribe", { url: "https://identity.example.test/hook", events: ["message.posted"] }, peer.secret);
+  const made = await mcp(o, "webhook_subscribe", { url: "https://identity.example.test/hook", events: ["message.posted"], roomId: "wake-den" }, peer.secret);
   assert.equal(made.isError, false, JSON.stringify(made.value));
   const listed = await mcp(o, "webhook_list", {}, scopedKey);
   assert.equal(listed.isError, true, JSON.stringify(listed.value));
@@ -67,7 +67,7 @@ test("identity secret and a key with webhooks:manage keep webhook tools over MCP
   const { o, store, peer, subs } = await setup(t);
   const managed = store.agentPlugin.issueApiKey({ identityId: peer.identityId, scopes: ["mcp:wake", "webhooks:manage"] });
   const k = `rak_${managed.secret}`;
-  const viaKey = await mcp(o, "webhook_subscribe", { url: HOOK, events: ["message.posted"] }, k);
+  const viaKey = await mcp(o, "webhook_subscribe", { url: HOOK, events: ["message.posted"], roomId: "wake-den" }, k);
   assert.equal(viaKey.isError, false, JSON.stringify(viaKey.value));
   const listed = await mcp(o, "webhook_list", {}, k);
   assert.equal(listed.isError, false);

@@ -284,10 +284,11 @@ export const hostedWakeTools = [
     requestId: { ...commandIdField, description: "Receipt key. Omitted keys are minted by the server and returned." },
     reason: { type: ["string", "null"], maxLength: 200, description: "Optional note. Accepted and not required." }
   }, ["roomId"]), false),
-  tool("webhook_subscribe", "Subscribe this identity to signed room-event delivery. Same call as POST /api/agent-webhooks: url and events are required; secret is optional. url must be public HTTPS. events are dotted names, agent.wake, or \"*\". Unknown names are refused with the known list. A server-generated signing secret is returned once. A caller-supplied secret is never echoed. This does not read the delivery journal.", schema({
+  tool("webhook_subscribe", "Subscribe this identity to signed delivery for one room. Same call as POST /api/agent-webhooks: url and events are required; roomId and secret are optional. url must be public HTTPS. events are dotted names, agent.wake, or \"*\". Unknown names are refused with the known list. Omit roomId only when this identity belongs to one room; a room-scoped API key uses that room. Events from other rooms are not delivered. The signing secret is never returned. This does not read the delivery journal.", schema({
     url: { type: "string", minLength: 1, maxLength: 2000, description: "Public HTTPS endpoint. Same checks as POST /api/agent-webhooks." },
     events: webhookEventsField,
-    secret: { type: "string", minLength: 16, maxLength: 2000, description: "Optional signing secret, at least 16 characters. Never echoed. Omit to receive a server-generated secret once." }
+    roomId: { ...roomIdField, description: "Room this subscription delivers. Required when this identity belongs to more than one room. A room-scoped API key can omit it and cannot name a different room." },
+    secret: { type: "string", minLength: 16, maxLength: 2000, description: "Optional signing secret, at least 16 characters. Never echoed." }
   }, ["url", "events"]), false),
   tool("webhook_list", "List this identity's webhook subscriptions. Same read as GET /api/agent-webhooks. Signing secrets are not included.", schema({})),
   tool("webhook_unsubscribe", "Delete one of this identity's webhook subscriptions. Same call as DELETE /api/agent-webhooks/:subscriptionId. Another identity's subscription reads as unknown.", schema({

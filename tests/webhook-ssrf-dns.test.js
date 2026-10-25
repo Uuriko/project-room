@@ -71,6 +71,7 @@ test("QA2 P2-8: webhook DNS stays on public addresses", async (t) => {
   });
   const origin = `http://127.0.0.1:${server.address().port}`;
   const identity = f.store.identities.create("ssrf-dns");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "ssrf-dns", permissions: [] });
 
   for (const [host] of BLOCKED) {
     const refused = await errorBody(await post(origin, "/api/agent-webhooks", {

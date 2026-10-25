@@ -26,6 +26,9 @@ import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { EVENT_CATALOG, MAX_SUBSCRIPTION_EVENTS } from "./agent-webhook-subscriptions.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView, scopedKeyRoomBinding, assertScopedKeyListener, scopedKeyHostId, scopedKeyPresenceView } from "./room-key-presence.mjs";
+import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs";
+import { ROOM_ID_PATTERN } from "../src/room-deep-link.js";
+import { ServiceError } from "./service-error.mjs";
 import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
 import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
 
@@ -113,6 +116,60 @@ export function createHeartbeatActor({ store, bearer, reject }) {
     }
     return auth;
   };
+}
+
+// A subscription delivers one room. A single-room API key defaults to that
+// room and cannot name another. An identity secret (or an identity-level
+// key) defaults only when the identity sits in exactly one room; otherwise
+// roomId is required. Unknown rooms and rooms the caller is not seated in
+// look the same.
+export function resolveWebhookSubscriptionRoom(store, { identityId, keyId = null, scopes = null, roomId = null } = {}) {
+  const requested = roomId == null ? null : roomId;
+  if (requested !== null && (typeof requested !== "string" || !ROOM_ID_PATTERN.test(requested))) {
+    throw new ServiceError(422, "invalid_subscription_request", "roomId must be a room id");
+  }
+  const roomScopes = keyId ? (scopes ?? []).filter(scope => typeof scope === "string" && scope.startsWith("mcp:room:")) : [];
+  if (roomScopes.length === 1) {
+    const bound = roomScopes[0].slice("mcp:room:".length);
+    if (!ROOM_ID_PATTERN.test(bound)) {
+      throw new ServiceError(422, "invalid_subscription_request", "This API key's room scope names no room");
+    }
+    if (requested && requested !== bound) {
+      throw new ServiceError(422, "invalid_subscription_request", "This API key is scoped to one room");
+    }
+    assertWebhookSeat(store, identityId, bound);
+    return bound;
+  }
+  if (roomScopes.length > 1) {
+    const allowed = new Set(roomScopes.map(scope => scope.slice("mcp:room:".length)));
+    if (!requested || !allowed.has(requested)) {
+      throw new ServiceError(422, "invalid_subscription_request", "roomId is required and must be one of this API key's rooms");
+    }
+    assertWebhookSeat(store, identityId, requested);
+    return requested;
+  }
+  const chosen = requested ?? soleWebhookRoom(store, identityId);
+  if (!chosen) throw new ServiceError(422, "invalid_subscription_request", "roomId is required");
+  assertWebhookSeat(store, identityId, chosen);
+  return chosen;
+}
+
+function assertWebhookSeat(store, identityId, roomId) {
+  if (!memberIdForWakeIdentity(store.db, roomId, identityId)) {
+    throw new ServiceError(404, "room_not_found", "No such room");
+  }
+}
+
+function soleWebhookRoom(store, identityId) {
+  const ids = new Set();
+  const collect = (sql) => {
+    try {
+      for (const row of store.db.prepare(sql).all(identityId)) if (row.roomId) ids.add(row.roomId);
+    } catch { /* table missing on an older database */ }
+  };
+  collect("SELECT room_id AS roomId FROM identity_links WHERE identity_id=?");
+  collect("SELECT room_id AS roomId FROM guest_members WHERE guest_identity_id=?");
+  return ids.size === 1 ? [...ids][0] : null;
 }
 
 const KEY_ACTION_ROUTE = /^\/api\/agent-keys\/(rak_[A-Za-z0-9_-]{1,64})\/(rotate|revoke)$/;
@@ -451,7 +508,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // and where to debug deliveries.
     const next = subscriptions.length === 0
       ? [Object.freeze({ action: "subscribe", method: "POST", path: "/api/agent-webhooks",
-          description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); the signing secret is never returned, only a secretRef sentinel (verify inbound deliveries server-side via POST {subscriptionId}/verify-delivery)." })]
+          description: "No subscriptions yet — POST { url, events, roomId } to subscribe to one room. Omit roomId only when this identity belongs to a single room. events uses dotted names (e.g. message.posted); the signing secret is never returned, only a secretRef sentinel (verify inbound deliveries server-side via POST {subscriptionId}/verify-delivery)." })]
       : subscriptions.slice(0, 3).map(s => Object.freeze({ action: "check-journal", method: "GET",
           path: `/api/agent-webhooks/${encodeURIComponent(s.subscriptionId)}/deliveries`,
           description: `Delivery journal for ${s.subscriptionId}: pending/delivered/failed/dead_letter states, attempts, and errors. Dead letters are redriven at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive.` }));
@@ -462,8 +519,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-webhook-subscribe:${remoteAddress}`, 20);
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     const data = await body(req);
-    if (!data || !(exact(data, ["url", "events"]) || exact(data, ["url", "events", "secret"])))
-      reject(422, "invalid_subscription_request", "url, events, and optional secret are the accepted fields");
+    if (!data || !(exact(data, ["url", "events"]) || exact(data, ["url", "events", "secret"])
+      || exact(data, ["url", "events", "roomId"]) || exact(data, ["url", "events", "secret", "roomId"])))
+      reject(422, "invalid_subscription_request", "url, events, optional roomId, and optional secret are the accepted fields");
     if (!Array.isArray(data.events) || data.events.length === 0 || !data.events.every(e => typeof e === "string"))
       reject(422, "invalid_subscription_request", "events must be a non-empty string array");
     // RC-2026-09-18-031: fail fast on unknown event names instead of a 201
@@ -482,11 +540,15 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     // QA2 finding P2-8: resolve before the write. Private answers are 422
     // webhook_url_not_public and are not stored.
     await store.agentPlugin.assertWebhookUrl(data.url);
+    const roomId = resolveWebhookSubscriptionRoom(store, {
+      identityId: auth.identityId, keyId: auth.keyId, scopes: auth.scopes, roomId: data.roomId,
+    });
     const { subscription } = store.agentPlugin.subscribeWebhook({
       identityId: auth.identityId,
       url: data.url,
       events: distinctEvents,
       secret: data.secret ?? null,
+      roomId,
     });
     // RC-2026-09-27-2729 (UFO-steal slice 2): the signing secret never
     // leaves the server — not even once. The 201 carries the subscription

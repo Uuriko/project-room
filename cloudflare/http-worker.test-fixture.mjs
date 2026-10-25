@@ -56,7 +56,7 @@ export class HttpTestRoom extends ProjectRoom {
       const identity = this.store.identities.create('Bounty observer');
       this.store.identities.link(ownerKey, 'commons', { identityId: identity.identityId, permissions: [] });
       this.store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
-        url: 'https://observer.example.test/hooks', events: ['*'] });
+        url: 'https://observer.example.test/hooks', events: ['*'], roomId: 'commons' });
       return Response.json({ ownerKey });
     }
     if (url.pathname === '/__test-bounty-queue') {

@@ -43,6 +43,7 @@ function seedDelivery(plugin, deliveryId, agentId) {
     url: "https://hooks.example.test/agent",
     events: ["message.posted"],
     secret: "test-secret-0123456789abcdef",
+    roomId: "commons",
   });
   plugin.db.prepare(`INSERT INTO agent_webhook_deliveries
     (delivery_id, idempotency_key, subscription_id, agent_id, event_type, payload_json,

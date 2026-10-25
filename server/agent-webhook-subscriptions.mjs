@@ -96,6 +96,7 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
     url: sub.url,
     events: Object.freeze([...sub.events]),
     enabled: sub.enabled,
+    roomId: sub.roomId ?? null,
     createdAt: sub.createdAt,
     deliveries: sub.deliveries.length,
   });
@@ -119,7 +120,7 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
   // An agent subscribes its own endpoint to room events. secret (signing
   // secret for delivery verification) is caller-supplied; never echoed
   // back — only subscriptionView() leaves this module.
-  const subscribe = ({ subscriptionId = null, agentId, url, events, secret }) => {
+  const subscribe = ({ subscriptionId = null, agentId, url, events, secret, roomId = null }) => {
     check(typeof agentId === "string" && AGENT_ID_PATTERN.test(agentId),
       "agentId must match [A-Za-z0-9_-]{1,64}");
     try {
@@ -147,6 +148,7 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
       events: Object.freeze([...new Set(events)]),
       secret,
       enabled: true,
+      roomId,
       createdAt: now(),
       deliveries: [],
     };

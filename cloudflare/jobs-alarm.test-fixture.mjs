@@ -64,7 +64,8 @@ export class JobsProbe extends ProjectRoom {
       identityId: identity.identityId,
       url: "https://hooks.example.test/hook",
       events: ["message.posted"],
-      secret: signing
+      secret: signing,
+      roomId: "commons"
     });
     const now = Date.now();
     this.store.db.prepare(`INSERT INTO agent_webhook_deliveries

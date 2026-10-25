@@ -24,6 +24,7 @@ test("a 429 retry reschedules with backoff, never immediately", async () => {
     url: "https://hooks.example.test/agent",
     events: ["message.posted"],
     secret: "test-secret-0123456789abcdef",
+    roomId: "commons",
   });
   // One pending delivery, due now, with no room link to re-check.
   plugin.db.prepare(`INSERT INTO agent_webhook_deliveries

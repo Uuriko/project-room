@@ -190,9 +190,10 @@ test("push registration reuses the subscribe-time public DNS check and does not 
 });
 
 test("webhook subscribe list and unsubscribe stay on this identity", async t => {
-  const { origin, store } = await serve(t);
+  const { origin, store, rooms } = await serve(t);
   const owner = store.identities.create("Hook owner");
   const other = store.identities.create("Hook other");
+  rooms.create(owner.secret, { roomId: "hook-room", title: "Hooks", purpose: "wake tools", kind: "personal", displayName: "Hook owner" });
   const callerSecret = "caller-signing-secret-0123";
   const httpUrl = await call(origin, "webhook.subscribe", { url: "http://insecure.example.test/hook", events: ["message.posted"] }, owner.secret);
   assert.equal(httpUrl.value.status, 422);

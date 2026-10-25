@@ -46,6 +46,7 @@ function subscribe(plugin, agentId) {
     url: "https://hooks.example.test/agent",
     events: ["message.posted"],
     secret: "test-secret-value",
+    roomId: "commons",
   });
   return subscription;
 }

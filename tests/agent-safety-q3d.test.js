@@ -123,6 +123,7 @@ test("minting a role-like display name is refused; ordinary names that merely st
 test("webhook URLs on internal suffixes or odd ports are refused; duplicate events collapse and unknown events are refused", async t => {
   const { f, post } = await serve(t);
   const identity = f.store.identities.create("Hook Hygiene");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "Hook Hygiene", permissions: [] });
   for (const url of ["https://db.internal/hook", "https://printer.local/hook", "https://hooks.example.com:6379/hook"]) {
     const res = await post("/api/agent-webhooks", { url, events: ["message.posted"] }, identity.secret);
     assert.equal(res.status, 422, `${url}: ${JSON.stringify(res.body)}`);

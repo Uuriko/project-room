@@ -15,7 +15,7 @@ import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
-import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
+import { createAgentAuth, createHeartbeatActor, resolveWebhookSubscriptionRoom } from "./agent-plugin-routes.mjs";
 import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
@@ -330,7 +330,8 @@ function validWakeArgs(name, args) {
   }
   if (name === "webhook_subscribe") {
     const secretOk = args.secret === undefined || typeof args.secret === "string" && args.secret.length >= 16 && args.secret.length <= 2000;
-    return validUrlString(args.url) && validEvents(args.events) && secretOk;
+    const roomOk = args.roomId === undefined || validId(args.roomId);
+    return validUrlString(args.url) && validEvents(args.events) && secretOk && roomOk;
   }
   if (name === "webhook_unsubscribe") return SUBSCRIPTION_ID_PATTERN.test(args.subscriptionId);
   return false;
@@ -692,7 +693,7 @@ function webhookListBody(subscriptions) {
   const next = subscriptions.length === 0
     ? [{
       action: "subscribe", method: "POST", path: "/api/agent-webhooks",
-      description: "No subscriptions yet — POST { url, events } to subscribe. events uses dotted names (e.g. message.posted); the signing secret is never returned, only a secretRef sentinel (verify inbound deliveries server-side via POST {subscriptionId}/verify-delivery)."
+      description: "No subscriptions yet — POST { url, events, roomId } to subscribe to one room. Omit roomId only when this identity belongs to a single room. events uses dotted names (e.g. message.posted); the signing secret is never returned, only a secretRef sentinel (verify inbound deliveries server-side via POST {subscriptionId}/verify-delivery)."
     }]
     : subscriptions.slice(0, 3).map(subscription => ({
       action: "check-journal", method: "GET",
@@ -787,9 +788,17 @@ async function callWakeTool(store, secret, identity, name, args) {
     return store.wakeQueue.resume(secret, args.roomId, request, null, { memberId: args.memberId ?? null });
   }
   if (name === "webhook_subscribe") {
+    const auth = createAgentAuth({
+      store,
+      bearer: () => secret,
+      reject: (status, code, message) => { throw new ServiceError(status, code, message); },
+    })(null);
     await store.agentPlugin.assertWebhookUrl(args.url);
+    const roomId = resolveWebhookSubscriptionRoom(store, {
+      identityId: agentId, keyId: auth.keyId, scopes: auth.scopes, roomId: args.roomId,
+    });
     const { subscription } = store.agentPlugin.subscribeWebhook({
-      identityId: agentId, url: args.url, events: args.events, secret: args.secret ?? null
+      identityId: agentId, url: args.url, events: args.events, secret: args.secret ?? null, roomId,
     });
     return webhookSubscribeBody(subscription);
   }
@@ -956,8 +965,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         if (!mcpKeyGrantsScope(store, secret, MCP_WAKE_SCOPE)) {
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WAKE_SCOPE} scope` });
         }
-        // R274-1: a webhook subscription fans out every room the identity is
-        // linked in, so hold API keys to webhooks:manage like /api/agent-webhooks.
+        // A webhook subscription delivers one room. Hold API keys to
+        // webhooks:manage like /api/agent-webhooks; the room comes from
+        // roomId or from the key's single mcp:room scope.
         if (name.startsWith("webhook_") && !mcpKeyGrantsScope(store, secret, MCP_WEBHOOKS_SCOPE)) {
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WEBHOOKS_SCOPE} scope` });
         }

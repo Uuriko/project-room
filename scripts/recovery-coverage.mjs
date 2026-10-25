@@ -212,7 +212,7 @@ export async function seedRecoveryCoverage(f) {
     card: recoveryCard, publicKey: recoveryKeyPair.publicKey,
     signature: signCard({ agentId: "recovery-agent", card: recoveryCard, privateKey: recoveryKeyPair.privateKey }),
     visibility: "public" });
-  f.store.agentPlugin.subscribeWebhook({ identityId, url: "https://hooks.example.test/recovery", events: ["message.posted"] });
+  f.store.agentPlugin.subscribeWebhook({ identityId, url: "https://hooks.example.test/recovery", events: ["message.posted"], roomId: "commons" });
   // Seed one verification attestation and one room gate so the capture covers
   // agent_identity_verification and room_verification_policy (RC-2026-09-18-049).
   f.store.agentPlugin.verifyIdentity({ identityId, verifiedBy: "owner" });

@@ -78,6 +78,7 @@ test("a trial seat's webhook subscription receives room events; the DM fence bin
   for (const [identity, label] of [[guest.identity, "guest"], [linked, "linked"], [stranger, "stranger"]]) {
     f.store.agentPlugin.subscribeWebhook({
       identityId: identity.identityId, url: `https://${label}.example.test/hook`, events: ["message.posted"],
+      roomId: "commons",
     });
   }
   const deliveriesFor = identityId => f.store.db.prepare(

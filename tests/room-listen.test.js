@@ -93,7 +93,7 @@ test('poll prints one pointer and leaves the wake pending; webhook prints the su
   assert.equal(code, 0);
   assert.deepEqual(JSON.parse(hook.text().stdout), {
     jsonrpc: '2.0', method: 'tools/call',
-    params: { name: 'webhook_subscribe', arguments: { url: 'https://events.example/room', events: ['agent.wake'] } }
+    params: { name: 'webhook_subscribe', arguments: { url: 'https://events.example/room', events: ['agent.wake'], roomId: 'listen-room' } }
   });
   assert.equal(f.requests.length, before);
   assert.equal(hook.text().stderr.includes(f.agent.secret), false);

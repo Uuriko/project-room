@@ -418,6 +418,7 @@ test("subscribe/list/unsubscribe roundtrip; signing secret never returned (senti
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("hook-agent");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "hook-agent", permissions: [] });
 
   assert.equal((await post(origin, "/api/agent-webhooks", { url: "https://hooks.example.test/agent", events: ["message.posted"] })).status, 401);
 
@@ -476,6 +477,7 @@ test("verify-delivery verifies HMAC server-side; cross-identity reads 404", asyn
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("hook-verify");
   const other = f.store.identities.create("hook-verify-other");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "hook-verify", permissions: [] });
 
   // The test plays the agent: it supplies the secret at subscribe (the
   // supply path), but from here on it holds only the sentinel and the
@@ -524,6 +526,7 @@ test("delivery journal is readable by the owning identity; cross-identity reads 
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("hook-journal");
   const other = f.store.identities.create("hook-journal-other");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "hook-journal", permissions: [] });
 
   const subscribed = await post(origin, "/api/agent-webhooks",
     { url: "https://hooks.example.test/agent", events: ["message.posted"] }, identity.secret);
@@ -560,6 +563,7 @@ test("webhook validation and cross-identity isolation", async t => {
   const origin = await startServer(t, f);
   const a = f.store.identities.create("hook-a");
   const b = f.store.identities.create("hook-b");
+  f.store.identities.link(f.keys.owner, "commons", { identityId: a.identityId, displayName: "hook-a", permissions: [] });
 
   // RC-2026-09-18-047: an empty list teaches the subscribe endpoint.
   const empty = await (await get(origin, "/api/agent-webhooks", a.secret)).json();

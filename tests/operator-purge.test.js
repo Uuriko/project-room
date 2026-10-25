@@ -217,7 +217,7 @@ describe("operator purge and status", { concurrency: false }, () => {
     store.workClaims.set(roomA, { id: "claim-a", title: "Fixture claim", state: "open", owner: "owner", updatedAt: new Date().toISOString() });
     const identity = store.identities.create("qa2-room-agent");
     store.identities.link(ownerA, roomA, { identityId: identity.identityId, memberId: "reporter", displayName: "Reporter", permissions: [] });
-    store.agentPlugin.subscribeWebhook({ identityId: identity.identityId, url: "https://hooks.example.test/operator-purge", events: ["message.posted"] });
+    store.agentPlugin.subscribeWebhook({ identityId: identity.identityId, url: "https://hooks.example.test/operator-purge", events: ["message.posted"], roomId: roomA });
     store.command(ownerA, roomA, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: randomUUID(), body: "wake the subscription" } });
     assert.ok(store.db.prepare("SELECT count(*) AS n FROM agent_webhook_deliveries WHERE room_id=?").get(roomA).n > 0);
     store.wakeQueue.enqueue(ownerA, roomA, { requestId: randomUUID(), queueKey: "qa-wake", intent: { kind: "fixture" }, dueAt: Date.now() + 60_000, maxAttempts: 3 });
@@ -347,7 +347,7 @@ describe("operator purge and status", { concurrency: false }, () => {
     const owner = store.issueAccessKey("commons", "owner");
     const identity = store.identities.create("qa2-fixture-agent");
     store.identities.link(owner, "commons", { identityId: identity.identityId, memberId: "linked", displayName: "Linked", permissions: [] });
-    const subscribed = store.agentPlugin.subscribeWebhook({ identityId: identity.identityId, url: "https://hooks.example.test/operator-purge", events: ["message.posted"] });
+    const subscribed = store.agentPlugin.subscribeWebhook({ identityId: identity.identityId, url: "https://hooks.example.test/operator-purge", events: ["message.posted"], roomId: "commons" });
     store.command(owner, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: randomUUID(), body: "for the delivery" } });
     assert.ok(store.db.prepare("SELECT count(*) AS n FROM agent_webhook_deliveries WHERE agent_id=?").get(identity.identityId).n > 0);
     assert.equal((await call("/api/rooms/commons", { authorization: `Bearer ${identity.secret}` })).status, 200);

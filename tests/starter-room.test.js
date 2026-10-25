@@ -257,7 +257,7 @@ test("a caught receipt index failure preserves the done claim without a partial 
   const identity = store.identities.create("Receipt observer");
   store.identities.link(ownerKey, "fault-room", { identityId: identity.identityId, displayName: "Observer", permissions: [] });
   const { subscription } = store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
-    url: "https://observer.example/receipt", events: ["message.posted"], secret: "synthetic-receipt-observer-secret" });
+    url: "https://observer.example/receipt", events: ["message.posted"], secret: "synthetic-receipt-observer-secret", roomId: "fault-room" });
   store.db.exec(`CREATE TRIGGER reject_receipt_index BEFORE INSERT ON messages
     WHEN NEW.room_id='fault-room' AND json_extract(NEW.record_json,'$.kind')='receipt_card'
     BEGIN SELECT RAISE(ABORT,'receipt index rejected'); END`);

@@ -45,7 +45,7 @@ const deliveries = (store, subscriptionId) =>
 test("a revoked identity's webhook stops journaling message deliveries", t => {
   const { store, agent, ownerToken } = setup(t);
   const { subscription } = store.agentPlugin.subscribeWebhook({
-    identityId: agent.identityId, url: "https://revoke.example.test/hook", events: ["message.posted"]
+    identityId: agent.identityId, url: "https://revoke.example.test/hook", events: ["message.posted"], roomId: "commons"
   });
   post(store, ownerToken, "before revoke");
   assert.equal(deliveries(store, subscription.subscriptionId), 1, "sanity: an enabled subscription journals the owner's message");
@@ -61,7 +61,7 @@ test("a revoked identity's webhook stops journaling message deliveries", t => {
 test("wake pings stop after revoke, and fanout skips a stale enabled row", t => {
   const { store, agent } = setup(t);
   const { subscription } = store.agentPlugin.subscribeWebhook({
-    identityId: agent.identityId, url: "https://revoke.example.test/wake", events: ["agent.wake"]
+    identityId: agent.identityId, url: "https://revoke.example.test/wake", events: ["agent.wake"], roomId: "commons"
   });
   store.identities.revoke(agent.identityId, agent.secret);
   const wake = store.agentPlugin.deliverWakePing({ identityId: agent.identityId, signal: { signalId: "s1" } });

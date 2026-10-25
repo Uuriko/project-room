@@ -78,6 +78,7 @@ function subscribe(plugin, identityId) {
     url: "https://hooks.example.test/agent",
     events: ["message.posted"],
     secret: "guest-dispatch-test-secret",
+    roomId: ROOM,
   });
   return subscription;
 }
