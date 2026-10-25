@@ -179,7 +179,7 @@ const EVIDENCE = [
     ["docs/ROUTE-AUTH-TABLE.md", /grants no room access by itself/],
   ]],
   [TERMS, "Guests", [
-    ["docs/ROUTE-AUTH-TABLE.md", /guest writes refused/],
+    ["server/http.mjs", /guest_scope_denied", "Guest members cannot perform this action/],
   ]],
   [TERMS, "blocked until ownership is transferred", [
     ["server/account-deletion.mjs", /blocks deletion until ownership is transferred/],

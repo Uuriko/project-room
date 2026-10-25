@@ -350,20 +350,23 @@ export class DmConsents {
       // NB: no member-active check here — an inactive recipient (or
       // requester) is rejected downstream by message posting ("Member
       // access revoked"), preserving that long-standing error contract.
-      const existing = this._get(roomId, requesterId, targetId);
-      if (existing) {
-        if (existing.status === "blocked") {
-          fail(403, "dm_blocked", "This member is not accepting direct messages from you");
-        }
-        if (existing.status === "rejected" || existing.status === "revoked") {
-          fail(403, "dm_consent_required",
-            "This member declined direct messages from you — ask in the room or have them unblock you");
-        }
-        // approved or pending: an explicit or default-open direction allows.
-      }
-      // No row, or a non-denying row: DMs are open by default.
+      const denied = this.deniedDirection(roomId, requesterId, targetId);
+      if (denied === "dm_blocked") fail(403, "dm_blocked", "This member is not accepting direct messages from you");
+      if (denied === "dm_consent_required") fail(403, "dm_consent_required",
+        "This member declined direct messages from you — ask in the room or have them unblock you");
+      // No row, or a non-denying row (approved or pending): DMs are open by default.
       return true;
     });
+  }
+
+  // Pure read of the same rule, safe inside a read-only transaction: the
+  // refusal code requireDmAllowed would throw, or null when it would allow.
+  deniedDirection(roomId, requesterId, targetId) {
+    if (requesterId === targetId) return null;
+    const existing = this._get(roomId, requesterId, targetId);
+    if (existing?.status === "blocked") return "dm_blocked";
+    if (existing?.status === "rejected" || existing?.status === "revoked") return "dm_consent_required";
+    return null;
   }
 
 }
