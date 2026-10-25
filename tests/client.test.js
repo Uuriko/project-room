@@ -24,7 +24,11 @@ test("browser refresh negotiates offers without claiming support on an older res
     fetcher: async (url, options) => { requests.push({ url, options }); return response(snapshot(1)); } });
   client.session = identity();
   await client.refresh();
-  assert.equal(requests.length, 1); assert.equal(requests[0].options.headers["X-Project-Room-Offer-Context"], "1");
+  assert.equal(requests.length, 2);
+  assert.match(requests[0].url, /\?messages=recent$/);
+  assert.equal(requests[0].options.headers["X-Project-Room-Offer-Context"], "1");
+  assert.match(requests[1].url, /\?view=work$/);
+  assert.equal(requests[1].options.headers["X-Project-Room-Offer-Context"], undefined, "offer context is not valid on the work view");
   assert.equal(seen[0].offerContextVersion, undefined);
 });
 test("bounded conversation reads preserve selection and reject a late response after signout", async () => {
@@ -73,13 +77,15 @@ test("simultaneous refreshes coalesce and do not drop a pending newer event", as
   client.session = identity();
   const first = client.refresh(), second = client.refresh();
   release(); await Promise.all([first, second]);
-  assert.deepEqual(seen, [4, 5]); assert.equal(calls, 2);
+  assert.deepEqual(seen, [4, 5]); assert.equal(calls, 4, "one flight: the hanging window and its work view, then the joined follow-up reads both again because this snapshot holds no message list");
 });
 test("late old-session snapshots cannot repopulate a signed-out or switched account", async () => {
-  let release; const seen = [];
-  const client = new RoomClient({ fetcher: () => new Promise(resolve => release = () => resolve(response(snapshot(99)))), onSnapshot: s => seen.push(s.sequence) });
+  const pending = []; const seen = [];
+  const client = new RoomClient({ fetcher: () => new Promise(resolve => pending.push(resolve)), onSnapshot: s => seen.push(s.sequence) });
   client.session = identity();
-  const old = client.refresh(); client.endAccess(); release(); await old;
+  const old = client.refresh(); client.endAccess();
+  for (const resolve of pending) resolve(response(snapshot(99)));
+  await old;
   assert.deepEqual(seen, []); assert.equal(client.session, null);
   client.fetcher = async () => response(snapshot(2, "other")); client.session = identity("other");
   await client.refresh(); assert.deepEqual(seen, [2]);
@@ -137,11 +143,12 @@ test("a room-cookie session without an account owns its own snapshot (join-flow 
   }
 });
 test("an obsolete snapshot failure is suppressed before a new session's error handler", async () => {
-  let reject;
-  const client = new RoomClient({ fetcher: () => new Promise((resolve, fail) => reject = fail) });
+  const pending = [];
+  const client = new RoomClient({ fetcher: () => new Promise((resolve, fail) => pending.push({ resolve, fail })) });
   client.session = identity();
   const old = client.refresh(); client.disconnect(); client.session = identity("other");
-  reject(Object.assign(new Error("Old session ended"), { status: 401 }));
+  pending[0].fail(Object.assign(new Error("Old session ended"), { status: 401 }));
+  pending[1]?.resolve(response(snapshot(1, "other")));
   await old;
   assert.equal(client.session.member.id, "other");
 });
@@ -409,7 +416,7 @@ test('a command and its stream notifications need only one snapshot in either ar
     }
     await sent;
     f.notify(); await f.client.flight?.promise;
-    assert.equal(f.reads(), 1, order);
+    assert.equal(f.reads(), 2, `${order}: the open is the message window plus the work view, and the duplicate notification does not add a read`);
     assert.deepEqual(f.seen, [9], order);
   });
 });
@@ -421,7 +428,7 @@ test('a newer notification during a stale snapshot still triggers a follow-up re
   f.setSequence(9); f.notify();
   pending.resolve(response(snapshot(8)));
   await f.client.flight.promise;
-  assert.equal(f.reads(), 2);
+  assert.equal(f.reads(), 4, "each snapshot pass is the message window plus the work view");
   assert.deepEqual(f.seen, [8, 9]);
 });
 
@@ -433,13 +440,13 @@ test('unknown event hints and reconnects still fetch snapshots even when room se
   for (const value of unknown) {
     const before = f.reads();
     f.notify(value); await f.client.flight.promise;
-    assert.equal(f.reads(), before + 1);
+    assert.equal(f.reads(), before + 2, "a refresh with no held messages reads the window and the work view");
   }
   for (const type of ['open', 'error']) {
     const before = f.reads(); f.emit(type); await f.client.flight.promise;
-    assert.equal(f.reads(), before + 1, type);
+    assert.equal(f.reads(), before + 2, type);
   }
   const before = f.reads();
   await f.client.refresh();
-  assert.equal(f.reads(), before + 1, 'manual refresh');
+  assert.equal(f.reads(), before + 2, 'manual refresh');
 });

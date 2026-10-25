@@ -183,14 +183,14 @@ test('a failed follow-up read on an open stream is retried without replacing the
   };
   postEvent(streams[0], 8);
   await client.flight.promise.catch(() => {});
-  assert.equal(reads, 1);
+  assert.equal(reads, 2, "the failed window read also starts the work view");
   assert.equal(client.sequence, 7);
   assert.equal(streams.length, 1);
   assert.equal(streams[0].readyState, 1);
   assert.match(statuses.at(-1), /Connection interrupted/);
   t.mock.timers.tick(1000);
   await client.flight?.promise;
-  assert.equal(reads, 2, 'the failed read is retried while the stream stays open');
+  assert.equal(reads, 4, 'the failed read is retried while the stream stays open');
   assert.equal(streams.length, 1);
   assert.equal(client.sequence, 8);
   assert.match(statuses.at(-1), /^Connected/);
