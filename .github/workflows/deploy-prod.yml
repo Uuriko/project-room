@@ -20,6 +20,14 @@ name: deploy-prod
 #                      begins with [deploy-production]. It deploys only the current
 #                      main tip, only when both gates are green, and only when
 #                      production is not already on that commit.
+#   schedule           hourly, at minute 47. Deploys the newest main commit
+#                      whose latest test and schema-gate runs succeeded,
+#                      including a workflow_dispatch run after a GITHUB_TOKEN
+#                      merge. Skips when that commit is still running, when
+#                      production is already on it or ahead of it, or when
+#                      another scheduled run started within 60 minutes.
+#                      Manual dispatch is not capped. The receipt reason is
+#                      hourly. A failed smoke uses the same recovery step.
 #
 # Steps: record the live prod and entry version ids (artifact), deploy the
 # canonical Worker (`wrangler deploy --env production --keep-vars`), then the
@@ -48,6 +56,9 @@ on:
         description: "Only when ROOM_ONBOARDING_GATE is 1: deploy even if the staging onboarding probe fails, recording this reason"
         required: false
         type: string
+  schedule:
+    # Offset from deploy-drift at minute 23 and the test coverage schedule at 10:17.
+    - cron: "47 * * * *"
   workflow_run:
     workflows: [test, schema-gate]
     types: [completed]
@@ -77,6 +88,7 @@ jobs:
       actions: read
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
       ((vars.ROOM_AUTO_DEPLOY == '1' ||
         startsWith(github.event.workflow_run.display_title, '[deploy-production]')) &&
        github.event.workflow_run.conclusion == 'success' &&
@@ -103,17 +115,32 @@ jobs:
           set -euo pipefail
           skip() { echo "::notice title=deploy-prod skipped::$1"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 0; }
           refuse() { echo "::error title=deploy-prod refused::$1"; echo "go=false" >> "$GITHUB_OUTPUT"; exit 1; }
-          if [ "$EVENT" = "workflow_dispatch" ]; then SHA="$(printf '%s' "$INPUT_SHA" | tr -d '[:space:]')"; else SHA="$RUN_SHA"; fi
+          git fetch --quiet origin main
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            SHA="$(printf '%s' "$INPUT_SHA" | tr -d '[:space:]')"
+          elif [ "$EVENT" = "schedule" ]; then
+            CANDIDATE_JSON="$(node scripts/repo-automations.mjs deploy-candidate)"
+            SHA="$(printf '%s' "$CANDIDATE_JSON" | jq -r '.sha // empty')"
+            if [ -z "$SHA" ]; then
+              REASON="$(printf '%s' "$CANDIDATE_JSON" | jq -r '.reason // "no candidate"')"
+              skip "hourly: $REASON"
+            fi
+          else
+            SHA="$RUN_SHA"
+          fi
           case "$SHA" in
             *[!0-9a-f]*|"") refuse "sha must be a full 40-character lowercase hex commit" ;;
           esac
           [ "${#SHA}" -eq 40 ] || refuse "sha must be a full 40-character lowercase hex commit"
-          git fetch --quiet origin main
           git cat-file -e "${SHA}^{commit}" 2>/dev/null || refuse "commit $SHA not found"
           git merge-base --is-ancestor "$SHA" origin/main || refuse "commit $SHA is not on main"
           TIP="$(git rev-parse origin/main)"
-          if [ "$EVENT" != "workflow_dispatch" ] && [ "$SHA" != "$TIP" ]; then skip "auto: $SHA is no longer the main tip ($TIP)"; fi
-          gh api "repos/$REPO/actions/runs?head_sha=$SHA&event=push&per_page=100" > runs.json
+          if [ "$EVENT" != "workflow_dispatch" ] && [ "$EVENT" != "schedule" ] && [ "$SHA" != "$TIP" ]; then skip "auto: $SHA is no longer the main tip ($TIP)"; fi
+          if [ "$EVENT" = "schedule" ]; then
+            gh api "repos/$REPO/actions/runs?head_sha=$SHA&per_page=100" > runs.json
+          else
+            gh api "repos/$REPO/actions/runs?head_sha=$SHA&event=push&per_page=100" > runs.json
+          fi
           for wf in test schema-gate; do
             CONCLUSION="$(jq -r --arg wf "$wf" '[.workflow_runs[] | select(.name == $wf)] | sort_by(.created_at) | last | if . == null then "missing" else (.conclusion // .status) end' runs.json)"
             echo "$wf on $SHA: $CONCLUSION"
@@ -316,7 +343,7 @@ jobs:
           PROD_PRE: ${{ steps.pre.outputs.prod }}
           ENTRY_PRE: ${{ steps.pre.outputs.entry }}
           ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
-          REASON: ${{ inputs.reason }}
+          REASON: ${{ github.event_name == 'schedule' && 'hourly' || inputs.reason }}
           PROBE_OVERRIDE: ${{ needs.probe.outputs.override }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |

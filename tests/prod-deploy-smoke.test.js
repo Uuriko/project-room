@@ -56,7 +56,10 @@ async function door(t, prefix, failure) {
     ["/api/health", { status: "ok" }],
     ["/api/ready", { status: "ready", emailVerification: "enforced", emailVerificationScope: "durable-object" }],
     ...versionPaths.map(path => [path, { sourceRevision: revision }]),
-    ...["/terms", "/privacy", "/"].map(path => [path, "<!doctype html><title>Room</title>"]),
+    ...["/terms", "/privacy"].map(path => [path, "<!doctype html><title>Room</title>"]),
+    ["/", '<!doctype html><div id="auth-signin-ui"></div>'],
+    ["/demo", "<!doctype html><p>Demo snapshot</p>"],
+    ["/agents.json", { convention: "agents.json" }],
     [cardPath, fixtureCard],
   ].map(([path, body]) => [`${prefix}${path}`, { status: 200, body }]));
   if (failure) responses.set(`${prefix}${failure.path}`, failure);
@@ -117,10 +120,12 @@ for (const withSha of [false, true]) {
     assert.equal(report.origin, origin.url);
     assert.equal(report.entry, entry.url);
     const paths = [...smokePaths, ...(withSha ? versionPaths : []), cardPath];
+    const originOnly = ["/demo", "/agents.json"];
     for (const current of [origin, entry]) {
-      assert.deepEqual(current.requests.toSorted(), paths.map(path => `${current.prefix}${path}`).toSorted());
+      const expected = [...paths, ...(current === origin ? originOnly : [])];
+      assert.deepEqual(current.requests.toSorted(), expected.map(path => `${current.prefix}${path}`).toSorted());
     }
-    assert.equal(report.checks.length, paths.length * 2);
+    assert.equal(report.checks.length, paths.length * 2 + originOnly.length);
     assert.ok(report.checks.every(check => check.pass));
   });
 
@@ -149,6 +154,25 @@ for (const withSha of [false, true]) {
         assert.equal(failed[0].status, failure.status);
       });
     }
+  }
+  const originOnlyFailures = [
+    { path: "/", status: 200, body: "<!doctype html><title>Room</title>" },
+    { path: "/demo", status: 503, body: "Unavailable" },
+    { path: "/demo", status: 200, body: "<!doctype html><p>Room</p>" },
+    { path: "/agents.json", status: 503, body: { convention: "agents.json" } },
+    { path: "/agents.json", status: 200, body: [] },
+  ];
+  for (const failure of originOnlyFailures) {
+    test(`${mode}: rejects canonical ${failure.path} (${failure.status})`, async t => {
+      const origin = await door(t, "/canonical", failure);
+      const entry = await door(t, "/room");
+      const { code, report } = await runSmoke(origin, entry, withSha);
+      assert.equal(code, 1, JSON.stringify(report));
+      const failed = report.checks.filter(check => !check.pass);
+      assert.equal(failed.length, 1, JSON.stringify(report));
+      assert.ok(failed[0].name.includes(`${origin.url}${failure.path}`), failed[0].name);
+      assert.equal(failed[0].status, failure.status);
+    });
   }
 }
 

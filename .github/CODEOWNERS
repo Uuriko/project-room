@@ -28,5 +28,6 @@
 /scripts/release-checkpoint.mjs @Uuriko
 /scripts/release-evidence.mjs @Uuriko
 /scripts/check-version-doors.mjs @Uuriko
+/scripts/repo-automations.mjs @Uuriko
 /cloudflare/*wrangler.jsonc @Uuriko
 /deploy/ @Uuriko
