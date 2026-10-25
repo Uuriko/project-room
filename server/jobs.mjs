@@ -10,6 +10,7 @@ import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
+import { sweepUnreferencedBodies } from "./projection-at-rest.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
@@ -19,7 +20,7 @@ import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
 import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
-import { relieveProjectionsIncrementally } from "./store-relief.mjs";
+import { relieveProjectionsIncrementally, roomOverMessageWindow } from "./store-relief.mjs";
 import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
 import { healBackfillQuarantines } from "./messages-store.mjs";
 
@@ -289,11 +290,35 @@ export const STORE_GROWTH_LIMITS = Object.freeze({
   dbBytes: 8_000_000_000
 });
 
+// Storage alert lines: 8 GB under the 10 GB Durable Object SQLite cap, and a
+// per-room warning at 3.5 MiB under the 4 MiB store cap. Every crossed line
+// is named in the summary's alerts, so a database alert is not hidden behind
+// a room breach, and roomsNearCap counts rooms (no ids) past the warning.
+export const STORAGE_ALERT_LINES = Object.freeze({
+  dbBytes: 8_000_000_000,
+  dbCapBytes: 10_000_000_000,
+  roomWarnBytes: 3.5 * 1024 * 1024
+});
+
+export function storageAlerts(gauges, lines = STORAGE_ALERT_LINES) {
+  const alerts = [];
+  if (Number(gauges?.dbBytes) >= lines.dbBytes) alerts.push("db_near_cap");
+  if (Number(gauges?.roomsNearCap) > 0) alerts.push("room_near_store_cap");
+  return alerts;
+}
+
 export function measureStoreGrowth(store) {
   const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
-    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
+    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes,
+    COALESCE(SUM(LENGTH(projection) >= ${STORAGE_ALERT_LINES.roomWarnBytes}), 0) AS roomsNearCap FROM rooms`).get();
   let dbBytes = 0;
-  try {
+  // The Durable Object runtime refuses PRAGMA page_count, so the worker
+  // read 0 here and the 10 GB SQLite line was never watched in production.
+  // A store that can name its own size (DurableDatabase: ctx.storage.sql
+  // .databaseSize) answers first; Node SQLite falls through to the pragmas.
+  const own = typeof store.db?.databaseSize === "function" ? Number(store.db.databaseSize()) : NaN;
+  if (Number.isFinite(own) && own > 0) dbBytes = own;
+  else try {
     const pages = store.db.prepare("PRAGMA page_count").get();
     const size = store.db.prepare("PRAGMA page_size").get();
     const count = Number(pages?.page_count);
@@ -304,6 +329,7 @@ export function measureStoreGrowth(store) {
     rooms: Number(row?.rooms) || 0,
     events: Number(row?.events) || 0,
     maxProjectionBytes: Number(row?.maxProjectionBytes) || 0,
+    roomsNearCap: Number(row?.roomsNearCap) || 0,
     dbBytes
   };
 }
@@ -315,7 +341,8 @@ export function reliefCounts(relief) {
   if (!relief || typeof relief !== "object") return {};
   const out = {};
   for (const [key, name] of [["attempted", "reliefAttempted"], ["relieved", "reliefRelieved"],
-    ["refused", "reliefRefused"], ["freedBytes", "reliefFreedBytes"], ["backupMissing", "reliefBackupMissing"]]) {
+    ["refused", "reliefRefused"], ["freedBytes", "reliefFreedBytes"], ["backupMissing", "reliefBackupMissing"],
+    ["deferred", "reliefDeferred"], ["deferredEvents", "reliefDeferredEvents"]]) {
     if (Number.isFinite(relief[key])) out[name] = relief[key];
   }
   return out;
@@ -543,6 +570,20 @@ export const JOBS = Object.freeze([
     }
   }),
   defineJob({
+    name: "projection-body-sweep",
+    cadenceMs: 5 * MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled(_env, store) {
+      if (!store?.db?.prepare) return false;
+      try { return Boolean(store.db.prepare("SELECT 1 FROM projection_bodies LIMIT 1").get()); }
+      catch { return false; }
+    },
+    disabledReason: () => "No message bodies are waiting to be released",
+    async run(store, ctx) {
+      return sweepUnreferencedBodies(store.db, { roomLimit: 20, deadline: ctx.deadline ?? Infinity });
+    }
+  }),
+  defineJob({
     name: "public-read-model",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
@@ -658,21 +699,35 @@ export const JOBS = Object.freeze([
     // breach that relief could not clear fails the tick.
     // Relief needs a verified recovery point (the newest verified daily
     // backup, at most a day old); without one it archives nothing.
+    // Relief is bound by this tick's deadline: on expiry it stops and
+    // the tick still returns (and records) its breach, with the rooms
+    // and catch-up events it deferred counted in the summary.
     async run(store, ctx = {}) {
       let gauges = measureStoreGrowth(store);
       let relief = null;
-      if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
+      const window = Number.isInteger(store.messageProjectionWindow) && store.messageProjectionWindow > 0
+        ? store.messageProjectionWindow : null;
+      // A chunk can drop the byte gauge under the alarm while most messages
+      // are still on the hot row. Keep compacting those rooms on later ticks.
+      const crowded = window !== null && roomOverMessageWindow(store.db, window * 2);
+      if (storeGrowthBreach(gauges) === "maxProjectionBytes" || crowded) {
         const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
         const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
-        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
+        relief = await relieveProjectionsIncrementally(store, {
+          limitBytes, recovery, deadline: ctx.deadline, settle: true,
+          ...(window ? { keepNewest: window, minMessages: window * 2 } : {})
+        });
         // Flat counts: the heartbeat keeps only top-level numbers, so a
         // nested relief object never reached /api/health/jobs.
         gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief) };
       }
+      const alerts = storageAlerts(gauges);
+      if (alerts.length) gauges = { ...gauges, alerts };
       const breach = storeGrowthBreach(gauges);
-      if (!breach) return gauges;
-      console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
-      return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit" } };
+      if (!breach && !alerts.length) return gauges;
+      console.warn(`[store-growth] ${breach ?? alerts[0]} crossed a storage line: ${JSON.stringify(gauges)}`);
+      const subcheck = alerts.includes("db_near_cap") ? "db_near_cap" : breach === "maxProjectionBytes" ? "maxProjectionBytes" : alerts[0] ?? breach;
+      return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit", subcheck } };
     }
   })
 ]);

@@ -199,7 +199,11 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("room_usage", "Read this room's usage card: member, event, and work-item headroom, and projectionBytes with warning when the stored projection is at or over 3.5 MiB. Same read as GET /api/rooms/:roomId/usage. days is the lookback, from 1 to 365, default 30. This read does not archive messages or change the room.", schema({
+    roomId: roomIdField,
+    days: { type: "integer", minimum: 1, maximum: 365, description: "Lookback in whole days. Defaults to 30." }
+  }, ["roomId"]))
 
 ];
 

@@ -1192,6 +1192,15 @@
         "openWorldHint": false
       }
     },
+    "room_usage": {
+      "inputSchema": "2cbeffd0d02d7525",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_withdraw_help_offer": {
       "inputSchema": "c93102c738720d65",
       "annotations": {

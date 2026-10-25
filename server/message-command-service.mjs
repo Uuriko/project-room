@@ -5,6 +5,7 @@
 import { EVENT_TYPES as T } from '../src/events.js';
 import { affectedMessageIds, captureMessageCertification, advanceMessageCertification, syncMessageRows, archivedMessageRow, archivedMessageCommandContext } from './messages-store.mjs';
 import { storedProjection } from './projection-at-rest.mjs';
+import { readStorageMode } from './storage-mode.mjs';
 import { ServiceError } from './service-error.mjs';
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -82,9 +83,14 @@ export function assertMessageCommandReferences(store, roomId, state, command, ac
 // invokes persistEntities before any observer can see the transaction. Pending
 // references are safe only because both writes share that transaction.
 export function prepareMessageWrite(store, { roomId, previous, state, event, sequence }) {
-  const certificate = store.maintainMessageCertification
+  // Slim rooms keep the messages-table certificate on the live write so the
+  // hot-window archive can run in the same command. Blob rooms are unchanged.
+  const slim = readStorageMode(store.db, roomId) === "slim";
+  const certificate = store.maintainMessageCertification || slim
     ? captureMessageCertification(store.db, {roomId,sequence:previous.sequence,event,state:previous.state}) : null;
-  const projection = store.messageEntityProjection && certificate
+  // A slim room stores message ids. The pending id is written in this same
+  // transaction, so the reference is never committed without its row.
+  const projection = slim || (store.messageEntityProjection && certificate)
     ? storedProjection(store.db,roomId,state,{messageEntities:true,pendingMessageIds:affectedMessageIds(event)})
     : store.storedProjection(roomId,state);
   return {

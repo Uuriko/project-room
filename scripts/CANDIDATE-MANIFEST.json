@@ -68,7 +68,7 @@
     "src/agent-invite-ui.js": "sha256:8898768aeb263add076d4db80dfc425e5cf4e50892cd88d1e404f11b9fad05e1",
     "src/agent-signin-page.js": "sha256:af475afc023431b066c2cabd490adc9c2b4d52f86af8741f471065475d773cd2",
     "src/agent-signin-ui.js": "sha256:bdaab08f6a4e92e1c6937a94ca48b29b6130621d9a435f73468aac22d6dd6e66",
-    "src/app.js": "sha256:f38d44813fe58c41a1505a7879f12caaf94f9d756f17dd298b2d8b9630c7212b",
+    "src/app.js": "sha256:49026650e2dd105c5358ba7d58fd246f157e53451c005ac96eb74bd01ebdeff9",
     "src/auth-signin-ui.js": "sha256:952dbdc3ebdf238a469a169ca23fb936d41b111c01c7f1fac3e0a2461719e485",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
@@ -151,17 +151,17 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:ed50070e82de9b7bd313da460fdf67da4ef540e12675c57f2a7bf827fd5fa097",
-    "strings/en.json": "sha256:4a66abb675ecd9a5d438c88c12bf6e4f4d9296cb2dec91509502313e5cd54633"
+    "strings/en.js": "sha256:5aede7ead3ca1b33074b2b422544a1a7eeb6117cb58a7beb21ad45fa11e58637",
+    "strings/en.json": "sha256:14a3403685c6cba9c3af951a7383cdf74e0536a32130ef59ceb31224a45d29b2"
   },
   "deployment": {
-    ".github/workflows/deploy-prod.yml": "sha256:ebdfd3d7cc7118098ad4e3280a0af4567d4c2d8322e88483f0cdcebc15245512",
+    ".github/workflows/deploy-prod.yml": "sha256:c46b418b45f552a3b9eb3b8df6669768301e608f512ba2465791ae6a524cce8e",
     "cloudflare/bootstrap.mjs": "sha256:ff6095ac5ab0332de1cacc5d5250ff71831ed8c360ec108b37ecc8effe211d6d",
     "cloudflare/build-assets.mjs": "sha256:7a204a775ed8aac33ff23d1d1c210de1a29efe84a47455db7e303e6fd4aff4d4",
     "cloudflare/package.json": "sha256:6f0e5ae7c18da9972a53fd5b1c2aa60fd7aa930e4b80640c7eb0519eb1792b8d",
     "cloudflare/pnpm-lock.yaml": "sha256:e85e6e33177fe8779a9baea1fe99b3575edc4a1b29da6ed7415b7d2023ca157f",
-    "cloudflare/room.mjs": "sha256:42581c72d2e958c11654c0f5b231eb4e2d4c40e3d4ac14de14d54abd1e92f27c",
-    "cloudflare/storage.mjs": "sha256:841c10ef3a3116aa592dd59daf9793b925d91d1804273a1df8d01131405ca10b",
+    "cloudflare/room.mjs": "sha256:5dae48484719cac38a76c2d281daad6b46a946ab81a6a1a6dac4b4210e1e9f6b",
+    "cloudflare/storage.mjs": "sha256:c28ef41693ddefb910b982cb65084376fde4d3a48a0669a7f91cb80d468a34e4",
     "cloudflare/wrangler.jsonc": "sha256:cd7454570a9f0aa54fef87933b587c5d1bfaed78069dcf16c5dcd3fc23fcb57b",
     "scripts/deploy-recovery.mjs": "sha256:7c3ada6d04b9a6944ed2e65354ef27b92ad356bca0829f4d5a76ce6884898b98"
   },
