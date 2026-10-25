@@ -401,6 +401,27 @@ let roomFilesByMessage = new Map();
 const messageFileDownloads = new Map();
 try { recovery = new DraftRecovery(navigator.userAgent.includes("ProjectRoomMac/") ? window.localStorage : window.sessionStorage); } catch { recovery = new DraftRecovery(null); }
 const draftScope = draftRecoveryScope;
+// DESIGN-UPGRADE begin. Flag designUpgrade. Inbox mounts in the topbar.
+// The UI module loads only after GET /design-upgrade says this room is on.
+let designUpgradeHandle = null;
+let designUpgradeToken = 0;
+function queueDesignUpgrade() {
+  const token = ++designUpgradeToken;
+  designUpgradeHandle?.teardown();
+  designUpgradeHandle = null;
+  const roomId = state?.room?.id;
+  const generation = roomGeneration;
+  if (!roomId || !session?.member?.id) return;
+  client.request(client.path("/design-upgrade")).then(flag => {
+    if (token !== designUpgradeToken || state?.room?.id !== roomId || roomGeneration !== generation) return;
+    if (!flag?.enabled) return;
+    return import("./design-upgrade-ui.js").then(mod => {
+      if (token !== designUpgradeToken || state?.room?.id !== roomId || roomGeneration !== generation) return;
+      designUpgradeHandle = mod.mountDesignUpgrade({ client });
+    });
+  }).catch(() => {});
+}
+// DESIGN-UPGRADE end
 const client = new RoomClient({
   accountClient,
   auditView: "activity",
@@ -426,6 +447,7 @@ const client = new RoomClient({
     catchUpBoundary = Number.isSafeInteger(snapshot.catchUpCursor) ? Math.max(snapshot.cursor, snapshot.catchUpCursor) : snapshot.cursor;
     roomGeneration = client.generation;
     const roomId = state.room?.id ?? identity.roomId;
+    if (presenceBoundary) queueDesignUpgrade();
     if (roomId !== activeChannelRoomId) { activeChannelRoomId = roomId; restoreActiveChannel(); }
     const roomTitle = state.room?.title ?? roomId;
     $("#room-title").textContent = roomTitle;
@@ -512,6 +534,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
+    queueDesignUpgrade();
     pendingHashReveal = null;
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();

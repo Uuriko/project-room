@@ -69,6 +69,15 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/spend-grants.mjs'); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/routes/spend-grants.mjs, server/mcp-room-profile.mjs, server/mcp-full-profile.mjs)
   paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
+  paths.add('server/design-upgrade.mjs');
+  paths.add('server/routes/design-upgrade.mjs');
+  paths.add('src/task-status.js');
+  paths.add('src/ack-state.js');
+  paths.add('src/task-result.js');
+  paths.add('src/design-upgrade-flag.js');
+  paths.add('src/needs-you.js');
+  paths.add('src/design-upgrade-ui.js');
+  paths.add('src/design-upgrade.css');
   paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/agent-presence.mjs'); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)

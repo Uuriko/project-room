@@ -625,6 +625,15 @@
         "openWorldHint": false
       }
     },
+    "room_ack_task": {
+      "inputSchema": "facc3120fdacfad6",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_acquire_claim": {
       "inputSchema": "60bbe03b9f4d42a8",
       "annotations": {
@@ -931,6 +940,15 @@
         "openWorldHint": true
       }
     },
+    "room_needs_you": {
+      "inputSchema": "313170d1d77e3e7f",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_offer_help": {
       "inputSchema": "bf8202dfae059c28",
       "annotations": {
@@ -969,6 +987,15 @@
     },
     "room_put_file": {
       "inputSchema": "97439b27a90f7807",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_put_task_result": {
+      "inputSchema": "4c1e5a0d61ce9859",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1019,6 +1046,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_read_task_result": {
+      "inputSchema": "7a4f3ba5a0180461",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_read_work": {
@@ -1188,6 +1224,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_task_status": {
+      "inputSchema": "7a4f3ba5a0180461",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }

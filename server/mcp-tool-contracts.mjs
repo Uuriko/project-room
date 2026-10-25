@@ -61,7 +61,12 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   squads_disband: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/disband" },
   webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
-  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" }
+  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" },
+  room_needs_you: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/needs-you" },
+  room_task_status: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/task-status" },
+  room_ack_task: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/acks" },
+  room_put_task_result: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/task-result" },
+  room_read_task_result: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/task-result" }
 });
 
 export function mcpToolContractLine(name) {

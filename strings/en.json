@@ -542,5 +542,22 @@
   "cockpit.jobTimes": "last run {run} · last success {success}",
   "cockpit.jobNever": "never",
   "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
-  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>",
+  "designUpgrade.needsYou": "Needs you",
+  "designUpgrade.loading": "Loading what needs you.",
+  "designUpgrade.empty": "Nothing needs you.",
+  "designUpgrade.error": "Could not load what needs you. Try again.",
+  "designUpgrade.retry": "Try again",
+  "designUpgrade.close": "Close",
+  "designUpgrade.result": "Result",
+  "designUpgrade.resultEmpty": "No result yet.",
+  "designUpgrade.resultError": "Could not load the result. Try again.",
+  "designUpgrade.kind.ask": "Ask",
+  "designUpgrade.kind.approval": "Approval",
+  "designUpgrade.kind.mention": "Mention",
+  "designUpgrade.kind.task": "Task",
+  "designUpgrade.count": "{count} need you",
+  "designUpgrade.acknowledge": "Acknowledge",
+  "designUpgrade.incomplete": "Some items could not be loaded.",
+  "designUpgrade.more": "Show more"
 }

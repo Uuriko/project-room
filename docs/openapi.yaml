@@ -1968,6 +1968,188 @@ paths:
                   ttlMs: { type: integer, description: Milliseconds until the beat expires without a fresh heartbeat }
         '401':
           description: No room credential, or membership ended (unauthenticated)
+  /api/rooms/{roomId}/design-upgrade:
+    get:
+      summary: Read the designUpgrade flag
+      description: |
+        Always returns the flag, including when it is off, so a client can
+        decide whether to load the design upgrade. muse-room is on until an
+        owner turns it off. Every other room is off until an owner turns it on.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Flag state
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [flag, enabled, roomId]
+                properties:
+                  flag: { type: string, enum: [designUpgrade] }
+                  enabled: { type: boolean }
+                  roomId: { type: string }
+    post:
+      x-room-permission: owner
+      summary: Turn designUpgrade on or off
+      description: |
+        Room owner only. Body is { "enabled": true } or { "enabled": false }.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated flag
+        '403':
+          description: Caller is not the room owner
+  /api/rooms/{roomId}/needs-you:
+    get:
+      summary: List what needs this member
+      description: |
+        One page of asks, approvals, mentions, and needs_you tasks for the
+        signed-in member. count is the full list. Pass cursor from nextCursor
+        to read the next page. Requires designUpgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: cursor, in: query, required: false, schema: { type: string } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 50 } }
+      responses:
+        '200':
+          description: Inbox page
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  count: { type: integer }
+                  nextCursor: { type: string, nullable: true }
+                  incomplete: { type: array, items: { type: string } }
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        kind: { type: string }
+                        subjectKind: { type: string }
+                        subjectId: { type: string }
+                        title: { type: string }
+                        at: { type: string }
+                        status: { type: string }
+                        label: { type: string }
+        '409':
+          description: designUpgrade is off. next says how the owner turns it on.
+  /api/rooms/{roomId}/task-status:
+    get:
+      summary: Read canonical task status
+      description: |
+        Pass kind and id for one task. Pass kind and ids (comma-separated, at
+        most 40) for a batch. Unknown id on the single read is 404. A batch
+        entry may be { id, error: unknown_task }. Requires designUpgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [claim, work] } }
+        - { name: id, in: query, required: false, schema: { type: string } }
+        - { name: ids, in: query, required: false, schema: { type: string } }
+      responses:
+        '200':
+          description: One task, or a batch in tasks
+        '404':
+          description: Unknown task
+  /api/rooms/{roomId}/acks:
+    get:
+      summary: Read acknowledgement
+      description: |
+        kind is claim, work, mention, or ask. Returns state waiting,
+        acknowledged, or not_responding for this member, plus canAck.
+        Requires designUpgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [claim, work, mention, ask] } }
+        - { name: id, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Acknowledgement for this member
+    post:
+      x-room-permission: member
+      summary: Acknowledge a task, mention, or ask
+      description: |
+        Body is { "kind", "id" }. A second call keeps the first acknowledgement
+        time. Requires designUpgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, id]
+              properties:
+                kind: { type: string, enum: [claim, work, mention, ask] }
+                id: { type: string }
+      responses:
+        '200':
+          description: Acknowledgement after the write
+        '403':
+          description: Caller is not the assignee
+        '404':
+          description: Unknown task or mention
+  /api/rooms/{roomId}/task-result:
+    get:
+      summary: Read a task result
+      description: |
+        A known task with no result returns result null. Requires designUpgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: kind, in: query, required: true, schema: { type: string, enum: [claim, work] } }
+        - { name: id, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Result or result null
+        '404':
+          description: Unknown task
+    post:
+      x-room-permission: member
+      summary: Attach a task result
+      description: |
+        Body is { "kind", "id", "summary", "links"? }. summary is 1 to 2000
+        characters. links has at most 8 https URLs or same-origin paths.
+        The latest write replaces the previous result. Requires designUpgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [kind, id, summary]
+              properties:
+                kind: { type: string, enum: [claim, work] }
+                id: { type: string }
+                summary: { type: string }
+                links:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      href: { type: string }
+                      label: { type: string }
+      responses:
+        '200':
+          description: Stored result
+        '422':
+          description: Invalid result. next says to send a summary and https links.
   /api/rooms/{roomId}/code:
     get:
       summary: List code drops

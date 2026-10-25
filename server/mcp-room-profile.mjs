@@ -56,6 +56,7 @@ import { stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext,
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
+import { callDesignUpgradeTool, isDesignUpgradeTool, validDesignUpgradeArgs } from "./design-upgrade.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -85,7 +86,8 @@ function failureValue(error) {
       // Spend-grant refusals carry machine-readable detail (price, reason,
       // remaining cap) alongside the human text — the x402 PaymentRequired
       // shape: structuredContent AND content[0].text both name the price.
-      ...(error.detail ? { detail: error.detail } : {})
+      ...(error.detail ? { detail: error.detail } : {}),
+      ...(error.next ? { next: error.next } : {})
     };
   }
   // qa4-fix-mcp-escrow500: the escrow module throws EscrowError (code, no
@@ -137,6 +139,7 @@ function validThreadId(value) {
 }
 
 function validRoomArgs(name, args) {
+  if (isDesignUpgradeTool(name)) return validDesignUpgradeArgs(name, args);
   const selected = ROOM_TOOLS.find(entry => entry.name === name);
   if (!selected || !allowed(args, Object.keys(selected.inputSchema.properties), selected.inputSchema.required)) return false;
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
@@ -471,6 +474,7 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
 }
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
+  if (isDesignUpgradeTool(name)) return callDesignUpgradeTool(store, secret, name, args);
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
   if (name === "room_create") {
     const request = {};
@@ -1016,6 +1020,7 @@ const MCP_ROOM_WRITE_TOOLS = new Set([
   "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
   "bond_propose", "bond_accept", "bond_decline", "bond_revoke",
   "dm_posted",
+  "room_ack_task", "room_put_task_result",
 ]);
 export function mcpRoomToolScope(name) {
   return MCP_ROOM_WRITE_TOOLS.has(name) ? "rooms:write" : "rooms:read";
