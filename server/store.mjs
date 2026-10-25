@@ -4919,6 +4919,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Both run in their own committing transaction OUTSIDE the mutation's:
     // the forced stop/suspend must stay in the log even though the caller's
     // mutation below is rejected (a nested savepoint would roll back).
+    // The generated command itself runs isolated inside that transaction
+    // (#3323): if it is refused or faults part-way, its own writes roll
+    // back, and the outcome below reports the stop/pause as pending instead
+    // of claiming it happened.
     const tripped = this.transaction(() => {
       const roomState = this.room(roomId).state;
       const item = roomState.workItems[request.workItemId];
@@ -4942,15 +4946,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // does not re-fire here.
       const alreadyPaused = session.status === "suspended" && session.suspended_by === "round_limit";
       if (!alreadyPaused && !isTerminalSession(session.status) && roundLimitExceeded(item, pendingRounds)) {
+        let pauseCommitted = true;
         try {
-          this.command(token, roomId, { id: `rounds-${request.requestId}`, type: T.SESSION_STATUS_CHANGED,
-            data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "suspended",
-              suspendReason: "round_limit" } }, expectedSessionBinding);
-        } catch {
-          // The 409 below still carries the reason; the worker's next
-          // heartbeat completes the pause.
-        }
-        return { kind: "rounds" };
+          this.transaction(() => {
+            this.command(token, roomId, { id: `rounds-${request.requestId}`, type: T.SESSION_STATUS_CHANGED,
+              data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "suspended",
+                suspendReason: "round_limit" } }, expectedSessionBinding);
+          }, { isolated: true });
+        } catch { pauseCommitted = false; }
+        return { kind: "rounds", committed: pauseCommitted };
       }
       const toolWire = !isTerminalSession(session.status) && session.budget?.maxToolCalls != null
         && pendingToolCalls > session.budget.maxToolCalls ? "maxToolCalls" : null;
@@ -4958,25 +4962,29 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         || (!isTerminalSession(session.status) && session.budget?.maxSpendCents != null && pendingSpend !== null
           && pendingSpend > session.budget.maxSpendCents ? "maxSpendCents" : null);
       if (wire) {
+        let stopCommitted = true;
         try {
-          this.command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
-            data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
-              budgetEnforced: true, reason: "budget_exceeded", limit: wire,
-              ...(binding === "matched" && request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
-              ...(binding === "matched" && request.rounds !== undefined ? { rounds: request.rounds } : {}),
-              // #3349: a spend trip records the spend figure that
-              // tripped it, mirroring the toolCalls/rounds payload.
-              ...(wire === "maxSpendCents" && pendingSpend !== null ? { spendCents: pendingSpend } : {}) } }, expectedSessionBinding);
-        } catch {
-          // The 409 below still carries the reason; the worker's next
-          // heartbeat completes the stop.
-        }
-        return { kind: "budget", limit: wire };
+          this.transaction(() => {
+            this.command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
+              data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
+                budgetEnforced: true, reason: "budget_exceeded", limit: wire,
+                ...(binding === "matched" && request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
+                ...(binding === "matched" && request.rounds !== undefined ? { rounds: request.rounds } : {}),
+                // #3349: a spend trip records the spend figure that
+                // tripped it, mirroring the toolCalls/rounds payload.
+                ...(wire === "maxSpendCents" && pendingSpend !== null ? { spendCents: pendingSpend } : {}) } }, expectedSessionBinding);
+          }, { isolated: true });
+        } catch { stopCommitted = false; }
+        return { kind: "budget", limit: wire, committed: stopCommitted };
       }
       return null;
     });
-    if (tripped?.kind === "rounds") fail(409, "round_limit_exceeded", "Session paused: the round limit was exceeded. The next mention or post resumes it");
-    if (tripped?.kind === "budget") fail(409, "budget_exceeded", `Session budget exceeded (${tripped.limit}); the session was stopped`);
+    if (tripped?.kind === "rounds" && tripped.committed) fail(409, "round_limit_exceeded", "Session paused: the round limit was exceeded. The next mention or post resumes it");
+    // #3323: the generated pause/stop did not commit — the outcome must
+    // not claim it happened. The next interaction retries the wire.
+    if (tripped?.kind === "rounds") fail(409, "round_pause_pending", "Session could not be paused: the round limit was exceeded and the pause is pending. The next mention or post retries it");
+    if (tripped?.kind === "budget" && tripped.committed) fail(409, "budget_exceeded", `Session budget exceeded (${tripped.limit}); the session was stopped`);
+    if (tripped?.kind === "budget") fail(409, "budget_stop_pending", `Session budget exceeded (${tripped.limit}); the session could not be stopped and its stop is pending`);
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);

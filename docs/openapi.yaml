@@ -4745,7 +4745,7 @@ paths:
         '401': { description: unauthenticated }
         '201': { description: Committed }
         '409':
-          description: Stale revision when expectedRevision is sent, session already claimed, budget exceeded (session force-stopped), or round limit exceeded (session auto-paused; the next mention or post resumes it)
+          description: Stale revision when expectedRevision is sent, session already claimed, budget exceeded (session force-stopped), round limit exceeded (session auto-paused; the next mention or post resumes it), or budget_stop_pending / round_pause_pending when the generated stop or pause could not commit (the session is still running and the next interaction retries the enforcement)
           content:
             application/json:
               schema:
