@@ -376,7 +376,10 @@ async function readProdSha(origin) {
 async function deployCandidateCommand() {
   const repo = repoName();
   const origin = (process.env.PROD_ORIGIN || "https://room.trydemigod.com").replace(/\/$/, "");
-  const scheduleRuns = ghLines(["api", `repos/${repo}/actions/workflows/deploy-prod.yml/runs?event=schedule&per_page=20`, "--jq", ".workflow_runs[] | {id,createdAt:.created_at}"]);
+  const scheduleRuns = ghLines(["api", [
+    "repos/", repo, "/actions/workflows/", "deploy-prod.yml",
+    "/runs?event=schedule", "&per_page=20",
+  ].join(""), "--jq", ".workflow_runs[] | {id,createdAt:.created_at}"]);
   if (scheduledDeployBlocked(scheduleRuns, { now: Date.now(), runId: process.env.GITHUB_RUN_ID || "" })) {
     console.log(JSON.stringify({ sha: null, reason: "a scheduled deploy already started within the last hour" }));
     return 0;
