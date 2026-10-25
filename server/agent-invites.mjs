@@ -19,7 +19,7 @@ import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
-import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";
+import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId, ownMember } from "../src/events.js";
 import { nextActionsForInviteRedeem } from "./discoverability.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
@@ -153,7 +153,7 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
   const store = invites.store;
   const linked = invites.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?")
     .get(receipt.room_id, receipt.identity_id);
-  const member = linked && store.room(receipt.room_id).state.members[linked.member_id];
+  const member = linked && ownMember(store.room(receipt.room_id).state.members, linked.member_id);
   if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
   // R305-1: a credential-less replay is the client that lost the 201 — the
   // original secret died in that lost response, so retiring it strands
@@ -277,7 +277,7 @@ const reactivateLinkedMember = (invites, row, member, identityId, { requestId, r
 const existingLinkOutcome = (invites, row, identityId, options) => {
   const link = invites.db.prepare("SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, identityId);
   if (!link) return null;
-  const member = invites.store.room(row.room_id).state.members[link.memberId];
+  const member = ownMember(invites.store.room(row.room_id).state.members, link.memberId);
   if (!member || member.active !== false) fail(409, "identity_already_linked", ACTIVE_MEMBER_MESSAGE);
   return reactivateLinkedMember(invites, row, member, identityId, options);
 };
@@ -351,7 +351,7 @@ export class AgentInvites {
     }
     // Non-owner issuers: manage_members may only grant bits they hold;
     // invite_member-only may grant the standing agent-safe set.
-    const issuer = auth.delegate ? auth.member : authority.members[auth.member.id];
+    const issuer = auth.delegate ? auth.member : ownMember(authority.members, auth.member.id);
     if (!issuer || issuer.active === false) fail(403, "access_denied", "Active membership required");
     if (!auth.delegate && auth.member.id !== authority.ownerId) {
       const admin = issuer.permissions.includes("manage_members");
@@ -426,7 +426,7 @@ export class AgentInvites {
       }
       if (row.redeemed_at != null && existingIdentity?.identityId === row.redeemed_identity_id) {
         const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
-        const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
+        const member = linked && ownMember(this.store.room(row.room_id).state.members, linked.member_id);
         if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
         // One live room key: the previous rak_ for this identity and room
         // is revoked before the replacement is minted.
@@ -579,9 +579,9 @@ export class AgentInvites {
     return this.store.transaction(() => {
       const room = this.store.room(roomId);
       const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(roomId, identity.identityId);
-      const member = linked && room.state.members[linked.member_id];
+      const member = linked && ownMember(room.state.members, linked.member_id);
       // Recovery never consumes another place or restores removed membership.
-      if (linked || room.state.members[identity.identityId]) {
+      if (linked || ownMember(room.state.members, identity.identityId)) {
         if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
         return { roomId, identityId: identity.identityId, memberId: member.id, permissions: member.permissions, duplicate: true };
       }
@@ -644,7 +644,7 @@ export class AgentInvites {
     }) ?? "custom";
     // Inviter display name for the consent screen ("Invited by …"). The
     // member id is never exposed — display name only, so no identity leaks.
-    const inviter = room.state?.members?.[row.created_by];
+    const inviter = ownMember(room.state?.members, row.created_by);
     const inviterDisplayName = typeof inviter?.displayName === "string" && inviter.displayName ? inviter.displayName : null;
     return { roomId: row.room_id, roomTitle: room.state?.room?.title ?? row.room_id,
       permissions, profile, expiresAt: row.expires_at, inviterDisplayName };

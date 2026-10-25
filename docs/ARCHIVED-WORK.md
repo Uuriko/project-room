@@ -2,6 +2,15 @@
 
 PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row keeps the head SHA, so the work can be restored with `git fetch origin pull/<n>/head && git push origin <sha>:refs/heads/<branch>`.
 
+## G7 combined
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #3564 | refactor(members): ownMember migration slice 1 — joining/authz paths (#3224) | `jill/3224-members-slice1-joining` | `6d684f1d405e559dabc4030315b65a1ba350465e` | Combined into the G7 pull request. Slice 1 is contained in #3568; red in the landing queue because main moved. |
+| #3568 | refactor(members): ownMember migration slice 2 — store core (#3224) | `jill/3224-members-slice2-store` | `4394c3e197e53f426096e14b02a69fdbb35ccae7` | Combined into the G7 pull request. Newest complete ownMember migration for the joining paths and the store core. |
+| #3621 | fix(account-deletion): tear down a sole-owned room's public footprint on deletion | `jill/fix-deletion-public-teardown` | `9367a6044d5882b7eca77545de5d747063bad362` | Combined into the G7 pull request. Public-footprint teardown in archivePersonalRoom. |
+| #4015 | feat(records): decision records get a >=4y legal-hold retention class (#3614) | `build-3614-decision-retention` | `63c0b383a25557619f1649ca4566f63092a18e0b` | Combined into the G7 pull request. Decision-record retention class and audit floor. Supersedes the archived #4024 draft of the same idea. |
+
 | PR | Title / idea | Branch | Head SHA | Why closed |
 |---|---|---|---|---|
 | #3393 | build(deps-dev): bump wrangler from 4.116.0 to 4.149.0 in /cloudflare in the minor-and-patch group across 1 directory | `dependabot/npm_and_yarn/cloudflare/minor-and-patch-d746ffe52c` | `8e3b9430ee3ccbd011c1684b51f008abbb36128e` | stale (no commits in 24h+) and red; idea recorded in docs/ARCHIVED-WORK.md |
