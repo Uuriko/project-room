@@ -160,7 +160,11 @@ const EVIDENCE = [
     ["server/legal-store.mjs", /password-signup.*google-oauth/],
   ]],
   [TERMS, "room credits are valueless ledger units", [
-    ["docs/SPEND-PRIMITIVE.md", /room credits are valueless ledger units — no cash-out/],
+    // #3305: the evidence is the bounty doc's statement about room credits
+    // themselves. (It previously pointed at SPEND-PRIMITIVE.md's money-
+    // honesty line, which was about the spend unit — cents — under the
+    // spend system's old "credits" mislabel.)
+    ["docs/BOUNTY-MCP-TOOLS.md", /Credits are Room ledger units only: they have no cash value, no cash-out path/],
   ]],
   [TERMS, "today this pays in reputation receipts; cash comes later", [
     ["docs/ROUTE-AUTH-TABLE.md", /Finish records submitted evidence; does not accept or pay/],

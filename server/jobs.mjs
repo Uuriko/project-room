@@ -3,21 +3,30 @@
 // the budget, and how to find the next due time. A job with nothing waiting
 // stays disabled so an idle room does not wake for it.
 import { telegramConfig } from "./channel-adapters/telegram-config.mjs";
-import { syncClaimPullRequests } from "./claim-pr-sync.mjs";
+import { staleSweepDueAt, syncClaimPullRequests } from "./claim-pr-sync.mjs";
 import { discoverUnlinkedPulls, linkDeployToSettledClaims } from "./claim-autolink.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
+import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
 import { createWatcher } from "../src/growth-watch.js";
 import { defaultOnAlert, defaultGrowthRules, DEFAULT_INTERVAL_MS } from "../src/growth-scheduler.js";
 import { growthCollector } from "../src/growth-emit.js";
-import { writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { verifiedRecentBackup, writeDailyBackup } from "../cloudflare/room-backup.mjs";
+import { relieveProjectionsIncrementally } from "./store-relief.mjs";
+import { catchUpMissedWakes, missedWakeDueAt } from "./sleeper-wake.mjs";
+import { healBackfillQuarantines } from "./messages-store.mjs";
 
+// One cooperative budget for every job on both runtimes: each job gets
+// this long per tick, measured from the job's own start and enforced at
+// the jobs' step checkpoints — not a hard per-step bound. The Worker
+// derives its CRON_JOB_BUDGET_MS from this constant (#3767).
 export const JOB_BUDGET_MS = 5000;
 export const MINUTE_MS = 60 * 1000;
 export const HOUR_MS = 60 * MINUTE_MS;
@@ -27,6 +36,10 @@ export const DAY_MS = 24 * HOUR_MS;
 export const SAFETY_NET_CRON = "*/30 * * * *";
 export const SAFETY_NET_MS = 30 * MINUTE_MS;
 export const ALARM_RETRY_MS = MINUTE_MS;
+// Slow jobs ride the */30 safety-net cron, whose phase can land a few
+// seconds before the job's own anchor. Without slack the job waits a
+// whole extra cron period; 60s absorbs that cron-vs-anchor phase race.
+export const SLOW_JOB_DUE_SLACK_MS = 60 * 1000;
 
 const oneLine = value => String(value ?? "").replace(/[\r\n]+/g, " ").trim().slice(0, 200);
 
@@ -36,6 +49,17 @@ function read(store, sql, params = []) {
   catch { return null; }
 }
 
+// Status-blind on purpose (#3927, the narrowed R1 invariant): ANY
+// journal row — pending, imported or failed — keeps the channel-drain
+// job enabled. Outcome consumption depends on it: a completed drain's
+// outcome is reported by the NEXT drain tick, and journal rows leave
+// 'pending' only by UPDATE to a terminal status (they are never
+// deleted outside account deletion), so a fully drained queue still
+// gets its reporting tick. Do not make this status-aware, and do not
+// start deleting terminal rows, without also gating eligibility on
+// "an unconsumed drain outcome exists" — that combination strands a
+// completed outcome in Durable Object memory with no tick ever
+// reporting it (pinned by tests/job-heartbeat.test.js).
 function channelPending(store) {
   return Boolean(read(store, "SELECT 1 AS hit FROM pending_channel_updates LIMIT 1")?.hit);
 }
@@ -43,6 +67,16 @@ function channelPending(store) {
 function webhookDueAt(store) {
   const row = read(store, "SELECT MIN(next_attempt_at) AS due FROM agent_webhook_deliveries WHERE state IN ('pending','failed')");
   return row?.due == null ? null : Number(row.due);
+}
+
+// A missed dm/mention wake is due even when no delivery row exists yet.
+// An armed flag with nothing waiting stays null so the job stays idle.
+function webhookNextDue(store) {
+  const webhook = webhookDueAt(store);
+  const missed = missedWakeDueAt(store);
+  if (webhook == null) return missed;
+  if (missed == null) return webhook;
+  return Math.min(webhook, missed);
 }
 
 function landDueAt(store, now) {
@@ -120,10 +154,15 @@ function backupConfigured(env) {
   return Boolean(kv && typeof kv.put === "function" && typeof kv.get === "function");
 }
 
+const PUBLIC_BLOCK_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
+
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "quarantinedEvents", "deferredSkips"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
+  }
+  for (const key of ["blockReason", "blockComponent"]) {
+    if (typeof integrity?.[key] === "string" && PUBLIC_BLOCK_TOKEN.test(integrity[key])) line[key] = integrity[key];
   }
   console.info(JSON.stringify(line));
   return integrity;
@@ -153,6 +192,21 @@ const INTEGRITY_RECORD_CLASS = Object.freeze({
 });
 const SAFE_CARRIED_CODE = /^[a-z][a-z0-9_]{0,63}$/i;
 
+// Naming rule (integrity batch isolation): the steps below record ROOM ids
+// in integrity_failures — the store puts a room id in record_id for these
+// steps and no other kind of record. The failure detail may name that
+// room, so the poisoned room is reachable from the job detail and the
+// token-gated operator status, not only from the console log line. The
+// PUBLIC health views deliberately do not project it: a private room's
+// id is block evidence on an unauthenticated surface
+// (integrity-block-health). Every other record id (invitation ids above
+// all) stays off every surface, exactly as #3334 required, as do message
+// bodies and secrets.
+export const INTEGRITY_ROOM_RECORD_STEPS = Object.freeze(new Set([
+  "messages_backfill", "messages_parity", "help_history"
+]));
+export const SAFE_RECORD_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+
 export function classifyIntegrityError(error) {
   const message = String(error?.message ?? error ?? "");
   let subcheck = INTEGRITY_SUBCHECKS.includes(error?.integritySubcheck) ? error.integritySubcheck : null;
@@ -178,6 +232,15 @@ export function classifyIntegrityError(error) {
   return { code, subcheck, errorClass, recordClass: INTEGRITY_RECORD_CLASS[subcheck] ?? "unknown" };
 }
 
+function integrityFailure(error) {
+  const failure = classifyIntegrityError(error);
+  return {
+    errors: 1,
+    scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+    failureDetail: failure
+  };
+}
+
 async function runNodeRetention(store, ctx) {
   const tableIndex = ctx.retentionIndex ?? 0;
   const receipt = runLiveStoreRetention({
@@ -201,10 +264,67 @@ function defineJob(job) {
     budgetMs: JOB_BUDGET_MS,
     redactErrors: false,
     slow: false,
+    required: false,
     singleRuntimeReason: null,
     disabledReason() { return "Not configured"; },
     ...job
   });
+}
+
+// #3895: aggregate growth gauges for the single-DO store. Every room,
+// account, session and job shares one SQLite store; before store-growth
+// no production-runtime job watched its aggregate size approach the
+// store's limits (growth-watch tracks product-growth events off a
+// process-local collector and is node-only for that reason). The gauges
+// are one aggregate read over the rooms table plus the SQLite page
+// count — cheap at any room count. The limits are the lines where an
+// operator must act, not the hard caps: the largest room projection is
+// escalated at 3.5 MB against the 4 MiB application cap, and the
+// database at 8 GB against the 10 GB Durable Object SQLite limit.
+// 3.5 MB stays the escalation in front of the 4 MiB cap. The projection
+// hot window keeps a busy room near 100 KB once it lands; raising this
+// line would page later, closer to the hard cap, both before and after.
+export const STORE_GROWTH_LIMITS = Object.freeze({
+  maxProjectionBytes: 3_500_000,
+  dbBytes: 8_000_000_000
+});
+
+export function measureStoreGrowth(store) {
+  const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
+    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
+  let dbBytes = 0;
+  try {
+    const pages = store.db.prepare("PRAGMA page_count").get();
+    const size = store.db.prepare("PRAGMA page_size").get();
+    const count = Number(pages?.page_count);
+    const bytes = Number(size?.page_size);
+    if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
+  } catch { /* a runtime without page pragmas reports 0; the room gauges still watch */ }
+  return {
+    rooms: Number(row?.rooms) || 0,
+    events: Number(row?.events) || 0,
+    maxProjectionBytes: Number(row?.maxProjectionBytes) || 0,
+    dbBytes
+  };
+}
+
+// The name of the first gauge past its limit, or null. The projection
+// line is judged first: it is the nearer, per-room-actionable cap.
+// The relief outcome as flat, public-safe counts (no room ids).
+export function reliefCounts(relief) {
+  if (!relief || typeof relief !== "object") return {};
+  const out = {};
+  for (const [key, name] of [["attempted", "reliefAttempted"], ["relieved", "reliefRelieved"],
+    ["refused", "reliefRefused"], ["freedBytes", "reliefFreedBytes"], ["backupMissing", "reliefBackupMissing"]]) {
+    if (Number.isFinite(relief[key])) out[name] = relief[key];
+  }
+  return out;
+}
+
+export function storeGrowthBreach(gauges, limits = STORE_GROWTH_LIMITS) {
+  if (Number(gauges?.maxProjectionBytes) > limits.maxProjectionBytes) return "maxProjectionBytes";
+  if (Number(gauges?.dbBytes) > limits.dbBytes) return "dbBytes";
+  return null;
 }
 
 export const JOBS = Object.freeze([
@@ -240,12 +360,16 @@ export const JOBS = Object.freeze([
     name: "webhook-dispatch",
     cadenceMs: MINUTE_MS,
     runtimes: Object.freeze(["worker", "node"]),
-    enabled(_env, store) { return store ? webhookDueAt(store) != null : true; },
+    enabled(_env, store) { return store ? webhookNextDue(store) != null : true; },
     disabledReason: () => "No webhook delivery is waiting",
-    nextDueAt: store => webhookDueAt(store),
+    nextDueAt: store => webhookNextDue(store),
     async run(store, ctx) {
-      if (ctx.room?.drainWebhookDeliveries) return ctx.room.drainWebhookDeliveries();
-      return store.agentPlugin.drainWebhookDeliveries({ fetchImpl: ctx.fetchImpl, dnsResolvers: ctx.dnsResolvers });
+      const drained = ctx.room?.drainWebhookDeliveries
+        ? await ctx.room.drainWebhookDeliveries()
+        : await store.agentPlugin.drainWebhookDeliveries({ fetchImpl: ctx.fetchImpl, dnsResolvers: ctx.dnsResolvers });
+      try { catchUpMissedWakes(store); }
+      catch (error) { console.error(`missed wake catch-up failed: ${error?.message ?? "failed"}`); }
+      return drained;
     }
   }),
   defineJob({
@@ -273,10 +397,10 @@ export const JOBS = Object.freeze([
     enabled(_env, store) {
       if (!store) return true;
       const now = Date.now();
-      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null;
+      return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null || staleSweepDueAt(store, now) != null;
     },
-    disabledReason: () => "No open pull request is waiting",
-    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now),
+    disabledReason: () => "No open pull request or stale board sweep is waiting",
+    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now) ?? staleSweepDueAt(store, now),
     async run(store, ctx) {
       if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
       const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });
@@ -313,23 +437,109 @@ export const JOBS = Object.freeze([
     enabled: () => true,
     disabledReason: () => null,
     async run(store, ctx) {
+      let integrity;
       try {
-        const integrity = ctx.room?.verifyRoomIntegrity
+        integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
-        return logIntegrity(integrity);
+        // Isolated failures: the store contained one record's blast radius
+        // and returned the outstanding failures instead of throwing. The
+        // tick still fails — the verdict is unchanged — with the same
+        // sanitized detail shape as the throw path (stable codes and
+        // classes only; record ids stay in the operator log line). The
+        // result is assigned, not returned, so the parked-block count
+        // below observes this path too. One extension: when an
+        // outstanding failure is recorded against a room, the detail names
+        // that room (INTEGRITY_ROOM_RECORD_STEPS) so the poisoned room is
+        // reachable from the operator surfaces, not only from this log line.
+        const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
+        if (failures.length) {
+          const first = failures.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
+            && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? failures[0];
+          const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
+          if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
+          if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
+            failure.recordId = first.recordId;
+          }
+          // The operator line carries the allowlisted fields only —
+          // sub-check, record id, stable code, class, count. The stored
+          // failure message is a diagnostic for the record's owner, not
+          // log text: re-emitting it here every tick would republish
+          // whatever a record's error once contained.
+          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
+          const summary = {};
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips"]) {
+            if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
+          }
+          integrity = {
+            ...summary,
+            errors: failures.length,
+            scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+            failureDetail: failure
+          };
+        }
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
         // #3334: the failure detail survives reporting — the heartbeat turns
         // scanError into lastError and persists failureDetail, so the health
         // surface names the failing sub-check instead of "1 error(s) in tick".
-        const failure = classifyIntegrityError(error);
-        return {
-          errors: 1,
-          scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
-          failureDetail: failure
-        };
+        integrity = integrityFailure(error);
       }
+      // A parked backfill does not throw again, and most rotation ticks do
+      // not visit it. Observe the durable set AFTER doing the normal work,
+      // even on a budget exit, so healthy rooms keep progressing while both
+      // runtimes retain an active, safe failure until every block clears.
+      try {
+        // Event-level parks become quarantines before the count, so one
+        // rejected event stops failing the tick. A log gap (skipped=0) still
+        // fails it. Reason and component are tokens; the error text, which
+        // can name the room, stays off this result.
+        try { healBackfillQuarantines(store); } catch { /* the read below reports an unreadable table */ }
+        const observed = store.db.prepare(`SELECT
+          (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=0) AS n,
+          (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=1) AS quarantined,
+          (SELECT reason FROM messages_backfill_blocks WHERE skipped=0 AND reason<>'' LIMIT 1) AS blockReason,
+          (SELECT component FROM messages_backfill_blocks WHERE skipped=0 AND component<>'' LIMIT 1) AS blockComponent,
+          (SELECT reason FROM messages_backfill_blocks WHERE reason<>'' ORDER BY skipped LIMIT 1) AS anyReason,
+          (SELECT component FROM messages_backfill_blocks WHERE component<>'' ORDER BY skipped LIMIT 1) AS anyComponent`).get();
+        const blockedRooms = observed?.n;
+        if (!Number.isSafeInteger(blockedRooms) || blockedRooms < 0) {
+          throw new Error("Invalid database messages backfill block count");
+        }
+        const token = value => typeof value === "string" && PUBLIC_BLOCK_TOKEN.test(value);
+        const reason = token(observed.blockReason) ? observed.blockReason : (blockedRooms === 0 && token(observed.anyReason) ? observed.anyReason : null);
+        const component = token(observed.blockComponent) ? observed.blockComponent : (blockedRooms === 0 && token(observed.anyComponent) ? observed.anyComponent : null);
+        const extra = { blockedRooms };
+        if (Number.isSafeInteger(observed.quarantined) && observed.quarantined > 0) extra.quarantinedEvents = observed.quarantined;
+        if (reason) extra.blockReason = reason;
+        if (component) extra.blockComponent = component;
+        integrity = { ...integrity, ...extra };
+        const backfillDetail = integrity?.failureDetail?.subcheck === "messages_backfill"
+          || integrity?.failureDetail?.code === "messages_backfill_failed";
+        if (blockedRooms > 0 && !summaryFailed(integrity)) {
+          const failure = integrityFailure({ integritySubcheck: "messages_backfill" });
+          if (token(observed.blockReason)) failure.failureDetail.reason = observed.blockReason;
+          if (token(observed.blockComponent)) failure.failureDetail.component = observed.blockComponent;
+          integrity = { ...integrity, ...failure };
+        } else if (backfillDetail && (token(observed.blockReason) || token(observed.blockComponent))) {
+          integrity = { ...integrity, failureDetail: {
+            ...integrity.failureDetail,
+            ...(token(observed.blockReason) ? { reason: observed.blockReason } : {}),
+            ...(token(observed.blockComponent) ? { component: observed.blockComponent } : {})
+          } };
+        }
+      } catch (error) {
+        // The general read() helper swallows SQL errors; using it here would
+        // turn an unreadable block table into a false recovery. Preserve an
+        // earlier failure, otherwise report this read failure without raw
+        // record identifiers or exception text on the public health surface.
+        if (!summaryFailed(integrity)) {
+          integrity = { ...integrity, ...integrityFailure({
+            integritySubcheck: "messages_backfill", message: error?.message ?? error
+          }) };
+        }
+      }
+      return logIntegrity(integrity);
     }
   }),
   defineJob({
@@ -362,9 +572,33 @@ export const JOBS = Object.freeze([
     }
   }),
   defineJob({
+    name: "escrow-epochs",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // #3693/#3844: payout epochs progress on their own. The keeper is due
+    // whenever any bounty is waiting on time — an accepted bounty past its
+    // challenge window, an approved one awaiting its sweep, a dispute past
+    // its timeout, a deadline refund. One closeEpoch per room per tick:
+    // the two-step close (approve, then sweep) is never collapsed.
+    enabled(_env, store) { return store ? escrowEpochNextDueAt(store, Date.now()) != null : true; },
+    disabledReason: () => "No bounty is waiting on an epoch close",
+    nextDueAt: (store, now) => escrowEpochNextDueAt(store, now),
+    async run(store, ctx) {
+      if (ctx.room?.progressEscrowEpochs) return ctx.room.progressEscrowEpochs();
+      return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now() });
+    }
+  }),
+  defineJob({
     name: "room-backup",
     cadenceMs: DAY_MS,
     slow: true,
+    // #3894: a required job's disable is a configuration failure, not
+    // healthy idle. Work-gated jobs are disabled whenever nothing is
+    // waiting — that is their resting state. This job is config-gated:
+    // disabled means the deployment cannot take backups at all (a
+    // dropped binding looks exactly like an intentional disable), so
+    // the health rollup and the external probe grade it as failing.
+    required: true,
     runtimes: Object.freeze(["worker"]),
     singleRuntimeReason: "Daily backup writes the ROOM_BACKUPS R2 bucket or the ROOM_BACKUPS_KV namespace. A Node process has neither binding.",
     enabled: env => backupConfigured(env),
@@ -379,6 +613,25 @@ export const JOBS = Object.freeze([
     }
   }),
   defineJob({
+    name: "patrol",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // ClueBot phase 1: enabled only while some room has events the patrol
+    // has not tailed, so an idle room never wakes for it (the registry's
+    // standing rule). Read-only: the patrol files findings, it never acts.
+    enabled: (_env, store) => (store ? patrolPending(store) : true),
+    disabledReason: () => "No unpatrolled events are waiting",
+    // Due at the caller's `now`, never a live Date.now(): a fresh clock
+    // read lands a hair past the arming computation, slips past the
+    // registry's push-out-by-one-cadence rule, and arms the alarm
+    // immediately — an idle room would wake at once (jobs-alarm proof).
+    nextDueAt: (store, now) => (patrolPending(store) ? now : null),
+    async run(store, ctx) {
+      if (ctx.room?.patrolTick) return ctx.room.patrolTick();
+      return runPatrolTick(store, { deadline: ctx.deadline });
+    }
+  }),
+  defineJob({
     name: "growth-watch",
     cadenceMs: DEFAULT_INTERVAL_MS,
     runtimes: Object.freeze(["node"]),
@@ -388,6 +641,38 @@ export const JOBS = Object.freeze([
     async run(_store, ctx) {
       if (typeof ctx.growthTick !== "function") return { skipped: 1 };
       return ctx.growthTick();
+    }
+  }),
+  defineJob({
+    name: "store-growth",
+    cadenceMs: HOUR_MS,
+    slow: true,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled: () => true,
+    disabledReason: () => null,
+    // The summary is the watch: the gauges ride the heartbeat on every
+    // tick, and a crossed limit fails the tick by name so the probe
+    // pages before the store reaches the hard cap.
+    // A projection past the line is first relieved through the guarded
+    // archive door (server/store-relief.mjs), then measured again; only a
+    // breach that relief could not clear fails the tick.
+    // Relief needs a verified recovery point (the newest verified daily
+    // backup, at most a day old); without one it archives nothing.
+    async run(store, ctx = {}) {
+      let gauges = measureStoreGrowth(store);
+      let relief = null;
+      if (storeGrowthBreach(gauges) === "maxProjectionBytes") {
+        const { maxProjectionBytes: limitBytes } = STORE_GROWTH_LIMITS;
+        const recovery = typeof ctx.recoveryPoint === "function" ? await ctx.recoveryPoint() : await verifiedRecentBackup(ctx.env);
+        relief = await relieveProjectionsIncrementally(store, { limitBytes, recovery });
+        // Flat counts: the heartbeat keeps only top-level numbers, so a
+        // nested relief object never reached /api/health/jobs.
+        gauges = { ...measureStoreGrowth(store), ...reliefCounts(relief) };
+      }
+      const breach = storeGrowthBreach(gauges);
+      if (!breach) return gauges;
+      console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
+      return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit" } };
     }
   })
 ]);
@@ -434,7 +719,10 @@ export function jobIsDue(job, store, now, lastRanAt, cadenceMs = job.cadenceMs) 
     return next != null && next <= now;
   }
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
-  return last + cadenceMs <= now;
+  // Only slow jobs get slack: they run from the safety-net cron, so a tick
+  // landing a few seconds before the anchor would otherwise skip a period.
+  const slack = job.slow ? SLOW_JOB_DUE_SLACK_MS : 0;
+  return last + cadenceMs - slack <= now;
 }
 
 export function lastRanFrom(stored) {
@@ -466,6 +754,27 @@ function finiteInterval(value, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number)) throw new TypeError("interval must be a finite number");
   return number;
+}
+
+// #3767 (with #3698): budgetExceeded is cooperative progress when the
+// tick moved the job's own counters — the next tick continues the
+// remainder. It is not progress when the tick did nothing at all: the
+// job was starved before it started (its deadline had already passed)
+// and the stall would otherwise be recorded as a plain success on every
+// tick. Progress is a positive value in any of the summary's own work
+// counters; the fields below never count — the exhaustion signal
+// itself, the failure channel (already graded as a failure), a
+// remaining-work gauge, a timestamp, and a configured batch limit.
+const NON_PROGRESS_FIELDS = new Set(["budgetExceeded", "errors", "pending", "at", "batchLimit"]);
+export const BUDGET_EXHAUSTED_NO_PROGRESS = "budget_exceeded_no_progress";
+export function budgetExhaustedWithoutProgress(result) {
+  if (!result || typeof result !== "object") return false;
+  if (!(result.budgetExceeded === true || Number(result.budgetExceeded) > 0)) return false;
+  for (const [key, value] of Object.entries(result)) {
+    if (NON_PROGRESS_FIELDS.has(key)) continue;
+    if (typeof value === "number" && Number.isFinite(value) && value > 0) return false;
+  }
+  return true;
 }
 
 // Node has no Durable Object alarm. One unref'd timer asks each node job
@@ -534,13 +843,27 @@ export function startNodeScheduler({
     for (const key of ["code", "subcheck", "errorClass", "recordClass"]) {
       if (typeof detail[key] === "string" && detailToken.test(detail[key])) out[key] = detail[key];
     }
+    for (const key of ["reason", "component"]) {
+      if (typeof detail[key] === "string" && PUBLIC_BLOCK_TOKEN.test(detail[key])) out[key] = detail[key];
+    }
+    // A room id named by the integrity job (room-record steps only; the
+    // job attaches it, this layer only shape-checks it). Ids contain
+    // hyphens, which the token pattern above does not allow.
+    if (typeof detail.recordId === "string" && SAFE_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
     return Object.keys(out).length ? out : null;
   };
-  const record = (name, at, ok, { error = null, failure = null, durationMs = null } = {}) => {
+  const record = (name, at, ok, { error = null, failure = null, grade = null, durationMs = null } = {}) => {
     const prior = records.get(name) ?? { consecutiveFailures: 0 };
+    // #3767: the grade names a success that did no work (budget exhausted
+    // with zero progress). Consecutive such ticks are the degraded
+    // signal; any other outcome — progress, an idle tick, or a failure —
+    // breaks the streak and clears the grade.
+    const exhausted = grade === BUDGET_EXHAUSTED_NO_PROGRESS;
     records.set(name, ok
-      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: durationMs, lastSummaryAt: at, lastFailure: null }
-      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error ?? prior.lastError ?? null, consecutiveFailures: prior.consecutiveFailures + 1, lastDurationMs: durationMs, lastFailure: failure });
+      ? { ...prior, lastRunAt: at, lastSuccessAt: at, consecutiveFailures: 0, lastDurationMs: durationMs, lastSummaryAt: at, lastFailure: null,
+        lastGrade: grade, consecutiveNoProgressExhaustions: exhausted ? (prior.consecutiveNoProgressExhaustions ?? 0) + 1 : 0 }
+      : { ...prior, lastRunAt: at, lastErrorAt: at, lastError: error ?? prior.lastError ?? null, consecutiveFailures: prior.consecutiveFailures + 1, lastDurationMs: durationMs, lastFailure: failure,
+        lastGrade: null, consecutiveNoProgressExhaustions: 0 });
   };
   // ctxBase is scheduler-lifetime state, not a per-tick template: jobs may
   // store progress on it across ticks (runNodeRetention advances
@@ -562,8 +885,12 @@ export function startNodeScheduler({
         if (!jobEnabled(job, env, store)) continue;
         const cadenceMs = overrides.get(job.name) ?? job.cadenceMs;
         if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs)) continue;
-        const deadline = at + (job.budgetMs ?? JOB_BUDGET_MS);
+        // #3767: the budget window opens at this job's own start, not at
+        // the pass start — the Worker builds each runner's deadline when
+        // the job runs. A pass-relative deadline let early jobs burn the
+        // later jobs' windows down to nothing.
         const startedAt = now();
+        const deadline = startedAt + (job.budgetMs ?? JOB_BUDGET_MS);
         try {
           // Jobs run sequentially under the `running` guard, so sharing
           // ctxBase is safe; only the per-job deadline changes between runs.
@@ -571,12 +898,19 @@ export function startNodeScheduler({
           const result = await job.run(store, ctxBase);
           lastRan.set(job.name, at);
           const failed = summaryFailed(result);
+          // #3767/#3698: a tick that exhausted its budget having done
+          // zero work is not an unqualified success — name the
+          // exhaustion in the outcome and the run record. It is still
+          // not a failure: budgetExceeded with progress made is
+          // cooperative, and the next tick continues the remainder.
+          const grade = !failed && budgetExhaustedWithoutProgress(result) ? BUDGET_EXHAUSTED_NO_PROGRESS : null;
           record(job.name, at, !failed, {
             error: failed ? (result.scanError ? `scanError: ${oneLine(result.scanError)}` : `${Number(result.errors) || 0} error(s) in tick`) : null,
             failure: failed ? failureDetailOf(result) : null,
+            grade,
             durationMs: now() - startedAt
           });
-          outcomes.push({ job: job.name, ok: true, result });
+          outcomes.push(grade ? { job: job.name, ok: true, grade, result } : { job: job.name, ok: true, result });
         } catch (error) {
           lastRan.set(job.name, at);
           record(job.name, at, false, { error: oneLine(error?.message ?? error), failure: failureDetailOf(error), durationMs: now() - startedAt });
@@ -618,8 +952,12 @@ export function startNodeScheduler({
           lastErrorSubcheck: rec.lastFailure?.subcheck ?? null,
           lastErrorClass: rec.lastFailure?.errorClass ?? null,
           lastErrorRecordClass: rec.lastFailure?.recordClass ?? null,
+          lastErrorReason: rec.lastFailure?.reason ?? null,
+          lastErrorComponent: rec.lastFailure?.component ?? null,
           lastDurationMs: rec.lastDurationMs ?? null,
           lastSummaryAt: iso(rec.lastSummaryAt),
+          lastGrade: rec.lastGrade ?? null,
+          consecutiveNoProgressExhaustions: rec.consecutiveNoProgressExhaustions ?? 0,
           consecutiveFailures: rec.consecutiveFailures ?? 0
         };
       });

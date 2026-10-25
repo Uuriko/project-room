@@ -105,7 +105,12 @@ async function deployLag({ liveRevision, githubApi = GITHUB_API, repo = REPO, to
   const compare = await fetch(`${githubApi}/repos/${repo}/compare/${liveRevision}...${head.sha}`, { headers });
   if (!compare.ok) return { status: "unknown", mainRevision: head.sha, reason: `compare ${compare.status}` };
   const diff = await compare.json();
-  const undeployed = (diff.commits ?? []).map(c => Date.parse(c.commit?.committer?.date ?? c.commit?.author?.date)).filter(Number.isFinite);
+  // Lag is how long main has held undeployed work: walk main's first-parent chain only, so a
+  // freshly merged branch whose own commits are old does not read as long-undeployed.
+  const bySha = new Map((diff.commits ?? []).map(c => [c.sha, c]));
+  const firstParent = [];
+  for (let sha = head.sha; bySha.has(sha); sha = bySha.get(sha).parents?.[0]?.sha) firstParent.push(bySha.get(sha));
+  const undeployed = (firstParent.length ? firstParent : diff.commits ?? []).map(c => Date.parse(c.commit?.committer?.date ?? c.commit?.author?.date)).filter(Number.isFinite);
   const oldest = undeployed.length ? Math.min(...undeployed) : now;
   const lagHours = Math.round((now - oldest) / 36e5 * 10) / 10;
   return { status: diff.status === "ahead" && lagHours > maxLagHours ? "stale" : diff.status === "ahead" ? "pending" : diff.status,

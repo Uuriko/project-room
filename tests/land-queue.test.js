@@ -17,7 +17,6 @@ import {
   nextPollBackoff, POLL_BACKOFF_STEPS_MS, migrateLandQueueClaims
 } from "../server/land-queue.mjs";
 import { createWork, claimWork } from "../server/work-claims.mjs";
-import { landCardHtml, shortSha } from "../src/land-queue-board.js";
 
 const SHA = "a".repeat(40);
 const NEXT = "b".repeat(40);
@@ -703,29 +702,7 @@ test("a spent cron budget does not read GitHub for a due pull request", async t 
   assert.equal(github.calls.length, duringAdd);
 });
 
-test("the board card shows the pull request, short head, checks, behind, and tip", () => {
-  assert.equal(shortSha(SHA), "aaaaaaa");
-  assert.equal(shortSha("abc"), "");
-  const html = landCardHtml({
-    prNumber: 969,
-    title: `<script>alert("x")</script>`,
-    url: "https://github.com/acme/demo/pull/969",
-    headSha: SHA,
-    checks: "green",
-    behind: true,
-    mergedSha: null,
-    tip: { sourceRevision: "rev", buildId: null }
-  });
-  assert.match(html, /#969/);
-  assert.match(html, /land-checks-green/);
-  assert.match(html, /aaaaaaa/);
-  assert.match(html, /behind/);
-  assert.match(html, />tip</);
-  assert.match(html, /&lt;script&gt;/);
-  assert.doesNotMatch(html, /<script>/);
-  const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  assert.match(page, /id="land-queue-panel"/);
-  assert.match(page, /id="land-queue-list"/);
+test("land queue refresh remains available to the backend without a human panel", () => {
   const registry = readFileSync(new URL("../server/jobs.mjs", import.meta.url), "utf8");
   assert.match(registry, /refreshLandQueue\(\)/);
 });

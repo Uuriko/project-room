@@ -1,9 +1,14 @@
+import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
+import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
+import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
+import { messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
 import { PublicWorkReviews, publicWorkReviewsSchema } from "./public-work-reviews.mjs";
 import { PublicWorkSuccessors, publicWorkSuccessorsSchema } from "./public-work-successors.mjs";
+import { PublicWorkSettlement, publicWorkSettlementSchema } from "./public-work-settlement.mjs";
 import { ProjectOffers, projectOffersSchema } from "./project-offers.mjs";
 import { DemigodOffers, demigodOffersSchema } from "./demigod-offers.mjs";
 import { DemigodContracts, demigodContractsSchema } from "./demigod-contracts.mjs";
@@ -11,6 +16,7 @@ import { BuyerSignoff, buyerSignoffSchema } from "./buyer-signoff.mjs";
 import { TrialTasks, trialTaskSchema } from "./trial-task-store.mjs";
 import { gmailSchema } from './gmail-mailbox.mjs';
 import { DatabaseSync } from "node:sqlite";
+import { isDeepStrictEqual } from "node:util";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 // ServiceError lives in server/service-error.mjs (shared, cycle-free); the
 // local import keeps the binding in scope (e.g. for StorageUnavailableError
@@ -24,11 +30,11 @@ import { createRoomFloodGuard } from "./room-flood-guard.mjs";
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 export { ServiceError };
 import {
-  applyEvent, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
+  applyEvent, replayEvents, emptyRoomState, event, EVENT_TYPES as T, WORK_STATES, INVITATION_ROLE_POLICIES,
   INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES,
   MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION, PIN_DM_PARTY_POLICY_VERSION, validId, memberCan, ROOM_POLICY_FIELDS, DEFAULT_CHANNEL_ID,
   TRUST_OFF_CODE, CHANNEL_ARCHIVED_CODE, trustOffMessage, firstBlockedWakeTarget,
-  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES
+  MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES, ownMember
 } from "../src/events.js";
 import { PIN_COMMAND_SHAPES, isPinned } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -38,20 +44,23 @@ import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA 
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
 import { ensureSpendGrantsSchema, registerTransactionRunner, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
-import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
+import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal, ChannelUpdateJournal, channelJournalSchema, SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns, JevShadowJournal, jevShadowSchema, SlaBreachAlertJournal, slaBreachAlertSchema, membershipDelegationJournalSchema, MembershipDelegationJournal } from "./journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
-import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity } from "./messages-store.mjs";
+import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
-import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
+import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
+import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, messageVisibleToViewer } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
 import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
+import { PublicAgentPages, agentPublicPageSchema } from "./public-agent-page.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
@@ -60,25 +69,22 @@ import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
 import { accountTermsSchema, publicAbuseSchema, publicUnpublishSchema, recordSignupTerms } from "./legal-store.mjs"; // terms, public reports, unpublish (G-SEC-11, G-SEC-14)
 import { roomAssistantSchema } from "./room-assistant.mjs";
 import { RequestRuns, requestRunSchema } from "./request-runs.mjs";
-import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema } from "./wake-queue.mjs";
+import { WakeQueue, wakeQueueSchema, wakeQueuePauseSchema, wakeQueuePauseBySchema } from "./wake-queue.mjs";
 import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
-import { PUBLIC_READ_MODEL_SCHEMA, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
+import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, ensurePublicReceiptAgentIdsColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
-import { updatesSchema } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
-import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
+import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
+import { buildRoomDigest } from "./room-digest.mjs"; // C-06 room digest composition.
+import { roomAttention } from "./needs-me.mjs"; // C-06: per-room needs-me slice for the digest.
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
-import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
-import { JevShadowJournal, jevShadowSchema } from "./jev-shadow-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
-import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { InboxHandoffJournal, inboxHandoffRoomSchema, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mjs"; // RC-2026-09-19-062: typed handoff envelopes.
 import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
-import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "./membership-delegation-journal.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
 import { agentRoomSchema, ensureAgentRoomRequestIdColumn } from "./agent-rooms.mjs";
@@ -94,10 +100,12 @@ import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, boardRowForItem, 
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { GuestInvites, guestInviteSchema, guestSelfServeSchema } from "./guest-invites.mjs";
+import { GuestInvites, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema } from "./guest-invites.mjs";
 import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch.mjs";
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
+import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -146,7 +154,9 @@ const RETIRED_BOARD_V2_SCHEMA = `
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { wakeForAgent } from "./sleeper-wake.mjs";
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
+import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
 import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queue.mjs";
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
@@ -178,10 +188,21 @@ import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   sessionClaimConflict,
   validateSessionBudget, budgetLimitExceeded, roundLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
-  validateAttemptEnvironment, validateAttemptOutputs, ensureWorkControlDefaults
+  validateAttemptEnvironment, validateAttemptModel, validateAttemptOutputs, ensureWorkControlDefaults
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
+
+// The Worker's room database (Durable Object SQL) rejects a statement with
+// more than 100 bound values ("too many SQL variables"); Node's SQLite
+// allows 32766, so a list that grows with input passes the Node suite and
+// fails on prod (the r38 patrol, the r39 restore look-up). Set
+// ROOM_SQL_BIND_LIMIT=100 to make a Node store enforce the Worker's limit.
+// Read per open, so a test can set it before constructing a store.
+export function nodeSqlLimits(env = globalThis.process?.env ?? {}) {
+  const limit = Number(env.ROOM_SQL_BIND_LIMIT);
+  return Number.isInteger(limit) && limit > 0 ? { limits: { variableNumber: limit } } : {};
+}
 
 // ServiceError is defined in server/service-error.mjs and re-exported by
 // store.mjs; see the import at the top of this file.
@@ -626,6 +647,7 @@ const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId =
     : event.type === T.SESSION_STARTED ? request.status === "processing"
       : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status)
   && (event?.data?.environment ?? null) === (request.environment ?? null)
+  && (event?.data?.model ?? null) === (request.model ?? null)
   && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
@@ -648,7 +670,7 @@ const nodeStorage = {
   transaction(db, fn, readOnly, { isolated = false } = {}) {
     const run = () => {
       const result = fn();
-      if (isolated && result && typeof result.then === "function") throw new Error("Room transactions must remain synchronous");
+      if (result && typeof result.then === "function") throw new Error("Room transactions must remain synchronous");
       return result;
     };
     if (db.isTransaction) {
@@ -688,12 +710,6 @@ const nodeStorage = {
   }
 };
 const work = "workItemId expectedRevision";
-// Commands that name an existing message, and which field names it.
-const ARCHIVED_REF_FIELDS = Object.freeze({
-  [T.MESSAGE_EDITED]: "messageId", [T.MESSAGE_DELETED]: "messageId", [T.MESSAGE_REDACTED]: "messageId",
-  [T.MESSAGE_REACTION_SET]: "messageId", [T.MESSAGE_PINNED]: "messageId", [T.MESSAGE_UNPINNED]: "messageId",
-  [T.MESSAGE_POSTED]: "replyToId"
-});
 
 const shapes = {
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
@@ -722,7 +738,7 @@ const shapes = {
   [T.MESSAGE_EDITED]: "messageId body expectedMessageRevision",
   [T.MESSAGE_DELETED]: "messageId expectedMessageRevision reason",
   [T.REPLY_REQUEST_CANCELLED]: "requestMessageId expectedRequestRevision reason",
-  [T.MESSAGE_REACTION_SET]: "messageId reaction active",
+  [T.POLL_VOTED]: "messageId option active",
   ...PIN_COMMAND_SHAPES,
   [T.CHANNEL_CREATED]: "channelId name",
   [T.CHANNEL_RENAMED]: "channelId name",
@@ -745,7 +761,7 @@ const shapes = {
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason sourceMessageId`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
-  [T.SESSION_STARTED]: `${work} budget environment`,
+  [T.SESSION_STARTED]: `${work} budget environment model`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
   [T.SESSION_STOP_REQUESTED]: work,
   [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs`,
@@ -763,7 +779,7 @@ const shapes = {
 export const COMMAND_TYPES = Object.freeze(Object.keys(shapes));
 
 // An unknown type names the closest real types, so "message.post" or
-// "message.reacted" points at message.posted / message.reaction_set
+// "message.edit" points at message.edited
 // instead of a bare "invalid type".
 function unknownCommandTypeMessage(type) {
   const given = typeof type === "string" ? type.slice(0, 64) : "";
@@ -781,7 +797,7 @@ function unknownCommandTypeMessage(type) {
   };
   const types = Object.keys(shapes);
   const sameFamily = family ? types.filter(t => t.split(".")[0] === family) : [];
-  // Prefer a same-family type sharing the verb's stem (reacted -> reaction_set).
+  // Prefer a same-family type sharing the verb's stem (edit -> edited).
   const stem = (given.split(".")[1] ?? "").slice(0, 5);
   const stemmed = stem.length >= 4 ? sameFamily.find(t => t.split(".")[1].startsWith(stem)) : undefined;
   const closest = stemmed ?? (given ? [...types].sort((a, b) => distance(given, a) - distance(given, b))[0] : null);
@@ -804,7 +820,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -954,6 +970,31 @@ const inboxNext = (roomId, directMessages, assignments, mentions, directMentions
   return steps.sort((a, b) => Number(b.required === true) - Number(a.required === true));
 };
 
+// B4 agent read-path: compact event shape for polling agents. Drops only
+// envelope fields a poller re-reads but never acts on: the write-path
+// idempotency key, the room id (constant across the whole page — the request
+// already names the room), a null causation id, and mention-chip display
+// names (the member id is the actionable part; names live on the roster).
+// Event content (type, actor, timestamp, data) is never touched.
+const compactEventForPoll = event => {
+  if (!event || typeof event !== "object" || Array.isArray(event)) return event;
+  const out = {};
+  for (const [name, value] of Object.entries(event)) {
+    if (name === "idempotencyKey" || name === "roomId") continue;
+    if (name === "causationId" && value === null) continue;
+    if (name === "mentions" && Array.isArray(value)) {
+      out.mentions = value.map(chip => {
+        if (!chip || typeof chip !== "object") return chip;
+        const { displayName, ...rest } = chip;
+        return rest;
+      });
+      continue;
+    }
+    out[name] = value;
+  }
+  return out;
+};
+
 // RC-2026-09-18-054: presence guidance — who is around and how to reach
 // them (DM via the message.posted command with toMemberId).
 const presenceNext = (roomId, memberIds) => {
@@ -1071,7 +1112,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
-  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@2"],
+  [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
   [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
@@ -1088,22 +1129,23 @@ function roomSchemaStamp() {
     referralInviteSchema, referralSchema,
     shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
+    wakeQueuePauseBySchema,
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
-    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema,
+    roomPublicFaceSchema, agentPublicPageSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
-    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema,
+    publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
     accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
     INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
-    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA,
+    ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
     // stamp matches skips the whole schema pass, so any DDL the pass applies
@@ -1132,7 +1174,29 @@ const INTEGRITY_ROOM_STATE_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_room_s
   sequence INTEGER NOT NULL,
   projection_bytes INTEGER NOT NULL
 )`;
+// Durable record of isolated integrity failures: one row per (step, record)
+// that a check has failed. Rows are written when a failure is isolated and
+// deleted when the record next verifies clean, so an outstanding row always
+// means "still failing, still reported" — never a silent pass.
+const INTEGRITY_FAILURES_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_failures (
+  step TEXT NOT NULL,
+  record_id TEXT NOT NULL DEFAULT '',
+  code TEXT NOT NULL DEFAULT '',
+  message TEXT NOT NULL DEFAULT '',
+  failures INTEGER NOT NULL DEFAULT 1,
+  first_seen_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  PRIMARY KEY (step, record_id)
+)`;
 const INTEGRITY_SWEEP_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN sweep_after TEXT NOT NULL DEFAULT ''";
+const INTEGRITY_DEFERRED_SKIPS_COLUMN = "ALTER TABLE integrity_job_cursor ADD COLUMN deferred_skips INTEGER NOT NULL DEFAULT 0";
+// #3896: consecutive verifyRoomIntegrity calls in which the deferred
+// batch may complete zero steps before the batch is run FIRST instead.
+// Two starved ticks are tolerated (a single heavy tick is ordinary);
+// the third call guarantees the batch progress before anything else
+// can eat the budget, so starvation is bounded and counted, never a
+// silent success forever.
+const DEFERRED_STARVATION_LIMIT = 2;
 // #3334: tag an integrity failure with the sub-check that threw, so the job
 // layer can report WHICH check failed on the public health surface. Only the
 // sub-check name (a fixed enum in server/jobs.mjs) is attached — never record
@@ -1142,6 +1206,71 @@ export function tagIntegritySubcheck(error, subcheck) {
     try { error.integritySubcheck = subcheck; } catch { /* frozen errors keep the generic classification path */ }
   }
   return error;
+}
+// Operational failures indict the store or the environment — schema
+// damage, the typed storage refusal, lock contention — not a record.
+// Isolating one as a per-record data failure would advance the cursor
+// past a systemic failure and re-report it as drift, so the deferred
+// batch propagates these to the job's throw path (which classifies them
+// schema/storage) with the failing transaction's rollback intact.
+// Recognized integrity verdicts — the reconciliation refusals and
+// mismatch errors the verify paths throw — are not operational and
+// isolate as before.
+export function isOperationalIntegrityError(error) {
+  if (isStorageUnavailable(error)) return true;
+  if (error?.code === "storage_unavailable" || error?.code === "SQLITE_BUSY") return true;
+  if (Number.isInteger(error?.errcode) && (error.errcode & 0xff) === 5) return true; // SQLITE_BUSY
+  const message = String(error?.message ?? error ?? "");
+  return /no such (table|column)|missing schema/i.test(message) || /database is locked/i.test(message);
+}
+// Whether a deferred step's return proves it verified its whole scope
+// this visit. The two budgeted messages steps report their coverage
+// explicitly, and a step-scoped record from an earlier visit clears only
+// against that explicit successful verification — a budget-exhausted
+// backfill (done=false) or a parity sweep that checked no room must not
+// clear it. Every other step's contract is a full verify per visit, so
+// returning without throwing is the proof.
+function stepVerifiedScope(name, result) {
+  if (name === "messages_backfill") return result?.done === true && !result?.budgetExceeded && (result?.failed?.length ?? 0) === 0 && (result?.blocked?.length ?? 0) === 0;
+  if (name === "messages_parity") return (result?.checked ?? 0) > 0;
+  return true;
+}
+// The only diagnostics a durable integrity-failure record may carry.
+// Arbitrary exception text is never persisted: parser and driver errors
+// can quote record bodies, and the stored message is re-logged on every
+// tick until the record clears. Fixed verdict templates survive with
+// their integer counts and the record's own id; anything else becomes a
+// generic line naming the step.
+const INTEGRITY_MESSAGE_CONSTANTS = new Set([
+  "Invitation record requires operator reconciliation",
+  "Help invitation history requires operator reconciliation"
+]);
+const INTEGRITY_MESSAGE_ID = "[A-Za-z0-9][A-Za-z0-9._-]*";
+const INTEGRITY_PARITY_COUNTS = new RegExp(
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): projection count (\\d+), table count (\\d+), projection last seq (\\d+), table last seq (\\d+)$`);
+const INTEGRITY_PARITY_ARCHIVED = new RegExp(
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): archived rows (\\d+), marker count (\\d+)$`);
+const INTEGRITY_PARITY_MISSING = new RegExp(
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): stored message body missing$`);
+const INTEGRITY_PARITY_RECORD = new RegExp(
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): current record (${INTEGRITY_MESSAGE_ID}) differs$`);
+const INTEGRITY_BACKFILL_STOP = new RegExp(
+  `^messages backfill stopped at (\\d+) before room (${INTEGRITY_MESSAGE_ID}) reached sequence (\\d+)$`);
+function allowlistedIntegrityMessage(step, error) {
+  const text = String(error?.message ?? error);
+  if (INTEGRITY_MESSAGE_CONSTANTS.has(text)) return text;
+  const parity = INTEGRITY_PARITY_COUNTS.exec(text);
+  if (parity) return `messages parity failed for ${parity[1]}: projection count ${parity[2]}, table count ${parity[3]}, projection last seq ${parity[4]}, table last seq ${parity[5]}`;
+  const archived = INTEGRITY_PARITY_ARCHIVED.exec(text);
+  if (archived) return `messages parity failed for ${archived[1]}: archived rows ${archived[2]}, marker count ${archived[3]}`;
+  const missing = INTEGRITY_PARITY_MISSING.exec(text);
+  if (missing) return `messages parity failed for ${missing[1]}: stored message body missing`;
+  const record = INTEGRITY_PARITY_RECORD.exec(text);
+  if (record) return `messages parity failed for ${record[1]}: current record ${record[2]} differs`;
+  if (/^messages parity failed for /.test(text)) return "messages parity failed: stored messages disagree with the projection";
+  const backfill = INTEGRITY_BACKFILL_STOP.exec(text);
+  if (backfill) return `messages backfill stopped at ${backfill[1]} before room ${backfill[2]} reached sequence ${backfill[3]}`;
+  return `${step} integrity check failed`;
 }
 const ROOM_SCHEMA_STAMP_SCHEMA = `CREATE TABLE IF NOT EXISTS room_schema_stamp (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
@@ -1167,18 +1296,48 @@ const LOOKUP_INDEXES = `
 
 // MSG-0: parsed projection cache. A hit reads sequence only, so a 64 MiB
 // room does not JSON.parse again until the sequence changes or a rooms
-// write drops the entry. Commit and rollback of a write transaction drop
-// the whole cache, including a parse of uncommitted bytes. Callers receive
+// write drops the entry. Successful commands refill it after outer commit;
+// rollback and unregistered writes discard candidates. Callers receive
 // a frozen snapshot; a rewrite clones it first.
 const PROJECTION_CACHE_MAX_ROOMS = 32;
 const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
-const ROOMS_WRITE = /\b(?:insert\s+into|update|delete\s+from|replace\s+into)\s+rooms\b/i;
+// SQLite accepts quoted/schema-qualified table names and OR conflict clauses.
+// They must invalidate too now that metadata-only commits keep their cache.
+const ROOMS_WRITE = /\b(?:insert(?:\s+or\s+\w+)?\s+into|update(?:\s+or\s+\w+)?|delete\s+from|replace\s+into)\s+(?:(?:\w+|"[^"]+"|`[^`]+`|\[[^\]]+\]|'[^']+')\s*\.\s*)?(?:rooms\b|"rooms"|`rooms`|\[rooms\]|'rooms')/i;
+const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
   if (value === null || typeof value !== "object" || Object.isFrozen(value)) return value;
   if (Array.isArray(value)) { for (const item of value) deepFreeze(item); }
   else { for (const key of Object.keys(value)) deepFreeze(value[key]); }
   return Object.freeze(value);
+}
+
+// Reuse only JSON-stable reducer state. Exotic values (undefined, sparse
+// arrays, -0, accessors, etc.) must still take the canonical cold-read path.
+// Freezing in this same walk prevents later command helpers changing a
+// candidate after its bytes have been persisted.
+// Only this validator can establish JSON stability; externally frozen objects
+// may still contain undefined, accessors or other non-canonical values.
+const verifiedJsonStates = new WeakSet();
+function freezeJsonState(value) {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value) && !Object.is(value, -0);
+  if (typeof value !== "object") return false;
+  if (verifiedJsonStates.has(value)) return true;
+  const array = Array.isArray(value);
+  if (Object.getPrototypeOf(value) !== (array ? Array.prototype : Object.prototype)) return false;
+  const keys = Object.keys(value);
+  if (Reflect.ownKeys(value).length !== keys.length + (array ? 1 : 0) || array && keys.length !== value.length) return false;
+  for (let index = 0; index < keys.length; index++) {
+    const key = keys[index];
+    if (array && key !== String(index)) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    if (!Object.hasOwn(descriptor, "value") || !freezeJsonState(descriptor.value)) return false;
+  }
+  Object.freeze(value);
+  verifiedJsonStates.add(value);
+  return true;
 }
 
 class ProjectionCache {
@@ -1207,9 +1366,17 @@ class ProjectionCache {
 
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
-    bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1", workItemBoardBackfill = "auto" } = {}) {
+    workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    this.verifyProjectionCache = verifyProjectionCache === true;
+    if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
+      throw new Error("messageProjectionWindow must be a positive integer or null");
+    if (messageEntityProjection && messageProjectionWindow === null) throw new Error("Entity projection requires a bounded message projection window");
+    this.messageEntityProjection = messageEntityProjection === true;
+    this.messageProjectionWindow = messageProjectionWindow;
+    this.maintainMessageCertification = maintainMessageCertification === true || messageProjectionWindow !== null;
     const coldStart = startColdStart();
     if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
     if (readOnly && integrity === "deferred") throw new Error("Read-only integrity checks stay eager");
@@ -1228,9 +1395,18 @@ export class RoomStore {
     // the threshold and recovers on the next committed write.
     this.storageFailureThreshold = storageFailureThreshold;
     this.storageFailures = 0;
+    // Delta sync: a per-room append stamp, bumped when an events INSERT
+    // commits (see _armProjectionWatch + transaction()). Stream pumps poll
+    // this in-memory counter instead of re-reading the store on a timer; a
+    // stamp is a counter, not a sequence, so a rolled-back append can never
+    // mask a later commit that reuses its sequence.
+    this._appendStamps = new Map();
+    this._pendingAppends = new Set();
+    this._appendListeners = new Set();
     this.now = now;
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
-    this.db = database ?? new DatabaseSync(filename, { readOnly });
+    this.db = database ?? new DatabaseSync(filename, { readOnly, ...nodeSqlLimits() });
+    this.workEntities = workEntities === true;
     this.storagePlatform = storagePlatform;
     registerTransactionRunner(this.db, fn => this.transaction(fn));
     this.shareLinks = new ShareLinks(this);
@@ -1269,6 +1445,7 @@ export class RoomStore {
     this.codeDrops = new CodeDrops(this); // patches agents share in the room (server/code-drops.mjs).
     this.inboxAttachments = new InboxAttachmentBytes(this); // identity-scoped inbox attachment bytes (put, list, get, discard).
     this.publicFace = new PublicFace(this);
+    this.publicAgentPages = new PublicAgentPages(this);
     this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
@@ -1295,6 +1472,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.publicWorkClaims = new PublicWorkClaims(this);
     this.publicWorkReviews = new PublicWorkReviews(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
+    this.publicWorkSettlement = new PublicWorkSettlement(this);
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -1321,11 +1499,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.wakeQueue.verifySchema({ allowAbsent: true });
         this.requestRuns.verifySchema({ allowAbsent: true });
         this.wakeQueue.verifyPauseSchema({ allowAbsent: true });
+        this.wakeQueue.verifyPauseBySchema({ allowAbsent: true });
         this.attention.verifySchema({ allowAbsent: true });
         this.workClaims.verifySchema({ allowAbsent: true });
         this.publicWorkClaims.verifySchema({ allowAbsent: true });
         this.publicWorkReviews.verifySchema({ allowAbsent: true });
         this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
+        this.publicWorkSettlement.verifySchema({ allowAbsent: true });
         verifyPublicWorkClaimFence(this.db, { allowAbsent: true });
         this.nextActions.verifySchema({ allowAbsent: true }); // RC-2026-09-25-911: next-action tables additive, read-only never migrates.
         this.agentConnections.verify();
@@ -1350,6 +1530,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
         this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
+        this.guestInvites.verifyAuthoritySchema({ allowAbsent: true }); // F-5: guest-invite authority provenance, additive, read-only never migrates.
         this.webFetch.verifySchema({ allowAbsent: true }); // RC-2026-09-23-102: web-fetch cache/journal additive, read-only never migrates.
         this.webResearch.verifySchema({ allowAbsent: true }); // RC-2026-09-24-310: research journal additive, read-only never migrates.
         this.quarantineSplits.verifySchema({ allowAbsent: true }); // Quarantine thread splits: additive, read-only never migrates.
@@ -1433,6 +1614,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${referralSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
+    this.db.exec(WORK_REPOSITORY_SCHEMA);
     if (version > 0 && version < 26 && (
       this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.completed' AND json_type(body,'$.data.externalProducer') IS NOT NULL LIMIT 1").get()
       || this.db.prepare("SELECT 1 FROM rooms,json_tree(rooms.projection) WHERE json_tree.key='externalProducer' LIMIT 1").get()
@@ -1566,6 +1748,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.exec(wakeQueueSchema);
       // The pause surface (W4-48) is purely additive as well.
       this.db.exec(wakeQueuePauseSchema);
+      // R327-1: who set each pause, as a separate additive side table (the
+      // guest_selfserve all-or-nothing pattern; legacy stores keep verifying).
+      this.db.exec(wakeQueuePauseBySchema);
       // Attention preferences are purely additive as well (W4-46).
       this.db.exec(attentionSchema);
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
@@ -1619,12 +1804,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // also land on the room ledger as participant-visible events.
       this.db.exec(bondSchema);
       this.db.exec(roomPublicFaceSchema);
+      this.db.exec(agentPublicPageSchema);
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
       // Empty public read-model tables. Filling them is the public-read-model
       // cron (or the opt-in write). The constructor does not scan rooms.
       this.db.exec(PUBLIC_READ_MODEL_SCHEMA);
+      // Result-mode receipts (#3636) record their verification tier on the
+      // public row; tables predating the column gain it additively.
+      ensurePublicReceiptVerificationColumn(this.db);
+      // Directory counts key on the credited identity ids a projection
+      // records; tables predating the column gain it additively.
+      ensurePublicReceiptAgentIdsColumn(this.db);
       // Existing directory rows predate the independent feed visibility bit.
       // Default them on so upgrading does not silently hide public work.
       const directoryColumns = new Set(this.db.prepare("PRAGMA table_info(room_directory_settings)").all().map(c => c.name));
@@ -1641,6 +1833,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // records — purely additive side tables (no events, no projection
       // impact), same pattern.
       this.db.exec(guestSelfServeSchema);
+      // F-5: guest-invite issuing-authority provenance — purely additive
+      // side table (no events, no projection impact), same pattern.
+      this.db.exec(guestInviteAuthoritySchema);
       // RC-2026-09-23-102: web-fetch page cache + per-request journal — purely
       // additive side tables (no events, no projection impact), same pattern.
       this.db.exec(webFetchSchema);
@@ -1754,6 +1949,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.publicWorkSuccessors.verifySchema({ allowAbsent: true });
       this.db.exec(publicWorkSuccessorsSchema);
       this.publicWorkSuccessors.verifySchema();
+      this.publicWorkSettlement.verifySchema({ allowAbsent: true });
+      this.db.exec(publicWorkSettlementSchema);
+      this.publicWorkSettlement.verifySchema();
       // Self-serve agent access requests: purely additive, intentionally outside
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
@@ -1829,11 +2027,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) {
         this.db.exec("ALTER TABLE messages ADD COLUMN record_json TEXT");
       }
+      // v39 keeps bounded reducer history off the room projection. Old rows
+      // remain null until backfill or archive; opening never replays history.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='reducer_extras_json'").get()) {
+        this.db.exec("ALTER TABLE messages ADD COLUMN reducer_extras_json TEXT");
+      }
       // MSG-2: replay cursor. Unfenced. The integrity cron fills it. A warm
       // wake whose stamp matches skips this block; the stamp includes this DDL.
       this.db.exec(MESSAGES_BACKFILL_CURSOR_SCHEMA);
+      migrateMessageReplaySnapshots(this.db);
+      // MSG-2 blocks: rooms parked on an un-replayable event, named for the
+      // operator. Unfenced and additive, like the cursor.
+      this.db.exec(MESSAGES_BACKFILL_BLOCKS_SCHEMA);
+      // The re-diagnosis cadence stamp: existing block rows predate it and
+      // default to 0, which refreshStaleBlocks reads as "clock not
+      // started" — their cadence starts on first sight, like a fresh park.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='last_diagnosed_at'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN last_diagnosed_at INTEGER NOT NULL DEFAULT 0");
+      }
+      // Quarantine bookkeeping. Additive, like last_diagnosed_at: existing
+      // parks stay skipped=0 until healBackfillQuarantines reclassifies an
+      // event-level row. anchor_seq -1 means "no replay anchor stashed".
+      // The CREATE TABLE string is already in the schema stamp, so a warm
+      // wake on an older room re-runs this pass and applies the columns.
+      // String literals, not exec(identifier): the stamp scanner treats a
+      // named exec argument as DDL that must be hashed.
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='reason'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN reason TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='component'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN component TEXT NOT NULL DEFAULT ''");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='attempts'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='skipped'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN skipped INTEGER NOT NULL DEFAULT 0");
+      }
+      if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_blocks') WHERE name='anchor_seq'").get()) {
+        this.db.exec("ALTER TABLE messages_backfill_blocks ADD COLUMN anchor_seq INTEGER NOT NULL DEFAULT -1");
+      }
       if (version > 0 && version < 38) {
+        this.db.prepare("DELETE FROM message_replay_snapshots").run();
         this.db.prepare("DELETE FROM messages_backfill_cursor").run();
+        this.db.prepare("DELETE FROM messages_backfill_state").run();
       }
       // BOARD-WAKE-2: opt-in ready-work preference. Unfenced, empty until an
       // agent opts in. The stamp includes this DDL.
@@ -1841,10 +2078,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Code drops: patch metadata and review checks. Unfenced and additive;
       // the bytes stay in room_attachments. The stamp includes this DDL.
       this.db.exec(CODE_DROPS_SCHEMA);
-      // Phase 1a: message bodies at rest, content-addressed, released by a
-      // trigger when the projection stops referencing them. The stamp
+      // Phase 1a: message bodies at rest, content-addressed. The stamp
       // includes this DDL.
       this.db.exec(PROJECTION_BODIES_SCHEMA);
+      // WRITE-PATH-WINS win 4: the serializer releases unreferenced body
+      // rows itself now; drop the json_each release trigger the schema
+      // used to install, so existing databases lose it on this pass (the
+      // schema string above is part of the stamp, so this pass runs).
+      this.db.exec("DROP TRIGGER IF EXISTS projection_bodies_release");
       // Idempotent: recreates fences for tables the additive schemas just
       // (re)created, and refuses a file whose existing triggers drifted.
       phase("fence");
@@ -1857,6 +2098,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.reminders.verifySchema();
       this.wakeQueue.verifySchema();
       this.wakeQueue.verifyPauseSchema();
+      this.wakeQueue.verifyPauseBySchema();
       this.attention.verifySchema();
       this.moderation.verifySchema();
       this.bountyEscrow.verifySchema(); // Escrowed bounties: additive at v36, verified like the other journals.
@@ -1906,6 +2148,31 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         console.error("work-item board backfill failed at open", error);
       }
     }
+    configureWorkRepository(this.db, this.workEntities);
+    if (this.workEntities && version < 42) this.migrateWorkProjections();
+  }
+
+  // Convert one room atomically; interrupted multi-room runs resume by
+  // skipping already normalized carriers. Reverse reconstructs inline state.
+  migrateWorkProjections({ reverse = false } = {}) {
+    let converted = 0;
+    for (const { id } of this.db.prepare("SELECT id FROM rooms ORDER BY id").all()) {
+      this.transaction(() => {
+        const row = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(id);
+        const raw = JSON.parse(row.projection);
+        const state = hydrateWorkItems(this.db, id, raw);
+        const projection = storedProjection(this.db, id, state, { enabled: this.bodiesAtRest, workEntities: !reverse });
+        if (projection !== row.projection) {
+          this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(projection, id);
+          converted++;
+        }
+        if (reverse) this.db.prepare("DELETE FROM work_entities WHERE room_id=?").run(id);
+        const actual = hydrateWorkItems(this.db, id, JSON.parse(projection));
+        if (JSON.stringify(actual.workItems) !== JSON.stringify(state.workItems)) throw new Error("Work migration comparison failed");
+      });
+    }
+    this._dropProjectionCache();
+    return { converted, reverse };
   }
 
   // Decision #10 operator/test surface: run (or re-run, with force) the
@@ -1983,8 +2250,187 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   backfillMessages(options = {}) {
     return runMessagesBackfill(this, options);
   }
-  checkMessagesParity() {
-    return verifyMessagesParity(this);
+  checkMessagesParity(options = {}) {
+    return verifyMessagesParity(this, options);
+  }
+  // ClueBot phase 1: the resident per-event invariant patrol. Read-only —
+  // it writes only patrol_* tables and files findings; see server/patrol.mjs.
+  patrolTick(options = {}) {
+    return runPatrolTick(this, options);
+  }
+  patrolFindings(options = {}) {
+    return listPatrolFindings(this, options);
+  }
+  patrolBlocks() {
+    return listPatrolBlocks(this);
+  }
+
+  ensureIntegrityFailures() {
+    this.db.exec(INTEGRITY_FAILURES_SCHEMA);
+  }
+
+  // Record one isolated integrity failure durably: step, record id, the
+  // error's stable code when it carries one (else the step's derived code),
+  // and an allowlisted diagnostic message (see allowlistedIntegrityMessage)
+  // — record ids and counts only, never record bodies or arbitrary
+  // exception text. Re-recording the same failure bumps its count, so the
+  // row proves the failure is still live, not a leftover.
+  recordIntegrityFailure(step, recordId, error) {
+    this.ensureIntegrityFailures();
+    const message = allowlistedIntegrityMessage(step, error).slice(0, 240);
+    const code = typeof error?.code === "string" && Number.isFinite(error?.status) && /^[a-z][a-z0-9_]{0,63}$/i.test(error.code)
+      ? error.code
+      : `${step}_failed`;
+    const at = this.now();
+    this.transaction(() => {
+      this.db.prepare(`INSERT INTO integrity_failures (step, record_id, code, message, failures, first_seen_at, last_seen_at)
+        VALUES (?, ?, ?, ?, 1, ?, ?)
+        ON CONFLICT(step, record_id) DO UPDATE SET code=excluded.code, message=excluded.message,
+          failures=integrity_failures.failures + 1, last_seen_at=excluded.last_seen_at`)
+        .run(step, typeof recordId === "string" ? recordId : "", code, message, at, at);
+    });
+  }
+
+  clearIntegrityFailure(step, recordId = "") {
+    this.ensureIntegrityFailures();
+    this.transaction(() => {
+      this.db.prepare("DELETE FROM integrity_failures WHERE step=? AND record_id=?").run(step, recordId);
+    });
+  }
+
+  // Every outstanding isolated failure, in step/record order. The integrity
+  // job reports this list on every tick until it is empty.
+  integrityFailures() {
+    this.ensureIntegrityFailures();
+    return this.db.prepare(`SELECT step, record_id AS recordId, code, message, failures,
+      first_seen_at AS firstSeenAt, last_seen_at AS lastSeenAt
+      FROM integrity_failures ORDER BY step, record_id`).all();
+  }
+
+  // Deferred step 9 with per-room isolation: runMessagesBackfill skips a
+  // room whose log cannot replay and names it in `failed`; record those
+  // durably, and clear the records of rooms that have since caught up (or
+  // no longer exist) so a repaired room stops being reported.
+  runIntegrityBackfillStep(deadline) {
+    const result = this.backfillMessages({ deadline });
+    const failedNow = new Set((result.failed ?? []).map(failure => failure.roomId));
+    for (const failure of result.failed ?? []) {
+      this.recordIntegrityFailure("messages_backfill", failure.roomId, failure.error);
+    }
+    // A room parked by an earlier call (or by a direct backfillMessages
+    // call outside this wrapper) is skipped now, so it never re-enters
+    // `failed` — record the standing block too, or its failure would go
+    // unreported while the room waits for repair.
+    for (const block of result.blocked ?? []) {
+      if (!failedNow.has(block.roomId)) {
+        this.recordIntegrityFailure("messages_backfill", block.roomId, block.error);
+      }
+    }
+    for (const row of this.integrityFailures()) {
+      // Per-room records only: the step-scoped record (record id "") is
+      // the batch loop's to clear, against verified scope coverage —
+      // "" is not a room, so the moot-room rule below must not eat it.
+      if (row.step !== "messages_backfill" || !row.recordId || failedNow.has(row.recordId)) continue;
+      const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(row.recordId);
+      // r52: a room whose park was lifted (its block re-diagnosed clean) and
+      // that did not fail in this call is lagging, not failing: lag is not
+      // an integrity failure for any other room. Without this the record
+      // stood until the room fully caught up, keeping integrity red for days
+      // after the cause was fixed. A later failure re-parks and re-records.
+      const parked = this.db.prepare("SELECT skipped FROM messages_backfill_blocks WHERE room_id=?").get(row.recordId);
+      // A quarantine (skipped=1) is one event, not a room failure. A park
+      // that was lifted, a room that is gone, or a room that has caught up
+      // stops being reported.
+      if (!roomExists || !parked || parked.skipped || messagesBackfillCaughtUp(this.db, row.recordId)) {
+        this.clearIntegrityFailure("messages_backfill", row.recordId);
+      }
+    }
+    return result;
+  }
+
+  // Deferred step 10 with per-room isolation: a room whose messages table
+  // drifted from its projection is recorded and the parity sweep moves on
+  // to the next room in the same visit; a room that certifies clears any
+  // earlier record.
+  runIntegrityParityStep() {
+    // Legacy record shapes would fail parity forever; upgrade them first.
+    this.upgradeLegacyMessageShapes();
+    const result = runMessagesParityCheck(this, {
+      report: ({ roomId, error }) => {
+        if (error) this.recordIntegrityFailure("messages_parity", roomId, error);
+        else this.clearIntegrityFailure("messages_parity", roomId);
+      }
+    });
+    // A room deleted since its failure was recorded is never picked by the
+    // sweep again; its record is moot. The step-scoped record (record id
+    // "") is not a room record — the batch loop clears it, against
+    // verified scope coverage.
+    for (const row of this.integrityFailures()) {
+      if (row.step !== "messages_parity" || !row.recordId) continue;
+      if (!this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(row.recordId)) {
+        this.clearIntegrityFailure("messages_parity", row.recordId);
+      }
+    }
+    return result;
+  }
+
+  // Targeted re-verification of outstanding full-path failures. The
+  // invitation audit and the help-history audit only re-run when the full
+  // path does, and a repaired record usually makes the store match its
+  // snapshot again — so without this recheck, a repaired record would be
+  // reported forever. Deferred-step records are re-verified by their own
+  // rotation and are not touched here.
+  recheckIntegrityFailures() {
+    const rows = this.integrityFailures();
+    for (const row of rows) {
+      if (row.step !== "invitation_audit" || !row.recordId) continue;
+      if (!this.db.prepare("SELECT 1 FROM membership_invitations WHERE id=?").get(row.recordId)) {
+        this.clearIntegrityFailure("invitation_audit", row.recordId);
+        continue;
+      }
+      try {
+        this.verifyInvitationRecord(row.recordId);
+        this.clearIntegrityFailure("invitation_audit", row.recordId);
+      } catch (error) {
+        this.recordIntegrityFailure("invitation_audit", row.recordId, error);
+      }
+    }
+    if (rows.some(row => row.step === "help_history")) {
+      if (!this.helpProjectionPresent()) {
+        for (const row of rows) {
+          if (row.step === "help_history") this.clearIntegrityFailure("help_history", row.recordId);
+        }
+      } else {
+        const helpFailures = [];
+        const help = this.verifyHelpHistory({ collect: helpFailures });
+        const failedRooms = new Set(helpFailures.map(failure => failure.roomId));
+        for (const failure of helpFailures) {
+          this.recordIntegrityFailure("help_history", failure.roomId, failure.error);
+        }
+        for (const roomId of help?.checked ?? []) {
+          if (!failedRooms.has(roomId)) this.clearIntegrityFailure("help_history", roomId);
+        }
+        this.reconcileHelpFailureRecords(help, failedRooms);
+      }
+    }
+  }
+
+  // Reconcile outstanding help-history records against current evidence.
+  // The audit only returns rooms it could see — a repaired room whose
+  // help state and history are entirely gone (while another room still
+  // has help, so the audit still runs) is never in `checked`, and its
+  // record would otherwise be reported forever. A room that no longer
+  // exists, or that carries no help trace the audit can see, cannot be
+  // re-audited: the condition its record named is gone, so the record is
+  // moot — the same rule the no-help-anywhere path applies globally.
+  // Rooms the audit can still see keep their records until they verify.
+  reconcileHelpFailureRecords(help, failedRooms = new Set()) {
+    const auditable = new Set(help?.auditable ?? []);
+    for (const row of this.integrityFailures()) {
+      if (row.step !== "help_history" || failedRooms.has(row.recordId)) continue;
+      const exists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(row.recordId);
+      if (!exists || !auditable.has(row.recordId)) this.clearIntegrityFailure("help_history", row.recordId);
+    }
   }
   // At most `limit` chain members whose cap was never copied off the invite.
   // The mint path refuses a NULL cap, so a tick that stops early fails closed.
@@ -2026,9 +2472,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // then check one caught-up room. This batch runs as the "integrity"
       // job in server/jobs.mjs, so the backfill inherits that job's cadence,
       // budget and runtimes without a second registry entry.
-      ["messages_backfill", () => this.backfillMessages({ deadline })],
-      ["messages_parity", () => this.checkMessagesParity()]
+      ["messages_backfill", () => this.runIntegrityBackfillStep(deadline)],
+      ["messages_parity", () => this.runIntegrityParityStep()]
     ];
+    this.recheckIntegrityFailures();
     let step = this.transaction(() => this.db.prepare("SELECT step FROM integrity_job_cursor WHERE singleton=1").get()?.step ?? 0);
     if (!Number.isInteger(step) || step < 0 || step >= steps.length) step = 0;
     const remember = next => this.transaction(() => {
@@ -2036,29 +2483,81 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         ON CONFLICT(singleton) DO UPDATE SET step=excluded.step`).run(next);
     });
     let ran = 0;
+    let backfillBlocked = [];
     while (ran < 2) {
       if (Date.now() > deadline) {
         // A step that finished is not run again on the next tick.
         if (ran > 0) remember(step);
-        return { ran, next: step, budgetExceeded: 1 };
+        return { ran, next: step, budgetExceeded: 1, failures: this.integrityFailures(), ...(backfillBlocked.length ? { blocked: backfillBlocked } : {}) };
       }
+      const [name, run] = steps[step];
       try {
-        steps[step][1]();
+        const result = run();
+        // A step-scoped record from an earlier wedge clears only when
+        // this visit verifiably covered the step's whole scope (see
+        // stepVerifiedScope): incomplete or skipped work preserves it.
+        // Per-room records for the messages steps are managed by their
+        // step wrappers, not here.
+        if (stepVerifiedScope(name, result)) this.clearIntegrityFailure(name, "");
+        if (name === "messages_backfill" && Array.isArray(result?.blocked)) {
+          backfillBlocked = result.blocked;
+        }
       } catch (error) {
-        throw tagIntegritySubcheck(error, steps[step][0]);
+        // Operational failures are not record data: they propagate to
+        // the job's throw path with their rollback intact, instead of
+        // being isolated here and silently advanced past (see
+        // isOperationalIntegrityError).
+        if (isOperationalIntegrityError(error)) throw error;
+        // Blast-radius isolation (the claim-prs #3464 shape): a step that
+        // throws is recorded against the step and the cursor still
+        // advances past the pair, so one poisoned record can no longer
+        // freeze every later step forever. The failure stays on the
+        // returned list — and therefore on the job's failure surface —
+        // until a later visit verifies it clean. The verdict is unchanged.
+        this.recordIntegrityFailure(name, "", tagIntegritySubcheck(error, name));
       }
       step = (step + 1) % steps.length;
       ran += 1;
       await yieldBetween();
     }
+    // Newly parked rooms are surfaced through the durable per-room failure
+    // records the backfill step wrapper writes (room, sequence, event id
+    // and error), and the standing block list rides on the result's
+    // `blocked` field — no throw, so the batch keeps its cadence and the
+    // unified failure surface stays the single reporting path.
     remember(step);
-    return { ran, next: step };
+    return { ran, next: step, failures: this.integrityFailures(), ...(backfillBlocked.length ? { blocked: backfillBlocked } : {}) };
   }
 
   ensureIntegrityRoomState() {
     this.db.exec(INTEGRITY_ROOM_STATE_SCHEMA);
     const columns = new Set(this.db.prepare("PRAGMA table_info(integrity_job_cursor)").all().map(column => column.name));
     if (!columns.has("sweep_after")) this.db.exec(INTEGRITY_SWEEP_COLUMN);
+    if (!columns.has("deferred_skips")) this.db.exec(INTEGRITY_DEFERRED_SKIPS_COLUMN);
+  }
+
+  // #3896: the durable streak of consecutive verifyRoomIntegrity calls
+  // in which the deferred batch completed zero steps (its budget was
+  // eaten by the incremental/full checks ahead of it, or the deadline
+  // had already passed). The streak rides every result as
+  // `deferredSkips`, so a starving store is visible on the job summary
+  // while the batch-first rule below bounds the starvation itself.
+  integrityDeferredSkips() {
+    this.ensureIntegrityRoomState();
+    const row = this.db.prepare("SELECT deferred_skips FROM integrity_job_cursor WHERE singleton=1").get();
+    return Number.isSafeInteger(row?.deferred_skips) && row.deferred_skips > 0 ? row.deferred_skips : 0;
+  }
+
+  noteDeferredOutcome(progressed) {
+    const current = this.integrityDeferredSkips();
+    const next = progressed ? 0 : current + 1;
+    if (next !== current) {
+      this.transaction(() => {
+        this.db.prepare(`INSERT INTO integrity_job_cursor (singleton, step, deferred_skips) VALUES (1, 0, ?)
+          ON CONFLICT(singleton) DO UPDATE SET deferred_skips=excluded.deferred_skips`).run(next);
+      });
+    }
+    return next;
   }
 
   // Remember each room's sequence and projection size after a full check so
@@ -2146,7 +2645,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => Boolean(this.db.prepare(`
       SELECT 1 AS present FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
       UNION
-      SELECT 1 FROM rooms, json_each(rooms.projection, '$.workItems') AS item
+      SELECT 1 FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
       WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
       UNION
       SELECT 1 FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
@@ -2162,7 +2661,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   async verifyRoomIntegrity({ yieldBetween = async () => {}, deadline = Infinity } = {}) {
     if (this.readOnly) throw new Error("Read-only stores do not run the integrity job");
     if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0 };
+    // #3896: every return carries deferredSkips — the durable streak of
+    // consecutive calls in which the deferred batch completed zero
+    // steps — and once the streak reaches the limit the batch runs
+    // FIRST, before the incremental/full checks can eat the budget
+    // again. A throwing call records nothing: it is a failure tick,
+    // not a silent success.
+    let deferredProgressed = false;
+    const finish = result => ({ ...result, deferredSkips: this.noteDeferredOutcome(deferredProgressed) });
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, checked: 0, swept: 0, failures: this.integrityFailures() });
+    if (this.integrityDeferredSkips() >= DEFERRED_STARVATION_LIMIT) {
+      const first = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
+      deferredProgressed = (first?.ran ?? 0) > 0;
+    }
     let incremental;
     try {
       incremental = this.incrementalIntegrityCheck();
@@ -2171,61 +2682,117 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     if (incremental.ok) {
       await yieldBetween();
-      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1 };
+      if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, budgetExceeded: 1, failures: this.integrityFailures() });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-      return { matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred };
+      deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+      return finish({ matched: 1, skipped: 1, verified: 0, invitations: incremental.invitations, checked: incremental.checked, swept: incremental.swept, deferred, failures: deferred.failures });
     }
     const before = this.integrityChecksum();
     if (this.readIntegritySnapshot() === before.text) {
       await yieldBetween();
-      if (Date.now() > deadline) return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1 };
+      if (Date.now() > deadline) return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, budgetExceeded: 1, failures: this.integrityFailures() });
       const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-      return { matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred };
+      deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+      return finish({ matched: 1, skipped: 1, verified: 0, invitations: before.invitations, deferred, failures: deferred.failures });
     }
     await yieldBetween();
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
+    // Per-record isolation for the full path's audits: one inconsistent
+    // invitation or one room's help history is recorded durably and the
+    // audit continues with every other record, instead of the first bad
+    // record aborting the whole path (and, through the frozen snapshot,
+    // every later tick). The orphan-journal check is a single global
+    // verdict, not a per-record iteration, so it still throws.
     try {
       const orphan = this.readTransaction(() => this.db.prepare("SELECT 1 FROM membership_invitation_journal j LEFT JOIN membership_invitations i ON i.id=j.invitation_id WHERE i.id IS NULL LIMIT 1").get());
       if (orphan) fail(503, "invitation_integrity_error", "Invitation record requires operator reconciliation");
-      const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
-      for (const id of ids) {
-        if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-        this.verifyInvitationRecord(id);
-        await yieldBetween();
-      }
     } catch (error) {
       throw tagIntegritySubcheck(error, "invitation_audit");
     }
-    if (this.helpProjectionPresent()) {
-      if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
+    const ids = this.readTransaction(() => this.db.prepare("SELECT id FROM membership_invitations ORDER BY id").all().map(row => row.id));
+    for (const id of ids) {
+      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
       try {
-        this.verifyHelpHistory();
+        this.verifyInvitationRecord(id);
+        this.clearIntegrityFailure("invitation_audit", id);
       } catch (error) {
-        throw tagIntegritySubcheck(error, "help_history");
+        this.recordIntegrityFailure("invitation_audit", id, error);
       }
       await yieldBetween();
     }
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 0, budgetExceeded: 1 };
-    try {
-      this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
-    } catch (error) {
-      throw tagIntegritySubcheck(error, "snapshot");
+    // Records for invitations deleted since they failed are moot: the
+    // audit above can only re-verify invitations that still exist.
+    {
+      const current = new Set(ids);
+      for (const row of this.integrityFailures()) {
+        if (row.step === "invitation_audit" && row.recordId && !current.has(row.recordId)) {
+          this.clearIntegrityFailure("invitation_audit", row.recordId);
+        }
+      }
     }
-    await yieldBetween();
-    let after;
-    try {
-      after = this.integrityChecksum();
-      this.writeIntegritySnapshot(after.text);
-      this.rememberIntegrityRoomState();
-    } catch (error) {
-      throw tagIntegritySubcheck(error, "snapshot");
+    if (this.helpProjectionPresent()) {
+      if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
+      const helpFailures = [];
+      const help = this.verifyHelpHistory({ collect: helpFailures });
+      const failedRooms = new Set(helpFailures.map(failure => failure.roomId));
+      for (const failure of helpFailures) {
+        this.recordIntegrityFailure("help_history", failure.roomId, failure.error);
+      }
+      for (const roomId of help?.checked ?? []) {
+        if (!failedRooms.has(roomId)) this.clearIntegrityFailure("help_history", roomId);
+      }
+      this.reconcileHelpFailureRecords(help, failedRooms);
+      await yieldBetween();
+    } else {
+      // No help state anywhere: earlier help records can no longer be
+      // re-audited, and the condition they named no longer exists.
+      for (const row of this.integrityFailures()) {
+        if (row.step === "help_history") this.clearIntegrityFailure("help_history", row.recordId);
+      }
     }
-    if (Date.now() > deadline) return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, budgetExceeded: 1 };
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified: 0, budgetExceeded: 1, failures: this.integrityFailures() });
+    // The snapshot certifies a clean full pass. With isolated failures
+    // outstanding it is NOT advanced, so the next tick re-runs the full
+    // path and re-audits the failed records until they verify — the
+    // failures are reported every tick, never silently certified over.
+    // The decision reads the reconciled outstanding records for this
+    // path's audits, not only what this run happened to collect: a
+    // record left outstanding by an earlier run blocks certification
+    // until the reconciliation above retires it or it verifies clean.
+    const outstanding = this.integrityFailures()
+      .filter(row => row.step === "invitation_audit" || row.step === "help_history");
+    let after = before;
+    if (!outstanding.length) {
+      try {
+        this.repairProjectionProvenance({ upgradeV1: false, ensureIndex: false });
+      } catch (error) {
+        throw tagIntegritySubcheck(error, "snapshot");
+      }
+      await yieldBetween();
+      try {
+        after = this.integrityChecksum();
+        this.writeIntegritySnapshot(after.text);
+        this.rememberIntegrityRoomState();
+      } catch (error) {
+        throw tagIntegritySubcheck(error, "snapshot");
+      }
+    }
+    const verified = outstanding.length ? 0 : 1;
+    if (Date.now() > deadline) return finish({ matched: 0, skipped: 0, verified, invitations: after.invitations, budgetExceeded: 1, failures: this.integrityFailures() });
     const deferred = await this.runDeferredIntegrityBatch({ deadline, yieldBetween });
-    return { matched: 0, skipped: 0, verified: 1, invitations: after.invitations, deferred };
+    deferredProgressed = deferredProgressed || (deferred?.ran ?? 0) > 0;
+    return finish({ matched: 0, skipped: 0, verified, invitations: after.invitations, deferred, failures: this.integrityFailures() });
   }
 
-  verifyHelpHistory() {
+  // With `collect` (an array), a room whose help history does not reconcile
+  // is pushed as { roomId, error } and the audit continues with the other
+  // rooms, returning { checked } with every audited room id; without it, the
+  // first bad room throws, as the startup paths require. The return also
+  // carries `auditable`: every room id carrying any help trace (help
+  // events, room projection, or checkpoint projection) — the set of rooms
+  // this audit could ever reach, which callers use to reconcile failure
+  // records for rooms that no longer carry any trace.
+  verifyHelpHistory({ collect = null } = {}) {
     return this.readTransaction(() => {
       const placeholders = HELP_EVENT_TYPES.map(() => "?").join(",");
       const helpRooms = new Set(this.db.prepare(
@@ -2236,28 +2803,49 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // NULL only when the key is absent, so this matches that check without
       // parsing message bodies.
       const roomHelp = idsWithHelp(`
-        SELECT id FROM rooms WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+        SELECT id FROM rooms WHERE json_valid(projection) AND json_type(projection, '$.helpOffers') IS NOT NULL
         UNION
-        SELECT rooms.id AS id FROM rooms, json_each(rooms.projection, '$.workItems') AS item
-        WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+        SELECT rooms.id AS id FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
+        WHERE json_valid(rooms.projection) AND json_type(item.value, '$.helpWanted') IS NOT NULL
       `);
       const checkpointHelp = idsWithHelp(`
-        SELECT room_id AS id FROM projection_checkpoints WHERE json_type(projection, '$.helpOffers') IS NOT NULL
+        SELECT room_id AS id FROM projection_checkpoints WHERE json_valid(projection) AND json_type(projection, '$.helpOffers') IS NOT NULL
         UNION
         SELECT projection_checkpoints.room_id AS id
         FROM projection_checkpoints, json_each(projection_checkpoints.projection, '$.workItems') AS item
-        WHERE json_type(item.value, '$.helpWanted') IS NOT NULL
+        WHERE json_valid(projection_checkpoints.projection) AND json_type(item.value, '$.helpWanted') IS NOT NULL
       `);
+      const checked = [];
       if (!helpRooms.size) {
-        if (roomHelp.size || checkpointHelp.size) throw new Error("Help invitation history requires operator reconciliation");
-        return;
+        if (roomHelp.size || checkpointHelp.size) {
+          if (!collect) throw new Error("Help invitation history requires operator reconciliation");
+          for (const roomId of new Set([...roomHelp, ...checkpointHelp])) {
+            checked.push(roomId);
+            collect.push({ roomId, error: new Error("Help invitation history requires operator reconciliation") });
+          }
+        }
+        return { checked, auditable: [...new Set([...roomHelp, ...checkpointHelp])] };
       }
-      for (const row of this.db.prepare("SELECT id, projection FROM rooms ORDER BY id").all()) {
+      for (const row of this.db.prepare("SELECT id, projection, json_valid(projection) AS projectionValid FROM rooms ORDER BY id").all()) {
         if (!helpRooms.has(row.id) && !roomHelp.has(row.id) && !checkpointHelp.has(row.id)) continue;
+        // #4126: an unreadable projection cannot be audited — the room is
+        // named by the boot quarantine record instead of throwing here and
+        // bricking the whole boot for one corrupt room.
+        if (!row.projectionValid) continue;
+        checked.push(row.id);
         const history = this.db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(row.id);
-        const checkpoint = this.db.prepare("SELECT sequence, projection FROM projection_checkpoints WHERE room_id=?").get(row.id);
-        auditWorkHelp(JSON.parse(row.projection), history, checkpoint);
+        const checkpointRow = this.db.prepare("SELECT sequence, projection, json_valid(projection) AS valid FROM projection_checkpoints WHERE room_id=?").get(row.id);
+        // An unparseable checkpoint is an optimisation miss, never an audit
+        // input: audit from the full event history instead (#4126).
+        const checkpoint = checkpointRow?.valid ? checkpointRow : null;
+        if (collect) {
+          try { auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint); }
+          catch (error) { collect.push({ roomId: row.id, error }); }
+        } else {
+          auditWorkHelp(hydrateWorkItems(this.db, row.id, JSON.parse(row.projection)), history, checkpoint);
+        }
       }
+      return { checked, auditable: [...new Set([...helpRooms, ...roomHelp, ...checkpointHelp])] };
     });
   }
 
@@ -2630,7 +3218,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.storagePlatform.setVersion(this.db, 2);
         return;
       }
-      for (const row of this.db.prepare("SELECT projection FROM rooms WHERE json_valid(projection) = 0").all()) JSON.parse(row.projection);
+      this.noteCorruptProjections();
       const replayIds = this.roomsNeedingProvenanceReplay();
       this.repairProjectionShape(replayIds);
       if (!replayIds.size) return;
@@ -2638,17 +3226,48 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.replayProvenance(rooms, { upgradeV1: false });
     });
   }
+  // #4126: a room whose stored projection is not valid JSON is quarantined,
+  // never fatal. This scan runs inside repairProjectionProvenance — at boot
+  // and again on the integrity snapshot step — and records each unreadable
+  // room (id + error class) in the boot log and in corruptRoomReports();
+  // the boot-path scans skip such rooms behind json_valid guards, healthy
+  // rooms boot and serve, and the corrupt room's own reads keep failing
+  // loudly until the operator projection-repair path (or a restore)
+  // replaces its bytes. The record is refreshed on every pass, so a
+  // repaired room drops off it.
+  noteCorruptProjections() {
+    const corrupt = (this.corruptRooms ??= new Map());
+    const rows = this.db.prepare("SELECT id, projection FROM rooms WHERE json_valid(projection) = 0").all();
+    const live = new Set(rows.map(row => row.id));
+    for (const id of [...corrupt.keys()]) if (!live.has(id)) corrupt.delete(id);
+    for (const row of rows) {
+      if (corrupt.has(row.id)) continue;
+      let error = null;
+      try { JSON.parse(row.projection); } catch (caught) { error = caught; }
+      const report = {
+        roomId: row.id,
+        errorClass: typeof error?.name === "string" ? error.name : "SyntaxError",
+        error: String(error?.message ?? "invalid JSON").slice(0, 240),
+        at: Date.now()
+      };
+      corrupt.set(row.id, report);
+      console.error(`corrupt projection quarantined: room ${row.id} (${report.errorClass}: ${report.error}); healthy rooms continue — repair via the operator projection-repair path`);
+    }
+    return corrupt;
+  }
+  // The quarantine record from the most recent repairProjectionProvenance
+  // pass: [{ roomId, errorClass, error, at }]. Empty on a healthy store.
+  corruptRoomReports() {
+    return [...(this.corruptRooms ?? new Map()).values()];
+  }
   // --- PRIV-2 history visibility ---
   // null when the member reads the whole history, else { sequence, at } of
   // their join event. Callers already hold a transaction.
   // Reads only the authority and history fields, not the full projection, so
   // event polling stays cheap.
   historyFloor(roomId, memberId, headSequence = null) {
-    const { sequence, ownerId, members } = this.roomAuthority(roomId);
-    const row = this.db.prepare("SELECT json_extract(projection,'$.room.historyVisibility') AS visibility, json_extract(projection,'$.room.historyDefaultsVersion') AS defaults FROM rooms WHERE id=?").get(roomId);
-    let visibility = null;
-    try { visibility = row?.visibility ? JSON.parse(row.visibility) : null; } catch { visibility = null; }
-    const state = { room: { ownerId, historyVisibility: visibility, historyDefaultsVersion: row?.defaults ?? null }, members };
+    const { sequence, ownerId, members, historyVisibility, historyDefaultsVersion } = this.roomAuthority(roomId, { includeHistory: true });
+    const state = { room: { ownerId, historyVisibility, historyDefaultsVersion }, members };
     return readHistoryFloor(this.db, state, roomId, memberId, headSequence ?? sequence);
   }
   // --- end PRIV-2 ---
@@ -2660,8 +3279,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   roomsNeedingProvenanceReplay() {
     const ids = this.db.prepare(`
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item
-      WHERE json_type(item.value) = 'object' AND (
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id
+      WHERE json_valid(rooms.projection) AND json_type(item.value) = 'object' AND (
         json_type(item.value, '$.proposedById') IS NULL
         OR (json_type(item.value, '$.receipt') = 'object' AND (
           json_type(item.value, '$.receipt.reportedById') IS NULL
@@ -2674,46 +3293,53 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       )
       UNION
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.receiptHistory') AS receipt
-      WHERE json_type(receipt.value) = 'object' AND (
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id, json_each(item.value, '$.receiptHistory') AS receipt
+      WHERE json_valid(rooms.projection) AND json_type(receipt.value) = 'object' AND (
         json_type(receipt.value, '$.reportedById') IS NULL
         OR json_type(receipt.value, '$.producerId') IS NULL
         OR json_type(receipt.value, '$.producerAttribution') IS NULL)
       UNION
       SELECT DISTINCT rooms.id AS id
-      FROM rooms, json_each(rooms.projection, '$.workItems') AS item, json_each(item.value, '$.verificationHistory') AS verification
-      WHERE json_type(verification.value) = 'object'
+      FROM rooms JOIN work_projection_items AS item ON item.room_id=rooms.id, json_each(item.value, '$.verificationHistory') AS verification
+      WHERE json_valid(rooms.projection) AND json_type(verification.value) = 'object'
         AND json_type(verification.value, '$.independenceConfirmed') IS NULL
     `).all().map(row => row.id);
     return new Set(ids);
   }
+  // Projection shape upgrade v1 (server/legacy-message-shape.mjs): stored
+  // message records the current reducer no longer builds. Idempotent.
+  upgradeLegacyMessageShapes({ skipIds = new Set() } = {}) {
+    if (this.readOnly) return { rooms: 0, reactionsRemoved: 0, receiptIdsAdded: 0 };
+    return runLegacyMessageShapeUpgrade(this, { skipIds });
+  }
   repairProjectionShape(skipIds) {
+    this.upgradeLegacyMessageShapes({ skipIds });
     const update = this.db.prepare("UPDATE rooms SET projection=? WHERE id=?");
     const missingChannel = this.db.prepare(`
       SELECT id, projection FROM rooms
-      WHERE json_type(projection, '$.room') = 'object'
+      WHERE json_valid(projection) AND json_type(projection, '$.room') = 'object'
         AND (json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') IS NULL
           OR json_type(projection, '$.channels.${DEFAULT_CHANNEL_ID}') = 'null')
     `).all();
     for (const row of missingChannel) {
       if (skipIds.has(row.id)) continue;
-      const state = JSON.parse(row.projection);
+      const state = hydrateProjection(this.db, row.id, JSON.parse(row.projection)).state;
       if (!ensureDefaultChannelState(state)) continue;
       update.run(this.storedProjection(row.id, state), row.id);
     }
     const linked = this.db.prepare(`
       SELECT rooms.id AS id, json_extract(rooms.projection, '$.workItems') AS workItems
       FROM rooms
-      WHERE EXISTS (
-        SELECT 1 FROM json_each(rooms.projection, '$.workItems') AS item
-        WHERE json_extract(item.value, '$.state') = 'superseded'
+      WHERE json_valid(rooms.projection) AND EXISTS (
+        SELECT 1 FROM work_projection_items AS item
+        WHERE item.room_id=rooms.id AND json_extract(item.value, '$.state') = 'superseded'
           AND json_type(item.value, '$.supersededBy') = 'text'
       )
     `).all();
     for (const row of linked) {
       if (skipIds.has(row.id)) continue;
-      if (!repairInvalidSupersessions({ workItems: parseStoredJson(row.workItems, {}) })) continue;
-      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection);
+      if (!repairInvalidSupersessions(hydrateWorkItems(this.db, row.id, { workItems: parseStoredJson(row.workItems, {}) }))) continue;
+      const state = hydrateWorkItems(this.db, row.id, JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(row.id).projection));
       if (repairInvalidSupersessions(state)) update.run(this.storedProjection(row.id, state), row.id);
     }
   }
@@ -2726,7 +3352,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const room of rooms) {
       const events = findEvents.all(room.id, ...PROVENANCE_EVENT_TYPES).map(row => JSON.parse(row.body));
       if (upgradeV1) {
-        const state = JSON.parse(room.projection);
+        const state = hydrateWorkItems(this.db, room.id, JSON.parse(room.projection));
         const changed = applyProvenanceRepair(state, events);
         if (changed) update.run(this.storedProjection(room.id, state), room.id);
         // Checkpoints keep full bodies (replay applies edits to them).
@@ -2734,45 +3360,103 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         continue;
       }
       const slices = slicesOf.get(room.id);
-      const partial = {
+      const partial = hydrateWorkItems(this.db, room.id, {
         room: parseStoredJson(slices?.room, null),
         channels: parseStoredJson(slices?.channels, undefined),
         workItems: parseStoredJson(slices?.workItems, {})
-      };
+      });
       if (!applyProvenanceRepair(partial, events)) continue;
-      const state = JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection);
+      const state = hydrateWorkItems(this.db, room.id, JSON.parse(this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(room.id).projection));
       if (applyProvenanceRepair(state, events)) update.run(this.storedProjection(room.id, state), room.id);
     }
   }
-  close() { this._projectionCache?.clear(); this.db.close(); }
-  // MSG-0: drop parsed projections when a write transaction commits or rolls
-  // back, so a parse of uncommitted bytes cannot outlive the transaction.
-  _dropProjectionCache() { this._projectionCache?.clear(); }
+  close() {
+    // Idempotent: a repeated or re-entrant close is a no-op, so a teardown
+    // that unwinds through close() twice cannot mask the real shutdown
+    // error with a raw "database is not open".
+    if (this._closed) return;
+    this._closed = true;
+    this._projectionCache?.clear();
+    this.db.close();
+  }
+  // Invalidate both parsed reads and unpublished command candidates.
+  _dropProjectionCache() {
+    this._projectionCache?.clear();
+    for (const pending of this._pendingProjectionFrames ?? []) pending.clear();
+  }
+  _queueProjectionCache(roomId, sequence, state, projection) {
+    const pending = this._pendingProjectionFrames?.at(-1);
+    if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
+      || !freezeJsonState(state)) return;
+    const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
+    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
+  }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
     this._projectionWatch = true;
-    const cache = () => this._projectionCache;
+    const invalidate = () => this._dropProjectionCache();
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
-      if (typeof sql === "string" && ROOMS_WRITE.test(sql) && typeof stmt.run === "function") {
-        const run = stmt.run.bind(stmt);
-        stmt.run = (...args) => {
-          const result = run(...args);
-          cache()?.clear();
-          return result;
-        };
-      }
+      if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
+      const roomsWrite = ROOMS_WRITE.test(sql) || /^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql), eventAppend = EVENT_APPEND.test(sql);
+      if (!roomsWrite && !eventAppend) return stmt;
+      const run = stmt.run.bind(stmt);
+      stmt.run = (...args) => {
+        const result = run(...args);
+        if (roomsWrite) invalidate();
+        // Every events insert in the codebase binds (roomId, sequence, ...)
+        // positionally; anything else is ignored rather than guessed at.
+        if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
+        return result;
+      };
       return stmt;
     };
     if (typeof this.db.exec === "function") {
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
         const result = exec(sql);
-        if (typeof sql === "string" && ROOMS_WRITE.test(sql)) cache()?.clear();
+        if (typeof sql === "string" && (ROOMS_WRITE.test(sql) || /\b(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql))) invalidate();
         return result;
       };
     }
+  }
+  // An events row was inserted for `roomId`. Inside a transaction the append
+  // is only pending: it becomes visible to stream pumps when the outermost
+  // transaction commits (_flushEventAppends, called from transaction()), and
+  // is dropped if that transaction rolls back. Outside a transaction the
+  // append has already committed by the time the statement returns.
+  _noteEventAppend(roomId) {
+    if (this.db.isTransaction) { this._pendingAppends.add(roomId); return; }
+    this._bumpAppendStamp(roomId);
+  }
+  _bumpAppendStamp(roomId) {
+    this._appendStamps.set(roomId, (this._appendStamps.get(roomId) ?? 0) + 1);
+    for (const listener of this._appendListeners) {
+      try { listener(roomId); } catch { /* a stream's wake must never fail a commit */ }
+    }
+  }
+  _flushEventAppends() {
+    if (!this._pendingAppends.size) return;
+    const rooms = [...this._pendingAppends];
+    this._pendingAppends.clear();
+    for (const roomId of rooms) this._bumpAppendStamp(roomId);
+  }
+  // The room's append stamp: a counter that changes whenever an event has
+  // committed to the room since the caller's last look. Purely in-memory.
+  eventStamp(roomId) { return this._appendStamps.get(roomId) ?? 0; }
+  // Subscribe to committed appends (the listener receives the roomId).
+  // Returns an unsubscribe function. Used by the SSE stream pump to wake on
+  // commit instead of polling the store.
+  onEventAppended(listener) {
+    this._appendListeners.add(listener);
+    return () => this._appendListeners.delete(listener);
+  }
+  // The room's committed head sequence in one primary-key read — the stream
+  // probe's change check, three orders of magnitude cheaper than a page read.
+  headSequence(roomId) {
+    const row = this.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+    return row?.sequence ?? 0;
   }
   transaction(fn, { isolated = false } = {}) {
     // Nested startup helpers share the outer migration transaction and its rollback.
@@ -2781,13 +3465,34 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Only a commit that changed rows proves storage is writable again; an
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
+    // Savepoints collect candidates separately, but never publish before
+    // the outer commit. Every rooms write invalidates all earlier candidates.
+    const boundary = outermost || isolated;
+    const frames = this._pendingProjectionFrames ??= [];
+    if (boundary) frames.push(new Map());
     let result;
     try { result = this.storagePlatform.transaction(this.db, fn, false, { isolated }); }
     catch (error) {
-      if (outermost || isolated) this._dropProjectionCache();
+      this._dropProjectionCache();
+      if (boundary) { frames.pop(); this._pendingAppends.clear(); }
       throw this.storageFailure(error, outermost);
     }
-    if (outermost || isolated) this._dropProjectionCache();
+    if (boundary) {
+      const pending = frames.pop();
+      // ROOMS_WRITE invalidates immediately in the projection watch. A commit
+      // of heartbeat/cursor/claim metadata must not discard unrelated parses.
+      if (!outermost) {
+        for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
+      } else {
+        const cache = this._projectionCache ??= new ProjectionCache();
+        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
+      }
+      // Publish committed appends only after the cache promotion above, so
+      // streams woken by the flush observe the post-commit projection state.
+      // A rolled-back append never reaches here: the catch path clears
+      // _pendingAppends at the same boundary instead.
+      this._flushEventAppends();
+    }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
   }
@@ -2817,22 +3522,41 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   storageStatus() {
     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
   }
-  room(roomId) {
+  room(roomId, { verifyBodyHashes = false } = {}) {
     // MSG-0 projection cache. The hit path reads sequence only.
     this._armProjectionWatch();
     const cache = this._projectionCache ??= new ProjectionCache();
     const meta = (this._roomSequenceStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
     if (!meta) fail(404, "room_not_found", "Room not found");
-    const hit = cache.lookup(roomId, meta.sequence);
-    if (hit) return hit;
+    // WRITE-PATH-WINS win 3: hydration trusts the content-addressed body
+    // key on the hot path, so a cache hit cannot vouch for body bytes.
+    // A verified read (the conversation read's tamper recovery) bypasses
+    // the hit, re-hashes, and lets _readProjection repair any tampered
+    // or missing row from the event log; the repaired value replaces
+    // the cache entry, so the room self-heals exactly as it did when
+    // every read verified.
+    if (!verifyBodyHashes) {
+      const hit = cache.lookup(roomId, meta.sequence);
+      if (hit) {
+        if (this.verifyProjectionCache && !isDeepStrictEqual(hit, this._readProjection(roomId, meta.sequence, { verifyBodyHashes: true }).value)) {
+          this._dropProjectionCache();
+          throw new Error(`Projection cache differs from storage for room ${roomId}`);
+        }
+        return hit;
+      }
+    }
+    const { value, weight } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
+    cache.insert(roomId, meta.sequence, value, weight);
+    return value;
+  }
+  _readProjection(roomId, sequence, { verifyBodyHashes = false } = {}) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection));
-    if (missing.length) this._restoreBodiesFromLog(roomId, meta.sequence, parsed, missing);
+    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection), { verifyBodyHashes });
+    if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
-    const value = Object.freeze({ sequence: meta.sequence, state });
-    cache.insert(roomId, meta.sequence, value, Buffer.byteLength(row.projection) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0));
-    return value;
+    return { value: Object.freeze({ sequence, state }),
+      weight: Buffer.byteLength(row.projection) + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
   // requester/target pair needs a sequenced receipt so open sessions refresh
@@ -2848,18 +3572,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     try { state = compact(applyEvent(room.state, event)); }
     catch (error) { fail(422, "invalid_side_table_event", error.message); }
     const projection = this.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     return sequence;
   }
   // Phase 1a/1b rollback: write every room back with full bodies and full
-  // message envelopes in one transaction. The release trigger then empties projection_bodies.
+  // message envelopes in one transaction. The serializer's release then empties projection_bodies.
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
-      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_entity\":1') > 0 OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+        // Migration validates stored authority, never a previously hydrated cache.
+        this._dropProjectionCache();
         restoreArchivedMessages(this, id);
         const state = this.room(id).state;
         this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
@@ -2890,16 +3616,37 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return out;
     });
   }
-  roomAuthority(roomId) {
+  roomAuthority(roomId, { includeHistory = false } = {}) {
+    // History policy travels in the same validated prefix as membership. This
+    // keeps fresh permission reads independent of conversation JSON parsing.
     // Fresh storage read, not an authorization cache. Keep membership provenance
     // intact without decoding conversation, work history or the Room brief in JS.
-    const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members') AS authority FROM rooms WHERE id=?").get(roomId);
+    // WRITE-PATH-WINS win 5: ownerId and members are the first two
+    // top-level keys of every stored projection, ahead of ,"messages":[ —
+    // extracting them from that prefix avoids tokenizing the whole
+    // multi-megabyte text on every command. The prefix result is used
+    // only when it yields a well-formed authority pair; any other shape
+    // (a future key order, a member name quoting the boundary verbatim)
+    // falls back to the full-projection extract below, so the values
+    // returned are always the stored ones, read fresh.
+    const prefix = (this._roomAuthorityPrefixStmt ??= this.db.prepare(
+      "SELECT sequence, CASE WHEN instr(projection, ',\"messages\":[') > 1 AND json_valid(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}') THEN json_extract(substr(projection, 1, instr(projection, ',\"messages\":[') - 1) || '}', '$.room.ownerId', '$.members', '$.room.historyVisibility', '$.room.historyDefaultsVersion') END AS authority FROM rooms WHERE id=?"));
+    let row = prefix.get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const authority = JSON.parse(row.authority);
-    const [ownerId, members] = Array.isArray(authority) ? authority : [];
-    if (typeof ownerId !== "string" || !members || typeof members !== "object")
-      fail(500, "projection_corrupt", "Room projection is missing authority fields");
-    return { sequence: row.sequence, ownerId, members };
+    let authority = null;
+    try { authority = JSON.parse(row.authority); } catch { /* fall through to the full extract */ }
+    let [ownerId, members] = Array.isArray(authority) ? authority : [];
+    if (typeof ownerId !== "string" || !members || typeof members !== "object") {
+      const full = (this._roomAuthorityFullStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room.ownerId','$.members','$.room.historyVisibility','$.room.historyDefaultsVersion') AS authority FROM rooms WHERE id=?"));
+      row = full.get(roomId);
+      if (!row) fail(404, "room_not_found", "Room not found");
+      authority = JSON.parse(row.authority);
+      [ownerId, members] = Array.isArray(authority) ? authority : [];
+      if (typeof ownerId !== "string" || !members || typeof members !== "object")
+        fail(500, "projection_corrupt", "Room projection is missing authority fields");
+    }
+    return { sequence: row.sequence, ownerId, members,
+      ...(includeHistory ? { historyVisibility: authority[2] ?? null, historyDefaultsVersion: authority[3] ?? null } : {}) };
   }
   rebuildProjection(roomId, through = null) {
     return this._replayRoom(roomId, through ?? this.room(roomId).sequence);
@@ -2910,8 +3657,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const room = { sequence: head.sequence };
     if (!Number.isSafeInteger(through) || through < 0 || through > room.sequence) throw new Error("Invalid historical room boundary");
     const checkpoint = this.db.prepare("SELECT sequence,projection FROM projection_checkpoints WHERE room_id=?").get(roomId);
-    let state = checkpoint ? JSON.parse(checkpoint.projection) : emptyRoomState();
-    let sequence = checkpoint?.sequence ?? 0;
+    let state = emptyRoomState();
+    let sequence = 0;
+    if (checkpoint) {
+      // #4126: a checkpoint is an optimisation. Bytes that do not parse to
+      // a state object are ignored — the replay falls back to the full
+      // event history instead of throwing the rebuild (and, at boot, the
+      // whole server) away with it.
+      try {
+        const parsed = JSON.parse(checkpoint.projection);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("checkpoint is not a state object");
+        state = parsed;
+        sequence = checkpoint.sequence;
+      } catch (error) {
+        console.error(`projection checkpoint for room ${roomId} is unreadable (${error.message}); replaying the full event history`);
+      }
+    }
     // Work controls predate some stored projections and their checkpoints:
     // backfill the round/tool-call counters, suspension cause, and receipt
     // segments before replaying, so a checkpoint with no later events still
@@ -2920,18 +3681,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     ensureDefaultChannelState(state);
     if (sequence > through) throw new Error("Historical room boundary predates the retained checkpoint");
     const rows = this.db.prepare("SELECT sequence,body FROM events WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence").all(roomId, sequence, through);
-    for (const row of rows) {
-      if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
-      state = applyEvent(state, JSON.parse(row.body));
-      sequence = row.sequence;
-    }
+    state = replayEvents(state, (function* () {
+      for (const row of rows) {
+        if (row.sequence !== sequence + 1) throw new Error("Event sequence is not contiguous");
+        yield JSON.parse(row.body);
+        sequence = row.sequence;
+      }
+    })());
     if (sequence !== through) throw new Error("Event sequence does not reach the room projection");
     return { sequence, state: compact(state) };
   }
   // Administrative bootstrap, never exposed over HTTP. Historical demo events are test fixtures only.
   initialize(events) {
     return this.transaction(() => {
-      const state = events.reduce(applyEvent, emptyRoomState());
+      const state = replayEvents(emptyRoomState(), events);
       const stored = compact(state);
       this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, this.storedProjection(state.room.id, stored), archivedAtOf(stored));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
@@ -3749,7 +4512,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       try { state = compact(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invitation_rejected", error.message); }
       const projection = this.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -3998,7 +4761,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   revoke(token) { this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(token)); }
-  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full") {
+  // R350-n1 (Fo 13936, option b): revoke() deliberately leaves room links
+  // alone, so an agent that revokes its own identity secret stays an active
+  // member. Member views carry a read-time identityRevoked flag for seats
+  // whose linked identity secret is revoked; membership and the projection
+  // are unchanged (the flag is on copies), so it is reversible and additive.
+  withIdentityRevoked(roomId, room) {
+    const rows = this.db.prepare(`SELECT l.member_id AS memberId FROM identity_links l
+      JOIN agent_identities i ON i.identity_id=l.identity_id
+      WHERE l.room_id=? AND i.revoked_at IS NOT NULL`).all(roomId);
+    if (!rows.length) return room;
+    const members = { ...room.state.members };
+    for (const { memberId } of rows) if (Object.hasOwn(members, memberId)) members[memberId] = { ...members[memberId], identityRevoked: true };
+    return { ...room, state: { ...room.state, members } };
+  }
+  snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -4006,13 +4783,34 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!["full", "activity"].includes(auditView) || auditView !== "full" && view !== "full") fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
-      const room = this.room(roomId);
+      const room = this.withIdentityRevoked(roomId, this.room(roomId));
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
-          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item, boardRowForItem(this, roomId, id))])) },
+          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item, boardRowForItem(this, roomId, id))])),
+          // The board projection needs halts. The HTTP work view strips this
+          // before it is sent; it is not part of that response's state keys.
+          agentHalts: room.state.agentHalts || {} },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
+      let messages = room.state.messages, pins = room.state.pins, messagesWindow;
+      if (messageLimit !== null || room.state.messagesArchive) {
+        const repository = messageRepository(this, roomId, room.state);
+        if (messageLimit !== null) {
+          const floor = this.historyFloor(roomId, auth.member.id);
+          const visible = message => messageInHistory(message, floor)
+            && (!message.toMemberId || message.authorId === auth.member.id || message.toMemberId === auth.member.id);
+          messages = repository.recent(messageLimit, visible);
+          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countMetadata(visible)-messages.length,older:"conversation"};
+          const pinned = repository.getMany((pins ?? []).map(pin=>pin.messageId));
+          pins = (pins ?? []).filter(pin=>pinned.has(pin.messageId) && visible(pinned.get(pin.messageId)));
+        } else {
+          // Explicit legacy full-snapshot contract. Recent and conversation reads
+          // stay bounded; full export-compatible reads explicitly request history.
+          messages = [...repository.records()];
+        }
+      }
       const rows = this.db.prepare("SELECT body FROM events WHERE room_id=? ORDER BY sequence DESC LIMIT 100").all(roomId);
       // Preserve the same committed tail and its activity-dependent selectors.
       // Message bodies already travel in the projection; the complete audit
@@ -4022,7 +4820,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         || /^(work\.|work_claim\.|verification\.|owner_decision\.)/.test(event.type)
         || event.data?.workItemId !== undefined) : events;
       const cursor = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
-      return { ...room, roomId, ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
+      return { ...room, roomId, ...(messagesWindow ? {messagesWindow} : {}), ...(auditView === "activity" ? { auditView, auditVersion: 1 } : {}), ...(offerContext ? { offerContextVersion: 1 } : {}), charter: charterContext(room.state.room), replyRequestContractVersion: REPLY_POLICY_VERSION, state: { ...room.state, messages, ...(pins === undefined ? {} : {pins}), eventLog }, cursor, catchUpCursor: this.catchUpCursor(roomId, auth.member.id), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
 
@@ -4088,7 +4886,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // a caller that smuggles them in is rejected, not silently honoured.
     const required = ["requestId", "workItemId", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "outputs"] : [])];
+    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "outputs"] : [])];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, and set_status or request_stop. expectedRevision is optional");
     }
@@ -4225,11 +5023,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // may record output references. Both are optional and validated.
       if (request.environment !== undefined && type !== T.SESSION_STARTED)
         fail(422, "invalid_session_environment", "An environment is declared when the session starts");
+      if (request.model !== undefined && type !== T.SESSION_STARTED)
+        fail(422, "invalid_session_model", "A model is declared when the session starts");
       if (request.outputs !== undefined && type !== T.SESSION_STOPPED)
         fail(422, "invalid_session_outputs", "Output references are recorded when the session stops");
-      let environment = null, outputs = null;
+      let environment = null, outputs = null, model = null;
       try { environment = validateAttemptEnvironment(request.environment); }
       catch (error) { fail(422, "invalid_session_environment", error.message); }
+      try { model = validateAttemptModel(request.model); }
+      catch (error) { fail(422, "invalid_session_model", error.message); }
       try { outputs = validateAttemptOutputs(request.outputs); }
       catch (error) { fail(422, "invalid_session_outputs", error.message); }
       const data = { workItemId: request.workItemId };
@@ -4237,6 +5039,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (type === T.SESSION_STATUS_CHANGED || type === T.SESSION_STOPPED) data.status = request.status;
       if (type === T.SESSION_STARTED && budget) data.budget = budget;
       if (type === T.SESSION_STARTED && environment) data.environment = environment;
+      if (type === T.SESSION_STARTED && model) data.model = model;
       if (type === T.SESSION_STOPPED && outputs) data.outputs = outputs;
       if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
       if (request.rounds !== undefined && type !== T.SESSION_STOP_REQUESTED) data.rounds = request.rounds;
@@ -4251,93 +5054,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   presence(token, roomId, watcherMemberIds, expectedSessionBinding = null) {
     return this.readTransaction(() => {
       this.authenticate(token, roomId, expectedSessionBinding);
-      const { members, ownerId } = this.roomAuthority(roomId);
-      const room = this.room(roomId);
-      const now = this.now();
-      const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
-      const working = new Map();
-      const heartbeats = new Map();
-      for (const item of Object.values(room.state.workItems ?? {})) {
-        const session = sessionRecord(item);
-        if (session.worker_member_id && session.heartbeat_at) {
-          const prev = heartbeats.get(session.worker_member_id);
-          if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
-        }
-        const worker = sessionWorker(item, now);
-        const heartbeatAt = timestamp(session.heartbeat_at);
-        if (!worker || !["processing", "active"].includes(session.status)
-          || !Number.isFinite(heartbeatAt) || heartbeatAt > now
-          || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
-        if (!working.has(worker)) working.set(worker, []);
-        working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
-      }
-      const lastCommandAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? GROUP BY actor`
-      ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
-      const addedAt = new Map(this.db.prepare(
-        `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
-         FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
-      ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
-      const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
-      // RC-2026-09-18-051: additive host presence for agent members.
-      const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
-      // #660: raw host status per member. status is "online"|"offline"|null
-      // (null = no registered host); identityId is the linked agent identity.
-      const hostStatusOf = memberId => {
-        const m = members[memberId];
-        if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
-        const link = identityLinkOf.get(roomId, memberId);
-        if (!link) return { identityId: null, status: null, lastSeenAt: null };
-        const status = this.agentHeartbeats.statusOf(link.identityId);
-        // Unregistered (no host) stays null so RC-051 clients keep the
-        // "no presence field or absent" contract. Roster still lists the member.
-        if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
-        return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
-      };
-      const agentPresence = memberId => {
-        const host = hostStatusOf(memberId);
-        if (host.status === null) return null;
-        return { status: host.status, lastSeenAt: host.lastSeenAt };
-      };
-      const listed = Object.values(members)
-        .filter(m => m && m.active !== false)
-        .map(m => {
-          const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
-          const host = hostStatusOf(m.id);
-          const workingOn = working.get(m.id) ?? [];
-          const isWatching = watching.has(m.id);
-          return {
-            memberId: m.id, displayName: m.displayName, kind: m.kind,
-            watching: isWatching, workingOn,
-            lastSeenAt, statusMessage: m.statusMessage ?? null,
-            presence: agentPresence(m.id),
-            // #660: derived working state + owner/scope projection (additive).
-            state: presenceState({
-              kind: m.kind,
-              hasActiveSession: workingOn.length > 0,
-              watching: isWatching,
-              hostStatus: host.status,
-              hostLastSeenAt: host.lastSeenAt,
-              lastCommandAt: timestamp(lastCommandAt.get(m.id)),
-              // Enrollment is retained in legacy lastSeenAt, but is not activity.
-              lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
-                timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
-              now,
-            }),
-            isOwner: m.id === ownerId,
-            scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
-            ownerIdentityId: m.kind === "agent" ? host.identityId : null,
-            // plan-dir-card: the member's linked directory card id (the
-            // member chip lazy-loads the card from
-            // /api/rooms/{roomId}/members/{memberId}/card). Null when the
-            // member has no visible card.
-            cardAgentId: m.kind === "agent" && host.identityId
-              ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
-              : null,
-          };
-        })
-        .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
+      const listed = this.presenceMembers(roomId, watcherMemberIds);
       // Suggested DM targets require current connection/execution observations.
       const onlineIds = listed.filter(m => m.watching
         || m.state === "listening" || m.state === "working").map(m => m.memberId);
@@ -4345,6 +5062,144 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         members: listed,
         next: Object.freeze(presenceNext(roomId, onlineIds)),
       };
+    });
+  }
+  // The per-room presence rows presence() serves, factored out so the
+  // cross-room read (agentPresence) derives a shared room's row through
+  // exactly this code — one derivation, two surfaces. The caller supplies
+  // the room's live SSE watcher member ids ([] for a read with no stream,
+  // so watching reads false there).
+  presenceMembers(roomId, watcherMemberIds) {
+    const { members, ownerId } = this.roomAuthority(roomId);
+    const room = this.room(roomId);
+    const now = this.now();
+    const timestamp = value => typeof value === "number" ? value : typeof value === "string" ? Date.parse(value) : NaN;
+    const working = new Map();
+    const heartbeats = new Map();
+    for (const item of Object.values(room.state.workItems ?? {})) {
+      const session = sessionRecord(item);
+      if (session.worker_member_id && session.heartbeat_at) {
+        const prev = heartbeats.get(session.worker_member_id);
+        if (!prev || session.heartbeat_at > prev) heartbeats.set(session.worker_member_id, session.heartbeat_at);
+      }
+      const worker = sessionWorker(item, now);
+      const heartbeatAt = timestamp(session.heartbeat_at);
+      if (!worker || !["processing", "active"].includes(session.status)
+        || !Number.isFinite(heartbeatAt) || heartbeatAt > now
+        || now - heartbeatAt > SESSION_HEARTBEAT_STALE_MS) continue;
+      if (!working.has(worker)) working.set(worker, []);
+      working.get(worker).push({ workItemId: item.id, title: item.title, heartbeat_at: item.heartbeat_at });
+    }
+    const lastCommandAt = new Map(this.db.prepare(
+      `SELECT json_extract(body,'$.actorId') AS actor, max(json_extract(body,'$.at')) AS at
+       FROM events WHERE room_id=? GROUP BY actor`
+    ).all(roomId).filter(row => row.actor).map(row => [row.actor, row.at]));
+    const addedAt = new Map(this.db.prepare(
+      `SELECT json_extract(body,'$.data.memberId') AS member, MIN(json_extract(body,'$.at')) AS at
+       FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added' GROUP BY member`
+    ).all(roomId).filter(row => row.member).map(row => [row.member, row.at]));
+    const watching = new Set((watcherMemberIds ?? []).filter(memberId => members[memberId]?.active !== false));
+    // RC-2026-09-18-051: additive host presence for agent members.
+    const identityLinkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
+    // #660: raw host status per member. status is "online"|"offline"|null
+    // (null = no registered host); identityId is the linked agent identity.
+    const hostStatusOf = memberId => {
+      const m = members[memberId];
+      if (!m || m.kind !== "agent" || m.active === false) return { identityId: null, status: null, lastSeenAt: null };
+      const link = identityLinkOf.get(roomId, memberId);
+      if (!link) return { identityId: null, status: null, lastSeenAt: null };
+      const status = this.agentHeartbeats.statusOf(link.identityId);
+      // Unregistered (no host) stays null so RC-051 clients keep the
+      // "no presence field or absent" contract. Roster still lists the member.
+      if (status.status === "unregistered") return { identityId: link.identityId, status: null, lastSeenAt: null };
+      return { identityId: link.identityId, status: status.status, lastSeenAt: status.lastSeenAt };
+    };
+    const agentPresence = memberId => {
+      const host = hostStatusOf(memberId);
+      if (host.status === null) return null;
+      return { status: host.status, lastSeenAt: host.lastSeenAt };
+    };
+    const listed = Object.values(members)
+      .filter(m => m && m.active !== false)
+      .map(m => {
+        const lastSeenAt = [lastCommandAt.get(m.id), heartbeats.get(m.id), addedAt.get(m.id)].filter(Boolean).sort().at(-1) ?? null;
+        const host = hostStatusOf(m.id);
+        const workingOn = working.get(m.id) ?? [];
+        const isWatching = watching.has(m.id);
+        return {
+          memberId: m.id, displayName: m.displayName, kind: m.kind,
+          watching: isWatching, workingOn,
+          lastSeenAt, statusMessage: m.statusMessage ?? null,
+          presence: agentPresence(m.id),
+          // #660: derived working state + owner/scope projection (additive).
+          state: presenceState({
+            kind: m.kind,
+            hasActiveSession: workingOn.length > 0,
+            watching: isWatching,
+            hostStatus: host.status,
+            hostLastSeenAt: host.lastSeenAt,
+            lastCommandAt: timestamp(lastCommandAt.get(m.id)),
+            // Enrollment is retained in legacy lastSeenAt, but is not activity.
+            lastSeenAt: Math.max(timestamp(lastCommandAt.get(m.id)) || 0,
+              timestamp(heartbeats.get(m.id)) <= now ? timestamp(heartbeats.get(m.id)) || 0 : 0) || null,
+            now,
+          }),
+          isOwner: m.id === ownerId,
+          scopes: Array.isArray(m.permissions) ? [...m.permissions] : [],
+          ownerIdentityId: m.kind === "agent" ? host.identityId : null,
+          // plan-dir-card: the member's linked directory card id (the
+          // member chip lazy-loads the card from
+          // /api/rooms/{roomId}/members/{memberId}/card). Null when the
+          // member has no visible card.
+          cardAgentId: m.kind === "agent" && host.identityId
+            ? this.agentPlugin.cardAgentIdForIdentity(host.identityId)
+            : null,
+        };
+      })
+      .sort((a, b) => a.memberId < b.memberId ? -1 : 1);
+    return listed;
+  }
+  // Presence Gap 4: the cross-room presence read behind
+  // GET /api/agents/{identityId}/presence. Returns the target identity's
+  // per-room presence row for exactly the rooms where the CALLER holds
+  // standing — a live member seat, or ownership of record (the room
+  // authority's owner member names the caller's identity). The
+  // intersection is computed here, in the derivation: the target's seats
+  // (identityRoomSeats: identity_links + guest_members) are joined
+  // against the caller's standing room by room, and a room the caller
+  // cannot stand in contributes no row — so the response cannot
+  // distinguish an identity that exists but shares no room with the
+  // caller from one that does not exist at all: both read as an empty
+  // rooms list. A room-scoped
+  // credential (boundRoomId) narrows standing to its bound room. Each
+  // row is the row presenceMembers() derives for that member (watching
+  // false: this read holds no stream), with roomId attached.
+  agentPresence(caller, targetIdentityId) {
+    return this.readTransaction(() => {
+      const empty = { identityId: targetIdentityId, rooms: [] };
+      if (!caller || typeof caller.identityId !== "string" || typeof targetIdentityId !== "string") return empty;
+      const targetSeats = identityRoomSeats(this.db, targetIdentityId);
+      if (targetSeats.length === 0) return empty;
+      const callerSeatByRoom = new Map(
+        identityRoomSeats(this.db, caller.identityId).map(seat => [seat.roomId, seat]));
+      const roomRowOf = this.db.prepare("SELECT archived_at AS archivedAt FROM rooms WHERE id=?");
+      const rooms = [];
+      for (const seat of targetSeats) {
+        if (caller.boundRoomId && seat.roomId !== caller.boundRoomId) continue;
+        const roomRow = roomRowOf.get(seat.roomId);
+        if (!roomRow || roomRow.archivedAt) continue;
+        const { members, ownerId } = this.roomAuthority(seat.roomId);
+        const callerSeat = callerSeatByRoom.get(seat.roomId);
+        const callerMember = callerSeat ? ownMember(members, callerSeat.memberId) : null;
+        const memberStanding = !!callerMember && callerMember.active !== false;
+        const ownerMember = ownerId ? ownMember(members, ownerId) : null;
+        const ownerStanding = !!ownerMember && ownerMember.identityId === caller.identityId;
+        if (!memberStanding && !ownerStanding) continue;
+        const row = this.presenceMembers(seat.roomId, [])
+          .find(entry => entry.memberId === seat.memberId);
+        if (row) rooms.push({ roomId: seat.roomId, ...row });
+      }
+      return { identityId: targetIdentityId, rooms };
     });
   }
   capabilities(token, roomId, bindingOrOptions = null, options = {}) {
@@ -4417,7 +5272,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return e;
       });
       let state;
-      try { state = compact(events.reduce(applyEvent, emptyRoomState())); }
+      try { state = compact(replayEvents(emptyRoomState(), events)); }
       catch (error) { fail(422, "invalid_import", `Export does not replay: ${error.message}`); }
       if (new Set(events.map(e => e.id)).size !== events.length) fail(422, "invalid_import", "Import has duplicate event ids");
       // Dependent rows reference event ids/sequences; a history replacement
@@ -4429,7 +5284,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("DELETE FROM cursors WHERE room_id=?").run(roomId);
       // Replacing history may preserve the head id and sequence. Invalidate
       // message replay snapshots and full-record certification explicitly.
+      discardMessageReplaySnapshot(this.db,roomId);
       this.db.prepare("DELETE FROM messages_backfill_cursor WHERE room_id=?").run(roomId);
+      // A parked room's block described the replaced log; it does not carry.
+      this.db.prepare("DELETE FROM messages_backfill_blocks WHERE room_id=?").run(roomId);
+      // Same for a patrol park (patrol_blocks is lazy: it exists only once
+      // a patrol tick has run against this store).
+      if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='patrol_blocks'").get()) {
+        this.db.prepare("DELETE FROM patrol_blocks WHERE room_id=?").run(roomId);
+      }
+      this.db.prepare("DELETE FROM messages_backfill_state WHERE room_id=?").run(roomId);
       // The projection checkpoint is a replay accelerator over the old
       // history — a stale checkpoint would corrupt rebuildProjection, so
       // replace it with one taken from the imported state.
@@ -4613,13 +5477,105 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return { ...built, ...identity };
     });
   }
+  // C-06 room digest: one bounded read composed from the context, needs-me,
+  // and updates projections plus journal window aggregates. `since` is the
+  // caller's last-handled seq (a wake's seq for the since-wake delta); the
+  // viewer's history floor (PRIV-2) clamps the window and is reported via
+  // `since`/`requestedSince`/`floorApplied`, never silently. Message rows use
+  // the current projection body through messageVisibleToViewer, so deleted,
+  // edited, DM, and pre-join text follows the same rules as every other
+  // summary read. Bodies themselves are never reproduced (see room-digest.mjs).
+  roomDigest(token, roomId, { since = 0, expectedSessionBinding = null } = {}) {
+    return this.readTransaction(() => {
+      const auth = this.authenticate(token, roomId, expectedSessionBinding);
+      if (!Number.isSafeInteger(since) || since < 0) fail(422, "invalid_cursor", "since must be a sequence number");
+      const room = this.room(roomId);
+      const through = room.sequence;
+      if (since > through) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
+      const viewerId = auth.member.id;
+      const identityId = auth.identityId ?? this.bonds?.identityForMember?.(roomId, viewerId) ?? null;
+      const floor = this.historyFloor(roomId, viewerId, through);
+      const effectiveSince = floor ? Math.max(since, floor.sequence - 1) : since;
+      const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, viewerId)?.sequence ?? 0;
+      const context = buildRoomContext({ state: room.state, sequence: through, viewerId, caughtUp, now: this.now() });
+      // Group the journal window once; retain exact known-type coverage and
+      // coalesce future event types into the same `other` compatibility bucket.
+      // File-backed Node and Workers read-only transactions are parity-tested.
+      const knownTypes = new Set(Object.values(T));
+      const byType = {};
+      for (const row of this.db.prepare(
+        "SELECT json_extract(body,'$.type') AS type, COUNT(*) AS count FROM events WHERE room_id=? AND sequence>? AND sequence<=? GROUP BY json_extract(body,'$.type')"
+      ).all(roomId, effectiveSince, through)) {
+        const type = knownTypes.has(row.type) ? row.type : "other";
+        byType[type] = (byType[type] ?? 0) + row.count;
+      }
+      // Changed work: one descending pass over the window's work_claim.updated
+      // rows; the first sighting of a claim is its latest change. The distinct
+      // total is exact from the same pass.
+      const workRows = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.data.workClaim') AS claimId,
+                json_extract(body,'$.data.action') AS action, json_extract(body,'$.data.claimState') AS state,
+                json_extract(body,'$.data.title') AS title FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')='work_claim.updated'
+           AND json_extract(body,'$.data.workClaim') IS NOT NULL
+         ORDER BY sequence DESC`
+      ).all(roomId, effectiveSince, through);
+      const seenClaims = new Set();
+      const workChanged = [];
+      for (const row of workRows) {
+        if (seenClaims.has(row.claimId)) continue;
+        seenClaims.add(row.claimId);
+        if (workChanged.length < 25) workChanged.push({ id: row.claimId, seq: row.seq, action: row.action, state: row.state, title: row.title });
+      }
+      const decisions = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.type') AS type, json_extract(body,'$.actorId') AS actorId FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type') IN ('decision.recorded','owner.decision_recorded')
+         ORDER BY sequence DESC LIMIT 10`
+      ).all(roomId, effectiveSince, through);
+      const messageRecords = messageRepository(this, roomId, room.state);
+      const messageRows = this.db.prepare(
+        `SELECT sequence AS seq, json_extract(body,'$.id') AS eventId, json_extract(body,'$.data.messageId') AS messageId,
+                json_extract(body,'$.data.body') AS body, json_extract(body,'$.data.toMemberId') AS toMemberId,
+                json_extract(body,'$.actorId') AS actorId, json_extract(body,'$.at') AS at FROM events
+         WHERE room_id=? AND sequence>? AND sequence<=? AND json_extract(body,'$.type')='message.posted'
+         ORDER BY sequence DESC LIMIT 50`
+      ).all(roomId, effectiveSince, through);
+      const currentById = messageRecords.getMany ? messageRecords.getMany(messageRows.map(row => row.messageId ?? row.eventId)) : messageRecords;
+      const messages = [];
+      for (const row of messageRows) {
+        const id = row.messageId ?? row.eventId;
+        const current = id ? currentById.get(id) : null;
+        const pseudo = current ?? { id, body: row.body, authorId: row.actorId, toMemberId: row.toMemberId, createdAt: row.at };
+        if (!messageVisibleToViewer(pseudo, viewerId, floor)) continue;
+        messages.push({ seq: row.seq, id, actorId: row.actorId, summary: pseudo.body });
+        if (messages.length >= 10) break;
+      }
+      const attention = roomAttention(this, roomId, viewerId, identityId, effectiveSince)
+        .filter(item => !floor || item.seq >= floor.sequence)
+        .map(({ kind, seq, id, summary }) => ({ kind, seq, id, summary }));
+      const projected = projectRoomUpdates(this, roomId, viewerId, identityId);
+      const byKind = {};
+      let actionableTotal = 0;
+      for (const item of projected.items) {
+        if (item.state !== "unread" && item.state !== "read") continue;
+        byKind[item.kind] = (byKind[item.kind] ?? 0) + 1;
+        actionableTotal += 1;
+      }
+      const digest = buildRoomDigest({
+        roomId, viewerId, since: effectiveSince, requestedSince: since, through, now: this.now(),
+        context, byType, workChanged, workChangedTotal: seenClaims.size,
+        attention, messages, decisions, actionable: { total: actionableTotal, byKind }
+      });
+      return digest;
+    });
+  }
   workContext(token, roomId, workItemId, { includeSource = false, includeOffers = false, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
       const room = this.room(roomId), now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers,
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: messageRepository(this, roomId, room.state),
         boardRow: boardRowForItem(this, roomId, workItemId),
         floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
@@ -4644,7 +5600,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         floor ? [floor.sequence, floor.at, [...floor.sameInstant].sort()] : null] : null;
       return { ...selectedWorkDiscussion({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence,
         now: this.now(), metadata, window, anchorId, cursor,
-        floor, scope }),
+        floor, scope, messageRecords: messageRepository(this, roomId, room.state) }),
         viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
@@ -4669,7 +5625,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const opts = bindingOrOptions && typeof bindingOrOptions === "object" && !Array.isArray(bindingOrOptions)
       ? bindingOrOptions : options;
     const expectedSessionBinding = opts.expectedSessionBinding ?? (typeof bindingOrOptions === "string" || bindingOrOptions === null ? bindingOrOptions : null);
-    const { actor = null, since = null, until = null } = opts;
+    const { actor = null, since = null, until = null, types = null, mentions = null, compact = false } = opts;
     // #658: mention timeouts are evaluated lazily on read. The flip needs a
     // write-capable transaction, so it runs before the query_only read
     // below; usually a no-op (one indexed UPDATE, zero rows touched).
@@ -4681,19 +5637,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       for (const [name, value] of [["since", since], ["until", until]]) {
         if (value !== null && (typeof value !== "string" || Number.isNaN(Date.parse(value)))) fail(422, "invalid_cursor", `Invalid ${name} timestamp`);
       }
+      // B4 agent read-path: type + mentions filters, same SQL-level audit
+      // filter family as actor/since/until — a filtered page still advances
+      // its cursor by what was scanned (see the note at `next` below).
+      if (types !== null && (!Array.isArray(types) || types.length < 1 || types.length > 16
+        || types.some(type => typeof type !== "string" || !/^[a-z0-9][a-z0-9._-]{0,63}$/.test(type))))
+        fail(422, "invalid_cursor", "Invalid type filter");
+      let mentionsMemberId = null;
+      if (mentions !== null) {
+        if (typeof mentions !== "string" || !mentions || mentions.length > 128) fail(422, "invalid_cursor", "Invalid mentions filter");
+        mentionsMemberId = mentions === "me" ? auth.member.id : mentions;
+      }
+      // A database from before the #658 schema has no mention_states table
+      // and simply has no mentions (same stance as openDirectMentions).
+      const mentionsTableReady = mentionsMemberId === null ? false
+        : Boolean(this.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='mention_states'").get());
       const authority = this.roomAuthority(roomId);
       const sequence = authority.sequence;
       if (after > sequence) fail(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
       // Round-2 #110: audit filters. The event log is the audit log —
       // every mutation records actorId + at, so "who did what when" is a
       // filtered read, not a new table.
+      const filterClauses = [
+        `AND (? IS NULL OR json_extract(body,'$.actorId')=?)`,
+        `AND (? IS NULL OR json_extract(body,'$.at')>=?)`,
+        `AND (? IS NULL OR json_extract(body,'$.at')<=?)`
+      ];
+      const filterArgs = [actor, actor, since, since, until, until];
+      if (types !== null) {
+        filterClauses.push(`AND json_extract(body,'$.type') IN (${types.map(() => "?").join(",")})`);
+        filterArgs.push(...types);
+      }
+      if (mentionsMemberId !== null) {
+        if (mentionsTableReady) {
+          filterClauses.push(`AND id IN (SELECT message_event_id FROM mention_states WHERE room_id=? AND mentioned_member_id=?)`);
+          filterArgs.push(roomId, mentionsMemberId);
+        } else {
+          filterClauses.push(`AND 1=0`);
+        }
+      }
       const events = this.db.prepare(
         `SELECT sequence,body FROM events WHERE room_id=? AND sequence>?
-         AND (? IS NULL OR json_extract(body,'$.actorId')=?)
-         AND (? IS NULL OR json_extract(body,'$.at')>=?)
-         AND (? IS NULL OR json_extract(body,'$.at')<=?)
+         ${filterClauses.join("\n         ")}
          ORDER BY sequence LIMIT ?`
-      ).all(roomId, after, actor, actor, since, since, until, until, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
+      ).all(roomId, after, ...filterArgs, limit).map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       // The cursor advances by what was SCANNED, not by what was returned.
       // A filter can match nothing in a stretch of the log: taking `next` from
       // the last returned row left it at the caller's own `after`, while
@@ -4718,7 +5705,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const isOwner = viewerId === authority.ownerId;
       // PRIV-2: since_join readers page past events from before their join.
       const floor = this.historyFloor(roomId, viewerId, sequence);
-      const floorMessages = floor ? indexHistoryMessages(this.room(roomId).state.messages) : null;
+      const floorMessages = floor ? messageRepository(this, roomId) : null;
       // SEC-19: thunk keeps the zero-decode polling optimization: the full
       // projection only decodes if the page actually holds a follow-up event.
       const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events, this.archivedDmPartiesReader(roomId));
@@ -4732,7 +5719,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       for (const { event } of visible) {
         if (event?.type === T.MESSAGE_POSTED && chips.has(event.id)) event.mentions = chips.get(event.id);
       }
-      return { events: visible, next, hasMore: next < sequence };
+      // B4 agent read-path: compact is opt-in per request; without it the
+      // page is byte-identical to the pre-filter read.
+      const shaped = compact === true
+        ? visible.map(row => ({ sequence: row.sequence, event: compactEventForPoll(row.event) }))
+        : visible;
+      return { events: shaped, next, hasMore: next < sequence };
     });
   }
   // RC-2026-09-18-012: agent-scoped unified inbox. An authenticated agent
@@ -4746,8 +5738,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Additive and room-scoped; the human /api/inbox/* account-session gate
   // is untouched. The HTTP layer additionally requires agent membership
   // and, for API-key callers, the inbox:read scope.
-  agentInbox(token, roomId, { limit = 50, expectedSessionBinding = null } = {}) {
+  agentInbox(token, roomId, { limit = 50, after = 0, expectedSessionBinding = null } = {}) {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 200) fail(422, "invalid_inbox_limit", "Limit must be an integer 1..200");
+    // B4 agent read-path: `after` is a sequence cursor over the two
+    // event-log lists (directMessages, directMentions). A polling agent
+    // passes the previous response's cursor.after and stops re-reading the
+    // head of both lists; the standing lists (assignments, routed mentions,
+    // bond proposals, peer messages, DM requests) are current state, not a
+    // log, and always ride in full. after=0 keeps the legacy response.
+    if (!Number.isSafeInteger(after) || after < 0) fail(422, "invalid_inbox_cursor", "After must be a sequence number of 0 or more");
     // RC-2026-09-18-013: the first per-room collab access lazily replays the
     // persisted journal inside a WRITE transaction. That replay cannot run
     // inside the readTransaction below ("Cannot write inside a read-only
@@ -4763,10 +5762,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
       const directMessages = this.db.prepare(
-        `SELECT sequence, body FROM events WHERE room_id=?
+        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
          ORDER BY sequence DESC LIMIT ?`)
-        .all(roomId, T.MESSAGE_POSTED, memberId, limit)
+        .all(roomId, after, T.MESSAGE_POSTED, memberId, limit)
         .map(row => {
           const parsed = JSON.parse(row.body);
           return {
@@ -4804,7 +5803,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
-      const directMentions = this.openDirectMentions(roomId, memberId, limit);
+      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after });
+      // A delivery cursor is not an acknowledgement. Keep bounded standing
+      // attention visible when a poll advances beyond an unanswered mention.
+      const pending = this.openDirectMentions(roomId, memberId, limit + 1, this.now());
+      const attention = Object.freeze({
+        pendingMentions: pending.slice(0, limit).map(({ sequence, replyToId, from, state, private: isPrivate }) =>
+          Object.freeze({ sequence, replyToId, from, state, private: isPrivate })),
+        hasMore: pending.length > limit,
+        acknowledges: false,
+        nextRead: pending.length ? { tool: "room_read_inbox", arguments: { limit, after: 0 } } : null,
+      });
       // Bond proposals and peer DMs are sibling lists, same composition as
       // routing mentions (items plus a next action). Direct @mentions stay
       // their own list — friend traffic is not a mention.
@@ -4813,6 +5822,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
       // only messages posted in this room, never another room's DM traffic.
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
+      // The poll cursor: the highest sequence either event-log list
+      // returned, or the caller's own `after` when nothing was newer.
+      // Standing lists carry no sequence and never move it.
+      const cursorAfter = Math.max(after,
+        ...directMessages.map(row => row.sequence),
+        ...directMentions.map(row => row.sequence));
       const inbox = stampInbox({
         agentId: memberId,
         roomId,
@@ -4820,12 +5835,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         assignments,
         mentions,
         directMentions,
+        attention,
         bondProposals,
         peerMessages,
+        cursor: { after: cursorAfter },
         next: inboxNext(roomId, directMessages, assignments, mentions, directMentions, bondProposals, peerMessages, this.room(roomId).state.replyRequests),
         dmRequests,
       }, memberId);
-      for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "next", "dmRequests"]) {
+      for (const key of ["directMessages", "assignments", "mentions", "directMentions", "bondProposals", "peerMessages", "cursor", "next", "dmRequests"]) {
         inbox[key] = Object.freeze(inbox[key]);
       }
       return Object.freeze(inbox);
@@ -4842,12 +5859,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // projection is the current state. A mention deleted after posting must
     // not surface at all (it listed a tombstone with a room_reply next step),
     // and an edited mention must show its current body, not the pre-edit
-    // text. Messages missing from the projection fall back to the logged
-    // body, as the #2941 fix did for room DMs. Deleted rows are skipped
+    // text. Archived messages resolve through current normalized records;
+    // only genuinely absent legacy records fall back to the logged body. Deleted rows are skipped
     // inside the scan so they never consume one of the caller's limit slots.
-    let liveMessages = [];
-    try { liveMessages = this.room(roomId).state?.messages ?? []; } catch { /* unknown room: no overlay */ }
-    const currentById = new Map(liveMessages.map(message => [message.id, message]));
+    let currentById = { get: () => undefined, hasReply: () => false };
+    try { currentById = messageRepository(this, roomId); }
+    catch (error) { if (error?.code !== 'room_not_found') throw error; }
     const rows = [];
     try {
       const stmt = this.db.prepare(
@@ -4872,7 +5889,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         for (const row of batch) {
           const logged = JSON.parse(row.body);
           const current = currentById.get(logged.data?.messageId ?? row.eventId);
-          if (current?.deletedAt) continue;
+          if (current?.deletedAt || logged?.type !== T.MESSAGE_POSTED) continue;
+          if (logged.data?.toMemberId && logged.data.toMemberId !== memberId && logged.actorId !== memberId) continue;
+          // Filter before consuming page slots: otherwise newer expired rows
+          // answered late can hide an older unresolved mention indefinitely.
+          if (row.state === "timed_out" && currentById.hasReply(memberId, logged.data.messageId ?? row.eventId)) continue;
           if (rows.length < limit) rows.push(row);
         }
         if (batch.length < want) break;
@@ -4884,16 +5905,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     // timed_out is terminal, so a late reply does not flip the row. Once this
     // member has replied to that message, it is no longer waiting in the inbox.
-    const answeredBy = new Map();
-    if (rows.some(row => row.state === "timed_out")) {
-      for (const message of this.room(roomId).state.messages ?? []) {
-        if (message.authorId === memberId && message.replyToId) answeredBy.set(message.replyToId, true);
-      }
-    }
     return rows.map(row => ({ row, event: JSON.parse(row.body) }))
       .filter(({ event }) => event?.type === T.MESSAGE_POSTED
         && (!event.data?.toMemberId || event.data.toMemberId === memberId || event.actorId === memberId))
-      .filter(({ row, event }) => row.state !== "timed_out" || !answeredBy.get(event.data.messageId ?? row.eventId))
+      .filter(({ row, event }) => row.state !== "timed_out" || !currentById.hasReply(memberId, event.data.messageId ?? row.eventId))
       .map(({ row, event }) => Object.freeze({
         sequence: row.sequence,
         eventId: row.eventId,
@@ -4929,7 +5944,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // Derive continuation from scanned rows before removing private events:
       // an invisible page must still progress within its frozen horizon.
       const floor = this.historyFloor(roomId, auth.member.id, room.sequence); // PRIV-2
-      const floorMessages = floor ? indexHistoryMessages(room.state.messages) : null;
+      const floorMessages = floor ? messageRepository(this, roomId, room.state) : null;
       const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items, this.archivedDmPartiesReader(roomId)); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, auth.member.id, isOwner)
@@ -4977,8 +5992,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       // RC-2026-09-23-100: guest-agent scope gate (dual-check part 2 of the
-      // GX-invite design). Guest members may post chat messages and set
-      // reactions; drafts (message.posted carrying a workItemId) need the
+      // GX-invite design). Guest members may post chat messages and vote in
+      // polls; drafts (message.posted carrying a workItemId) need the
       // contributor tier recorded at redemption. Every other command type
       // is refused outright — a guest can never hold a scope outside
       // guest:*, even if some other path granted permission bits.
@@ -4992,7 +6007,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // prepareReplyPost scopes responses to requests addressed to the
         // guest itself.
         const opensReplyRequest = command.type === T.MESSAGE_POSTED && command.data?.requestKind != null;
-        const allowed = command.type === T.MESSAGE_REACTION_SET
+        const allowed = command.type === T.POLL_VOTED
           || (command.type === T.MESSAGE_POSTED && !opensReplyRequest && (!isDraft || tier === "contributor"));
         if (!allowed) fail(403, "guest_scope_denied", "Guest members cannot perform this action");
       }
@@ -5016,15 +6031,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       let room = this.room(roomId);
       refuseArchivedWrite(room.state);
-      // The author or the Room owner can still delete an archived message: bring
-      // that one message back into the projection (it stays retained) and let the
-      // normal delete and redaction run. Anyone else falls through to the
-      // archived-message refusal below, which confirms nothing to a non-party.
-      if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
-        const archivedRow = archivedMessageRow(this.db, roomId, command.data.messageId);
-        if (archivedRow && (archivedRow.author_id === auth.member.id || room.state.room?.ownerId === auth.member.id)
-            && restoreArchivedMessage(this, roomId, command.data.messageId)) room = this.room(roomId);
-      }
+      room = prepareMessageCommand(this, roomId, room, command, auth.member.id);
       if (command.type === T.MESSAGE_POSTED && typeof command.data.toMemberId === "string" && command.data.toMemberId) {
         // DMs are open by default: only an explicit denial (blocked /
         // rejected / revoked) refuses. Runs before the event is built, so a
@@ -5094,53 +6101,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           fail(403, "work_claims_not_permitted", "Creating, claiming, renewing, or updating work claims needs a contribute, review, or collaborate profile.");
         }
       }
-      // Archived messages are not in the projection, so the reducer cannot change
-      // them or thread under them. Refuse with a clear error. A DM the actor is
-      // not a party to reads like an unknown id, so nothing about it is confirmed.
-      const archivedRef = ARCHIVED_REF_FIELDS[command.type];
-      if (archivedRef) {
-        const refId = command.data?.[archivedRef];
-        if (typeof refId === "string" && refId && !(room.state.messages || []).some(m => m.id === refId)) {
-          const archivedRow = archivedMessageRow(this.db, roomId, refId);
-          const party = archivedRow && (!archivedRow.to_member_id || archivedRow.author_id === auth.member.id || archivedRow.to_member_id === auth.member.id);
-          // An archived message can still hold a pin (older archives did not retain pins).
-          // Unpinning is allowed for anyone who may see the message and refused, like a
-          // live DM, for a non-party; the reducer cannot check it without the message.
-          const stillPinned = command.type === T.MESSAGE_UNPINNED && (room.state.pins ?? []).some(pin => pin.messageId === refId);
-          if (archivedRow && stillPinned) {
-            if (!party) fail(422, "command_rejected", "Cannot unpin a direct message you are not a party to");
-          } else if (party) {
-            fail(409, "message_archived", "That message is archived and cannot be changed or replied to");
-          }
-        }
-      }
-      // A new post cannot reuse the id of an archived message: the reducer only
-      // sees the projection, so it would otherwise accept a second message under
-      // that id. Same refusal as a live duplicate; it reads the same for a DM.
-      if (command.type === T.MESSAGE_POSTED) {
-        const newId = command.data?.messageId || command.id;
-        if (typeof newId === "string" && newId && !(room.state.messages || []).some(m => m.id === newId)
-            && archivedMessageRow(this.db, roomId, newId)) {
-          fail(409, "command_rejected", "Message already exists");
-        }
-      }
-      // A reaction on a DM is shown to its parties and the answer would
+      assertMessageCommandReferences(this, roomId, room.state, command, auth.member.id);
+      // A vote on a DM poll is shown to its parties and the answer would
       // confirm the private id, so a non-party is told "no such message".
-      // Live admission only; reactions already in a log keep replaying.
-      if (command.type === T.MESSAGE_REACTION_SET && typeof command.data?.messageId === "string") {
+      if (command.type === T.POLL_VOTED && typeof command.data?.messageId === "string") {
         const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
-        // Reply requests are directed but room-threaded: members may react to them.
+        // Reply requests are directed but room-threaded.
         if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)
             && target.authorId !== auth.member.id && target.toMemberId !== auth.member.id) {
-          fail(422, "command_rejected", "Reaction must reference a message in this Room");
+          fail(422, "command_rejected", "Vote must reference a message in this Room");
         }
       }
       // r233: after a block, the blocked member's edit of its own DM (a new
-      // body in the blocker's view) or reaction to the blocker's DM (a new
-      // activity event for her) is new contact in the denied direction, so it
-      // gets the same consent check as a fresh DM. Retracting a reaction and
-      // deleting stay open; reply requests are room-threaded and exempt.
-      if ((command.type === T.MESSAGE_EDITED || (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true))
+      // body in the blocker's view) or vote on the blocker's DM poll is new
+      // contact in the denied direction, so it gets the same consent check as
+      // a fresh DM. Retracting a vote and deleting stay open; reply requests are room-threaded and exempt.
+      if ((command.type === T.MESSAGE_EDITED || (command.type === T.POLL_VOTED && command.data?.active === true))
           && typeof command.data?.messageId === "string") {
         const target = (room.state.messages || []).find(m => m.id === command.data.messageId);
         if (target?.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, target.id)) {
@@ -5258,7 +6234,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (error?.code === CHANNEL_ARCHIVED_CODE) fail(409, CHANNEL_ARCHIVED_CODE, error.message);
         if (error?.code === "display_name_unavailable") fail(422, "display_name_unavailable", error.message);
         if (/^Claim held by [A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(error.message)) fail(409, "session_claimed", error.message);
-        if (command.type === T.MESSAGE_REACTION_SET && (/^Event data missing /.test(error.message) || error.message === "Invalid reaction choice")) {
+        if (command.type === T.POLL_VOTED && (/^Event data missing /.test(error.message) || error.message === "Invalid poll vote" || error.message === "Vote must reference a poll")) {
           fail(422, "invalid_arguments", error.message);
         }
         // The reducer's generic "Invalid title" also covers values longer
@@ -5291,9 +6267,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const conflict = conflictingClaim(room.state.workItems, state.workItems[incoming.data.workItemId], Date.parse(incoming.at));
         if (conflict) fail(409, "claim_conflict", `Scope is reserved by work ${conflict.id}. Coordinate or release that reservation first; no new claim was saved.`);
       }
-      const projection = this.storedProjection(roomId, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
       const sequence = room.sequence + 1;
+      const messageWrite = prepareMessageWrite(this, {roomId,previous:room,state,event:incoming,sequence});
+      const { projection } = messageWrite;
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes && !cleanup) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       // R1 delivery-path tracing (RC-2026-09-26-966): delivery.log spans the
       // event-log persist. getTracer() is read per command (never at module
       // scope) so tests can reset the singleton; when telemetry is off the
@@ -5306,6 +6283,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        this._queueProjectionCache(roomId, sequence, state, projection);
         // Board is the claim authority the MCP tools share with /work-claims.
         // Same transaction as the projection event: decision #10's write-path
         // cutover syncs the item's board claim from post-command state via
@@ -5316,10 +6294,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (WORK_ITEM_BOARD_SYNC_TYPES.has(incoming.type)) {
           syncWorkItemClaim(this, roomId, auth.member.id, incoming, state);
         }
-        // MSG-1: double-write the messages table in this same transaction.
-        // A throw here rolls the event back with the row. No read path uses
-        // the table yet. Older events wait for the MSG-2 backfill.
-        syncMessageRows(this.db, { roomId, sequence, event: incoming, state });
+        // Persist the message domain in the same transaction as event/receipt.
+        // A failure rolls back both the entity and its projection reference.
+        messageWrite.persistEntities();
         if (incoming.type === T.MESSAGE_EDITED) {
           invalidateEditedAssistantInput(this.db, roomId, incoming.data.messageId, this.now());
         }
@@ -5348,17 +6325,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, command.data.memberId);
         this.reminders.retireMember(roomId, command.data.memberId);
       }
-      // RC-2026-10-07: reaction-as-ack. The agent.wake payload's one-tap ack
-      // copy (WAKE_ACK_HINT) says "react 👍 to acknowledge", so an active
-      // reaction by a member marks THEIR OWN pending wake signals for that
-      // message delivered. Without this the same signal re-appears on every
-      // heartbeat poll after the member reacted (the phantom re-wake loop).
-      // Runs in the same transaction as the reaction event; never throws —
-      // an ack is best-effort and must not fail the reaction.
-      if (command.type === T.MESSAGE_REACTION_SET && command.data?.active === true
-        && typeof command.data.messageId === "string") {
-        try { this.ackWakesOnReaction(roomId, auth.member.id, command.data.messageId); } catch {}
-      }
       if (command.type === T.MESSAGE_POSTED) {
         this.maybeWakeOnMention(roomId, state, auth.member.id, command.data, incoming.id);
         state = this.resumeRoundLimitPauses(roomId, state, auth.member.id, incoming, sequence);
@@ -5372,7 +6338,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
+        const { woken, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
         if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
@@ -5410,8 +6376,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (@handles whose target is ambiguous or unknown); they ride the response below.
       let mentionWarnings = null;
       if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
-      // Attention: write-time activity fan-out (mention/reply/thread_reply/
-      // reaction). Runs in the same transaction as the triggering event.
+      // Attention: write-time activity fan-out (mention/reply/thread_reply).
+      // Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
       // #3261: but it is no longer silent either. The fan-out is atomic
       // per recipient set (see activity.mjs), the failure is logged and
@@ -5472,7 +6438,23 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const note = skippedWakes.length
         ? `Posted. Wake skipped for ${skippedWakes.map(id => room.state.members?.[id]?.displayName || id).join(", ")}: Room Trust is off, so that agent was not woken.`
         : null;
+      // Delegation lifecycle (F-1): an ownership transfer lapses every
+      // delegation grant the outgoing owner issued in this room — the
+      // grants are their personal issuance, and the incoming owner must
+      // not silently inherit them. Runs inside the transfer's own
+      // transaction, after the event persists, so a failed transfer
+      // revokes nothing. Account deletion revokes the same way through
+      // its own executor; it appends its transfer event directly and
+      // never reaches this hook.
+      if (command.type === T.OWNERSHIP_TRANSFERRED) {
+        state = this.lapseDelegationOnTransfer(roomId, state, room.state.room.ownerId, sequence, incoming);
+      }
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
+      if (this.messageProjectionWindow !== null && (state.messages?.length ?? 0) > this.messageProjectionWindow * 2) {
+        // Archive only at an exact certified head; unsafe transitions defer to
+        // backfill. This is the existing reversible format, not another store.
+        this.archiveMessages(roomId, { keepNewest: this.messageProjectionWindow, dryRun: false });
+      }
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });
@@ -5485,6 +6467,48 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       throw error;
     }
+  }
+
+  // F-1: lapse the outgoing owner's delegation grants on an ownership
+  // transfer. Grant rows are revoked and journaled under the
+  // "ownership_transferred" lifecycle actor by the two delegation modules;
+  // a grant-conferred invite_member bit is stripped here through the event
+  // path, with the incoming owner as actor (their authority replaces the
+  // lapsed grant), following the in-command event-append pattern of
+  // resumeRoundLimitPauses. Runs inside the transfer command's transaction:
+  // if a strip cannot apply, the whole transfer fails rather than leaving
+  // the bit behind. Returns the post-strip room state.
+  lapseDelegationOnTransfer(roomId, state, outgoingOwnerId, sequence, transferEvent) {
+    const actorId = "ownership_transferred";
+    this.ownerDelegates.revokeAllGrantedBy(roomId, outgoingOwnerId, { actorId });
+    const { stripTargets } = this.delegation.revokeAllGrantedBy(roomId, outgoingOwnerId, { actorId });
+    let next = state;
+    let seq = sequence;
+    for (const target of stripTargets) {
+      if (seq >= PILOT_LIMITS.eventsPerRoom) break;
+      const member = next.members?.[target.memberId];
+      if (!member || member.active === false || !member.permissions.includes("invite_member")) continue;
+      const stripEvent = event({
+        type: T.MEMBER_ACCESS_CHANGED, roomId, actorId: next.room.ownerId, at: transferEvent.at,
+        id: `delegate-lapse-${transferEvent.id}-${target.memberId}`,
+        idempotencyKey: `delegate-lapse-${transferEvent.id}-${target.memberId}`,
+        causationId: transferEvent.id,
+        data: { memberId: member.id, expectedMemberRevision: member.revision,
+          permissions: member.permissions.filter(permission => permission !== "invite_member"),
+          active: member.active, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION }
+      });
+      const applied = compact(applyEventWithGrowth(next, stripEvent, growthCollector).state);
+      const projection = this.storedProjection(roomId, applied);
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) break;
+      seq += 1;
+      this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, stripEvent.id, JSON.stringify(stripEvent));
+      this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?")
+        .run(seq, projection, archivedAtOf(applied), roomId);
+      // Parity with a command-issued member.access_changed (see command()).
+      this.agentConnections.revokeMember(roomId, member.id);
+      next = applied;
+    }
+    return next;
   }
 
   // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
@@ -5566,51 +6590,39 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // to agent members, then wake the offline ones via their registered
   // agent identity. Never throws for unparseable input — a mention that
   // resolves to nobody (or to an online agent) is simply not woken.
-  // RC-2026-10-07: reaction-as-ack. The agent.wake payload carries the
-  // one-tap ack hint "react 👍 to acknowledge" — honor it: an active
-  // reaction marks the REACTING member's own undelivered wake signals for
-  // that message delivered. Only their own signals are touched (a reaction
-  // is personal acknowledgment, never someone else's), and a member with
-  // no identity link or no pending signals for the message is a no-op.
-  // Defensive against pre-schema databases; never throws.
-  ackWakesOnReaction(roomId, memberId, messageId) {
-    let link = null;
-    try {
-      link = this.db.prepare(
-        "SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").get(roomId, memberId);
-    } catch { return; }
-    if (!link?.identityId) return;
-    try {
-      this.db.prepare(
-        "UPDATE agent_wake_signals SET delivered_at=? WHERE agent_id=? AND room_id=? AND message_id=? AND delivered_at IS NULL"
-      ).run(this.now(), link.identityId, roomId, messageId);
-    } catch { /* pre agent_wake_signals schema: nothing to ack */ }
-  }
   maybeWakeOnMention(roomId, state, senderMemberId, data, eventId) {
     const targets = agentWakeTargets(state, senderMemberId, data, this.db, roomId);
     if (targets.size === 0) return;
-    const linkOf = this.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?");
     // Decision #25: trial seats receive mention wakes in their room. Guest
     // members are seated through guest_members, never identity_links, so
-    // the identity_links-only lookup silently dropped every trial-seat
-    // wake. Fall back to the guest seat's identity. Deliberately local to
-    // this fan-out: identityIdForMember (the work-wake resolver) keeps
-    // NOT resolving guests — work wakes stay excluded for trial seats.
-    const guestLinkOf = this.db.prepare("SELECT guest_identity_id AS identityId FROM guest_members WHERE room_id=? AND member_id=?");
+    // an identity_links-only lookup silently drops every trial-seat wake.
+    // Resolve through the shared guest-aware resolver
+    // (server/wake-identity-resolution.mjs), the same one the webhook fan-out
+    // uses. identityIdForMember (the work-wake
+    // resolver) deliberately keeps NOT resolving guests — work wakes stay
+    // excluded for trial seats.
     for (const [memberId, kind] of targets) {
       // Trust off skips the wake. The post already landed; the command result
       // names the skip.
       if (firstBlockedWakeTarget(state, senderMemberId, [memberId])) continue;
-      const link = linkOf.get(roomId, memberId) ?? guestLinkOf.get(roomId, memberId);
-      if (!link) continue;
-      const { woken, signal } = this.agentHeartbeats.wakeIfOffline({
-        agentId: link.identityId, kind, roomId, messageId: data.messageId ?? eventId });
+      const identityId = identityIdForWakeMember(this.db, roomId, memberId);
+      // #3345: a mention target with no identity link on either table can
+      // never be woken — that used to be a silent `continue`; it is now a
+      // counted, journaled loss (the member exists; the fabric cannot
+      // address them).
+      if (!identityId) {
+        recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
+          event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
+        continue;
+      }
+      const { woken, signal } = wakeForAgent(this, {
+        agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
-        this.agentPlugin.deliverWakePing({ identityId: link.identityId, signal });
+        this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: link.identityId,
+        this.agentHeartbeats.pushNotify({ identityId: identityId,
           eventType: kind === "dm" ? "dm.posted" : "message.posted",
           roomId, id: data.messageId ?? eventId, ts: this.now() });
       }
@@ -5629,16 +6641,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const nowMs = this.now();
     const replyToId = typeof data.replyToId === "string" ? data.replyToId : "";
     if (replyToId) {
+      // Deadline classification must not depend on whether a reader happened
+      // to persist lazy expiry before this reply. Late response evidence lives
+      // separately from the terminal deadline state.
+      this.flipExpiredMentions(roomId, nowMs);
       const pending = this.db.prepare(
         `SELECT m.message_event_id AS eventId, e.body
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
-         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged')`
+         WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')`
       ).all(roomId, senderMemberId);
       const answered = pending.find(row => {
         let parsed = null;
         try { parsed = JSON.parse(row.body); } catch { parsed = null; }
         return (parsed?.data?.messageId || row.eventId) === replyToId;
       });
+      if (answered) this.db.prepare(
+        `INSERT INTO mention_observations(room_id,message_event_id,mentioned_member_id,acknowledged,responded_at)
+         VALUES(?,?,?,1,?) ON CONFLICT(room_id,message_event_id,mentioned_member_id)
+         DO UPDATE SET acknowledged=1, responded_at=COALESCE(mention_observations.responded_at,excluded.responded_at)`
+      ).run(roomId, answered.eventId, senderMemberId, nowMs);
       if (answered) this.db.prepare(
         `UPDATE mention_states SET state='responded', decided_at=?
          WHERE room_id=? AND message_event_id=? AND mentioned_member_id=? AND state IN ('delivered','acknowledged')`
@@ -5741,10 +6762,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return 0;
     }
     if (!expired) return 0;
-    const run = () => this.db.prepare(
-      `UPDATE mention_states SET state='timed_out', decided_at=?
-       WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
-    ).run(nowMs, roomId, nowMs);
+    const run = () => {
+      // Preserve facts from legacy acknowledged rows without inventing their
+      // original acknowledgement time.
+      this.db.prepare(`INSERT OR IGNORE INTO mention_observations
+        (room_id,message_event_id,mentioned_member_id,acknowledged)
+        SELECT room_id,message_event_id,mentioned_member_id,1 FROM mention_states
+        WHERE room_id=? AND state='acknowledged' AND timeout_at<=?`).run(roomId, nowMs);
+      return this.db.prepare(
+        `UPDATE mention_states SET state='timed_out', decided_at=?
+         WHERE room_id=? AND state IN ('delivered','acknowledged') AND timeout_at<=?`
+      ).run(nowMs, roomId, nowMs);
+    };
     return this.db.isTransaction ? run().changes : this.transaction(run).changes;
   }
 
@@ -5770,6 +6799,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         fail(any ? 403 : 404, any ? "mention_not_yours" : "mention_not_found",
           any ? "You can only acknowledge your own mentions" : "No mention found for this message");
       }
+      // An explicit late ACK is still an observation even when the deadline
+      // state is terminal. Repeats preserve the first recorded timestamp.
+      this.db.prepare(`INSERT INTO mention_observations
+        (room_id,message_event_id,mentioned_member_id,acknowledged,acknowledged_at)
+        VALUES(?,?,?,1,?) ON CONFLICT(room_id,message_event_id,mentioned_member_id)
+        DO UPDATE SET acknowledged=1, acknowledged_at=COALESCE(mention_observations.acknowledged_at,excluded.acknowledged_at)`)
+        .run(roomId, messageEventId, auth.member.id, this.now());
       if (mine.state !== "delivered") return this.mentionView(roomId, messageEventId, auth.member.id);
       assertTransitionMention("delivered", "acknowledged");
       this.db.prepare(

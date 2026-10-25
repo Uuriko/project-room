@@ -26,6 +26,21 @@ function assertPublicPolicy(response, origin) {
   });
 }
 
+// /about ships one first-party script (src/front-door.js) fed by one API
+// path (/api/public/front-door); both are path-pinned into its policy.
+// Everything else matches the shared public policy above.
+function assertAboutPolicy(response, origin) {
+  const directives = Object.fromEntries(response.headers.get('content-security-policy').split(';').map(part => {
+    const [name, ...values] = part.trim().split(/\s+/); return [name, values.join(' ')];
+  }));
+  assert.deepEqual(directives, {
+    'default-src': "'none'", 'script-src': `${origin}/src/front-door.js https://static.cloudflareinsights.com`,
+    'style-src': "'unsafe-inline'", 'connect-src': `${origin}/api/public/front-door https://cloudflareinsights.com ${origin}/cdn-cgi/rum`,
+    'img-src': "'self'", 'manifest-src': "'self'", 'base-uri': "'none'",
+    'form-action': "'none'", 'frame-ancestors': "'none'"
+  });
+}
+
 test('actual Worker public search routes load packaged HTML and preserve private/error indexing defaults', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
@@ -47,11 +62,11 @@ test('actual Worker public search routes load packaged HTML and preserve private
   const present = start(false);
   try {
     const page = await call(present, '/about'); assert.equal(page.status, 200); assert.equal(page.headers.get('x-robots-tag'), 'all');
-    assertPublicPolicy(page, origin);
-    assert.match(page.headers.get('content-security-policy'), /script-src https:\/\/static\.cloudflareinsights\.com/);
-    assert.match(page.headers.get('content-security-policy'), /connect-src https:\/\/cloudflareinsights\.com/);
+    assertAboutPolicy(page, origin);
+    assert.match(page.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
+    assert.match(page.headers.get('content-security-policy'), /connect-src \S+\/api\/public\/front-door https:\/\/cloudflareinsights\.com/);
     assert.match(page.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
-    assert.match(page.headers.get('content-type'), /text\/html/); assert.match(await page.text(), /Work with your agents in one room/);
+    assert.match(page.headers.get('content-type'), /text\/html/); assert.match(await page.text(), /Put AI teammates to work/);
     const head = await call(present, '/about', 'HEAD'); assert.equal(head.status, 200); assert.equal(await head.text(), '');
     const alias = await call(present, '/about.html'); assert.equal(alias.status, 301); assert.equal(alias.headers.get('location'), '/about');
     const home = await call(present, '/'); assert.equal(home.status, 200); assert.equal(home.headers.get('x-robots-tag'), 'all');
@@ -86,7 +101,7 @@ test('actual Worker public search routes load packaged HTML and preserve private
         'CF-Connecting-IP': '192.0.2.1', 'X-Forwarded-Host': 'csp-denied.example', Forwarded: 'host=csp-denied.example;proto=http'
       } });
       assert.equal(response.status, 200, door + path);
-      assertPublicPolicy(response, door);
+      if (path === '/about') assertAboutPolicy(response, door); else assertPublicPolicy(response, door);
     }
     // /room/agents is an existing machine-discovery alias, not /agents HTML.
     const agentPacket = await present.dispatchFetch('https://www.getdasha.com/room/agents');
