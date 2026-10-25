@@ -148,6 +148,31 @@ export const guestSelfServeSchema = `
   );
 `;
 
+// Issuing-authority provenance for guest invites (F-5). Kept as a SEPARATE
+// schema string from guestInviteSchema, the guestSelfServeSchema pattern:
+// the invite row itself predates provenance, and a delegate mint stores
+// minted_by_account_id = NULL by design (delegates are accountless), which
+// left delegate-minted invites invisible to account deletion's by-account
+// revocation. Each row names the account the mint's authority traces to —
+// the minter's own account, or for a delegate the room owner's account —
+// and whether the mint rode a delegation grant. Deletion revokes invites
+// whose authority account is deleted; redemption re-checks that the
+// authority still stands (the share-link issuer-liveness pattern). The
+// authority member id is the accountable human for the redemption event:
+// the member reducer requires an accountable HUMAN sponsor, and a
+// delegate minter is an agent — without the granting owner recorded here,
+// a delegate-minted invite could never redeem at all.
+export const guestInviteAuthoritySchema = `
+  CREATE TABLE IF NOT EXISTS guest_invite_authority (
+    invite_id TEXT PRIMARY KEY REFERENCES guest_invites(id),
+    room_id TEXT NOT NULL REFERENCES rooms(id),
+    authority_account_id TEXT,
+    authority_member_id TEXT,
+    minted_via_delegate INTEGER NOT NULL DEFAULT 0 CHECK(minted_via_delegate IN (0,1))
+  );
+  CREATE INDEX IF NOT EXISTS guest_invite_authority_account ON guest_invite_authority(authority_account_id, invite_id);
+`;
+
 function verifySchemaText(db, schemaText, label) {
   return ({ allowAbsent = false } = {}) => {
     const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
@@ -177,6 +202,11 @@ export function guestInviteContract() {
   return {
     status: "live",
     mint: "owner_only",
+    // #3432: "owner_only" alone taught a door agent owners cannot open.
+    // The minter must carry the owner's account (signed-in account
+    // session) or an owner delegate granted by that account — an agent
+    // identity bearer cannot mint, even as the room's owner.
+    mintRequires: "owner_account_session_or_delegate",
     tiers: {
       observer: [...GUEST_INVITE_TIERS.observer],
       contributor: [...GUEST_INVITE_TIERS.contributor],
@@ -244,6 +274,41 @@ export class GuestInvites {
     return verifySchemaText(this.db, guestSelfServeSchema, "Guest self-serve")(opts);
   }
 
+  verifyAuthoritySchema(opts) {
+    return verifySchemaText(this.db, guestInviteAuthoritySchema, "Guest invite authority")(opts);
+  }
+
+  // F-5: an invite stands on its issuing authority for its whole redeem
+  // window. If that authority is gone — the granting account deleted or
+  // deactivated, or the delegation a delegate minted under has lapsed —
+  // the invite fails closed, the same issuer-liveness recheck share links
+  // perform on every use. Invites minted before provenance was recorded
+  // carry no authority row and keep the invite-row-only behavior.
+  provenanceOf(inviteId) {
+    return this.db.prepare("SELECT * FROM guest_invite_authority WHERE invite_id=?").get(inviteId);
+  }
+
+  assertIssuingAuthorityLive(row) {
+    const provenance = this.provenanceOf(row.id);
+    if (!provenance) return;
+    if (provenance.authority_account_id) {
+      const account = this.db.prepare("SELECT active FROM accounts WHERE id=?").get(provenance.authority_account_id);
+      if (!account || account.active !== 1) fail(410, "invite_unavailable", "This guest invite is not valid.");
+    }
+    if (provenance.minted_via_delegate) {
+      // The minter's authority was a delegation grant. It stands only
+      // while the grant stands — unless the minter has since become the
+      // room owner, in which case the authority is their own.
+      const ownerId = this.store.room(row.room_id).state.room?.ownerId;
+      if (row.minted_by_member_id !== ownerId) {
+        const identityId = this.store.identities.identityIdForMember(row.room_id, row.minted_by_member_id);
+        if (!identityId || !this.store.ownerDelegates.hasGrant(row.room_id, identityId)) {
+          fail(410, "invite_unavailable", "This guest invite is not valid.");
+        }
+      }
+    }
+  }
+
   // Owner-only gate. v1 keeps the human owner as the single trust anchor;
   // delegating mint to lanes is a later decision, not a code gap.
   ownerGate(token, roomId, binding) {
@@ -252,7 +317,13 @@ export class GuestInvites {
     // accountless by design: their authority comes from the owner's
     // persisted grant (server/owner-delegates.mjs), not a signed-in account
     // session.
-    if (!auth.account && !auth.delegate) fail(403, "account_session_required", "Minting a guest invite requires a signed-in account session");
+    // #3432: this refusal gets its own registry-born code
+    // (guest_invite_account_session_required, src/agent-error.mjs). Every
+    // caller who reaches it IS the owner or their delegate, so the shared
+    // account_session_required envelope — whose generic 403 recovery is
+    // "Ask the owner to mint a guest invite" — was a self-loop for them.
+    // The registry entry addresses the owner and names the real remedies.
+    if (!auth.account && !auth.delegate) fail(403, "guest_invite_account_session_required", "Guest invites are managed from the room owner's signed-in account session");
     return auth;
   }
 
@@ -333,7 +404,7 @@ export class GuestInvites {
     this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
     this.store.reminders.retireMember(roomId, member.id);
     const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     return { sequence, state };
   }
@@ -388,7 +459,7 @@ export class GuestInvites {
       state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     // Rebind the seat to the redeeming invite; the tier is owner-set and
@@ -398,6 +469,9 @@ export class GuestInvites {
   }
 
   mint(token, roomId, details, binding) {
+    // Authz before input checks: a non-owner with an empty body gets 403,
+    // not a field-validation 422 that describes the owner's form.
+    this.ownerGate(token, roomId, binding);
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
     const allowed = ["requestId", "roomId", "guestLabel", "tier", "credentialTtlMs", "redeemWindowMs", "expectedOwnerRevision"];
     if (Object.keys(details).some(key => !allowed.includes(key))) fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
@@ -448,6 +522,17 @@ export class GuestInvites {
         VALUES(?,?,?,?,?,?,?,?,?,?,?, 'active')`)
         .run(inviteId, hash(code), roomId, tier, credentialTtlMs, guestLabel.trim(),
           auth.member.id, auth.account?.id ?? null, requestId, now, now + redeemWindowMs);
+      // F-5 provenance: record the authority this mint stood on, in the
+      // same transaction. An account mint stands on the minter's account;
+      // a delegate mint (accountless by design) stands on the room owner's
+      // account, resolved through the owner's member binding — without it,
+      // deletion's by-account revocation could never find these invites.
+      const authorityAccountId = auth.account?.id
+        ?? this.db.prepare("SELECT account_id AS accountId FROM member_accounts WHERE room_id=? AND member_id=?")
+          .get(roomId, authority.ownerId)?.accountId ?? null;
+      this.db.prepare(`INSERT INTO guest_invite_authority(invite_id, room_id, authority_account_id, authority_member_id, minted_via_delegate)
+        VALUES(?,?,?,?,?)`)
+        .run(inviteId, roomId, authorityAccountId, authority.ownerId, auth.delegate ? 1 : 0);
       const row = this.inviteRow(hash(code));
       return { ...this.issued(row, roomId, code), duplicate: false };
     });
@@ -479,6 +564,7 @@ export class GuestInvites {
     return this.store.readTransaction(() => {
       const row = this.inviteRow(hash(code));
       if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
+      this.assertIssuingAuthorityLive(row);
       const room = this.store.room(row.room_id).state.room;
       return {
         room: { id: room.id, title: room.title },
@@ -514,6 +600,7 @@ export class GuestInvites {
       const roomId = row.room_id;
       let room = this.store.room(roomId);
       refuseArchivedWrite(room.state);
+      this.assertIssuingAuthorityLive(row);
       // Sweep expired guest seats before any capacity decision: an expired
       // membership must not consume the concurrent-guest cap, and the seat
       // logic below must see a consistent state.
@@ -571,7 +658,11 @@ export class GuestInvites {
             kind: "agent",
             permissions: [],
             identityId: identity.identityId,
-            accountableHumanId: row.minted_by_member_id,
+            // F-5: for a delegate-minted invite the accountable human is
+            // the granting owner recorded in the provenance row — the
+            // delegate is an agent and cannot be its own accountable
+            // sponsor (the reducer refuses a non-human sponsor).
+            accountableHumanId: this.provenanceOf(row.id)?.authority_member_id ?? row.minted_by_member_id,
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
           },
         });
@@ -580,7 +671,7 @@ export class GuestInvites {
           state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
         } catch (error) { fail(422, "command_rejected", error.message); }
         const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-        if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+        if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
         this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
         this.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")

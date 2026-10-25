@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { deriveNotifications, SUGGESTED_ACK_REACTION } from "../server/notifications.mjs";
+import { deriveNotifications } from "../server/notifications.mjs";
 import { buildWakePing, WAKE_ACK_HINT, WAKE_PING_EVENT } from "../server/outbound-webhooks.mjs";
 import { AgentHeartbeats, agentHeartbeatSchema } from "../server/agent-heartbeats.mjs";
 
@@ -15,7 +15,7 @@ const owner = { id: "owner", displayName: "Owner", kind: "human" };
 const maya = { id: "maya", displayName: "Maya", kind: "human" };
 
 const msg = (id, authorId, body, extra = {}) =>
-  ({ id, authorId, body, replyToId: null, toMemberId: null, reactions: {}, ...extra });
+  ({ id, authorId, body, replyToId: null, toMemberId: null, ...extra });
 
 const posted = (sequence, messageId, actorId, data = {}) => ({
   sequence,
@@ -36,31 +36,12 @@ function derive({ messages, events, viewer = member }) {
 
 const mentionsOf = items => items.filter(item => item.kind === "mention");
 
-test("a mention is pending by default and suggests the like react", () => {
+test("a mention is pending by default", () => {
   const messages = [msg("m1", "owner", "Hey @Test Agent take a look")];
   const items = mentionsOf(derive({ messages, events: [posted(1, "m1", "owner", { body: "Hey @Test Agent take a look" })] }));
   assert.equal(items.length, 1);
   assert.equal(items[0].ackState, "pending");
-  assert.equal(items[0].suggestedAck, SUGGESTED_ACK_REACTION);
-  assert.equal(items[0].suggestedAck, "like");
-});
-
-test("a reaction by the mentioned member acknowledges the mention", () => {
-  const messages = [msg("m1", "owner", "Hey @Test Agent ok", { reactions: { like: ["agent"] } })];
-  const items = mentionsOf(derive({ messages, events: [posted(1, "m1", "owner", { body: "Hey @Test Agent" })] }));
-  assert.equal(items[0].ackState, "acknowledged");
-});
-
-test("any reaction key counts, not just the suggested one", () => {
-  const messages = [msg("m1", "owner", "Hey @Test Agent ok", { reactions: { heart: ["agent"] } })];
-  const items = mentionsOf(derive({ messages, events: [posted(1, "m1", "owner", { body: "Hey @Test Agent" })] }));
-  assert.equal(items[0].ackState, "acknowledged");
-});
-
-test("a reaction by someone else does not acknowledge", () => {
-  const messages = [msg("m1", "owner", "Hey @Test Agent ok", { reactions: { like: ["maya"] } })];
-  const items = mentionsOf(derive({ messages, events: [posted(1, "m1", "owner", { body: "Hey @Test Agent" })] }));
-  assert.equal(items[0].ackState, "pending");
+  assert.equal("suggestedAck" in items[0], false);
 });
 
 test("a direct reply to the mentioning message acknowledges", () => {
@@ -159,9 +140,10 @@ function ackRateOf(items) {
 
 test("ack rate counts acknowledged over total mentions", () => {
   const messages = [
-    msg("m1", "owner", "Hey @Test Agent ok", { reactions: { like: ["agent"] } }),
+    msg("m1", "owner", "Hey @Test Agent ok"),
     msg("m2", "owner", "Hey @Test Agent again"),
     msg("m3", "maya", "Hey @Test Agent too"),
+    msg("r1", "agent", "On it", { replyToId: "m1" }),
   ];
   const items = mentionsOf(derive({
     messages,
@@ -169,6 +151,7 @@ test("ack rate counts acknowledged over total mentions", () => {
       posted(1, "m1", "owner", { body: "Hey @Test Agent" }),
       posted(2, "m2", "owner", { body: "Hey @Test Agent again" }),
       posted(3, "m3", "maya", { body: "Hey @Test Agent too" }),
+      posted(4, "r1", "agent", { body: "On it", replyToId: "m1" }),
     ],
   }));
   assert.deepEqual(ackRateOf(items), { acknowledged: 1, total: 3, rate: 1 / 3 });
@@ -178,7 +161,7 @@ test("ack rate is null with no mentions", () => {
   assert.deepEqual(ackRateOf([]), { acknowledged: 0, total: 0, rate: null });
 });
 
-// Wake path: the one-tap ack hint rides the agent.wake payload and the
+// Wake path: the explicit ack hint rides the agent.wake payload and the
 // journaled pending-wake signal, additively.
 test("buildWakePing carries the ack hint additively", () => {
   const signal = { signalId: "ws_1", agentId: "ai_x", kind: "mention", roomId: "r", messageId: "m" };
@@ -186,7 +169,7 @@ test("buildWakePing carries the ack hint additively", () => {
   assert.equal(payload.event, WAKE_PING_EVENT);
   assert.deepEqual(payload.signal, signal);
   assert.equal(payload.ackHint, WAKE_ACK_HINT);
-  assert.equal(payload.ackHint, "react 👍 to acknowledge");
+  assert.match(payload.ackHint, /heartbeat_ack/);
 });
 
 test("journaled pending-wake signals carry the ack hint", () => {

@@ -13,6 +13,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { handleIdentityMintMcp } from "../server/mcp-identity-mint.mjs";
+import { mcpResultText } from "../server/mcp-result-text.mjs";
 import { solveIdentityMintProof } from "./fixtures/identity-mint-solver.mjs";
 
 async function serve(t) {
@@ -171,4 +172,49 @@ test("a valid proof-of-work is accepted on first mint", async t => {
   assert.equal(provenResult.isError, undefined,
     `valid proof must mint, got ${JSON.stringify(provenResult.structuredContent).slice(0, 300)}`);
   assert.match(provenResult.structuredContent.secret, /^pri_[A-Za-z0-9_-]{43}$/);
+});
+
+test("mint text block withholds the secret and privateKey; enrollment runs on structuredContent alone", async t => {
+  const origin = await serve(t);
+  const minted = await call(origin, "room_identity_mint", { displayName: "Text Hygiene Agent" });
+  const mintResult = unwrapCall(minted, "room_identity_mint (text hygiene)");
+  assert.equal(mintResult.isError, undefined,
+    `mint must not be a tool error: ${JSON.stringify(mintResult.structuredContent).slice(0, 300)}`);
+  const created = mintResult.structuredContent;
+  assert.match(created.secret, /^pri_[A-Za-z0-9_-]{43}$/);
+  assert.equal(typeof created.privateKey, "string");
+  // The text block is what hosts display and log verbatim (issue #3750):
+  // neither credential may appear in it, in any content block.
+  const text = (mintResult.content ?? []).filter(block => block.type === "text").map(block => block.text).join("\n");
+  assert.ok(text.length > 0, "mint result must carry a text block");
+  assert.equal(text.includes(created.secret), false, "identity secret must not appear in the text block");
+  assert.equal(text.includes(created.privateKey), false, "privateKey must not appear in the text block");
+  assert.ok(text.includes("structuredContent.secret"), "text must say where the secret lives");
+  assert.ok(text.includes("structuredContent.privateKey"), "text must say where the privateKey lives");
+  // Non-credential facts stay readable in the text.
+  assert.ok(text.includes(created.identityId), "identityId is not a credential and stays in the text");
+  // Enrollment completes reading structuredContent alone: the secret taken
+  // from structuredContent authenticates and unlocks the enrolled catalog.
+  const listed = await rpc(origin, "tools/list", undefined, created.secret);
+  assert.equal(listed.status, 200);
+  assert.equal(listed.json.result.tools.length, 11, "enrolled catalog must list from the structuredContent secret alone");
+  const check = await call(origin, "room_check_access", {}, created.secret);
+  assert.equal(unwrapCall(check, "room_check_access").structuredContent.status, "credential_accepted");
+});
+
+test("mcpResultText masks a credential wherever it appears, including quoted prose", () => {
+  const code = "fixture-invite-code-never-real"; // secrets-allowlist (fixture value, not a credential)
+  const value = {
+    code,
+    next: [{ action: "share-code", description: `Share it with { code: "${code}" } — it burns on redeem.` }],
+    inviteId: "inv_fixture"
+  };
+  const text = mcpResultText(value, [{ secret: code, where: "structuredContent.code" }]);
+  assert.equal(text.includes(code), false, "no occurrence of the credential survives, even inside prose");
+  assert.ok(text.includes("structuredContent.code"), "masked occurrences point at the structuredContent field");
+  assert.equal(JSON.parse(text).code, "(withheld from this text — the value is in structuredContent.code)");
+  assert.equal(JSON.parse(text).inviteId, "inv_fixture", "the text rendering keeps the same JSON shape");
+  // No redactions (or no credential present) renders exactly as before.
+  assert.equal(mcpResultText(value), JSON.stringify(value));
+  assert.equal(mcpResultText(value, [{ secret: undefined, where: "structuredContent.code" }]), JSON.stringify(value));
 });

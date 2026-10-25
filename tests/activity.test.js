@@ -88,26 +88,6 @@ test("thread mutes suppress thread_reply events but not mentions", t => {
     "mute kills thread_reply; a direct reply to your own message and mentions still arrive");
 });
 
-test("reaction fan-out: reacting notifies the message author; unreacting retracts the pending event", t => {
-  const f = setup(t);
-  post(f, "agent", { messageId: "m1", body: "post" });
-  f.send("maya", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: true });
-  assert.deepEqual(eventsFor(f, "agent").map(e => [e.type, e.actorId]), [["reaction", "maya"]]);
-  f.send("maya", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: false });
-  assert.deepEqual(eventsFor(f, "agent"), [], "toggle-off removes the unread reaction event");
-});
-
-test("reactions to your own message and read-then-unreacted events are left alone", t => {
-  const f = setup(t);
-  post(f, "agent", { messageId: "m1", body: "post" });
-  f.send("agent", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: true });
-  assert.deepEqual(eventsFor(f, "agent"), [], "no self-events on reactions");
-  f.send("maya", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: true });
-  f.store.db.prepare("UPDATE activity_events SET read_at=1 WHERE user_id='agent'").run();
-  f.send("maya", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: false });
-  assert.equal(eventsFor(f, "agent").length, 1, "a read event is history, not retracted");
-});
-
 test("replayed commands never duplicate activity events", t => {
   const f = setup(t);
   const id = randomUUID();
@@ -150,7 +130,7 @@ async function serve(t) {
 const seedActivity = f => {
   f.send(f.ownerKey, T.MESSAGE_POSTED, { messageId: "root", body: "hello @maya" });
   f.send(f.mayaKey, T.MESSAGE_POSTED, { messageId: "r1", body: "replying", replyToId: "root" });
-  f.send(f.ownerKey, T.MESSAGE_REACTION_SET, { messageId: "r1", reaction: "like", active: true });
+  f.send(f.ownerKey, T.MESSAGE_POSTED, { messageId: "r2", body: "thanks", replyToId: "r1" });
 };
 
 test("activity list: paging, type filter, and validation", async t => {
@@ -159,8 +139,8 @@ test("activity list: paging, type filter, and validation", async t => {
   const list = (token, query = "") => f.call(`/api/rooms/commons/activity${query}`, { token });
   const { status, body } = await list(f.mayaKey);
   assert.equal(status, 200);
-  assert.equal(body.items.length, 2, "mention + reaction for maya; the reply went to owner");
-  assert.deepEqual(body.items.map(i => i.type), ["reaction", "mention"], "newest first");
+  assert.equal(body.items.length, 2, "mention + reply for maya; maya's reply went to owner");
+  assert.deepEqual(body.items.map(i => i.type), ["reply", "mention"], "newest first");
   assert.ok(body.items.every(i => i.messageBody && i.actorId), "joined message view");
   const filtered = await list(f.mayaKey, "?type=mention");
   assert.deepEqual(filtered.body.items.map(i => i.type), ["mention"]);
@@ -174,6 +154,13 @@ test("activity list: paging, type filter, and validation", async t => {
   assert.equal((await list(f.mayaKey, "?limit=500")).status, 422);
   assert.equal((await list(f.mayaKey, "?before=nope")).status, 422);
   assert.equal((await f.call("/api/rooms/commons/activity")).status, 401, "no credential, no feed");
+});
+
+test("legacy reaction rows are skipped by the feed and unread count", async t => {
+  const f = await serve(t);
+  f.store.db.prepare("INSERT INTO activity_events(room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at) VALUES('commons','reaction','owner','Owner','x','','maya',1,NULL)").run();
+  assert.deepEqual((await f.call("/api/rooms/commons/activity", { token: f.mayaKey })).body.items, []);
+  assert.equal((await f.call("/api/rooms/commons/activity-unread-count", { token: f.mayaKey })).body.total, 0);
 });
 
 test("marking 100 activity events read succeeds when SQL rejects more than 100 binds", async t => {
@@ -207,15 +194,15 @@ test("unread count, mark read, mark all read", async t => {
   const f = await serve(t);
   seedActivity(f);
   const count = () => f.call("/api/rooms/commons/activity-unread-count", { token: f.mayaKey }).then(r => r.body);
-  assert.deepEqual((await count()).byType, { mention: 1, reply: 0, thread_reply: 0, reaction: 1 });
+  assert.deepEqual((await count()).byType, { mention: 1, reply: 1, thread_reply: 0 });
   assert.equal((await count()).total, 2);
   const first = (await f.call("/api/rooms/commons/activity", { token: f.mayaKey })).body.items;
-  const reaction = first.find(i => i.type === "reaction");
-  const marked = await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.mayaKey, data: { ids: [reaction.id] } });
+  const reply = first.find(i => i.type === "reply");
+  const marked = await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.mayaKey, data: { ids: [reply.id] } });
   assert.equal(marked.status, 200);
   assert.equal(marked.body.read, 1);
   assert.equal((await count()).total, 1);
-  assert.equal((await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.ownerKey, data: { ids: [reaction.id] } })).body.read, 0, "cannot mark another member's events");
+  assert.equal((await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.ownerKey, data: { ids: [reply.id] } })).body.read, 0, "cannot mark another member's events");
   const all = await f.call("/api/rooms/commons/activity-read-all", { method: "POST", token: f.mayaKey, data: { type: "mention" } });
   assert.equal(all.body.read, 1);
   assert.equal((await count()).total, 0);

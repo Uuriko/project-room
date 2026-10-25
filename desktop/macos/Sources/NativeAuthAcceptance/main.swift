@@ -101,9 +101,12 @@ private func acceptanceFailure(_ message: String) -> Never {
                 fputs("NATIVE_AUTH_ATTEMPTS \(sessions.count)\n", stderr)
                 guard sessions.count == 1, sessions[0].started == 1 else { acceptanceFailure("Overlapping browser authentication sessions") }
                 guard room.webView.isHidden else { acceptanceFailure("App must fence account changes during authentication") }
+                guard let pendingSurface = room.window.contentView?.subviews.first(where: { $0.identifier?.rawValue == "native-sign-in-pending" }), !pendingSurface.isHidden,
+                      pendingSurface.frame.width > 0, pendingSurface.frame.height > 0 else { acceptanceFailure("Browser handoff must show a visible pending surface instead of a blank window") }
                 nativeBack()
                 try await Task.sleep(nanoseconds: 100_000_000)
                 guard !room.webView.isHidden else { acceptanceFailure("Cancellation left the app hidden") }
+                guard pendingSurface.isHidden else { acceptanceFailure("Cancellation left the pending surface visible") }
                 @MainActor func labels(_ view: NSView) -> [String] { ((view as? NSTextField).map { [$0.stringValue] } ?? []) + view.subviews.flatMap(labels) }
                 guard let content = room.window.contentView, labels(content).contains("Sign-in cancelled. Your room is unchanged."), room.window.attachedSheet == nil else { acceptanceFailure("Actual canceledLogin must use cancellation copy without a failure dialog") }
                 print("NATIVE_AUTH_SINGLE_ATTEMPT passed; actual Back cancels held browser and restores visible app")
@@ -158,7 +161,7 @@ private func acceptanceFailure(_ message: String) -> Never {
                 guard !room.webView.isHidden else { acceptanceFailure("GitHub cancellation did not restore app") }
                 print("NATIVE_AUTH_PROVIDER_INTENT passed; Google/GitHub preserved; generic menu omits provider")
                 completeWithRealBrowser = true
-                _ = try await room.webView.evaluateJavaScript("history.replaceState(null, '', '/?native_return=preserved&oauth=old&oauth=duplicate#pr-view/inbox'); document.querySelector('#google-signin').click(); true")
+                _ = try await room.webView.evaluateJavaScript("history.replaceState(null, '', '/?native_return=preserved&oauth=old&oauth=duplicate#pr-view/room-list'); document.querySelector('#google-signin').click(); true")
                 for _ in 0..<200 {
                     if cookieCommitInstalled { break }
                     try await Task.sleep(nanoseconds: 50_000_000)
@@ -202,14 +205,14 @@ private func acceptanceFailure(_ message: String) -> Never {
                 guard !scriptCookie.contains("account_session") else { acceptanceFailure("JavaScript gained access to the account cookie") }
                 var visibleAccount = false
                 for _ in 0..<100 {
-                    let visible = try? await room.webView.evaluateJavaScript("document.querySelector('#auth-panel')?.hidden === true && document.querySelector('#account-settings-button')?.hidden === false && document.querySelector('#account-settings-button')?.disabled === false && ['#main', '#inbox-panel'].some(selector => { const element = document.querySelector(selector); return element && !element.hidden && element.getClientRects().length > 0; })")
+                    let visible = try? await room.webView.evaluateJavaScript("document.querySelector('#auth-panel')?.hidden === true && document.querySelector('#account-settings-button')?.hidden === false && document.querySelector('#account-settings-button')?.disabled === false && ['#main', '#account-rooms-panel'].some(selector => { const element = document.querySelector(selector); return element && !element.hidden && element.getClientRects().length > 0; })")
                     if visible as? Bool == true { visibleAccount = true; break }
                     try await Task.sleep(nanoseconds: 50_000_000)
                 }
-                let uiState = try await room.webView.evaluateJavaScript("JSON.stringify({href:location.href,accountSignedIn:document.body.dataset.accountSignedIn,authHidden:document.querySelector('#auth-panel')?.hidden,mainHidden:document.querySelector('#main')?.hidden,inboxHidden:document.querySelector('#inbox-panel')?.hidden,inboxHeight:document.querySelector('#inbox-panel')?.getBoundingClientRect().height})")
+                let uiState = try await room.webView.evaluateJavaScript("JSON.stringify({href:location.href,accountSignedIn:document.body.dataset.accountSignedIn,authHidden:document.querySelector('#auth-panel')?.hidden,mainHidden:document.querySelector('#main')?.hidden,roomsHidden:document.querySelector('#account-rooms-panel')?.hidden,roomsHeight:document.querySelector('#account-rooms-panel')?.getBoundingClientRect().height})")
                 print("NATIVE_AUTH_VISIBLE_STATE \(uiState)")
                 guard visibleAccount else { fputs("NATIVE_AUTH_VISIBLE_WORKSPACE_FAILED: authenticated cookie did not restore visible signed-in workspace\n", stderr); exit(1) }
-                let returnPreserved = try await room.webView.evaluateJavaScript("new URL(location.href).searchParams.get('native_return') === 'preserved' && new URL(location.href).searchParams.getAll('oauth').join(',') === 'login' && location.hash === '#pr-view/inbox'")
+                let returnPreserved = try await room.webView.evaluateJavaScript("new URL(location.href).searchParams.get('native_return') === 'preserved' && new URL(location.href).searchParams.getAll('oauth').join(',') === 'login' && location.hash === '#pr-view/room-list'")
                 guard returnPreserved as? Bool == true else { acceptanceFailure("Native sign-in lost the original destination parameters") }
                 print("NATIVE_AUTH_VISIBLE_WORKSPACE passed; account signed in and welcome hidden; return parameters retained")
                 print("NATIVE_AUTH_REAL_GOOGLE_CALLBACK passed; actual PKCE201 and WK HttpOnly account readback")

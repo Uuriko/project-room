@@ -64,6 +64,7 @@ test("an identity creates a room self-serve and becomes its owner", async t => {
   assert.equal(created.next[0].path, "/api/rooms/agent-den/work-claims/starter/update",
     "room-scoped next steps are templated with the new roomId");
   assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/work-claims/starter/update");
+  assert.equal(created.next.find(n => n.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   assert.equal(created.starter.claimId, "starter");
   assert.equal(created.starter.state, "claimed");
   // The projection names the agent member as owner with the full set...
@@ -575,6 +576,8 @@ test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + he
   assert.equal(boot.json.invite.profile, "collaborate");
   assert.deepEqual(boot.json.invite.permissions, [...AGENT_AUTONOMY_PERMISSIONS]);
   assert.match(boot.json.invite.code, /^RM-/);
+  assert.equal(Date.parse(boot.json.invite.expiresAtIso), boot.json.invite.expiresAt);
+  assert.equal(boot.json.warnings.includes("Live www /room/api/* is 404 until Instinct publishes the Worker rewrite. Source path is ready."), false);
   assert.equal(boot.json.hello.posted, true);
   assert.ok(boot.json.ownerPermissions.includes("invite_member"));
   assert.ok(boot.json.ownerPermissions.includes("manage_members"));
@@ -633,7 +636,7 @@ test("room-create kind 422 teaches the allowed kinds (RC-2026-09-18-021)", async
 // #597/#643: the agent owner administers by ID on its identity bearer —
 // reports, access review, diagnostics, agent connections, share links —
 // while a non-owner agent member is denied on each. Guest-agent mint passes
-// the owner gate but stays account-bound (403 account_session_required).
+// the owner gate but stays account-bound (403 guest_invite_account_session_required, #3432).
 test("HTTP: agent owner administers by ID; non-owner agent is denied", async t => {
   const { store, post, origin } = await httpFixture(t);
   const get = (path, token) => fetch(`${origin}${path}`, {
@@ -665,7 +668,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
     requestId: randomUUID(), expectedOwnerRevision: 0, guestLabel: "Guest"
   } });
   assert.equal(guestMint.status, 403);
-  assert.equal(guestMint.body?.error?.code, "account_session_required");
+  assert.equal(guestMint.body?.error?.code, "guest_invite_account_session_required");
   // A non-owner agent member: denied on every admin surface.
   const other = await post("/room/api/agent-identities", { data: { displayName: "Other Agent" } });
   store.identities.link(ownerSecret, "owner-den", {
@@ -679,7 +682,7 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
     requestId: randomUUID(), expectedOwnerRevision: 0, guestLabel: "Guest"
   } });
   assert.equal(otherMint.status, 403);
-  assert.notEqual(otherMint.body?.error?.code, "account_session_required");
+  assert.notEqual(otherMint.body?.error?.code, "guest_invite_account_session_required");
 });
 
 test("the auto-claimed starter task carries the retention ack with the 24h SLA", async t => {
@@ -763,4 +766,48 @@ test("create with starter:false skips the auto-claimed starter task", t => {
   assert.equal(created.starter, null, "response reports no starter");
   assert.ok(!store.workClaims.list("no-starter-room").some(item => item.id === "starter"),
     "no starter work claim was created");
+});
+
+test("client: a lost creation response can be retried before inviting a contributor", async t => {
+  const { store, origin, post } = await httpFixture(t);
+  const identity = store.identities.create("Project creator");
+  const request = { title: "Shared project", purpose: "Build together", requestId: "create-retry" };
+  await assert.rejects(createAgentRoom(origin, identity.secret, request, {
+    fetchImpl: async (...args) => {
+      const response = await fetch(...args);
+      assert.equal(response.status, 201);
+      await response.arrayBuffer();
+      throw new Error("Connection lost after the server committed");
+    }
+  }), { code: "service_unavailable" });
+  const recovered = await createAgentRoom(origin, identity.secret, request);
+  assert.equal(recovered.duplicate, true, "retry recovers the committed room instead of creating another");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n, 1);
+  await assert.rejects(createAgentRoom(origin, identity.secret, { ...request, title: "Different project" }),
+    { status: 409, code: "request_conflict" });
+  const invite = await post(`/api/rooms/${recovered.roomId}/agent-invites`, {
+    token: identity.secret, data: { profile: "contribute", displayName: "Contributor" }
+  });
+  assert.equal(invite.status, 201);
+  const joined = await redeemAgentInvite(origin, invite.body.code, "Contributor");
+  assert.equal(joined.roomId, recovered.roomId);
+  const contributor = new RoomAgentClient({ origin, roomId: joined.roomId,
+    memberId: joined.memberId, token: joined.mcpToken.credential });
+  await contributor.command({ id: "first-contribution", type: "message.posted",
+    data: { messageId: "first-contribution", body: "Here is my first contribution." } });
+  const snapshot = await contributor.snapshot();
+  assert.equal(snapshot.state.room.id, recovered.roomId);
+  assert.equal(snapshot.state.messages.find(message => message.id === "first-contribution").body, "Here is my first contribution.");
+});
+
+test("client: explicitly creating an empty room preserves that choice on retry", async t => {
+  const { store, origin } = await httpFixture(t);
+  const identity = store.identities.create("Empty project creator");
+  const request = { ...createArgs("empty-client-room"), starter: false };
+  const created = await createAgentRoom(origin, identity.secret, request);
+  assert.equal(created.starter, null);
+  assert.equal(store.workClaims.list(created.roomId).length, 0);
+  assert.equal((await createAgentRoom(origin, identity.secret, request)).duplicate, true);
+  await assert.rejects(createAgentRoom(origin, identity.secret, { ...request, starter: true }),
+    { status: 409, code: "room_exists" });
 });
