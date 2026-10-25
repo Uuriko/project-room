@@ -437,6 +437,16 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 | #4858 | Wake webhook retries at the delivery's next attempt | `cursor/webhook-retry-schedule-da81` | `dba5f8413752ea1b5991b5cf671de28eac28ff1d` | conflicts with main and is stale; idea recorded in docs/ARCHIVED-WORK.md |
 | #4889 | Cure: guard signin-navigation sync() against absent provider anchors | `cure/signin-navigation-absent-anchor` | `efaa8a9ecc75b3fec780510f9ab94fb926f1e909` | contained in #4922 |
 
+## G9 combined
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #4041 | Records: stamp session instance, authorizing principal, and claimed model/harness provenance (#3612) | `jill/records-3612-stamps` | `10c4ae5397d634a86b7e4552cfe7966accf2f1a2` | combined into the G9 decision-records pull request |
+| #4047 | Records: incident linkage + stored performance aggregates (#3618 R-10/R-12) | `jill/records-3618-incidents` | `50d58b84849f216acb4b8011d296344678de5ebe` | combined into the G9 decision-records pull request |
+| #4051 | Decision-row export (decision-rows/1) + evidence access logging (#3616) | `jill/records-3616-export` | `703f02d87d2d8fe6f1f73484d533e1a6aecc8908` | combined into the G9 decision-records pull request |
+| #4053 | Records: adverse-decision packet for the subject + notices as records (#3615) | `jill/records-3615-packet` | `3fa95a1462e44d954d23d41286964efc329442b4` | combined into the G9 decision-records pull request |
+| #4054 | Records: stamp obligation ceilings/ratification; refusal journal (#3617 R-7/R-8) | `jill/records-3617-refusals` | `bc446065aa68b76b5ed4d477941e8cd3320aba89` | combined into the G9 decision-records pull request |
+
 ## Branches with no PR (deleted in cleanup)
 
 | Branch | Head SHA |

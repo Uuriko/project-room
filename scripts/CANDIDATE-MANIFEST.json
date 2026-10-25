@@ -155,7 +155,7 @@
     "strings/en.json": "sha256:4a66abb675ecd9a5d438c88c12bf6e4f4d9296cb2dec91509502313e5cd54633"
   },
   "deployment": {
-    ".github/workflows/deploy-prod.yml": "sha256:ebdfd3d7cc7118098ad4e3280a0af4567d4c2d8322e88483f0cdcebc15245512",
+    ".github/workflows/deploy-prod.yml": "sha256:c46b418b45f552a3b9eb3b8df6669768301e608f512ba2465791ae6a524cce8e",
     "cloudflare/bootstrap.mjs": "sha256:ff6095ac5ab0332de1cacc5d5250ff71831ed8c360ec108b37ecc8effe211d6d",
     "cloudflare/build-assets.mjs": "sha256:7a204a775ed8aac33ff23d1d1c210de1a29efe84a47455db7e303e6fd4aff4d4",
     "cloudflare/package.json": "sha256:6f0e5ae7c18da9972a53fd5b1c2aa60fd7aa930e4b80640c7eb0519eb1792b8d",
@@ -167,6 +167,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:301419dd2256c996a6c774b7a5a8f18713f68a2d4478da1e29c97548d1098cb8",
-    "package.json": "sha256:de43ea946014b7a2da70755d30cb5dc8c36258c4e58fd98c4ed62d7573c6b230"
+    "package.json": "sha256:7fd506de30091293ff730853bb8f1d3a34b01faad9f1f353937d9e429fdaf297"
   }
 }

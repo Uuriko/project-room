@@ -204,11 +204,10 @@ export function buildPublicWorkPacket({ receipt, review, offer, deciderKind, ver
   if (Array.isArray(receipt.criteriaAttestation) && receipt.criteriaAttestation.length)
     dataReliedOn.push({ label: 'Your own criteria attestation (supplied by you at submission)',
       detail: receipt.criteriaAttestation.map(entry => `${entry.criterion}: ${entry.status}`).join('; ') });
-  // Provenance stamps (#3612/#4041) ride the receipt when present; absent
-  // fields are omitted, never fabricated.
-  for (const [field, label] of [['sessionInstanceId', 'Work session instance'], ['authorizingPrincipalId', 'Authorizing principal'],
-    ['claimedModel', 'Claimed model (self-reported)'], ['claimedHarness', 'Claimed harness (self-reported)']])
-    if (receipt[field] != null) dataReliedOn.push({ label, detail: String(receipt[field]) });
+  // Provenance stamps (#3612) ride nested `provenance` on the receipt and
+  // on the decision/verification records. The earlier packet draft also
+  // looked for those names at the top level. Absent fields are omitted.
+  citeProvenance(dataReliedOn, receipt, decision, verification);
   const consequence = settlementPhase === 'refunded'
     ? ' This task carried a credit payment: because the work was not accepted, the payment was returned to the poster in full and no payment was made to you.'
     : '';
@@ -225,6 +224,31 @@ export function buildPublicWorkPacket({ receipt, review, offer, deciderKind, ver
     humanReview: humanReviewSection(reviewer, { surface: 'public_work' }),
     reviewRequests: followups.filter(entry => entry.kind === 'human_review_request'),
     notices };
+}
+
+// Cite a #3612 provenance stamp. The live stamp is the nested object
+// `{ sessionInstanceId, authorizingPrincipalId, claimedModelVersion,
+// claimedHarnessVersion }`. Top-level copies and the shorter names from
+// the packet draft are accepted too. Nothing is invented when absent.
+function citeProvenance(dataReliedOn, ...sources) {
+  const objects = sources.filter(source => source && typeof source === 'object');
+  const stamps = objects.map(source => source.provenance && typeof source.provenance === 'object' ? source.provenance : null).filter(Boolean);
+  const fields = [
+    ['sessionInstanceId', 'Work session instance'],
+    ['authorizingPrincipalId', 'Authorizing principal'],
+    ['claimedModelVersion', 'Claimed model (self-reported)'],
+    ['claimedModel', 'Claimed model (self-reported)'],
+    ['claimedHarnessVersion', 'Claimed harness (self-reported)'],
+    ['claimedHarness', 'Claimed harness (self-reported)'],
+  ];
+  const seen = new Set();
+  for (const [field, label] of fields) {
+    if (seen.has(label)) continue;
+    const value = [...stamps, ...objects].map(source => source[field]).find(item => item != null);
+    if (value == null) continue;
+    seen.add(label);
+    dataReliedOn.push({ label, detail: String(value) });
+  }
 }
 
 export function buildBountyPacket({ bounty, rejectedEventKind, reviewer, notices, followups, generatedAt }) {
@@ -245,6 +269,7 @@ export function buildBountyPacket({ bounty, rejectedEventKind, reviewer, notices
     { label: 'The fingerprint of the submission checked', detail: bounty.submissionHash ?? 'No submission hash was recorded.' },
     { label: 'The criteria in force', detail: `${bounty.criteria} (rubric version ${bounty.rubric?.version ?? 1}, hash ${bounty.rubric?.hash ?? 'unrecorded'})` },
   ];
+  citeProvenance(dataReliedOn, bounty.evidence, bounty.attestation, settlement, bounty);
   const flake = resolution.flake ? ` Your claim bond was forfeited and a flake strike was recorded on your lane (strike ${resolution.flake.strikes}).` : '';
   const explanation = `Your work on "${bounty.title}" was rejected by ${resolution.rejectedBy ?? 'the reviewer'} on ${resolution.rejectedAt ?? settlement?.settledAt ?? 'an unrecorded date'}. The recorded reason was: "${reason}". The payment of ${bounty.amount} credits was returned to the poster in full, and no payment was made to you.${flake}`;
   return { schema: 'adverse-decision-packet/1', packetKind: 'bounty', ref: bounty.bountyId,

@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-920 rows (879 distinct codes).
+995 rows (955 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -524,6 +524,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_inbox_send` | 422 | Choose an exact reply operation. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_share` | 422 | Select source paragraphs and the current room audience. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_inbox_source` | 422 | Supply a qualified channel observation. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_incident_record` | 500 | Incident record failed validation | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_input` | internal | receipt text must be a string | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_invitation` | 422 | Invitation token required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_invitation_acceptance` | 422 | Invitation token, redemption ID, and expected revision required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -591,6 +592,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_password_set` | 422 | A new password is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pause_command` | 422 | Supply action (pause or resume), memberId, requestId and, for pause, reason or null | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pause_selection` | 422 | Choose at most one member | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_performance_aggregate` | 500 | Performance aggregate failed validation | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_pin` | 422 | messageId and pinned are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_plan` | 422 | expectedSha256 and expectedSequence from the repair plan are required | fix+resend | Re-run the repair plan (POST /api/operator/projection/plan) and resubmit execute with the expectedSha256 and expectedSequence it returned; do not guess them. |
 | `invalid_policy` | 422 | AgentPluginError(422) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

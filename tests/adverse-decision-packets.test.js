@@ -71,6 +71,9 @@ test('R-4: a rejected submission yields a packet the subject reads with their ow
   assert.match(packet.agentParticipation.disclosure, /automated agent made this decision/);
   // Data relied on names the exact artifact fingerprint.
   assert.match(packet.dataReliedOn[0].detail, new RegExp(f.receipt.artifact.sha256));
+  // The #3612 stamp on the receipt is cited from its nested provenance.
+  const session = packet.dataReliedOn.find(row => row.label === 'Work session instance');
+  assert.equal(session?.detail, f.receipt.provenance.sessionInstanceId);
   // Correction path exists and is explicitly not a dispute.
   assert.equal(packet.correctionPath.distinctFromDispute, true);
   assert.match(packet.correctionPath.summary, /not a dispute/);
