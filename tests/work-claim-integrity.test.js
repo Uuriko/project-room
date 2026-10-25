@@ -210,7 +210,22 @@ test("the Board list pages done claims by age and summarizes history", async t =
   await f.call("owner", "list", { query: "?limit=200" });
   const page = await f.call("owner", "list", { query: "?limit=50" });
   const bytes = Buffer.byteLength(JSON.stringify(page.value));
-  assert.ok(bytes < 64 * 1024, `a 50-claim page is ${bytes} bytes`);
+  // Page budget, measured 2026-10-25 at composed head 11e232f6d (PR #3629):
+  // the page is exactly 66601 bytes, locally and in the labelled CI run.
+  // The same page at main (bdc5a04bc) measures 63701 bytes; the delta is
+  // exactly 2900 bytes = 50 claims x 58 bytes, which is the serialised
+  // size of the two decision-gate fields every claim row now carries
+  // ("ownerDecisionRequired":false, plus "humanDecisionMakerId":null,).
+  // The fields belong in list rows: they are canonical claim fields
+  // (validated and defaulted by workOf in server/work-claims.mjs for
+  // board-native claims too, which never pass through the work-item
+  // board mapping, so trimming that mapping could not shrink this page),
+  // the default list returns the full claim row, and the decisions
+  // inbox reads gate state off board rows. The budget is therefore
+  // raised to the measured size; it stays exact, so any further
+  // per-claim payload growth fails this test.
+  const PAGE_BYTES_BUDGET = 66601;
+  assert.ok(bytes <= PAGE_BYTES_BUDGET, `a 50-claim page is ${bytes} bytes`);
   assert.equal(page.value.olderDone, 30, "done claims older than 7 days leave the default list");
   assert.equal(page.value.olderDoneQuery, "state=done");
   for (const claim of page.value.claims) {

@@ -64,7 +64,12 @@ test("slice2 fate: a decision-gated item's row carries both fields in every mapp
   f.mutate(f.workerKey, "start-2", "work.started", "gated-1");
   f.mutate(f.workerKey, "complete", "work.completed", "gated-1", { summary: "done", producerId: "worker", nextAction: "decide", signedEvidence: signEvidence() });
   row = f.board("gated-1");
-  assert.equal(row.state, "done");
+  // Completed but still gated: main's board mapping (work.completed in
+  // server/work-item-board.mjs) maps a completed item to "delivered" while
+  // an owner decision or independent verification is outstanding, and to
+  // "done" only once neither is required. This item requires an owner
+  // decision, so the mapped state is "delivered", not "done".
+  assert.equal(row.state, "delivered");
   assert.equal(row.ownerDecisionRequired, true);
   assert.equal(row.humanDecisionMakerId, "owner");
 });
