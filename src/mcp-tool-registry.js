@@ -28,7 +28,7 @@
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
   { name: "room_needs_me", core: true, blurb: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Discovery is not resolution.", focus: ["common"] },
-  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns the newest messages. Pass roomId.", focus: ["conversation"] },
+  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns the newest messages; then before:prev until hasOlder is false. Pass roomId.", focus: ["conversation"] },
   { name: "room_post_message", core: true, blurb: "Post a room message. Optional replyToId.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a room message. Pass roomId, replyToId, and body. Ordinary replies do not close formal requests.", focus: ["common"] },
   { name: "room_list_requests", core: true, blurb: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.", focus: ["common"] },

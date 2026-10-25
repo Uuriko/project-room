@@ -42,8 +42,10 @@ test("latest:true second page across a seam continues with no gap or duplicate",
   });
   assert.deepEqual(first.messages.map(m => m.sequence),
     Array.from({ length: 100 }, (_, i) => i + 151));
+  assert.equal(first.prev, 151, "prev is the oldest sequence, the exclusive bound of the next older page");
+  assert.equal(first.next, 250, "next stays the newest sequence, a forward cursor");
   const second = await paginateRoomMessages(fetchPage(events), {
-    after: 0, limit: 150, latest: true, end: first.next,
+    after: 0, limit: 150, latest: true, end: first.prev,
   });
   assert.deepEqual(second.messages.map(m => m.sequence),
     Array.from({ length: 150 }, (_, i) => i + 1));

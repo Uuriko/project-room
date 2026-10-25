@@ -42,15 +42,14 @@ export const validWorkSearchQuery = query => typeof query === "string" && query.
 // page is never empty while messages exist (user-testing m4: {limit:5} on a
 // room whose only message sat at seq 8 returned {messages:[],next:5,hasMore:true}).
 //
-// `latest:true` returns the latest `limit` messages in chronological order,
-// matching GET /conversation?limit=N (REST parity). When `end` (exclusive
-// upper bound) is known the scan walks backward from it and stops after
-// `limit` messages; otherwise it scans forward to the end of the log.
+// Forward: `after` is exclusive. `next` is the forward cursor and `hasMore`
+// means newer messages may exist. Follow `next` as `after` while `hasMore`.
 //
-// `next`/`hasMore` keep the after-cursor contract: follow `next` while
-// `hasMore` is true. In latest mode `next` is the oldest returned message's
-// sequence (a bookmark, not a walk cursor) and `hasMore` says older messages
-// remain below it.
+// Backward: `before` (exclusive), or `latest` with a known `end`, returns the
+// newest `limit` messages strictly older than that bound, oldest first.
+// `prev` is the oldest sequence on the page. `hasOlder` means older messages
+// exist. `hasMore` stays forward, so it is false when the page is the log head.
+// Walk the tail with latest:true, then before:prev until hasOlder is false.
 //
 // fetchPage(after, pageLimit) resolves { events:[{sequence, event}], next, hasMore }.
 const MESSAGE_SCAN_PAGE = 100;
@@ -98,45 +97,111 @@ async function scanBackward(fetchPage, after, end, limit) {
   return { collected, reachedStart: bound - 1 <= after, capped: pages >= MESSAGE_SCAN_PAGES && bound - 1 > after };
 }
 
-// latest:true next from paginateRoomMessages is the oldest sequence in the
-// window, the exclusive end for an older page. The read tools have no end
-// argument, so returning that value as next makes a follow with after repeat
-// the same messages. The returned next is the newest sequence. hasMore still
-// means older messages exist; it is not an after-cursor.
-export function latestSnapshotPage(messages, after = 0, hasMore = false) {
+// before and after are different directions. Naming both in the message is the
+// contract agents match on; a bare invalid_arguments would not say which pair.
+export function messageReadArgumentError(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)) return null;
+  if (Object.hasOwn(args, "before") && Object.hasOwn(args, "after")) {
+    return { status: 422, code: "invalid_arguments", message: "before and after cannot be used together" };
+  }
+  if (Object.hasOwn(args, "before") && !(Number.isSafeInteger(args.before) && args.before >= 1)) {
+    return { status: 422, code: "invalid_arguments", message: "before must be an integer sequence of 1 or more" };
+  }
+  return null;
+}
+
+// next is the forward cursor. hasMore is forward only. prev is the oldest
+// sequence on the page, omitted when the page has no messages. hasOlder is
+// true when older messages exist below prev.
+export function publicMessageCursors(messages, { next, hasMore = false, hasOlder = false } = {}) {
+  const oldest = messages[0]?.sequence;
   return {
-    next: messages.length ? messages[messages.length - 1].sequence : after,
-    hasMore,
+    next,
+    hasMore: Boolean(hasMore),
+    hasOlder: Boolean(hasOlder),
+    ...(Number.isSafeInteger(oldest) ? { prev: oldest } : {}),
   };
 }
 
-export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, latest = false, end = null, mapMessage } = {}) {
+// Latest-page cursors. next is the newest sequence, so passing it as after
+// tails new messages and does not repeat the page. hasMore is false: this
+// page is the log head. Older history is hasOlder and prev.
+export function latestSnapshotPage(messages, after = 0, hasOlder = false) {
+  return publicMessageCursors(messages, {
+    next: messages.length ? messages[messages.length - 1].sequence : after,
+    hasMore: false,
+    hasOlder,
+  });
+}
+
+function pageFields(selected, next, hasMore, hasOlder) {
+  return {
+    messages: selected,
+    next,
+    prev: selected[0]?.sequence ?? null,
+    hasMore,
+    hasOlder,
+  };
+}
+
+export async function paginateRoomMessages(fetchPage, { after = 0, limit = 50, latest = false, before = null, end = null, mapMessage } = {}) {
   const map = mapMessage ?? (item => item);
-  if (latest && Number.isSafeInteger(end) && end > after) {
-    const { collected, reachedStart, capped } = await scanBackward(fetchPage, after, end, limit);
+  // before wins over latest: the exclusive upper bound already selects the
+  // newest messages older than that sequence, so latest would repeat it.
+  const upper = Number.isSafeInteger(before) ? before : (latest && Number.isSafeInteger(end) ? end : null);
+  if (upper !== null && upper > after) {
+    const { collected, reachedStart, capped } = await scanBackward(fetchPage, after, upper, limit);
     const selected = collected.slice(-limit);
-    return {
-      messages: selected.map(map),
-      next: selected.length ? selected[0].sequence : after,
-      hasMore: collected.length > selected.length || !reachedStart || capped,
-    };
+    return pageFields(selected.map(map), selected.length ? selected.at(-1).sequence : after, false,
+      collected.length > selected.length || !reachedStart || capped);
   }
   const { collected, scanCursor, reachedEnd, capped } = await scanForward(fetchPage, after, limit, latest);
   if (latest) {
     const selected = collected.slice(-limit);
-    return {
-      messages: selected.map(map),
-      next: selected.length ? selected[0].sequence : after,
-      hasMore: collected.length > selected.length || capped,
-    };
+    return pageFields(selected.map(map), selected.length ? selected.at(-1).sequence : after, !reachedEnd,
+      collected.length > selected.length || after > 0);
   }
   const selected = collected.slice(0, limit);
+  const hasOlder = after > 0;
   if (collected.length > selected.length) {
     // The final scanned page held more messages than `limit`: resume right
     // after the last returned message so the follow-up re-collects the rest.
-    return { messages: selected.map(map), next: selected.at(-1).sequence, hasMore: true };
+    return pageFields(selected.map(map), selected.at(-1).sequence, true, hasOlder);
   }
-  return { messages: selected.map(map), next: scanCursor, hasMore: !reachedEnd || capped };
+  return pageFields(selected.map(map), scanCursor, !reachedEnd || capped, hasOlder);
+}
+
+async function forwardMessageExists(fetchPage, before) {
+  try {
+    const probe = await paginateRoomMessages(fetchPage, { after: before - 1, limit: 1 });
+    return probe.messages.length > 0;
+  } catch (error) {
+    if (error?.status === 409 && error?.code === "cursor_ahead") return false;
+    throw error;
+  }
+}
+
+// One page of room_read_messages. before is exclusive and returns the newest
+// `limit` messages strictly older than it. before together with after is
+// rejected. latest with before is redundant: before already selects that page.
+export async function assembleRoomMessagePage(fetchPage, { after, before, limit = 50, latest = false, end = null, mapMessage } = {}) {
+  const problem = messageReadArgumentError({
+    ...(after === undefined ? {} : { after }),
+    ...(before === undefined ? {} : { before }),
+  });
+  if (problem) throw new RoomClientError(problem.status, problem.code, problem.message);
+  const cursorAfter = after ?? 0;
+  const pagingBefore = before === undefined ? null : before;
+  const atLatest = pagingBefore == null && latest === true;
+  const page = await paginateRoomMessages(fetchPage, {
+    after: cursorAfter, limit, before: pagingBefore, latest: atLatest,
+    end: atLatest && Number.isSafeInteger(end) ? end : null, mapMessage,
+  });
+  const hasMore = pagingBefore == null ? page.hasMore : await forwardMessageExists(fetchPage, pagingBefore);
+  const cursors = atLatest && page.hasMore === false
+    ? latestSnapshotPage(page.messages, cursorAfter, page.hasOlder)
+    : publicMessageCursors(page.messages, { next: page.next, hasMore, hasOlder: page.hasOlder });
+  return { messages: page.messages, ...cursors };
 }
 function checkedCharter(value, horizon) {
   try {
@@ -585,10 +650,11 @@ export class RoomAgentClient {
   // Room messages after a sequence, in order, as compact records. Other event
   // types are skipped; private messages appear only to their two parties
   // (the service filters them). limit counts messages, not scanned events.
-  // latest:true returns the latest messages in chronological order
-  // (GET /conversation parity). next is the newest sequence, so following it
-  // as after does not repeat the page. hasMore means older messages exist.
-  async roomMessages({ after = 0, limit = 50, latest = false, signal } = {}) {
+  // latest:true returns the newest messages in chronological order
+  // (GET /conversation parity). next is the forward cursor and hasMore is
+  // forward, so at the log head hasMore is false. Older pages use before:prev
+  // until hasOlder is false.
+  async roomMessages({ after, before, limit = 50, latest = false, signal } = {}) {
     const fetchPage = (cursor, pageLimit) => this.#request(`/events?after=${cursor}&limit=${pageLimit}`, undefined, signal);
     const mapMessage = ({ sequence, event }) => ({
       sequence, eventId: event.id, messageId: event.data?.messageId ?? event.id, from: event.actorId, at: event.at,
@@ -598,14 +664,11 @@ export class RoomAgentClient {
         && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
     });
-    const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, mapMessage });
-    const mapped = messages.map(message => markIfOther(message, this.#memberId, message.from));
-    const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
+    const page = await assembleRoomMessagePage(fetchPage, { after, before, limit, latest, mapMessage });
     return withContentTrust({
+      ...page,
       roomId: this.#roomId,
-      messages: mapped,
-      next: cursor.next,
-      hasMore: cursor.hasMore,
+      messages: page.messages.map(message => markIfOther(message, this.#memberId, message.from)),
     });
   }
   async replyRead(name, args = {}, { signal } = {}) {

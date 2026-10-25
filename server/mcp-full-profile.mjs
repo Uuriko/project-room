@@ -26,7 +26,7 @@ import { validId } from "../src/events.js";
 import { redactEventPage } from "./redact-read.mjs";
 import { projectBoard } from "../src/board.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
-import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.mjs";
+import { assembleRoomMessagePage } from "../client/room-agent.mjs";
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
@@ -87,8 +87,6 @@ function stampRoom(value, roomId) {
 }
 
 async function roomMessages(store, secret, roomId, args, memberId) {
-  const after = args.after ?? 0;
-  const limit = args.limit ?? 50;
   const latest = args.latest ?? false;
   // Edit/delete redaction is per-event (projection-indexed), so applying it
   // per scanned page is equivalent to applying it to the whole log.
@@ -103,17 +101,18 @@ async function roomMessages(store, secret, roomId, args, memberId) {
       && [event.actorId, event.data.toMemberId].includes(memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { roomId, requestMessageId: event.data.messageId ?? event.id } } } : {}),
     ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(mention => ({ memberId: mention.memberId, displayName: mention.displayName })) } : {})
   });
-  const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, {
-    after, limit, latest,
-    // Backward walk needs the log head; the bound is exclusive, so +1.
-    end: latest ? store.roomAuthority(roomId).sequence + 1 : null,
+  const head = store.roomAuthority(roomId).sequence;
+  const page = await assembleRoomMessagePage(fetchPage, {
+    after: args.after, before: args.before, limit: args.limit ?? 50, latest,
+    // Backward walk from the head needs the exclusive end, sequence + 1.
+    // before already supplies that bound, so latest is not also applied.
+    end: args.before === undefined && latest ? head + 1 : null,
     mapMessage,
   });
-  const mapped = messages.map(message => markIfOther(message, memberId, message.from));
-  const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
   return withContentTrust({
-    roomId, messages: mapped,
-    next: cursor.next, hasMore: cursor.hasMore,
+    ...page,
+    roomId,
+    messages: page.messages.map(message => markIfOther(message, memberId, message.from)),
   });
 }
 

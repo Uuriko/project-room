@@ -78,6 +78,9 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.equal(readMessages.description, CORE_MCP_BLURBS.room_read_messages);
   assert.match(readMessages.description, /oldest first/);
   assert.doesNotMatch(readMessages.description, /\brecent\b/i);
+  assert.match(readMessages.description, /before:prev until hasOlder is false/);
+  assert.equal(readMessages.inputSchema.properties.before.minimum, 1);
+  assert.match(readMessages.inputSchema.properties.before.description, /latest:true, then before:prev until hasOlder is false/);
   assert.equal(readMessages.inputSchema.properties.after.default, 0);
   const coreBytes = Buffer.byteLength(JSON.stringify(body));
   const coreResultBytes = Buffer.byteLength(JSON.stringify(body.result));
@@ -106,6 +109,7 @@ test("default tools/list is the short core profile and every listed name is lega
   const fullBody = await full.json();
   assert.ok(namesOf(fullBody).every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(namesOf(fullBody).includes("room_read_board"), true);
+  assert.match(fullBody.result.tools.find(tool => tool.name === "room_read_messages").description, /latest:true, then before:prev until hasOlder is false/);
   assert.equal(fullBody.result.tools.every(tool => tool.aliases === undefined), true);
   assert.ok(Buffer.byteLength(JSON.stringify(fullBody)) > coreBytes);
   assert.ok(PUBLIC_WORK_MCP_TOOLS.every(name => namesOf(fullBody).includes(name)));
