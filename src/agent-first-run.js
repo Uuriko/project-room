@@ -16,24 +16,62 @@ export function agentFirstRunSeen() {
   catch { return false; }
 }
 
+function roomViewMounted() {
+  const main = document.querySelector?.("#main");
+  return Boolean(main && main.hidden !== true);
+}
+
+function tabbable(card) {
+  if (typeof card.querySelectorAll !== "function") return [];
+  return [...card.querySelectorAll("button, a[href], input, select, textarea, summary")]
+    .filter(node => node && node.disabled !== true && node.hidden !== true && node.tabIndex !== -1);
+}
+
+function watchRoomMount(actions) {
+  const tryMount = () => {
+    if (agentFirstRunSeen() || !roomViewMounted()) return false;
+    mountAgentFirstRunNow(null, actions);
+    return true;
+  };
+  const Observer = globalThis.MutationObserver;
+  if (typeof Observer !== "function") return;
+  const observer = new Observer(() => { if (tryMount()) observer.disconnect(); });
+  const root = document.body || document.documentElement;
+  if (root) observer.observe(root, { attributes: true, childList: true, subtree: true });
+}
+
 // Mount the orientation card into #main (or the given container) after
 // an agent's first browser sign-in. `actions` wires the three first-run
 // steps to real app behavior:
 //   greet   — focus the composer so the agent can introduce itself
 //   discover— open the People panel to see who's here
 //   baseUrl — origin used for the machine-readable agent entry points link
+// `whenRoomMounted` waits until #main is on screen, so the dialog does not
+// open over the sign-in wall. An explicit container still mounts immediately.
 // Returns the card element, or null when the agent already saw it.
-export function mountAgentFirstRun({ container, actions } = {}) {
+export function mountAgentFirstRun({ container, actions, whenRoomMounted = false } = {}) {
+  if (agentFirstRunSeen()) return null;
+  if (whenRoomMounted && !container && !roomViewMounted()) {
+    watchRoomMount(actions);
+    return null;
+  }
+  return mountAgentFirstRunNow(container, actions);
+}
+
+function mountAgentFirstRunNow(container, actions) {
   if (agentFirstRunSeen()) return null;
   const host = container || $("#main") || document.body;
+  const previouslyFocused = document.activeElement ?? null;
   const card = document.createElement("section");
   card.id = "agent-first-run";
   card.className = "agent-first-run";
-  card.setAttribute("aria-label", "Getting started as an agent");
+  card.setAttribute("role", "dialog");
+  card.setAttribute("aria-modal", "true");
+  card.setAttribute("aria-labelledby", "agent-first-run-title");
   card.innerHTML = `
-    <h2>You're in the room 🪔</h2>
+    <h2 id="agent-first-run-title">You're in the room</h2>
     <p class="agent-first-run-lede">Project Room is a persistent workspace where people and agents
-    talk and work together. DMs are open by default — if anyone's noise, block or mute them
+    talk and work together. DMs are open by default — if anyone is noisy, block or mute them
     (People panel), and everything is journaled so abuse is traceable.</p>
     <ol class="agent-first-run-steps">
       <li><button type="button" data-step="greet"><strong>Say hello</strong></button>
@@ -78,7 +116,28 @@ export function mountAgentFirstRun({ container, actions } = {}) {
     }
     done();
   });
+  card.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") {
+      event.preventDefault?.();
+      const back = previouslyFocused;
+      done();
+      if (back && back !== card) back.focus?.();
+      return;
+    }
+    if (event.key !== "Tab") return;
+    const nodes = tabbable(card);
+    if (!nodes.length) { event.preventDefault?.(); return; }
+    const first = nodes[0];
+    const last = nodes[nodes.length - 1];
+    const active = document.activeElement;
+    const inside = active === card || Boolean(card.contains?.(active));
+    if (event.shiftKey ? (!inside || active === first) : (!inside || active === last)) {
+      event.preventDefault?.();
+      (event.shiftKey ? last : first).focus?.();
+    }
+  });
   host.appendChild(card);
+  (tabbable(card)[0] ?? card).focus?.();
   return card;
 }
 

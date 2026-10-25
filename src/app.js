@@ -63,6 +63,114 @@ import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 import "./entry-started.js";
+
+const CONNECTED_STREAM = "Connected to room service · no peer read or processing receipt";
+const RECONNECTING_EXPLANATION = "Connection interrupted · reconnecting; displayed history may be stale";
+
+export function connectionView({ online = true, streamText = "" } = {}) {
+  const signedOut = /^Not connected · (account )?sign.in required$/.test(streamText);
+  if (online === false) return { visible: "Offline", explanation: "Offline", state: "other", interrupted: true };
+  const reconnecting = /^(Reconnecting|Connection interrupted)/.test(streamText);
+  if (reconnecting) return { visible: "Reconnecting", explanation: RECONNECTING_EXPLANATION, state: "other", interrupted: true };
+  const connected = streamText === CONNECTED_STREAM;
+  const interrupted = /^(Connection interrupted|Room service unavailable|Reconnecting)/.test(streamText);
+  return { visible: connected ? "Connected" : streamText, explanation: streamText, state: connected ? "connected" : signedOut ? "signed-out" : "other", interrupted };
+}
+
+export function composerNotices({ delivery = "", interruption = "" } = {}, event, next = {}) {
+  if (event === "send-start") return { delivery: "", interruption };
+  if (event === "send-success") return { delivery: next.delivery ?? delivery, interruption: "" };
+  if (event === "interrupted") return { delivery, interruption: next.interruption ?? interruption };
+  return { delivery, interruption };
+}
+
+export function presenceRefreshOn({ event, hadDrop = false } = {}) {
+  if (event === "online") return true;
+  return event === "stream-connected" && hadDrop === true;
+}
+
+export function slashFocusesSearch(event, { inField = false, dialogOpen = false } = {}) {
+  if (!event || event.key !== "/" || event.repeat || event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.keyCode === 229) return false;
+  return !inField && !dialogOpen;
+}
+
+export function composerShortcut(event) {
+  if (!event || event.repeat || event.isComposing || event.keyCode === 229) return false;
+  if (!event.altKey || !event.shiftKey || event.ctrlKey || event.metaKey) return false;
+  return event.code === "KeyC" || event.key === "C" || event.key === "c";
+}
+
+export function applyMessageRoving(list) {
+  if (!list?.querySelectorAll) return;
+  const rows = [...list.querySelectorAll(":scope > .message")];
+  if (!rows.length) {
+    if (list.tabIndex === -1) list.tabIndex = 0;
+    return;
+  }
+  let current = rows.findIndex(row => Number(row.tabIndex) === 0);
+  if (current < 0 && typeof document !== "undefined") current = rows.findIndex(row => row.contains?.(document.activeElement));
+  if (current < 0) current = 0;
+  list.tabIndex = -1;
+  for (const [index, row] of rows.entries()) {
+    row.tabIndex = index === current ? 0 : -1;
+    for (const node of row.querySelectorAll?.(["a", "button", "summary", "input", "textarea", "select"].join(", ")) ?? []) node.tabIndex = -1;
+  }
+}
+
+export function onMessageListKey(event, list) {
+  const key = event?.key;
+  const action = key === "ArrowDown" ? "next" : key === "ArrowUp" ? "previous" : key === "Enter" ? "open" : "";
+  if (!action || !list?.querySelectorAll) return false;
+  const active = event.target;
+  if (active?.matches?.(["input", "textarea", "select"].join(",")) || active?.isContentEditable) return false;
+  const rows = [...list.querySelectorAll(":scope > .message")];
+  if (!rows.length) return false;
+  const index = rows.findIndex(row => row === active || row.contains?.(active));
+  if (index < 0) return false;
+  if (action === "open") {
+    if (active !== rows[index]) return false;
+    const more = rows[index].querySelector?.("details.message-more, .message-more");
+    if (more) {
+      event.preventDefault();
+      more.open = true;
+      const summary = more.querySelector?.("summary") ?? more;
+      summary.tabIndex = 0;
+      summary.focus?.();
+      return true;
+    }
+    const button = rows[index].querySelector?.("[data-message-action]");
+    if (!button) return false;
+    event.preventDefault();
+    button.tabIndex = 0;
+    button.focus?.();
+    return true;
+  }
+  const target = action === "next" ? Math.min(rows.length - 1, index + 1) : Math.max(0, index - 1);
+  event.preventDefault();
+  for (const [i, row] of rows.entries()) row.tabIndex = i === target ? 0 : -1;
+  rows[target].focus?.();
+  return true;
+}
+
+export function installSkipToComposer(doc = globalThis.document) {
+  if (!doc?.querySelector || doc.querySelector("#skip-to-composer")) return doc?.querySelector?.("#skip-to-composer") ?? null;
+  const link = doc.createElement("a");
+  link.id = "skip-to-composer";
+  link.className = "skip-link";
+  link.href = "#message-input";
+  link.textContent = uiText("a11y.skipComposer");
+  link.setAttribute("aria-keyshortcuts", "Alt+Shift+C");
+  const skip = doc.querySelector("#skip-link");
+  if (skip?.insertAdjacentElement) skip.insertAdjacentElement("afterend", link);
+  else (doc.body ?? doc.documentElement)?.prepend?.(link);
+  doc.querySelector("#message-input")?.setAttribute?.("aria-keyshortcuts", "Alt+Shift+C");
+  link.addEventListener?.("click", event => {
+    event.preventDefault();
+    doc.querySelector("#message-input")?.focus?.();
+  });
+  return link;
+}
+
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
 const bodyHtmlCache = createBodyHtmlCache();
 
@@ -127,6 +235,7 @@ $("#skip-link").addEventListener("click", event => {
     : "#auth-title";
   $(target).focus();
 });
+installSkipToComposer(document);
 const setText = (selector, text) => { const node = $(selector); if (node.textContent !== text) node.textContent = text; };
 const invitationTokenPattern = /^[A-Za-z0-9_-]{43}$/;
 function consumeInvitationFragment() {
@@ -1347,20 +1456,29 @@ const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(chara
 const recordHref = (kind, id) => `#pr-record/${kind}/${encodeURIComponent(id)}`;
 const workDomId = id => recordDomId("work", id);
 const workHref = id => recordHref("work", id);
-function setConnectionStatus(text) {
-  const normalized = /^(Reconnecting|Connection interrupted)/.test(text)
-    ? "Connection interrupted · reconnecting; displayed history may be stale"
-    : text;
+let lastStreamStatus = "";
+let browserOnline = typeof navigator === "undefined" || navigator.onLine !== false;
+let sawStreamDrop = false;
+function paintConnectionStatus() {
+  const view = connectionView({ online: browserOnline, streamText: lastStreamStatus });
   const status = $("#connection-status");
+  if (!status) return;
   const wasInterrupted = status.dataset.interrupted === "true";
-  status.dataset.interrupted = String(/^(Connection interrupted|Room service unavailable|Reconnecting)/.test(normalized));
-  const connected = normalized === "Connected to room service · no peer read or processing receipt";
-  const visible = connected ? "Connected" : normalized;
-  status.dataset.state = connected ? "connected"
-    : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
-  if (status.textContent !== visible) status.textContent = visible;
-  $("#connection-explanation").textContent = normalized;
-  if (state && wasInterrupted !== (status.dataset.interrupted === "true")) queueMicrotask(() => { if (state) render(); });
+  status.dataset.interrupted = String(view.interrupted);
+  status.dataset.state = view.state;
+  if (status.textContent !== view.visible) status.textContent = view.visible;
+  const explanation = $("#connection-explanation");
+  if (explanation) explanation.textContent = view.explanation;
+  if (/^(Reconnecting|Connection interrupted|Room service unavailable)/.test(lastStreamStatus)) sawStreamDrop = true;
+  if (state && wasInterrupted !== view.interrupted) queueMicrotask(() => { if (state) render(); });
+  if (!view.interrupted && view.state === "connected" && presenceRefreshOn({ event: "stream-connected", hadDrop: sawStreamDrop })) {
+    sawStreamDrop = false;
+    queueMicrotask(() => { if (state) void refreshPresenceStates(); });
+  }
+}
+function setConnectionStatus(text) {
+  lastStreamStatus = text;
+  paintConnectionStatus();
 }
 function accountRoomCreateFailure(error) {
   if (["email_unverified", "pilot_limit"].includes(error?.code)) return uiText(`error.${error.code}`);
@@ -2527,6 +2645,7 @@ function renderMessages() {
     const now = settledFocus.getBoundingClientRect();
     if (now.top < 0 || now.bottom > innerHeight) settledFocus.scrollIntoView({ block: "nearest", behavior: "instant" });
   }
+  applyMessageRoving(list);
   if (announceCount) $("#conversation-announcement").textContent = `${announceCount} new ${announceCount === 1 ? "message" : "messages"} in ${currentThreadId ? "this thread" : "the room"}. Room event ${client.sequence}.`;
 }
 function draftFeedbackHTML(message) {
@@ -3773,7 +3892,13 @@ async function submit(form, fn, { failureHint } = {}) {
     && generation === client.generation;
   form.setAttribute("aria-busy", "true"); controls.forEach(e => e.disabled = true);
   const local = form.querySelector(".form-status");
-  if (form.id === "message-form") setComposerError("");
+  if (form.id === "message-form") {
+    const delivery = $("#message-delivery");
+    if (delivery && composerNotices({ delivery: delivery.hidden ? "" : "saved", interruption: drafts.get(composerKey()).error }, "send-start").delivery === "") {
+      delivery.replaceChildren();
+      delivery.hidden = true;
+    }
+  }
   else if (local) setFormStatus(local, "");
   try { await fn(current); }
   catch (error) {
@@ -4236,7 +4361,10 @@ $("#message-form").addEventListener("submit", e => {
     try {
       if (sharedRequest) {
         await humanExperience.submit(sendingCommand, askRoom, stagedFileIds);
-        if (generation === client.generation && state) maybeShowGuestUpgradeHint();
+        if (generation === client.generation && state) {
+          setComposerError(composerNotices({ interruption: drafts.get(composerKey()).error }, "send-success").interruption);
+          maybeShowGuestUpgradeHint();
+        }
         return;
       }
       await client.send(sendingCommand);
@@ -4249,7 +4377,10 @@ $("#message-form").addEventListener("submit", e => {
     const delivery = $("#message-delivery");
     const savedMessageId = data.messageId || sendingCommand.id;
     const visible = state.messages.some(message => message.id === savedMessageId);
-    delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
+    const savedCopy = visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending");
+    const notices = composerNotices({ interruption: drafts.get(composerKey()).error }, "send-success", { delivery: savedCopy });
+    setComposerError(notices.interruption);
+    delivery.replaceChildren(document.createTextNode(notices.delivery));
     const link = document.createElement("a");
     link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
     delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
@@ -4435,6 +4566,7 @@ function expandTimelineTo(id) {
     renderMessages();
   }
 }
+$("#message-list").addEventListener("keydown", event => { onMessageListKey(event, $("#message-list")); });
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-timeline-earlier]")) {
     if (client.loadHistory()) return; // older history first; it renders on arrival
@@ -4852,9 +4984,19 @@ document.addEventListener("keydown", event => {
 let attentionKeyPrefix = null;
 let attentionKeyTimer = 0;
 document.addEventListener("keydown", event => {
+  if (composerShortcut(event) && !$("#main").hidden) {
+    event.preventDefault();
+    $("#message-input")?.focus();
+    return;
+  }
   if ($("#main").hidden || event.target?.closest?.("dialog")) return;
   if (event.ctrlKey || event.metaKey || event.altKey || event.isComposing || event.keyCode === 229) return;
   if (event.target?.closest?.("input, textarea, select, [contenteditable]")) { attentionKeyPrefix = null; return; }
+  if (slashFocusesSearch(event)) {
+    event.preventDefault();
+    $("#message-search")?.focus();
+    return;
+  }
   const key = event.key?.toLowerCase();
   if (attentionKeyPrefix === "g") {
     attentionKeyPrefix = null;
@@ -7027,6 +7169,15 @@ document.addEventListener("visibilitychange", () => {
 window.addEventListener("pageshow", event => {
   if (event.persisted && document.visibilityState === "visible") void refreshPresenceStates();
 });
+window.addEventListener("online", () => {
+  browserOnline = true;
+  paintConnectionStatus();
+  if (presenceRefreshOn({ event: "online" })) void refreshPresenceStates();
+});
+window.addEventListener("offline", () => {
+  browserOnline = false;
+  paintConnectionStatus();
+});
 $("#presence-list").addEventListener("click", event => {
   if (event.target.closest("[data-refresh-presence]")) void refreshPresenceStates();
 });
@@ -7948,4 +8099,4 @@ return ready;
 }
 
 // Cached HTML from before the entry split still names this module directly.
-if (document.querySelector('script[type="module"][src$="/src/app.js"]')) startApp();
+if (typeof document !== "undefined" && document.querySelector('script[type="module"][src$="/src/app.js"]')) startApp();

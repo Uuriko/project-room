@@ -90,7 +90,7 @@ const failedReads = {
   "thrown fetch": async () => { throw new TypeError("fetch failed"); },
   "5xx": async () => res(503)
 };
-const chipFor = status => /<p class="live-chip">([^<]*)<\/p>/.exec(boardHtml([], status, { id: "u1", manage: false, owner: false, write: true }, {}, Date.now(), { canWrite: true }))?.[1];
+const chipFor = status => /<p class="live-chip">([^<]*)<\/p>/.exec(boardHtml([], status, { id: "u1", manage: false, owner: false, write: true }, {}, Date.now(), { canWrite: true, operator: true }))?.[1];
 
 for (const [name, fetchImpl] of Object.entries(failedReads)) {
   test(`deploy status after a failed GitHub read (${name}) is stale and the chip stays unknown`, async t => {

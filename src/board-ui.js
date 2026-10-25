@@ -1,5 +1,6 @@
 import { escapeHtml } from "./html-escape.js";
 import { workStatus } from "./work-status.js";
+import { SESSION_HEARTBEAT_STALE_MS } from "./work-item-session.js";
 // Tasks › Board. Claims come from GET /work-claims. Live updates follow
 // work_claim.updated on the room snapshot the client already applies.
 // This module does not open its own stream and does not poll.
@@ -46,26 +47,127 @@ function dependenciesMet(item, byId) {
   return deps.every(id => byId.get(id)?.state === "done");
 }
 
-export function columnOf(item, byId, now) {
+const PROJECT_ROOM_REPO = "uuriko/project-room";
+const ACCEPTED_WORK = new Set(["accepted", "working", "in_progress"]);
+const ACTIVE_SESSION = new Set(["processing", "active"]);
+
+export function isProjectRoomRepo(value) {
+  const text = String(value ?? "").trim()
+    .replace(/\.git$/i, "")
+    .replace(/^https?:\/\/github\.com\//i, "")
+    .replace(/^git@github\.com:/i, "")
+    .replace(/\/$/, "");
+  return text.toLowerCase() === PROJECT_ROOM_REPO;
+}
+
+function workRecords(workItems) {
+  if (!workItems || typeof workItems !== "object") return [];
+  return Array.isArray(workItems) ? workItems.filter(Boolean) : Object.values(workItems).filter(Boolean);
+}
+
+function linkedWork(item, workItems) {
+  if (item?.workItemId && workItems && !Array.isArray(workItems) && workItems[item.workItemId]) return workItems[item.workItemId];
+  const ids = new Set([item?.workItemId, item?.id].filter(id => typeof id === "string" && id));
+  return workRecords(workItems).find(work => ids.has(work.id) || ids.has(work.claimId)) ?? null;
+}
+
+function acceptedAssignee(work) {
+  if (!work || !ACCEPTED_WORK.has(work.state)) return "";
+  const id = work.assignee ?? work.accountableMemberId ?? work.accountable_member_id ?? "";
+  return typeof id === "string" ? id : "";
+}
+
+function sessionHolder(session, now) {
+  if (!session || !ACTIVE_SESSION.has(session.status)) return "";
+  const beat = session.heartbeat_at ?? session.heartbeatAt;
+  if (beat != null) {
+    const at = Date.parse(beat);
+    if (!Number.isFinite(at) || now - at > SESSION_HEARTBEAT_STALE_MS) return "";
+  }
+  const id = session.worker_member_id ?? session.workerMemberId ?? session.holderId ?? session.holder ?? session.memberId ?? "";
+  return typeof id === "string" ? id : "";
+}
+
+function sessionsFor(item, work, sessions) {
+  const list = Array.isArray(sessions) ? sessions : [];
+  const ids = new Set([item?.id, item?.workItemId, work?.id].filter(id => typeof id === "string" && id));
+  const matched = list.filter(session => {
+    const key = session?.workItemId ?? session?.work_item_id ?? session?.claimId ?? session?.itemId;
+    return typeof key === "string" && ids.has(key);
+  });
+  if (work?.session && typeof work.session === "object") matched.push({ ...work.session, workItemId: work.id });
+  const embeddedStatus = work?.sessionStatus ?? (ACTIVE_SESSION.has(work?.status) ? work.status : "");
+  const embeddedHolder = work?.worker_member_id ?? work?.workerMemberId;
+  if (embeddedHolder && ACTIVE_SESSION.has(embeddedStatus)) {
+    matched.push({ status: embeddedStatus, worker_member_id: embeddedHolder, heartbeat_at: work.heartbeat_at ?? work.heartbeatAt, workItemId: work.id });
+  }
+  return matched;
+}
+
+// Claim owner wins. Otherwise an accepted work item's assignee, then the
+// holder of a live processing/active session. A stale heartbeat is not live.
+export function effectiveOwner(item, workItems, sessions, now = Date.now()) {
+  if (item?.owner) return item.owner;
+  const work = linkedWork(item, workItems);
+  const assignee = acceptedAssignee(work);
+  if (assignee) return assignee;
+  for (const session of sessionsFor(item, work, sessions)) {
+    const holder = sessionHolder(session, now);
+    if (holder) return holder;
+  }
+  return null;
+}
+
+export function activeSessionHolder(item, workItems, sessions, now = Date.now()) {
+  const work = linkedWork(item, workItems);
+  for (const session of sessionsFor(item, work, sessions)) {
+    const holder = sessionHolder(session, now);
+    if (holder) return holder;
+  }
+  return null;
+}
+
+// A work item the claims ledger has not posted yet still needs a card, or
+// accepted work with a live session stays invisible and reads as unclaimed.
+export function cardsForBoard(items, workItems, sessions, now = Date.now()) {
+  const claims = Array.isArray(items) ? [...items] : [];
+  const covered = new Set();
+  for (const item of claims) {
+    if (typeof item?.id === "string") covered.add(item.id);
+    if (typeof item?.workItemId === "string") covered.add(item.workItemId);
+  }
+  for (const work of workRecords(workItems)) {
+    if (typeof work.id !== "string" || covered.has(work.id)) continue;
+    const stub = { id: work.id, title: work.title || work.id, state: "unclaimed", owner: null, workItemId: work.id, dependsOn: [], fromWorkItem: true };
+    if (effectiveOwner(stub, workItems, sessions, now)) claims.push(stub);
+  }
+  return claims;
+}
+
+export function columnOf(item, byId, now, scope) {
   if (!item) return null;
   if (item.state === "done") {
     const at = Date.parse(updatedAt(item));
     return Number.isFinite(at) && now - at <= WEEK ? "landed" : null;
   }
-  if (item.state === "unclaimed" && !item.owner && !dependenciesMet(item, byId)) return "blocked";
+  // An owned-but-unclaimed claim is mid-transition and still has no column.
+  // Accepted work and a live session are already owned, so they are in progress.
+  if (item.state === "unclaimed" && !item.owner) {
+    if (effectiveOwner(item, scope?.workItems, scope?.sessions, now)) return "claimed";
+    return dependenciesMet(item, byId) ? "ready" : "blocked";
+  }
   if (item.state === "delivered" || openPull(item)) return "review";
   if (item.state === "blocked") return "blocked";
   if (item.state === "claimed" || item.state === "in_progress") return "claimed";
-  if (item.state === "unclaimed" && !item.owner && dependenciesMet(item, byId)) return "ready";
   return null;
 }
 
-export function placeClaims(items, now = Date.now()) {
+export function placeClaims(items, now = Date.now(), scope) {
   const list = Array.isArray(items) ? items : [];
   const byId = new Map(list.map(item => [item.id, item]));
   const columns = Object.fromEntries(COLUMNS.map(([id]) => [id, []]));
   for (const item of list) {
-    const column = columnOf(item, byId, now);
+    const column = columnOf(item, byId, now, scope);
     if (column) columns[column].push(item);
   }
   for (const rows of Object.values(columns)) rows.sort((a, b) => String(a.title).localeCompare(String(b.title)) || String(a.id).localeCompare(String(b.id)));
@@ -83,15 +185,16 @@ function memberName(members, id) {
 // Board search and "mine only" filter. Pure: the filter bar narrows the loaded
 // claims client-side, and the two controls compose by AND — each control can
 // only narrow the other, never widen it.
-export function filterClaims(items, { q = "", mine = false } = {}, viewerId = null, members = {}) {
+export function filterClaims(items, { q = "", mine = false } = {}, viewerId = null, members = {}, scope) {
   const term = String(q ?? "").trim().toLocaleLowerCase();
   const list = Array.isArray(items) ? items : [];
   return list.filter(item => {
-    if (mine && (!viewerId || item?.owner !== viewerId)) return false;
+    const ownerId = effectiveOwner(item, scope?.workItems, scope?.sessions, scope?.now);
+    if (mine && (!viewerId || ownerId !== viewerId)) return false;
     if (!term) return true;
     const haystack = [
       item?.title, item?.note, typeof item?.id === "string" ? item.id : "",
-      item?.owner ? memberName(members, item.owner) : "Unclaimed",
+      ownerId ? memberName(members, ownerId) : "Unclaimed",
       ...(Array.isArray(item?.files) ? item.files : []),
     ].filter(text => typeof text === "string");
     return haystack.some(text => text.toLocaleLowerCase().includes(term));
@@ -277,11 +380,16 @@ function viewerOf(state, session) {
 // verify permission); the owner can never review their own claim, and only
 // owned claims the kernel can still review are offered the form. The
 // review route re-checks on POST; this only decides whether the form renders.
-export function canReviewClaim(item, viewer, members) {
+function scopeOwner(item, scope) {
+  return effectiveOwner(item, scope?.workItems, scope?.sessions, scope?.now ?? Date.now());
+}
+
+export function canReviewClaim(item, viewer, members, scope) {
   if (!item || !viewer?.id) return false;
   const member = members?.[viewer.id];
   if (!member || member.active === false) return false;
-  if (!item.owner || item.owner === viewer.id) return false;
+  const owner = scopeOwner(item, scope);
+  if (!owner || owner === viewer.id) return false;
   // recordReview accepts active or delivered claims ("only active or
   // delivered claims can be reviewed") — the delivered state is where the
   // verdict matters most, so it renders the form too. Done/closed claims
@@ -330,11 +438,12 @@ export function currentApprovalFor(item, memberId) {
 //   under independent_principal (#3885) must additionally hold the
 //   verify permission (canCloseWork's verifyMembers) — approvers
 //   without it were offered a Verify the kernel always refuses.
-export function canVerifyFromBoard(item, viewer, members, roomPolicy = null) {
+export function canVerifyFromBoard(item, viewer, members, roomPolicy = null, scope) {
   if (!item || item.state !== "delivered" || !viewer?.id) return false;
   const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
-  if (policy === "self_attested") return item.owner === viewer.id;
-  if (item.owner === viewer.id) return false;
+  const owner = scopeOwner(item, scope);
+  if (policy === "self_attested") return owner === viewer.id;
+  if (owner === viewer.id) return false;
   if (!currentApprovalFor(item, viewer.id)) return false;
   if (policy === "independent_principal") {
     const member = members?.[viewer.id];
@@ -350,9 +459,9 @@ export function canVerifyFromBoard(item, viewer, members, roomPolicy = null) {
 // to the owner outright, and to a manager or reviewer when a CURRENT
 // changes_requested review stands on the claim (basisCurrent, the same
 // currency test approvals use). The route re-checks on POST.
-export function canSendBackClaim(item, viewer, members) {
+export function canSendBackClaim(item, viewer, members, scope) {
   if (!item || item.state !== "delivered" || !viewer?.id) return false;
-  if (item.owner === viewer.id) return true;
+  if (scopeOwner(item, scope) === viewer.id) return true;
   const member = members?.[viewer.id];
   if (!member || member.active === false) return false;
   const standing = (item.reviews ?? []).filter(entry => entry?.verdict === "changes_requested" && basisCurrent(entry, item));
@@ -628,14 +737,14 @@ function workLink(item, workItems, key, label, { claimRecord = false } = {}) {
   return escapeHtml(label);
 }
 
-function claimReference(id, byId, workItems, key, now) {
+function claimReference(id, byId, workItems, key, now, scope) {
   const target = byId.get(id);
   const label = target?.title ? `${target.title} (#${id})` : `#${id}`;
-  return workLink(target, workItems, key, label, { claimRecord: Boolean(target && columnOf(target, byId, now)) });
+  return workLink(target, workItems, key, label, { claimRecord: Boolean(target && columnOf(target, byId, now, scope)) });
 }
 
-function canLinkPullRequest(item, viewer, now) {
-  return viewer.write && viewer.id === item.owner && !item.supersededBy
+function canLinkPullRequest(item, viewer, now, scope) {
+  return viewer.write && viewer.id === scopeOwner(item, { ...scope, now }) && !item.supersededBy
     && ["claimed", "in_progress", "blocked"].includes(item.state)
     && (!item.leaseExpiresAt || Date.parse(item.leaseExpiresAt) > now);
 }
@@ -709,9 +818,12 @@ function claimRecordHtml(item, members) {
   return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
 }
 
-function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null) {
-  const ownerId = item.owner;
-  const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
+function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null, scope = null) {
+  const boardScope = { workItems, sessions: scope?.sessions, now };
+  const ownerId = effectiveOwner(item, workItems, boardScope.sessions, now);
+  const holder = activeSessionHolder(item, workItems, boardScope.sessions, now);
+  const person = memberName(members, holder || ownerId);
+  const owner = holder ? uiText("board.working", { name: person }) : (ownerId ? person : "Unclaimed");
   const mine = Boolean(viewer.id && ownerId === viewer.id);
   const files = Array.isArray(item.files) ? item.files : [];
   const blocks = item.fileBlocks && typeof item.fileBlocks === "object" ? item.fileBlocks : {};
@@ -733,21 +845,21 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     ? `<p class="claim-repo">${escapeHtml([item.repo, item.branch].filter(Boolean).join("@"))}</p>`
     : "";
   const chain = Array.isArray(item.chain) ? item.chain : [];
-  const links = chain.map((link, index) => `<li>${escapeHtml(link.kind)} → ${claimReference(link.targetId, byId, workItems, `claim-chain:${item.id}:${index}`, now)}${link.note ? ` · ${escapeHtml(link.note)}` : ""}</li>`).join("");
+  const links = chain.map((link, index) => `<li>${escapeHtml(link.kind)} → ${claimReference(link.targetId, byId, workItems, `claim-chain:${item.id}:${index}`, now, boardScope)}${link.note ? ` · ${escapeHtml(link.note)}` : ""}</li>`).join("");
   const reviews = Array.isArray(item.reviews) && item.reviews.length
     ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(reviewLabel(review, item))}</li>`).join("")}</ul>`
     : "";
   const dependencies = Array.isArray(item.dependsOn) ? item.dependsOn : [];
   const remaining = dependencies.filter(id => byId.get(id)?.state !== "done");
-  const waiting = item.state === "unclaimed" && !item.owner && remaining.length > 0;
+  const waiting = item.state === "unclaimed" && !ownerId && !holder && remaining.length > 0;
   const reason = waiting ? `<p class="form-hint claim-waiting">Waiting for ${remaining.length} prerequisite${remaining.length === 1 ? "" : "s"} before claiming.</p>` : "";
   const deps = dependencies.map((id, index) => {
     const target = byId.get(id);
     const status = !target ? "Not loaded or unavailable; status unknown"
       : target.state === "done" ? "Completed"
-      : target.state === "unclaimed" && !target.owner ? "Unclaimed; needs an owner"
+      : target.state === "unclaimed" && !effectiveOwner(target, workItems, boardScope.sessions, now) ? "Unclaimed; needs an owner"
       : ({ claimed: "Claimed", in_progress: "In progress", blocked: "Blocked" }[target.state] ?? "Status unknown");
-    const reference = claimReference(id, byId, workItems, `claim-dependency:${item.id}:${index}`, now);
+    const reference = claimReference(id, byId, workItems, `claim-dependency:${item.id}:${index}`, now, boardScope);
     return `<li>${target?.state === "done" ? "Prerequisite" : "Waiting for"} ${reference} · ${escapeHtml(status)}</li>`;
   }).join("");
   const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
@@ -756,29 +868,29 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     const work = workItems?.[item.workItemId];
     actions.push(workLink(item, workItems, `work-acceptance:${item.id}`, work ? workStatus(work, now).label : item.title || item.id));
   }
-  if (canLinkPullRequest(item, viewer, now)) {
+  if (canLinkPullRequest(item, viewer, now, boardScope)) {
     actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
   }
   // VERIFY step: the board used to render no review control at all — "What
   // needs me › Review" only scrolled to the card (dead end). Eligible
   // reviewers now get the verdict form right on the card.
-  if (!item.workItemId && canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
+  if (!item.workItemId && canReviewClaim(item, viewer, members, boardScope)) actions.push(claimReviewForm(item));
   // The delivered end of the lifecycle (#3795/#3754): a reviewer whose
   // approval is still current against the delivered bundle verifies it to
   // done from the same card. The update route re-runs canCloseWork on POST;
   // this only renders the control when the claim could actually close for
   // this viewer — policy-aware since B4 (#3885/#3887, canVerifyFromBoard).
-  if (!item.workItemId && canVerifyFromBoard(item, viewer, members, roomPolicy)) {
+  if (!item.workItemId && canVerifyFromBoard(item, viewer, members, roomPolicy, boardScope)) {
     actions.push(button("verify", uiText("board.action.verify"), "primary"));
   }
   // H1 (#3888): the send-back control. After a changes_requested review
   // the delivered claim used to sit with Close as the holder's only
   // offered exit; the route-authorized actors (owner, claim manager,
   // that reviewer) now get the delivered -> in_progress transition.
-  if (!item.workItemId && canSendBackClaim(item, viewer, members)) {
+  if (!item.workItemId && canSendBackClaim(item, viewer, members, boardScope)) {
     actions.push(button("sendback", uiText("board.action.sendback"), "secondary"));
   }
-  if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
+  if (item.state === "unclaimed" && !ownerId && !holder && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
   if (!item.workItemId && mine && item.state === "in_progress") {
@@ -807,7 +919,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }
   // Claim lifecycle: close (holder or claim manager) and cancel (creator of
   // an unclaimed item, or its holder) retire open work without delivery.
-  if (viewer.write && item.state !== "done" && item.state !== "closed") {
+  if (!item.fromWorkItem && viewer.write && item.state !== "done" && item.state !== "closed") {
     const opener = item.state === "unclaimed" && !item.owner && !item.historyOmitted
       && item.history?.[0]?.action === "created" && item.history[0].agentId === viewer.id;
     if (viewer.manage || mine) actions.push(button("close", "Close", "secondary"));
@@ -815,7 +927,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id, { claimRecord: true });
   const record = claimRecordHtml(item, members);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${(holder || ownerId) ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(person))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
@@ -878,9 +990,20 @@ function filterBarHtml(filter = {}) {
   });
 }
 
-export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null } = {}) {
-  const all = Array.isArray(items) ? items : [];
-  const visible = filterClaims(all, filter, viewer?.id, members);
+function roomDeclaresProjectRoom(room) {
+  return [room?.repo, room?.repository, room?.githubRepository, room?.github_repository].some(isProjectRoomRepo);
+}
+
+export function showsDeployDrift(viewer, { room = null, operator = false } = {}) {
+  if (operator || viewer?.operator) return true;
+  if (room?.operatorId && viewer?.id && room.operatorId === viewer.id) return true;
+  return roomDeclaresProjectRoom(room);
+}
+
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, sessions = [], room = null, operator = false, loading = false, loadError = false, filter = {}, reviewPolicy = null } = {}) {
+  const scope = { workItems, sessions, now };
+  const all = cardsForBoard(items, workItems, sessions, now);
+  const visible = filterClaims(all, filter, viewer?.id, members, scope);
   // The filter narrows display only: placement and dependency status are
   // facts about the full loaded board. Place every claim against the full
   // list (so a filtered-out prerequisite still counts as met or unmet
@@ -888,7 +1011,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   // Card lookups likewise resolve against the full list, so a dependency
   // the filter hid reports its real status instead of "unknown".
   const visibleIds = new Set(visible.map(item => item.id));
-  const placed = placeClaims(all, now);
+  const placed = placeClaims(all, now, scope);
   const columns = Object.fromEntries(Object.entries(placed).map(([id, rows]) => [id, rows.filter(item => visibleIds.has(item.id))]));
   const byId = new Map(all.map(item => [item.id, item]));
   const waitingCount = columns.blocked.filter(item => item.state === "unclaimed" && !item.owner).length;
@@ -900,7 +1023,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
   // The section literal below is verbatim the board's original column markup:
   // it stays one grandfathered i18n literal instead of growing the ratchet.
-  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
+  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy, scope)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
   const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
   // The filter bar rides above the board content; BU-02's loading states keep
   // precedence — skeleton while the first read is in flight, the error (not
@@ -915,7 +1038,8 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   // A failed refresh keeps the stale board but must still say so, with retry.
   const loadFailure = loadError && !loading ? uiText("board.loading.error") : "";
   const loadingNote = loading ? uiText(all.length ? "board.loading.002" : "board.loading.001") : "";
-  return `${needsMe}${form}<div class="board-head"><p class="live-chip">${escapeHtml(liveLabel(status))}</p>${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
+  const chip = showsDeployDrift(viewer, { room, operator }) ? `<p class="live-chip">${escapeHtml(liveLabel(status))}</p>` : "";
+  return `${needsMe}${form}<div class="board-head">${chip}${sweep}${capForm}</div><p id="board-status" class="form-hint" role="status">${escapeHtml(loadingNote)}</p>${loadFailure}${board}`;
 }
 
 function staleDonePage(claims, now) {
@@ -959,6 +1083,15 @@ function filesFromField(value) {
   return String(value ?? "").split(/[\n,]/).map(part => part.trim()).filter(Boolean).slice(0, 64);
 }
 
+function boardSessions(state) {
+  const sessions = Array.isArray(state?.workSessions) ? [...state.workSessions] : [];
+  for (const work of Object.values(state?.workItems ?? {})) {
+    if (!work || typeof work !== "object") continue;
+    if (work.session && typeof work.session === "object") sessions.push({ ...work.session, workItemId: work.id });
+  }
+  return sessions;
+}
+
 export function installWorkBoard({ client, getState, getSession }) {
   const root = document.querySelector("#work-board");
   if (!root) return { sync() {}, reset() {}, async whenReady() { return false; }, async revealClaim() { return false; } };
@@ -997,8 +1130,11 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
     pendingFocus = null;
     pendingStatus = "";
-    root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
+    const viewer = viewerOf(state, session);
+    root.innerHTML = boardHtml(items, status, viewer, state?.members ?? {}, Date.now(), {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
+      sessions: boardSessions(state), room: state?.room ?? null,
+      operator: Boolean(session?.operator || session?.member?.operator),
       loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy
     });
     // This control's markup comes from the shared strings catalog.

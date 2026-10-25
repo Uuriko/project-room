@@ -410,7 +410,7 @@ test("a completed Board action moves focus to the finished card when its button 
 // (server/claim-pr-sync.mjs readRoomDeployStatus), never a positive count, so
 // the chip must read the two shas to tell "differs" from "can't tell".
 const SHA_A = "a".repeat(40), SHA_B = "b".repeat(40);
-const liveChip = status => /<p class="live-chip">([^<]*)<\/p>/.exec(boardHtml([], status, viewer, {}, NOW, { canWrite: true }))?.[1];
+const liveChip = status => /<p class="live-chip">([^<]*)<\/p>/.exec(boardHtml([], status, viewer, {}, NOW, { canWrite: true, operator: true }))?.[1];
 
 test("deploy chip: matching shas read as matching", () => {
   assert.equal(liveChip({ live: SHA_A, main: SHA_A, behind: 0, checkedAt: "2026-10-11T00:00:00Z" }), "Live matches main");
