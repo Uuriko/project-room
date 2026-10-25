@@ -56,7 +56,7 @@ test("B-4: View receipt links the human page; JSON stays as the secondary link",
 });
 
 test("B-5: the toggle's name is the name the /receipts copy uses", () => {
-  const index = read("index.html");
+  const index = read("src/workspace-shell.html");
   assert.match(index, /id="public-receipts-toggle"[^>]*> Public receipts — publish receipts/);
   const page = read("server/receipts-page.mjs");
   assert.match(page, /Settings, then Permissions, and turn on “Public receipts”/);
@@ -76,7 +76,7 @@ test("B-9: the matcher sits below the offers workspace, and the copy assumes no 
 });
 
 test("B-2: New work has a visible labeled address in the Tasks navigation", () => {
-  assert.match(read("index.html"), /id="new-work-open" type="button">New work<\/button>/);
+  assert.match(read("src/workspace-shell.html"), /id="new-work-open" type="button">New work<\/button>/);
   assert.match(read("src/app.js"), /\$\("#new-work-open"\)\?\.addEventListener\("click", \(\) => openWork\(\)\)/);
 });
 

@@ -91,7 +91,7 @@ test("QAJ-001: the consolidated door's ask is the minimal fallback set", () => {
 });
 
 test("QAJ-001 (#3293 step 3): the dead-invite dialog links out to the room's join-page door", async () => {
-  const html = await readFile(new URL("../index.html", import.meta.url), "utf8");
+  const html = await readFile(new URL("../src/workspace-shell.html", import.meta.url), "utf8");
   const app = await readFile(new URL("../src/app.js", import.meta.url), "utf8");
   // The dialog carries ONE link; the inline form is gone.
   assert.match(html, /<a id="invitation-request-access" class="button secondary">Request access<\/a>/);

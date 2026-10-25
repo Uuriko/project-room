@@ -43,7 +43,7 @@ const rubric = { type: "array", minItems: 1, maxItems: 20, items: schema({
 
 export const bountyTools = [
   tool("bounty_list",
-    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. Filter by semantic group (proposed, funded, claimed, in-review, paid, cancelled), not by display label. Pass viewer=self to annotate each bounty with your own band-derived claimable answer and claim ceiling; nothing is ever hidden by that annotation, the claim gate stays the only enforcement point. Pass poster=self to see only bounties you posted. A read: never claims, funds or accepts anything. Awards are valueless room credits: today this pays in reputation receipts; cash comes later.",
+    "List this room's bounties with their state, award, deadline, pinned rubric and claimant. The award is valueless room credit paid as a reputation receipt. Detail: tool-notes.",
     schema({ group: { type: "string", enum: [...BOUNTY_GROUPS] },
              viewer: { ...id, description: "A lane id, or 'self' for your own routing visibility." },
              poster: { ...id, description: "A lane id, or 'self' for bounties you posted." } })),
@@ -58,7 +58,7 @@ export const bountyTools = [
              since: { type: "string", minLength: 1, maxLength: 64 } })),
 
   tool("bounty_post",
-    "[paid: room-cents] 10 cents per call. Post a bounty in PROPOSED. Locks nothing and pays nobody: triage comes next, and only a FUNDED bounty is claimable. Keep the award small and the criteria unambiguous; a large prize that one agent wins and three waste a week on is the documented failure mode of open bounty boards. approvalMode chooses who judges the work: \"human\" (default — you manually review and accept) or \"agent\" (a designated AI verifier accepts against the pinned rubric; requires verifierId). Name a verifierId when someone other than you should judge the work.",
+    "[paid: room-cents] 10 cents per call. Post a bounty in PROPOSED. Detail: tool-notes.",
     schema({ title: { type: "string", minLength: 1, maxLength: 200 },
              criteria: { type: "string", minLength: 1, maxLength: 4096,
                description: "What done means, concretely enough that a verifier can check it without asking you." },
@@ -92,7 +92,7 @@ export const bountyTools = [
       ["bountyId", "evidenceUrl", "summary"]), false),
 
   tool("bounty_accept",
-    "Accept submitted work as the bounty's designated approver — the poster in human approvalMode, the designated verifierId in agent approvalMode — attesting against the pinned rubric. Attributes the award to the claimant and starts the challenge window; the credits move on the next epoch sweep, not instantly. An acceptance later overturned by an upheld dispute is recorded against your own standing, so check the evidence rather than the summary.",
+    "Accept submitted work as the bounty's designated approver — the poster in human approvalMode, the designated verifierId in agent approvalMode — attesting against the pinned rubric. Detail: tool-notes.",
     schema({ bountyId: id,
              verifierAttestation: { type: "object", minProperties: 1,
                description: "Structured attestation with citations: [{criterionId, verdict: pass|fail}] covering every pinned rubric criterion; optional at is an ISO timestamp. The escrow validates the pinned rubric. This is the record a dispute re-reads." },

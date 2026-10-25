@@ -20,7 +20,7 @@ const resultSegments = { type: "array", maxItems: 20, description: "Optional 1â€
   items: object({ kind: { type: "string", enum: ["fact", "inference", "proposal"] },
     text: { ...text, maxLength: 2000 } }, ["kind", "text"]) };
 const definitions = [
-  ["submit_text_result", "Save room text as result", T.WORK_COMPLETED, "Submit one immutable work-linked Room message as your assigned result. Preview it with room_read_result first. Pins its post event, exact UTF-8 SHA-256 and previous completion (explicit null for first). Same completion/claim gates as external evidence. Posting, producer attribution, review and human approval remain separate.", {
+  ["submit_text_result", "Save room text as result", T.WORK_COMPLETED, "Submit one immutable work-linked Room message as your assigned result. Detail: tool-notes.", {
     summary: text, nextAction: text, evidenceMessageId: id, evidenceMessageEventId: id,
     evidenceVersion: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
     previousCompletionEventId: { ...id, type: ["string", "null"] }, producerId: { ...id, type: ["string", "null"] },
@@ -35,28 +35,28 @@ const definitions = [
   ["start_work", "Record work started", T.WORK_STARTED, "Record that you are starting your assigned task. Requires accept_work and, for write mode, existing write authority and your active scope claim. Does not run code or tools. Starting blocked work requires resolvedBlocker.", { resolvedBlocker: text }, []],
   ["block_work", "Report blocker", T.WORK_BLOCKED, "Report a blocker or reopen your completed task for rework. Requires assigned accept_work. Existing approval may be retired; a reviewer uses record_verification instead.", { reason: text, nextAction: text }],
   ["resolve_blocker", "Resolve blocker", T.WORK_BLOCKER_RESOLVED, "Record how your blocker was resolved, returning work to accepted. Requires assigned accept_work. Does not restart work or renew a claim.", { resolution: text }],
-  ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Requires complete_work; write mode also requires current write authority and your active claim. Producer attribution is an explicit assertion, never inferred. Evidence is not fetched. This is not verification or human approval.", {
+  ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Detail: tool-notes.", {
     summary: text, evidenceUrl: { ...text, description: "HTTPS reference without embedded credentials; not fetched or independently verified by Room." }, evidenceVersion: text, nextAction: text,
     producerId: { ...id, type: ["string", "null"], description: "Explicit reported producer. Omit or use null when unknown; do not guess." },
     externalProducer, segments: resultSegments, signedEvidence: { type: "object", description: "Signed external evidence (room-signed-evidence/1) bound to the signer's room identity key. Required for external completions." },
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]],
-  ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
+  ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Detail: tool-notes.", {
     result: { type: "string", enum: ["pass", "fail"] }, completionEventId: id, evidenceVersion: text, summary: text, nextAction: text
   }, ["result", "completionEventId", "evidenceVersion", "summary"]],
-  ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task and record the same claim on the work-claims board. Requires a contribute, review, or collaborate profile (or the room owner). write_external is not granted by the claim and is still required to finish write-mode work. Optional pullRequests are several GitHub pull links; the board settles only when every link is merged or closed. Optional blocks label a region of a path so two claims on one file can differ; a path with no label stays exclusive for the whole file.", {
+  ["acquire_claim", "Reserve work scope", T.CLAIM_ACQUIRED, "Reserve a declared repository/ref/path scope for your assigned write-mode task and record the same claim on the work-claims board. Detail: tool-notes.", {
     repository: text, ref: text, paths: { type: "array", minItems: 1, maxItems: 64, items: { ...text, maxLength: 512 } },
     expiresAt: { ...text, description: "Explicit ISO timestamp. The service checks that it is in the future; no automatic renewal." },
     pullRequests: { type: "array", maxItems: 16, items: { ...text, maxLength: 300 } },
     blocks: { type: "array", maxItems: 64, items: object({ path: { ...text, maxLength: 512 }, block: { ...text, maxLength: 80 }, region: { ...text, maxLength: 80 } }, ["path"]) }
   }, ["repository", "ref", "paths", "expiresAt"]],
   ["release_claim", "Release work scope", T.CLAIM_RELEASED, "Release an active claim you hold (or manage with manage_claims), including the matching work-claims board row. Does not stop an outside worker. A duplicate receipt does not describe the current reservation.", {}],
-  ["renew_claim", "Renew work scope", T.CLAIM_RENEWED, "Extend the lease on an active claim you hold and on its work-claims board row. A heartbeat is enough: progressMessageId is optional evidence, not a required chat post. When present it must be your public message newer than the current lease start. Refused on leaseless claims and on lapsed leases (claim again instead).", {
+  ["renew_claim", "Renew work scope", T.CLAIM_RENEWED, "Extend the lease on an active claim you hold and on its work-claims board row. Detail: tool-notes.", {
     progressMessageId: { ...id, description: "Optional. Your public progress message in this room, posted after the current lease window began." },
     expiresAt: { ...text, description: "New explicit ISO expiry timestamp. The service checks that it is in the future." }
   }, ["expiresAt"]],
-  ["supersede_work", "Replace work", T.WORK_SUPERSEDED, "Replace work with an already-existing work item. Requires steer, not granted by enrollment presets. Retires the original work's active reservation/approval; does not transfer them to its replacement. Also links the two cards on the work-claims board.", { supersededByWorkItemId: id, reason: text }],
-  ["record_handoff", "Record handoff receipt", T.WORK_HANDOFF_RECORDED, "Record a handoff receipt when you cannot continue your assigned task: what is actually done against the done criteria, an optional partial-evidence reference, the exact next action, and why you are stopping. This never closes, completes or reassigns the work; the state and review gates stay with the room. The work-claims board gains a successor card that depends on this claim. haltAll=true also stops all your further work mutations until a steer/decide member clears the exact halt.", {
+  ["supersede_work", "Replace work", T.WORK_SUPERSEDED, "Replace work with an already-existing work item. Detail: tool-notes.", { supersededByWorkItemId: id, reason: text }],
+  ["record_handoff", "Record handoff receipt", T.WORK_HANDOFF_RECORDED, "Record a handoff receipt when you cannot continue your assigned task: what is actually done against the done criteria, an optional partial-evidence reference, the exact next action, and why you are stopping. Detail: tool-notes.", {
     doneSummary: { ...text, description: "What is actually done against the definition of done; partial is expected, state it exactly." },
     evidenceUrl: { ...text, description: "Optional HTTPS reference without embedded credentials; not fetched. Requires evidenceVersion when present." },
     evidenceVersion: { ...text, description: "Version of the partial evidence; required with evidenceUrl." },

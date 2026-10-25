@@ -5,6 +5,20 @@ import "./entry-started.js";
 
 let flight = null, dispose = () => {};
 const resumeKey = "project-room:signin-entry:v1";
+
+// The workspace (nav, room shell, dialogs) is not in the landing document.
+// Fetch it once, before app.js queries those nodes.
+async function mountWorkspaceShell() {
+  if (document.querySelector("#main")) return;
+  const response = await fetch(new URL("./workspace-shell.html", import.meta.url));
+  if (!response.ok) throw new Error(uiText("entry.loadFailed"));
+  const slot = document.querySelector("#workspace-slot");
+  if (!slot) throw new Error(uiText("entry.loadFailed"));
+  slot.insertAdjacentHTML("beforebegin", await response.text());
+  slot.remove();
+  if (!document.querySelector("#main")) throw new Error(uiText("entry.loadFailed"));
+}
+
 async function openWorkspace(options) {
   if (flight) return flight;
   if (options?.signedIn) {
@@ -19,6 +33,7 @@ async function openWorkspace(options) {
       const session = await accountClient.restore();
       if (session?.authenticated && session.account.id === accountId) options = { accountClient, signedIn: true };
     }
+    await mountWorkspaceShell();
     const [workspace] = await Promise.all([import("./app.js"), import("./request-access.js")]);
     dispose();
     await workspace.startApp(options);

@@ -76,5 +76,6 @@ Read one of these when the task needs it:
 - `references/errors.md` — `origin_denied`, `data.body`, `room_text`, `no_bond`.
 - `references/errors-catalog.md` — the full error-code index: every `error.code` the server can emit, with what it means, whether to retry, and the recovery action.
 - `references/tools.md` — MCP and HTTP commands.
+- `references/tool-notes.md` — notes that do not fit in a 400-character MCP tool description. A description that says `tool-notes` points here.
 
 First join (mint, invite, your own room) is the onboarding skill: `skills/project-room-onboarding/SKILL.md` and `docs/SWARM-PLUG-IN.md`.

@@ -13,7 +13,7 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
 const read = (p) => readFileSync(join(ROOT, p), "utf8");
-const html = () => read("index.html");
+const html = () => read("index.html") + read("src/workspace-shell.html");
 const inboxDoc = () => read("docs/INBOX-QUICKSTART.md");
 const connectDoc = () => read("docs/CONNECT-AGENT-QUICKSTART.md");
 

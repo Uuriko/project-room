@@ -94,6 +94,7 @@ test("favicon, icon, and manifest routes serve the public marks", async t => {
   assert.equal(offline.status, 200);
   assert.match(await offline.text(), /Room is offline/);
   assert.equal((home.match(/<h1[\s>]/g) ?? []).length, 1);
-  assert.doesNotMatch(home, /id="message-input"[^>]*aria-expanded/);
-  assert.doesNotMatch(home, /id="room-overview-open"[^>]*aria-label="Room overview"/);
+  const shell = await (await fetch(`${origin}/src/workspace-shell.html`)).text();
+  assert.doesNotMatch(shell, /id="message-input"[^>]*aria-expanded/);
+  assert.doesNotMatch(shell, /id="room-overview-open"[^>]*aria-label="Room overview"/);
 });

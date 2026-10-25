@@ -266,7 +266,8 @@ test("a delayed logout response cannot end a replacement session", async () => {
   assert.equal(client.session.member.id, "other");
 });
 test("connected UI hooks exist and demo controls are not exposed", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8")
+    + readFileSync(new URL("../src/workspace-shell.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
   assert.equal(new Set(ids).size, ids.length);

@@ -27,7 +27,7 @@ async function serve(t) {
 
 test("composer has a visible, plain-language send hint (not tooltip-only)", async t => {
   const origin = await serve(t);
-  const home = await (await fetch(`${origin}/`)).text();
+  const home = await (await fetch(`${origin}/src/workspace-shell.html`)).text();
   const hint = home.match(/<p[^>]*id="composer-hint"[^>]*>([\s\S]*?)<\/p>/);
   assert.ok(hint, "expected a visible #composer-hint element in the composer markup");
   const tag = hint[0].slice(0, hint[0].indexOf(">") + 1);

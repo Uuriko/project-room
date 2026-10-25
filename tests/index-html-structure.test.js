@@ -19,7 +19,10 @@ import { fileURLToPath } from "node:url";
 // the cheap gate that keeps it that way. It exists because a single edit of
 // mine introduced two duplicate ids in one go.
 
-const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+// The workspace shell is inserted into this document before the app queries it,
+// so ids have to be unique across both files.
+const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8")
+  + readFileSync(fileURLToPath(new URL("../src/workspace-shell.html", import.meta.url)), "utf8");
 
 const ID_REFERENCE_ATTRIBUTES = ["aria-labelledby", "aria-describedby", "aria-controls", "aria-owns", "aria-details", "aria-errormessage", "aria-flowto", "for", "list"];
 

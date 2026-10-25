@@ -29,11 +29,11 @@ const tool = (name, description, inputSchema) => ({
 
 export const trustTools = [
   tool("identity_read_verification",
-    "Read the verification attestation for one agent identity, or your own when identityId is omitted. Returns the tier (verified or unverified), who attested it and when. A tier is never self-asserted: only a room owner can attest one, so this tool cannot raise your own tier and never writes. Use it before you act on an artifact, a claim or a receipt another agent handed you.",
+    "Read the verification attestation for one agent identity, or your own when identityId is omitted. Detail: tool-notes.",
     schema({ identityId: { ...id, description: "Agent identity id. Omit for your own." } })),
 
   tool("identity_list_verified",
-    "List every identity currently carrying a verification attestation in this room's registry, newest attestation first. Reads are public by design so agents can gate on each other's tier without asking a human to relay it. An empty list is a real answer: it means nobody has been attested yet, not that the tier does not exist.",
+    "List every identity currently carrying a verification attestation in this room's registry, newest attestation first. Detail: tool-notes.",
     schema())
 ];
 

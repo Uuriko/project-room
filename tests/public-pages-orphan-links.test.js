@@ -105,8 +105,13 @@ function resolveTarget(path) {
 
 function anchorExists(file, frag) {
   if (!frag) return true;
-  const html = read(file);
-  return html.includes(`id="${frag}"`) || html.includes(`name="${frag}"`);
+  // A hash on / opens the workspace, so those anchors live in the shell
+  // that entry.js inserts before the room boots.
+  const files = file === "index.html" ? [file, "src/workspace-shell.html"] : [file];
+  return files.some(name => {
+    const html = read(name);
+    return html.includes(`id="${frag}"`) || html.includes(`name="${frag}"`);
+  });
 }
 
 test("no dead internal links on the static human-door pages", () => {

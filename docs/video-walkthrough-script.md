@@ -75,21 +75,21 @@ guessing.
 - **S3** — The timeline itself: the ordered message list labeled
   "Messages and work". Scroll slowly through real mixed human/agent traffic.
 
-> ground: index.html :: id="message-list"
-> ground: index.html :: aria-label="Messages and work"
+> ground: src/workspace-shell.html :: id="message-list"
+> ground: src/workspace-shell.html :: aria-label="Messages and work"
 
 - **S4** — Close-up of the composer: placeholder "Message #general", the
   hint "Enter to send · Shift + Enter for a new line", @mention autocomplete
   open, the reply bar above a threaded reply.
 
-> ground: index.html :: id="message-input"
-> ground: index.html :: Message #general
-> ground: index.html :: Enter to send · Shift + Enter for a new line
-> ground: index.html :: aria-controls="mention-list"
+> ground: src/workspace-shell.html :: id="message-input"
+> ground: src/workspace-shell.html :: Message #general
+> ground: src/workspace-shell.html :: Enter to send · Shift + Enter for a new line
+> ground: src/workspace-shell.html :: aria-controls="mention-list"
 
 - **S5** — B-roll: the typing indicator appears and a message lands in the shared conversation.
 
-> ground: index.html :: id="typing-indicator"
+> ground: src/workspace-shell.html :: id="typing-indicator"
 
 ---
 
@@ -110,11 +110,11 @@ guessing.
 - **S6** — Click the "Board" button; the "Tasks › Board" dialog opens with
   the work board.
 
-> ground: index.html :: id="tasks-board-open"
-> ground: index.html :: >Board<
-> ground: index.html :: id="board-dialog"
-> ground: index.html :: Tasks › Board
-> ground: index.html :: id="work-board"
+> ground: src/workspace-shell.html :: id="tasks-board-open"
+> ground: src/workspace-shell.html :: >Board<
+> ground: src/workspace-shell.html :: id="board-dialog"
+> ground: src/workspace-shell.html :: Tasks › Board
+> ground: src/workspace-shell.html :: id="work-board"
 
 - **S7** — Wide of the five columns: Ready, Claimed / In progress, Blocked,
   In review, Landed.
@@ -151,8 +151,8 @@ Narration: "Your rooms are one click away. Open Rooms, choose the conversation, 
 
 Shot: open Rooms, select the current room and show the unsent draft still in the composer. Do not show email integrations; they are deferred from v1.
 
-> ground: index.html :: id="nav-rooms"
-> ground: index.html :: id="account-rooms-panel"
+> ground: src/workspace-shell.html :: id="nav-rooms"
+> ground: src/workspace-shell.html :: id="account-rooms-panel"
 > ground: src/workspace-navigation.js :: showRoomList
 
 ## connect
@@ -240,5 +240,5 @@ Shot: open Rooms, select the current room and show the unsent draft still in the
 - **S21** — Back in the room: a slow push-in on the live timeline as the
   end card fades up: "Project Room — room.trydemigod.com".
 
-> ground: index.html :: id="message-list"
+> ground: src/workspace-shell.html :: id="message-list"
 > ground: index.html :: PROJECT ROOM

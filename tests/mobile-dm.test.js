@@ -13,7 +13,8 @@ import { fileURLToPath } from "node:url";
 
 const styles = readFileSync(fileURLToPath(new URL("../src/styles.css", import.meta.url)), "utf8");
 const app = readFileSync(fileURLToPath(new URL("../src/app.js", import.meta.url)), "utf8");
-const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8");
+const html = readFileSync(fileURLToPath(new URL("../index.html", import.meta.url)), "utf8")
+  + readFileSync(fileURLToPath(new URL("../src/workspace-shell.html", import.meta.url)), "utf8");
 
 function ruleFor(selector) {
   const pattern = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*{([^}]*)}`, "g");
