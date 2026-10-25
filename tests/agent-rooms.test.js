@@ -64,6 +64,7 @@ test("an identity creates a room self-serve and becomes its owner", async t => {
   assert.equal(created.next[0].path, "/api/rooms/agent-den/work-claims/starter/update",
     "room-scoped next steps are templated with the new roomId");
   assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/work-claims/starter/update");
+  assert.equal(created.next.find(n => n.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   assert.equal(created.starter.claimId, "starter");
   assert.equal(created.starter.state, "claimed");
   // The projection names the agent member as owner with the full set...

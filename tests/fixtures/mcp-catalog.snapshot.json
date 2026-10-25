@@ -228,7 +228,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "e44673ea50fc459c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1094,7 +1094,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "e44673ea50fc459c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1600,7 +1600,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "e44673ea50fc459c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1845,7 +1845,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "e44673ea50fc459c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2054,7 +2054,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "e44673ea50fc459c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2209,7 +2209,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "e44673ea50fc459c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2564,7 +2564,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "e44673ea50fc459c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
