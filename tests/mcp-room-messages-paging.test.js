@@ -90,7 +90,10 @@ test("latest:true returns the latest N messages in chronological order, matching
     const page = await read({ latest: true, limit: 3 });
     assert.deepEqual(page.messages.map(m => m.messageId), ["l3", "l4", "l5"],
       "latest:true matches /conversation?limit=3 message ids in order");
-    assert.equal(page.hasMore, true, "older messages remain below the latest page");
+    assert.equal(page.hasMore, false, "latest is the log head, so nothing is newer");
+    assert.equal(page.hasOlder, true, "older messages remain below the latest page");
+    assert.equal(page.prev, page.messages[0].sequence);
+    assert.equal(page.next, page.messages.at(-1).sequence);
   }
 });
 
@@ -106,6 +109,7 @@ test("latest:true includes the head event when the head itself is a message", as
     const full = await read({ latest: true, limit: 10 });
     assert.deepEqual(full.messages.map(m => m.messageId), ["h1", "h2", "h3"]);
     assert.equal(full.hasMore, false);
+    assert.equal(full.hasOlder, false);
   }
 });
 
@@ -143,6 +147,7 @@ test("latest:true backward windows tile with no boundary gaps (unit, dense 301)"
   const all = await paginateRoomMessages(fetchPage, { latest: true, limit: 500, end: 302 });
   assert.deepEqual(all.messages.map(m => m.sequence), range(1, 301), "every sequence once, oldest first");
   assert.equal(all.hasMore, false);
+  assert.equal(all.hasOlder, false);
   const bounded = await paginateRoomMessages(fetchPage, { after: 150, latest: true, limit: 500, end: 302 });
   assert.deepEqual(bounded.messages.map(m => m.sequence), range(151, 301), "the after bound is exclusive and respected");
 });
@@ -169,8 +174,91 @@ test("latest:true is a snapshot, so following next as after does not repeat the 
   for (const read of [args => f.hosted(args), args => f.clientFor("worker1").roomMessages(args)]) {
     const page = await read({ latest: true, limit: 3 });
     assert.deepEqual(page.messages.map(m => m.messageId), ["b", "c", "d"]);
-    assert.equal(page.hasMore, true);
+    assert.equal(page.hasMore, false, "latest is the log head");
+    assert.equal(page.hasOlder, true);
     const again = await read({ latest: true, limit: 3, after: page.next });
     assert.deepEqual(again.messages.map(m => m.messageId), []);
+    const older = await read({ before: page.prev, limit: 3 });
+    assert.deepEqual(older.messages.map(m => m.messageId), ["a"]);
+    assert.equal(older.hasOlder, false);
+    assert.equal(older.hasMore, true, "newer messages remain above this page");
+    const same = await read({ before: page.prev, latest: true, limit: 3 });
+    assert.deepEqual(same.messages.map(m => m.messageId), ["a"], "latest is redundant with before");
+  }
+});
+
+test("before walks back from latest across 50 messages, counting a tombstone and skipping an invisible DM", async t => {
+  const f = fixture(t);
+  await f.ready;
+  // Burst is 30 chat posts per member. Step the store clock so the refill
+  // covers the rest of the fixture; the guard is not what this walk tests.
+  let clock = Date.now();
+  f.store.now = () => clock;
+  const ids = Array.from({ length: 50 }, (_, i) => `m${String(i).padStart(2, "0")}`);
+  for (const id of ids) {
+    clock += 2000;
+    f.post(id, id === "m17" ? "tombstone-source-text" : id);
+  }
+  clock += 2000;
+  f.send("owner", { id: "post-secret-dm", type: "message.posted", data: {
+    messageId: "secret-dm", body: "hidden from worker1", toMemberId: "mate-0"
+  } });
+  f.send("owner", { id: "del-m17", type: "message.deleted", data: {
+    messageId: "m17", expectedMessageRevision: 0
+  } });
+  const walkBack = async read => {
+    const pages = [];
+    let page = await read({ latest: true, limit: 10 });
+    assert.equal(page.hasMore, false, "the first latest page is the log head");
+    assert.equal(page.hasOlder, true);
+    pages.push(page);
+    let guard = 0;
+    while (page.hasOlder) {
+      const prev = page.prev;
+      assert.equal(Number.isSafeInteger(prev), true);
+      page = await read({ before: prev, limit: 10 });
+      assert.ok(page.messages.length > 0);
+      assert.ok(page.messages.every(message => message.sequence < prev));
+      assert.equal(page.hasMore, true);
+      pages.push(page);
+      assert.ok(++guard < 8);
+    }
+    assert.equal(pages.length, 5);
+    const flat = pages.flatMap(entry => entry.messages);
+    const seen = pages.reverse().flatMap(entry => entry.messages.map(message => message.messageId));
+    const tombstone = flat.find(message => message.messageId === "m17");
+    assert.equal(tombstone.body, "");
+    assert.equal(seen.includes("secret-dm"), false);
+    return seen;
+  };
+  const walkForward = async read => {
+    const seen = [];
+    let after = 0, guard = 0;
+    for (;;) {
+      const page = await read({ after, limit: 10 });
+      seen.push(...page.messages.map(message => message.messageId));
+      if (!page.hasMore || ++guard > 8) break;
+      after = page.next;
+    }
+    return seen;
+  };
+  for (const read of [args => f.hosted(args, "worker1"), args => f.clientFor("worker1").roomMessages(args)]) {
+    const backward = await walkBack(read);
+    assert.deepEqual(backward, ids);
+    assert.equal(new Set(backward).size, 50);
+    assert.deepEqual(await walkForward(read), ids);
+  }
+});
+
+test("before together with after is rejected and names both", async t => {
+  const f = fixture(t);
+  await f.ready;
+  f.post("only", "only");
+  const refused = error => error?.status === 422 && error?.code === "invalid_arguments"
+    && /before/.test(error.message) && /after/.test(error.message);
+  for (const read of [args => f.hosted(args), args => f.clientFor("worker1").roomMessages(args)]) {
+    await assert.rejects(() => read({ before: 4, after: 4, limit: 10 }), refused);
+    await assert.rejects(() => read({ before: 0, limit: 10 }), error => error?.status === 422
+      && error?.code === "invalid_arguments" && /before/.test(error.message));
   }
 });

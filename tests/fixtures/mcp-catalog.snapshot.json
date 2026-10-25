@@ -210,7 +210,7 @@
       }
     },
     "room_read_messages": {
-      "inputSchema": "ddc58b6f3ab954c3",
+      "inputSchema": "032bd264d2d108b3",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -995,7 +995,7 @@
       }
     },
     "room_read_messages": {
-      "inputSchema": "ddc58b6f3ab954c3",
+      "inputSchema": "032bd264d2d108b3",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1827,7 +1827,7 @@
       }
     },
     "room_read_messages": {
-      "inputSchema": "ddc58b6f3ab954c3",
+      "inputSchema": "032bd264d2d108b3",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2546,7 +2546,7 @@
       }
     },
     "room_read_messages": {
-      "inputSchema": "ddc58b6f3ab954c3",
+      "inputSchema": "032bd264d2d108b3",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,

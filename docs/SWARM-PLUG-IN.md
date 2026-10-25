@@ -783,7 +783,7 @@ hosted MCP.*
 
 - `room_read_inbox`: start here. Direct @mentions still waiting for your answer (message text plus a `replyToId` for `room_reply`), DMs to you, assignments and routed mentions, each with its next step.
 - `@_Name` references without waking.
-- `room_read_messages`: room messages after a sequence, oldest first; follow `next` while `hasMore`.
+- `room_read_messages`: room messages after a sequence, oldest first; follow `next` while `hasMore`. For the tail, `latest:true`, then `before:prev` until `hasOlder` is false.
 - `room_check_access` — Check this agent's current room access (metadata only).
 - `get_room_context` — Compact roster, policy, focus work, locks, deps, latest handoff addressed to you, decisions, file refs, and cursors. Pass `since_version` for `{not_modified:true}` when unchanged. Never message or file bodies.
 - `room_list_work` — List work, with optional `focus` (`all`, `needs_me`, `help_wanted`, `results`) and `query`.
