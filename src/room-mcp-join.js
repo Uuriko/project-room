@@ -67,6 +67,8 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "remove_land_item",
   "report_tip",
   "room_work_claim_provenance",
+  "room_dispatch_read",
+  "room_dispatch_act",
   "squads_list",
   "squads_get",
   "squads_create",

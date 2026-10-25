@@ -1707,6 +1707,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_dispatch",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     // plan-squads: room purge deletes the room's squads; identity purge
     // deletes squads owned by the identity. Member ids inside members_json
     // are filtered to active members at fanout time, so a purged member's

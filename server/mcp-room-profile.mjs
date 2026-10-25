@@ -26,6 +26,7 @@ import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
+import { actOnDispatch, sliceView } from "./agent-dispatch.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
@@ -177,6 +178,23 @@ function validRoomArgs(name, args) {
   }
   if (name === "room_work_claim_provenance") {
     return typeof args.claimId === "string" && args.claimId.length >= 1 && args.claimId.length <= 128;
+  }
+  if (name === "room_dispatch_read") return args.view === undefined || ["all", "capacity", "queue", "metrics"].includes(args.view);
+  if (name === "room_dispatch_act") {
+    const actions = ["tick", "respond", "claim_seat", "release_seat", "assign", "pause", "resume", "seat", "fix_plan"];
+    if (!actions.includes(args.action)) return false;
+    const short = value => value === undefined || (typeof value === "string" && value.length > 0 && value.length <= 200);
+    if (!short(args.assignmentId) || !short(args.memberId) || !short(args.id) || !short(args.note) || !short(args.title)) return false;
+    if (args.taskKey !== undefined && (typeof args.taskKey !== "string" || args.taskKey.length < 1 || args.taskKey.length > 400)) return false;
+    if (args.decision !== undefined && args.decision !== "accept" && args.decision !== "decline") return false;
+    if (args.files !== undefined && (!Array.isArray(args.files) || args.files.length > 64 || args.files.some(file => typeof file !== "string" || file.length < 1 || file.length > 300))) return false;
+    if (args.value !== undefined && (typeof args.value !== "number" || !Number.isFinite(args.value) || args.value < 0 || args.value > 100)) return false;
+    if (args.blockedBy !== undefined && (!Array.isArray(args.blockedBy) || args.blockedBy.length > 20 || args.blockedBy.some(item => typeof item !== "string" || item.length < 1 || item.length > 128))) return false;
+    if (args.action === "respond") return typeof args.assignmentId === "string" && (args.decision === "accept" || args.decision === "decline");
+    if (args.action === "assign") return typeof args.memberId === "string" && typeof args.taskKey === "string";
+    if (args.action === "fix_plan") return typeof args.id === "string" && typeof args.title === "string" && Array.isArray(args.files) && args.files.length > 0;
+    if (args.action === "seat") return args.memberId === undefined || typeof args.memberId === "string";
+    return true;
   }
   if (name === "room_post_message") {
     const idOk = args.id === undefined || validId(args.id);
@@ -550,6 +568,20 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
       mentions: typeof args.mentions === "string" ? args.mentions : null,
       compact: args.compact === true
     }), store.redactionMessages(roomId)), auth.member.id);
+  }
+  if (name === "room_dispatch_read") {
+    store.authenticate(secret, roomId);
+    return sliceView(store.agentDispatch.view(roomId), args.view ?? "all");
+  }
+  if (name === "room_dispatch_act") {
+    const auth = store.authenticate(secret, roomId);
+    const ownerId = store.room(roomId)?.state?.room?.ownerId ?? null;
+    return actOnDispatch(store, roomId, {
+      memberId: auth.member.id,
+      displayName: auth.member.displayName,
+      kind: auth.member.kind,
+      role: auth.member.id === ownerId ? "owner" : "member"
+    }, args);
   }
   if (name === "room_work_claim_provenance") {
     // Provenance walk (orch-provenance-rollback): same graph as GET

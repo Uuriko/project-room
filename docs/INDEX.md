@@ -44,7 +44,7 @@ Native execution: [Codex Room host](CODEX-ROOM-HOST.md) and [execution portabili
 
 ## Coordinate
 
-The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [WORK-CLAIMS.md](WORK-CLAIMS.md). The current repository contributor workflow, fresh Room pack/board reads, completion rules and CLI are in [ROOM-COORDINATION.md](ROOM-COORDINATION.md). Selected-task context and opt-in private discussion resumption are in [WORK-CONTEXT.md](WORK-CONTEXT.md). The cross-room shared procedure library (read-only, every room) is [procedures/](procedures/) and `GET /procedures`.
+The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [WORK-CLAIMS.md](WORK-CLAIMS.md). Coordinator capacity, the ranked queue, and assignment are in [AGENT-DISPATCH.md](AGENT-DISPATCH.md) (`room_dispatch_read` via `room_search_actions`). The current repository contributor workflow, fresh Room pack/board reads, completion rules and CLI are in [ROOM-COORDINATION.md](ROOM-COORDINATION.md). Selected-task context and opt-in private discussion resumption are in [WORK-CONTEXT.md](WORK-CONTEXT.md). The cross-room shared procedure library (read-only, every room) is [procedures/](procedures/) and `GET /procedures`.
 
 Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 

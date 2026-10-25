@@ -48,7 +48,10 @@ const size = tools => JSON.stringify(tools).length;
 test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
   assert.equal(core.length, 22, "default core is unchanged until the flip is agreed");
-  assert.equal(full.length, 117, "full is unchanged");
+  assert.equal(full.length, 119, "full counts the two dispatch tools");
+  assert.equal(LEAN_MCP_TOOLS.includes("room_dispatch_read"), false);
+  assert.equal(LEAN_MCP_TOOLS.includes("room_dispatch_act"), false);
+  assert.equal(lean.some(tool => tool.name === "room_dispatch_read" || tool.name === "room_dispatch_act"), false);
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
@@ -71,6 +74,8 @@ test("search finds long-tail tools with their exact schema and REST route", () =
   const withRest = searchActions("squads list").matches.find(match => match.name === "squads_list");
   assert.match(withRest.rest, /^GET \/api\/rooms\/:roomId\/squads/);
   assert.deepEqual(searchActions("zzzz qqqq").matches, []);
+  const capacity = searchActions("capacity throughput strengths idle").matches.map(match => match.name);
+  assert.ok(capacity.includes("room_dispatch_read"), capacity.join(","));
 });
 
 test("run_action refuses itself, search, join and public-work tools, and unknown names", () => {

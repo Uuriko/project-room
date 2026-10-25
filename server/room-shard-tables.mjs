@@ -13,6 +13,7 @@
 import { REPLAY_SKIPPED_TABLES } from "./room-export.mjs";
 
 export const ROOM_TABLE_KEYS = Object.freeze({
+  agent_dispatch: "room_id",
   bounty_disputes: "room_id",
   bounty_events: "room_id",
   bounty_flakes: "room_id",

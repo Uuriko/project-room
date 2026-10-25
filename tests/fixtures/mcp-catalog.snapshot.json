@@ -769,6 +769,24 @@
         "openWorldHint": false
       }
     },
+    "room_dispatch_act": {
+      "inputSchema": "8293b795599c681a",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_dispatch_read": {
+      "inputSchema": "56c217561991309c",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_get_file": {
       "inputSchema": "08502609b54ff943",
       "annotations": {
