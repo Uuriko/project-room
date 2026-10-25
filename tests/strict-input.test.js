@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { llmsFullTxt, llmsTxt } from "../server/agent-discovery.mjs";
+import { applyStrictInputNext } from "../server/strict-input.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -73,6 +74,7 @@ async function errorOf(response) {
 
 function assertNextNames(error, offending, accepted) {
   const command = error.next[0]?.command ?? "";
+  assert.equal(command, applyStrictInputNext({}, { offending, accepted }).next[0].command);
   for (const key of offending) assert.match(command, new RegExp(`\\b${key}\\b`), command);
   if (accepted.length === 0) assert.match(command, /Accepted keys: none/, command);
   else for (const key of accepted) assert.match(command, new RegExp(`\\b${key}\\b`), command);
