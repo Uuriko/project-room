@@ -8,6 +8,7 @@ import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
+import { contentEtag, etagMatches, HTML_ENTRY_CACHE, IMMUTABLE_CLIENT_CACHE, resolveHashedClientAsset } from "./client-assets.mjs";
 import { vapidFromEnv } from "./push-subscriptions.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -2385,6 +2386,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (acquisition) reject(405, "method_not_allowed", "Method not allowed");
       // --- end GR2 ---
+      const hashedAsset = resolveHashedClientAsset(url.pathname);
+      if (hashedAsset && ["GET", "HEAD"].includes(req.method)) {
+        let hashedBytes = null;
+        try { hashedBytes = await loadAsset(hashedAsset.file); }
+        catch (error) { if (error?.code !== "ENOENT") throw error; }
+        if (hashedBytes) {
+          res.setHeader("Cache-Control", IMMUTABLE_CLIENT_CACHE);
+          res.setHeader("Link", discoveryLinks(url));
+          res.writeHead(200, { "Content-Type": `${hashedAsset.type}; charset=utf-8`, "Content-Length": hashedBytes.length });
+          return res.end(req.method === "HEAD" ? undefined : hashedBytes);
+        }
+      }
       if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
         const [path, type] = assets.get(url.pathname);
         let data = null;
@@ -2422,6 +2435,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const payload = path === "index.html"
           ? Buffer.from(frontDoorHtml(data, { githubConfigured: Boolean(githubAuth) }))
           : data;
+        if (path === "index.html") {
+          res.setHeader("Cache-Control", HTML_ENTRY_CACHE);
+          const etag = contentEtag(payload);
+          res.setHeader("ETag", etag);
+          if (etagMatches(req.headers["if-none-match"], etag)) {
+            res.writeHead(304);
+            return res.end();
+          }
+        }
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
         return res.end(req.method === "HEAD" ? undefined : payload);
         }

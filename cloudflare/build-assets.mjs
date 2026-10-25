@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile, readdir, lstat } from 'node:fs/promises';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { publicAssetPaths, templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
+import { isPackagedClientAsset } from '../server/client-assets.mjs';
 export const assetPaths = publicAssetPaths;
 const packagedPaths = [...publicAssetPaths, ...templateAssetPaths];
 
@@ -13,9 +14,11 @@ async function checkOutput(directory, prefix = '') {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const path = prefix + entry.name;
     if (entry.isDirectory()) {
-      if (!packagedPaths.some(file => file.startsWith(path + '/'))) throw new Error(`Unexpected asset output: ${path}`);
+      // scripts/build-client.mjs writes content-hashed bundles here after this
+      // copy. A second asset build must keep them instead of refusing the directory.
+      if (path !== 'assets' && !packagedPaths.some(file => file.startsWith(path + '/'))) throw new Error(`Unexpected asset output: ${path}`);
       await checkOutput(new URL(entry.name + '/', directory), path + '/');
-    } else if (!entry.isFile() || !packagedPaths.includes(path)) throw new Error(`Unexpected asset output: ${path}`);
+    } else if (!entry.isFile() || !(packagedPaths.includes(path) || isPackagedClientAsset(path))) throw new Error(`Unexpected asset output: ${path}`);
   }
 }
 // Decision #36 (#3254, Option A): docs/agents/*.html are generated build

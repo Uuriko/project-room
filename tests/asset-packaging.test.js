@@ -16,6 +16,7 @@ import { templateAssetPaths, generatedAgentPages } from '../server/public-assets
 // below is therefore stated against the allowlist minus the generated pages
 // absent from this tree — everything else must always be present.
 const absentGenerated = file => generatedAgentPages.includes(file) && !existsSync(new URL('../' + file, import.meta.url));
+import { frontDoorHtml } from '../server/github-oauth.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 
@@ -38,7 +39,7 @@ test('asset build produces and refreshes exactly the allowlisted application fil
   assert.deepEqual((await readdir(new URL('src/', output))).sort(), produced.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
   for (const file of produced) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.equal(config.build.command, 'node ../scripts/build-agent-docs.mjs && node ../scripts/stamp-version.mjs && node ../scripts/build-capabilities.mjs && node ../scripts/sign-agent-card.mjs && node build-assets.mjs', 'deploy builds the generated agent pages first, then stamps the committed revision before building exact assets');
+  assert.equal(config.build.command, 'node ../scripts/build-agent-docs.mjs && node ../scripts/stamp-version.mjs && node ../scripts/build-capabilities.mjs && node ../scripts/sign-agent-card.mjs && node build-assets.mjs && node ../scripts/build-client.mjs', 'deploy builds the generated agent pages first, stamps the committed revision, copies exact assets, then writes the hashed client bundles');
 });
 test('the deployment allowlist and the runtime package agree on the public assets', async () => {
   // Three lists name the browser assets: cloudflare/build-assets.mjs (what is
@@ -75,7 +76,11 @@ test('the HTTP allowlist serves every packaged browser asset with exact bytes', 
   for (const path of assetPaths.filter(file => !absentGenerated(file))) {
     const response = await fetch(origin + '/' + path);
     assert.equal(response.status, 200, path);
-    assert.deepEqual(Buffer.from(await response.arrayBuffer()), await readFile(new URL('../' + path, import.meta.url)), path);
+    const source = await readFile(new URL('../' + path, import.meta.url));
+    // index.html is the front door. With GitHub auth off, the served document
+    // omits the GitHub anchor. Every other packaged file is the source bytes.
+    const expected = path === 'index.html' ? Buffer.from(frontDoorHtml(source, { githubConfigured: false })) : source;
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), expected, path);
   }
   // Absent generated pages are the designed package state (decision #36):
   // the server answers 404 for them, never a 500.

@@ -21,6 +21,7 @@
     "gate": "bash scripts/pre-push.sh",
     "lint": "node scripts/lint.mjs && node scripts/lint-design-tokens.mjs && node scripts/reachability.mjs --check && node scripts/i18n-harness.mjs --check && node scripts/build-ui-strings.mjs --check",
     "build:og-atlas": "node scripts/build-og-atlas.mjs",
+    "build:client": "node scripts/build-client.mjs",
     "github-app:check": "node scripts/github-app-check.mjs",
     "analytics:backfill": "node scripts/analytics-backfill.mjs",
     "analytics:bond-shadow": "node scripts/claim-bond-shadow.mjs",
@@ -50,6 +51,7 @@
   "devDependencies": {
     "@axe-core/playwright": "^4.13.0",
     "acorn": "8.18.0",
+    "esbuild": "0.28.2",
     "eslint": "10.10.0",
     "eslint-plugin-security": "^4.2.0",
     "fast-check": "4.10.2",

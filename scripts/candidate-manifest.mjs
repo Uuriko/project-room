@@ -8,7 +8,7 @@ import { publicAssets } from "./runtime-package.mjs";
 
 export const MANIFEST_PATH = "scripts/CANDIDATE-MANIFEST.json";
 const DEPLOYMENT_FILES = [".github/workflows/deploy-prod.yml", "scripts/deploy-recovery.mjs", "cloudflare/room.mjs", "cloudflare/storage.mjs", "cloudflare/bootstrap.mjs",
-  "cloudflare/build-assets.mjs", "cloudflare/wrangler.jsonc", "cloudflare/package.json", "cloudflare/pnpm-lock.yaml"];
+  "cloudflare/build-assets.mjs", "cloudflare/wrangler.jsonc", "cloudflare/package.json", "cloudflare/pnpm-lock.yaml", "scripts/build-client.mjs"];
 const PACKAGE_FILES = ["package.json", "package-lock.json"];
 
 const sha256 = buffer => "sha256:" + createHash("sha256").update(buffer).digest("hex");
