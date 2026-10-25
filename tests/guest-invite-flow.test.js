@@ -55,6 +55,9 @@ test("contract advertises the GX public-handoff terms", async t => {
   assert.deepEqual(contract, guestInviteContract());
   assert.equal(contract.status, "live");
   assert.equal(contract.mint, "owner_only");
+  // #3432: the contract discloses the mint credential, not just the role —
+  // "owner_only" alone taught agent owners a door they cannot open.
+  assert.equal(contract.mintRequires, "owner_account_session_or_delegate");
   assert.deepEqual(contract.tiers.observer, ["guest:read", "guest:post"]);
   assert.deepEqual(contract.tiers.contributor, ["guest:read", "guest:post", "guest:draft"]);
   assert.equal(contract.credentialTtlMs.default, 72 * 3600 * 1000);
@@ -100,6 +103,43 @@ test("owner mint issues a public-safe GX code; strangers and non-owners are refu
   assert.equal((await denied.json()).error.code, "owner_required");
   const anon = await request("/api/rooms/commons/guest-invites", { method: "POST", data: mintBody() });
   assert.equal(anon.status, 401);
+});
+
+test("agent owner mint is refused with owner-addressed remedies; the named Add-agent remedy converges (#3432)", async t => {
+  const { store, request } = await serve(t);
+  // An agent-owned room: the owner is an agent identity with no account
+  // behind it (the promoted agent-room-create path). Trial seats are
+  // sponsored by the owner's account (register #3/#6), so this mint can
+  // never succeed — what #3432 pins is that the refusal tells the truth:
+  // it addresses the owner (never "Ask the owner"), names the
+  // account-session remedy, and names the door the agent owner CAN use.
+  const identity = store.identities.create("Agent Owner");
+  const created = await request("/api/agent-rooms", {
+    method: "POST", token: identity.secret,
+    data: { roomId: "agent-owned-lab", title: "Agent owned", purpose: "trial-seat probe", kind: "personal", displayName: "Agent Owner" },
+  });
+  assert.equal(created.status, 201);
+  const roomId = (await created.json()).roomId;
+  assert.equal(roomId, "agent-owned-lab");
+
+  const refused = await request(`/api/rooms/${roomId}/guest-invites`, { method: "POST", token: identity.secret, data: mintBody() });
+  assert.equal(refused.status, 403);
+  const body = await refused.json();
+  assert.equal(body.error.code, "guest_invite_account_session_required");
+  assert.equal(body.reason, "guest_invite_account_session_required");
+  const envelope = `${body.hint} ${JSON.stringify(body.next)}`;
+  assert.doesNotMatch(envelope, /Ask the owner to mint/);
+  assert.match(body.hint, /signed-in account session/);
+  assert.match(envelope, /owner delegate/);
+  assert.match(envelope, /agent-invites/);
+
+  // Teachability (register #28): follow the refusal's own alternative from
+  // the same refused state — Add agent mints on the owner identity bearer.
+  const alt = await request(`/api/rooms/${roomId}/agent-invites`, {
+    method: "POST", token: identity.secret, data: { profile: "chat", displayName: "Trial Peer" },
+  });
+  assert.equal(alt.status, 201);
+  assert.match((await alt.json()).code, /^RM-/);
 });
 
 test("mint validates TTL range and tier", async t => {

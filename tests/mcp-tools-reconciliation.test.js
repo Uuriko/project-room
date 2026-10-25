@@ -3,9 +3,10 @@
 // Round 1 found public_work_recommend and room_list_work missing from the
 // default profile's tools/list while /.well-known/ard.json lists them. The
 // scoping is intentional (they live under focus=public_work / focus=work and
-// profile=full, and the server card uses the enrolled list) - but nothing
-// pinned it, so the next catalog edit could silently strand a tool. This test
-// pins the reconciliation contract at the real boundary:
+// profile=full; the server card's enrolled list is the member core catalog,
+// #3769) - but nothing pinned it, so the next catalog edit could silently
+// strand a tool. This test pins the reconciliation contract at the real
+// boundary:
 //
 //   1. every MCP tool named in the ARD ai-catalog
 //      (/.well-known/ard.json, the normative agent discovery document)
@@ -96,5 +97,9 @@ test("round-1 scoping is pinned: public_work_recommend and room_list_work live o
   assert.ok(!names(profiles["core (default)"]).includes("room_list_work"), "room_list_work is not in the default profile");
   assert.ok(names(profiles["focus=public_work"]).includes("public_work_recommend"), "public_work_recommend is in focus=public_work");
   assert.ok(names(profiles["focus=work"]).includes("room_list_work"), "room_list_work is in focus=work");
-  assert.ok(names(profiles.enrolled).includes("public_work_recommend"), "enrolled server-card list includes public_work_recommend");
+  // The enrolled server-card list is the member core catalog (#3769): it
+  // carries the hosted room tools, not the non-member public-work set.
+  assert.ok(names(profiles.enrolled).includes("room_post_message"), "enrolled server-card list is the member catalog (hosted room tools)");
+  assert.ok(!names(profiles.enrolled).includes("public_work_recommend"), "enrolled server-card list is not the non-member public-work catalog");
+  assert.ok(names(profiles.full).includes("public_work_recommend"), "public_work_recommend is in profile=full");
 });
