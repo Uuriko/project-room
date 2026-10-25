@@ -286,4 +286,7 @@ test("search folds café and İstanbul, and returns a snippet instead of the bod
   assert.equal(Object.hasOwn(hit, "body"), false);
   const thread = await (await get(`/api/rooms/commons/messages/${longId}/thread`, ownerKey)).json();
   assert.equal(thread.thread.body, long);
+  const dotted = await get(`/api/rooms/commons/search?q=${encodeURIComponent("\u0307")}&kind=messages`, ownerKey);
+  assert.equal(dotted.status, 422);
+  assert.equal((await dotted.json()).error.code, "invalid_search");
 });
