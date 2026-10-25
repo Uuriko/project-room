@@ -88,8 +88,11 @@ export function publicJoinInviteHref(token, purposePath = "", locationLike = glo
   const local = hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
     || /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])\b/i.test(origin);
   const pathAware = humanJoinShareBase(locationLike);
+  // Keep created and personal links on the app host; getdasha roots use the door.
+  const appHere = /^https:\/\//i.test(origin) && !/(^|\.)getdasha\.com$/i.test(hostname)
+    && !/\.html$/i.test(pathAware);
   const base = local
     ? (pathAware || origin)
-    : (pathAware.endsWith("/room") ? pathAware : PUBLIC_ROOM_DOOR);
+    : (pathAware.endsWith("/room") || appHere ? pathAware : PUBLIC_ROOM_DOOR);
   return `${base}/#join/${secret}${extra}`;
 }

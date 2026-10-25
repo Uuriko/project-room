@@ -78,7 +78,7 @@ function assertInterfacesShareCardOrigin(card) {
 async function listen(t) {
   const directory = mkdtempSync(join(tmpdir(), "a2a-card-truth-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ enableDeferredInbox: true, store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams();

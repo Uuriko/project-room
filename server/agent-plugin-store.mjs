@@ -31,10 +31,12 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
   backoffDelayMs, MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS, fenceRoomEventData,
+  WebhookDispatchError,
 } from "./webhook-dispatch.mjs"; // RC-2026-09-19-064: signed dispatch engine.
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
@@ -155,6 +157,29 @@ export const WEBHOOK_DELIVERY_CLAIM_LEASE_MS = 5 * 60 * 1000;
 export const WEBHOOK_DELIVERY_KEEP = 100;
 export const WEBHOOK_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const WEBHOOK_DELIVERY_PRUNE_BATCH = 500;
+
+// Bug sweep 2026-10-16 lane 11 F1 (#3893): per-row isolation for the
+// webhook drain, mirroring the claim-prs registry isolation (#3464). A
+// stored delivery row that throws during its attempt — a payload_json
+// that no longer parses, a stored secret that fails signDelivery's
+// checks — used to abort the whole drain batch at the same position on
+// every tick: the row was claimed, the throw landed before any outcome
+// write, and next_attempt_at never advanced, so the row could never
+// dead-letter and the webhook-dispatch job failed forever. The drain now
+// isolates the row instead: count it, name it in the operator log, and
+// keep its detail on the drain's return value. The numeric count is the
+// part that survives into the job heartbeat summary (compactSummary
+// keeps numbers only); repairing the row itself is operator work — a
+// dead-lettered row can be redriven once its stored data is fixed.
+function noteIsolatedWebhookDelivery(isolated, deliveryId, error) {
+  const entry = { deliveryId: deliveryId ?? null, error: String(error?.message ?? error).slice(0, 200) };
+  if (Array.isArray(isolated)) {
+    if (isolated.some(prior => prior.deliveryId === entry.deliveryId)) return entry;
+    isolated.push(entry);
+  }
+  console.warn(`[webhook-dispatch] isolated throwing delivery row ${entry.deliveryId}: ${entry.error}`);
+  return entry;
+}
 
 // Indexed per subscription. ORDER BY created_at matches the previous
 // "newest 100" selection when timestamps differ; rowid breaks ties without
@@ -1227,19 +1252,21 @@ export class AgentPluginStore {
   // RC-2026-09-19-064: fan out a persisted room event to every enabled
   // subscription whose event filter matches. RC-2026-09-24 fanout scope:
   // delivery is scoped to room membership — only subscriptions whose
-  // agent_id is linked to the event's room (identity_links) are
-  // considered. A subscription that never joined the room hears nothing
-  // from it, the same way the /events and /stream read paths behave.
+  // agent_id is seated in the event's room are considered. A subscription
+  // that never joined the room hears nothing from it, the same way the
+  // /events and /stream read paths behave. #3777: seating resolves
+  // through the shared guest-aware resolver (identity_links first,
+  // guest_members fallback) — trial seats hold subscriptions too, and an
+  // identity_links-only join silently starved them of every delivery.
   // Called from the room store's command() inside the same transaction as
   // the event insert, so a delivery is never journaled without its
   // triggering event.
   fanoutRoomEvent({ roomId, event }) {
     const rows = this.db.prepare(
       `SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,
-              s.events_json AS eventsJson, l.member_id AS memberId
+              s.events_json AS eventsJson
        FROM agent_webhook_subs s
-       JOIN identity_links l ON l.identity_id = s.agent_id AND l.room_id = ?
-       WHERE s.enabled = 1`).all(roomId);
+       WHERE s.enabled = 1`).all();
     let created = 0;
     // Q3-D: the actor's kind and name come from the room roster, read once.
     let members;
@@ -1254,6 +1281,12 @@ export class AgentPluginStore {
       // room's message bodies to the URL it chose, even if the row stayed
       // enabled from an older build.
       if (this.identityRevoked(row.agentId)) continue;
+      // Room-membership scope: resolve the subscription's agent_id to its
+      // member id in this room through the shared guest-aware resolver.
+      // An identity seated in neither identity_links nor guest_members
+      // for this room is not a member and hears nothing.
+      const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId);
+      if (!memberId) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
       if (!events.includes(event.type) && !events.includes("*")) continue;
@@ -1261,17 +1294,19 @@ export class AgentPluginStore {
       // (RC-2026-09-18-012, server/store.mjs). A message.posted event
       // carrying data.toMemberId is a direct message, visible only to its
       // sender and its addressed member — never to third-party push
-      // subscribers. The JOIN above already resolved the subscription's
-      // agent_id to this room's member id; apply the same rule the
-      // /events and /stream read paths use. (Every candidate row has a
-      // link by construction, so an unlinkable subscriber can never
-      // reach this branch as sender or addressee.)
+      // subscribers. The resolver above already resolved the
+      // subscription's agent_id to this room's member id (the guest
+      // seat's member id for trial seats, so the fence binds guests
+      // too); apply the same rule the /events and /stream read paths
+      // use. (Every candidate row is a seated member by construction, so
+      // an unseated subscriber can never reach this branch as sender or
+      // addressee.)
       if (event?.type === "message.posted" && event?.data?.toMemberId) {
-        if (event.actorId !== row.memberId && event.data.toMemberId !== row.memberId) continue;
+        if (event.actorId !== memberId && event.data.toMemberId !== memberId) continue;
       }
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, eventId: event.id, roomId,
-          data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: row.memberId }) });
+          data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: memberId }) });
       if (!delivery.duplicate) created++;
     }
     // Prompt dispatch: the drain kicks fire-and-forget after the request
@@ -1346,13 +1381,77 @@ export class AgentPluginStore {
 
   // Attempt one stored delivery: recompute the signature with a fresh
   // issuedAt (replay resistance), POST, and advance the lifecycle.
-  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers }) {
+  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers, isolated = null }) {
     // #3251: claim the row before the first await. A concurrent drain —
     // on this store, or on another instance sharing the database — that
     // selected the same row loses this race and skips it instead of
     // POSTing a second copy.
     const claimExpiresAt = this.claimWebhookDelivery(row, now);
     if (claimExpiresAt === null) return "skipped";
+    try {
+      return await this.#attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt });
+    } catch (error) {
+      // #3893: a throw after the claim — the stored payload no longer
+      // parses, the subscription's stored secret fails signDelivery's
+      // checks, the stored row fails the dispatch module's validation —
+      // must not escape. Uncaught, it aborted the whole drain batch
+      // before any outcome was written, so next_attempt_at never
+      // advanced and every later drain re-claimed the same row and
+      // aborted again; the row could never dead-letter and the
+      // webhook-dispatch job reported failure forever. Isolate the row
+      // instead: record its outcome, name it, and let the batch move on.
+      // (The drain loop keeps a last-resort guard for throws that happen
+      // before this layer can record anything.)
+      return this.#isolateClaimedDelivery(row, { error, now, claimExpiresAt, isolated });
+    }
+  }
+
+  // #3893: write the outcome for a claimed delivery whose attempt threw
+  // before it could record one, claim-guarded like every other outcome
+  // write (#3251). A throw from the stored row's own data — a JSON.parse
+  // SyntaxError or a WebhookDispatchError from the dispatch module's
+  // validation of the stored payload, secret, or target — is permanent
+  // as stored: the bytes cannot change between attempts, so the row
+  // dead-letters immediately, with redriveDeadLetter as the operator
+  // repair path once the stored data is fixed. Any other throw is
+  // recorded as a failed attempt under the usual backoff and attempt
+  // cap, so a transient fault still gets its retries.
+  #isolateClaimedDelivery(row, { error, now, claimExpiresAt, isolated }) {
+    noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
+    const message = String(error?.message ?? error).slice(0, 500);
+    const permanent = error instanceof SyntaxError || error instanceof WebhookDispatchError;
+    return this.mutate(() => {
+      const fresh = this.db.prepare(
+        "SELECT state, attempts, claim_expires_at FROM agent_webhook_deliveries WHERE delivery_id=?")
+        .get(row.delivery_id);
+      if (!fresh || (fresh.state !== "pending" && fresh.state !== "failed")
+        || fresh.claim_expires_at !== claimExpiresAt) {
+        return "skipped";
+      }
+      try {
+        this.webhooks.recordAttempt(row.delivery_id, {
+          ok: false, error: message, terminal: permanent,
+        });
+      } catch { /* cache may lag; the table is authoritative */ }
+      const attempts = fresh.attempts + 1;
+      if (permanent || attempts >= MAX_DELIVERY_ATTEMPTS) {
+        const reason = permanent
+          ? `stored delivery cannot be attempted: ${message}`
+          : `gave up after ${MAX_DELIVERY_ATTEMPTS} attempts; last error: ${message}`;
+        const changed = this.markDeadLetter(row.delivery_id, reason, now, attempts, claimExpiresAt);
+        return changed ? "deadLettered" : "skipped";
+      }
+      const changed = this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='failed', attempts=?, last_error=?, next_attempt_at=?,
+            claim_expires_at=NULL, updated_at=?
+        WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+        .run(attempts, `delivery attempt failed before dispatch: ${message}`,
+          now + backoffDelayMs(attempts), now, row.delivery_id, claimExpiresAt).changes;
+      return changed ? "retried" : "skipped";
+    });
+  }
+
+  async #attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt }) {
     const sub = this.subs.get(row.subscription_id);
     if (!sub) {
       const changed = this.mutate(() =>
@@ -1373,19 +1472,24 @@ export class AgentPluginStore {
     };
     if (!sub.enabled) return skip();
     // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
-    // identity lost its room link between fan-out and dispatch is skipped,
+    // identity lost its room seat between fan-out and dispatch is skipped,
     // not sent. Fail closed at the last moment too. The delivery stays
-    // pending, so a re-linked identity still receives it on a later drain.
-    const link = this.db.prepare(
-      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?")
-      .get(row.room_id, row.agent_id);
-    if (!link && row.room_id) return skip();
+    // pending, so a re-seated identity still receives it on a later drain.
+    // The seat lookup goes through the shared guest-aware resolver
+    // (identity_links first, guest_members fallback) — the same one the
+    // fan-out uses (#3777) — so a trial seat's queued delivery is not
+    // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
+    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id)) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
+    // payload?.data: a stored payload that parses to a non-object (or an
+    // object without an object data) reaches signDelivery's own check
+    // and throws its WebhookDispatchError, which the isolation layer
+    // classifies as permanent-as-stored (#3893) — not a bare TypeError.
     const signature = signDelivery(sub.secret,
-      { deliveryId: row.delivery_id, eventType: row.event_type, issuedAt, data: payload.data });
+      { deliveryId: row.delivery_id, eventType: row.event_type, issuedAt, data: payload?.data });
     const envelope = deliveryEnvelope({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
-      eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload.data });
+      eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload?.data });
     const headers = deliveryHeaders({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
       eventType: row.event_type, issuedAt, signature });
     const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
@@ -1502,7 +1606,10 @@ export class AgentPluginStore {
   // Called by the Cloudflare cron tick and by the agent-triggered process
   // endpoint (agentId scopes it to one identity's deliveries). Each
   // delivery mutates in its own transaction so one poison row cannot roll
-  // back the rest of the sweep. dnsResolvers ({ resolve4, resolve6 }) is
+  // back the rest of the sweep, and a row whose attempt throws is
+  // isolated the same way (#3893): its outcome is recorded, it is named
+  // in the summary's isolated items, and the sweep continues.
+  // dnsResolvers ({ resolve4, resolve6 }) is
   // injectable so tests never touch the network; omitted it defaults to the
   // real resolver (dns.lookup on Node; skipped on Workers) and every target
   // is re-validated before its POST (dispatch-time SSRF guard). An injected
@@ -1530,8 +1637,9 @@ export class AgentPluginStore {
   async #drainWebhookDeliveriesOnce({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
     const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
     // Only rows that can actually be attempted fill the batch. Deliveries of a
-    // disabled subscription or of an identity no longer linked to the event's
-    // room stay pending but are left out here; otherwise a large skipped
+    // disabled subscription or of an identity no longer seated in the event's
+    // room (identity_links or guest_members — the resolver's two seats,
+    // #3881) stay pending but are left out here; otherwise a large skipped
     // backlog occupies every LIMIT-sized batch and live deliveries wait behind
     // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
     // subscription was removed (s is NULL) are still selected so they
@@ -1542,13 +1650,31 @@ export class AgentPluginStore {
        WHERE d.state IN ('pending','failed') AND d.next_attempt_at <= ?
        ${agentId ? "AND d.agent_id = ?" : ""}
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
-         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
+         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id)
+         OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
       .all(...(agentId ? [now, agentId, limit] : [now, limit]));
+    const isolated = [];
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {
       summary.processed++;
-      summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers })]++;
+      try {
+        summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers, isolated })]++;
+      } catch (error) {
+        // #3893 last-resort guard: attemptStoredDelivery records an
+        // outcome for every throw after its claim; a throw that still
+        // escapes (the claim transaction itself, a failed outcome
+        // write) is isolated here so one row can never abort the batch.
+        // The row keeps its queue position and is retried next drain.
+        noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
+      }
+    }
+    // #3893: the isolated count is numeric, so it survives compactSummary
+    // into the job heartbeat; the item detail rides this return value
+    // and the operator log — the claim-prs convention (#3464).
+    if (isolated.length) {
+      summary.isolated = isolated.length;
+      summary.isolatedItems = isolated;
     }
     return Object.freeze(summary);
   }

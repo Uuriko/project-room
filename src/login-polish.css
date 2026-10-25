@@ -5,8 +5,8 @@
 }
 #auth-panel .signin-logo { display: block; margin: 0 auto var(--space-3); border-radius: var(--radius-lg); }
 #auth-panel #auth-title { margin-bottom: var(--space-5); }
-#auth-panel #google-signin { display: flex; align-items: center; gap: var(--space-3); }
-#auth-panel #google-signin svg { flex: none; }
+#auth-panel #google-signin, #auth-panel #github-signin { display: flex; align-items: center; gap: var(--space-3); text-decoration: none; }
+#auth-panel #google-signin svg, #auth-panel #github-signin svg { flex: none; }
 #auth-panel .signin-divider { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); font-size: var(--text-sm); }
 #auth-panel .signin-divider::before, #auth-panel .signin-divider::after { content: ""; flex: 1; border-top: 1px solid var(--line); }
 #auth-panel [data-signin-form="password"] { gap: var(--space-3); }

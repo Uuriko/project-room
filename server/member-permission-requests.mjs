@@ -79,6 +79,9 @@ export class MemberPermissionRequests {
       }
       const room = this.store.room(roomId);
       if (isRoomArchived(room.state)) fail(409, "room_archived", "This room is archived; access cannot be upgraded");
+      // #3745: same lazy-expiry trap as the join path — materialize this
+      // principal's lapsed rows before the cap counts them.
+      this.access.expireOld(roomId, principalId);
       const pending = this.db.prepare("SELECT count(*) AS n FROM access_requests WHERE room_id=? AND identity_id=? AND status IN ('pending','pending_upgrade')")
         .get(roomId, principalId).n;
       if (pending >= this.maxPending) fail(409, "too_many_requests", `At most ${this.maxPending} pending requests per room`);
