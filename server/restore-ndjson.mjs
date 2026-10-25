@@ -38,7 +38,7 @@ const FIRST = ["accounts", "rooms", "events", "commands", "member_accounts", "ac
 // export's version marker could downgrade the writer fence and brick the DO.
 // (On node the schema version lives in PRAGMA user_version, so these tables
 // only ever appear in DO-produced exports.)
-const RESTORE_SKIP_TABLES = new Set(["room_runtime_version", "room_writer_permit"]);
+const RESTORE_SKIP_TABLES = new Set(["room_runtime_version", "room_writer_permit", "room_writer_permit_heal"]);
 // #3324: the public work-claim writer permit is the TARGET's own authority,
 // never the export's. The file replay drops the exported row and opens the
 // target's seeded permit for the bulk load; an imported enabled=1 row would

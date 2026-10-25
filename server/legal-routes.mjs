@@ -9,6 +9,7 @@ import {
 import { refreshDirectoryForRoom, refreshDirectoryForReceipt } from "./public-read-model.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
+import { readWriterPermitHeal } from "./writer-permit-heal.mjs";
 import { workItemBoardDivergence } from "./work-item-board.mjs";
 
 const PAGE_PATHS = new Set(LEGAL_SITEMAP_PATHS);
@@ -80,6 +81,7 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
     // from the per-room snapshots. Zero is the only healthy value.
     const divergence = workItemBoardDivergence(store);
     json(res, 200, { schema: "room.job-health/1", publicReports: countOpenPublicReports(store), servedBy: "node",
+      writerPermitResets: readWriterPermitHeal(store.db),
       workItemBoard: { divergedRooms: divergence.divergedRooms, divergedRows: divergence.divergedRows },
       ...(jobs ? { generatedAt: new Date(store.now()).toISOString(), jobs } : {}) }, head);
     return true;

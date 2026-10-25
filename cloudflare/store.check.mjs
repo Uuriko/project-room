@@ -169,6 +169,6 @@ test('a stale writer permit left at the writer version heals on the next transac
   try {
     const response = await mf.dispatchFetch('http://localhost/stale-writer-permit');
     assert.equal(response.status, 200, await response.clone().text());
-    assert.deepEqual(await response.json(), { ok: true });
+    assert.deepEqual(await response.json(), { ok: true, writerPermitResets: 2 });
   } finally { await mf.dispose(); }
 });

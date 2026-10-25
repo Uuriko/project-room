@@ -83,7 +83,7 @@ test("a card whose posting event carried receiptId gets that id, not the derived
 test("the upgrade is idempotent and leaves a current projection byte-identical", t => {
   const store = seeded(t);
   const before = store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
-  assert.deepEqual(store.upgradeLegacyMessageShapes(), { rooms: 0, reactionsRemoved: 0, receiptIdsAdded: 0 });
+  assert.deepEqual(store.upgradeLegacyMessageShapes(), { rooms: 0, reactionsRemoved: 0, receiptIdsAdded: 0, records: 0 });
   assert.equal(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection, before);
   assert.equal(store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='projection_shape_upgrades'").get(), undefined, "no audit table without a change");
   rewriteProjection(store, legacy);
@@ -118,6 +118,74 @@ test("with bodies at rest, a long body stays readable after the upgrade rewrites
   assert.equal(Object.hasOwn(message, "reactions"), false);
   catchUp(store);
   assert.equal(store.checkMessagesParity().ok, true);
+});
+
+// Production since 2026-10-11: the backfill published records with the reducer
+// of that day (receipt cards gained receiptId; reactions were still applied).
+// The 2026-10-18 upgrade rewrote only rooms.projection. A caught-up room is
+// not replayed again, so messages.record_json still carries reactions, and
+// the projection scan no longer sees a legacy row. Parity then fails on
+// "current record differs" on every later tick.
+function legacyRecords(store) {
+  const db = store.db;
+  const plain = JSON.parse(db.prepare("SELECT record_json FROM messages WHERE room_id='commons' AND message_id='plain'").get().record_json);
+  plain.reactions = { "👀": ["owner"] };
+  db.prepare("UPDATE messages SET record_json=?, reactions_json=? WHERE room_id='commons' AND message_id='plain'")
+    .run(JSON.stringify(plain), JSON.stringify(plain.reactions));
+  const card = JSON.parse(db.prepare("SELECT record_json FROM messages WHERE room_id='commons' AND message_id='card'").get().record_json);
+  delete card.receiptId;
+  db.prepare("UPDATE messages SET record_json=? WHERE room_id='commons' AND message_id='card'").run(JSON.stringify(card));
+}
+
+test("indexed records left behind by the projection-only upgrade are repaired, then the room certifies", t => {
+  const store = seeded(t);
+  catchUp(store);
+  assert.equal(store.checkMessagesParity().ok, true);
+  legacyRecords(store);
+  // The production audit table was created by the projection-only upgrade,
+  // whose check does not yet allow a messages target.
+  store.db.exec(`CREATE TABLE projection_shape_upgrades (
+    room_id TEXT NOT NULL,
+    version INTEGER NOT NULL,
+    target TEXT NOT NULL CHECK(target IN ('projection','checkpoint')),
+    reactions_removed INTEGER NOT NULL,
+    receipt_ids_added INTEGER NOT NULL,
+    runs INTEGER NOT NULL DEFAULT 1,
+    first_at TEXT NOT NULL,
+    last_at TEXT NOT NULL,
+    PRIMARY KEY(room_id, version, target)
+  )`);
+  store.db.prepare("INSERT INTO projection_shape_upgrades VALUES ('commons', 1, 'projection', 11, 127, 1, '2026-10-18T00:00:00.000Z', '2026-10-18T00:00:00.000Z')").run();
+  store.runIntegrityParityStep();
+  assert.deepEqual(parityFailures(store), []);
+  const db = store.db;
+  const plain = db.prepare("SELECT record_json, reactions_json FROM messages WHERE room_id='commons' AND message_id='plain'").get();
+  assert.equal(Object.hasOwn(JSON.parse(plain.record_json), "reactions"), false);
+  assert.equal(plain.reactions_json, null);
+  const card = JSON.parse(db.prepare("SELECT record_json FROM messages WHERE room_id='commons' AND message_id='card'").get().record_json);
+  assert.equal(card.receiptId, "rc_CLAIM-1");
+  assert.deepEqual(Object.keys(card).slice(Object.keys(card).indexOf("claimId"), Object.keys(card).indexOf("claimId") + 2), ["claimId", "receiptId"]);
+  const cursor = db.prepare("SELECT applied_seq, parity_at_seq FROM messages_backfill_cursor WHERE room_id='commons'").get();
+  assert.equal(cursor.parity_at_seq, cursor.applied_seq);
+  const audit = audits(store).find(row => row.target === "messages");
+  assert.deepEqual(audit, { room_id: "commons", version: 1, target: "messages", reactions_removed: 1, receipt_ids_added: 1, runs: 1 });
+  assert.equal(audits(store).find(row => row.target === "projection").reactions_removed, 11);
+  store.runIntegrityParityStep();
+  assert.equal(audits(store).find(row => row.target === "messages").runs, 1, "a repaired record is not rewritten again");
+});
+
+test("a record that differs in anything other than the legacy shape still fails parity", t => {
+  const store = seeded(t);
+  catchUp(store);
+  const row = store.db.prepare("SELECT record_json, body FROM messages WHERE room_id='commons' AND message_id='plain'").get();
+  const plain = JSON.parse(row.record_json);
+  plain.body = "tampered";
+  store.db.prepare("UPDATE messages SET record_json=?, body=? WHERE room_id='commons' AND message_id='plain'").run(JSON.stringify(plain), "tampered");
+  store.runIntegrityParityStep();
+  const failures = parityFailures(store);
+  assert.equal(failures.length, 1);
+  assert.match(failures[0].message, /current record plain differs/);
+  assert.equal(store.db.prepare("SELECT body FROM messages WHERE room_id='commons' AND message_id='plain'").get().body, "tampered");
 });
 
 test("an upgraded room's parity certification is cleared so the sweep re-certifies it", t => {

@@ -55,6 +55,7 @@ const PUBLIC_WORK_ANON = ["public_work_recommend", "public_work_read_task"];
 // Lane 1 funnel repair (2026-10-07): the anonymous catalog gains the
 // enrollment tool so a pure-MCP stranger can mint its own identity secret.
 const IDENTITY_MINT_ANON = ["room_identity_mint"];
+const ROOM_HEALTH_ANON = ["room_health"];
 const PUBLIC_WORK_ALL = [...PUBLIC_WORK_ANON,
   "public_work_claim", "public_work_renew", "public_work_release",
   "public_work_finish", "public_work_my_review"];
@@ -121,7 +122,7 @@ test("anonymous catalog is exactly the packet's seven tools", async () => {
   const names = await toolsList();
   // Packet: "the four public join tools ... plus public_work_recommend,
   // public_work_read_task, and room_identity_mint" / "seven tools with no credential".
-  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ANON, ...IDENTITY_MINT_ANON]);
+  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ANON, ...IDENTITY_MINT_ANON, ...ROOM_HEALTH_ANON]);
   assert.ok(llmsTxt().includes("room_mcp_snippet"),
     "packet must name room_mcp_snippet among the four join tools");
 });

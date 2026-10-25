@@ -16,6 +16,7 @@ import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreati
 import { generateVapidKeys } from '../server/web-push.mjs';
 import { exportNdjsonText } from '../server/room-export.mjs';
 import { replayNdjsonInto } from '../server/restore-ndjson.mjs';
+import { readWriterPermitHeal } from '../server/writer-permit-heal.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -58,11 +59,22 @@ export class StoreTestRoom {
       this.ctx.storage.sql.exec(`UPDATE room_writer_permit SET version=${STORE_SCHEMA_VERSION} WHERE singleton=1`);
       assert.equal(permit(), STORE_SCHEMA_VERSION);
       // A cold start on the same storage must open and write, not refuse.
+      assert.deepEqual(readWriterPermitHeal(store.db), { count: 0, lastResetAt: null });
       const cold = new RoomStore(null, { database: new DurableDatabase(this.ctx.storage), storagePlatform: durableStorage, integrity: 'deferred' });
       cold.createAccount('after-reset');
       assert.ok(cold.account('after-reset'));
       assert.equal(permit(), 0, 'stale permit reset');
-      return Response.json({ ok: true });
+      const once = readWriterPermitHeal(cold.db);
+      assert.equal(once.count, 1);
+      assert.equal(typeof once.lastResetAt, 'string');
+      this.ctx.storage.sql.exec(`UPDATE room_writer_permit SET version=${STORE_SCHEMA_VERSION} WHERE singleton=1`);
+      const colder = new RoomStore(null, { database: new DurableDatabase(this.ctx.storage), storagePlatform: durableStorage, integrity: 'deferred' });
+      colder.createAccount('after-reset-2');
+      assert.equal(permit(), 0, 'second stale permit reset');
+      const twice = readWriterPermitHeal(colder.db);
+      assert.equal(twice.count, 2);
+      assert.equal(typeof twice.lastResetAt, 'string');
+      return Response.json({ ok: true, writerPermitResets: twice.count });
     }
     if (path === '/isolated-transactions') {
       store.initialize(initialRoom('isolated'));

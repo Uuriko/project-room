@@ -25,6 +25,7 @@ import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import { publicWorkMcpDefinitions, anonymousPublicWorkMcpTools } from "../server/mcp-public-work.mjs";
 import { identityMintMcpDefinitions } from "../server/mcp-identity-mint.mjs";
+import { ROOM_HEALTH_MCP_TOOL } from "../server/room-health.mjs";
 
 function ardMcpTools() {
   const catalog = JSON.parse(aiCatalog());
@@ -58,6 +59,7 @@ function codeToolNames() {
     ...MCP_JOIN_TOOLS.map(t => t.name),
     ...publicWorkMcpDefinitions.map(t => t.name),
     ...identityMintMcpDefinitions.map(t => t.name),
+    ROOM_HEALTH_MCP_TOOL.name,
     ...(anonymousPublicWorkMcpTools ?? []).map(t => t.name),
   ]);
 }

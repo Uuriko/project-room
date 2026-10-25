@@ -1,5 +1,6 @@
 import { STORE_SCHEMA_VERSION, fenceDefinitions, writerVersions } from '../server/writer-fence.mjs';
 import { ServiceError } from '../server/service-error.mjs';
+import { noteWriterPermitReset } from '../server/writer-permit-heal.mjs';
 
 const marker = 'room_runtime_version';
 const permit = 'room_writer_permit';
@@ -206,6 +207,8 @@ export const durableStorage = {
       if (version >= 8 && hasPermit(db) && permitValue(db) === version) {
         console.error(JSON.stringify({ event: 'room.writer_permit_stale_reset', version }));
         db.storage.sql.exec(`UPDATE ${permit} SET version=0 WHERE singleton=1`);
+        try { noteWriterPermitReset(db); }
+        catch { console.error(JSON.stringify({ event: 'room.writer_permit_heal_count_failed' })); }
         forgetRuntime(db);
       }
       if (version >= 8) verifyPermit(db, version, 0);

@@ -176,6 +176,7 @@ test("GET /api/health/jobs on Node includes the jobs list once the scheduler is 
   assert.equal(res.status, 200);
   const body = await res.json();
   assert.equal(body.schema, "room.job-health/1"); assert.equal(body.servedBy, "node");
+  assert.deepEqual(body.writerPermitResets, { count: 0, lastResetAt: null });
   assert.equal(Object.hasOwn(body, "status"), false, "Node reports facts, not a grade");
   assert.deepEqual(body.jobs.map(j => j.name), JOBS.map(j => j.name));
   assert.ok(body.jobs.some(j => j.enabled && typeof j.lastRunAt === "string"));

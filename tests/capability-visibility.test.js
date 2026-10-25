@@ -228,7 +228,7 @@ test("listing endpoints: no leaks, no over-filtering", async t => {
   //    and the identity mint.
   const publicList = handleMcpJoinRpc(rpc("tools/list"));
   assert.deepEqual(toolNames(publicList.result.tools),
-    new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint"]));
+    new Set(["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint", "room_health"]));
 
   // 2. Server card: public by design, full unfiltered list. The enrolled
   //    tier is the member core catalog — the default a member bearer gets —

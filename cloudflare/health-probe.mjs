@@ -1,5 +1,7 @@
-// Shared probe for /api/ready. /api/health is Worker liveness and does not
-// enter the Durable Object. Readiness asks invite-only-pilot to run SELECT 1.
+import { ROOM_HEALTH_NEXT, ROOM_HEALTH_RETRY_SECONDS } from "../server/room-health.mjs";
+
+// Shared probe for /api/ready and /api/health. Both ask invite-only-pilot to
+// run SELECT 1. /api/version/worker stays up when that object cannot answer.
 // One in-flight probe is shared so a 1 Hz checker does not queue a call per
 // tick while the constructor holds the input gate. Each caller still gets its
 // own answer once the object is awake, because Origin checks and HEAD/GET are
@@ -86,6 +88,24 @@ async function snapshotResponse(response) {
   };
 }
 
+export function workerHealthResponse(request, { mode, deployment, emailVerification, snapshot, elapsedMs }) {
+  const body = {
+    status: "ok",
+    mode,
+    ...(deployment ? { deployment } : {}),
+    ...(emailVerification ? { emailVerification, emailVerificationScope: "worker" } : {}),
+    do: {
+      status: "ok",
+      statusCode: snapshot?.status ?? 200,
+      ...(Number.isFinite(elapsedMs) ? { ms: elapsedMs } : {})
+    }
+  };
+  return new Response(request.method === "HEAD" ? null : JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
+  });
+}
+
 export function workerLivenessResponse(request, { mode, deployment, emailVerification }) {
   // emailVerification is part of the documented /api/health contract
   // (docs/openapi.yaml): the Node handler reports it so a deploy that lost
@@ -125,11 +145,18 @@ export function healthLivenessResponse(request, { mode, deployment, readiness, e
     durableObject: { ready: false, status: readiness },
     do: readiness === "timeout"
       ? { status: "timeout", timeoutMs: timeoutMs ?? HEALTH_PROBE_TIMEOUT_MS, ...(Number.isFinite(waited) ? { ms: waited } : {}) }
-      : { status: "error", ...(Number.isFinite(waited) ? { ms: waited } : {}) }
+      : { status: "error", ...(Number.isFinite(waited) ? { ms: waited } : {}) },
+    retryAfter: ROOM_HEALTH_RETRY_SECONDS,
+    next: ROOM_HEALTH_NEXT
   };
   return new Response(request.method === "HEAD" ? null : JSON.stringify(body), {
     status: 503,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" }
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Cache-Control": "no-store",
+      "Retry-After": String(ROOM_HEALTH_RETRY_SECONDS),
+      "Link": `</api/health>; rel="status"`
+    }
   });
 }
 
