@@ -48,6 +48,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { alertLeaseRefusal, notifyClaimCollisions } from "./agent-collisions.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -608,6 +609,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     if (linked === item) return item;
     registry.set(roomId, linked);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
+    try { notifyClaimCollisions(store, roomId, linked); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
     return linked;
   };
   return registry.transaction ? registry.transaction(run) : run();
@@ -682,7 +684,16 @@ export async function handleWorkClaims(options) {
     const result = registry.transaction ? registry.transaction(run) : run();
     return helpers.json(res, result.status, result.value);
   } catch (error) {
-    if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
+    if (error?.code === "file_lease_conflict" && error.body) {
+      try {
+        alertLeaseRefusal(options.store, options.roomId, {
+          claimId: error.attemptedClaimId, callerId: error.attemptedBy, conflict: error.body
+        });
+      } catch (alertError) {
+        console.error("collision alert failed:", alertError?.message ?? alertError);
+      }
+      return helpers.json(res, 409, error.body);
+    }
     if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
     throw error;
   }
@@ -778,6 +789,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // agents that opted in (server/work-wants.mjs). Default off; never throws.
     if (action === "created" || action === "released") noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
     if (action === "state_changed" || action === "claimed") wakeNamedReviewers(store, roomId, item, { actorId: extra.actorId ?? caller });
+    try { notifyClaimCollisions(store, roomId, item); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
     return item;
   };
   const closeLiveClaims = () => {
@@ -845,6 +857,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const error = new Error(body.error.message);
     error.code = "file_lease_conflict";
     error.body = body;
+    error.attemptedClaimId = item.id;
+    error.attemptedBy = caller;
     throw error;
   };
 
@@ -1091,6 +1105,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const error = new Error(body.error.message);
       error.code = "file_lease_conflict";
       error.body = body;
+      error.attemptedClaimId = claimed.id;
+      error.attemptedBy = caller;
       throw error;
     }
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets

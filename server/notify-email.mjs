@@ -3,18 +3,11 @@
 // is unconfigured the result is `unavailable`, which is what the settings
 // page will say. Bodies stay out unless the caller set includeFullText.
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { escapeHtml } from "./html-escape.mjs";
 import { resendTransport } from "./resend-mailer.mjs";
 import { loadConfig, MAGIC_FROM_DEFAULT } from "./config.mjs";
 
 const CLIP = 140;
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
 
 function clip(value, max = CLIP) {
   if (typeof value !== "string") return "";

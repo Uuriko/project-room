@@ -51,7 +51,10 @@ try {
 // blocks the request path — the drain runs on a microtask and failures
 // stay in the durable retry queue. The same scheduler retries webhooks,
 // polls the land queue and linked claims, and runs retention and integrity.
-if (store) store.landQueue.configure({ env: process.env });
+if (store) {
+  store.featureEnv = process.env;
+  store.landQueue.configure({ env: process.env });
+}
 // Track C C13/C14 — growth scheduler state. Declared before the server is
 // created so the C14 read-only HTTP surface can close over live status via
 // a getter evaluated per request (the scheduler itself starts after listen).

@@ -52,19 +52,19 @@ const fail = (status, code, message, extra) => { throw new WebFetchError(status,
 // Limits
 // ---------------------------------------------------------------------------
 export const WEB_FETCH_MAX_BODY_BYTES = 2 * 1024 * 1024;
-export const WEB_FETCH_TIMEOUT_MS = 15_000;
-export const WEB_FETCH_MAX_REDIRECTS = 5;
-export const WEB_FETCH_DEFAULT_MAX_AGE_MS = 86_400_000; // 24h, Context's default
-export const WEB_FETCH_MAX_MAX_AGE_MS = 2_592_000_000; // 30d
-export const WEB_FETCH_RATE_PER_MEMBER_PER_DAY = 100;
-export const WEB_FETCH_RATE_PER_ROOM_PER_DAY = 1000;
-export const WEB_FETCH_RATE_WINDOW_MS = 86_400_000;
-export const WEB_FETCH_UA = "project-room-web-fetch/1.0 (+room-side research fetch)";
-export const WEB_FETCH_HIGHLIGHT_PASSAGES_DEFAULT = 5;
-export const WEB_FETCH_HIGHLIGHT_PASSAGES_MAX = 20;
-export const WEB_FETCH_HIGHLIGHT_PASSAGE_CHARS = 1500;
-export const WEB_FETCH_MAX_TAGS = 20;
-export const WEB_FETCH_TAG_CHARS = 64;
+const WEB_FETCH_TIMEOUT_MS = 15_000;
+const WEB_FETCH_MAX_REDIRECTS = 5;
+const WEB_FETCH_DEFAULT_MAX_AGE_MS = 86_400_000; // 24h, Context's default
+const WEB_FETCH_MAX_MAX_AGE_MS = 2_592_000_000; // 30d
+const WEB_FETCH_RATE_PER_MEMBER_PER_DAY = 100;
+const WEB_FETCH_RATE_PER_ROOM_PER_DAY = 1000;
+const WEB_FETCH_RATE_WINDOW_MS = 86_400_000;
+const WEB_FETCH_UA = "project-room-web-fetch/1.0 (+room-side research fetch)";
+const WEB_FETCH_HIGHLIGHT_PASSAGES_DEFAULT = 5;
+const WEB_FETCH_HIGHLIGHT_PASSAGES_MAX = 20;
+const WEB_FETCH_HIGHLIGHT_PASSAGE_CHARS = 1500;
+const WEB_FETCH_MAX_TAGS = 20;
+const WEB_FETCH_TAG_CHARS = 64;
 
 // Env-gated loopback allowance for tests (in-process HTTP servers). Strict by
 // default: production never sets this. Only the loopback ranges are allowed —

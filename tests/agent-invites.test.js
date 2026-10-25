@@ -728,7 +728,7 @@ test("served discovery copy states the invite TTL range without mangled characte
   const { llmsTxt, llmsFullTxt, skillMd } = await import("../server/agent-discovery.mjs");
   for (const [name, body] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()]]) {
     assert.ok(!/minutes201330/.test(body), `${name}: no mangled en dash in the TTL range`);
-    if (name !== "SKILL.md") assert.match(body, /5 minutes to 30 days/, `${name}: names the 5 minute to 30 day range`);
+    if (name === "llms-full.txt") assert.match(body, /5 minutes to 30 days/, `${name}: names the 5 minute to 30 day range`);
   }
 });
 
@@ -829,6 +829,7 @@ test("redeem: a member re-joining under its own name gets identity_already_linke
   const again = await post(origin, "/api/agent-invites/redeem", { code: code2.json.code, displayName: "Returning Agent" }, me.secret);
   assert.equal(again.status, 409, JSON.stringify(again.json));
   assert.equal(again.json.error.code, "identity_already_linked");
+  assert.equal(again.json.error.message, "This identity is already an active member");
   // The refusal happened pre-burn: a stranger can still redeem code #2.
   const stranger = await post(origin, "/api/agent-invites/redeem", { code: code2.json.code, displayName: "New Agent" });
   assert.equal(stranger.status, 201, JSON.stringify(stranger.json));
@@ -838,4 +839,84 @@ test("redeem: a member re-joining under its own name gets identity_already_linke
   const collide = await post(origin, "/api/agent-invites/redeem", { code: code3.json.code, displayName: "Returning Agent" });
   assert.equal(collide.status, 422, JSON.stringify(collide.json));
   assert.equal(collide.json.error.code, "display_name_unavailable");
+});
+
+test("a removed agent can be re-invited on the same member id with the new profile", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work", "complete_work"], displayName: "Returning Bot" });
+  assert.equal(minted.status, 201);
+  const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Returning Bot" });
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  const member = store.room("commons").state.members[first.json.memberId];
+  store.command(ownerKey, "commons", { id: randomUUID(), type: "member.access_changed",
+    data: { memberId: member.id, expectedMemberRevision: member.revision, permissions: member.permissions, active: false } });
+  assert.equal(store.room("commons").state.members[first.json.memberId].active, false);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM identity_links WHERE room_id=? AND identity_id=?").get("commons", first.json.identityId).n, 1);
+  const again = await mint(origin, ownerKey, { profile: "review", displayName: "Returning Bot" });
+  assert.equal(again.status, 201, JSON.stringify(again.json));
+  // The redeem door's success status is 201. The removed member is back,
+  // not a second membership.
+  const relinked = await post(origin, "/api/agent-invites/redeem", { code: again.json.code, displayName: "Returning Bot" }, first.json.identitySecret);
+  assert.equal(relinked.status, 201, JSON.stringify(relinked.json));
+  assert.equal(relinked.json.memberId, first.json.memberId);
+  assert.equal(relinked.json.identityId, first.json.identityId);
+  assert.equal(relinked.json.identitySecret, undefined);
+  assert.match(relinked.json.mcpToken.credential, /^rak_/);
+  assert.deepEqual(relinked.json.permissions, again.json.permissions);
+  const restored = store.room("commons").state.members[first.json.memberId];
+  assert.equal(restored.active, true);
+  assert.deepEqual(restored.permissions, again.json.permissions);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM identity_links WHERE room_id=? AND identity_id=?").get("commons", first.json.identityId).n, 1);
+  const read = await get(origin, "/api/rooms/commons", first.json.identitySecret);
+  assert.equal(read.status, 200, JSON.stringify(read.json)?.slice(0, 240));
+  const still = await mint(origin, ownerKey, { profile: "chat", displayName: "Returning Bot" });
+  const active = await post(origin, "/api/agent-invites/redeem", { code: still.json.code, displayName: "Returning Bot" }, first.json.identitySecret);
+  assert.equal(active.status, 409, JSON.stringify(active.json));
+  assert.equal(active.json.error.code, "identity_already_linked");
+  assert.equal(active.json.error.message, "This identity is already an active member");
+  assert.equal(store.db.prepare("SELECT redeemed_at FROM agent_invite_codes WHERE substr(code_hash,1,8)=?").get(still.json.inviteId).redeemed_at, null);
+});
+
+test("revoke answers 200 for a revoked or expired invite and 404 for an unknown code", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const unknown = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: "00000000" }, ownerKey);
+  assert.equal(unknown.status, 404);
+  assert.equal(unknown.json.error.code, "invite_unavailable");
+  const active = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  const once = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: active.json.inviteId }, ownerKey);
+  assert.equal(once.status, 200, JSON.stringify(once.json));
+  assert.deepEqual(once.json, { inviteId: active.json.inviteId, revoked: true, status: "revoked" });
+  const twice = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: active.json.inviteId }, ownerKey);
+  assert.equal(twice.status, 200, JSON.stringify(twice.json));
+  assert.deepEqual(twice.json, once.json);
+  const expiring = await mint(origin, ownerKey, { permissions: ["accept_work"] });
+  store.db.prepare("UPDATE agent_invite_codes SET expires_at=? WHERE substr(code_hash,1,8)=?").run(Date.now() - 1000, expiring.json.inviteId);
+  const expired = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: expiring.json.inviteId }, ownerKey);
+  assert.equal(expired.status, 200, JSON.stringify(expired.json));
+  assert.deepEqual(expired.json, { inviteId: expiring.json.inviteId, revoked: true, status: "expired" });
+  assert.equal(store.db.prepare("SELECT revoked_at FROM agent_invite_codes WHERE substr(code_hash,1,8)=?").get(expiring.json.inviteId).revoked_at, null);
+  const expiredAgain = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: expiring.json.inviteId }, ownerKey);
+  assert.equal(expiredAgain.status, 200);
+  assert.equal(expiredAgain.json.status, "expired");
+});
+
+test("three credential replays of a burned invite leave one live room key", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], displayName: "Replay Bot" });
+  const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Replay Bot" });
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  let last = first;
+  for (let i = 0; i < 3; i++) {
+    last = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Replay Bot" }, first.json.identitySecret);
+    assert.equal(last.status, 201, JSON.stringify(last.json));
+    assert.equal(last.json.duplicate, true);
+    assert.match(last.json.mcpToken.credential, /^rak_/);
+    assert.equal(last.json.next[0].action, "save-room-key");
+  }
+  const live = store.agentPlugin.listApiKeys(first.json.identityId).filter(key => !key.revoked);
+  assert.equal(live.length, 1);
+  assert.equal(live[0].keyId, last.json.mcpToken.keyId);
+  const raw = credential => credential.slice("rak_".length);
+  assert.equal(store.agentPlugin.verifyApiKeySecret(raw(first.json.mcpToken.credential)), null);
+  assert.equal(store.agentPlugin.verifyApiKeySecret(raw(last.json.mcpToken.credential))?.keyId, last.json.mcpToken.keyId);
 });

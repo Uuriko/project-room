@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html-escape.mjs";
 import { buildMagicLinkUrl } from "./magic-links.mjs";
 import { envConfig, MAGIC_FROM_DEFAULT } from "./config.mjs";
 
@@ -120,14 +121,6 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
         `<p>It expires in ${minutes} minutes. If you didn't request this, you can ignore this email.</p>`;
     await postResendEmail({ apiKey, from, fetchFn, to, subject, text, html, label: "magic link email" });
   };
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 // Resolve the magic-link mailer from the environment. Returns null when
