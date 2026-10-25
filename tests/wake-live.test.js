@@ -502,6 +502,14 @@ test("GET /api/wake-status?roomId= admits a guest caller and lists the guest sea
   // The guest seat lives in guest_members only - no identity_links row.
   f.store.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES ('mem-wake-guest', 'commons', ?, 'contributor', 'inv-wake-guest', 1)")
     .run(guest.identity.identityId);
+  // F-8 fixture cure (live-seat composition): in a database that HAS the
+  // credentials table, a guest seat is judged by the shared live-seat
+  // predicate — the direct insert above seats a credential-less guest,
+  // which the gated room enumeration now reads as a dead seat. Mint the
+  // seat's live access credential alongside, as #4808's own adjustment
+  // did in tests/guest-wake-dispatch.test.js. Assertions unchanged.
+  f.store.db.prepare("INSERT INTO credentials(hash, room_id, member_id, kind, parent_hash, expires_at, revoked, account_id, account_auth_epoch) VALUES ('h-wake-guest', 'commons', 'mem-wake-guest', 'access', NULL, 9999999999999, 0, NULL, NULL)")
+    .run();
   const res = await get(origin, "/api/wake-status?roomId=commons", guest.credential);
   assert.equal(res.status, 200, "a guest member can read its own room's wake status");
   const doc = await res.json();

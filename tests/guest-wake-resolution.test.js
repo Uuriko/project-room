@@ -232,3 +232,47 @@ test("identityNamesForRoom names guest seats from guest_members (#3908 F-9)", t 
   assert.equal(names["mem-linked"], "Linked Name", "linked member keeps its link name (link seat wins)");
   assert.equal(names["mem-guest"], "Guest Name", "guest member resolves its identity display name");
 });
+
+
+// ---------------------------------------------------------------------------
+// Live-seat composition F-2: the with-credentials-table variant of the
+// room-list tests above. The fixtures above run WITHOUT a credentials
+// table and pass unchanged through the pre-schema fallback (the seat row
+// alone resolves). With the table present, the same surfaces judge guest
+// seats by the shared predicate: only live seats resolve, either way.
+// ---------------------------------------------------------------------------
+
+test("resolver with a credentials table: dead guest seats resolve neither way (live-seat F-2)", async t => {
+  const { DatabaseSync } = await import("node:sqlite");
+  const NOW_F2 = 1_800_000_000_000;
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  db.exec(`
+    CREATE TABLE identity_links (room_id TEXT, identity_id TEXT, member_id TEXT);
+    CREATE TABLE guest_members (room_id TEXT, guest_identity_id TEXT, member_id TEXT);
+    CREATE TABLE credentials (room_id TEXT, member_id TEXT, kind TEXT, expires_at INTEGER, revoked INTEGER);
+    INSERT INTO identity_links VALUES ('room-a', 'id-linked-f2', 'mem-linked-f2');
+    INSERT INTO guest_members VALUES ('room-a', 'id-live-f2', 'mem-live-f2');
+    INSERT INTO guest_members VALUES ('room-a', 'id-revoked-f2', 'mem-revoked-f2');
+    INSERT INTO guest_members VALUES ('room-a', 'id-expired-f2', 'mem-expired-f2');
+    INSERT INTO guest_members VALUES ('room-a', 'id-rotated-f2', 'mem-rotated-f2');
+    INSERT INTO credentials VALUES ('room-a', 'mem-live-f2', 'access', ${NOW_F2 + 60_000}, 0);
+    INSERT INTO credentials VALUES ('room-a', 'mem-revoked-f2', 'access', ${NOW_F2 + 60_000}, 1);
+    INSERT INTO credentials VALUES ('room-a', 'mem-expired-f2', 'access', ${NOW_F2 - 1}, 0);
+    INSERT INTO credentials VALUES ('room-a', 'mem-rotated-f2', 'access', ${NOW_F2 - 1}, 0);
+    INSERT INTO credentials VALUES ('room-a', 'mem-rotated-f2', 'access', ${NOW_F2 + 60_000}, 0);
+  `);
+  assert.deepEqual(identityIdsForWakeRoom(db, "room-a", NOW_F2).sort(),
+    ["id-linked-f2", "id-live-f2", "id-rotated-f2"],
+    "the room list names live and rotated guest seats plus links — revoked and expired seats are absent");
+  assert.equal(isWakeRoomMember(db, "room-a", "id-live-f2", NOW_F2), true);
+  assert.equal(isWakeRoomMember(db, "room-a", "id-rotated-f2", NOW_F2), true,
+    "an expired row coexisting with a later live row keeps the seat (D-1)");
+  assert.equal(isWakeRoomMember(db, "room-a", "id-revoked-f2", NOW_F2), false);
+  assert.equal(isWakeRoomMember(db, "room-a", "id-expired-f2", NOW_F2), false);
+  assert.equal(identityIdForWakeMember(db, "room-a", "mem-live-f2", NOW_F2), "id-live-f2");
+  assert.equal(identityIdForWakeMember(db, "room-a", "mem-revoked-f2", NOW_F2), null,
+    "the gated member -> identity direction refuses a revoked seat (S-5)");
+  assert.equal(identityIdForWakeMember(db, "room-a", "mem-expired-f2", NOW_F2), null);
+  assert.equal(memberIdForWakeIdentity(db, "room-a", "id-expired-f2", NOW_F2), null);
+});
