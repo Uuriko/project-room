@@ -1,4 +1,5 @@
 import { messageRepository } from "./message-repository.mjs";
+import { loadConfig } from "./config.mjs";
 // Work-claim HTTP routes (task RC-2026-09-18-041; receipts RC-2026-09-24-205).
 //
 // Room-scoped handlers mounted by server/http.mjs inside the authenticated
@@ -642,7 +643,7 @@ export async function handleWorkClaims(options) {
   if (options.workClaimRoute === "status" && req.method === "GET") {
     const credential = options.githubToken !== undefined
       ? options.githubToken
-      : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
+      : loadConfig().githubToken;
     // SEC-2 / Q3-A: every member reads the shared cached status; only a
     // Board writer's ?refresh=1 skips the 60 s cache.
     const access = resolveWorkClaimAccess(options.store, options.roomId, options.auth);
@@ -667,7 +668,7 @@ export async function handleWorkClaims(options) {
     } else {
       const credential = options.githubToken !== undefined
         ? options.githubToken
-        : (process.env.GITHUB_TOKEN || process.env.GH_TOKEN || null);
+        : loadConfig().githubToken;
       pullBatch = await collectPullRequestLookups(registry.list(options.roomId), {
         fetchImpl: options.fetchPullRequest ?? fetch,
         token: credential || null,

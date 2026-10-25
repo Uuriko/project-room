@@ -5,6 +5,7 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { escapeHtml } from "./html-escape.mjs";
 import { resendTransport } from "./resend-mailer.mjs";
+import { loadConfig, MAGIC_FROM_DEFAULT } from "./config.mjs";
 
 const CLIP = 140;
 
@@ -114,10 +115,11 @@ export async function sendNotificationEmail({ transport, to, ...message } = {}) 
 }
 
 export function notificationEmailFromEnv(env = process.env, { fetchFn = fetch } = {}) {
-  const from = typeof env?.ROOM_MAGIC_FROM === "string" && env.ROOM_MAGIC_FROM
-    ? env.ROOM_MAGIC_FROM
-    : "Project Room <noreply@trydemigod.com>";
-  const transport = resendTransport({ apiKey: env?.RESEND_API_KEY, from, fetchFn });
+  const cfg = env == null || typeof env !== "object" ? loadConfig({}) : loadConfig(env);
+  const from = typeof cfg.magicFrom === "string" && cfg.magicFrom
+    ? cfg.magicFrom
+    : MAGIC_FROM_DEFAULT;
+  const transport = resendTransport({ apiKey: cfg.resendApiKey, from, fetchFn });
   if (!transport) return Object.freeze({ available: false, reason: "unavailable", send: null });
   return Object.freeze({
     available: true,

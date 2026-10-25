@@ -4,6 +4,7 @@
 // transaction. The integrity snapshot is rewritten in that same transaction.
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { envConfig } from "./config.mjs";
 import { validId } from "../src/events.js";
 import { ServiceError } from "./service-error.mjs";
 import { executeAccountDeletion, planAccountDeletion } from "./account-deletion.mjs";
@@ -26,8 +27,9 @@ const q = name => {
 };
 
 export function protectedRoomIds(env = globalThis.process?.env ?? {}) {
-  const extra = typeof env.ROOM_OPERATOR_PROTECTED_ROOMS === "string"
-    ? env.ROOM_OPERATOR_PROTECTED_ROOMS.split(",").map(part => part.trim()).filter(Boolean)
+  const raw = envConfig(env).operatorProtectedRooms;
+  const extra = typeof raw === "string"
+    ? raw.split(",").map(part => part.trim()).filter(Boolean)
     : [];
   return new Set([...BUILTIN_PROTECTED, ...extra]);
 }

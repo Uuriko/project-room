@@ -6,14 +6,14 @@
 // scrypt rows still verify. Scrypt runs only when a candidate row is still
 // v2, at most once per secret per request, then the row stores the HMAC.
 import { createHash, createHmac, scryptSync } from "node:crypto";
+import { loadConfig } from "./config.mjs";
 
 export const IDENTITY_HASH_SALT = "project-room-agent-identity-v2";
 export const IDENTITY_HASH_PARAMS = Object.freeze({ N: 16384, r: 8, p: 1 });
 export const IDENTITY_V2_PREFIX = "v2:";
 const IDENTITY_FAST_PREFIX = "v3:";
-// Worker secret / Node env. Unset uses the fallback below so a deploy that
-// has not been given the secret still verifies and issues verifiers.
-const IDENTITY_HASH_KEY_ENV = "ROOM_IDENTITY_HASH_KEY";
+// ROOM_IDENTITY_HASH_KEY is optional. Unset uses the fallback below so a
+// deploy that has not been given the secret still verifies and issues verifiers.
 // Built-in key for local Node, self-hosted installs, and a Worker deploy
 // that has not set ROOM_IDENTITY_HASH_KEY. Not a substitute for the Worker
 // secret once an operator sets one: verification accepts this key as well,
@@ -35,7 +35,9 @@ export function legacyIdentityHash(secret) {
 // `source` is a key string, null/undefined (fallback only), or an env object
 // such as process.env. A string shorter than 16 characters is ignored.
 function configuredIdentityHashKey(source) {
-  const value = typeof source === "string" ? source : source?.[IDENTITY_HASH_KEY_ENV];
+  const value = typeof source === "string"
+    ? source
+    : (source != null && typeof source === "object" ? loadConfig(source).identityHashKey : undefined);
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
   if (trimmed.length < 16) return null;

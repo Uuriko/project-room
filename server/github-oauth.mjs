@@ -13,6 +13,7 @@
 // never carry tokens.
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { envConfig } from "./config.mjs";
 
 export const GITHUB_START_PATH = "/api/auth/github/start";
 export const GITHUB_CALLBACK_PATH = "/api/auth/github/callback";
@@ -53,8 +54,9 @@ const base64urlToken = bytes => bytes.toString("base64url");
 // The HTTP layer treats a missing client id/secret as "not configured" and
 // answers honestly instead of starting a flow that can never complete.
 export function isGitHubConfigured(env = {}) {
-  return typeof env.GITHUB_OAUTH_CLIENT_ID === "string" && env.GITHUB_OAUTH_CLIENT_ID.length > 0
-    && typeof env.GITHUB_OAUTH_CLIENT_SECRET === "string" && env.GITHUB_OAUTH_CLIENT_SECRET.length > 0;
+  const cfg = envConfig(env);
+  return typeof cfg.githubOauthClientId === "string" && cfg.githubOauthClientId.length > 0
+    && typeof cfg.githubOauthClientSecret === "string" && cfg.githubOauthClientSecret.length > 0;
 }
 
 // index.html keeps the GitHub anchor so a configured deploy can serve it.
@@ -77,8 +79,9 @@ export function frontDoorHtml(html, { githubConfigured = false } = {}) {
 // what the HTTP layer's github() factory accepts for the redirect URI:
 // https anywhere, or http only on 127.0.0.1 for local dev.
 export function githubConfig(env = {}, origin) {
-  const clientId = env.GITHUB_OAUTH_CLIENT_ID;
-  const clientSecret = env.GITHUB_OAUTH_CLIENT_SECRET;
+  const cfg = envConfig(env);
+  const clientId = cfg.githubOauthClientId;
+  const clientSecret = cfg.githubOauthClientSecret;
   if ([clientId, clientSecret].every(value => value === undefined)) return null;
   const invalid = () => { throw new Error("Invalid GitHub authentication configuration"); };
   if (!opaque(clientId) || clientId.length > 256 || !opaque(clientSecret) || clientSecret.length > 256) invalid();

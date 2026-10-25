@@ -191,6 +191,7 @@ import {
   validateAttemptEnvironment, validateAttemptModel, validateAttemptOutputs, ensureWorkControlDefaults
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
+import { envConfig } from "./config.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
 
 // The Worker's room database (Durable Object SQL) rejects a statement with
@@ -200,7 +201,7 @@ import { EmailImport, emailImportSchema } from "./email-import.mjs";
 // ROOM_SQL_BIND_LIMIT=100 to make a Node store enforce the Worker's limit.
 // Read per open, so a test can set it before constructing a store.
 export function nodeSqlLimits(env = globalThis.process?.env ?? {}) {
-  const limit = Number(env.ROOM_SQL_BIND_LIMIT);
+  const limit = Number(envConfig(env).sqlBindLimit);
   return Number.isInteger(limit) && limit > 0 ? { limits: { variableNumber: limit } } : {};
 }
 

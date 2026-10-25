@@ -11,6 +11,7 @@ import { buildOpenApiJson } from '../server/discoverability.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
 import { agentErrorBody, errorCategory } from '../src/agent-error.mjs';
 import { randomBytes } from 'node:crypto';
+import { loadConfig } from '../server/config.mjs';
 
 const APP_CSP = "default-src 'none'; script-src 'self' https://static.cloudflareinsights.com; style-src 'self'; font-src 'self'; connect-src 'self' https://cloudflareinsights.com; img-src 'self'; manifest-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'";
 const ASSET_CACHE_MAX = 96;
@@ -316,7 +317,7 @@ async function assetResponse(request, env, url) {
 export async function edgePublicResponse(request, env, url) {
   const kind = classifyEdgePath(url.pathname);
   if (!kind) return null;
-  if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
+  if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env == null || typeof env !== 'object' ? undefined : loadConfig(env).securityContact));
   if (kind === 'openapi') return openApiResponse(request, url);
   if (kind === 'discovery') return discoveryResponse(request, url);
   // #3274: POST / is 404 on Node (the app root is the SPA shell route, not a

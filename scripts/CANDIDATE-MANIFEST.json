@@ -156,7 +156,7 @@
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:ebdfd3d7cc7118098ad4e3280a0af4567d4c2d8322e88483f0cdcebc15245512",
-    "cloudflare/bootstrap.mjs": "sha256:ff6095ac5ab0332de1cacc5d5250ff71831ed8c360ec108b37ecc8effe211d6d",
+    "cloudflare/bootstrap.mjs": "sha256:5c01ee73b5be17af45f414ee70c91c67685344f6abc366f86b47a01116be5b0c",
     "cloudflare/build-assets.mjs": "sha256:7a204a775ed8aac33ff23d1d1c210de1a29efe84a47455db7e303e6fd4aff4d4",
     "cloudflare/package.json": "sha256:6f0e5ae7c18da9972a53fd5b1c2aa60fd7aa930e4b80640c7eb0519eb1792b8d",
     "cloudflare/pnpm-lock.yaml": "sha256:e85e6e33177fe8779a9baea1fe99b3575edc4a1b29da6ed7415b7d2023ca157f",

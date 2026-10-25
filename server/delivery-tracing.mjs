@@ -37,6 +37,7 @@
 //                                  (default: buffer in memory; flush via tracer.flush())
 //   OTEL_SERVICE_NAME              service.name resource attribute (default: project-room)
 import { randomBytes } from "node:crypto";
+import { envConfig, OTEL_SERVICE_NAME_DEFAULT } from "./config.mjs";
 
 export const SPAN_NAMES = Object.freeze({
   INBOUND: "delivery.inbound",       // message received at ingress (API, webhook, bridge)
@@ -182,11 +183,14 @@ class NullSpan {
 }
 
 // --- Tracer ------------------------------------------------------------------
-const readEnv = (env = process.env) => ({
-  enabled: env.TELEMETRY === "true" || env.TELEMETRY === "1",
-  endpoint: env.OTEL_EXPORTER_OTLP_ENDPOINT ?? null,
-  serviceName: env.OTEL_SERVICE_NAME ?? "project-room",
-});
+const readEnv = (env = process.env) => {
+  const cfg = envConfig(env);
+  return {
+    enabled: cfg.telemetry === "true" || cfg.telemetry === "1",
+    endpoint: cfg.otelEndpoint ?? null,
+    serviceName: cfg.otelServiceName ?? OTEL_SERVICE_NAME_DEFAULT,
+  };
+};
 
 export class DeliveryTracer {
   constructor(env = process.env) {

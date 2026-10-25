@@ -1,5 +1,6 @@
 import { escapeHtml } from "./html-escape.mjs";
 import { buildMagicLinkUrl } from "./magic-links.mjs";
+import { envConfig, MAGIC_FROM_DEFAULT } from "./config.mjs";
 
 // Resend mail sender for magic-link sign-in codes.
 //
@@ -126,8 +127,9 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
 // RESEND_API_KEY is absent so callers fall back to the unconfigured seam.
 // ROOM_MAGIC_FROM sets the From address (defaults to a noreply sender).
 export function magicLinkMailerFromEnv(env = process.env, { fetchFn = fetch } = {}) {
-  const apiKey = env.RESEND_API_KEY;
+  const cfg = envConfig(env);
+  const apiKey = cfg.resendApiKey;
   if (!isNonEmptyString(apiKey)) return null;
-  const from = isNonEmptyString(env.ROOM_MAGIC_FROM) ? env.ROOM_MAGIC_FROM : "Project Room <noreply@trydemigod.com>";
+  const from = isNonEmptyString(cfg.magicFrom) ? cfg.magicFrom : MAGIC_FROM_DEFAULT;
   return resendMagicLinkSend({ apiKey, from, fetchFn });
 }

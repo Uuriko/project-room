@@ -1,6 +1,7 @@
 // Gmail mailbox access is separate from Google account sign-in. Credentials
 // and pending browser sessions are encrypted at rest and never projected.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
+import { envConfig } from './config.mjs';
 import { ServiceError } from './service-error.mjs';
 import { normalizeGmailMessage } from './channel-adapters/gmail.mjs';
 export const GMAIL_CALLBACK = '/api/auth/gmail/callback';
@@ -26,11 +27,12 @@ CREATE TABLE IF NOT EXISTS gmail_pending (
  expires_at INTEGER NOT NULL, encrypted TEXT NOT NULL
 );`;
 export function gmailConfig(env = {}, origin, google = null) {
-  if (env.ROOM_GMAIL_ENABLED !== '1') return null;
-  if (!google || !/^[a-f0-9]{64}$/i.test(env.ROOM_GMAIL_TOKEN_KEY ?? '')) throw new Error('Gmail requires Google OAuth and a 32-byte ROOM_GMAIL_TOKEN_KEY');
-  const pilotAccountId = env.ROOM_GMAIL_PILOT_ACCOUNT_ID || env.ROOM_OPERATOR_ACCOUNT_ID;
-  if (env.ROOM_GMAIL_PILOT_ONLY === '1' && !pilotAccountId) throw new Error('Gmail pilot requires the operator account');
-  return { allowedAccountIds: env.ROOM_GMAIL_PILOT_ONLY === '1' ? [pilotAccountId] : null, clientId: google.clientId, clientSecret: google.clientSecret, redirectUri: origin + GMAIL_CALLBACK, tokenKey: env.ROOM_GMAIL_TOKEN_KEY };
+  const cfg = envConfig(env);
+  if (cfg.gmailEnabled !== '1') return null;
+  if (!google || !/^[a-f0-9]{64}$/i.test(cfg.gmailTokenKey ?? '')) throw new Error('Gmail requires Google OAuth and a 32-byte ROOM_GMAIL_TOKEN_KEY');
+  const pilotAccountId = cfg.gmailPilotAccountId || cfg.operatorAccountId;
+  if (cfg.gmailPilotOnly === '1' && !pilotAccountId) throw new Error('Gmail pilot requires the operator account');
+  return { allowedAccountIds: cfg.gmailPilotOnly === '1' ? [pilotAccountId] : null, clientId: google.clientId, clientSecret: google.clientSecret, redirectUri: origin + GMAIL_CALLBACK, tokenKey: cfg.gmailTokenKey };
 }
 export class GmailMailbox {
   constructor(store, config) { this.store = store; this.config = config; this.fetch = (...args) => (config.fetchImpl ?? fetch)(...args); }

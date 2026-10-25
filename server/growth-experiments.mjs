@@ -7,6 +7,7 @@
 // GROWTH_FORCE_ARMS=experiment:arm,experiment:arm. An unknown id or arm in
 // that list is ignored and the hash assignment stands.
 import { createHash } from "node:crypto";
+import { loadConfig } from "./config.mjs";
 
 const ID_SHAPE = /^[a-z][a-z0-9_]{0,40}$/;
 
@@ -63,7 +64,7 @@ export function listExperiments() {
 }
 
 function forcedArm(experimentId, env) {
-  const raw = env?.GROWTH_FORCE_ARMS;
+  const raw = env == null || typeof env !== "object" ? undefined : loadConfig(env).growthForceArms;
   if (typeof raw !== "string" || raw.trim().length === 0) return null;
   for (const part of raw.split(",")) {
     const piece = part.trim();

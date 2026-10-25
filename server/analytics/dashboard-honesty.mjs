@@ -1,3 +1,5 @@
+import { loadConfig } from "../config.mjs";
+
 // Dashboard honesty pass (strategy-rethink opps #24, #27, #28).
 //
 // Additive and reversible: this module never changes an existing metric
@@ -44,11 +46,13 @@ function parseIdList(value) {
 }
 
 export function laneActorIdsFromEnv(env = process.env) {
-  return parseIdList(env?.ANALYTICS_LANE_ACTOR_IDS);
+  const raw = env == null || typeof env !== "object" ? undefined : loadConfig(env).analyticsLaneActorIds;
+  return parseIdList(raw);
 }
 
 export function johnActorIdsFromEnv(env = process.env) {
-  return parseIdList(env?.ANALYTICS_JOHN_ACTOR_IDS);
+  const raw = env == null || typeof env !== "object" ? undefined : loadConfig(env).analyticsJohnActorIds;
+  return parseIdList(raw);
 }
 
 function normalizeEvent(row) {
