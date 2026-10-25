@@ -63,7 +63,14 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const packagedTools = readFileSync(join(destination, "client/mcp-stdio.mjs"), "utf8");
     const packagedWorkActions = existsSync(join(destination, "client/work-actions.mjs"))
       ? readFileSync(join(destination, "client/work-actions.mjs"), "utf8") : "";
+    const packagedAssistant = existsSync(join(destination, "client/assistant-tools.mjs"))
+      ? readFileSync(join(destination, "client/assistant-tools.mjs"), "utf8") : "";
+    const coordinatorTools = packagedAssistant.includes("room_assistant_decline");
+    const assistantNames = coordinatorTools
+      ? ["room_assistant_context", "room_assistant_action", "room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop", "room_assistant_accept", "room_assistant_decline"]
+      : ["room_assistant_context", "room_assistant_action"];
     const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
+      : coordinatorTools ? 50
       : packagedTools.includes("\"room_close_work_claim\"") ? 44
       : packagedTools.includes("...assistantTools") ? 43
       : packagedTools.includes('"room_link_work_claim_pr"') ? 41
@@ -75,7 +82,7 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
       : packagedTools.includes('"room_read_inbox"') ? 34
       : packagedTools.includes('"get_room_context"') ? 33
       : 32;
-    assert.deepEqual(JSON.parse(cold.stdout), { tools: toolCount, assistantTools: packagedTools.includes("...assistantTools") ? ["room_assistant_context", "room_assistant_action"] : [], helper: "function",
+    assert.deepEqual(JSON.parse(cold.stdout), { tools: toolCount, assistantTools: packagedTools.includes("...assistantTools") ? assistantNames : [], helper: "function",
       command: { id: "cold-package", type: "work.accepted", data: { workItemId: "work", expectedRevision: 0 } } });
   }
   if (existsSync(join(destination, "scripts/run-codex-room.mjs"))) {

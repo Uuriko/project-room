@@ -85,9 +85,9 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
   assert.deepEqual(tools.filter(tool => tool.name.includes("outside_agent")).map(tool => tool.name), ["room_list_outside_agents", "room_introduce_outside_agent"]);
-  assert.equal(tools.length, 44);
+  assert.equal(tools.length, 50);
   const assistant = tools.filter(tool => tool.name.startsWith("room_assistant_"));
-  assert.deepEqual(assistant.map(tool => tool.name), ["room_assistant_context", "room_assistant_action"]);
+  assert.deepEqual(assistant.map(tool => tool.name), ["room_assistant_context", "room_assistant_action", "room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop", "room_assistant_accept", "room_assistant_decline"]);
   assert.equal(assistant[0].annotations.readOnlyHint, true);
   assert.deepEqual(assistant[1].inputSchema.properties.action.enum, ["claim", "report", "publish", "draft"]); assert.ok(tools.every(tool => tool.inputSchema.additionalProperties === false));
   assert.equal((await h.rpc("tools/call", { name: "room_check_access", arguments: {} }, "typed-id")).result.structuredContent.status, "credential_accepted");

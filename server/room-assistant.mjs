@@ -5,6 +5,7 @@ import { messageRepository, messageThreadRoot } from './message-repository.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { historyFloor, messageInHistory, messageVisibleToViewer } from './history-visibility.mjs';
 import { createHash } from 'node:crypto';
+import { installCoordinator } from './coordinator.mjs';
 
 // Coordination records reserve one publisher. A host claim is an observation,
 // not a hosted execution service, and never grants that host additional rights.
@@ -382,3 +383,5 @@ export class RoomAssistant {
     });
   }
 }
+
+installCoordinator(RoomAssistant);

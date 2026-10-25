@@ -5,10 +5,11 @@
 // agent for help. Stop, by the coordinator or a room administrator, halts
 // asks that have not been applied.
 //
-// room-assistant.mjs and src/events.js are left unchanged: open pulls already
-// edit them. This module wraps RoomAssistant when the server graph loads it.
-// A choice is a message.posted event so people and agents can both read the
-// reason. The message body is that reason; coordinatorSource marks the choice.
+// room-assistant.mjs calls installCoordinator once the class exists. src/events.js
+// stays unchanged: open pulls already edit it. A choice is a message.posted
+// event so people and agents can both read the reason. The message body is
+// that reason; coordinatorSource marks the choice. An ask wakes the target
+// through the claim wake queue, and that agent accepts or declines it.
 import { createHash } from "node:crypto";
 import { canAdministerRoom } from "../src/room-administration.js";
 import { EVENT_TYPES, event, ownMember, validId } from "../src/events.js";
@@ -16,7 +17,6 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts } from "./claim-coordination.mjs";
 import { COORDINATOR_RANKING_VERSION, kindFor, scoreCandidate } from "./coordinator-ranking.mjs";
 import { syncMessageRows } from "./messages-store.mjs";
-import { RoomAssistant } from "./room-assistant.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { ACTIVE_CLAIM_STATES, isTerminalClaimState, reassignWork } from "./work-claims.mjs";
 
@@ -31,12 +31,12 @@ const CLAIM_ID_MAX = 256;
 const fail = (code, message, status = 409) => { throw Object.assign(new Error(message), { code, status }); };
 let installed = false;
 
-export function installCoordinator() {
-  if (installed) return;
+export function installCoordinator(Assistant) {
+  if (installed || !Assistant?.prototype) return;
   installed = true;
-  const original = RoomAssistant.prototype.apply;
-  const originalList = RoomAssistant.prototype.list;
-  RoomAssistant.prototype.list = function listWithCoordinator(roomId, authorize) {
+  const original = Assistant.prototype.apply;
+  const originalList = Assistant.prototype.list;
+  Assistant.prototype.list = function listWithCoordinator(roomId, authorize) {
     authorize();
     ensurePick(this, roomId);
     const body = originalList.call(this, roomId, authorize);
@@ -47,9 +47,9 @@ export function installCoordinator() {
     }
     return body;
   };
-  RoomAssistant.prototype.apply = function applyWithCoordinator(roomId, input, authorize, postToken = null) {
+  Assistant.prototype.apply = function applyWithCoordinator(roomId, input, authorize, postToken = null) {
     const action = input && !Array.isArray(input) ? input.action : undefined;
-    if (action === "assign" || action === "ask" || action === "stop") return perform(this, roomId, input, authorize);
+    if (action === "assign" || action === "ask" || action === "accept" || action === "decline" || action === "stop") return perform(this, roomId, input, authorize);
     if (action !== "configure") return original.call(this, roomId, input, authorize, postToken);
     return preserveOnConfigure(this, original, roomId, input, authorize, postToken);
   };
@@ -87,7 +87,8 @@ function preserveOnConfigure(assistant, original, roomId, input, authorize, post
 
 function perform(assistant, roomId, input, authorize) {
   assertEnvelope(input);
-  if (input.action !== "stop") {
+  const reply = input.action === "accept" || input.action === "decline";
+  if (input.action !== "stop" && !reply) {
     authorize();
     ensurePick(assistant, roomId);
   }
@@ -105,7 +106,7 @@ function perform(assistant, roomId, input, authorize) {
     if (input.action === "stop") {
       if (!isAdmin && actor.id !== config.coordinatorMemberId)
         fail("assistant_denied", "Only the room coordinator or a room administrator can stop coordinator actions.", 403);
-    } else {
+    } else if (!reply) {
       const coordinator = ownMember(state.members, config.coordinatorMemberId);
       const connected = Boolean(coordinator?.active && coordinator.kind === "agent" && coordinator.permissions?.includes("accept_work"));
       if (!connected) fail("assistant_not_connected", "Name an active room agent as coordinator before assigning or asking.", 409);
@@ -118,7 +119,7 @@ function perform(assistant, roomId, input, authorize) {
       if (prior.input !== canonical) fail("assistant_retry_conflict", "Retry ID already records different input");
       return JSON.parse(prior.result);
     }
-    if (input.action !== "stop") {
+    if (!reply && input.action !== "stop") {
       if (Number.isFinite(config.stoppedAt))
         fail("assistant_host_paused", "This coordinator is stopped. The room owner configures the assistant to clear the stop.", 409);
       if (assistant.store.wakeQueue?.pauseStatus?.(roomId, config.coordinatorMemberId))
@@ -128,9 +129,9 @@ function perform(assistant, roomId, input, authorize) {
     const actions = Array.isArray(config.coordinatorActions) ? config.coordinatorActions : [];
     let result;
     if (input.action === "stop") result = stopActions(assistant, roomId, config, actions, actor, now);
-    else result = input.action === "assign"
-      ? assignClaim(assistant, roomId, state, config, actions, input, actor, now)
-      : askAgent(assistant, roomId, state, config, actions, input, actor, now);
+    else if (input.action === "assign") result = assignClaim(assistant, roomId, state, config, actions, input, actor, now);
+    else if (input.action === "ask") result = askAgent(assistant, roomId, state, config, actions, input, actor, now);
+    else result = replyToAsk(assistant, roomId, config, actions, input, actor, now);
     const response = { contractVersion: 1, roomId, action: input.action, result };
     assistant.store.db.prepare("INSERT INTO room_assistant_ops VALUES(?,?,?,?,?)").run(roomId, actor.id, input.requestId, canonical, JSON.stringify(response));
     recordAudit(assistant, roomId, actor.id, now, input.action, result, input.requestId);
@@ -142,6 +143,8 @@ function assertEnvelope(input) {
   const fields = {
     assign: ["workClaimId", "targetMemberId", "expectedClaimedAt", "expectedHistoryLength", "note"],
     ask: ["workClaimId", "targetMemberId", "note"],
+    accept: ["askRequestId"],
+    decline: ["askRequestId"],
     stop: []
   };
   if (!input || Array.isArray(input) || !Object.hasOwn(fields, input.action) || !validId(input.requestId)
@@ -233,7 +236,29 @@ function askAgent(assistant, roomId, state, config, actions, input, actor, now) 
     id: input.requestId, kind: "ask", actorId: actor.id, workClaimId, targetMemberId,
     ...(note !== undefined ? { note } : {}), status: "pending", hop, createdAt: now
   });
-  return { workClaimId, targetMemberId, status: "pending", hop };
+  const wake = notifyMember(assistant.store, roomId, targetMemberId, workClaimId, "ask", input.requestId, actor.id);
+  return { workClaimId, targetMemberId, status: "pending", hop, wake };
+}
+
+function replyToAsk(assistant, roomId, config, actions, input, actor, now) {
+  const askRequestId = memberId(input.askRequestId, "Name the ask you are answering.");
+  const entry = actions.find(item => item?.kind === "ask" && item.id === askRequestId);
+  if (!entry) fail("assistant_ask_missing", "That ask is not in this room.", 404);
+  if (entry.status !== "pending") fail("assistant_ask_closed", `That ask is already ${entry.status}.`, 409);
+  if (actor.id !== entry.targetMemberId) fail("assistant_denied", "Only the asked agent can accept or decline.", 403);
+  const status = input.action === "accept" ? "accepted" : "declined";
+  writeConfig(assistant, roomId, {
+    ...config,
+    coordinatorActions: actions.map(item => item === entry ? { ...item, status, decidedAt: now } : item)
+  });
+  const wake = notifyMember(assistant.store, roomId, entry.actorId, entry.workClaimId, status === "accepted" ? "ask_accepted" : "ask_declined", entry.id, actor.id);
+  return { workClaimId: entry.workClaimId, askRequestId, targetMemberId: entry.targetMemberId, status, wake };
+}
+
+function notifyMember(store, roomId, memberId, workClaimId, reason, requestId, actorId) {
+  const wake = enqueueClaimWake(store, roomId, memberId, `work-claim:${workClaimId}:${reason}:${requestId}`, { reason, actorId });
+  if (!wake || wake.enqueued !== true) return { enqueued: false, ...(typeof wake?.skipped === "string" ? { skipped: wake.skipped } : {}) };
+  return { enqueued: true };
 }
 
 function stopActions(assistant, roomId, config, actions, actor, now) {
@@ -541,5 +566,3 @@ function recordChoice(store, roomId, { memberId, source, reason, at }) {
   try { store.agentPlugin?.fanoutRoomEvent?.({ roomId, event: incoming }); }
   catch (error) { console.error("coordinator choice fan-out failed:", error?.message ?? error); }
 }
-
-installCoordinator();
