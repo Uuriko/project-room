@@ -11,6 +11,10 @@
 // Each member stays inside the chat flood burst of 30.
 //
 //   node perf/write-burst-bench.mjs --writers 8 --each 5 --seed 1000
+//   node perf/write-burst-bench.mjs --writers 8 --each 5 --seed 1000 --side-table --defer-release
+//
+// --side-table and --defer-release are the hosted-object switches from
+// #4843 and #4842. A store that has no such option reports the flag false.
 //
 // The smoke test is perf/write-burst-bench.test.mjs.
 import { mkdtempSync, rmSync } from "node:fs";
@@ -52,7 +56,7 @@ function memberCount(writers, seed) {
   return { seedAuthors, members: 1 + writers + seedAuthors };
 }
 
-export async function runWriteBurst({ writers = 4, each = 4, seed = 0 } = {}) {
+export async function runWriteBurst({ writers = 4, each = 4, seed = 0, sideTableMessages = false, deferBodyRelease = false } = {}) {
   if (!Number.isInteger(writers) || writers < 1) throw new Error("--writers must be an integer >= 1");
   if (!Number.isInteger(each) || each < 1 || each > FLOOD_BURST) throw new Error(`--each must be an integer from 1 to ${FLOOD_BURST}`);
   if (!Number.isInteger(seed) || seed < 0) throw new Error("--seed must be an integer >= 0");
@@ -62,7 +66,10 @@ export async function runWriteBurst({ writers = 4, each = 4, seed = 0 } = {}) {
   }
 
   const directory = mkdtempSync(join(tmpdir(), "room-write-burst-"));
-  const store = new RoomStore(join(directory, "room.sqlite"));
+  const store = new RoomStore(join(directory, "room.sqlite"), {
+    ...(sideTableMessages ? { sideTableMessages: true } : {}),
+    ...(deferBodyRelease ? { deferBodyRelease: true } : {})
+  });
   let server;
   try {
     store.initialize(initialRoom(ROOM_ID));
@@ -136,7 +143,9 @@ export async function runWriteBurst({ writers = 4, each = 4, seed = 0 } = {}) {
       each,
       seed,
       refused,
-      rowBytesBefore: before
+      rowBytesBefore: before,
+      sideTableMessages: store.sideTableMessages === true,
+      deferBodyRelease: store.deferBodyRelease === true
     };
     if (refused) {
       const sample = flat.find(item => item.status !== 201);
@@ -168,7 +177,9 @@ if (isMain) {
     const report = await runWriteBurst({
       writers: integerArg("writers") ?? 4,
       each: integerArg("each") ?? 4,
-      seed: integerArg("seed") ?? 0
+      seed: integerArg("seed") ?? 0,
+      sideTableMessages: process.argv.includes("--side-table"),
+      deferBodyRelease: process.argv.includes("--defer-release")
     });
     process.stdout.write(`${JSON.stringify(report)}\n`);
     process.exitCode = report.writes > 0 && report.refused === 0 ? 0 : 1;

@@ -26,6 +26,8 @@ test("write-burst bench prints one JSON line for a throwaway local burst", { tim
   assert.equal(report.each, 2);
   assert.equal(report.seed, 0);
   assert.equal(report.refused, 0);
+  assert.equal(report.sideTableMessages, false);
+  assert.equal(report.deferBodyRelease, false);
   assert.equal(typeof report["writes/s"], "number");
   assert.ok(report["writes/s"] > 0);
   assert.ok(Number.isInteger(report.rowBytes) && report.rowBytes > report.rowBytesBefore);
