@@ -50,7 +50,7 @@ test('owner results retain withdrawn receipts, exact decisions persist, artifact
   assert.deepEqual(initial.offer.exclusions, []);
   assert.equal(initial.offer.repositoryUrl, 'https://github.com/example/project');
   assert.deepEqual(initial.task, { repositoryRef: 'main', files: ['result.txt'] });
-  assert.deepEqual(f.service().inspect('commons', 'owner', id), initial);
+  assert.deepEqual(f.service().inspect('commons', 'owner', id), { ...initial, history: [] });
   assert.deepEqual(f.service().contributorReview(f.producer.secret, id), minimalFeedback);
   for (const field of ['offer', 'task', 'acceptanceCriteria', 'repositoryUrl', 'files']) assert.equal(Object.hasOwn(minimalFeedback, field), false);
   assert.equal(initial.offer.status, 'withdrawn'); assert.equal(initial.review.revision, 0); assert.equal(initial.authority.acceptReady, true);
@@ -60,7 +60,22 @@ test('owner results retain withdrawn receipts, exact decisions persist, artifact
   assert.equal(accepted.review.state, 'accepted'); assert.equal(accepted.review.revision, 1);
   assert.equal(accepted.authority.canDecide, false);
   f.reopen(); assert.deepEqual(f.service().decide('commons', 'owner', id, args), accepted);
-  assert.deepEqual(f.store.publicWorkClaims.receipt(id), f.receipt);
+  // #3546: acceptance stamps the public receipt's verified successor state;
+  // everything the receipt was issued with (artifact, checks, identity) is
+  // otherwise exactly as submitted — no executed checks ran in this flow,
+  // so the level stays the honest "hash_only" under a verified state.
+  const stamped = f.store.publicWorkClaims.receipt(id);
+  assert.equal(stamped.state, 'verified');
+  assert.equal(stamped.verified.by, 'owner');
+  assert.equal(stamped.verification, 'hash_only');
+  // #3733: the canonical read also composes the review summary onto the
+  // stamped record. The summary is the whole public outcome — no decider
+  // member id, no reason, no fingerprint.
+  assert.deepEqual(stamped.review, { state: 'accepted', verificationVerdict: null, verificationReviewerKind: null,
+    verifiedAt: null, decidedAt: accepted.review.decision.at });
+  const receiptRest = { ...stamped };
+  delete receiptRest.verified; delete receiptRest.review;
+  assert.deepEqual({ ...receiptRest, state: 'submitted' }, f.receipt);
   assert.deepEqual(f.store.publicWorkClaims.artifact(id), artifact);
   assert.equal(f.store.workClaims.get(kernel.namespaceId, kernel.taskId).state, 'done');
   assert.deepEqual(f.store.db.prepare('SELECT * FROM bounty_journal ORDER BY seq').all(), balances);
@@ -83,7 +98,8 @@ test('CAS, exact tuple and room isolation refuse stale or unauthorized decisions
   try { assert.throws(() => otherService.decide('commons', 'owner', id, f.input('other-connection', 0, { decision: 'rejected' })), code('stale_review')); } finally { concurrent.close(); }
   assert.throws(() => f.service().decide('commons', 'owner', id, f.input('concurrent', 0, { decision: 'accepted' })), code('stale_review'));
   assert.equal(f.service().decide('commons', 'owner', id, f.input('explicit-after-revision', 1, { decision: 'accepted' })).review.revision, 2);
-  assert.equal(f.store.publicWorkClaims.receipt(id).state, 'submitted');
+  // #3546: the accepted decision is the receipt's verified successor state.
+  assert.equal(f.store.publicWorkClaims.receipt(id).state, 'verified');
 });
 
 test('mixed acceptance requires real authorized exact-current PASS and survives restart', t => {
@@ -189,7 +205,7 @@ test('review action namespace cannot alias verification journal and invalid inpu
 
 test('historical readonly receipts remain inspectable as pending without installing review tables', t => {
   const f = fixture(t), id = f.receipt.receiptId;
-  f.store.db.exec('DROP TABLE public_work_reviews; DROP TABLE public_work_review_requests;');
+  f.store.db.exec('DROP TABLE public_work_reviews; DROP TABLE public_work_review_versions; DROP TABLE public_work_review_requests;');
   const readonly = new RoomStore(f.file, { readOnly: true });
   try {
     const service = new PublicWorkReviews(readonly);

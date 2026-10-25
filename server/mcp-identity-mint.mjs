@@ -9,13 +9,14 @@ import { mcpInvalidRequest } from './mcp-arg-errors.mjs';
 // door, an identity alone grants nothing.
 import { IDENTITY_MINT_MCP_TOOLS } from '../src/room-mcp-join.js';
 import { diagnoseArguments, mcpCallError } from './mcp-arg-errors.mjs';
+import { mcpResultText } from './mcp-result-text.mjs';
 import { ServiceError } from './service-error.mjs';
 import { noteIdentityMint } from './growth-loop.mjs';
 
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const result = (id, value, isError = false) => ({
+const result = (id, value, isError = false, redactions = []) => ({
   jsonrpc: '2.0', id,
-  result: { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, ...(isError ? { isError: true } : {}) }
+  result: { content: [{ type: 'text', text: mcpResultText(value, redactions) }], structuredContent: value, ...(isError ? { isError: true } : {}) }
 });
 
 const displayNameField = {
@@ -99,5 +100,12 @@ export function handleIdentityMintMcp(store, message, { remoteAddress } = {}) {
   } catch (error) {
     console.error('identity mint bookkeeping failed:', error?.message ?? error);
   }
-  return result(requestId, created);
+  // The one-time secret and privateKey ride in structuredContent only:
+  // the text block is what hosts display and log verbatim, so repeating
+  // the credentials there persists them in transcripts (issue #3750).
+  // A duplicate-recovery mint carries no secret; its redactions skip.
+  return result(requestId, created, false, [
+    { secret: created.secret, where: 'structuredContent.secret' },
+    { secret: created.privateKey, where: 'structuredContent.privateKey' }
+  ]);
 }

@@ -14,7 +14,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { routeCandidates } from "./open-routes.mjs";
-import { nextActionsRouteTemplates, pluginRouteTemplates, workerRouteTemplates } from "./route-docs-check.mjs";
+import { BOARD_V2_RETIRED_TEMPLATES, httpRetiresBoardV2, nextActionsRouteTemplates, pluginRouteTemplates, workerRouteTemplates } from "./route-docs-check.mjs";
 import { A2A_PATHS } from "../server/a2a-jsonrpc.mjs";
 import { ROOM_MCP_PATHS } from "../src/room-mcp-join.js";
 import { DISCOVERY_PATHS, HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
@@ -426,11 +426,9 @@ export function extractLegacyRoutes(sources) {
   for (const path of workerRouteTemplates(sources.worker)) {
     for (const method of WORKER_POST_ONLY_PATHS.has(path) ? ["POST"] : ["GET", "HEAD"]) addRoute(bag, method, path);
   }
-  if (/if \(boardV2Match\)/.test(prepared)) {
-    for (const [, paths] of indexRegexConsts(prepared)) {
-      for (const path of paths) if (path.includes("/board/v2/")) {
-        for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]) addRoute(bag, method, path);
-      }
+  if (httpRetiresBoardV2(prepared)) {
+    for (const path of BOARD_V2_RETIRED_TEMPLATES) {
+      for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]) addRoute(bag, method, path);
     }
   }
   return [...bag.values()].sort((a, b) => a.path === b.path ? a.method.localeCompare(b.method) : a.path.localeCompare(b.path));

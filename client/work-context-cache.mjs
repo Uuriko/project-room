@@ -2,6 +2,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { constants, openSync, closeSync, fstatSync, lstatSync, readSync, writeFileSync, fsyncSync, mkdirSync, realpathSync, renameSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { createWorkBrief } from "./work-brief.mjs";
 
 const digest = value => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const fail = code => Object.assign(new Error(code), { code });
@@ -129,8 +130,10 @@ export async function readResumablePreparation(client, workItemId, {
       ids.add(row.message.id);
     }
     const discussion = { items, ...completed };
+    const workBrief = await createWorkBrief(current);
     cache.write(discussion);
     return { roomId: current.roomId, viewer: current.viewer, work: current.work, next: current.next, instructions: current.context?.charter ?? null,
+      workBrief,
       ...(current.replyRequestContext === undefined ? {} : { replyRequestContext: current.replyRequestContext }),
       discussion: { since: 0, ...discussion }, changedDuringRead: initial.work.revision !== current.work.revision,
       eventsAfterDiscussion: current.evaluatedThrough > completed.checkpoint,

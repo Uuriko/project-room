@@ -73,7 +73,8 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await guest.locator("#main").waitFor({ state: "visible" });
   const card = guest.locator('[data-work-record-id="test-handoff"]');
   await card.waitFor();
-  assert.equal(await card.locator(".work-details").evaluate(el => el.open), true, "invited item is opened for the guest");
+  assert.equal(await card.evaluate(el => el === document.activeElement), true, "invited work is focused for the guest");
+  await card.locator(".work-details > summary").click();
   assert.match(await guest.locator("#status").textContent(), /This invitation opens.*prepare an agenda/i);
   assert.match(await card.innerText(), /The agenda needs updated dates/);
   assert.match(await card.innerText(), /Earlier agenda result/);

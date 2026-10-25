@@ -1,3 +1,5 @@
+import { escapeHtml } from "./html-escape.js";
+import { workStatus } from "./work-status.js";
 // Tasks › Board. Claims come from GET /work-claims. Live updates follow
 // work_claim.updated on the room snapshot the client already applies.
 // This module does not open its own stream and does not poll.
@@ -14,12 +16,6 @@ const COLUMNS = Object.freeze([
   ["review", "In review"],
   ["landed", "Landed"]
 ]);
-
-export function escapeHtml(text) {
-  return String(text ?? "").replace(/[&<>"']/g, char => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
-  }[char]));
-}
 
 function updatedAt(item) {
   const history = Array.isArray(item?.history) ? item.history : [];
@@ -57,7 +53,7 @@ export function columnOf(item, byId, now) {
     return Number.isFinite(at) && now - at <= WEEK ? "landed" : null;
   }
   if (item.state === "unclaimed" && !item.owner && !dependenciesMet(item, byId)) return "blocked";
-  if (openPull(item)) return "review";
+  if (item.state === "delivered" || openPull(item)) return "review";
   if (item.state === "blocked") return "blocked";
   if (item.state === "claimed" || item.state === "in_progress") return "claimed";
   if (item.state === "unclaimed" && !item.owner && dependenciesMet(item, byId)) return "ready";
@@ -279,19 +275,128 @@ function viewerOf(state, session) {
 // VERIFY step: who may record a verdict review from the board. Mirrors the
 // server's mayReviewWorkClaims (an active member with write rights or the
 // verify permission); the owner can never review their own claim, and only
-// owned, active claims are reviewable. The
+// owned claims the kernel can still review are offered the form. The
 // review route re-checks on POST; this only decides whether the form renders.
 export function canReviewClaim(item, viewer, members) {
   if (!item || !viewer?.id) return false;
   const member = members?.[viewer.id];
   if (!member || member.active === false) return false;
   if (!item.owner || item.owner === viewer.id) return false;
-  // recordReview refuses anything but an active claim ("only active claims can
-  // be reviewed"), so a done/closed claim with a still-open PR must not render
-  // a form the server will always reject.
-  if (!["claimed", "in_progress", "blocked"].includes(item.state)) return false;
+  // recordReview accepts active or delivered claims ("only active or
+  // delivered claims can be reviewed") — the delivered state is where the
+  // verdict matters most, so it renders the form too. Done/closed claims
+  // must not render a form the server will always reject.
+  if (!["claimed", "in_progress", "blocked", "delivered"].includes(item.state)) return false;
   const permissions = new Set(member.permissions ?? []);
   return viewer.write || permissions.has("verify");
+}
+
+// Whether a review's basis still matches the claim it was recorded against.
+// Mirrors the kernel's currentReviewBasis (work-claims.mjs): the owner round,
+// revision and CI head must match, and — since #3684 — so must the delivery:
+// an approval bound to a delivery digest counts only for that delivery, and
+// an approval recorded before any delivery (generation 0) counts only for
+// the round's first delivery; a re-delivery stales it like a head move.
+function basisCurrent(review, item) {
+  const basis = review?.basis;
+  if (!basis || basis.version !== 1) return false;
+  const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
+    ? basis.deliveryDigest === (item.delivery?.digest ?? null)
+    : (basis.deliveryGeneration ?? 0) === 0 && (item.deliveryGeneration ?? 0) <= 1;
+  return deliveryCurrent && basis.owner === item.owner && basis.claimedAt === item.claimedAt
+    && basis.revision === (item.revision ?? null) && basis.headSha === (item.ci?.headSha ?? null);
+}
+
+// The member's approval that can still close this claim, or null. The
+// kernel's canCloseWork additionally requires the attestation recordReview
+// stamps alongside an approve verdict, at the same instant; the routes
+// re-check all of it on POST — this only decides whether the board offers
+// the verify control.
+export function currentApprovalFor(item, memberId) {
+  if (!item || typeof memberId !== "string" || !memberId) return null;
+  const review = (item.reviews ?? []).find(entry => entry?.memberId === memberId && entry?.verdict === "approve");
+  if (!review || !basisCurrent(review, item)) return null;
+  const attested = (item.attestations ?? []).some(entry => entry?.memberId === memberId && entry.at === review.at);
+  return attested ? review : null;
+}
+
+// Whether the board offers Verify on a delivered claim — policy-aware,
+// mirroring canCloseWork (the route re-checks on POST):
+// - self_attested (#3887): the OWNER is the verifier (reviewerId ===
+//   owner) and can never hold an approval on their own claim, so the
+//   approval-gated condition was unsatisfiable for exactly the person
+//   the kernel authorizes; the owner gets the control, nobody else does.
+// - reviewed policies: the viewer must hold a current approval, and
+//   under independent_principal (#3885) must additionally hold the
+//   verify permission (canCloseWork's verifyMembers) — approvers
+//   without it were offered a Verify the kernel always refuses.
+export function canVerifyFromBoard(item, viewer, members, roomPolicy = null) {
+  if (!item || item.state !== "delivered" || !viewer?.id) return false;
+  const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
+  if (policy === "self_attested") return item.owner === viewer.id;
+  if (item.owner === viewer.id) return false;
+  if (!currentApprovalFor(item, viewer.id)) return false;
+  if (policy === "independent_principal") {
+    const member = members?.[viewer.id];
+    return Boolean(member && member.active !== false && (member.permissions ?? []).includes("verify"));
+  }
+  return true;
+}
+
+// Whether the board offers the send-back control on a delivered claim
+// (H1 / #3888). The update route authorizes the delivered ->
+// in_progress transition for the owner, a claim manager, or the
+// reviewer who recorded changes_requested; the board shows the control
+// to the owner outright, and to a manager or reviewer when a CURRENT
+// changes_requested review stands on the claim (basisCurrent, the same
+// currency test approvals use). The route re-checks on POST.
+export function canSendBackClaim(item, viewer, members) {
+  if (!item || item.state !== "delivered" || !viewer?.id) return false;
+  if (item.owner === viewer.id) return true;
+  const member = members?.[viewer.id];
+  if (!member || member.active === false) return false;
+  const standing = (item.reviews ?? []).filter(entry => entry?.verdict === "changes_requested" && basisCurrent(entry, item));
+  if (!standing.length) return false;
+  if (viewer.manage) return true;
+  return standing.some(entry => entry.memberId === viewer.id);
+}
+
+const sendBackRequestId = (item, memberId) =>
+  ["sendback", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
+
+// The send-back POST body, pure like claimVerifyBody: the transition
+// plus its operation identity (#3829's replay binding covers reviewer
+// send-backs) and the round basis the board read, so a stale card
+// cannot send back a newer round.
+export function claimSendBackBody(item, memberId) {
+  const basis = typeof item?.claimedAt === "string"
+    ? { expectedClaimedAt: item.claimedAt,
+      expectedHistoryLength: (Array.isArray(item?.history) ? item.history.length : 0) + (Number(item?.historyOmitted) || 0) }
+    : {};
+  return { state: "in_progress", requestId: sendBackRequestId(item, memberId), ...basis };
+}
+
+// The review POST body (#3889): the reviewer names the basis they
+// actually read — the board holds every field of the kernel's
+// reviewBasisFor — so an identical re-review after the basis moved is a
+// deliberate refresh where the kernel allows one (a sole CI head move),
+// instead of a silent no-op the board announces as "Reviewed". A basis
+// that no longer matches is refused as a conflict by the kernel.
+export function claimReviewBody(item, verdict, summary) {
+  return { verdict, summary, expectedBasis: { version: 1, owner: item?.owner ?? null,
+    claimedAt: item?.claimedAt ?? null, revision: item?.revision ?? null,
+    headSha: item?.ci?.headSha ?? null, deliveryDigest: item?.delivery?.digest ?? null,
+    deliveryGeneration: item?.deliveryGeneration ?? 0 } };
+}
+
+// #3889 readback: after the board reloads, the submitted review counts
+// as recorded only when the reviewer's standing review on the refreshed
+// claim carries the submitted verdict + summary AND its basis is still
+// current — a stale-basis no-op leaves the old, stale review in place,
+// which this refuses to call success.
+export function reviewOutcomeConfirmed(item, memberId, verdict, summary) {
+  const review = (item?.reviews ?? []).find(entry => entry?.memberId === memberId);
+  return Boolean(review && review.verdict === verdict && review.summary === summary && basisCurrent(review, item));
 }
 
 // Review controls for a claim card. Every label comes from the strings
@@ -321,15 +426,212 @@ export function claimReviewForm(item) {
   ].join("");
 }
 
-function workLink(item, workItems, key, label) {
-  const linked = typeof item?.workItemId === "string" && Object.hasOwn(workItems ?? {}, item.workItemId) && workItems[item.workItemId]?.id === item.workItemId;
-  return linked ? `<a href="#pr-record/work/${encodeURIComponent(item.workItemId)}" data-open-work="${escapeHtml(item.workItemId)}" data-focus-key="${escapeHtml(key)}">${escapeHtml(label)}</a>` : escapeHtml(label);
+// Operation identity for the board's lifecycle POSTs (#3829): an update
+// carrying a requestId records its outcome server-side, and the identical
+// retry replays that outcome instead of applying twice. The id is derived
+// from the operation itself — claim, delivery round, actor — so a retry of
+// the same click re-sends the same id, while a new round or a different
+// actor is a new operation with a new id. Sanitized to the route's
+// requestId shape.
+//
+// B4/H2: the round is bound explicitly, not only through
+// deliveryGeneration. A release resets the generation to 0, so a
+// same-owner re-claim used to derive the IDENTICAL deliver id as round 1
+// and the kernel replayed round 1's recorded outcome — the round-2
+// delivery was silently swallowed (identical bundle) or refused as a
+// conflict (changed bundle). The id now carries a fingerprint of the
+// round basis (claimedAt + lifetime history length, the same basis the
+// release/reassign posts bind), which every new round changes. The
+// kernel also clears recorded outcomes when a round ends, so the two
+// fixes are independent locks on the same door.
+// Two independent 32-bit string hashes combined into 16 hex chars: not a
+// security digest, just a stable fingerprint a browser can compute
+// synchronously for id derivation.
+const fingerprint = value => {
+  const text = String(value ?? "");
+  let h1 = 0x811c9dc5, h2 = 5381;
+  for (let index = 0; index < text.length; index++) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 0x01000193) >>> 0;
+    h2 = (Math.imul(h2, 33) ^ code) >>> 0;
+  }
+  return [h1.toString(16).padStart(8, "0"), h2.toString(16).padStart(8, "0")].join("");
+};
+// Parts were truncated to 40 chars, so two ids sharing a 40-char prefix
+// collided into one operation. A long part now keeps a readable prefix
+// plus a fingerprint of the FULL value, so distinct values stay distinct.
+const requestIdPart = value => {
+  const clean = String(value ?? "").replace(/[^A-Za-z0-9_-]/g, "-");
+  return clean.length <= 40 ? clean : [clean.slice(0, 23), fingerprint(clean)].join("-");
+};
+const historyLengthOf = item => (Array.isArray(item?.history) ? item.history.length : 0) + (Number(item?.historyOmitted) || 0);
+const roundPart = item => fingerprint([item?.claimedAt ?? "", historyLengthOf(item)].join("|"));
+export function verifyRequestId(item, memberId) {
+  return ["verify", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
+}
+const deliverRequestId = (item, memberId) =>
+  ["deliver", requestIdPart(item?.id), String(item?.deliveryGeneration ?? 0), roundPart(item), requestIdPart(memberId)].join("-");
+
+// The round basis a first Verify/Deliver submission is fenced by (H3):
+// the kernel's existing preconditions, computed exactly as the board's
+// release/reassign posts compute them, so a stale form held across a
+// release + re-claim is refused as a conflict instead of replaying into
+// the new round. Only a claimed round carries a basis worth posting.
+const roundBasis = item => typeof item?.claimedAt === "string"
+  ? { expectedClaimedAt: item.claimedAt, expectedHistoryLength: historyLengthOf(item) }
+  : {};
+
+// The reviewer's verify as a pure body, so the requestId wiring is
+// unit-testable at this boundary (the newItemCreateBody precedent). Before
+// this the board posted { state: "done" } alone: no operation identity, so
+// a lost response could only be retried as a brand-new update against a
+// claim that was already done.
+export function claimVerifyBody(item, memberId) {
+  return { state: "done", requestId: verifyRequestId(item, memberId), ...roundBasis(item) };
 }
 
-function claimReference(id, byId, workItems, key) {
+const DELIVERY_CHECK_RESULTS = ["pass", "fail", "error", "skipped"];
+const CHECK_RESULT_KEYS = { pass: "board.deliver.result.pass", fail: "board.deliver.result.fail",
+  error: "board.deliver.result.error", skipped: "board.deliver.result.skipped" };
+const CRITERION_STATUS_KEYS = { met: "board.deliver.criterion.met", not_met: "board.deliver.criterion.not_met",
+  na: "board.deliver.criterion.na" };
+
+// Delivery controls for a claim card (#3547): under a reviewed policy the
+// finish must carry the delivery bundle — { artifact, checks, criteria },
+// the kernel's own shape — or the kernel refuses it delivery_incomplete.
+// The form composes exactly that bundle from the holder's input, prefilled
+// with what the claim already carries: the linked PR as the artifact
+// reference, and the stored bundle itself on a re-delivery, so reusing a
+// valid bundle is one submit. Labels come from the strings catalog, like
+// claimReviewForm; criterion texts are claim data, escaped as values.
+export function claimDeliverForm(item) {
+  const id = escapeHtml(item.id);
+  const pulls = Array.isArray(item.pullRequests) && item.pullRequests.length ? item.pullRequests
+    : (item.pullRequest?.url ? [item.pullRequest] : []);
+  const artifact = item.delivery?.artifact ?? null;
+  const kind = artifact?.kind ?? (pulls.length ? "pull_request" : "");
+  const ref = artifact?.ref ?? pulls[0]?.url ?? "";
+  const sha = artifact?.sha256 ?? "";
+  const checks = Array.isArray(item.delivery?.checks) && item.delivery.checks.length ? item.delivery.checks : [null];
+  // Composed like claimReviewForm — array pieces and complete-tag literals
+  // with at most one interpolation each — so the i18n harness sees no
+  // sentence building. Repeated rows share one field name; the body
+  // builder reads them back in order with getAll.
+  const option = (value, selected, label) => ["<option value=\"", value, "\"",
+    selected ? " selected" : "", ">", label, "</option>"].join("");
+  const parts = [
+    `<form class="board-new" data-claim-deliver="${id}">`,
+    "<span class=\"form-hint\">", uiText("board.deliver.legend"), "</span>",
+    "<label>", uiText("board.deliver.artifact.kind"),
+    ` <input name="artifactKind" required maxlength="64" autocomplete="off" value="${escapeHtml(kind)}">`, "</label>",
+    "<label>", uiText("board.deliver.artifact.ref"),
+    ` <input name="artifactRef" required maxlength="512" autocomplete="off" value="${escapeHtml(ref)}">`, "</label>",
+    "<label>", uiText("board.deliver.artifact.sha256"),
+    ` <input name="artifactSha256" required maxlength="71" autocomplete="off" value="${escapeHtml(sha)}">`, "</label>",
+  ];
+  checks.forEach(entry => {
+    parts.push("<label>", uiText("board.deliver.check.name"),
+      ` <input name="checkName" required maxlength="200" autocomplete="off" value="${escapeHtml(entry?.name ?? "")}">`, "</label>",
+      "<label>", uiText("board.deliver.check.result"), " <select name=\"checkResult\">",
+      ...DELIVERY_CHECK_RESULTS.map(result => option(result, entry?.result === result, uiText(CHECK_RESULT_KEYS[result]))),
+      "</select>", "</label>");
+  });
+  const criteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
+  if (criteria.length) {
+    const mappedStatus = new Map((Array.isArray(item.delivery?.criteria) ? item.delivery.criteria : [])
+      .map(entry => [entry?.criterion, entry?.status]));
+    parts.push("<span class=\"form-hint\">", uiText("board.deliver.criteria.legend"), "</span>");
+    criteria.forEach(criterion => {
+      const selected = mappedStatus.get(criterion) ?? "met";
+      parts.push("<label>", escapeHtml(criterion), " <select name=\"criterion\">",
+        ...Object.keys(CRITERION_STATUS_KEYS).map(status => option(status, selected === status, uiText(CRITERION_STATUS_KEYS[status]))),
+        "</select>", "</label>");
+    });
+  }
+  parts.push("<button type=\"submit\" class=\"button primary\">", uiText("board.action.deliver"), "</button>", "</form>");
+  return parts.join("");
+}
+
+// The deliver POST body, composed from the form's fields — pure, so the
+// bundle wiring is unit-testable at this boundary. It mirrors the kernel's
+// shape bounds (deliveryOf / requireBundleComplete in work-claims.mjs) and
+// returns null when the fields cannot form a bundle the kernel accepts,
+// so the board refuses locally with the reason instead of posting a
+// refusal. Policy refusals the kernel owns (a failing check, say) still
+// surface from the server, which names them.
+export function claimDeliverBody(item, data, memberId) {
+  const field = name => String(data?.get(name) ?? "").trim();
+  const kind = field("artifactKind"), ref = field("artifactRef");
+  const sha256 = field("artifactSha256").replace(/^sha256:/, "");
+  if (!kind || kind.length > 64 || !ref || ref.length > 512 || !/^[0-9a-f]{64}$/.test(sha256)) return null;
+  const all = name => (typeof data?.getAll === "function" ? data.getAll(name) : [])
+    .map(value => String(value ?? "").trim());
+  const checkNames = all("checkName"), checkResults = all("checkResult");
+  const checks = [];
+  for (let index = 0; index < checkNames.length; index++) {
+    const name = checkNames[index], result = checkResults[index] ?? "";
+    if (!name || name.length > 200 || !DELIVERY_CHECK_RESULTS.includes(result)) return null;
+    checks.push({ name, result });
+  }
+  if (!checks.length) return null;
+  const statuses = all("criterion");
+  const criteria = [];
+  const wanted = Array.isArray(item?.acceptanceCriteria) ? item.acceptanceCriteria : [];
+  for (let index = 0; index < wanted.length; index++) {
+    const status = statuses[index] ?? "";
+    if (!Object.hasOwn(CRITERION_STATUS_KEYS, status)) return null;
+    criteria.push({ criterion: wanted[index], status });
+  }
+  return { state: "delivered",
+    delivery: { artifact: { kind, ref, sha256 }, checks, criteria },
+    requestId: deliverRequestId(item, memberId), ...roundBasis(item) };
+}
+
+// H4 readback for the Deliver submit: the refreshed claim confirms the
+// delivery only when it is actually delivered, by this member, carrying
+// the submitted bundle. The kernel's delivery digest is a pure function
+// of exactly { artifact, checks, criteria } (deliveryDigest in
+// work-claims.mjs), so field equality with the submitted bundle is
+// equality with the submitted bundle's digest — a claim delivered with
+// any other bundle does not confirm this submit.
+export function deliverOutcomeConfirmed(item, body, memberId) {
+  if (!item || item.state !== "delivered" || !item.delivery || !body?.delivery) return false;
+  if (item.delivery.deliveredBy !== memberId) return false;
+  const same = (left, right) => JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+  return same(item.delivery.artifact, body.delivery.artifact)
+    && same(item.delivery.checks, body.delivery.checks)
+    && same(item.delivery.criteria, body.delivery.criteria);
+}
+
+// One anchor literal for both record targets, so the board's link shape
+// (and its i18n-harness footprint) stays exactly the one the legacy link
+// already had; claim links differ only by the prebuilt marker attribute.
+function recordAnchor(id, key, label, claimAttr) {
+  return `<a href="#pr-record/work/${encodeURIComponent(id)}" data-open-work="${escapeHtml(id)}"${claimAttr} data-focus-key="${escapeHtml(key)}">${escapeHtml(label)}</a>`;
+}
+
+function workLink(item, workItems, key, label, { claimRecord = false } = {}) {
+  const linked = typeof item?.workItemId === "string" && Object.hasOwn(workItems ?? {}, item.workItemId) && workItems[item.workItemId]?.id === item.workItemId;
+  if (linked) return recordAnchor(item.workItemId, key, label, "");
+  // #3795: a board-native claim has no legacy work item behind it (the
+  // post-migration norm), so it opens its OWN record — the card's record
+  // disclosure — through the same #pr-record/work route and data-open-work
+  // dispatch conversation records use. data-open-claim marks the target as
+  // a claim so the app routes it to the board instead of the workItems
+  // timeline. Callers pass claimRecord only when the claim's card is on
+  // the board (a title always is; a reference only when its target is
+  // placed) — a claim the board does not show keeps the plain-text label
+  // instead of a link whose reveal would honestly fail.
+  if (claimRecord && item && typeof item.id === "string" && typeof item.state === "string") {
+    return recordAnchor(item.id, key, label, ` data-open-claim="${escapeHtml(item.id)}"`);
+  }
+  return escapeHtml(label);
+}
+
+function claimReference(id, byId, workItems, key, now) {
   const target = byId.get(id);
   const label = target?.title ? `${target.title} (#${id})` : `#${id}`;
-  return workLink(target, workItems, key, label);
+  return workLink(target, workItems, key, label, { claimRecord: Boolean(target && columnOf(target, byId, now)) });
 }
 
 function canLinkPullRequest(item, viewer, now) {
@@ -340,14 +642,74 @@ function canLinkPullRequest(item, viewer, now) {
 
 function reviewLabel(review, item) {
   if (review.verdict !== "approve") return String(review.verdict ?? "").replaceAll("_", " ");
-  const basis = review.basis;
-  const current = basis?.version === 1 && basis.owner === item.owner && basis.claimedAt === item.claimedAt
-    && basis.revision === (item.revision ?? null) && basis.headSha === (item.ci?.headSha ?? null);
   const attested = (item.attestations ?? []).some(entry => entry.memberId === review.memberId && entry.at === review.at);
-  return current && attested ? "approve" : "previous approval · does not qualify for current work";
+  return basisCurrent(review, item) && attested ? "approve" : "previous approval · does not qualify for current work";
 }
 
-function cardHtml(item, viewer, members, now, workItems, byId) {
+// The claim's record (#3795): the fields the card summary leaves out —
+// acceptance criteria, evidence, the frozen delivery bundle, the
+// verification fact and the history the board read carries — rendered as a
+// disclosure on the card itself, from the same claim object the list
+// already returned. One record model: this is a view of the claim, not a
+// second projection. History arrives newest-first and truncated by the
+// list read; the omitted count is disclosed rather than silently dropped.
+// Composed like claimReviewForm — array pieces, each literal a complete tag
+// or a lone catalog string — so the i18n harness sees no new hardcoded copy.
+function claimRecordHtml(item, members) {
+  const parts = [];
+  const section = (labelKey, body) => ["<p class=\"claim-record-label\">", uiText(labelKey), "</p>", body].join("");
+  const listOf = values => ["<ul>", values.map(value => ["<li>", escapeHtml(value), "</li>"].join("")).join(""), "</ul>"].join("");
+  const criteria = Array.isArray(item.acceptanceCriteria) ? item.acceptanceCriteria : [];
+  if (criteria.length) parts.push(section("board.record.criteria", listOf(criteria)));
+  const evidence = Array.isArray(item.evidenceRefs) ? item.evidenceRefs : [];
+  if (evidence.length) parts.push(section("board.record.evidence", listOf(evidence)));
+  if (item.delivery) {
+    // The kernel's frozen bundle (#3547): { artifact, checks, criteria }
+    // plus digest / deliveredBy / deliveredAt (deliveryOf in
+    // work-claims.mjs). Render exactly those fields — an earlier version
+    // read result / merged / production, which no delivery carries, so
+    // the real evidence never reached the record.
+    const delivery = item.delivery;
+    const rows = [];
+    if (delivery.artifact) {
+      const artifact = delivery.artifact;
+      const line = [artifact.kind, artifact.ref, artifact.sha256 ? `sha256:${artifact.sha256}` : ""]
+        .filter(value => typeof value === "string" && value).join(" · ");
+      if (line) rows.push(["<p>", escapeHtml(line), "</p>"].join(""));
+    }
+    const checks = Array.isArray(delivery.checks) ? delivery.checks : [];
+    if (checks.length) rows.push(listOf(checks.map(entry => [entry?.name, entry?.result, entry?.command]
+      .filter(value => typeof value === "string" && value).join(" — "))));
+    const mapped = Array.isArray(delivery.criteria) ? delivery.criteria : [];
+    if (mapped.length) rows.push(listOf(mapped.map(entry => [entry?.criterion, entry?.status]
+      .filter(value => typeof value === "string" && value).join(" — ")
+      + (typeof entry?.evidenceRef === "string" && entry.evidenceRef ? ` · ${entry.evidenceRef}` : ""))));
+    const by = delivery.deliveredBy ? memberName(members, delivery.deliveredBy) || delivery.deliveredBy : "";
+    const line = [by, delivery.deliveredAt ?? ""].filter(Boolean).join(" · ");
+    if (line) rows.push(["<p>", escapeHtml(line), "</p>"].join(""));
+    if (rows.length) parts.push(section("board.record.delivery", rows.join("")));
+  }
+  if (item.verification) {
+    const by = item.verification.by ? memberName(members, item.verification.by) || item.verification.by : "";
+    const line = [item.verification.state ?? "", by, item.verification.at ?? ""].filter(Boolean).join(" · ");
+    parts.push(section("board.record.verification", ["<p>", escapeHtml(line), "</p>"].join("")));
+  }
+  const history = Array.isArray(item.history) ? item.history : [];
+  const omitted = Number(item.historyOmitted) || 0;
+  if (history.length || omitted > 0) {
+    const rows = history.map(entry => ["<li>", escapeHtml(entry?.action ?? ""),
+      entry?.agentId ? [" · ", escapeHtml(memberName(members, entry.agentId) || entry.agentId)].join("") : "",
+      entry?.note ? [" — ", escapeHtml(entry.note)].join("") : "", "</li>"].join("")).join("");
+    const note = omitted > 0
+      ? ["<p class=\"form-hint\">", escapeHtml(uiText("board.record.history.omitted", { count: omitted })), "</p>"].join("")
+      : "";
+    parts.push(section("board.record.history", [rows ? ["<ul>", rows, "</ul>"].join("") : "", note].join("")));
+  }
+  if (!parts.length) return "";
+  return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
+}
+
+function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
   const mine = Boolean(viewer.id && ownerId === viewer.id);
@@ -371,7 +733,7 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
     ? `<p class="claim-repo">${escapeHtml([item.repo, item.branch].filter(Boolean).join("@"))}</p>`
     : "";
   const chain = Array.isArray(item.chain) ? item.chain : [];
-  const links = chain.map((link, index) => `<li>${escapeHtml(link.kind)} → ${claimReference(link.targetId, byId, workItems, `claim-chain:${item.id}:${index}`)}${link.note ? ` · ${escapeHtml(link.note)}` : ""}</li>`).join("");
+  const links = chain.map((link, index) => `<li>${escapeHtml(link.kind)} → ${claimReference(link.targetId, byId, workItems, `claim-chain:${item.id}:${index}`, now)}${link.note ? ` · ${escapeHtml(link.note)}` : ""}</li>`).join("");
   const reviews = Array.isArray(item.reviews) && item.reviews.length
     ? `<ul class="claim-reviews">${item.reviews.map(review => `<li>${escapeHtml(memberName(members, review.memberId) || review.memberId)} ${escapeHtml(reviewLabel(review, item))}</li>`).join("")}</ul>`
     : "";
@@ -385,22 +747,58 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
       : target.state === "done" ? "Completed"
       : target.state === "unclaimed" && !target.owner ? "Unclaimed; needs an owner"
       : ({ claimed: "Claimed", in_progress: "In progress", blocked: "Blocked" }[target.state] ?? "Status unknown");
-    const reference = claimReference(id, byId, workItems, `claim-dependency:${item.id}:${index}`);
+    const reference = claimReference(id, byId, workItems, `claim-dependency:${item.id}:${index}`, now);
     return `<li>${target?.state === "done" ? "Prerequisite" : "Waiting for"} ${reference} · ${escapeHtml(status)}</li>`;
   }).join("");
   const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
   const actions = [];
+  if (item.workItemId) {
+    const work = workItems?.[item.workItemId];
+    actions.push(workLink(item, workItems, `work-acceptance:${item.id}`, work ? workStatus(work, now).label : item.title || item.id));
+  }
   if (canLinkPullRequest(item, viewer, now)) {
     actions.push(`<form class="board-new" data-claim-link-pr="${escapeHtml(item.id)}"><label>Pull request URL <input name="pullRequest" type="url" size="1" maxlength="300" required autocomplete="off" placeholder="https://github.com/…/pull/…" aria-label="Pull request URL for ${escapeHtml(item.title || item.id)}" data-focus-key="link-pr:${escapeHtml(item.id)}"></label><button type="submit" class="button secondary">Link PR</button></form>`);
   }
   // VERIFY step: the board used to render no review control at all — "What
   // needs me › Review" only scrolled to the card (dead end). Eligible
   // reviewers now get the verdict form right on the card.
-  if (canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
+  if (!item.workItemId && canReviewClaim(item, viewer, members)) actions.push(claimReviewForm(item));
+  // The delivered end of the lifecycle (#3795/#3754): a reviewer whose
+  // approval is still current against the delivered bundle verifies it to
+  // done from the same card. The update route re-runs canCloseWork on POST;
+  // this only renders the control when the claim could actually close for
+  // this viewer — policy-aware since B4 (#3885/#3887, canVerifyFromBoard).
+  if (!item.workItemId && canVerifyFromBoard(item, viewer, members, roomPolicy)) {
+    actions.push(button("verify", uiText("board.action.verify"), "primary"));
+  }
+  // H1 (#3888): the send-back control. After a changes_requested review
+  // the delivered claim used to sit with Close as the holder's only
+  // offered exit; the route-authorized actors (owner, claim manager,
+  // that reviewer) now get the delivered -> in_progress transition.
+  if (!item.workItemId && canSendBackClaim(item, viewer, members)) {
+    actions.push(button("sendback", uiText("board.action.sendback"), "secondary"));
+  }
   if (item.state === "unclaimed" && !item.owner && !waiting) actions.push(button("claim", "Claim", "primary"));
   if (mine && ["claimed", "in_progress", "blocked"].includes(item.state)) actions.push(button("renew", "Renew", "secondary"));
   if (mine && (item.state === "claimed" || item.state === "blocked")) actions.push(button("progress", "Mark in progress", "secondary"));
-  if (mine && item.state === "in_progress") actions.push(button("done", "Done", "primary"));
+  if (!item.workItemId && mine && item.state === "in_progress") {
+    // Under a reviewed policy the single-step finish is refused
+    // (work_not_delivered): the holder finishes to delivered with the
+    // delivery bundle, and the reviewer verifies from there — so the card
+    // offers the step the policy actually accepts. The step is the deliver
+    // form, not a bare button: a first finish without the bundle is
+    // refused delivery_incomplete, so the form composes it.
+    const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
+    // H5 (#3886): under self_attested a criteria-bearing claim's bare
+    // Done is a guaranteed refusal — the kernel's finish requires a
+    // first delivery bundle whenever criteria exist — so the card
+    // offers the bundle-carrying deliver form for exactly that class;
+    // the claim then completes from delivered via the owner-verify
+    // control (#3887). Criteria-free self-attested claims keep Done.
+    if (policy === "self_attested" && !(Array.isArray(item.acceptanceCriteria) && item.acceptanceCriteria.length)) {
+      actions.push(button("done", "Done", "primary"));
+    } else actions.push(claimDeliverForm(item));
+  }
   if (viewer.manage && ownerId && item.state !== "done" && item.state !== "unclaimed") {
     actions.push(button("release", "Release", "secondary"));
     const options = Object.values(members ?? {}).filter(member => member && member.active !== false && member.id !== ownerId)
@@ -415,8 +813,9 @@ function cardHtml(item, viewer, members, now, workItems, byId) {
     if (viewer.manage || mine) actions.push(button("close", "Close", "secondary"));
     else if (opener) actions.push(button("cancel", "Cancel", "secondary"));
   }
-  const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}<div class="claim-actions">${actions.join("")}</div></article>`;
+  const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id, { claimRecord: true });
+  const record = claimRecordHtml(item, members);
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
@@ -450,6 +849,9 @@ const PENDING_OUTCOME_KEYS = {
   renew: "board.action.pending.renew",
   progress: "board.action.pending.progress",
   done: "board.action.pending.done",
+  deliver: "board.action.pending.deliver",
+  verify: "board.action.pending.verify",
+  sendback: "board.action.pending.sendback",
   release: "board.action.pending.release",
   close: "board.action.pending.close",
   cancel: "board.action.pending.cancel",
@@ -476,7 +878,7 @@ function filterBarHtml(filter = {}) {
   });
 }
 
-export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {} } = {}) {
+export function boardHtml(items, status, viewer, members, now, { older = false, canWrite = false, capabilities = [], cap = 20, workItems = {}, loading = false, loadError = false, filter = {}, reviewPolicy = null } = {}) {
   const all = Array.isArray(items) ? items : [];
   const visible = filterClaims(all, filter, viewer?.id, members);
   // The filter narrows display only: placement and dependency status are
@@ -498,7 +900,7 @@ export function boardHtml(items, status, viewer, members, now, { older = false, 
   const colEmpty = filterActive(filter) ? uiText("board.filter.column.empty") : "Nothing here.";
   // The section literal below is verbatim the board's original column markup:
   // it stays one grandfathered i18n literal instead of growing the ratchet.
-  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
+  const columnSections = COLUMNS.map(([id, label]) => `<section aria-labelledby="board-col-${id}"><h3 id="board-col-${id}">${label}${id === "blocked" && waitingCount ? ` · ${waitingCount} waiting` : ""}</h3>${columns[id].map(item => cardHtml(item, viewer, members, now, workItems, byId, reviewPolicy)).join("") || `<p class="form-hint">${colEmpty}</p>`}</section>`).join("");
   const columnsHtml = `<div class="board-columns">${columnSections}</div>`;
   // The filter bar rides above the board content; BU-02's loading states keep
   // precedence — skeleton while the first read is in flight, the error (not
@@ -559,10 +961,11 @@ function filesFromField(value) {
 
 export function installWorkBoard({ client, getState, getSession }) {
   const root = document.querySelector("#work-board");
-  if (!root) return { sync() {}, reset() {}, async whenReady() { return false; } };
+  if (!root) return { sync() {}, reset() {}, async whenReady() { return false; }, async revealClaim() { return false; } };
   let items = [];
   let status = null;
   let cap = 20;
+  let reviewPolicy = null;
   let older = false;
   let seen = null;
   let loadedRoom = null;
@@ -596,7 +999,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     pendingStatus = "";
     root.innerHTML = boardHtml(items, status, viewerOf(state, session), state?.members ?? {}, Date.now(), {
       older, canWrite: canWriteClaims(state, session), capabilities: advertisedCapabilities(state), cap, workItems: state?.workItems ?? {},
-      loading: boardLoading, loadError: boardLoadError, filter
+      loading: boardLoading, loadError: boardLoadError, filter, reviewPolicy
     });
     // This control's markup comes from the shared strings catalog.
     root.querySelector('[data-board-filter] [name="mine"]')?.setAttribute("data-focus-key", "board-filter-mine");
@@ -642,6 +1045,9 @@ export function installWorkBoard({ client, getState, getSession }) {
     if (action === "renew") return `Renewed '${title}'`;
     if (action === "progress") return `Marked '${title}' in progress`;
     if (action === "done") return `Done '${title}'`;
+    if (action === "deliver") return uiText("board.action.outcome.deliver", { title });
+    if (action === "verify") return uiText("board.action.outcome.verify", { title });
+    if (action === "sendback") return uiText("board.action.outcome.sendback", { title });
     if (action === "release") return `Released '${title}'`;
     if (action === "close" || action === "cancel") return uiText(action === "close" ? "board.claim.closed" : "board.claim.cancelled", { title });
     if (action === "reassign") return `Reassigned '${title}'`;
@@ -676,6 +1082,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       older = page.older;
       status = live;
       cap = config?.maxMemberOpenClaims ?? cap;
+      reviewPolicy = config?.reviewPolicy ?? reviewPolicy;
       loadedRoom = session.roomId;
       seen = mark;
       boardLoading = false;
@@ -699,7 +1106,7 @@ export function installWorkBoard({ client, getState, getSession }) {
     }
   }
 
-  async function act(run, focus, reconcile = null) {
+  async function act(run, focus, reconcile = null, unconfirmed = "Could not confirm the PR link. Refresh the board before trying again.") {
     const owned = context();
     if (!owned || loadedContext !== owned || mutating) return;
     const mine = ++operation;
@@ -716,7 +1123,7 @@ export function installWorkBoard({ client, getState, getSession }) {
       // Keep duplicate mutations excluded until their new state is visible.
       const refreshed = await load({ force: true, focus });
       if (reconcile && actionFlight === pending && context() === owned) {
-        note(refreshed ? reconcile(null) : "Could not confirm the PR link. Refresh the board before trying again.");
+        note(refreshed ? reconcile(null) : unconfirmed);
       }
     } catch (error) {
       if (mine !== operation || context() !== owned) return;
@@ -724,7 +1131,7 @@ export function installWorkBoard({ client, getState, getSession }) {
         note("Checking the current claim…");
         const refreshed = await load({ force: true, focus });
         if (actionFlight === pending && context() === owned) {
-          note(refreshed ? reconcile(error) : "Could not confirm the PR link. Refresh the board before trying again.");
+          note(refreshed ? reconcile(error) : unconfirmed);
         }
       } else {
         pendingFocus = null;
@@ -740,10 +1147,13 @@ export function installWorkBoard({ client, getState, getSession }) {
   // aria-busy so the board never looks frozen mid-request. paint() removes
   // the node on success; if it survives (failed action, no repaint) it is
   // re-enabled here.
-  function flyButton(button, run, focus) {
+  function flyButton(button, run, focus, reconcile = null, unconfirmed = undefined) {
+    // Disabling the focused control moves focus to body. Preserve this
+    // action before the loading paint can restore an older navigation link.
+    stick = { key: focus?.key ?? null, id: focus?.id ?? null, status: stick?.status ?? "" };
     button.disabled = true;
     button.setAttribute("aria-busy", "true");
-    act(run, focus).finally(() => {
+    act(run, focus, reconcile, unconfirmed).finally(() => {
       if (root.contains(button)) { button.disabled = false; button.removeAttribute("aria-busy"); }
     });
   }
@@ -800,16 +1210,61 @@ export function installWorkBoard({ client, getState, getSession }) {
     else if (action === "close" || action === "cancel") flyButton(button, () => client.request([path, action].join("/"), { method: "POST", data: {} }), focus);
     else if (action === "progress") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "in_progress" } }), focus);
     else if (action === "done") flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: { state: "done" } }), focus);
+    // The reviewed-policy lifecycle from the card: the holder's finish is
+    // the deliver form's submit (below); the reviewer's verify is this
+    // update to done, gated server-side by their recorded approval. The
+    // verify carries its operation identity (#3829): the requestId is
+    // derived from the claim, the delivery round and the reviewer, so a
+    // retry after a lost response replays the landed outcome — bound
+    // server-side to this reviewer — instead of applying twice or
+    // erroring on the completed claim. The reconcile is the readback: on
+    // any failure the board reloads and reports what the claim shows.
+    else if (action === "verify") {
+      const item = items.find(entry => entry.id === id);
+      const me = viewerOf(getState(), getSession()).id;
+      const title = titleOf(id);
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (current?.state === "done") {
+          return current.verification?.by === me
+            ? uiText("board.action.outcome.verify", { title })
+            : uiText("board.action.verify.already", { title });
+        }
+        return error?.message || uiText("board.action.verify.unconfirmed", { title });
+      };
+      flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: claimVerifyBody(item, me) }), focus, reconcile,
+        uiText("board.action.verify.unconfirmed", { title }));
+    }
+    // H1 (#3888): the send-back, with the Verify treatment — the same
+    // reconcile shape, announcing success only when the refreshed claim
+    // is actually back in progress (its verification fact names the
+    // send-back when this actor took it).
+    else if (action === "sendback") {
+      const item = items.find(entry => entry.id === id);
+      const me = viewerOf(getState(), getSession()).id;
+      const title = titleOf(id);
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (current?.state === "in_progress") {
+          return current.verification?.by === me
+            ? uiText("board.action.outcome.sendback", { title })
+            : uiText("board.action.sendback.already", { title });
+        }
+        return error?.message || uiText("board.action.sendback.unconfirmed", { title });
+      };
+      flyButton(button, () => client.request(`${path}/update`, { method: "POST", data: claimSendBackBody(item, me) }), focus, reconcile,
+        uiText("board.action.sendback.unconfirmed", { title }));
+    }
     else if (action === "renew") {
       flyButton(button, () => client.request(`${path}/renew`, { method: "POST", data: {} }), focus);
     }
   });
   // Same in-flight treatment for form submits (BU-02): disable the submit
   // button with aria-busy; restore it only if the node survives the repaint.
-  function flySubmit(form, run, focus) {
+  function flySubmit(form, run, focus, reconcile = null, unconfirmed = undefined) {
     const submit = form.querySelector("button[type=submit]");
     if (submit) { submit.disabled = true; submit.setAttribute("aria-busy", "true"); }
-    act(run, focus).finally(() => {
+    act(run, focus, reconcile, unconfirmed).finally(() => {
       if (submit && root.contains(submit)) { submit.disabled = false; submit.removeAttribute("aria-busy"); }
     });
   }
@@ -859,6 +1314,35 @@ export function installWorkBoard({ client, getState, getSession }) {
       });
       return;
     }
+    const deliver = event.target.closest("[data-claim-deliver]");
+    if (deliver && root.contains(deliver)) {
+      event.preventDefault();
+      if (mutating) return;
+      const id = deliver.dataset.claimDeliver;
+      const viewer = viewerOf(getState(), getSession());
+      const item = items.find(entry => entry.id === id);
+      if (!item || item.owner !== viewer.id || item.state !== "in_progress") return;
+      const body = claimDeliverBody(item, new FormData(deliver), viewer.id);
+      if (!body) { note(uiText("board.deliver.invalid")); return; }
+      const title = item.title || id;
+      // H4: the Deliver submit gets the Verify treatment — success is
+      // announced only when the refreshed claim is actually delivered
+      // with the submitted bundle (deliverOutcomeConfirmed). A replayed
+      // or lost response that left the claim undelivered reports
+      // unconfirmed instead of the canned "Delivered" text.
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (deliverOutcomeConfirmed(current, body, viewer.id)) {
+          return uiText("board.action.outcome.deliver", { title });
+        }
+        return error?.message || uiText("board.action.deliver.unconfirmed", { title });
+      };
+      flySubmit(deliver,
+        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/update`), { method: "POST", data: body }),
+        { id, key: `deliver:${id}`, status: uiText("board.action.outcome.deliver", { title }), pending: uiText("board.action.pending.deliver", { title }) },
+        reconcile, uiText("board.action.deliver.unconfirmed", { title }));
+      return;
+    }
     const review = event.target.closest("[data-claim-review]");
     if (review && root.contains(review)) {
       event.preventDefault();
@@ -875,9 +1359,22 @@ export function installWorkBoard({ client, getState, getSession }) {
         return;
       }
       const title = item.title || id;
+      // #3889: name the basis read (claimReviewBody) and reconcile the
+      // announcement — "Reviewed" only when the refreshed claim carries
+      // this review standing on the current basis; a stale-basis no-op
+      // (200, item unchanged) reports unconfirmed instead.
+      const me = viewerOf(state, getSession()).id;
+      const reconcile = error => {
+        const current = items.find(entry => entry.id === id);
+        if (reviewOutcomeConfirmed(current, me, verdict, summary)) {
+          return uiText("board.review.done", { title });
+        }
+        return error?.message || uiText("board.review.unconfirmed", { title });
+      };
       flySubmit(review,
-        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: { verdict, summary } }),
-        { id, key: `review:${id}`, status: uiText("board.review.done", { title }), pending: uiText("board.review.pending") });
+        () => client.request(client.path(`/work-claims/${encodeURIComponent(id)}/review`), { method: "POST", data: claimReviewBody(item, verdict, summary) }),
+        { id, key: `review:${id}`, status: uiText("board.review.done", { title }), pending: uiText("board.review.pending") },
+        reconcile, uiText("board.review.unconfirmed", { title }));
       return;
     }
     const created = event.target.closest("#board-new-item");
@@ -917,6 +1414,35 @@ export function installWorkBoard({ client, getState, getSession }) {
 
   return {
     sync() { void load(); },
+    // #3795: bring one claim's card into view with its record open — the
+    // destination of the card-title record link, the needs-attention Review
+    // anchor, and #pr-record/work/<claimId> deep links. Loads on demand and
+    // clears an active filter once if it hides the card. Returns false when
+    // the claim is not on this board (unknown id, or a state the board does
+    // not place) so the caller can say so honestly instead of stranding the
+    // user on a board that does not contain what they opened.
+    async revealClaim(id) {
+      const owned = context();
+      if (!owned || typeof id !== "string" || !id) return false;
+      if (!items.some(item => item.id === id)) {
+        if (readFlight) { try { await readFlight; } catch { /* load() below reports */ } }
+        if (context() !== owned) return false;
+        if (!items.some(item => item.id === id)) await load({ force: true });
+        if (context() !== owned) return false;
+      }
+      let card = root.querySelector(`article[data-claim-id="${CSS.escape(id)}"]`);
+      if (!card && filterActive(filter)) {
+        filter = { q: "", mine: false };
+        paint();
+        card = root.querySelector(`article[data-claim-id="${CSS.escape(id)}"]`);
+      }
+      if (!card) return false;
+      const record = card.querySelector(`details[data-claim-record="${CSS.escape(id)}"]`);
+      if (record) record.open = true;
+      card.scrollIntoView({ block: "center" });
+      (card.querySelector("h4 a") ?? card.querySelector("h4"))?.focus({ preventScroll: true });
+      return true;
+    },
     async whenReady() {
       const owned = context();
       if (!owned) return false;
@@ -928,6 +1454,6 @@ export function installWorkBoard({ client, getState, getSession }) {
       } catch { return false; }
       return context() === owned && loadedContext === owned && loadedRoom === getSession()?.roomId;
     },
-    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; if (root.isConnected) root.replaceChildren(); }
+    reset() { operation++; mutating = false; readFlight = null; actionFlight = null; boardLoading = false; boardLoadError = false; loadedContext = null; items = []; status = null; cap = 20; reviewPolicy = null; older = false; seen = null; loadedRoom = null; pendingFocus = null; pendingStatus = ""; stick = null; filter = { q: "", mine: false }; pendingCaret = null; if (root.isConnected) root.replaceChildren(); }
   };
 }
