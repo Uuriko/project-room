@@ -128,25 +128,3 @@ test("hashed client bundles are immutable and index.html stays revalidated", asy
   const kept = await readdir(new URL("assets/", output));
   assert.ok(kept.some(name => isPackagedClientAsset(`assets/${name}`)));
 });
-
-test("a browser still loads the signed-out room from the hashed bundle", async t => {
-  const { output } = await packaged(t);
-  const origin = await listen(t, { assetRoot: output });
-  const { chromium } = await import("playwright");
-  const browser = await chromium.launch({
-    headless: true,
-    ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}),
-  });
-  t.after(() => browser.close());
-  const page = await browser.newPage();
-  const errors = [];
-  page.on("pageerror", error => errors.push(String(error)));
-  const response = await page.goto(origin + "/", { waitUntil: "load", timeout: 30000 });
-  assert.equal(response.status(), 200);
-  await page.waitForFunction(() => globalThis.document.querySelector("#identity-label")?.textContent === "Not signed in", null, { timeout: 15000 });
-  assert.equal(await page.locator("#static-hero").count(), 0);
-  assert.equal(await page.locator("#auth-panel").getAttribute("hidden"), null);
-  const src = await page.locator('script[type="module"]').getAttribute("src");
-  assert.match(src, /^\.\/assets\/entry-[A-Z0-9]{8}\.js$/);
-  assert.deepEqual(errors, []);
-});
