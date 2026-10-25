@@ -77,7 +77,7 @@ import { attentionReport } from "./owner-attention.mjs";
 import { ownerOverview } from "./owner-overview.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
-import { jevShadowReport } from "./jev-shadow-journal.mjs";
+import { jevShadowReport } from "./journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
@@ -117,7 +117,7 @@ import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planA
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
-  GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
+  frontDoorHtml, GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
@@ -344,7 +344,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
-  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "" }) {
+  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
+  publicAgentPages = false }) {
   // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
   // (server/boot-config.mjs) runs here, in the shared boot path every entry
   // converges on — the node entry (server.mjs), the Worker entry
@@ -1257,6 +1258,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         gmail, channelWebhooks, telegram, telegramStatus,
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
+        publicAgentPages,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
@@ -2257,6 +2259,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (templateDetail) {
           const page = templatePage(templateDetail[1], { ref });
+          // Same posture as an unknown room page: a slug that matches the
+          // template route but is not a template gets the styled public 404
+          // for browsers. /templates/<slug>.json and non-HTML clients keep JSON.
+          if (!page && !templateDetail[2] && acceptPrefersHtml(req.headers.accept)) {
+            const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+            res.setHeader("X-Robots-Tag", "noindex");
+            res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+            return res.end(req.method === "HEAD" ? undefined : body);
+          }
           if (!page) reject(404, "not_found", "Not found");
           return sendPage(200, page.html, templateDetail[2] ? page.document : null, `/templates/${templateDetail[1]}`);
         }
@@ -2355,8 +2366,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        // The front door keeps the GitHub anchor in source. Omit it from the
+        // served bytes unless this server was given a GitHub auth config.
+        const payload = path === "index.html"
+          ? Buffer.from(frontDoorHtml(data, { githubConfigured: Boolean(githubAuth) }))
+          : data;
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
-        return res.end(req.method === "HEAD" ? undefined : data);
+        return res.end(req.method === "HEAD" ? undefined : payload);
         }
       }
       if (url.pathname === "/api/account-rooms" && req.method === "GET") {
