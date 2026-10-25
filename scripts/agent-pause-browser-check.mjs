@@ -60,7 +60,7 @@ test("People panel: owner pauses, resumes and removes an agent with a two-click 
   await pause.waitFor();
   assert.equal(await pause.textContent(), "Pause");
   assert.equal(await remove.textContent(), "Remove");
-  assert.equal(await guestRow.locator(".member-actions").count(), 0, "humans get no agent controls");
+  assert.equal(await guestRow.locator("[data-member-pause]").count(), 0, "Pause is agent-only; people get Remove only (R9-1)");
   assert.equal(await ownerRow.locator(".member-actions").count(), 0);
   assert.equal(await row.locator(".pause-chip").count(), 0);
 

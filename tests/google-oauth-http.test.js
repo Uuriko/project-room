@@ -284,10 +284,54 @@ for (const stale of ["missing", "expired", "malformed"]) test(`Google start repl
   const flow = await beginFlow(origin, `account_session=${old}`);
   assert.ok(flow.slotCookie);
   assert.notEqual(flow.slotCookie, old);
-  const callback = await fetch(origin + GOOGLE_CALLBACK_PATH + "?state=" + flow.authorize.searchParams.get("state") + "&code=fixture", { redirect: "manual" });
+  // A real browser sends back the cookie the start response set; the callback
+  // must carry the same session slot the flow's state was issued for.
+  const callback = await fetch(origin + GOOGLE_CALLBACK_PATH + "?state=" + flow.authorize.searchParams.get("state") + "&code=fixture",
+    { redirect: "manual", headers: { Cookie: `account_session=${flow.slotCookie}` } });
   assert.equal(callback.headers.get("X-Room-Auth-Failure"), null);
   const token = accountCookie(callback);
   assert.ok(token);
   const session = await fetch(origin + "/api/account-session", { headers: { Cookie: `account_session=${token}` } });
   assert.equal((await session.json()).authenticated, true);
+});
+
+// Login-CSRF: the OAuth state is issued for the browser session that started
+// the flow (RFC 6749 section 10.12). An attacker who starts a flow, completes
+// Google's consent themselves, and tricks a victim into loading the captured
+// callback URL must not land the victim in the attacker's session.
+test("callback completing a state issued to another browser fails closed (login CSRF)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  // Attacker starts the flow in their own browser and completes Google's
+  // consent, capturing the callback URL for their state.
+  const attacker = await beginFlow(origin);
+  const attackerState = attacker.authorize.searchParams.get("state");
+  // The victim has their own unrelated session slot.
+  const victim = await beginFlow(origin);
+  // The victim is tricked into loading the attacker's callback URL.
+  const attack = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture`,
+    { redirect: "manual", headers: { Cookie: `account_session=${victim.slotCookie}` } });
+  assert.equal(attack.status, 200);
+  // Fail closed: the victim must not be authenticated, and no Google account
+  // may be provisioned from the cross-session completion.
+  assert.match(await attack.text(), /url=\/\?google=error/);
+  assert.equal(attack.headers.get("set-cookie") || "", "");
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
+});
+
+test("callback with a valid state but no session cookie fails closed", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const attacker = await beginFlow(origin);
+  const attackerState = attacker.authorize.searchParams.get("state");
+  // A browser carrying no session cookie cannot be the one that started the
+  // flow, so the completion must fail rather than adopting the state's slot.
+  const attack = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture`,
+    { redirect: "manual" });
+  assert.equal(attack.status, 200);
+  assert.match(await attack.text(), /url=\/\?google=error/);
+  assert.equal(attack.headers.get("set-cookie") || "", "");
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
 });

@@ -19,6 +19,37 @@ import { admitHistoricalMember } from './unstamped-member.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { EVENT_TYPES as T, event } from '../src/events.js';
 
+// Hosted runners stall hard enough that the fixed per-page default (8-10s)
+// kills waits whose product leg is ~1s on an unloaded box, and unbounded
+// promise waits die silently at the test timeout instead. Waits on an async
+// round trip poll the actual state (or bound the promise) with a generous
+// ceiling and, on timeout, fail with a dump of the page state that says why.
+async function waitForState(page, description, probe, { timeout = 30000, interval = 250 } = {}) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    if (await probe()) return;
+    await page.waitForTimeout(Math.min(interval, deadline - Date.now()));
+  }
+  if (await probe()) return;
+  const state = await page.evaluate(() => ({
+    hash: location.hash,
+    identity: document.querySelector('#identity-label')?.textContent ?? null,
+    authVisible: Boolean(document.querySelector('#auth-panel') && !document.querySelector('#auth-panel').hidden),
+    messageCount: document.querySelectorAll('[data-message-record-id]').length,
+  })).catch(() => null);
+  throw new Error(`Timed out after ${timeout}ms waiting for ${description}. Page state: ${JSON.stringify(state)}`);
+}
+
+async function awaitBounded(page, promise, description, { timeout = 30000 } = {}) {
+  let timer;
+  try {
+    await Promise.race([promise, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`Timed out after ${timeout}ms waiting for ${description}`)), timeout); })]);
+  } catch (error) {
+    const state = await page.evaluate(() => ({ hash: location.hash, identity: document.querySelector('#identity-label')?.textContent ?? null })).catch(() => null);
+    throw new Error(`${error.message}. Page state: ${JSON.stringify(state)}`);
+  } finally { clearTimeout(timer); }
+}
+
 test('chat requests activity only; Record loads the complete tail, retries failure and returns to lean reads', { timeout: 30000 }, async t => {
   const f = createAcceptanceFixture(); f.store.roomFlood = { consume() {} };
   const sourceEventId = f.store.command(f.keys.owner, 'commons', { id: 'audit-source', type: 'message.posted', data: { messageId: 'audit-message', body: 'A shared message whose audit is loaded on demand.' } }).event.id;
@@ -49,14 +80,19 @@ test('chat requests activity only; Record loads the complete tail, retries failu
   await page.locator('[data-record-retry]').click();
   await page.locator(`[data-event-record-id="${sourceEventId}"]`).waitFor();
   assert.deepEqual(reads.slice(before).filter(view => view === 'full'), ['full', 'full']);
+  const beforeClose = reads.length;
+  const closeActivityRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons'
+    && response.request().headers()['x-project-room-audit-view'] === 'activity-v1');
   await page.locator('#settings-close').click();
   await page.waitForFunction(() => !document.querySelector('#settings-dialog').open);
+  await closeActivityRead;
+  assert.ok(reads.slice(beforeClose).includes('activity'), 'closing Record revalidates in the activity view');
   await page.locator('#message-input').fill('A draft stays here.');
   const after = reads.length;
   f.store.command(f.keys.owner, 'commons', { id: 'audit-arrival', type: 'message.posted', data: { messageId: 'audit-new-message', body: 'A new arrival' } });
   await page.locator('[data-message-record-id="audit-new-message"]').waitFor();
   assert.equal(await page.locator('#message-input').inputValue(), 'A draft stays here.');
-  assert.ok(reads.slice(after).includes('activity'));
+  // A covered message may apply as a local delta without another snapshot read.
   assert.equal(reads.slice(after).includes('full'), false, 'closing Record restores lightweight live updates');
   const absentRecordRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons' && !response.request().headers()['x-project-room-audit-view']);
   await page.evaluate(() => { location.hash = '#event-no-such-record'; });
@@ -69,7 +105,12 @@ test('chat requests activity only; Record loads the complete tail, retries failu
   const leanRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons' && response.request().headers()['x-project-room-audit-view'] === 'activity-v1');
   await page.locator('#settings-close').click();
   await leanRead;
-  denyRecord = true; await openSettings(page, 'record-panel');
+  denyRecord = true;
+  const deniedRecordRead = page.waitForResponse(response => new URL(response.url()).pathname === '/api/rooms/commons'
+    && !response.request().headers()['x-project-room-audit-view'] && response.status() === 403);
+  // A refused read clears the app before a dialog can stay visible.
+  await clickChrome(page, '#topbar-settings');
+  await deniedRecordRead;
   await page.locator('#main').waitFor({ state: 'hidden' });
   assert.equal(await page.locator('[data-message-record-id="audit-message"]').count(), 0, 'a refused lazy read clears cached private Room content');
   assert.deepEqual(errors, []);
@@ -214,7 +255,7 @@ test('chat arrivals in a room with board claim lines move no message rows', { ti
   assert.deepEqual(errors, []);
 });
 
-test('snapshot labels update duplicates while preserving focus and selection, and late old-room data cannot replace new labels', { timeout: 45000 }, async t => {
+test('snapshot labels update duplicates while preserving focus and selection, and late old-room data cannot replace new labels', { timeout: 90000 }, async t => {
   const f = createAcceptanceFixture(), other = initialRoom('other', 'owner');
   other[0].data.title = 'Another private room'; other[1].data.displayName = 'Another private owner';
   f.store.initialize(other); f.store.createAccount('other-private-account'); f.store.bindHumanAccount('other', 'owner', 'other-private-account');
@@ -225,7 +266,10 @@ test('snapshot labels update duplicates while preserving focus and selection, an
   const origin = `http://127.0.0.1:${server.address().port}`;
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
   let release; t.after(async () => { release?.(); await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } }); page.setDefaultTimeout(10000);
+  const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
+  // Same stall math as the waits below: the shared sign-in helper's waits ride
+  // this page default, and 10s is a stall death sentence for a ~1s leg.
+  page.setDefaultTimeout(30000);
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   await page.goto(origin); await signInFixture(page, f.keys.owner);
   const original = page.locator('[data-message-record-id="test-welcome"]');
@@ -240,7 +284,10 @@ test('snapshot labels update duplicates while preserving focus and selection, an
     document.querySelector('[data-member-record-id="owner"] .member-profile > summary').focus();
   });
   admitHistoricalMember(f.store, 'commons', 'owner', { memberId: 'duplicate-owner', displayName: ' room OWNER ', kind: 'human', permissions: [] });
-  await original.locator('.message-meta strong').filter({ hasText: /^Room owner \(owner\)$/ }).waitFor();
+  // The relabel arrives on the stream-driven render: fast unloaded, past the
+  // 10s page default on a stalled hosted runner. Poll the state.
+  const relabeled = original.locator('.message-meta strong').filter({ hasText: /^Room owner \(owner\)$/ });
+  await waitForState(page, 'the duplicate label update to render', async () => (await relabeled.count().catch(() => 0)) > 0);
   assert.equal(await profile.evaluate(el => el.open), true);
   const preserved = await page.evaluate(() => ({ body: globalThis.retainedAuditBody === document.querySelector('[data-message-record-id="test-welcome"] .message-body'), selected: getSelection().toString() === globalThis.auditSelectedText, focus: document.activeElement?.dataset.focusKey }));
   assert.deepEqual(preserved, { body: true, selected: true, focus: 'member-profile:owner' });
@@ -250,12 +297,26 @@ test('snapshot labels update duplicates while preserving focus and selection, an
     const response = await route.fetch(); captured(); await unblock; await route.fulfill({ response }); delivered();
   });
   f.store.command(f.keys.owner, 'commons', { id: 'held-private-old', type: 'message.posted', data: { messageId: 'held-private-old', body: 'Old private message must not return' } });
-  await held;
-  await clickChrome(page, '#signout-button'); await page.locator('#auth-panel').waitFor();
+  // Delta era: the post applies locally with no snapshot fetch, so it is
+  // genuinely rendered in its own room before the switch — the private
+  // content is in the client's hands, and the trial below is whether any of
+  // it can cross into the next room.
+  await waitForState(page, 'the private post to render in its own room', async () => await page.locator('[data-message-record-id="held-private-old"]').isVisible().catch(() => false));
+  // A member admission still reads (it is not a covered delta type): the
+  // full snapshot it drives carries the private message, and that in-flight
+  // response — issued for the old room, delivered after the switch — is the
+  // late data on trial, exactly as the held post-driven read was before
+  // delta sync removed the post's own read.
+  admitHistoricalMember(f.store, 'commons', 'owner', { memberId: 'late-joiner', displayName: 'Late joiner', kind: 'human', permissions: [] });
+  await awaitBounded(page, held, 'the held snapshot fetch to reach the route');
+  await clickChrome(page, '#signout-button');
+  const authPanel = page.locator('#auth-panel');
+  await waitForState(page, 'the auth panel after sign-out', async () => await authPanel.isVisible().catch(() => false));
   assert.equal(await page.locator('#presence-list').textContent(), '');
   await signInFixtureInPlace(page, f.store, otherKey, 'other');
-  await page.locator('[data-message-record-id="other-message"]').waitFor();
-  release(); await finished;
+  const otherMessage = page.locator('[data-message-record-id="other-message"]');
+  await waitForState(page, 'the other room message to render', async () => await otherMessage.isVisible().catch(() => false));
+  release(); await awaitBounded(page, finished, 'the held snapshot response to be delivered');
   assert.equal(await page.locator('[data-message-record-id="other-message"] .message-meta strong').textContent(), 'Another private owner');
   assert.equal(await page.locator('#identity-label').textContent(), 'Another private owner');
   assert.equal(await page.locator('[data-message-record-id="test-welcome"]').count(), 0);
@@ -391,14 +452,20 @@ test('a long room opens at its newest message on a phone, and older history fill
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await signInFixture(page, ownerKey);
     await page.locator('[data-message-record-id="long-open-600"] .message-body').waitFor({ state: 'attached' });
-    await page.waitForFunction(() => document.querySelectorAll('#message-list > li').length > 150);
-    await page.waitForTimeout(1500);
-    const seen = await page.evaluate(() => {
+    const newestView = () => page.evaluate(() => {
       const list = document.querySelector('#message-list'), pill = document.querySelector('#new-messages-button');
       const last = document.querySelector('[data-message-record-id="long-open-600"]').getBoundingClientRect(), box = list.getBoundingClientRect();
       return { gap: Math.round(list.scrollHeight - list.scrollTop - list.clientHeight), lastOnScreen: last.bottom <= Math.min(box.bottom, innerHeight) + 1 && last.top < innerHeight, pill: pill.hidden ? null : pill.textContent };
     });
-    assert.deepEqual(seen, { gap: 0, lastOnScreen: true, pill: null }, `${viewport.width}px open lands on the newest message with no new-messages pill`);
+    await page.waitForTimeout(1500);
+    assert.deepEqual(await newestView(), { gap: 0, lastOnScreen: true, pill: null }, `${viewport.width}px open lands on the newest message with no new-messages pill`);
+    // Lazy history waits for activation. Request it without scrolling the
+    // reader away from the newest message: this isolates the fill/layout
+    // regression from intentional reader navigation to an older position.
+    await page.locator('[data-timeline-earlier]').evaluate(button => button.click());
+    await page.waitForFunction(() => document.querySelectorAll('#message-list > li').length > 150);
+    await page.waitForTimeout(1500);
+    assert.deepEqual(await newestView(), { gap: 0, lastOnScreen: true, pill: null }, `${viewport.width}px older history preserves the newest pin without a new-messages pill`);
     assert.deepEqual(errors, []);
     await context.close();
   }

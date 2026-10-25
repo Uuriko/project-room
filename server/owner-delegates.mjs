@@ -143,6 +143,31 @@ export class OwnerDelegates {
     })));
   }
 
+  // Lifecycle revocation (account deletion / ownership transfer): revoke
+  // every active grant in this room that the given member granted. A grant
+  // is the granter's personal issuance — it must not outlive their account
+  // or their ownership of the room, and the incoming owner must never
+  // silently inherit it (they may re-grant deliberately). Rows and journal
+  // stay for audit; revocation alone ends the authority, because hasGrant
+  // reads revoked_at only. Journaled under the lifecycle actor (e.g.
+  // "account_deleted", "ownership_transferred") so an operator can tell a
+  // lifecycle revocation from a manual owner revoke. Returns the number of
+  // grants revoked. Callers run inside a store transaction (account
+  // deletion's executor, RoomStore#command); the updates join it.
+  revokeAllGrantedBy(roomId, grantedByMemberId, { actorId, at } = {}) {
+    const now = at ?? this.store.now();
+    const rows = this.db.prepare(
+      "SELECT identity_id FROM owner_delegate_grants WHERE room_id=? AND granted_by=? AND revoked_at IS NULL ORDER BY granted_at ASC")
+      .all(roomId, grantedByMemberId);
+    for (const row of rows) {
+      this.db.prepare(
+        "UPDATE owner_delegate_grants SET revoked_at=? WHERE room_id=? AND identity_id=?")
+        .run(now, roomId, row.identity_id);
+      this.#journal(roomId, row.identity_id, "revoke", actorId, now);
+    }
+    return rows.length;
+  }
+
   // Does the identity hold an active grant in this room right now? The one
   // predicate RoomStore#authenticate uses to stamp the delegate flag.
   hasGrant(roomId, identityId) {
