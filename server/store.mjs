@@ -1,6 +1,6 @@
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
-import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
+import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -6016,6 +6016,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
       }
+      // Exact replays of commands committed before the pause returned above.
+      refusePausedAgentWrite(this, roomId, auth.member, command);
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
       if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {
