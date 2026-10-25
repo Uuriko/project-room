@@ -76,9 +76,16 @@ jobs:
   # Publishes the run table to docs/onboarding-probe/results.md (newest run
   # first) so measured onboarding times are visible from the repo, not only
   # in the CI job summary. Separate job so the probe itself keeps read-only
-  # permissions; this job alone can push the docs file.
+  # permissions; this job alone can write the docs file.
   # Runs only on main: a workflow_dispatch from any other ref must never
-  # push that ref's commits to main.
+  # publish that ref's results.
+  # Main is protected (GH006: changes must go through a pull request and
+  # carry the room/release-lease check), so this job no longer pushes to
+  # main directly. It pushes the results commit to the dedicated
+  # onboarding-probe/results branch and opens (or updates) a pull request
+  # from it, the same branch-plus-PR shape trace-entry.yml uses. One
+  # rolling PR: while a results PR is still open the next run force-pushes
+  # the branch (rebased on current main) and the open PR updates in place.
   publish:
     name: publish results to docs
     needs: probe
@@ -87,6 +94,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: write
+      pull-requests: write
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -107,20 +115,48 @@ jobs:
             --run-id "${{ github.run_id }}" \
             --run-url "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: Commit docs results
+        id: commit
         if: steps.write.outcome == 'success'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add docs/onboarding-probe/results.md
-          git diff --cached --quiet && { echo "no docs changes"; exit 0; }
+          if git diff --cached --quiet; then
+            echo "no docs changes"
+            echo "pushed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git commit -m "docs: publish onboarding probe results (run ${{ github.run_id }})"
           git fetch origin main:refs/remotes/origin/main
           git rebase origin/main
-          # Fail closed: the only change ever pushed to main is the results file.
+          # Fail closed: the only change ever published is the results file.
           if [ "$(git show --name-only --format= HEAD | tr '\n' ' ')" != "docs/onboarding-probe/results.md " ]; then
-            echo "refusing to push: publish commit touches unexpected files"
+            echo "refusing to publish: publish commit touches unexpected files"
             git show --name-only --format= HEAD
             exit 1
           fi
-          git push origin HEAD:main
+          # Push to the dedicated results branch, never to main: main is
+          # protected and rejects direct pushes (GH006). --force is safe
+          # here: this workflow is the branch's only writer, and the commit
+          # was just rebased on current main (same pattern as the
+          # trace-entry bot branch).
+          git push --force origin HEAD:refs/heads/onboarding-probe/results
+          echo "pushed=true" >> "$GITHUB_OUTPUT"
+      - name: Open or update results PR
+        if: steps.commit.outputs.pushed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          PR=$(gh pr list --head onboarding-probe/results --base main \
+            --state open --json number --jq '.[0].number // empty')
+          if [ -n "$PR" ]; then
+            echo "results PR #$PR updated by the push to onboarding-probe/results"
+            exit 0
+          fi
+          gh pr create \
+            --title "docs: publish onboarding probe results (run ${{ github.run_id }})" \
+            --body "Automated onboarding probe results for run ${{ github.run_id }}, written to docs/onboarding-probe/results.md by the onboarding-probe workflow (.github/workflows/onboarding-probe.yml). Opened as a pull request because main is protected and rejects direct pushes (GH006). No manual step." \
+            --head onboarding-probe/results \
+            --base main
