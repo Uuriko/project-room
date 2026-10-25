@@ -19,6 +19,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { buildWorkClaimPage, linkWorkClaimPullRequest, closeWorkClaim } from "./work-claim-routes.mjs";
+import { withProjectMapOverlap } from "./project-map-store.mjs";
 
 import { readWorkSelection, workReadRefusal } from "../client/work-preparation.mjs";
 import { beginSelectedWork, findBeginReceipt } from "../client/begin-work.mjs";
@@ -348,8 +349,8 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (name === "room_read_board") {
     const snapshot = store.snapshot(secret, roomId, null, "work");
     const now = typeof store.now === "function" ? store.now() : Date.now();
-    const { claims, ...claimsPage } = buildWorkClaimPage(store.workClaims.list(roomId), roomId,
-      auth.member.id, new URLSearchParams(rest), now);
+    const { claims, ...claimsPage } = withProjectMapOverlap(store, roomId, buildWorkClaimPage(store.workClaims.list(roomId), roomId,
+      auth.member.id, new URLSearchParams(rest), now));
     return { value: stampBoard({ ...projectBoard(snapshot.state, Date.now()), roomId: snapshot.roomId,
       evaluatedThrough: snapshot.sequence, evaluatedAt: new Date().toISOString(), claims, claimsPage }), isError: false };
   }

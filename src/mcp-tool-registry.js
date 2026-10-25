@@ -86,6 +86,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_record_handoff", focus: ["work"] },
   { name: "room_request_history", focus: ["conversation"] },
   { name: "room_request_reply", focus: ["common"] },
-  { name: "room_cancel_request", focus: ["conversation"] }
+  { name: "room_cancel_request", focus: ["conversation"] },
+  { name: "room_map", focus: ["work"] }
 ]);
 

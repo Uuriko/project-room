@@ -199,7 +199,15 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("room_map", "Read this room's code map. GET /api/rooms/{roomId}/map/query. map.query returns a symbol or file with its neighbors and dependents. map.path finds a path from one symbol or file to another. map.hotspots lists the most coupled files. map.explain summarizes one symbol or file. Pass op query, path, hotspots, or explain. q is the symbol or file for query and explain. from and to are the ends of a path. repo is owner/name and defaults to the newest map in the room.", schema({
+    roomId: roomIdField,
+    op: { type: "string", enum: ["query", "path", "hotspots", "explain"], description: "map.query, map.path, map.hotspots, or map.explain." },
+    q: { type: "string", minLength: 1, maxLength: 300, description: "Symbol or file for map.query and map.explain." },
+    from: { type: "string", minLength: 1, maxLength: 300, description: "Start symbol or file for map.path." },
+    to: { type: "string", minLength: 1, maxLength: 300, description: "End symbol or file for map.path." },
+    repo: { type: "string", minLength: 3, maxLength: 200, description: "owner/name. Defaults to the room's newest map." }
+  }, ["roomId", "op"]))
 
 ];
 

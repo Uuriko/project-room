@@ -904,6 +904,15 @@
         "openWorldHint": true
       }
     },
+    "room_map": {
+      "inputSchema": "9cfc8cae8778bdcc",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_mcp_snippet": {
       "inputSchema": "99334726611ccf58",
       "annotations": {
@@ -1471,6 +1480,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_map": {
+      "inputSchema": "9cfc8cae8778bdcc",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_mcp_snippet": {
