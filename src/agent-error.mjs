@@ -1122,8 +1122,8 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (reasonCode === "storage_busy") {
     return {
       status: "action_required", reason: "storage_busy",
-      hint: "Storage is busy — another writer holds the lock and the request was rolled back with nothing applied. Wait for Retry-After, then retry the exact request unchanged. No success is claimed.",
-      next: [command("Wait for Retry-After (1s), then retry the exact same request unchanged")]
+      hint: uiText("agentError.storageBusy.hint"),
+      next: [command(uiText("agentError.storageBusy.next"))]
     };
   }
   if (reasonCode === "mail_not_configured") {
