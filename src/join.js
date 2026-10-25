@@ -14,6 +14,7 @@ import { formatSessionExpiry } from "./session-expiry.js";
 import { AccountClient } from "./client.js";
 import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
 import { readAccessRequest } from "./invite-context.js";
+import { parseShareInviteCode } from "./share-invite-code.js";
 
 export const JOIN_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
 
@@ -42,6 +43,26 @@ export function parseInviteCodeInput(value) {
   const linkMatch = /\/(?:room\/)?join\/([A-Za-z0-9_-]{1,64})(?:[/?#\s]|$)/.exec(text);
   const candidate = (linkMatch?.[1] ?? text).toUpperCase();
   return JOIN_CODE_PATTERN.test(candidate) ? candidate : null;
+}
+
+// Route pasted invitations into the existing consent flows on this door.
+// A pasted origin is never a navigation destination or proof of access.
+export function inviteEntryPath(value, pathname = "/join") {
+  const text = String(value ?? "").trim();
+  if (!text || text.length > 2048) return null;
+  const door = String(pathname).startsWith("/room/") ? "/room" : "";
+  let hash;
+  try {
+    const url = new URL(text, "https://room.invalid");
+    if (!["http:", "https:"].includes(url.protocol)) return null;
+    hash = url.hash;
+  } catch { return null; }
+  if (/^#join\/[A-Za-z0-9_-]{43}(?:\/(?:work|message)\/[^/?#\s]+)?$/.test(hash)) return [door, hash].join("/");
+  const agent = /^#(?:agent-invite|invite)\/(RM-[A-Z0-9]+)$/i.exec(hash);
+  const code = agent?.[1]?.toUpperCase() ?? parseInviteCodeInput(text);
+  if (code) return joinCodePath(code, pathname);
+  const shared = parseShareInviteCode(text);
+  return shared ? [door, "#code", shared].join("/") : null;
 }
 
 // A ?code= value is a claimed code too (same rule as the path segment):
@@ -333,13 +354,13 @@ function renderEnter() {
     form.addEventListener("submit", event => {
       event.preventDefault();
       const statusEl = $("join-enter-status");
-      const code = parseInviteCodeInput($("join-enter-code")?.value);
-      if (!code) {
+      const destination = inviteEntryPath($("join-enter-code")?.value, globalThis.location?.pathname);
+      if (!destination) {
         if (statusEl) { statusEl.textContent = "That doesn't look like an invite code. Codes look like RM-XXXXXX — or paste the whole invite link."; statusEl.classList.add("visible"); }
         $("join-enter-code")?.focus();
         return;
       }
-      globalThis.location.assign(joinCodePath(code, globalThis.location?.pathname));
+      globalThis.location.assign(destination);
     });
   }
   renderRequestDoor();

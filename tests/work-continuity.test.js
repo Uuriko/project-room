@@ -125,3 +125,33 @@ test("channel drafts recover independently and legacy root keys migrate without 
   assert.equal(archived.activeKey, null, "archived text is not placed in another channel composer");
   assert.equal(archived.drafts.get(key).body, design.body, "archival retains the unsent text");
 });
+
+test("empty thread navigation is scoped and never revives rejected drafts", () => {
+  const f = fixture(), drafts = new ConversationDrafts();
+  f.state.channels = { design: { id: "design" } };
+  f.state.messages = [{ id: "thread", channelId: "design" }];
+  const save = () => f.recovery.write("scope", drafts, "thread");
+  save();
+  const restored = f.recovery.read("scope", f.state);
+  assert.equal(restored.threadId, "thread");
+  assert.equal(restored.channelId, "design");
+  assert.equal(restored.drafts.get("thread").body, "");
+  assert.equal(restored.drafts.get("thread").pending, null);
+  for (const change of [
+    state => { state.messages = []; },
+    state => { state.messages[0].deletedAt = "now"; },
+    state => { state.messages[0].toMemberId = "a"; },
+    state => { state.channels.design.archivedAt = "now"; },
+    state => { state.channels = {}; },
+  ]) {
+    const state = structuredClone(f.state);
+    change(state);
+    assert.equal(f.recovery.read("scope", state).threadId, null);
+  }
+  const saved = JSON.parse(f.memory.get(f.recovery.key));
+  saved.entries = [["thread", { body: "Private draft", toMemberId: "missing", replyToId: "thread" }]];
+  f.memory.set(f.recovery.key, JSON.stringify(saved));
+  assert.equal(f.recovery.read("scope", f.state).threadId, null);
+  save();
+  assert.equal(f.recovery.read("other-session", f.state), null);
+});
