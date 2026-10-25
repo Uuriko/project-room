@@ -7,7 +7,7 @@
 // and in what state, and when each member last acted. Assembly is a pure read over the store; the HTTP route
 // and the CLI print the same object. No token, secret or hash is ever
 // selected — the report is meant to be pasted into a review ticket.
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { ownMember } from "../src/events.js";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 

@@ -8,6 +8,12 @@ npm run lint              # eslint, design tokens, reachability, i18n, UI string
 npm test                  # full unit suite (CI runs it sharded, plus browser/cloudflare)
 ```
 
+For write-path, storage, snapshot, sync or replay changes, run
+`npm run bench:room -- --sizes 1000` before pushing; use the full defaults for a
+performance PR. Include the complete table in the PR, room post or code-drop check.
+Follow [docs/BENCH.md](docs/BENCH.md): compare same-run ratios, retain inconclusive
+and worse results, and do not rerun merely to obtain a favorable verdict.
+
 Build and maintain `Uuriko/project-room`. Read task-relevant code and docs;
 start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
 

@@ -114,3 +114,23 @@ test("activity negotiation preserves private-message filtering and rejects inval
     assert.equal((await f.get(path, f.keys.owner, { 'X-Project-Room-Audit-View': value })).status, 422);
   assert.equal((await f.get('', 'revoked-or-invalid', { 'X-Project-Room-Audit-View': 'activity-v1' })).status, 401);
 });
+
+
+test("recent and full snapshots preserve visible history, counts and older pins after compaction", async t => {
+ const f=await fixture(t);f.store.roomFlood={consume(){}};
+ const pinned=f.post(f.keys.producer,'An old pinned message.').event.data.messageId;
+ f.store.command(f.keys.owner,'commons',{id:randomUUID(),type:'message.pinned',data:{messageId:pinned}});
+ for(let i=0;i<115;i++)f.post(f.keys.producer,`Archived public ${i}.`);
+ for(let i=0;i<3;i++)f.post(f.keys.owner,'Hidden private message.',{toMemberId:'reviewer'});
+ const full=await(await f.get()).json(),recent=await(await f.get('?messages=recent')).json();
+ while(!f.store.backfillMessages({limit:1000}).done){}
+ assert.equal(f.store.checkMessagesParity().ok,true);
+ assert.equal(f.store.archiveMessages('commons',{keepNewest:2,dryRun:false}).ok,true);
+ const after=await(await f.get('?messages=recent')).json(),all=await(await f.get()).json();
+ assert.deepEqual(after.state.messages,recent.state.messages);
+ assert.deepEqual(after.messagesWindow,recent.messagesWindow);
+ assert.deepEqual(after.state.pins,recent.state.pins);
+ assert.ok(after.state.pins.some(pin=>pin.messageId===pinned));
+ assert.deepEqual(all.state.messages,full.state.messages);
+ assert.equal(JSON.stringify(after).includes('Hidden private message.'),false);
+});

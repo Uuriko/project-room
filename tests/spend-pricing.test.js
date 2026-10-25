@@ -77,7 +77,7 @@ test("reducer: pricing defaults enabled, owner-only, strict shape, replayable", 
   assert.equal(spendPricingEnabled(stateOf(f)), true, "absent pricing state means enabled (current behavior)");
   assert.throws(() => f.store.command(f.peerSecret, f.roomId, {
     id: randomUUID(), type: T.ROOM_SPEND_PRICING_SET, data: { enabled: false },
-  }), /Only the Room owner may set spend pricing/, "non-owner event refused in the reducer");
+  }), /Only a Room administrator may set spend pricing/, "non-owner event refused in the reducer");
   for (const [data, pattern] of [
     [{}, /enabled must be a boolean/],
     [{ enabled: "false" }, /Invalid field: enabled/],
@@ -231,4 +231,18 @@ test("admission-only: a call admitted before disable still settles; disable does
     grantedBy: f.ownerMemberId, capCents: "200", perTxCapCents: "10", nowMs: Date.now(),
   });
   assert.ok(reissued, "owner can still issue or replace a grant while pricing is disabled");
+});
+
+
+test('delegated room administrator changes pricing and revocation takes effect', t => {
+  const f=roomWithPeer(t);
+  const grant=permissions=>f.store.command(f.ownerSecret,f.roomId,{id:randomUUID(),type:T.MEMBER_ACCESS_CHANGED,data:{memberId:f.peerMemberId,expectedMemberRevision:stateOf(f).members[f.peerMemberId].revision,permissions,active:true}});
+  const prior=stateOf(f).members[f.peerMemberId].permissions;
+  grant([...new Set([...prior,'manage_members'])]);
+  setSpendPricing(f.store,f.peerSecret,f.roomId,{enabled:false,requestId:randomUUID()});
+  assert.equal(readSpendPricing(f.store,f.peerSecret,f.roomId).enabled,false);
+  assert.equal(priceForTool('room_put_file',stateOf(f)),null);
+  grant(prior);
+  assert.throws(()=>setSpendPricing(f.store,f.peerSecret,f.roomId,{enabled:true}),e=>e.status===403);
+  assert.equal(readSpendPricing(f.store,f.ownerSecret,f.roomId).enabled,false);
 });

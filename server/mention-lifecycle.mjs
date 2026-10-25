@@ -144,6 +144,22 @@ export const mentionStateSchema = `
     decided_at INTEGER,
     PRIMARY KEY(room_id,message_event_id,mentioned_member_id)
   );
+  CREATE TABLE IF NOT EXISTS mention_observations (
+    room_id TEXT NOT NULL,
+    message_event_id TEXT NOT NULL,
+    mentioned_member_id TEXT NOT NULL,
+    acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1)),
+    acknowledged_at INTEGER,
+    responded_at INTEGER,
+    PRIMARY KEY(room_id,message_event_id,mentioned_member_id),
+    FOREIGN KEY(room_id,message_event_id,mentioned_member_id)
+      REFERENCES mention_states(room_id,message_event_id,mentioned_member_id) ON DELETE CASCADE
+  );
+  INSERT OR IGNORE INTO mention_observations
+    (room_id,message_event_id,mentioned_member_id,acknowledged,responded_at)
+    SELECT room_id,message_event_id,mentioned_member_id,1,
+      CASE WHEN state='responded' THEN decided_at ELSE NULL END
+    FROM mention_states WHERE state IN ('acknowledged','responded');
   CREATE INDEX IF NOT EXISTS mention_states_member ON mention_states(room_id,mentioned_member_id,state);
   CREATE INDEX IF NOT EXISTS mention_states_message ON mention_states(room_id,message_event_id);
   CREATE TABLE IF NOT EXISTS room_mention_settings (

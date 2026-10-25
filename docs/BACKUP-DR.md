@@ -16,7 +16,11 @@ honestly cannot survive yet.
   there is no second backup target. Enabling R2 (account action, then the
   `ROOM_BACKUPS` binding in BACKUPS.md) is the standing fix.
 - **Operator export works.** `GET /api/operator/export` streams the same
-  NDJSON when `ROOM_BACKUP_TOKEN` is configured on the owning script.
+  NDJSON when `ROOM_EXPORT_TOKEN` is configured on the owning script.
+  TM-2 split the backup credential: the restore doors below answer only
+  to `ROOM_RESTORE_TOKEN` (unset outside a restore incident, so they
+  answer 404 in normal operation), and the retired `ROOM_BACKUP_TOKEN`
+  opens nothing. See BACKUPS.md, "Split backup credentials".
 - **Restore paths:**
   - *File replay (the working route today):* `scripts/replay-room-export.mjs`
     loads an export into a **new** Node sqlite store. Rehearsed end-to-end on
@@ -30,8 +34,8 @@ honestly cannot survive yet.
   - *KV-native restore (the #3409 fix; deployed to production in revision
     `7ca2e955` on 2026-10-16):*
     `POST /api/operator/restore-from-backup` restores the daily backup
-    already stored in the `ROOM_BACKUPS_KV` namespace — same operator token
-    and fail-closed posture, no size cap: the manifest and parts are pulled
+    already stored in the `ROOM_BACKUPS_KV` namespace — same restore token
+    (`ROOM_RESTORE_TOKEN`) and fail-closed posture, no size cap: the manifest and parts are pulled
     and verified (per-part and whole-backup sha256) one at a time and
     replayed in bounded batches, and the same trailer, foreign-key,
     watermark, recovery, and invitation audits must pass before the restore
@@ -115,7 +119,10 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
 ## Restore runbook (operator)
 
 1. Obtain the NDJSON: reassemble the day's KV parts per the manifest in
-   BACKUPS.md, or `GET /api/operator/export` with the operator token.
+   BACKUPS.md, or `GET /api/operator/export` with the export token.
+   For a DO-native restore, first arm the restore token for the incident
+   (`wrangler secret put ROOM_RESTORE_TOKEN --env production` on the
+   owning script) and delete it again when the restore completes.
 2. Replay into a new store. From the nightly KV copy,
    `node scripts/restore-room-backup.mjs --kv <YYYY-MM-DD> --to <new sqlite path>`
    checks each part's sha256 and the whole file's sha256 against the manifest
@@ -128,8 +135,43 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
 (The request-body endpoint runbook applies only to exports under the 64 MiB
 cap: confirm the DO store is empty — the endpoints refuse a non-empty store
 with 409 — then POST the NDJSON with
-`Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
+`Authorization: Bearer <ROOM_RESTORE_TOKEN>`. For the current over-cap
 backup, use the KV-native endpoint above with the backup's key instead.)
+
+## Corrupt-projection maintenance procedure (operator)
+
+A room whose stored projection no longer parses does **not** block boot
+(#4126): the node server quarantines the room — the boot log carries a
+`corrupt projection quarantined: room <id> (...)` line and the record is
+readable as `store.corruptRoomReports()` — while every healthy room boots
+and serves. The corrupt room's own reads keep failing loudly until it is
+repaired. A `projection_checkpoints` row that no longer parses is ignored
+the same way: rebuilds fall back to a full event-history replay.
+
+1. **Repair in-server first.** With the server up, run the operator
+   projection repair (`POST /api/operator/projection/plan`, then
+   `.../execute` with the plan's digests): it rebuilds the room's
+   materialisation from its journal without touching events or
+   checkpoints, and clears the room's patrol park. The quarantine record
+   clears on the next repair pass once the bytes parse again.
+2. **Maintenance connection (only when the in-server door cannot run).**
+   The writer fence refuses writes from a raw connection by design; the
+   sanctioned escape hatch is to register the writer function on your
+   maintenance connection, then make the one targeted repair:
+
+   ```js
+   import { DatabaseSync } from "node:sqlite";
+   import { registerWriter } from "../server/writer-fence.mjs";
+   const db = new DatabaseSync("<store path>");
+   registerWriter(db);
+   // Exactly one targeted fix, e.g. drop a torn checkpoint so the next
+   // boot replays the full history:
+   db.prepare("DELETE FROM projection_checkpoints WHERE room_id=?").run("<room id>");
+   db.close();
+   ```
+
+   Never edit `events`. If the journal itself is torn, the room's path is
+   the restore runbook above, not SQL surgery.
 
 ## What was deliberately not done
 
