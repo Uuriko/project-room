@@ -80,9 +80,12 @@ export function setShareLinkStatus(element, text) {
 
 const interrupted = error => error?.name === "AbortError" || error?.name === "TimeoutError" || error instanceof TypeError;
 const changedJoinSession = error => ["csrf_denied", "session_binding_changed", "stale_session_revision", "account_session_required"].includes(error?.code);
-export const canRetryInvitation = error => interrupted(error) || error?.status === 429 || error?.status >= 500;
+export const canRetryInvitation = error => error?.code === "maybe_saved" || error?.unconfirmed === true || interrupted(error) || error?.status === 429 || error?.status >= 500;
 // Raw transport text ("signal is aborted without reason", "Unexpected token '<'") is not a user message.
+// A write that already names itself maybe-saved keeps that sentence: the post
+// may be stored, and the retry uses the same idempotency key.
 export function requestFailureMessage(error) {
+  if (error?.code === "maybe_saved" || error?.code === "room_busy") return error.message;
   return interrupted(error) || error instanceof SyntaxError ? "The connection was interrupted and the result could not be confirmed" : error.message;
 }
 // Join a failure message and a recovery hint into one sentence. The base may

@@ -6,7 +6,7 @@ import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
 import { DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { BOND_REFUSAL_CODES } from "./friend-bond.js";
-import { humanErrorMessage } from "./error-copy.js";
+import { createWriteRetries, settleResponse, unansweredWrite, writeMethod } from "./client-transport.js";
 
 // C2: the read-only "what this agent can access" preview must describe exactly the
 // selected work the browser asked about and repeat the server's own omission list;
@@ -136,6 +136,7 @@ export class RoomClient {
     this.lastReadAt = 0;
     this.livenessTimer = null;
     this.livenessInterval = LIVENESS_INTERVAL_MS;
+    this.writes = createWriteRetries();
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -151,16 +152,24 @@ export class RoomClient {
   async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
+    const writing = writeMethod(method);
+    const claim = writing ? this.writes.claim(method, path, data) : null;
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
+          ...(claim ? { "Idempotency-Key": claim.key } : {}),
           ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
           ...(auditView === "activity" ? { "X-Project-Room-Audit-View": "activity-v1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-      const body = await response.json();
-      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; throw error; }
+      const body = await settleResponse(response, { write: writing });
+      this.writes.settle(claim, false);
       return body;
+    } catch (error) {
+      const unanswered = writing && (error?.unconfirmed === true || unansweredWrite(error));
+      this.writes.settle(claim, Boolean(unanswered));
+      if (unanswered && error?.code !== "maybe_saved") throw unansweredWrite(error);
+      throw error;
     } finally { clearTimeout(timer); }
   }
   async restore(roomId = null) {
