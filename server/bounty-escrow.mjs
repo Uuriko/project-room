@@ -2350,6 +2350,34 @@ export class BountyEscrow {
       .map(([id]) => ({ lane: canonicalLane(id), trust_level: "standard" }));
   }
 
+  // HARDEN-RACE-CAVEATS (a): does any dispute other than `exceptDisputeId`
+  // already exist for this bounty at write time? Reads the fresh bounty row
+  // AND the persisted dispute rows, so a dispute written by a re-entrant
+  // call inside this transaction is seen even when its bounty-row write
+  // landed after this call's entry read (the orphan-dispute shape: the
+  // entry `!bounty.disputeId` guard reads a stale row while a second
+  // disputeBounty runs inside the open transaction). A bounty may only
+  // ever carry one dispute — the settled-dispute guard at entry already
+  // refuses a second dispute for the life of the bounty, so a persisted
+  // row for this bounty is always a conflict, never history to ignore.
+  _assertNoExistingDispute(roomId, bountyId, exceptDisputeId = null) {
+    const fresh = this.db.prepare("SELECT dispute_id FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
+    if (fresh?.dispute_id && fresh.dispute_id !== exceptDisputeId)
+      fail("dispute_exists", "this bounty already has a dispute");
+    let rows = [];
+    try { rows = this.db.prepare("SELECT dispute_id, body FROM bounty_disputes WHERE room_id=?").all(roomId); }
+    catch { rows = []; /* pre-escrow database: no disputes yet */ }
+    for (const row of rows) {
+      if (row.dispute_id === exceptDisputeId) continue;
+      let record = null;
+      try {
+        record = decodeRow(row.body, { kind: BOUNTY_DISPUTE_ROW_KIND, fields: DISPUTE_FIELDS, defaults: DISPUTE_DEFAULTS });
+      } catch { continue; /* an undecodable row cannot name this bounty */ }
+      if (record?.bountyId === bountyId)
+        fail("dispute_exists", "this bounty already has a dispute");
+    }
+  }
+
   disputeBounty(roomId, bountyId, { challenger, bond, grounds, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
@@ -2429,14 +2457,38 @@ export class BountyEscrow {
       const at = isoNow(this.nowMs());
       const disputeId = newId("dsp_");
       const lotId = newId("lot_");
+      // HARDEN-RACE-CAVEATS (a), claim-before-lock: stamp this dispute onto
+      // the bounty row BEFORE the bond locks. Every validation that can
+      // refuse the dispute has already run, and the surrounding transaction
+      // rolls this write back if anything below throws, so no caller can
+      // observe a dispute that never opened. The stamp closes the
+      // re-entrancy window the entry guard cannot see: a second
+      // disputeBounty invoked from inside this open transaction (only
+      // constructible via a journal seam today — no production caller
+      // re-enters escrow mid-transaction) re-reads the row, finds
+      // dispute_id set and state `disputed`, and is refused dispute_exists
+      // instead of opening an orphan dispute whose bond no settlement
+      // path can ever release.
+      const fromState = bounty.state;
+      this._assertNoExistingDispute(roomId, bountyId, disputeId);
+      bounty.disputeId = disputeId; bounty.disputeOpenedMs = this.nowMs();
+      this._transition(bounty, "disputed");
+      this._saveBounty(bounty);
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
         amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId, memo: `dispute bond for ${disputeId}`, actor: act,
         receipt: { type: "bond-locked", payload: { bondKind: "dispute", fromAccount: lane } } });
+      // Write-time re-check: a re-entrant dispute that completed before
+      // the claim above (a seam earlier in this call) has persisted its
+      // dispute row by now — refuse rather than persist a second one.
+      // Our own dispute row is not persisted yet, and the bounty row
+      // points at our own disputeId, so this only fires on a foreign
+      // dispute. The throw rolls the whole transaction back, bond lock
+      // included, so the refusal strands nothing.
+      this._assertNoExistingDispute(roomId, bountyId, disputeId);
       // Walk the pure machine to adjudication: open -> challenged -> evidence
       // (grounds are the first evidence) -> seat the designated verifier.
       const machine = this._disputes;
       let dispute;
-      const fromState = bounty.state;
       try {
         dispute = machine.open({ disputeId, bountyId, bountyAmount: bounty.amountMillis, raisedBy: lane, reason: grounds, kind: "economic", bond: bondMillis });
         this._persistDispute(roomId, dispute);

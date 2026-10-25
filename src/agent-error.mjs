@@ -1119,6 +1119,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       next: [command("Wait for Retry-After (30s), then retry the exact same request; reconcile afterward")]
     };
   }
+  if (reasonCode === "storage_busy") {
+    return {
+      status: "action_required", reason: "storage_busy",
+      hint: "Storage is busy — another writer holds the lock and the request was rolled back with nothing applied. Wait for Retry-After, then retry the exact request unchanged. No success is claimed.",
+      next: [command("Wait for Retry-After (1s), then retry the exact same request unchanged")]
+    };
+  }
   if (reasonCode === "mail_not_configured") {
     return {
       status: "failed", reason: "mail_not_configured",

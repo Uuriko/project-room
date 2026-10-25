@@ -25,6 +25,21 @@
 // Unknown errors are rethrown for the generic 500 path — never wrapped, so
 // no internal detail leaks.
 //
+// One non-EscrowError is mapped here, at the escrow door only
+// (HARDEN-RACE-CAVEATS (b)): a SQLite BUSY (primary code 5 — a foreign
+// connection holding the WAL write lock past busy_timeout) is a clean
+// retryable refusal, 503 storage_busy with Retry-After, not a 500. The
+// failing transaction has already rolled back, so zero partial writes
+// exist and the exact request is safe to retry once the lock releases.
+// BUSY is deliberately NOT added to store.mjs's storageFailureSqlite
+// set: contention is not storage failure — classifying it there would
+// count transient lock waits toward the storage-unavailable readiness
+// threshold and misreport a busy store as a broken one. 503 (not 409):
+// nothing about the request conflicts with current state — the same
+// request succeeds unchanged after the wait, which is the
+// storage_unavailable family's shape, at a contention timescale
+// (Retry-After 1s, not 30s).
+//
 // Idempotency: every mutating route accepts an idempotency key via the
 // Idempotency-Key header or the `idempotencyKey` body field. A replayed key
 // returns the original status and body without re-executing.
@@ -79,6 +94,21 @@ export const canReadLaneLedger = (store, roomId, auth, laneIdentity) => {
   return isRoomOwner(store, roomId, auth);
 };
 
+// SQLite primary result code 5 is SQLITE_BUSY; extended busy codes
+// (SQLITE_BUSY_SNAPSHOT 517, SQLITE_BUSY_TIMEOUT 773, ...) share the low
+// byte. node:sqlite surfaces it as errcode 5 with code ERR_SQLITE_ERROR
+// and the message "database is locked" — the code check is authoritative,
+// the message check only a fallback for drivers that report BUSY by code
+// name alone. Other ERR_SQLITE_ERRORs (constraint, I/O, schema) are NOT
+// busy and keep the raw rethrow below.
+export const isSqliteBusy = error => {
+  if (!error || typeof error !== "object") return false;
+  if (Number.isInteger(error.errcode) && (error.errcode & 0xff) === 5) return true;
+  if (error.code === "SQLITE_BUSY") return true;
+  return error.code === "ERR_SQLITE_ERROR"
+    && /database is locked|database table is locked/i.test(String(error.message ?? ""));
+};
+
 const runPure = (reject, fn) => {
   try { return fn(); }
   catch (error) {
@@ -88,6 +118,8 @@ const runPure = (reject, fn) => {
       if (error.code === "already_claimed" || error.code === "dispute_exists" || error.code === "idempotency_actor_mismatch" || error.code === "idempotency_key_reused") reject(409, error.code, error.message);
       reject(422, error.code, error.message);
     }
+    if (isSqliteBusy(error))
+      reject(503, "storage_busy", "Storage is busy; nothing was applied — retry the exact request", { "Retry-After": "1" });
     throw error;
   }
 };
