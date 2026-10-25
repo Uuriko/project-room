@@ -8259,6 +8259,7 @@ paths:
         '404': { description: packet_not_found or no_adverse_decision }
   /api/rooms/{roomId}/bounties/{bountyId}/decision-packet/followups:
     post:
+      x-room-permission: member
       summary: File a correction or human-review request on a rejected bounty's packet
       description: |
         Claimant-only, and a rejection must be recorded. kind=correction
@@ -15998,6 +15999,7 @@ paths:
         - identityBearer: []
   /api/public-work/receipts/{receiptId}/decision-packet/followups:
     post:
+      x-room-permission: self
       operationId: "fileAdverseDecisionPacketFollowup"
       summary: "File a correction or human-review request on your own adverse-decision packet."
       description: "Fresh saved global identity, receipt ownership required, and an adverse decision must be recorded. kind=correction records that data the decision relied on is wrong (it fixes the record; it is not a dispute and moves no money). kind=human_review_request records a request routed to a human reviewer who was not the original decider; 409 no_distinct_human_reviewer when none is recorded."

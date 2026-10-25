@@ -391,7 +391,7 @@ export class AdverseDecisionPackets {
       { id: state.room?.ownerId, role: 'room owner' }], deciderId, id => state.members?.[id]?.kind);
   }
   fileBountyFollowup(roomId, lane, bountyId, input) {
-    const packet = this.forBounty(roomId, lane, bountyId);
+    this.forBounty(roomId, lane, bountyId);
     const resolved = this.#resolveBountyReviewer(roomId, bountyId);
     return this.fileFollowup({ packetKind: 'bounty', packetRef: bountyId, roomId, subject: lane,
       reviewer: resolved, input });
