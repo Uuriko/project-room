@@ -10,6 +10,7 @@ import { AccessRequests } from "../server/access-requests.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
 import { seedStarter } from "../server/starter-room.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // A gate for one bug class, found three times in one day.
 //
@@ -220,12 +221,8 @@ function sweep() {
   try {
     const left = fixture.store.identities.create("Sweep bond left");
     const right = fixture.store.identities.create("Sweep bond right");
-    fixture.store.identities.link(fixture.keys.owner, "commons", {
-      identityId: left.identityId, displayName: "Sweep bond left", permissions: ["accept_work"]
-    });
-    fixture.store.identities.link(fixture.keys.owner, "commons", {
-      identityId: right.identityId, displayName: "Sweep bond right", permissions: ["accept_work"]
-    });
+    linkWithProof(fixture.store, fixture.keys.owner, "commons", left, { displayName: "Sweep bond left", permissions: ["accept_work"] });
+    linkWithProof(fixture.store, fixture.keys.owner, "commons", right, { displayName: "Sweep bond right", permissions: ["accept_work"] });
     // Graduated autonomy tiers: linked agent identities enroll at t1_readonly;
     // promote them so the sweep exercises the bond command surface.
     for (const identity of [left, right])

@@ -23,6 +23,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
 import { solveIdentityMintProof } from "../server/agent-identities.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function serve(t, ownerId = "owner") {
   const directory = mkdtempSync(join(tmpdir(), "project-room-referral-"));
@@ -77,10 +78,7 @@ function mintRefusalViaStore(store, body, secret) {
 async function enrollInviter(store, origin, ownerKey, displayName = "Inviter") {
   const created = await post(origin, "/api/agent-identities", { displayName });
   assert.equal(created.status, 201);
-  store.identities.link(ownerKey, "commons", {
-    identityId: created.json.identityId, displayName,
-    permissions: ["steer", "accept_work", "complete_work", "verify", "invite_member"],
-  });
+  linkWithProof(store, ownerKey, "commons", created.json, { displayName, permissions: ["steer", "accept_work", "complete_work", "verify", "invite_member"] });
   return { identityId: created.json.identityId, secret: created.json.secret };
 }
 

@@ -18,6 +18,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { accessReviewReport, assembleAccessReview, renderAccessReview, ACCESS_REVIEW_FORMAT } from "../server/access-review.mjs";
 import { GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_KIND, GUEST_AGENT_PERMISSIONS, guestAgentMemberId } from "../server/guest-agent-links.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const execFileAsync = promisify(execFile);
 const checkout = fileURLToPath(new URL("..", import.meta.url));
@@ -62,7 +63,7 @@ async function fixture(t) {
     displayName: "Helper", access: "contribute", keyHash, expiresAt: now + 86400000, expectedOwnerRevision: 0 }, ownerSession.session.sessionBinding);
   // Multi-room agent identity linked into the room.
   const identity = store.identities.create("Roaming agent");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  linkWithProof(store, ownerKey, "commons", identity, { permissions: ["accept_work"] });
   // Guest agent (2 h credential), seeded as legacy data. The v0 mint door
   // was cut in #3216, but guests minted before the cut live out their
   // credentials and the review must keep surfacing them, so the fixture

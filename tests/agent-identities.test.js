@@ -12,6 +12,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { RoomAgentClient, createAgentIdentity, listAgentRooms } from "../client/room-agent.mjs";
 import { AgentIdentities, IDENTITY_LIMIT } from "../server/agent-identities.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof, mintHolderLinkCode } from "./helpers/link-with-proof.mjs";
 
 const execFileAsync = promisify(execFile);
 // The room server runs on this process's event loop, so the CLI must be
@@ -66,11 +67,13 @@ test("multi-room agent identity: one secret works across linked rooms (round-2 #
   const row = store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identityId);
   assert.ok(row && !row.secret_hash.includes(secret.slice(4, 12)));
 
-  // Link the same identity into two rooms with one call each.
+  // Link the same identity into two rooms with one call each. Each link
+  // carries a holder-minted link code for that room (#942 holder proof).
   const link = async (roomId, ownerKey) => {
+    const identityLinkCode = mintHolderLinkCode(store, { identityId, secret }, roomId);
     const res = await fetch(`${origin}/api/rooms/${roomId}/identity-links`, {
       method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerKey}` },
-      body: JSON.stringify({ identityId, permissions: ["accept_work", "complete_work"] })
+      body: JSON.stringify({ identityId, permissions: ["accept_work", "complete_work"], identityLinkCode })
     });
     assert.equal(res.status, 201);
     return res.json();
@@ -123,11 +126,12 @@ test("multi-room agent identity: one secret works across linked rooms (round-2 #
 });
 
 test("re-linking applies the permissions the owner supplies now, not the unlinked record's", async t => {
-  const { origin, ownerCommons } = await serve(t);
-  const { identityId } = await createAgentIdentity(origin, "Scoped Bot");
+  const { store, origin, ownerCommons } = await serve(t);
+  const bot = await createAgentIdentity(origin, "Scoped Bot");
+  const { identityId } = bot;
   const link = async (permissions) => fetch(`${origin}/api/rooms/commons/identity-links`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
-    body: JSON.stringify({ identityId, permissions })
+    body: JSON.stringify({ identityId, permissions, identityLinkCode: mintHolderLinkCode(store, bot, "commons") })
   });
   const members = async () => (await (await fetch(`${origin}/api/rooms/commons`, { headers: { Authorization: `Bearer ${ownerCommons}` } })).json()).state.members;
   assert.equal((await link(["accept_work", "complete_work", "verify"])).status, 201);
@@ -156,7 +160,7 @@ test("identity-links accepts an empty permissions array: read/chat-only link", a
   const { identityId, secret } = await createAgentIdentity(origin, "Readonly Bot");
   const link = await fetch(`${origin}/api/rooms/commons/identity-links`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
-    body: JSON.stringify({ identityId, permissions: [] })
+    body: JSON.stringify({ identityId, permissions: [], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "commons") })
   });
   assert.equal(link.status, 201);
   const members = (await (await fetch(`${origin}/api/rooms/commons`, { headers: { Authorization: `Bearer ${ownerCommons}` } })).json()).state.members;
@@ -178,7 +182,8 @@ test("identity-links accepts an empty permissions array: read/chat-only link", a
   assert.equal(denied.status, 403);
   // The CLI also supports omitting permissions for a read-only link.
   const cliOther = await createAgentIdentity(origin, "Cli Readonly");
-  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerCommons };
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerCommons,
+    ROOM_AGENT_LINK_CODE: mintHolderLinkCode(store, cliOther, "commons") };
   const cliLinked = await cli(origin, ["identity-link", cliOther.identityId], ownerEnv);
   assert.equal(cliLinked.status, 0, cliLinked.stderr);
   assert.equal(cliLinked.json.memberId, cliOther.identityId);
@@ -186,7 +191,8 @@ test("identity-links accepts an empty permissions array: read/chat-only link", a
 
 test("#1004: link with an inherited Object.prototype memberId returns 422, not 409, and writes no row", async t => {
   const { store, origin, ownerCommons } = await serve(t);
-  const { identityId } = await createAgentIdentity(origin, "Prototype Bot");
+  const bot = await createAgentIdentity(origin, "Prototype Bot");
+  const { identityId } = bot;
   // These names pass MEMBER_ID_PATTERN but are inherited, not members. A
   // bare members[id] lookup resolves them to Object.prototype's functions
   // (truthy), which used to fail closed with a misleading 409
@@ -207,7 +213,7 @@ test("#1004: link with an inherited Object.prototype memberId returns 422, not 4
   // A normal link for the same identity still works afterwards.
   const ok = await fetch(`${origin}/api/rooms/commons/identity-links`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
-    body: JSON.stringify({ identityId, permissions: [] }),
+    body: JSON.stringify({ identityId, permissions: [], identityLinkCode: mintHolderLinkCode(store, bot, "commons") }),
   });
   assert.equal(ok.status, 201);
 });
@@ -224,7 +230,8 @@ test("CLI plug-in loop: a new AI goes from no credential to connected member", a
   const { identityId, secret } = created.json;
 
   // 2. The owner links the identity (human owner + manage_members credential).
-  const linked = await cli(origin, ["identity-link", identityId, "accept_work,complete_work"], ownerEnv);
+  const linked = await cli(origin, ["identity-link", identityId, "accept_work,complete_work"],
+    { ...ownerEnv, ROOM_AGENT_LINK_CODE: mintHolderLinkCode(store, { identityId, secret }, "commons") });
   assert.equal(linked.status, 0, linked.stderr);
   assert.equal(linked.json.memberId, identityId);
   assert.equal(linked.json.roomId, "commons");
@@ -335,7 +342,7 @@ test("identity-link listing is membership administration: agents and plain membe
   const { identityId, secret } = await createAgentIdentity(origin, "Listing Bot");
   const link = await fetch(`${origin}/api/rooms/commons/identity-links`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
-    body: JSON.stringify({ identityId, permissions: ["accept_work"] })
+    body: JSON.stringify({ identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "commons") })
   });
   assert.equal(link.status, 201);
   const list = token => fetch(`${origin}/api/rooms/commons/identity-links`, { headers: { Origin: origin, Authorization: `Bearer ${token}` } });
@@ -359,7 +366,8 @@ test("identity-links DELETE error contract: 403/404/422 match the documented res
   // A refactor that relaxes the manage_members guard, drops the
   // link-existence check, or loosens the exact-body shape check fails here.
   const { store, origin, ownerCommons } = await serve(t);
-  const { identityId } = await createAgentIdentity(origin, "Unlink Guard Bot");
+  const bot = await createAgentIdentity(origin, "Unlink Guard Bot");
+  const { identityId } = bot;
   const unlink = (token, body) => fetch(`${origin}/api/rooms/commons/identity-links`, {
     method: "DELETE", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${token}` },
     body: JSON.stringify(body)
@@ -385,7 +393,7 @@ test("identity-links DELETE error contract: 403/404/422 match the documented res
   // Positive control: the owner unlinks a linked identity with 200.
   const link = await fetch(`${origin}/api/rooms/commons/identity-links`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerCommons}` },
-    body: JSON.stringify({ identityId, permissions: ["accept_work"] })
+    body: JSON.stringify({ identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, bot, "commons") })
   });
   assert.equal(link.status, 201);
   const ok = await unlink(ownerCommons, { identityId });
@@ -395,14 +403,15 @@ test("identity-links DELETE error contract: 403/404/422 match the documented res
 
 test("identity link/unlink/list honour the session-binding fence", async t => {
   const { store, ownerCommons } = await serve(t);
-  const { identityId } = store.identities.create("Fenced Bot");
+  const bot = store.identities.create("Fenced Bot");
+  const { identityId } = bot;
   const staleFence = "f".repeat(64);
   const fenced = error => error.status === 409 && error.code === "session_binding_changed";
   // A room access key has no session binding, so any expected fence is a mismatch.
   assert.throws(() => store.identities.list(ownerCommons, "commons", staleFence), fenced);
   assert.throws(() => store.identities.link(ownerCommons, "commons", { identityId, permissions: ["accept_work"] }, staleFence), fenced);
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM identity_links WHERE identity_id=?").get(identityId).n, 0);
-  store.identities.link(ownerCommons, "commons", { identityId, permissions: ["accept_work"] });
+  linkWithProof(store, ownerCommons, "commons", bot, { permissions: ["accept_work"] });
   assert.throws(() => store.identities.unlink(ownerCommons, "commons", identityId, staleFence), fenced);
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM identity_links WHERE identity_id=?").get(identityId).n, 1);
   // The default (no fence) keeps working.
@@ -554,7 +563,7 @@ test("identity secret is shown once: no read path returns it afterwards (RC-2026
   // Owner-side link audit carries no secret either.
   const link = await fetch(`${origin}/api/rooms/lab/identity-links`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerLab}` },
-    body: JSON.stringify({ identityId, permissions: ["accept_work"] })
+    body: JSON.stringify({ identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "lab") })
   });
   assert.equal(link.status, 201);
   const list = await (await fetch(`${origin}/api/rooms/lab/identity-links`, {
@@ -569,12 +578,12 @@ test("identity secret is shown once: no read path returns it afterwards (RC-2026
 });
 
 test("agent-visible surfaces never return owner tokens or session cookies (RC-2026-09-18-042)", async t => {
-  const { origin, ownerLab } = await serve(t);
+  const { store, origin, ownerLab } = await serve(t);
   const { identityId, secret } = await createAgentIdentity(origin, "Surface Bot");
   // Owner links with the owner credential (never shared with the agent).
   const link = await fetch(`${origin}/api/rooms/lab/identity-links`, {
     method: "POST", headers: { "Content-Type": "application/json", Origin: origin, Authorization: `Bearer ${ownerLab}` },
-    body: JSON.stringify({ identityId, permissions: ["accept_work"] })
+    body: JSON.stringify({ identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId, secret }, "lab") })
   });
   assert.equal(link.status, 201);
   // As the agent: the room snapshot carries no credential material.
@@ -625,7 +634,7 @@ test("room discovery needs only identity, isolates callers and immediately refle
   const identity = store.identities.create("Returning agent");
   const other = store.identities.create("Other agent");
   for (const [roomId, owner] of [["commons", ownerCommons], ["lab", ownerLab]])
-    store.identities.link(owner, roomId, { identityId: identity.identityId, permissions: [] });
+    linkWithProof(store, owner, roomId, identity, { permissions: [] });
   const result = await listAgentRooms(origin, identity.secret);
   assert.equal(result.identityId, identity.identityId);
   assert.deepEqual(result.rooms.map(room => room.roomId), ["commons", "lab"]);
@@ -712,9 +721,7 @@ test("owner agent passes the identity-connection ladder with owner-class permiss
   assert.ok(check.permissions.includes("decide"), "owner keeps decide");
   // An explicit owner-delegated admin grant is valid without transferring ownership.
   const other = store.identities.create("Helper");
-  store.identities.link(identity.secret, "keeper-den", {
-    identityId: other.identityId, displayName: "Helper", permissions: ["accept_work", "manage_members"]
-  });
+  linkWithProof(store, identity.secret, "keeper-den", other, { displayName: "Helper", permissions: ["accept_work", "manage_members"] });
   const otherClient = new RoomAgentClient({ origin, roomId: "keeper-den", token: other.secret, memberId: other.identityId });
   const delegated = await otherClient.checkConnection();
   assert.equal(delegated.status, "credential_accepted");
@@ -764,7 +771,7 @@ test("legacy identity first reads authenticate without writing or degrading stor
   const { store, ownerCommons } = await serve(t);
   const { createHash } = await import("node:crypto");
   const identity = store.identities.create("Legacy Reader");
-  store.identities.link(ownerCommons, "commons", { identityId: identity.identityId, permissions: [] });
+  linkWithProof(store, ownerCommons, "commons", identity, { permissions: [] });
   const legacy = createHash("sha256").update(identity.secret).digest("hex");
   store.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=?").run(legacy, identity.identityId);
   const storedHash = () => store.db.prepare("SELECT secret_hash FROM agent_identities WHERE identity_id=?").get(identity.identityId).secret_hash;

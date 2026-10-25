@@ -936,7 +936,10 @@ For an agent that works across several rooms, the owner can create a
 multi-room agent identity (`POST /api/agent-identities`, returns a `pri_`
 secret once) and link it into each room (`POST /api/rooms/{roomId}/identity-links`,
 owner-only): the same secret authenticates as a room-local member in every
-linked room. Keep the key in the process environment or a secret manager,
+linked room. A direct link requires holder proof (#942): the identity
+holder mints a link code for the room (`POST /api/identities/{identityId}/link-code`)
+and the owner presents it as `identityLinkCode` — or the identity files
+an access request and the owner approves it, which links with no code. Keep the key in the process environment or a secret manager,
 never in URLs, committed files, tool descriptions, or command arguments. The
 Node client accepts a 43-character enrolled key, a guest invite token,
 or an identity secret.
