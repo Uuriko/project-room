@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { AGENT_JOIN_PROFILE_ROUTES } from "../server/routes/agent-join-profile.mjs";
 import {
   claimAllowedByProfile,
   joinProfileLine,
@@ -62,6 +63,14 @@ async function mint(origin, ownerKey) {
   assert.equal(minted.status, 201, JSON.stringify(minted.json));
   return minted.json.code;
 }
+
+test("join profile is redeemed and read on the member profile routes", () => {
+  assert.deepEqual(AGENT_JOIN_PROFILE_ROUTES.map(row => `${row.method} ${row.path}`), [
+    "POST /api/agent-invites/redeem",
+    "GET /api/rooms/{roomId}/members/{memberId}/profile",
+    "PATCH /api/rooms/{roomId}/members/{memberId}/profile",
+  ]);
+});
 
 test("a bad join profile names one field and one next step", async t => {
   const { origin } = await serve(t);
