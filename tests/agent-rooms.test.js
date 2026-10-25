@@ -575,6 +575,8 @@ test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + he
   assert.equal(boot.json.invite.profile, "collaborate");
   assert.deepEqual(boot.json.invite.permissions, [...AGENT_AUTONOMY_PERMISSIONS]);
   assert.match(boot.json.invite.code, /^RM-/);
+  assert.equal(Date.parse(boot.json.invite.expiresAtIso), boot.json.invite.expiresAt);
+  assert.equal(boot.json.warnings.includes("Live www /room/api/* is 404 until Instinct publishes the Worker rewrite. Source path is ready."), false);
   assert.equal(boot.json.hello.posted, true);
   assert.ok(boot.json.ownerPermissions.includes("invite_member"));
   assert.ok(boot.json.ownerPermissions.includes("manage_members"));
