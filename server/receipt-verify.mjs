@@ -188,7 +188,7 @@ function checkSignatures(store, receipt, keyHistory) {
     // scored by their own checks, not folded into this one.
     if (result.ok || reason.startsWith("unexpected_signer") || reason.startsWith("journal_mismatch")) {
       checks.push({ id: "signature", label, status: "pass",
-        detail: "The signature verifies over the receipt's canonical form." });
+        detail: "The signed bytes are unaltered since issuance — the signature verifies over the receipt's canonical form." });
     } else {
       checks.push({ id: "signature", label, status: "contradicted",
         detail: `The stored signed body fails verification (${reasonClass}) — it was altered after signing, or never validly signed.` });
@@ -213,7 +213,7 @@ function checkSignatures(store, receipt, keyHistory) {
         detail: "The signature does not verify, so the signer cannot be confirmed against the pinned key." });
     } else {
       checks.push({ id: "signer-identity", label, status: "pass",
-        detail: `The signer key is pinned by the published key history (escrow-keeper, fingerprint ${fingerprint}).${entry.status === "revoked" ? " The key was later revoked; this receipt predates the declared compromise time." : ""}` });
+        detail: `Signed by the published escrow-keeper key ${fingerprint} (pinned by the published key history).${entry.status === "revoked" ? ` Signed before the declared compromise at ${entry.compromiseTime ?? "an unpublished time"}.` : ""}` });
     }
     // Journal linkage.
     if (result.ok) {
@@ -237,11 +237,11 @@ function checkSignatures(store, receipt, keyHistory) {
     if (!entry) {
       checks.push({ id: "signature-status", label, status: "not-checked",
         detail: keyHistory == null
-          ? "Key history not published — the signer key's status is not published."
+          ? "Status unchecked — no key history or status record was consulted."
           : "The published key history does not carry this key, so its status is not published." });
     } else if (entry.status === "superseded") {
       checks.push({ id: "signature-status", label, status: "observed",
-        detail: `The signer key is published as superseded${entry.successor ? ` by ${entry.successor}` : ""}.` });
+        detail: `Signing key superseded${entry.successor ? ` by ${entry.successor}` : ""}; this receipt still verifies.` });
     } else if (entry.status === "revoked") {
       checks.push({ id: "signature-status", label, status: "observed",
         detail: "The signer key is published as revoked; the issue-time window is scored under signer identity." });
