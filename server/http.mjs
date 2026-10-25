@@ -5366,10 +5366,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
         // Research r7, opt-in: ROOM_PAUSE_BLOCKS_POSTS=1 makes an owner's
-        // Pause also stop the paused member from POSTING in that room. A
-        // pause the member set on itself never blocks. Default off: blocking
-        // posts is an owner/product decision, not part of the pause default.
-        if (process.env.ROOM_PAUSE_BLOCKS_POSTS === "1" && auth?.member) {
+        // Pause also stop a paused human from POSTING in that room. A pause
+        // the human set on itself never blocks. Agents are not gated here:
+        // store.command refuses a paused agent's writes either way, including
+        // a pause the agent set itself. Default off for humans.
+        if (process.env.ROOM_PAUSE_BLOCKS_POSTS === "1" && auth?.member && auth.member.kind !== "agent") {
           const memberPause = store.wakeQueue.pauseStatus(roomId, auth.member.id);
           if (memberPause && memberPause.heldBy !== "self") reject(423, "member_paused", "The room owner paused this member. Posting resumes when the owner resumes it.");
         }
