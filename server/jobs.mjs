@@ -158,7 +158,7 @@ const PUBLIC_BLOCK_TOKEN = /^[a-z][a-z0-9_]{0,40}$/i;
 
 function logIntegrity(integrity) {
   const line = { event: "room.integrity" };
-  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "quarantinedEvents", "deferredSkips"]) {
+  for (const key of ["matched", "skipped", "verified", "budgetExceeded", "invitations", "paused", "checked", "swept", "blockedRooms", "quarantinedEvents", "deferredSkips", "verifiedRooms", "blockedFailures", "blockedSince"]) {
     if (typeof integrity?.[key] === "number") line[key] = integrity[key];
   }
   for (const key of ["blockReason", "blockComponent"]) {
@@ -438,10 +438,20 @@ export const JOBS = Object.freeze([
     disabledReason: () => null,
     async run(store, ctx) {
       let integrity;
+      // Whether the scan result itself carried the outstanding-failure
+      // list, and how many of its records the partition below rode as
+      // parked. The real scan always carries the list (every return
+      // shape has `failures`); a result without one never isolated its
+      // parked rooms into per-room records this tick, so the
+      // durable-count guard after the scan remains that park's only —
+      // and therefore failing — signal.
+      let scanReportedFailures = false;
+      let scanParkedCount = 0;
       try {
         integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
           : await store.verifyRoomIntegrity({ deadline: ctx.deadline });
+        scanReportedFailures = Array.isArray(integrity?.failures ?? integrity?.deferred?.failures);
         // Isolated failures: the store contained one record's blast radius
         // and returned the outstanding failures instead of throwing. The
         // tick still fails — the verdict is unchanged — with the same
@@ -454,29 +464,90 @@ export const JOBS = Object.freeze([
         // reachable from the operator surfaces, not only from this log line.
         const failures = integrity?.failures ?? integrity?.deferred?.failures ?? [];
         if (failures.length) {
-          const first = failures.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
-            && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? failures[0];
-          const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
-          if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
-          if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
-            failure.recordId = first.recordId;
+          // Per-room isolation at the summary level, NARROWED at the
+          // C6 reconcile. A room parked by the messages backfill on a
+          // stored EVENT (its durable block carries the event's id) is
+          // UNSCANNABLE, not a failed verification: it is recorded
+          // durably by name, every later sweep skips it, and failing
+          // the whole tick for it zeroed the fleet's integrity signal
+          // for exactly as long as a park lasted. Such records never
+          // fail the tick on their own; they ride the summary as their
+          // own numbers (blockedFailures here, blockedRooms below,
+          // blockedSince = the oldest parked record's first sighting)
+          // beside verifiedRooms, the count of rooms that stand
+          // verified at head. A parked room still reads blocked — its
+          // record stays outstanding and is re-reported every tick —
+          // it is never laundered into a pass for the room itself.
+          //
+          // A LOG-GAP park is carved out and stays FATAL. The log
+          // ending before the room's head is data loss, and main's
+          // post-#4758 contract (the block-health fixture; the
+          // observation comment below) is that it still fails the
+          // tick. A gap record is recognisable two ways, either
+          // sufficient: its stored message is the allowlisted
+          // backfill-stop line, or its block row carries event_id
+          // NULL — the blocks table's own encoding of a head the log
+          // does not reach. If the block map cannot be read, no
+          // record is partitioned on the map's evidence (the message
+          // leg still applies): the partition fails closed.
+          //
+          // Every other failure keeps the tick failing, with the
+          // detail chosen from the fatal set only: a parked room must
+          // never mask a real failure behind its name.
+          let blocksByRoom = null;
+          try {
+            blocksByRoom = new Map(store.db.prepare(
+              "SELECT room_id, event_id FROM messages_backfill_blocks WHERE skipped=0"
+            ).all().map(row => [row.room_id, row.event_id]));
+          } catch { blocksByRoom = null; }
+          const isLogGapPark = failure => {
+            if (typeof failure.message === "string" && failure.message.startsWith("messages backfill stopped at ")) return true;
+            return blocksByRoom !== null && blocksByRoom.has(failure.recordId)
+              && blocksByRoom.get(failure.recordId) === null;
+          };
+          const parked = [];
+          const fatal = [];
+          for (const failure of failures) {
+            if (failure.step === "messages_backfill" && typeof failure.recordId === "string"
+              && failure.recordId !== "" && !isLogGapPark(failure)) parked.push(failure);
+            else fatal.push(failure);
           }
-          // The operator line carries the allowlisted fields only —
-          // sub-check, record id, stable code, class, count. The stored
-          // failure message is a diagnostic for the record's owner, not
-          // log text: re-emitting it here every tick would republish
-          // whatever a record's error once contained.
-          console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${failures.length} outstanding)`);
+          scanParkedCount = parked.length;
           const summary = {};
-          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips"]) {
+          for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips", "verifiedRooms", "budgetExceeded"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
           }
-          integrity = {
-            ...summary,
-            errors: failures.length,
-            scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
-            failureDetail: failure
-          };
+          if (parked.length) {
+            summary.blockedFailures = parked.length;
+            const firstSeen = parked.reduce((oldest, failure) => Number.isFinite(failure.firstSeenAt) ? Math.min(oldest, failure.firstSeenAt) : oldest, Infinity);
+            if (Number.isFinite(firstSeen)) summary.blockedSince = firstSeen;
+          }
+          if (fatal.length) {
+            const first = fatal.find(failure => INTEGRITY_ROOM_RECORD_STEPS.has(failure.step)
+              && typeof failure.recordId === "string" && SAFE_RECORD_ID.test(failure.recordId)) ?? fatal[0];
+            const failure = classifyIntegrityError({ message: first.message, integritySubcheck: first.step });
+            if (typeof first.code === "string" && SAFE_CARRIED_CODE.test(first.code)) failure.code = first.code;
+            if (INTEGRITY_ROOM_RECORD_STEPS.has(first.step) && typeof first.recordId === "string" && SAFE_RECORD_ID.test(first.recordId)) {
+              failure.recordId = first.recordId;
+            }
+            // The operator line carries the allowlisted fields only —
+            // sub-check, record id, stable code, class, count. The
+            // stored failure message is a diagnostic for the record's
+            // owner, not log text: re-emitting it here every tick
+            // would republish whatever a record's error once
+            // contained.
+            console.error(`[integrity] ${failure.subcheck} failed for ${first.recordId || "store"} (${failure.code}, ${failure.errorClass}; ${fatal.length} outstanding)`);
+            integrity = {
+              ...summary,
+              errors: fatal.length,
+              scanError: `integrity ${failure.subcheck} failed (${failure.code})`,
+              failureDetail: failure
+            };
+          } else {
+            const names = parked.map(failure => failure.recordId).filter(id => SAFE_RECORD_ID.test(id));
+            console.error(`[integrity] ${parked.length} room(s) parked in messages backfill${names.length === parked.length ? ` (${names.join(", ")})` : ""}; every scannable room verified`);
+            integrity = summary;
+          }
         }
       } catch (error) {
         console.error(`[integrity] ${oneLine(error?.message ?? error)}`);
@@ -497,6 +568,7 @@ export const JOBS = Object.freeze([
         try { healBackfillQuarantines(store); } catch { /* the read below reports an unreadable table */ }
         const observed = store.db.prepare(`SELECT
           (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=0) AS n,
+          (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=0 AND event_id IS NULL) AS gapBlocks,
           (SELECT COUNT(*) FROM messages_backfill_blocks WHERE skipped=1) AS quarantined,
           (SELECT reason FROM messages_backfill_blocks WHERE skipped=0 AND reason<>'' LIMIT 1) AS blockReason,
           (SELECT component FROM messages_backfill_blocks WHERE skipped=0 AND component<>'' LIMIT 1) AS blockComponent,
@@ -516,7 +588,18 @@ export const JOBS = Object.freeze([
         integrity = { ...integrity, ...extra };
         const backfillDetail = integrity?.failureDetail?.subcheck === "messages_backfill"
           || integrity?.failureDetail?.code === "messages_backfill_failed";
-        if (blockedRooms > 0 && !summaryFailed(integrity)) {
+        // The #3855 force-fail stands for any standing block the scan
+        // did not itself account: a log-gap block (gapBlocks > 0 — a
+        // gap's record is fatal in the partition, so a gap block under
+        // a non-failing summary means its record has not been written
+        // yet), or a block recorded after the scan read its list. The
+        // guard is suppressed only when the scan carried its list and
+        // every standing skipped=0 block is one of the event parks
+        // the partition just rode as blockedFailures: those rooms are
+        // already named in the summary, and failing the tick for them
+        // would re-zero the signal the partition exists to save.
+        if (blockedRooms > 0 && !summaryFailed(integrity)
+          && !(scanReportedFailures && scanParkedCount === blockedRooms && Number(observed?.gapBlocks) === 0)) {
           const failure = integrityFailure({ integritySubcheck: "messages_backfill" });
           if (token(observed.blockReason)) failure.failureDetail.reason = observed.blockReason;
           if (token(observed.blockComponent)) failure.failureDetail.component = observed.blockComponent;
