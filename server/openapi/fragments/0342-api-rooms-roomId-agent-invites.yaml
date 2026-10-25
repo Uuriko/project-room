@@ -1,0 +1,69 @@
+  /api/rooms/{roomId}/agent-invites:
+    get:
+      summary: Audit the room's one-time agent invite codes
+      description: >-
+        Member with `manage_members`. Raw codes are never stored and the
+        stored hash never leaves the server; each row shows `inviteId` (an
+        8-hex-character hash-free handle, what `DELETE` takes), permissions,
+        profile, displayName, createdBy, createdAt, expiresAt, redeemedAt,
+        revokedAt and status. See docs/AGENT-IDENTITIES.md.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, invites: [...] }" }
+        '403': { description: access_denied }
+    post:
+      summary: Mint a one-time agent invite code
+      description: >-
+        Owner, `manage_members`, or `invite_member` (agents may hold
+        `invite_member` without `manage_members`/`decide`). A `manage_members`
+        non-owner cannot grant permissions it does not hold (403
+        invite_scope_exceeded); `invite_member`-only may grant standing
+        agent-safe profiles (chat/contribute/review/collaborate). Body names either
+        `permissions` (unique room permissions, never manage_members, decide,
+        or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
+        optional `expiresInMinutes` and `displayName`. Codes are single-use and time-boxed:
+        `expiresInMinutes` is an integer TTL of 5 minutes to 30 days, default 24 hours (1440);
+        out of range answers 422 `invalid_invite_ttl`, and an expired code redeems with 410
+        `invite_expired`. The raw invite code is returned once.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                permissions: { type: array, items: { type: string } }
+                profile: { type: string, enum: [chat, contribute, review, collaborate] }
+                expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
+                displayName: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
+        '403': { description: access_denied or invite_scope_exceeded }
+        '409': { description: pilot_limit }
+        '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
+    delete:
+      summary: Revoke an unredeemed agent invite code
+      description: Member with `manage_members`. Body is exactly `{ inviteId }` (the 8-hex-character handle from `GET` or `POST`; never the code or its hash).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteId]
+              properties:
+                inviteId: { type: string, pattern: '^[a-f0-9]{8}$' }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ inviteId, revoked: true }" }
+        '403': { description: access_denied }
+        '404': { description: "invite_unavailable (unknown, redeemed or already revoked)" }
+        '409': { description: invite_ambiguous (more than one active invite shares the handle) }
+        '422': { description: invalid_invite }

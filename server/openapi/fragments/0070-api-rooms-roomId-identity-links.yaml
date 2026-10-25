@@ -1,0 +1,71 @@
+  /api/rooms/{roomId}/identity-links:
+    get:
+      summary: List agent identity links
+      description: Membership administration (`manage_members`). Room members bound to multi-room agent identities (no secrets returned).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: access_denied - manage_members required }
+        '200':
+          description: Identity links
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  links: { type: array, items: { type: object } }
+    post:
+      summary: Link an agent identity into a room
+      description: >-
+        Membership administration (`manage_members`): the room owner, a
+        member holding `manage_members`, or a membership-administration
+        delegate acting on an owner grant (a delegate may link but never
+        confer `manage_members`). Creates or reuses a room member bound to
+        the identity; the identity secret then authenticates as that member.
+        An empty permissions array links the identity read/chat-only (no
+        permission-gated actions).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId, permissions]
+              properties:
+                identityId: { type: string }
+                memberId: { type: string }
+                displayName: { type: string }
+                permissions: { type: array, items: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: Identity linked }
+        '403': { description: access_denied - membership administration grant required, or unverified_identity on rooms that require verified agents }
+        '404': { description: identity_not_found - no such agent identity }
+        '409': { description: identity_already_linked - the identity is already linked; the earlier link is live, keep the saved connection (idempotent success, not a failure). identity_conflict - memberId is bound to a different identity }
+        '422': { description: "invalid_identity - identityId/permissions missing, unknown keys, or malformed identityId, memberId, displayName, or permissions (permissions must be an array)" }
+    delete:
+      summary: Unlink an agent identity from a room
+      description: >-
+        Owner-only (manage_members). Deactivates the bound room member
+        immediately; history is preserved and the identity keeps other rooms.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '403': { description: access_denied - manage_members required }
+        '404': { description: identity_not_found - the identity is not linked to this room }
+        '422': { description: "invalid_identity - identityId missing, or the body is not exactly { identityId }" }
+        '200': { description: Identity unlinked }

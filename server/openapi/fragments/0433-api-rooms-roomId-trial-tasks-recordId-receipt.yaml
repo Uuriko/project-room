@@ -1,0 +1,11 @@
+  /api/rooms/{roomId}/trial-tasks/{recordId}/receipt:
+    get:
+      summary: Read a private verified vetting receipt (record-only)
+      description: Active room and party access required. Returns the signed receipt and owner-configured issuer public key provenance. Consumers must independently trust the issuer and verify candidate/task binding.
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: path, name: recordId, required: true, schema: {type: string}}
+      responses:
+        '200': {description: Signed receipt and configured trust provenance}
+        '403': {description: Room or party access denied}
+        '404': {description: Receipt not available}
