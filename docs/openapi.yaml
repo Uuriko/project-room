@@ -185,6 +185,23 @@ paths:
       security: []
       responses:
         '200': { description: Download page headers without a response body }
+  /offers:
+    get:
+      summary: Public offers shelf (server-rendered HTML)
+      description: >-
+        The published project offers rendered into the page at read
+        time — the same set as /api/project-offers — so the shelf is
+        readable without JavaScript; the client script enhances it.
+        Query limit (1–100, default 20) and after (an offer id cursor)
+        page the shelf.
+      security: []
+      responses:
+        '200': { description: Server-rendered offers shelf as HTML }
+    head:
+      summary: Offers shelf metadata
+      security: []
+      responses:
+        '200': { description: Offers headers without a response body }
   /api/public-work/match:
     post:
       operationId: "matchPublicWork"

@@ -111,7 +111,7 @@
     "src/polls.js": "sha256:7d39af43a6d14593cbf54093e9d16183cc2bcbc3964173cdb8f1fed119813aa2",
     "src/portable-work.js": "sha256:88d9325a8cbb698ced48b9eb2ba594606b093a443d21939ca3a7fbee62e49c24",
     "src/project-offers-ui.js": "sha256:38d1c285b53ba40dcf2b95452c0fd6830a1832ce5d5696969f6298fb7998bcca",
-    "src/project-offers.css": "sha256:693f1cc89bd8d86826379457388207fa8c545e2108b993b0cacc2f874ff2ee4d",
+    "src/project-offers.css": "sha256:72d9acbbd4ea295904c8c53b8e8a58c8fe5e1e6ffa54aae8f28f1e9f5b5aa4f5",
     "src/public-a11y.css": "sha256:cb8019ac86fd0320936f8f1da5dcaaa5d3532326a843ae35566ce0797a91d980",
     "src/push-ask.js": "sha256:a81105c001f9043a657b203d642b64933107cc11fbf486386451f2336d417c5a",
     "src/pwa-install.js": "sha256:791a9565cf007a24505af10e893255b854ba73d6f332612840946238912f9788",
@@ -161,7 +161,7 @@
     "cloudflare/package.json": "sha256:6f0e5ae7c18da9972a53fd5b1c2aa60fd7aa930e4b80640c7eb0519eb1792b8d",
     "cloudflare/pnpm-lock.yaml": "sha256:e85e6e33177fe8779a9baea1fe99b3575edc4a1b29da6ed7415b7d2023ca157f",
     "cloudflare/room.mjs": "sha256:42581c72d2e958c11654c0f5b231eb4e2d4c40e3d4ac14de14d54abd1e92f27c",
-    "cloudflare/storage.mjs": "sha256:74497e5eb39a649c519b37063d4358d0b813a4f84d06dab36a5a9562d44b1f8d",
+    "cloudflare/storage.mjs": "sha256:841c10ef3a3116aa592dd59daf9793b925d91d1804273a1df8d01131405ca10b",
     "cloudflare/wrangler.jsonc": "sha256:cd7454570a9f0aa54fef87933b587c5d1bfaed78069dcf16c5dcd3fc23fcb57b",
     "scripts/deploy-recovery.mjs": "sha256:7c3ada6d04b9a6944ed2e65354ef27b92ad356bca0829f4d5a76ce6884898b98"
   },

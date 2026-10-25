@@ -28,9 +28,10 @@ const when = value => {
 };
 
 // One server-rendered card. The title links to the JS detail view
-// (/offers?offer=<id>, which project-offers-ui.js selects on load) and
-// the brief link is the no-JS readable path: the public brief document
-// the API already serves for this offer.
+// (the /offers page with the offer query parameter, which
+// project-offers-ui.js selects on load) and the brief link is the
+// no-JS readable path: the public brief document the API already
+// serves for this offer.
 export function renderOfferCardHtml(offer) {
   const id = escapeHtml(offer.id);
   const deadline = offer.deadline ? `<span>Due ${escapeHtml(when(offer.deadline))}</span>` : "";
