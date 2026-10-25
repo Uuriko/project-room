@@ -15,9 +15,10 @@ import { workHelpContext } from "../src/work-help.js";
 import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../src/help-offers.js";
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
-import { edgeDoorApiPath } from "../server/agent-discovery.mjs";
+import { edgeDoorApiPath } from "../src/service-origin.js";
 import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
 import { CONTENT_TRUST, markIfOther, stampBoard, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
+import { validRoomDigest } from "./room-digest.mjs";
 
 export { AGENT_ERRORS };
 export class RoomClientError extends Error {
@@ -348,10 +349,10 @@ export async function joinSharedInvite(origin, linkToken, displayName, options =
     throw new RoomClientError(200, "invalid_response", "Invalid joined invitation");
   return value;
 }
-export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName } = {}, options = {}) {
+export async function createAgentRoom(origin, identitySecret, { roomId, title, purpose, kind, displayName, requestId, starter } = {}, options = {}) {
   requireIdentitySecret(identitySecret);
   const value = await discoveryRequest(origin, "/api/agent-rooms", { method: "POST", token: identitySecret,
-    body: { roomId, title, purpose, kind, displayName } }, options);
+    body: { roomId, title, purpose, kind, displayName, requestId, starter } }, options);
   if (typeof value?.roomId !== "string" || typeof value?.ownerMemberId !== "string")
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid created room");
   return value;
@@ -571,8 +572,15 @@ export class RoomAgentClient {
   }
   // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
   // routed mentions, each with its next step. A read; nothing is marked.
-  agentInbox({ limit, signal } = {}) {
-    return this.#request(`/agent-inbox${limit === undefined ? "" : `?limit=${limit}`}`, undefined, signal);
+  // `after` is the previous response's cursor.after: the two event-log lists
+  // (DMs, direct @mentions) then return only newer entries instead of
+  // re-sending their heads; standing lists always ride in full.
+  agentInbox({ limit, after, signal } = {}) {
+    const params = new URLSearchParams();
+    if (limit !== undefined) params.set("limit", String(limit));
+    if (after !== undefined) params.set("after", String(after));
+    const query = params.toString();
+    return this.#request(`/agent-inbox${query ? `?${query}` : ""}`, undefined, signal);
   }
   // Room messages after a sequence, in order, as compact records. Other event
   // types are skipped; private messages appear only to their two parties
@@ -612,6 +620,55 @@ export class RoomAgentClient {
       || input && (value.action !== input.action || value.result?.id !== input.runId || value.result?.attemptId !== input.attemptId))
       throw new RoomClientError(200, "invalid_response", "Shared assistant response does not match this request");
     return withContentTrust(value);
+  }
+  // This response authenticates its own principal; a separate snapshot
+  // preflight would duplicate the read. It is never an execution grant.
+  async agentWork({ signal } = {}) {
+    if (!this.#memberId) throw new RoomClientError(0, "member_required", "Configure the expected agent member before reading work");
+    let value;
+    try { value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/agent-work`, undefined, signal); }
+    catch (error) {
+      // Older deployments alone use the existing authorized path. Never hide
+      // authentication failures, throttling, malformed data or service errors.
+      if (error.status !== 404 || error.code !== "not_found") throw error;
+      const listing = await this.replyRequests({ direction: "incoming", status: "open", signal });
+      const { runs } = listing.requests.length ? await this.requestRuns(undefined, { signal }) : { runs: {} };
+      return { ...listing, runs };
+    }
+    const member = value?.member, owner = value?.ownerId === this.#memberId;
+    const integer = n => Number.isSafeInteger(n) && n >= 0;
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.viewerId !== this.#memberId
+      || member?.id !== this.#memberId || member.kind !== "agent" || member.active !== true
+      || !integer(member.revision) || !Array.isArray(member.permissions)
+      || member.permissions.some(permission => !PERMISSIONS.includes(permission))
+      || new Set(member.permissions).size !== member.permissions.length || typeof member.delegatedAdmin !== "boolean"
+      || (!owner && !member.delegatedAdmin && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))
+      || !validId(value.ownerId) || value.executionGranted !== false || !integer(value.evaluatedThrough)
+      || !integer(value.observedAt) || !Array.isArray(value.requests) || !value.runs || typeof value.runs !== "object" || Array.isArray(value.runs))
+      throw new RoomClientError(200, "invalid_response", "Invalid work observation for the configured agent");
+    const ids = new Set();
+    for (const request of value.requests) {
+      if (!request || !validId(request.id) || ids.has(request.id) || request.recipientId !== this.#memberId
+        || request.status !== "open" || !integer(request.revision))
+        throw new RoomClientError(200, "invalid_response", "Invalid request identity in work observation");
+      ids.add(request.id);
+    }
+    // Optional for older servers. Unknown future reasons still mean blocked;
+    // malformed metadata must never silently turn into permission to prepare.
+    if (Object.hasOwn(value, "blockedBy")) {
+      const blockers = value.blockedBy;
+      if (!blockers || typeof blockers !== "object" || Array.isArray(blockers)
+        || Object.entries(blockers).some(([id, reasons]) => !ids.has(id)
+          || !Array.isArray(reasons) || reasons.length === 0
+          || reasons.some(reason => typeof reason !== "string" || !reason.trim())
+          || new Set(reasons).size !== reasons.length))
+        throw new RoomClientError(200, "invalid_response", "Invalid blockers in work observation");
+    }
+    for (const [id, run] of Object.entries(value.runs)) {
+      if (!ids.has(id) || !run || !["working", "unknown", "result_ready", "needs_attention", "delivered"].includes(run.state)
+        || !integer(run.updatedAt)) throw new RoomClientError(200, "invalid_response", "Invalid run observation");
+    }
+    return value;
   }
   async requestRuns(input, { signal } = {}) {
     const value = await this.#request("/request-runs", input, signal);
@@ -834,11 +891,12 @@ export class RoomAgentClient {
     const done = next === null;
     return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
-  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee } = {}, { signal } = {}) {
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee, acceptanceCriteria } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
       ...(reviewPolicy === undefined ? {} : { reviewPolicy }),
+      ...(acceptanceCriteria === undefined ? {} : { acceptanceCriteria }),
       ...(tags === undefined ? {} : { tags }),
       ...(files === undefined ? {} : { files }),
       ...(dependsOn === undefined ? {} : { dependsOn }),
@@ -875,14 +933,15 @@ export class RoomAgentClient {
         ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
         ...(pullRequest === undefined ? {} : { pullRequest }) }, signal);
   }
-  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
+  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
       { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
         ...(reviewedBy === undefined ? {} : { reviewedBy }),
         ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }),
         ...(parentClaimId === undefined ? {} : { parentClaimId }),
-        ...(evidenceRefs === undefined ? {} : { evidenceRefs }) }, signal);
+        ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
+        ...(delivery === undefined ? {} : { delivery }) }, signal);
   }
   linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
@@ -929,6 +988,11 @@ export class RoomAgentClient {
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
     return this.updateWorkItem(id, { state: "done", note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal });
   }
+  // #3546: finish under a reviewed policy — the holder delivers the bundle,
+  // then the reviewer verifies with workComplete from their own session.
+  async workDeliver(id, { delivery, deliveryMode, note, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {
+    return this.updateWorkItem(id, { state: "delivered", note, deliveryMode, tags, blobs, parentClaimId, evidenceRefs, delivery, signal });
+  }
   async workRelease(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal });
   }
@@ -940,7 +1004,20 @@ export class RoomAgentClient {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
     return this.#request(`/events?after=${after}&limit=${limit}`, undefined, signal);
   }
-  activationPack({ signal } = {}) { return this.#request("/activation-pack", undefined, signal); }
+  activationPack({ view = "full", signal } = {}) {
+    if (view !== "full" && view !== "brief") throw new RoomClientError(0, "invalid_view", "Use full or brief activation view");
+    return this.#request(`/activation-pack${view === "brief" ? "?view=brief" : ""}`, undefined, signal);
+  }
+  // One bounded summary read after the existing connection preflight. `next`
+  // is the observed head, not an acknowledgement or a complete event page.
+  async roomDigest({ since = 0, signal } = {}) {
+    if (!Number.isSafeInteger(since) || since < 0) throw new RoomClientError(0, "invalid_cursor", "since must be a nonnegative safe sequence number");
+    const value = await this.#request(`/digest?since=${since}`, undefined, signal);
+    if (!validRoomDigest(value, { roomId: this.#roomId, memberId: this.#memberId, since })) {
+      throw new RoomClientError(200, "invalid_response", "Room digest does not match its identity, coverage or bounded summary contract");
+    }
+    return value;
+  }
   // Compact catch-up. sinceVersion is the previous context_version. An exact
   // match returns { not_modified: true } and no room projection. This read
   // never returns message or file bodies.
@@ -1143,6 +1220,10 @@ export class RoomAgentClient {
   accessRequests({ status } = {}, { signal } = {}) {
     const query = status === undefined ? "" : `?status=${encodeURIComponent(status)}`;
     return this.#accessAdmin(`/access-requests${query}`, undefined, { signal });
+  }
+  requestMemberPermissions({ permissions, requestId, note } = {}, { signal } = {}) {
+    return this.#accessAdmin("/members/me/permission-requests",
+      { permissions, requestId, ...(note === undefined ? {} : { note }) }, { signal });
   }
   decideAccessRequest(requestId, { decision, permissions, note } = {}, { signal } = {}) {
     return this.#accessAdmin(`/access-requests/${encodeURIComponent(requestId)}/decide`,

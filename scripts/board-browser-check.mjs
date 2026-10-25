@@ -10,6 +10,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, openSearch } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 async function openBoard(page) {
@@ -281,7 +282,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     assert.equal(new URL(page.url()).hash, canonicalHash);
     assert.equal(await dialog.evaluate(node => node.open), false, "the Board no longer traps focus over work");
     assert.equal(await record.locator("h3").innerText(), "Canonical work behind the Board card");
-    assert.equal(await record.locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await record.locator(".work-details").evaluate(node => node.open), false);
     assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to Board");
   };
   const assertBoardReturn = async (url, scrollTop) => {
@@ -300,13 +301,26 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     assert.equal(await linked.getAttribute("href"), canonicalHash);
     assert.equal(await linked.getAttribute("data-open-work"), workId);
     const boardUrl = page.url();
+    // #3795: a claim without a resolvable work item is not a fabricated WORK
+    // link — its title links to its own claim record instead. The journey
+    // stays on the Board (the record is the card, disclosure open, return
+    // control naming the Board), and going back restores the Board URL with
+    // the dialog still open and focus on the title link.
     for (const id of ["board-null", "board-dangling", "board-coincidence"]) {
-      const heading = page.locator(`article[data-claim-id='${id}'] h4`);
-      assert.equal(await heading.count(), 1);
-      assert.equal(await heading.locator("a, [data-open-work]").count(), 0, `${id} is not a fabricated work link`);
-      await heading.click();
-      assert.equal(page.url(), boardUrl);
+      const titleLink = page.locator(`article[data-claim-id='${id}'] h4 a[data-open-claim]`);
+      assert.equal(await titleLink.count(), 1, `${id} links to its own claim record`);
+      assert.equal(await titleLink.getAttribute("data-open-work"), id);
+      assert.equal(await titleLink.getAttribute("href"), `#pr-record/work/${id}`,
+        `${id} never links to a missing or coincidentally equal work item`);
+      await titleLink.click();
+      await page.waitForFunction(claimId => location.hash === `#pr-record/work/${claimId}`
+        && document.querySelector(`article[data-claim-id='${claimId}'] details[data-claim-record]`)?.open === true, id);
+      assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to Board");
+      assert.equal(await dialog.evaluate(node => node.open), true, "the claim record is the Board card itself");
+      await page.goBack();
+      await page.waitForFunction(expected => location.href === expected, boardUrl);
       assert.equal(await dialog.evaluate(node => node.open), true);
+      assert.equal(await titleLink.evaluate(node => node === document.activeElement), true, "return restores the title link");
     }
     await page.locator("#board-close").focus();
     for (let step = 0; step < 100; step += 1) {
@@ -494,7 +508,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     rmSync(fixture.directory, { recursive: true, force: true });
     assert.deepEqual(errors, []);
   });
-  const workId = "waiting:prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
+  const workId = "prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
   fixture.store.command(fixture.keys.owner, "commons", {
     id: crypto.randomUUID(), type: "work.proposed",
     data: { workItemId: workId, title: "Prepare the handoff", definitionOfDone: "Record the prerequisite result.",
@@ -557,7 +571,10 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     assert.match(await dependent.innerText(), /Prepare the handoff.*Unclaimed; needs an owner/);
     assert.equal(await dependent.locator("[data-claim-action='claim']").count(), 0);
     assert.match(await unknown.innerText(), /Not loaded or unavailable; status unknown/);
-    assert.equal(await unknown.locator("a, [data-claim-action='claim']").count(), 0);
+    // The missing prerequisite itself is never linked (its reference stays
+    // plain text) and the card offers no claim action; the card's own title
+    // record link (#3795) is the one anchor the card legitimately carries.
+    assert.equal(await unknown.locator(".claim-deps a, [data-claim-action='claim']").count(), 0);
     assert.deepEqual(await boardIds(), ["available", "dependent", "prerequisite", "unknown"]);
     assert.equal(await link.getAttribute("href"), `#pr-record/work/${encodeURIComponent(workId)}`);
     assert.equal(await dependent.locator(".claim-chain [data-open-work]").getAttribute("href"), await link.getAttribute("href"));
@@ -608,9 +625,19 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.locator("#board-close").click();
   }
   await openBoard();
-  await post(page, origin, "/work-claims/prerequisite/claim", {});
-  await post(page, origin, "/work-claims/prerequisite/update", { state: "in_progress" });
-  await post(page, origin, "/work-claims/prerequisite/update", { state: "done" });
+  const acceptance = page.locator('[data-focus-key="work-acceptance:prerequisite"]');
+  await acceptance.press("Enter");
+  await page.locator(`[data-work-record-id='${workId}']`).waitFor({ state: "visible" });
+  for (const [type, data] of [["work.accepted", {}], ["work.started", {}], ["work.completed", {
+    summary: "Handoff prepared", evidenceVersion: "v1", producerId: "owner", evidenceUrl: "https://example.com/handoff", nextAction: "Continue", signedEvidence: makeTestSigner(fixture.store)()
+  }]]) {
+    await post(page, origin, "/commands", { id: crypto.randomUUID(), type, data: {
+      workItemId: workId, expectedRevision: fixture.store.room("commons").state.workItems[workId].revision, ...data
+    } }, 201);
+  }
+  await page.locator("#work-navigation-return").press("Enter");
+  await dialog.waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "work-acceptance:prerequisite");
   await page.locator("[aria-labelledby='board-col-ready'] article[data-claim-id='dependent']").waitFor();
   assert.equal(await dependent.locator(".claim-waiting").count(), 0);
   assert.equal(await page.locator("#board-col-blocked").innerText(), "Blocked · 1 waiting");
@@ -967,7 +994,7 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
     });
     await page.goto(`${origin}/?account=1`);
     await signInFixture(page, accountKey);
-    await page.locator("#inbox-panel").waitFor({ state: "visible" });
+    await page.locator("#account-rooms-panel").waitFor({ state: "visible" });
     const chooseRoom = async roomId => {
       await clickChrome(page, await page.locator("#main").isVisible() ? "#choose-room" : "#nav-rooms");
       await page.locator(`[data-account-room="${roomId}"]`).click();
@@ -1207,4 +1234,114 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
   } finally {
     await drainBoardRoutes(page, ...holds.map(entry => entry.release));
   }
+});
+
+// #3688: closing the board must hand keyboard focus to a stable anchor —
+// the element that opened it when that element survives, otherwise the
+// conversation title — never <body>. The native <dialog> return chain
+// bottoms out at <body> when the palette was opened from body focus, and
+// when the recorded opener is removed while the board is open.
+test("board close returns focus to the opener, else the conversation title", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  const dialog = page.locator("#board-dialog");
+  const focusLandsOn = id => page.waitForFunction(expected => document.activeElement?.id === expected, id);
+  const closeWithEscape = async () => {
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+  };
+
+  // A backdrop click is not a close path: the dialog stays open.
+  await openBoard(page);
+  await page.mouse.click(8, 8);
+  assert.equal(await dialog.evaluate(node => node.open), true, "backdrop click does not close the board");
+  await closeWithEscape();
+
+  // Surviving opener: focus starts in the composer, the palette carries it
+  // into the board, and both close paths hand it back to the composer.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("message-input");
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.locator("#board-close").click();
+  await dialog.waitFor({ state: "hidden" });
+  await focusLandsOn("message-input");
+
+  // No opener: the palette was opened from body focus, so the fallback
+  // anchor — the conversation title — takes focus instead of <body>.
+  await page.evaluate(() => document.activeElement?.blur());
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+
+  // Opener removed while the board is open: the same fallback applies.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.evaluate(() => document.querySelector("#message-input").remove());
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+});
+
+test("criteria delivery, send-back, redelivery and owner verification work from the board", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch({ headless: true });
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await post(page, origin, "/work-claims", { id: "lifecycle", title: "Reviewable result", reviewPolicy: "self_attested", acceptanceCriteria: ["Result checked"] }, 201);
+  await post(page, origin, "/work-claims/lifecycle/claim", {});
+  await post(page, origin, "/work-claims/lifecycle/update", { state: "in_progress" });
+  await openBoard(page);
+  const card = page.locator('article[data-claim-id="lifecycle"]');
+  const form = card.locator('[data-claim-deliver="lifecycle"]');
+  await form.waitFor();
+  await form.locator('[name="artifactKind"]').fill("report");
+  await form.locator('[name="artifactRef"]').fill("room://artifacts/lifecycle");
+  await form.locator('[name="artifactSha256"]').fill("a".repeat(64));
+  await form.locator('[name="checkName"]').fill("Result checked");
+  await form.locator('button[type="submit"]').click();
+  await card.getByRole("button", { name: "Send back", exact: true }).waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").state, "delivered");
+  await card.getByRole("button", { name: "Send back", exact: true }).click();
+  await form.waitFor();
+  const sentBack = fixture.store.workClaims.get("commons", "lifecycle");
+  assert.equal(sentBack.state, "in_progress");
+  assert.equal(sentBack.verification.state, "changes_requested");
+  assert.ok(sentBack.delivery);
+  // The form retains the previous bundle. A new delivery creates a new
+  // review generation even when the artifact bytes are unchanged.
+  await form.locator('button[type="submit"]').click();
+  await card.getByRole("button", { name: "Verify", exact: true }).waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").deliveryGeneration, 2);
+  await card.getByRole("button", { name: "Verify", exact: true }).click();
+  await page.locator('[aria-labelledby="board-col-landed"] article[data-claim-id="lifecycle"]').waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").verification.state, "self_attested");
 });

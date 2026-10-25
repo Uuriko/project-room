@@ -1,12 +1,14 @@
-// Orient endpoint builder (jill lane, RC-2026-09-28 — ryska's 404).
+import { messageRepository } from "./message-repository.mjs";
+// Orient payload builder (jill lane, RC-2026-09-28 — ryska's 404).
 //
-// The URL outside agents guess by analogy with /activation-pack:
-// GET /api/rooms/{roomId}/orient. Read-only, member-scoped orientation
-// payload: contract version, the authenticated member and their scope,
-// room summary, evaluated-through sequence, and a bounded list of open
-// work records with their next steps — the same "where the room stands"
-// the client-side orient() computes from a snapshot, served to cold-HTTP
-// agents with no client SDK.
+// Read-only, member-scoped orientation payload: contract version, the
+// authenticated member and their scope, room summary, evaluated-through
+// sequence, and a bounded list of open work records with their next
+// steps — the same "where the room stands" the client-side orient()
+// computes from a snapshot. The standalone GET /api/rooms/{roomId}/orient
+// endpoint was deleted (simplification register D1); this builder is the
+// shared helper embedded by the activation pack, the context response,
+// and the MCP room profile.
 //
 // Everything returned is derivable from the activation pack plus the
 // caller's own member record, so this adds no new visibility and has no
@@ -21,7 +23,7 @@ import { orientSections } from "./updates.mjs";
 import { fleetSelf } from "./agent-fleet.mjs";
 import { ServiceError } from "./store.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
-import { availableClaimsFromBoard } from "./available-work.mjs";
+import { availableClaimsFromBoard, memoizeBoardList } from "./available-work.mjs";
 
 // Work states that count as open; completed and superseded work is history,
 // not something an arriving agent should pick up.
@@ -122,9 +124,9 @@ function rankLines(lines, query, maxTokens) {
   return { lines: kept, tokens: used };
 }
 
-function fleetSelfOrNull(store, roomSlug, room, viewerId) {
+function fleetSelfOrNull(store, roomSlug, room, viewerId, boardList = null) {
   try {
-    const self = fleetSelf(store, roomSlug, room, viewerId);
+    const self = fleetSelf(store, roomSlug, room, viewerId, { boardList });
     return self ? self : {};
   } catch { return {}; }
 }
@@ -142,6 +144,12 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   const member = state.members?.[viewerId];
   if (!member) throw new Error("Viewer is not a member of this room");
   const now = store.now();
+  // PERF-10X L4: the board is decoded ONCE per request. Every board
+  // consumer in this payload — the claims sections below, the fleet badge
+  // (agent viewers), and the next-actions snapshot (token callers) —
+  // shares this per-request memo; a caller composing several reads in one
+  // request (activation pack, context) passes its own memo in.
+  const boardList = options.boardList ?? memoizeBoardList(store);
   const query = parseOrientQuery(options);
   const openWork = Object.values(state.workItems ?? {})
     .filter(item => item && OPEN_WORK_STATES.has(item.state))
@@ -152,7 +160,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   let claims = [];
   let availableClaims = [];
   try {
-    const board = store.workClaims?.list?.(roomSlug) ?? [];
+    const board = boardList(roomSlug);
     claims = board
       .filter(item => item?.owner === viewerId)
       .map(item => ({ id: item.id, title: item.title ?? item.id, state: item.state, untrusted: true }));
@@ -161,7 +169,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   let nextActions = [];
   if (options.token && store.nextActions?.list) {
     try {
-      const listed = store.nextActions.list(options.token, roomSlug, { limit: 8, binding: options.binding ?? null });
+      const listed = store.nextActions.list(options.token, roomSlug, { limit: 8, binding: options.binding ?? null, boardList });
       nextActions = listed.items.filter(item => item.action?.api).slice(0, 8).map(item => ({
         id: item.id, kind: item.kind, title: item.title,
         method: item.action.api.method, path: item.action.api.path
@@ -178,7 +186,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   }));
   const lines = [
     ...pinned.filter(pin => pin.text).map(pin => ({ id: pin.messageId, source: "pinned", text: pin.text })),
-    ...(state.messages ?? []).filter(visible).slice(-40).map(message => ({ id: message.id, source: "message", text: message.body })),
+    ...messageRepository(store, roomSlug, state).recent(40, visible).map(message => ({ id: message.id, source: "message", text: message.body })),
     ...claims.map(item => ({ id: item.id, source: "claim", text: item.title }))
   ];
   // A member with no published directory card is still orientable. Missing
@@ -201,7 +209,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
       profile: { displayName: member.displayName, kind: member.kind, identityId: member.identityId ?? null },
       capabilities,
       // CP-AGENTS-1: the calling agent's own fleet state (agents only).
-      ...(member.kind === "agent" ? fleetSelfOrNull(store, roomSlug, { sequence, state }, viewerId) : {})
+      ...(member.kind === "agent" ? fleetSelfOrNull(store, roomSlug, { sequence, state }, viewerId, boardList) : {})
     },
     instructions: { charter: charterContext(state.room), pinned },
     focus: query.focus,

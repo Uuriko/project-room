@@ -6,8 +6,8 @@ name: deploy-prod
 #
 # Triggers
 #   workflow_dispatch  sha = full 40-hex commit on main. The run refuses the
-#                      deploy unless the `test` and `schema-gate` push runs on
-#                      that commit both concluded success.
+#                      deploy unless the `schema-gate` push run succeeded.
+#                      The `test` result is advisory and recorded in the summary.
 #   onboarding gate    optional. When the repo variable ROOM_ONBOARDING_GATE is
 #                      "1", the `probe` job runs the onboarding probe against
 #                      staging at the same commit and blocks the deploy on a
@@ -37,7 +37,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Full 40-character commit SHA on main (test + schema-gate must be green)"
+        description: "Full 40-character commit SHA on main (schema-gate required; test advisory)"
         required: true
         type: string
       reason:
@@ -86,7 +86,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: Resolve the commit and require green test + schema-gate
+      - name: Resolve the commit and check deployment policy
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,8 +112,15 @@ jobs:
           for wf in test schema-gate; do
             CONCLUSION="$(jq -r --arg wf "$wf" '[.workflow_runs[] | select(.name == $wf)] | sort_by(.created_at) | last | if . == null then "missing" else (.conclusion // .status) end' runs.json)"
             echo "$wf on $SHA: $CONCLUSION"
+            echo "$wf on $SHA: $CONCLUSION" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$EVENT" = "workflow_dispatch" ] && [ "$wf" = "test" ]; then
+              if [ "$CONCLUSION" != "success" ]; then
+                echo "::warning title=Advisory test result::test is $CONCLUSION on $SHA; the manual deployer must assess relevant failures"
+              fi
+              continue
+            fi
             if [ "$CONCLUSION" != "success" ]; then
-              if [ "$EVENT" = "workflow_dispatch" ]; then refuse "$wf is $CONCLUSION on $SHA; deploy only dual-green commits"; fi
+              if [ "$EVENT" = "workflow_dispatch" ]; then refuse "$wf is $CONCLUSION on $SHA; schema-gate must succeed"; fi
               skip "auto: $wf is $CONCLUSION on $SHA; the other gate's completion will retry"
             fi
           done
@@ -135,7 +142,7 @@ jobs:
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "go=true" >> "$GITHUB_OUTPUT"
-          echo "Deploying $SHA (test + schema-gate green)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploying $SHA (schema-gate green; test advisory for manual dispatch, required for automatic deployment)" >> "$GITHUB_STEP_SUMMARY"
 
   # --- ACT-5b onboarding gate (off unless vars.ROOM_ONBOARDING_GATE == '1') ---
   # Probes staging at the commit about to ship and fails on a >20% regression

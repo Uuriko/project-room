@@ -1,0 +1,1340 @@
+{
+ "env": {
+  "node": "v24.19.0",
+  "cpu": "Apple M5",
+  "cores": 10,
+  "runs": 6,
+  "writes": 200,
+  "floor": 0.1,
+  "sizes": [
+   1000,
+   4000
+  ],
+  "bodiesAtRest": true,
+  "date": "2026-10-18T21:03:49.710Z"
+ },
+ "base": {
+  "ref": "14e4320b693d6455d0432ac5c85a2c2ec870809b",
+  "sha": "14e4320b693d6455d0432ac5c85a2c2ec870809b"
+ },
+ "head": {
+  "sha": "80f32b4deaa2800abed7c7676f7c2d4a812e4c25",
+  "dirty": false
+ },
+ "sizes": {
+  "1000": [
+   {
+    "key": "writeP50Ms",
+    "name": "write p50 (ms)",
+    "verdict": "~",
+    "base": 3.5949999999999998,
+    "head": 3.31,
+    "baseCi": {
+     "low": 3.04,
+     "high": 4,
+     "exact": true
+    },
+    "headCi": {
+     "low": 2.94,
+     "high": 3.98,
+     "exact": true
+    },
+    "ratio": 0.9207232267037553,
+    "p": 0.48484848484848486,
+    "baseSamples": [
+     3.3,
+     3.04,
+     3.14,
+     3.89,
+     4,
+     3.91
+    ],
+    "headSamples": [
+     2.94,
+     3.08,
+     3.54,
+     3.98,
+     3.06,
+     3.56
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "writeP95Ms",
+    "name": "write p95 (ms)",
+    "verdict": "~",
+    "base": 5.574999999999999,
+    "head": 5.6899999999999995,
+    "baseCi": {
+     "low": 5.03,
+     "high": 6.54,
+     "exact": true
+    },
+    "headCi": {
+     "low": 5.08,
+     "high": 13.58,
+     "exact": true
+    },
+    "ratio": 1.020627802690583,
+    "p": 0.5887445887445888,
+    "baseSamples": [
+     5.27,
+     5.03,
+     5.11,
+     6.33,
+     6.54,
+     5.88
+    ],
+    "headSamples": [
+     5.17,
+     5.47,
+     5.91,
+     7.66,
+     5.08,
+     13.58
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "storedProjectionMs",
+    "name": "storedProjection (ms)",
+    "verdict": "~",
+    "base": 1.595,
+    "head": 1.8,
+    "baseCi": {
+     "low": 1.43,
+     "high": 2.03,
+     "exact": true
+    },
+    "headCi": {
+     "low": 1.54,
+     "high": 2.07,
+     "exact": true
+    },
+    "ratio": 1.1285266457680252,
+    "p": 0.2510822510822511,
+    "baseSamples": [
+     1.51,
+     1.45,
+     1.43,
+     2.03,
+     1.75,
+     1.68
+    ],
+    "headSamples": [
+     1.58,
+     1.54,
+     2.07,
+     2.03,
+     1.58,
+     2.02
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "coldRoomMs",
+    "name": "cold room() (ms)",
+    "verdict": "~",
+    "base": 2.9749999999999996,
+    "head": 3.29,
+    "baseCi": {
+     "low": 2.51,
+     "high": 3.4,
+     "exact": true
+    },
+    "headCi": {
+     "low": 2.68,
+     "high": 3.81,
+     "exact": true
+    },
+    "ratio": 1.1058823529411765,
+    "p": 0.3939393939393939,
+    "baseSamples": [
+     2.88,
+     2.51,
+     3.01,
+     3.4,
+     3.07,
+     2.94
+    ],
+    "headSamples": [
+     2.7,
+     3.05,
+     3.76,
+     3.53,
+     2.68,
+     3.81
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "projectionKB",
+    "name": "projection (KB)",
+    "verdict": "~",
+    "base": 226,
+    "head": 226,
+    "baseCi": {
+     "low": 226,
+     "high": 226,
+     "exact": true
+    },
+    "headCi": {
+     "low": 226,
+     "high": 226,
+     "exact": true
+    },
+    "ratio": 1,
+    "p": 1,
+    "baseSamples": [
+     226,
+     226,
+     226,
+     226,
+     226,
+     226
+    ],
+    "headSamples": [
+     226,
+     226,
+     226,
+     226,
+     226,
+     226
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "snapshotBuildMs",
+    "name": "snapshot build (ms)",
+    "verdict": "~",
+    "base": 1.98,
+    "head": 1.94,
+    "baseCi": {
+     "low": 1.73,
+     "high": 2.5,
+     "exact": true
+    },
+    "headCi": {
+     "low": 1.61,
+     "high": 2.25,
+     "exact": true
+    },
+    "ratio": 0.9797979797979798,
+    "p": 0.6666666666666666,
+    "baseSamples": [
+     1.96,
+     1.73,
+     1.98,
+     2.5,
+     2.16,
+     1.98
+    ],
+    "headSamples": [
+     1.69,
+     1.77,
+     2.17,
+     2.11,
+     1.61,
+     2.25
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "httpFullKB",
+    "name": "GET full room (KB)",
+    "verdict": "~",
+    "base": 1322.9,
+    "head": 1322.9,
+    "baseCi": {
+     "low": 1322.9,
+     "high": 1322.9,
+     "exact": true
+    },
+    "headCi": {
+     "low": 1322.9,
+     "high": 1322.9,
+     "exact": true
+    },
+    "ratio": 1,
+    "p": 1,
+    "baseSamples": [
+     1322.9,
+     1322.9,
+     1322.9,
+     1322.9,
+     1322.9,
+     1322.9
+    ],
+    "headSamples": [
+     1322.9,
+     1322.9,
+     1322.9,
+     1322.9,
+     1322.9,
+     1322.9
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "httpFullMs",
+    "name": "GET full room (ms)",
+    "verdict": "~",
+    "base": 7.23,
+    "head": 6.63,
+    "baseCi": {
+     "low": 6.18,
+     "high": 8.33,
+     "exact": true
+    },
+    "headCi": {
+     "low": 5.78,
+     "high": 7.38,
+     "exact": true
+    },
+    "ratio": 0.91701244813278,
+    "p": 0.17965367965367965,
+    "baseSamples": [
+     7.11,
+     6.89,
+     8.33,
+     7.35,
+     7.57,
+     6.18
+    ],
+    "headSamples": [
+     5.78,
+     6.38,
+     7.06,
+     7.38,
+     6.7,
+     6.56
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "httpRecentKB",
+    "name": "GET recent window (KB)",
+    "verdict": "~",
+    "base": 221.3,
+    "head": 221.3,
+    "baseCi": {
+     "low": 221.3,
+     "high": 221.3,
+     "exact": true
+    },
+    "headCi": {
+     "low": 221.3,
+     "high": 221.3,
+     "exact": true
+    },
+    "ratio": 1,
+    "p": 1,
+    "baseSamples": [
+     221.3,
+     221.3,
+     221.3,
+     221.3,
+     221.3,
+     221.3
+    ],
+    "headSamples": [
+     221.3,
+     221.3,
+     221.3,
+     221.3,
+     221.3,
+     221.3
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "httpRecentMs",
+    "name": "GET recent window (ms)",
+    "verdict": "~",
+    "base": 4.05,
+    "head": 3.67,
+    "baseCi": {
+     "low": 3.58,
+     "high": 4.4,
+     "exact": true
+    },
+    "headCi": {
+     "low": 3.26,
+     "high": 3.93,
+     "exact": true
+    },
+    "ratio": 0.9061728395061729,
+    "p": 0.06493506493506493,
+    "baseSamples": [
+     3.73,
+     3.58,
+     4.4,
+     4.29,
+     4.36,
+     3.81
+    ],
+    "headSamples": [
+     3.46,
+     3.26,
+     3.72,
+     3.93,
+     3.7,
+     3.64
+    ],
+    "pAdjusted": 0.4545454545454545
+   },
+   {
+    "key": "replayMs",
+    "name": "replay from log (ms)",
+    "verdict": "better",
+    "base": 398.5,
+    "head": 110.5,
+    "baseCi": {
+     "low": 348,
+     "high": 469,
+     "exact": true
+    },
+    "headCi": {
+     "low": 97,
+     "high": 124,
+     "exact": true
+    },
+    "ratio": 0.27728983688833125,
+    "p": 0.0021645021645021645,
+    "baseSamples": [
+     379,
+     348,
+     469,
+     425,
+     418,
+     370
+    ],
+    "headSamples": [
+     104,
+     97,
+     117,
+     123,
+     101,
+     124
+    ],
+    "pAdjusted": 0.017316017316017316
+   }
+  ],
+  "4000": [
+   {
+    "key": "writeP50Ms",
+    "name": "write p50 (ms)",
+    "verdict": "~",
+    "base": 12.67,
+    "head": 12.82,
+    "baseCi": {
+     "low": 10.55,
+     "high": 17.59,
+     "exact": true
+    },
+    "headCi": {
+     "low": 9.14,
+     "high": 14.91,
+     "exact": true
+    },
+    "ratio": 1.0118389897395423,
+    "p": 0.9372294372294372,
+    "baseSamples": [
+     14.35,
+     14.07,
+     17.59,
+     10.55,
+     11.27,
+     10.82
+    ],
+    "headSamples": [
+     14.91,
+     12.91,
+     13.33,
+     9.14,
+     12.73,
+     11.81
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "writeP95Ms",
+    "name": "write p95 (ms)",
+    "verdict": "~",
+    "base": 18.18,
+    "head": 18.81,
+    "baseCi": {
+     "low": 15.63,
+     "high": 25.49,
+     "exact": true
+    },
+    "headCi": {
+     "low": 13.82,
+     "high": 22.43,
+     "exact": true
+    },
+    "ratio": 1.0346534653465347,
+    "p": 1,
+    "baseSamples": [
+     21.58,
+     19.7,
+     25.49,
+     15.63,
+     16.66,
+     16.01
+    ],
+    "headSamples": [
+     22.43,
+     18.56,
+     20.65,
+     13.82,
+     19.06,
+     17.71
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "storedProjectionMs",
+    "name": "storedProjection (ms)",
+    "verdict": "~",
+    "base": 6.23,
+    "head": 7.1,
+    "baseCi": {
+     "low": 5.78,
+     "high": 7.37,
+     "exact": true
+    },
+    "headCi": {
+     "low": 5.26,
+     "high": 10.6,
+     "exact": true
+    },
+    "ratio": 1.1396468699839486,
+    "p": 0.30952380952380953,
+    "baseSamples": [
+     6.41,
+     7.37,
+     7.14,
+     6.05,
+     6.03,
+     5.78
+    ],
+    "headSamples": [
+     10.6,
+     7.75,
+     6.36,
+     6.45,
+     7.92,
+     5.26
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "coldRoomMs",
+    "name": "cold room() (ms)",
+    "verdict": "~",
+    "base": 13.23,
+    "head": 13.475000000000001,
+    "baseCi": {
+     "low": 11.12,
+     "high": 16.68,
+     "exact": true
+    },
+    "headCi": {
+     "low": 11.07,
+     "high": 17.69,
+     "exact": true
+    },
+    "ratio": 1.0185185185185186,
+    "p": 0.8181818181818182,
+    "baseSamples": [
+     14.13,
+     14.88,
+     16.68,
+     12.12,
+     12.33,
+     11.12
+    ],
+    "headSamples": [
+     17.69,
+     14.32,
+     12.16,
+     12.63,
+     16.02,
+     11.07
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "projectionKB",
+    "name": "projection (KB)",
+    "verdict": "~",
+    "base": 767,
+    "head": 767,
+    "baseCi": {
+     "low": 767,
+     "high": 767,
+     "exact": true
+    },
+    "headCi": {
+     "low": 767,
+     "high": 767,
+     "exact": true
+    },
+    "ratio": 1,
+    "p": 1,
+    "baseSamples": [
+     767,
+     767,
+     767,
+     767,
+     767,
+     767
+    ],
+    "headSamples": [
+     767,
+     767,
+     767,
+     767,
+     767,
+     767
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "snapshotBuildMs",
+    "name": "snapshot build (ms)",
+    "verdict": "~",
+    "base": 6.175000000000001,
+    "head": 5.949999999999999,
+    "baseCi": {
+     "low": 5.11,
+     "high": 8.58,
+     "exact": true
+    },
+    "headCi": {
+     "low": 5.1,
+     "high": 7.53,
+     "exact": true
+    },
+    "ratio": 0.963562753036437,
+    "p": 0.5887445887445888,
+    "baseSamples": [
+     6.49,
+     6.96,
+     8.58,
+     5.57,
+     5.86,
+     5.11
+    ],
+    "headSamples": [
+     7.53,
+     6.1,
+     5.1,
+     5.18,
+     6.43,
+     5.8
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "httpFullKB",
+    "name": "GET full room (KB)",
+    "verdict": "~",
+    "base": 4348.1,
+    "head": 4348.1,
+    "baseCi": {
+     "low": 4348.1,
+     "high": 4348.1,
+     "exact": true
+    },
+    "headCi": {
+     "low": 4348.1,
+     "high": 4348.1,
+     "exact": true
+    },
+    "ratio": 1,
+    "p": 1,
+    "baseSamples": [
+     4348.1,
+     4348.1,
+     4348.1,
+     4348.1,
+     4348.1,
+     4348.1
+    ],
+    "headSamples": [
+     4348.1,
+     4348.1,
+     4348.1,
+     4348.1,
+     4348.1,
+     4348.1
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "httpFullMs",
+    "name": "GET full room (ms)",
+    "verdict": "~",
+    "base": 16.494999999999997,
+    "head": 14.2,
+    "baseCi": {
+     "low": 14.47,
+     "high": 23.05,
+     "exact": true
+    },
+    "headCi": {
+     "low": 11.74,
+     "high": 16.29,
+     "exact": true
+    },
+    "ratio": 0.8608669293725372,
+    "p": 0.09307359307359307,
+    "baseSamples": [
+     18.24,
+     16.18,
+     23.05,
+     16.81,
+     14.6,
+     14.47
+    ],
+    "headSamples": [
+     16.29,
+     15.3,
+     12.85,
+     13.1,
+     15.94,
+     11.74
+    ],
+    "pAdjusted": 0.5584415584415584
+   },
+   {
+    "key": "httpRecentKB",
+    "name": "GET recent window (KB)",
+    "verdict": "~",
+    "base": 221.3,
+    "head": 221.3,
+    "baseCi": {
+     "low": 221.3,
+     "high": 221.3,
+     "exact": true
+    },
+    "headCi": {
+     "low": 221.3,
+     "high": 221.3,
+     "exact": true
+    },
+    "ratio": 1,
+    "p": 1,
+    "baseSamples": [
+     221.3,
+     221.3,
+     221.3,
+     221.3,
+     221.3,
+     221.3
+    ],
+    "headSamples": [
+     221.3,
+     221.3,
+     221.3,
+     221.3,
+     221.3,
+     221.3
+    ],
+    "pAdjusted": 1
+   },
+   {
+    "key": "httpRecentMs",
+    "name": "GET recent window (ms)",
+    "verdict": "~",
+    "base": 5.82,
+    "head": 4.955,
+    "baseCi": {
+     "low": 5.41,
+     "high": 10.65,
+     "exact": true
+    },
+    "headCi": {
+     "low": 3.77,
+     "high": 5.89,
+     "exact": true
+    },
+    "ratio": 0.8513745704467354,
+    "p": 0.025974025974025976,
+    "baseSamples": [
+     5.83,
+     6.19,
+     10.65,
+     5.81,
+     5.48,
+     5.41
+    ],
+    "headSamples": [
+     5.89,
+     5.04,
+     3.89,
+     4.87,
+     5.29,
+     3.77
+    ],
+    "pAdjusted": 0.18181818181818182
+   },
+   {
+    "key": "replayMs",
+    "name": "replay from log (ms)",
+    "verdict": "better",
+    "base": 4125,
+    "head": 438.5,
+    "baseCi": {
+     "low": 3740,
+     "high": 5721,
+     "exact": true
+    },
+    "headCi": {
+     "low": 349,
+     "high": 477,
+     "exact": true
+    },
+    "ratio": 0.1063030303030303,
+    "p": 0.0021645021645021645,
+    "baseSamples": [
+     4325,
+     5570,
+     5721,
+     3740,
+     3925,
+     3745
+    ],
+    "headSamples": [
+     477,
+     462,
+     373,
+     420,
+     457,
+     349
+    ],
+    "pAdjusted": 0.017316017316017316
+   }
+  ]
+ },
+ "raw": {
+  "1000": {
+   "base 14e4320b693d6455d0432ac5c85a2c2ec870809b (14e4320b)": [
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.3,
+     "writeP95Ms": 5.27,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 1.51,
+     "coldRoomMs": 2.88,
+     "projectionKB": 226,
+     "snapshotBuildMs": 1.96,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 7.11,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.73,
+     "replayMs": 379,
+     "heapMB": 97
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.04,
+     "writeP95Ms": 5.03,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 1.45,
+     "coldRoomMs": 2.51,
+     "projectionKB": 226,
+     "snapshotBuildMs": 1.73,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 6.89,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.58,
+     "replayMs": 348,
+     "heapMB": 97
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.14,
+     "writeP95Ms": 5.11,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 1.43,
+     "coldRoomMs": 3.01,
+     "projectionKB": 226,
+     "snapshotBuildMs": 1.98,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 8.33,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 4.4,
+     "replayMs": 469,
+     "heapMB": 97
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.89,
+     "writeP95Ms": 6.33,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 2.03,
+     "coldRoomMs": 3.4,
+     "projectionKB": 226,
+     "snapshotBuildMs": 2.5,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 7.35,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 4.29,
+     "replayMs": 425,
+     "heapMB": 97
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 4,
+     "writeP95Ms": 6.54,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 1.75,
+     "coldRoomMs": 3.07,
+     "projectionKB": 226,
+     "snapshotBuildMs": 2.16,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 7.57,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 4.36,
+     "replayMs": 418,
+     "heapMB": 65
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.91,
+     "writeP95Ms": 5.88,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 1.68,
+     "coldRoomMs": 2.94,
+     "projectionKB": 226,
+     "snapshotBuildMs": 1.98,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 6.18,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.81,
+     "replayMs": 370,
+     "heapMB": 65
+    }
+   ],
+   "head 80f32b4d": [
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 2.94,
+     "writeP95Ms": 5.17,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 1.58,
+     "coldRoomMs": 2.7,
+     "projectionKB": 226,
+     "snapshotBuildMs": 1.69,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 5.78,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.46,
+     "replayMs": 104,
+     "heapMB": 54
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.08,
+     "writeP95Ms": 5.47,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 1.54,
+     "coldRoomMs": 3.05,
+     "projectionKB": 226,
+     "snapshotBuildMs": 1.77,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 6.38,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.26,
+     "replayMs": 97,
+     "heapMB": 54
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.54,
+     "writeP95Ms": 5.91,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 2.07,
+     "coldRoomMs": 3.76,
+     "projectionKB": 226,
+     "snapshotBuildMs": 2.17,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 7.06,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.72,
+     "replayMs": 117,
+     "heapMB": 54
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.98,
+     "writeP95Ms": 7.66,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 2.03,
+     "coldRoomMs": 3.53,
+     "projectionKB": 226,
+     "snapshotBuildMs": 2.11,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 7.38,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.93,
+     "replayMs": 123,
+     "heapMB": 54
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.06,
+     "writeP95Ms": 5.08,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 1.58,
+     "coldRoomMs": 2.68,
+     "projectionKB": 226,
+     "snapshotBuildMs": 1.61,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 6.7,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.7,
+     "replayMs": 101,
+     "heapMB": 54
+    },
+    {
+     "size": 1000,
+     "sequence": 1061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 3.56,
+     "writeP95Ms": 13.58,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 2.02,
+     "coldRoomMs": 3.81,
+     "projectionKB": 226,
+     "snapshotBuildMs": 2.25,
+     "snapshotKB": 1323,
+     "httpFullKB": 1322.9,
+     "httpFullMs": 6.56,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.64,
+     "replayMs": 124,
+     "heapMB": 54
+    }
+   ]
+  },
+  "4000": {
+   "base 14e4320b693d6455d0432ac5c85a2c2ec870809b (14e4320b)": [
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 14.35,
+     "writeP95Ms": 21.58,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 6.41,
+     "coldRoomMs": 14.13,
+     "projectionKB": 767,
+     "snapshotBuildMs": 6.49,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 18.24,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 5.83,
+     "replayMs": 4325,
+     "heapMB": 104
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 14.07,
+     "writeP95Ms": 19.7,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 7.37,
+     "coldRoomMs": 14.88,
+     "projectionKB": 767,
+     "snapshotBuildMs": 6.96,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 16.18,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 6.19,
+     "replayMs": 5570,
+     "heapMB": 105
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 17.59,
+     "writeP95Ms": 25.49,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 7.14,
+     "coldRoomMs": 16.68,
+     "projectionKB": 767,
+     "snapshotBuildMs": 8.58,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 23.05,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 10.65,
+     "replayMs": 5721,
+     "heapMB": 102
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 10.55,
+     "writeP95Ms": 15.63,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 6.05,
+     "coldRoomMs": 12.12,
+     "projectionKB": 767,
+     "snapshotBuildMs": 5.57,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 16.81,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 5.81,
+     "replayMs": 3740,
+     "heapMB": 104
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 11.27,
+     "writeP95Ms": 16.66,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 6.03,
+     "coldRoomMs": 12.33,
+     "projectionKB": 767,
+     "snapshotBuildMs": 5.86,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 14.6,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 5.48,
+     "replayMs": 3925,
+     "heapMB": 104
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 10.82,
+     "writeP95Ms": 16.01,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 5.78,
+     "coldRoomMs": 11.12,
+     "projectionKB": 767,
+     "snapshotBuildMs": 5.11,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 14.47,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 5.41,
+     "replayMs": 3745,
+     "heapMB": 104
+    }
+   ],
+   "head 80f32b4d": [
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 14.91,
+     "writeP95Ms": 22.43,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 10.6,
+     "coldRoomMs": 17.69,
+     "projectionKB": 767,
+     "snapshotBuildMs": 7.53,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 16.29,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 5.89,
+     "replayMs": 477,
+     "heapMB": 75
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 12.91,
+     "writeP95Ms": 18.56,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 7.75,
+     "coldRoomMs": 14.32,
+     "projectionKB": 767,
+     "snapshotBuildMs": 6.1,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 15.3,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 5.04,
+     "replayMs": 462,
+     "heapMB": 75
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 13.33,
+     "writeP95Ms": 20.65,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 6.36,
+     "coldRoomMs": 12.16,
+     "projectionKB": 767,
+     "snapshotBuildMs": 5.1,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 12.85,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.89,
+     "replayMs": 373,
+     "heapMB": 75
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 9.14,
+     "writeP95Ms": 13.82,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 6.45,
+     "coldRoomMs": 12.63,
+     "projectionKB": 767,
+     "snapshotBuildMs": 5.18,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 13.1,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 4.87,
+     "replayMs": 420,
+     "heapMB": 75
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 12.73,
+     "writeP95Ms": 19.06,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 7.92,
+     "coldRoomMs": 16.02,
+     "projectionKB": 767,
+     "snapshotBuildMs": 6.43,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 15.94,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 5.29,
+     "replayMs": 457,
+     "heapMB": 75
+    },
+    {
+     "size": 4000,
+     "sequence": 4061,
+     "fixtureFailures": 0,
+     "writeP50Ms": 11.81,
+     "writeP95Ms": 17.71,
+     "writeFailures": 0,
+     "writeAttempts": 200,
+     "writeSuccesses": 200,
+     "storedProjectionMs": 5.26,
+     "coldRoomMs": 11.07,
+     "projectionKB": 767,
+     "snapshotBuildMs": 5.8,
+     "snapshotKB": 4348,
+     "httpFullKB": 4348.1,
+     "httpFullMs": 11.74,
+     "httpRecentKB": 221.3,
+     "httpRecentMs": 3.77,
+     "replayMs": 349,
+     "heapMB": 75
+    }
+   ]
+  }
+ }
+}

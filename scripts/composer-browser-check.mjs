@@ -49,6 +49,34 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     assert.match(await input.getAttribute("placeholder"), /Message #/);
 
+    // A committed write must remain visible when subsequent history reads fail.
+    const failRead = route => route.fulfill({ status: 503, contentType: "application/json",
+      body: JSON.stringify({ error: "service_unavailable", message: "Temporarily unavailable" }) });
+    await page.route(/\/api\/rooms\/commons(?:\?.*)?$/, failRead);
+    await page.route("**/api/rooms/commons/stream**", failRead);
+    server.closeStreams();
+    await page.waitForFunction(() => document.querySelector("#connection-status").textContent.includes("interrupted"));
+    // Force a gap so the command receipt cannot use the contiguous delta path.
+    send(T.MESSAGE_POSTED, { messageId: "unseen-before-send", body: "Background update" });
+    await input.fill("Committed during read outage");
+    await input.press("Enter");
+    await page.waitForFunction(() => document.querySelector("#message-input").value === "");
+    assert.match(await page.locator("#message-delivery").innerText(), /Message saved/);
+    assert.match(await page.locator("#message-delivery").innerText(), /history/);
+    assert.equal(await page.locator('[data-member-record-id="nova"]').getAttribute("data-presence"), "unknown");
+    assert.match(await page.locator('[data-member-record-id="nova"]').textContent(), /connection interrupted/);
+    const savedMessage = store.room("commons").state.messages.find(m => m.body === "Committed during read outage");
+    assert.ok(savedMessage);
+    assert.match(await page.locator("#message-delivery a").getAttribute("href"), new RegExp(savedMessage.id));
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector("#connection-status").textContent.includes("unavailable"));
+    assert.equal(await page.locator("#signin-methods").isVisible(), false, "a service outage is not a sign-in prompt");
+    await page.unroute(/\/api\/rooms\/commons(?:\?.*)?$/, failRead);
+    await page.unroute("**/api/rooms/commons/stream**", failRead);
+    await page.locator("#refresh-button").click();
+    await page.locator("#main").waitFor({ state: "visible" });
+    assert.equal(await page.locator('[data-message-record-id="' + savedMessage.id + '"]').count(), 1);
+
     // Paste must retain overflow rather than silently send a truncated message.
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
     const overflow = "x".repeat(65537), lengthStatus = page.locator("#message-length-status");
@@ -72,10 +100,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), false);
     await input.fill("x".repeat(65531) + " :fire");
     assert.equal(await input.getAttribute("aria-invalid"), "true");
-    await page.locator('#emoji-list [data-emoji="🔥"]').click();
-    assert.equal((await input.inputValue()).length, 65535);
-    assert.equal(await input.getAttribute("aria-invalid"), null, "picker replacement clears the derived overflow error");
-    assert.equal(await page.locator('#message-form button[type="submit"]').isDisabled(), false);
+    assert.equal(await page.locator('#emoji-list').count(), 0);
     const longValid = "a".repeat(4001);
     await input.fill(longValid);
     assert.equal(await lengthStatus.isVisible(), false, "ordinary valid text stays quiet");
@@ -121,6 +146,45 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator("#composer-attachments .file-chip").isVisible(), true);
     await page.getByRole("button", { name: "Remove options-note.txt", exact: true }).click();
     await input.fill("");
+
+    await page.route("**/api/rooms/commons/files", route => route.request().method() === "POST"
+      ? route.fulfill({ status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "storage_unavailable", message: "Try later" } }) }) : route.continue());
+    await page.locator('#composer-file').setInputFiles({ name: 'retry-note.txt', mimeType: 'text/plain', buffer: Buffer.from('Retry these exact bytes') });
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    await input.fill('A message with a recovered file');
+    const beforeFailedFile = store.room('commons').sequence;
+    await input.press('Enter');
+    assert.equal(await input.inputValue(), 'A message with a recovered file', 'unresolved attachment keeps the text draft');
+    assert.equal(store.room('commons').sequence, beforeFailedFile, 'no text-only message is posted behind a failed file');
+    await page.unroute('**/api/rooms/commons/files');
+    await page.getByRole('button', { name: 'Retry retry-note.txt', exact: true }).click({ timeout: 2000 });
+    await page.locator('#composer-attachments .file-chip').getByText('retry-note.txt', { exact: true }).waitFor();
+    await page.locator('#composer-file').setInputFiles({ name: 'second-note.txt', mimeType: 'text/plain', buffer: Buffer.from('Second attachment') });
+    await page.locator('#composer-attachments .file-chip').getByText('second-note.txt', { exact: true }).waitFor();
+    let firstCommitDraft;
+    await page.route('**/api/rooms/commons/files/*/commit', async route => {
+      firstCommitDraft ??= await page.evaluate(() => Object.values(sessionStorage).map(value => {
+        try { return JSON.parse(value); } catch { return null; }
+      }).find(value => Array.isArray(value?.entries)));
+      await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'storage_unavailable', message: 'Try later' } }) });
+    });
+    await input.press('Enter');
+    await page.waitForFunction(() => document.querySelector('#message-input').value === '');
+    assert.equal(store.room('commons').state.messages.filter(m => m.body === 'A message with a recovered file').length, 1);
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    const boundFiles = firstCommitDraft.entries.flatMap(([, draft]) => draft.files ?? []);
+    assert.equal(boundFiles.length, 2);
+    assert.ok(boundFiles.every(file => file.commitMessageId), 'every attachment is bound before the first commit request');
+    assert.equal(new Set(boundFiles.map(file => file.commitMessageId)).size, 1);
+    await page.unroute('**/api/rooms/commons/files/*/commit');
+    await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
+    await page.getByText('retry-note.txt failed', { exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Retry retry-note.txt', exact: true }).click();
+    await page.getByRole('button', { name: 'Retry second-note.txt', exact: true }).click();
+    await page.locator('#composer-attachments').waitFor({ state: 'hidden' });
+    const recoveredMessage = store.room('commons').state.messages.find(m => m.body === 'A message with a recovered file');
+    assert.equal(store.roomAttachments.list(owner, 'commons').files.filter(f => f.messageId === recoveredMessage.id).length, 2, 'retry commits onto the original message');
+    assert.equal(store.room('commons').state.messages.filter(m => m.body === recoveredMessage.body).length, 1);
 
     // An explicit agent request stays discoverable without making ordinary Send a request.
     const recipient = page.locator("#message-to-select"), requestButton = page.locator("#request-reply");
@@ -184,71 +248,34 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await input.fill("");
     await input.click();
     await page.keyboard.type(":fire");
-    const emojiList = page.locator("#emoji-list");
-    await emojiList.waitFor({ state: "visible" });
-    assert.equal(await emojiList.getAttribute("role"), "listbox");
-    assert.equal(await emojiList.locator('[role="option"]').first().getAttribute("aria-selected"), "true");
-    await page.keyboard.press("Enter");
-    assert.equal(await input.inputValue(), "🔥 ");
-    assert.equal((await input.inputValue()).includes(":fire"), false);
-    assert.equal(await emojiList.isHidden(), true);
-    assert.equal(await mentionList.isHidden(), true);
-    await input.fill("");
+    assert.equal(await page.locator('#emoji-list, #reaction-sheet, [data-message-action="add-reaction"]').count(), 0);
+    assert.equal(await input.inputValue(), ':fire');
+    await input.fill('');
     const topic = page.locator('[data-message-record-id="topic"]');
-    assert.equal(await topic.locator('.reactions button').count(), 0, "no unused reaction pills beneath messages");
-    assert.equal(await topic.locator('.reaction-options').count(), 0, "no always-visible reaction picker");
-    // Add Reaction lives in the ⋯ menu and opens a reaction sheet (long-press /
-    // right-click open it too). Tapping a reaction toggles it and closes the sheet.
-    const moreActions = topic.locator('summary[aria-label="More actions for this message"]');
-    await moreActions.focus();
-    await page.keyboard.press("Enter");
-    await topic.locator('button[data-message-action="add-reaction"]').click();
-    const sheet = page.locator("#reaction-sheet");
-    const THINKING = "\u{1F914}";
-    const LIKE = "\u{1F44D}";
-    await sheet.waitFor({ state: "visible" });
-    assert.equal(await page.evaluate(() => document.activeElement.id), "reaction-search");
-    send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: true });
-    await topic.locator(`.reactions [data-reaction="${THINKING}"]`).waitFor();
-    assert.equal(await sheet.isVisible(), true, "live changes keep the open sheet");
-    send(T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "thinking", active: false });
-    await topic.locator(`.reactions [data-reaction="${THINKING}"]`).waitFor({ state: "detached" });
-    const sheetLike = sheet.locator(`[data-reaction="${LIKE}"]`).first();
-    assert.equal(await sheetLike.isVisible(), true);
-    const sheetBounds = await sheet.boundingBox();
-    assert.ok(sheetBounds.x >= 0 && sheetBounds.x + sheetBounds.width <= viewport.width, "sheet fits narrow and desktop screens");
-    await sheetLike.click();
-    await sheet.waitFor({ state: "hidden" });
-    await page.waitForFunction(glyph => document.querySelector(`[data-message-record-id="topic"] [data-reaction="${glyph}"]`).getAttribute("aria-pressed") === "true", "\u{1F44D}");
-
-    assert.equal(await topic.locator('.reactions button').count(), 1, "only the used reaction remains visible");
-    assert.equal(await page.evaluate(() => document.activeElement.closest("li.message")?.dataset.messageRecordId), "topic", "closing the sheet returns focus to the message");
-    const like = topic.locator('[data-reaction="\u{1F44D}"]');
-
+    const pin = topic.locator('[data-message-action="pin"]');
+    await topic.locator('.message-more > summary').click();
     // Error toasts persist until dismissed and can be selected/copied; successes still auto-clear.
     await page.route("**/api/rooms/commons/commands", route => route.fulfill({
-      status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "unavailable", message: "Reaction store unavailable" } })
+      status: 503, contentType: "application/json", body: JSON.stringify({ error: { code: "unavailable", message: "Pin store unavailable" } })
     }));
     const toast = page.locator("#status");
-    await like.click();
+    await pin.click();
     await page.waitForFunction(() => document.querySelector("#status").classList.contains("error"));
-    assert.match(await toast.locator(".status-text").textContent(), /Reaction store unavailable/);
+    assert.match(await toast.locator(".status-text").textContent(), /Pin store unavailable/);
     assert.equal(await toast.getAttribute("role"), "alert");
     assert.equal(await toast.getAttribute("aria-live"), "assertive");
     assert.deepEqual(await toast.evaluate(node => [getComputedStyle(node).pointerEvents, getComputedStyle(node).userSelect]), ["auto", "text"]);
     const dismiss = toast.getByRole("button", { name: "Dismiss error" });
     assert.equal(await dismiss.isVisible(), true);
-    assert.equal(await toast.evaluate(node => { const range = document.createRange(); range.selectNodeContents(node.querySelector(".status-text")); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); const text = selection.toString(); selection.removeAllRanges(); return text; }).then(t => /Reaction store unavailable/.test(t)), true, "error text is selectable");
+    assert.equal(await toast.evaluate(node => { const range = document.createRange(); range.selectNodeContents(node.querySelector(".status-text")); const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range); const text = selection.toString(); selection.removeAllRanges(); return text; }).then(t => /Pin store unavailable/.test(t)), true, "error text is selectable");
     await dismiss.click();
     assert.equal(await toast.textContent(), "");
     assert.equal(await toast.evaluate(node => node.classList.contains("visible")), false);
     assert.equal(await toast.getAttribute("role"), "status");
     await page.unroute("**/api/rooms/commons/commands");
-    await page.locator('[data-message-record-id="topic"] button[data-reaction="\u{1F44D}"]').click();
-    // A cleared reaction detaches its chip (only used reactions stay visible),
-    // so wait for detachment rather than an aria-pressed=false state that the
-    // new UI never renders.
-    await topic.locator('button[data-reaction="\u{1F44D}"]').waitFor({ state: "detached" });
+    await topic.locator('.message-more > summary').click();
+    await pin.click();
+    await page.waitForFunction(() => document.querySelector('[data-message-record-id="topic"] [data-message-action="pin"]').getAttribute('aria-pressed') === 'true');
     await openSearch(page);
     await page.locator("#search-mentions").click();
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "true");
@@ -258,7 +285,17 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "false");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     assert.match(await input.getAttribute("placeholder"), /Reply in thread/);
+    assert.equal(await input.inputValue(), "");
+    await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    assert.match(await input.getAttribute("placeholder"), /Reply in thread/, "an empty composer still restores the active task thread");
+    await input.fill("A finished thread reply survives return");
+    await page.locator('#message-form button[type="submit"]').click();
+    await page.waitForFunction(() => !document.querySelector('#message-input').disabled && document.querySelector('#message-input').value === '');
+    await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    assert.match(await input.getAttribute("placeholder"), /Reply in thread/, "sending a result does not lose the active thread on reload");
+    assert.equal(store.room('commons').state.messages.filter(m => m.body === 'A finished thread reply survives return').length, 1);
     await page.locator("#thread-back").click();
+    await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
     assert.match(await input.getAttribute("placeholder"), /Message #/);
     assert.equal(await page.locator("#composer-options").count(), 1);
     assert.equal(await page.locator("#remember-drafts").count(), 0);
