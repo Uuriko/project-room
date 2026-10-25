@@ -755,9 +755,13 @@ test("ANCHOR-D7a: redeem times out, retry with the same requestId recovers the m
   assert.equal(retry.json.memberId, first.json.memberId);
   assert.equal(retry.json.roomId, first.json.roomId);
   assert.equal(retry.json.duplicate, true);
-  assert.ok(typeof retry.json.mcpToken?.credential === "string" && /^rak_/.test(retry.json.mcpToken.credential),
-    "replay re-issues an onboarding token");
-  assert.notEqual(retry.json.mcpToken.credential, first.json.mcpToken.credential, "replay mints a fresh token, not the lost one");
+  assert.equal(retry.json.mcpToken, null, "a replay does not mint another onboarding token");
+  assert.equal(retry.json.next[1].action, "rotate");
+  assert.equal(typeof retry.json.identitySecret, "string");
+  const rotated = await post(origin, "/api/agent-rooms/commons/token/rotate", {}, retry.json.identitySecret);
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.json));
+  assert.match(rotated.json.mcpToken.credential, /^rak_/);
+  assert.equal(store.authenticate(rotated.json.mcpToken.credential, "commons").identityId, first.json.identityId);
   assert.equal(Object.keys(store.room("commons").state.members).length, membersBefore + 1, "no second membership");
   assert.doesNotThrow(() => store.db.prepare("SELECT 1 FROM agent_invite_redeem_receipts WHERE request_id=?").get(requestId));
   // Contrast: without the requestId the legacy trap still 409s — the client
@@ -765,6 +769,28 @@ test("ANCHOR-D7a: redeem times out, retry with the same requestId recovers the m
   const legacy = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "G1 Bot" });
   assert.equal(legacy.status, 409);
   assert.equal(legacy.json.error.code, "invite_already_used");
+});
+
+test("re-redeeming an invite with the same identity does not mint another token", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const me = store.identities.create("Returning Agent");
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60, displayName: "Returning Agent" });
+  assert.equal(minted.status, 201);
+  const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Returning Agent" }, me.secret);
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  assert.match(first.json.mcpToken.credential, /^rak_/);
+  const again = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Returning Agent" }, me.secret);
+  assert.equal(again.status, 201, JSON.stringify(again.json));
+  assert.equal(again.json.duplicate, true);
+  assert.equal(again.json.mcpToken, null);
+  assert.equal(again.json.next[0].action, "rotate");
+  assert.match(again.json.next[0].description, /inside 60 seconds/);
+  assert.equal(store.authenticate(first.json.mcpToken.credential, "commons").identityId, me.identityId);
+  const rotated = await post(origin, again.json.next[0].path, {}, me.secret);
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.json));
+  assert.throws(() => store.authenticate(first.json.mcpToken.credential, "commons"),
+    err => err.status === 401 && err.code === "unauthenticated");
+  assert.equal(store.authenticate(rotated.json.mcpToken.credential, "commons").identityId, me.identityId);
 });
 
 test("ANCHOR-D7e: a replay with another identity's credential is refused and mints no token", async t => {
