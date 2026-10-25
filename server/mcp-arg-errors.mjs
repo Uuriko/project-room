@@ -4,6 +4,9 @@
 // a room tool is called with no identity bearer.
 
 import { randomBytes } from "node:crypto";
+// The room coordinator wraps the assistant when this module loads. http.mjs
+// already imports this file, and room-assistant.mjs is owned by other open pulls.
+import "./coordinator.mjs";
 
 const operationId = () => `op_${randomBytes(6).toString("base64url")}`;
 
