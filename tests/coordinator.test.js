@@ -185,7 +185,7 @@ test("the hop cap stops an assign and ask cycle, and the hour cap stops the room
   assert.match(capped.body.error.message, /Stop the chain or choose another claim/);
   assert.equal(capped.body.next.length >= 1, true);
 
-  const other = putClaim(store, { id: "loop-2" });
+  putClaim(store, { id: "loop-2" });
   const otherAsk = await call("coord", { requestId: "loop-other", action: "ask", workClaimId: "loop-2", targetMemberId: "helper" });
   assert.equal(otherAsk.status, 200);
 
