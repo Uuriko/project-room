@@ -86,6 +86,7 @@
   "src/portable-work.js",
   "src/presence-state.js",
   "src/project-offers-ui.js",
+  "src/public-agent-ui.js",
   "src/push-ask.js",
   "src/pwa-install.js",
   "src/reminder-time.js",
