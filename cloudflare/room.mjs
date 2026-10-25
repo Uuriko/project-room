@@ -1,5 +1,5 @@
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
-import { publicPageCsp } from "../server/public-search.mjs";
+import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { GmailSync } from '../server/gmail-sync.mjs';
 import { GmailMailbox, gmailConfig } from '../server/gmail-mailbox.mjs';
@@ -17,6 +17,7 @@ import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
 import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
+import { channelDrainTickShape, CHANNEL_DRAIN_INFLIGHT_KEY } from './channel-drain-tick.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
@@ -27,12 +28,14 @@ import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath
 import { durableInboundEmailConsumer, emailRoutingLimits, emailRoutingRejections } from '../server/email-routing-inbound.mjs';
 import { RETENTION_TABLES, runLiveStoreRetention } from '../server/retention-run.mjs';
 import { backfillPublicReadModel as fillPublicReadModel } from '../server/public-read-model.mjs';
+import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-keeper.mjs';
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
+import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
@@ -53,6 +56,11 @@ function yieldToQueuedRequests() {
 function cronDeadline() {
   return Date.now() + CRON_JOB_BUDGET_MS;
 }
+// The drain RPC's decision table (channelDrainTickShape,
+// CHANNEL_DRAIN_STUCK_MS) lives in ./channel-drain-tick.mjs: this file is
+// the Worker entry module, so its export surface is the runtime's
+// handler/RPC surface and cannot carry test-only exports — workerd
+// rejects a non-function entry at startup.
 const RETENTION_CURSOR_KEY = 'retention-table-index';
 
 // The DO transport may erase the original error type. Report availability,
@@ -84,8 +92,26 @@ function roomOrigin(env) {
   return origin;
 }
 
+// TM-2: resolve the split backup credentials for the operator export and
+// restore doors. Each door's handler reads a missing or sub-16-char value
+// as "unconfigured" (404), so the values pass through untouched — except
+// when both secrets hold the same usable value: then one credential would
+// open both doors, the split would be void, and both doors fail closed
+// until the operator sets distinct values.
+function splitBackupTokens(env) {
+  const exportToken = env.ROOM_EXPORT_TOKEN;
+  const restoreToken = env.ROOM_RESTORE_TOKEN;
+  if (typeof exportToken === 'string' && exportToken.length >= 16 && exportToken === restoreToken) {
+    return { exportToken: undefined, restoreToken: undefined };
+  }
+  return { exportToken, restoreToken };
+}
+
 // One pilot workspace per object, not one object per member. Account/session
 // ownership currently spans rooms, so splitting by room would break that contract.
+// Reads that carry the job list: refresh the heartbeat snapshot first.
+const JOB_LIST_READS = new Set(['/api/owner/overview']);
+
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -113,6 +139,7 @@ export class ProjectRoom extends DurableObject {
         });
       });
     });
+    this.store.featureEnv = env;
     bootstrapRoom(this.store, env);
     this.store.landQueue.configure({ env });
     // Google sign-in is optional: unconfigured or misconfigured credentials
@@ -131,9 +158,14 @@ export class ProjectRoom extends DurableObject {
     catch (error) { console.warn(`room github auth disabled: ${error.message}`); }
     this.gmailSync = gmailAuth ? new GmailSync(new GmailMailbox(this.store, gmailAuth)) : null;
     const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+    // The owner overview's job list reads the heartbeat view, refreshed on
+    // each recorded tick and before each overview read (the Node scheduler
+    // records are absent in the Durable Object, so the list was empty here).
+    this.jobHealthSnapshot = null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
-      boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
+      jobHealth: () => this.jobHealthSnapshot,
+      publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
       push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,
@@ -195,21 +227,30 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
+    if (JOB_LIST_READS.has(url.pathname)) await this.refreshJobHealthSnapshot();
+    // TM-2 split: the backup doors no longer share one credential.
+    // ROOM_EXPORT_TOKEN opens the read door only and may stay armed standing
+    // for the nightly second-home pull; ROOM_RESTORE_TOKEN opens the two
+    // restore doors and stays unset outside a restore incident, so they
+    // answer 404 in normal operation. The retired ROOM_BACKUP_TOKEN opens
+    // nothing. If both secrets are configured to the same usable value the
+    // split is void, so both doors fail closed until the values differ.
+    const backupTokens = splitBackupTokens(this.env);
     if (url.pathname === '/api/operator/export') {
-      return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
+      return respond(operatorExportResponse(request, backupTokens.exportToken, this.store.db));
     }
     // Disaster recovery: replay a whole-store NDJSON export into this Durable
-    // Object's storage. Same operator token as the export; fail-closed on a
-    // non-empty store (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
+    // Object's storage. Restore token only; fail-closed on a non-empty store
+    // (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
     if (url.pathname === '/api/operator/restore') {
-      return respond(await operatorRestoreResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store));
+      return respond(await operatorRestoreResponse(request, backupTokens.restoreToken, this.store));
     }
     // Same recovery, sourced from the daily backup already sitting in the
     // ROOM_BACKUPS_KV namespace: the request-body path caps at 64 MiB and
     // the current backup is past it (#3409), so the parts are pulled and
     // replayed one at a time instead of uploaded whole.
     if (url.pathname === '/api/operator/restore-from-backup') {
-      return respond(await operatorRestoreFromBackupResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store, this.env.ROOM_BACKUPS_KV));
+      return respond(await operatorRestoreFromBackupResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
@@ -226,7 +267,7 @@ export class ProjectRoom extends DurableObject {
   probeStorage() {
     if (this.paused || !this.store) return { ok: false };
     const row = this.store.db.prepare("SELECT 1 AS ok").get();
-    return { ok: row?.ok === 1 };
+    return { ok: row?.ok === 1, emailVerification: magicLinkMailerFromEnv(this.env) ? 'enforced' : 'relaxed-no-mailer' };
   }
 
   async syncGmailMailboxes() {
@@ -241,10 +282,44 @@ export class ProjectRoom extends DurableObject {
   // Cron heartbeat: the Worker records each tick's per-job outcome here after
   // the jobs settle; GET /api/health/jobs reads it back (no secrets stored).
   async recordCronTick(outcomes) {
-    const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
-    const next = applyOutcomes(previous, outcomes);
-    await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
-    return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
+    // Serialize the entire read/merge/write across alarms and cron RPCs.
+    const persist = async () => {
+      const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+      const next = applyOutcomes(previous, outcomes);
+      // #3927 R4: drainChannelBacklog only PEEKS at the completed drain
+      // outcome; it is consumed here, once the heartbeat record reporting
+      // it is durable. If the put fails, the report marker is released and
+      // the stash stays, so the next drain tick reports the same outcome
+      // again instead of it being lost with the failed write.
+      const reported = this.channelDrainOutcomeReported ?? null;
+      const drainRecorded = reported !== null && Array.isArray(outcomes)
+        && outcomes.some(outcome => outcome?.job === 'channel-drain');
+      try {
+        await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
+      } catch (error) {
+        this.channelDrainOutcomeReported = null;
+        throw error;
+      }
+      if (drainRecorded) {
+        this.channelDrainOutcomeReported = null;
+        if (this.channelDrainOutcome === reported) {
+          // Consume exactly once; a completion that queued behind the
+          // reported outcome while it awaited this record is promoted.
+          this.channelDrainOutcome = this.channelDrainOutcomeHeld ?? null;
+          this.channelDrainOutcomeHeld = null;
+        }
+      }
+      this.jobHealthSnapshot = jobHealthView(next, Date.now(), this.env, this.store).jobs;
+      return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
+    };
+    const pending = (this.cronTickTail ?? Promise.resolve()).then(persist, persist);
+    this.cronTickTail = pending;
+    try { return await pending; }
+    finally { if (this.cronTickTail === pending) this.cronTickTail = null; }
+  }
+  async refreshJobHealthSnapshot() {
+    try { this.jobHealthSnapshot = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store).jobs; }
+    catch (error) { console.warn(`[job-heartbeat] snapshot failed: ${error?.message ?? error}`); }
   }
   async readJobHealth() {
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
@@ -256,21 +331,66 @@ export class ProjectRoom extends DurableObject {
   // on schedule); the inbox import itself still needs an owner session (B20
   // system import authority), so slices without one are honestly deferred,
   // never imported. Runs in the DO so no connection data leaves it.
+  //
+  // The drain itself runs in the background (waitUntil), so this RPC cannot
+  // report the drain it starts — it reports the last one that COMPLETED,
+  // whose outcome #drainChannelsInBackground stashes in channelDrainOutcome
+  // (the same summary the drainer keeps as lastTick). Each outcome is
+  // consumed exactly once: this call only peeks at it, and recordCronTick
+  // consumes it once the heartbeat record reporting it is durable
+  // (#3927 R4). A drain still inflight past CHANNEL_DRAIN_STUCK_MS is
+  // reported as a failed tick, not a success (bug sweep F-1: previously
+  // every return shape recorded success while the real drain's failures
+  // went to console only).
   async drainChannelBacklog() {
     if (this.paused) throw new Error('Room paused');
     await yieldToQueuedRequests();
     const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
     const gate = drainer.configured();
     if (!gate.configured) return { skipped: 1, configured: false, connections: 0 };
-    if (this.channelDrainInflight) return { started: 0, background: 1, inflight: 1, connections: gate.connections };
-    const work = this.#drainChannelsInBackground(drainer);
-    this.ctx.waitUntil(work);
-    return { started: 1, background: 1, connections: gate.connections };
+    const completed = this.channelDrainOutcome ?? null;
+    if (completed !== null) this.channelDrainOutcomeReported = completed;
+    // #3927 R3: the inflight fields are instance memory. An instance
+    // evicted mid-drain leaves only the durable start stamp behind; a
+    // successor that finds it has a drain outstanding whose background
+    // half died with the old instance (orphaned) — the stuck clock runs
+    // from the stamped start, not from the eviction.
+    let inflight = this.channelDrainInflight === true;
+    let inflightSince = this.channelDrainInflightSince;
+    let orphaned = false;
+    if (!inflight) {
+      const stamped = await this.ctx.storage.get(CHANNEL_DRAIN_INFLIGHT_KEY);
+      if (Number.isFinite(stamped)) {
+        inflight = true;
+        inflightSince = stamped;
+        orphaned = true;
+      }
+    }
+    const { result, start } = channelDrainTickShape({
+      connections: gate.connections, inflight,
+      inflightSince, now: Date.now(), completed, orphaned
+    });
+    if (start) {
+      // Stamp the start durably before the background half runs, so the
+      // stuck clock is already running if this instance is evicted in
+      // between (the background half re-stamps at its own start and
+      // deletes the stamp when it ends).
+      try { await this.ctx.storage.put(CHANNEL_DRAIN_INFLIGHT_KEY, Date.now()); }
+      catch (error) { console.error(`[channel-drain] inflight stamp failed: ${error?.message ?? error}`); }
+      this.ctx.waitUntil(this.#drainChannelsInBackground(drainer));
+    }
+    return result;
   }
   // Runs after the RPC returns. The first await opens the input gate before
   // any journal scan, and tick yields again between connections. Not an RPC.
   async #drainChannelsInBackground(drainer) {
     this.channelDrainInflight = true;
+    this.channelDrainInflightSince = Date.now();
+    // #3927 R3: stamp the start durably; the finally below deletes it.
+    // drainChannelBacklog reads the stamp back when a successor instance
+    // finds its own inflight fields cold.
+    try { await this.ctx.storage.put(CHANNEL_DRAIN_INFLIGHT_KEY, this.channelDrainInflightSince); }
+    catch (error) { console.error(`[channel-drain] inflight stamp failed: ${error?.message ?? error}`); }
     try {
       await yieldToQueuedRequests();
       const summary = await drainer.tick({ deadline: cronDeadline(), yieldBetween: () => yieldToQueuedRequests() });
@@ -278,12 +398,28 @@ export class ProjectRoom extends DurableObject {
         event: 'room.channel_drain', connections: summary.connections ?? 0, deferred: summary.deferred ?? 0,
         errors: summary.errors ?? 0, budgetExceeded: summary.budgetExceeded ? 1 : 0
       }));
+      this.#stashChannelDrainOutcome(summary);
       return summary;
     } catch (error) {
       console.error(`[channel-drain] background tick failed: ${error?.message ?? error}`);
+      this.#stashChannelDrainOutcome({ at: Date.now(), errors: 1 });
       return { errors: 1 };
     } finally {
       this.channelDrainInflight = false;
+      this.channelDrainInflightSince = null;
+      try { await this.ctx.storage.delete(CHANNEL_DRAIN_INFLIGHT_KEY); }
+      catch (error) { console.error(`[channel-drain] inflight stamp clear failed: ${error?.message ?? error}`); }
+    }
+  }
+  // #3927 R4: a completion that lands while an earlier outcome is still
+  // awaiting its durable heartbeat record (peeked, unconfirmed) queues
+  // behind it instead of overwriting an outcome health has not durably
+  // seen; recordCronTick promotes the queued one when the head confirms.
+  #stashChannelDrainOutcome(summary) {
+    if (this.channelDrainOutcome != null && this.channelDrainOutcomeReported === this.channelDrainOutcome) {
+      this.channelDrainOutcomeHeld = summary;
+    } else {
+      this.channelDrainOutcome = summary;
     }
   }
   // Changed rooms update the checksum. One room per tick is reread so a
@@ -294,6 +430,13 @@ export class ProjectRoom extends DurableObject {
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
     return this.store.verifyRoomIntegrity({ yieldBetween: () => yieldToQueuedRequests(), deadline: cronDeadline() });
+  }
+  // ClueBot phase 1: tail new events and file invariant findings. The
+  // patrol is read-only (patrol_* tables only); a paused room skips.
+  async patrolTick() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return runPatrolTick(this.store, { deadline: cronDeadline() });
   }
   // RC-2026-09-19-064 — signed webhook dispatch RPC for the Worker's cron
   // trigger. Sweeps due deliveries (pending/failed with next_attempt_at <=
@@ -329,6 +472,14 @@ export class ProjectRoom extends DurableObject {
       deadline: cronDeadline(),
       yieldBetween: () => yieldToQueuedRequests()
     });
+  }
+  // Mechanical escrow keeper (#3693/#3844): closes due payout epochs —
+  // challenge-window approvals, approved sweeps, dispute timeouts, deadline
+  // refunds — so no bounty waits on a human remembering to close an epoch.
+  async progressEscrowEpochs() {
+    if (this.paused) return { skipped: 1, paused: 1 };
+    await yieldToQueuedRequests();
+    return runEscrowEpochs(this.store, { now: Date.now() });
   }
   // Copies opted-in rooms into the public read model, a bounded batch per tick.
   // Paused rooms return before the store exists. The constructor does not do this.
@@ -373,25 +524,25 @@ export class ProjectRoom extends DurableObject {
   }
   // Due jobs only. Slow jobs (retention, integrity, backup) run from the
   // safety-net cron. Fast jobs run from the alarm when their nextDueAt arrives.
-  async #runDueJobs({ includeSlow }) {
+  async #runDueJobs({ includeSlow, onlyJob = null }) {
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
     const lastRan = lastRanFrom(stored);
     const now = Date.now();
     const selected = selectWorkerJobs(this.env, this.store).filter(job => {
+      if (onlyJob !== null && job.name !== onlyJob) return false;
       if (job.slow && !includeSlow) return false;
       return jobIsDue(job, this.store, now, lastRan[job.name]);
     });
-    const runners = {};
+    const outcomes = [];
     for (const job of selected) {
-      runners[job.name] = () => job.run(this.store, {
+      const result = await runCronJobs({ [job.name]: () => job.run(this.store, {
         deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
         env: this.env, room: this, now: () => Date.now()
-      });
-    }
-    const outcomes = await runCronJobs(runners);
-    if (outcomes.length) {
-      try { await this.recordCronTick(outcomes); }
-      catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
+      }) });
+      // A later job may reset the object. Commit completed work before
+      // starting it; a failed heartbeat write must not claim a healthy tick.
+      await this.recordCronTick(result);
+      outcomes.push(...result);
     }
     return outcomes;
   }
@@ -417,16 +568,26 @@ export class ProjectRoom extends DurableObject {
     await this.ctx.storage.setAlarm(when);
     return { armed: true, alarmAt: when };
   }
-  // Safety-net RPC. Runs anything already due, then re-arms a missing alarm.
+  // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
   // anything due?" without this wake. The cron stays at 30 minutes.
   async ensureJobAlarm() {
     if (this.paused || !this.store) return { skipped: "paused", armed: false };
-    const outcomes = await this.#runDueJobs({ includeSlow: true });
+    const outcomes = await this.#runDueJobs({ includeSlow: false });
     const armed = await this.#armJobAlarm();
     const failed = outcomes.filter(outcome => !outcome.ok && !JOBS.find(job => job.name === outcome.job)?.slow);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
     return { ...armed, ran: outcomes.map(outcome => outcome.job) };
+  }
+  // Separate RPC invocations give each slow job its own CPU budget. A reset
+  // cannot erase outcomes already committed by another invocation.
+  async runSlowJob(name) {
+    if (!JOBS.some(job => job.name === name && job.slow && job.runtimes.includes("worker"))) {
+      throw new Error("Unsupported slow job");
+    }
+    if (this.paused || !this.store) return { skipped: "paused" };
+    await yieldToQueuedRequests();
+    return this.#runDueJobs({ includeSlow: true, onlyJob: name });
   }
   // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
   async alarm() {
@@ -460,6 +621,7 @@ export default {
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     const browserOrigin = new URL(request.url).origin;
     let internalPublicPolicy = null, browserPublicPolicy = null;
+    let internalAboutPolicy = null, browserAboutPolicy = null;
     // JDOT-PUBLIC-CSP-RUM end
     const finish = (response, servedBy) => {
       // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
@@ -469,6 +631,12 @@ export default {
       if (browserPublicPolicy && response.headers.get('Content-Security-Policy') === internalPublicPolicy) {
         const headers = new Headers(response.headers);
         headers.set('Content-Security-Policy', browserPublicPolicy);
+        response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+      } else if (browserAboutPolicy && response.headers.get('Content-Security-Policy') === internalAboutPolicy) {
+        // /about carries its own path-pinned policy (see aboutPageCsp);
+        // header equality identifies it, so it rebases the same way.
+        const headers = new Headers(response.headers);
+        headers.set('Content-Security-Policy', browserAboutPolicy);
         response = new Response(response.body, { status: response.status, statusText: response.statusText, headers });
       }
       // JDOT-PUBLIC-CSP-RUM end
@@ -500,6 +668,8 @@ export default {
     // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
     internalPublicPolicy = publicPageCsp(url.origin);
     browserPublicPolicy = publicPageCsp(browserOrigin);
+    internalAboutPolicy = aboutPageCsp(url.origin);
+    browserAboutPolicy = aboutPageCsp(browserOrigin);
     // JDOT-PUBLIC-CSP-RUM end
     // Storage/DO-independent version signal: answered entirely from module
     // scope and env, never touching the Durable Object, so deploy
@@ -570,7 +740,7 @@ export default {
         start: async () => {
           const result = await env.ROOM.getByName('invite-only-pilot').probeStorage();
           if (!result?.ok) throw new Error('storage probe failed');
-          return new Response(JSON.stringify({ status: 'ok' }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+          return new Response(JSON.stringify({ status: 'ok', emailVerification: result.emailVerification }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
         },
         waitUntil: ctx?.waitUntil?.bind(ctx),
         onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),
@@ -613,14 +783,29 @@ export default {
 
   // Safety-net cron (wrangler production trigger is every 30 minutes).
   // Reading Durable Object storage always wakes it, so this handler cannot
-  // ask "is anything due?" from the Worker. It makes one RPC that runs jobs
-  // already due and re-arms the alarm when one is missing. Webhook retries,
+  // ask "is anything due?" from the Worker. Fast work re-arms its alarm;
+  // each slow job then runs in a separate RPC, with due checks in the object.
+  // Continue after an RPC failure so one reset cannot starve later jobs.
+  // Webhook retries,
   // land-queue polls, and claim polls run from ProjectRoom.alarm() at the
   // next due time. A failed fast job fails this invocation so Cron Events
   // show the exception.
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
-    const room = env.ROOM.getByName('invite-only-pilot');
-    await room.ensureJobAlarm();
+    let room = env.ROOM.getByName('invite-only-pilot');
+    const failures = [];
+    try { await room.ensureJobAlarm(); }
+    catch { failures.push("fast jobs"); room = env.ROOM.getByName('invite-only-pilot'); }
+    for (const job of JOBS.filter(job => job.slow && job.runtimes.includes("worker"))) {
+      try { await room.runSlowJob(job.name); }
+      catch { failures.push(job.name); room = env.ROOM.getByName('invite-only-pilot'); }
+    }
+    if (failures.length) throw new Error(`Scheduled job RPC failed: ${failures.join(", ")}`);
   }
 };
+
+// Per-room objects stay classified and unwired. Fetch still names
+// invite-only-pilot. This re-export keeps the classification on the worker
+// import graph; it does not open a second Durable Object.
+export { tableHome } from '../server/room-shard.mjs';
+export { RoomShard } from './room-shard.mjs';

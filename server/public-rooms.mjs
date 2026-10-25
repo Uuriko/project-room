@@ -1,10 +1,13 @@
+import { createHash } from "node:crypto";
 // Public acquisition pages: template gallery, opt-in room pages, agent directory,
-// and the demo room. Script-free HTML. Member-authored text is escaped on the
+// and the demo room. A hash-authorized copy helper is the only inline script. Member-authored text is escaped on the
 // page and marked untrusted on the JSON agents read. The pages read
 // public_rooms, public_receipts, and public_directory_entries. They do not read
 // rooms.projection, and a GET does not mint a share link. The demo room is the
 // exception: it reads nothing at all — curated static content only.
-import { escapeHtml, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { escapeHtml } from "./html-escape.mjs";
+import { RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { roomSetupPrompt } from "../src/room-setup-prompt.js";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { PUBLIC_PAGE_LASTMOD } from "./public-search.mjs";
@@ -13,7 +16,27 @@ import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
 import { loadPublicRoom, listPublicRoomSitemap, queryDirectoryEntries, roomPageReceipts } from "./public-read-model.mjs";
 import { excludeHiddenReceipts } from "./receipts-live.mjs";
 
+const SETUP_COPY_SCRIPT = `(() => {
+  const button = document.getElementById('copy-room-setup');
+  const field = document.getElementById('room-setup-prompt');
+  const status = document.getElementById('room-setup-copy-status');
+  if (!button || !field || !status) return;
+  button.hidden = false;
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('unavailable');
+      await Promise.race([navigator.clipboard.writeText(field.value), new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 1000))]);
+      status.textContent = 'Copied. Paste into your agent on the computer you want to connect.';
+    } catch {
+      field.closest('details').open = true;
+      field.focus(); field.select();
+      status.textContent = 'Copy the selected prompt, then paste it into your agent.';
+    } finally { button.disabled = false; }
+  });
+})();`;
 export { RECEIPTS_PAGE_CSP as PUBLIC_PAGE_CSP };
+export const PUBLIC_ROOM_SETUP_CSP = RECEIPTS_PAGE_CSP.replace('script-src ', `script-src 'sha256-${createHash('sha256').update(SETUP_COPY_SCRIPT).digest('base64')}' `);
 
 const OG_IMAGE = `${ROOM_ORIGIN}/og/home.png`;
 
@@ -93,7 +116,7 @@ function requestHref(slug, ref) {
   return withRef(`/?request=${encodeURIComponent(slug)}`, ref);
 }
 
-export function publicRoomView(store, slug, { ref = "" } = {}) {
+export function publicRoomView(store, slug, { ref = "", origin = ROOM_ORIGIN } = {}) {
   const room = loadPublicRoom(store, slug);
   if (!room) return null;
   const clean = publicRef(ref);
@@ -112,7 +135,21 @@ export function publicRoomView(store, slug, { ref = "" } = {}) {
     names: room.names,
     tasks: room.tasks,
     receipts,
+    proofHref: room.receiptsEnabled ? `/r/${slug}/proof` : null,
     join,
+    agentJoin: {
+      packet: "/llms.txt",
+      setupSkill: "/skills/project-room-setup/SKILL.md",
+      setupPrompt: roomSetupPrompt(`${origin}/r/${slug}`),
+      roomPage: `/r/${slug}`,
+      preview: `/r/${slug}.json`,
+      admission: join.mode === "link" ? "invitation" : "approval_required",
+      permissions: [],
+      executionGranted: false,
+      next: join.mode === "link"
+        ? "Use join.href as a shared invitation with your own saved identity; preview it, join, then read your activation pack. Invitation limits and verification checks still apply."
+        : "Use your own saved identity to request read/chat access to this room; wait for approval, then read your activation pack.",
+    },
   };
   const description = room.purpose || `${room.title} on Project Room.`;
   const nameLine = room.names.length ? `<p>People who show their name: ${room.names.map(escapeHtml).join(", ")}</p>` : "";
@@ -129,11 +166,23 @@ ${shell(`<a href="/templates">Templates</a>`)}
 <p>${escapeHtml(room.purpose)}</p>
 <p class="meta">${room.counts.humans} ${room.counts.humans === 1 ? "person" : "people"} · ${room.counts.agents} ${room.counts.agents === 1 ? "agent" : "agents"}</p>
 ${nameLine}
+<p><a href="${escapeHtml(join.href)}">${join.mode === "link" ? "Join this room" : "Request to join"}</a></p>
+<details><summary>Join with your AI</summary>
+<p>Paste these instructions into your agent. It will help you join and, if you choose, connect your computer.</p>
+<button id="copy-room-setup" type="button" hidden>Copy setup prompt</button>
+<p id="room-setup-copy-status" role="status" aria-live="polite"></p>
+<details><summary>View setup prompt</summary><label for="room-setup-prompt">Copy this into your agent</label><textarea id="room-setup-prompt" readonly rows="12" style="width:100%;box-sizing:border-box">${escapeHtml(document.agentJoin.setupPrompt)}</textarea></details>
+
+
+<p>Joining does not share your computer. You choose that separately.</p>
+<p><a href="/r/${escapeHtml(slug)}.json">Agent join instructions</a></p>
+</details>
+<script>${SETUP_COPY_SCRIPT}</script>
 <h2>Open tasks</h2>
 ${taskLine}
 <h2>Public receipts</h2>
 ${receiptLine}
-<p><a href="${escapeHtml(join.href)}">Join</a></p>
+${room.receiptsEnabled ? `<p><a href="/r/${escapeHtml(slug)}/proof">Proof of work — this room's published results, each traceable to its receipt</a></p>` : ""}
 <p><a href="${escapeHtml(reportHref("room", slug))}">Report</a></p>
 </main>
 <footer><a href="/?start=room">Made in Project Room — start your own room</a><p>${LEGAL_FOOTER_LINKS}</p></footer>
@@ -302,10 +351,9 @@ export function publicSitemapEntries(store) {
     { path: "/agents", lastmod: PUBLIC_PAGE_LASTMOD },
   ];
   for (const room of listPublicRoomSitemap(store)) {
-    entries.push({
-      path: `/r/${room.slug}`,
-      lastmod: typeof room.setAt === "string" && room.setAt.length >= 10 ? room.setAt.slice(0, 10) : PUBLIC_PAGE_LASTMOD,
-    });
+    const lastmod = typeof room.setAt === "string" && room.setAt.length >= 10 ? room.setAt.slice(0, 10) : PUBLIC_PAGE_LASTMOD;
+    entries.push({ path: `/r/${room.slug}`, lastmod });
+    if (room.receiptsEnabled) entries.push({ path: `/r/${room.slug}/proof`, lastmod });
   }
   return entries;
 }

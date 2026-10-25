@@ -33,6 +33,12 @@ function fixture(t, route) {
   const client = new RoomClient({ events: Events, onSnapshot: value => seen.push(value), fetcher: async (url, options) => {
     if (url === "/api/rooms/commons/commands" && options.method === "POST") return response(route.receipt);
     assert.equal(options.method, "GET");
+    // The history endpoint the background fill prefers: this room fits on one
+    // page. Not a snapshot read — it does not consume the route's numbering.
+    if (url.startsWith("/api/rooms/commons/conversation")) {
+      const whole = route(FULL, nth());
+      return response({ ...owner, generatedAt: "2026-01-01T00:00:00.000Z", conversationVersion: 1, mode: "replace", limit: 100, messageId: null, channelId: null, checkpoint: null, sequence: whole.sequence, messages: whole.state.messages, nextCursor: null, hasMore: false });
+    }
     reads.push(url); calls += 1;
     // A fresh client's first read is the newest window; answer it from the same room the full read would show.
     if (calls === 1 && url === RECENT) {
@@ -279,7 +285,7 @@ test("a background fill refused with 401 ends access once, stops retrying and ne
   t.after(() => client.disconnect());
   await client.refresh();
   await new Promise(resolve => setTimeout(resolve, 1500));
-  assert.deepEqual(reads, [RECENT, FULL], "one window read, one fill, no retries after a 401");
+  assert.deepEqual(reads, [RECENT, "/api/rooms/commons/conversation?limit=100"], "one window read, one paged fill refused, no retries after a 401");
   assert.equal(client.session, null, "access ended");
   assert.equal(statuses.some(text => /Connection interrupted/.test(text)), false);
 });

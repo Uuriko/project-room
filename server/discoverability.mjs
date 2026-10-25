@@ -112,6 +112,34 @@ const CLAIM_VALIDATE_BODY = Object.freeze({ required: true, content: { "applicat
   },
 } } } });
 
+const queryParam = (name, schema, extra = {}) => Object.freeze({ name, in: "query", schema, ...extra });
+const ROOM_EVENTS_QUERY = Object.freeze([
+  queryParam("after", { type: "integer", minimum: 0, default: 0 }, { description: "Sequence strictly before the page. Pass the previous response's next." }),
+  queryParam("limit", { type: "integer", minimum: 1, maximum: 100, default: 100 }),
+  queryParam("actor", { type: "string" }, { description: "Only events by this member." }),
+  queryParam("since", { type: "string", format: "date-time" }, { description: "Only events at or after this ISO timestamp." }),
+  queryParam("until", { type: "string", format: "date-time" }, { description: "Only events at or before this ISO timestamp." }),
+  queryParam("type", { type: "string" }, { description: "Comma-separated event types, applied server-side." }),
+  queryParam("mentions", { type: "string" }, { description: "Only events that @mention this member id, or me for the caller." }),
+  queryParam("compact", { type: "string", enum: ["1", "0", "true", "false"] }, { description: "1 or true drops envelope fields a poller does not act on." }),
+  queryParam("tail", { type: "integer", minimum: 1, maximum: 200 }, { description: "Newest N events, sent alone. Combining tail with other event filters is 422." }),
+]);
+const ROOM_SEARCH_QUERY = Object.freeze([
+  queryParam("q", { type: "string", minLength: 1, maxLength: 80 }, { required: true, description: "Substring to match. Required." }),
+  queryParam("kind", { type: "string", enum: ["all", "messages", "work", "pinned"], default: "all" }),
+  queryParam("limit", { type: "integer", minimum: 1, maximum: 200, default: 50 }, { description: "Hits per kind. Outside 1..200 is 422 invalid_search." }),
+  queryParam("before", { type: "string", maxLength: 320 }, { description: "Opaque nextCursor from a previous messages or pinned page." }),
+]);
+const ROOM_COMMAND_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
+  type: "object", additionalProperties: false, required: ["id", "type", "data"],
+  properties: {
+    id: { type: "string", description: "Client idempotency key." },
+    type: { type: "string", description: "Event type, for example message.posted." },
+    data: { type: "object", description: "Event payload. Allowed fields depend on type." },
+    causationId: { type: "string", description: "Optional id of the event that caused this command." },
+  },
+} } } });
+
 export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Public discovery documents (no credential).
   route("/demo", ["GET", "HEAD"], "none", "Curated static illustrative conversation; no live private room data.", "getDemo",
@@ -178,7 +206,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   ...["claim", "renew", "release", "finish"].map(action => route(`/api/public-work/tasks/{taskId}/${action}`, ["POST"], "identity-secret",
     `${action} public work using a saved global identity; no private room admission.`, `${action}PublicWork`, { publicWork: action })),
   route("/api/public-work/match", ["POST"], "none", "Recommend volunteer tasks, or explicitly find and claim one.", "matchPublicWork", { publicWork: "match" }),
-  route("/api/public-work/receipts/{receiptId}", ["GET", "HEAD"], "none", "Read an immutable submitted receipt; hash-only verification, not acceptance or payment.", "getPublicWorkReceipt",
+  route("/api/public-work/receipts/{receiptId}", ["GET", "HEAD"], "none", "Read a public-work receipt; the read composes the recorded review outcome (verified on acceptance, or the rejection / revision-request decision) onto the stored record. Payment settles only through the review's settlement step.", "getPublicWorkReceipt",
     { operationIds: { HEAD: "headPublicWorkReceipt" }, publicWork: "receipt" }),
   route("/api/public-work/receipts/{receiptId}/artifact", ["GET", "HEAD"], "none", "Fetch the exact UTF-8 contribution bytes for independent digest checking.", "getPublicWorkArtifact",
     { operationIds: { HEAD: "headPublicWorkArtifact" }, publicWork: "artifact" }),
@@ -230,6 +258,19 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Agent claim-block pre-validation (QA2 2026-10-04: served spec omitted it).
   route("/api/claims/validate", ["POST"], "open", "Validate a ```room-claim block before posting it. Unauthenticated by design; a pure function of the request body.", "validateClaimText",
     { requestBodies: { POST: CLAIM_VALIDATE_BODY } }),
+  // Room core read/write (QA4 2026-10-24: served spec omitted them). Field
+  // truth is docs/openapi.yaml and the handlers in server/http.mjs.
+  route("/api/rooms/{roomId}/events", ["GET"], "room-member",
+    "Read the room event log after a sequence. Pass the previous response's next back as after. afterSequence is refused (422 invalid_event_cursor). tail is newest-N and must be sent alone.",
+    "getRoomEvents", { query: ROOM_EVENTS_QUERY }),
+  route("/api/rooms/{roomId}/commands", ["POST"], "room-member",
+    "Append one event command. Body is {id, type, data} plus optional causationId. The same id and input returns the original receipt (200); a different input is 409. First commit is 201.",
+    "postRoomCommand",
+    { requestBodies: { POST: ROOM_COMMAND_BODY }, successStatuses: ["201", "200"],
+      successDescriptions: { "201": "First commit of this command id.", "200": "Idempotent duplicate: the same id and input already committed." } }),
+  route("/api/rooms/{roomId}/search", ["GET"], "room-member",
+    "Full-text search over messages and work items. q is required (1-80 characters). kind is all, messages, work, or pinned. before pages older message or pin hits.",
+    "searchRoom", { query: ROOM_SEARCH_QUERY }),
 ]);
 
 // MCP tools/list discovery block: every tools/list response (public and
@@ -300,12 +341,24 @@ function jsonRpcErrorResponse(status) {
 // answered 200 while the generated spec documented only 201).
 const POST_NON_CREATE_PATHS = new Set(["/api/needs-me", "/api/claims/validate"]);
 
+function successResponse(status, description) {
+  return { description: description ?? (status === "201"
+    ? "Created. Success bodies carry next[] guidance toward the next step."
+    : "OK. Success bodies carry next[] guidance toward the next step.") };
+}
+
 function operationResponses(entry, method) {
-  const success = entry.path === "/demo"
-    ? { "200": { description: entry.summary, content: { "text/html": { schema: { type: "string" } } } } }
-    : method === "POST" && !POST_NON_CREATE_PATHS.has(entry.path)
-    ? { "201": { description: "Created. Success bodies carry next[] guidance toward the next step." } }
-    : { "200": { description: "OK. Success bodies carry next[] guidance toward the next step." } };
+  let success;
+  if (entry.path === "/demo") {
+    success = { "200": { description: entry.summary, content: { "text/html": { schema: { type: "string" } } } } };
+  } else if (Array.isArray(entry.successStatuses)) {
+    success = {};
+    for (const status of entry.successStatuses) success[status] = successResponse(status, entry.successDescriptions?.[status]);
+  } else if (method === "POST" && !POST_NON_CREATE_PATHS.has(entry.path)) {
+    success = { "201": successResponse("201") };
+  } else {
+    success = { "200": successResponse("200") };
+  }
   const errors = {};
   const jsonRpc = method === "POST" ? JSON_RPC_STATUSES[entry.path] : null;
   for (const name of ERROR_RESPONSES) {
@@ -325,8 +378,9 @@ const publicWorkSchemas = {
       schema: { const: "public-work-task/1" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
       namespaceId: { type: "string" }, repositoryUrl: { type: "string", format: "uri" }, repositoryRef: { type: "string" },
       title: { type: "string" }, acceptanceCriteria: { type: "array", items: { type: "string" } }, files: { type: "array", items: { type: "string" } },
+      reward: { type: "object" }, settlement: { type: "object" },
       claim: { type: "object", required: ["state", "generation", "identityId", "leaseExpiresAt", "submittedReceiptId"], properties: {
-        state: { enum: ["unclaimed", "claimed", "submitted"] }, generation: { type: "integer", minimum: 0 },
+        state: { enum: ["unclaimed", "claimed", "submitted", "verified"] }, generation: { type: "integer", minimum: 0 },
         identityId: { type: ["string", "null"] }, leaseExpiresAt: { type: ["string", "null"] }, submittedReceiptId: { type: ["string", "null"] },
       } },
     },
@@ -335,9 +389,19 @@ const publicWorkSchemas = {
     type: "object", required: ["schema", "receiptId", "taskId", "termsVersion", "namespaceId", "generation", "identityId", "state", "artifact", "checksReported", "verification", "createdAt"],
     properties: {
       schema: { const: "public-work-receipt/1" }, receiptId: { type: "string" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 },
-      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" }, state: { const: "submitted" },
+      namespaceId: { type: "string" }, generation: { type: "integer", minimum: 1 }, identityId: { type: "string" },
+      // The stored record is minted "submitted" and an acceptance stamps
+      // it "verified" (#3546); the canonical read additionally composes
+      // the review outcome (#3733), so a rejected or revision-requested
+      // receipt reports its decision state and carries the review summary.
+      state: { enum: ["submitted", "verified", "rejected", "revision_requested"] },
       artifact: { type: "object", required: ["sha256", "bytes"], properties: { sha256: { type: "string", pattern: "^[a-f0-9]{64}$" }, bytes: { type: "integer", minimum: 0, maximum: 65536 } } },
-      checksReported: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } }, verification: { const: "hash_only" }, createdAt: { type: "string", format: "date-time" },
+      checksReported: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 1000 } }, verification: { enum: ["hash_only", "system_checked"] }, createdAt: { type: "string", format: "date-time" },
+      review: { type: "object", required: ["state", "verificationVerdict", "verificationReviewerKind", "verifiedAt", "decidedAt"], properties: {
+        state: { enum: ["pending", "accepted", "rejected", "revision_requested"] },
+        verificationVerdict: { type: ["string", "null"] }, verificationReviewerKind: { type: ["string", "null"] },
+        verifiedAt: { type: ["string", "null"], format: "date-time" }, decidedAt: { type: ["string", "null"], format: "date-time" },
+      } },
     },
   },
   PublicWorkOutcome: { type: "object", required: ["action", "task"], properties: {
@@ -489,6 +553,7 @@ export function buildOpenApiJson({ origin }) {
       const queryParameters = publicSpec.queryParameters; delete publicSpec.queryParameters;
       Object.assign(op, publicSpec);
       if (queryParameters) op.parameters = [...(op.parameters ?? []), ...queryParameters];
+      if (Array.isArray(entry.query)) op.parameters = [...(op.parameters ?? []), ...entry.query];
       const documentedBody = entry.requestBodies?.[method];
       if (documentedBody) {
         op.requestBody = documentedBody;
@@ -698,8 +763,8 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
 export const nextActionsForIdentityMint = () => Object.freeze([
   Object.freeze({ action: "create-room", transport: "http", method: "POST", path: "/api/agent-rooms",
     description: "Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>" }),
-  Object.freeze({ action: "list-tools", transport: "mcp", tool: "tools/list", path: "/room/mcp",
-    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /room/mcp." }),
+  Object.freeze({ action: "list-tools", transport: "mcp", tool: "tools/list", path: "/mcp",
+    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /mcp." }),
 ]);
 
 export const nextActionsForRoomCreate = roomId => {

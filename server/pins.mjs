@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Pinned messages (issue #6 B2): the HTTP-facing read and write for
 // the pin reducers in src/events.js. Both entry points re-check membership on every call through
 // store.authenticate, so a revoked member gets the same refusal as on every
@@ -5,7 +6,7 @@
 // path (idempotency, write budget, event bound, protectWrite at the router);
 // a request that asks for the state the room is already in appends nothing.
 import { randomUUID } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { EVENT_TYPES as T, PIN_LIMIT, pinnedMessages, validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -61,7 +62,7 @@ export function setPin(store, token, roomId, data, expectedSessionBinding = null
   const current = store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const room = store.room(roomId);
-    const message = room.state.messages.find(m => m.id === messageId);
+    const message = messageRepository(store, roomId, room.state).get(messageId);
     if (!message) fail(404, "message_not_found", "No such message in this room");
     // 409 on both write paths: the same refusal through `commands` is 409 command_rejected (store.command maps the reducer message).
     // Mirrors the pinMessage reducer's condition: a redacted-but-live message

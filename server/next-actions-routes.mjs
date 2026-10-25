@@ -78,9 +78,18 @@ export function createNextActionsRoutes({ store, json, reject, body, rate, roomC
     }
     if (route === "next-actions-suppressions" && req.method === "PUT") {
       rate(`next-actions-write:${roomId}:${selected.token.slice(0, 12)}`, 60);
-      const payload = await body(req);
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) reject(422, "invalid_input", "Supply {suppressions:[{kind, reason?}]}");
-      return json(res, 200, na.putSuppressions(selected.token, roomId, { suppressions: payload.suppressions ?? [], binding: fence }));
+      const payload = await body(req, { fields: ["suppressions"], unknownCode: "invalid_input" });
+      const suppressions = payload.suppressions ?? [];
+      if (!Array.isArray(suppressions)) reject(422, "invalid_input", "suppressions must be a list");
+      const unknown = [];
+      for (const item of suppressions) {
+        if (!item || typeof item !== "object" || Array.isArray(item)) reject(422, "invalid_input", "Supply {suppressions:[{kind, reason?}]}");
+        for (const key of Object.keys(item)) {
+          if (key !== "kind" && key !== "reason" && !unknown.includes(key)) unknown.push(key);
+        }
+      }
+      if (unknown.length) reject(422, "invalid_input", `unknown fields: ${unknown.join(", ")}`);
+      return json(res, 200, na.putSuppressions(selected.token, roomId, { suppressions, binding: fence }));
     }
     if (route === "next-actions-dismissals" && req.method === "GET") {
       rate(memberKey, 120);
