@@ -318,7 +318,7 @@ for (const touch of [false, true]) test(`purpose join ${touch ? 'mobile' : 'desk
   // Reload reconciles the already-consented uncertain redemption automatically.
   await page.locator('#main').waitFor({ state: 'visible' });
   const card = page.locator('[data-work-record-id="test-handoff"]');
-  assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await card.evaluate(node => node === document.activeElement), true, 'invited work is focused without expanding secondary controls');
   assert.match(await page.locator('#status').innerText(), /This invitation opens/);
   assert.equal(new Set(redemptions).size, 1, 'the original redemption is retried unchanged');
   assert.equal(fixture.store.db.prepare('SELECT count(*) AS n FROM share_link_joins WHERE link_id = ?').get(invitation.link.id).n, 1, 'one committed membership consumes one place');

@@ -47,21 +47,14 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   const accountSession = await session.json();
   assert.equal(accountSession.authenticated, true);
   const connect = await mf.dispatchFetch(origin + '/api/inbox/gmail/connect', {method: 'POST', headers: {Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': accountSession.csrf, 'X-Session-Binding': accountSession.sessionBinding}, body: '{}'});
-  assert.equal(connect.status, 200, await connect.clone().text());
-  const consent = new URL((await connect.json()).authorizationUrl);
-  assert.equal(consent.searchParams.get('scope'), 'https://www.googleapis.com/auth/gmail.modify');
-  const gmailReturn = await mf.dispatchFetch(origin + '/api/auth/gmail/callback?state=' + consent.searchParams.get('state') + '&code=fixture-mail-code', {redirect: 'manual', headers: {Cookie: cookie + '; ' + connect.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')}});
-  assert.equal(gmailReturn.status, 200);
-  assert.match(await gmailReturn.text(), /gmail=connected/);
+  // Account Google sign-in remains available; mailbox integration is deferred
+  // even when old Gmail environment bindings remain configured.
+  assert.equal(connect.status, 404, await connect.clone().text());
+  const gmailReturn = await mf.dispatchFetch(origin + '/api/auth/gmail/callback?state=retired&code=fixture-mail-code', {headers: {Cookie: cookie}});
+  assert.equal(gmailReturn.status, 404);
   const mailbox = await mf.dispatchFetch(origin + '/api/inbox/gmail', {headers: {Cookie: cookie, 'X-Session-Binding': accountSession.sessionBinding}});
-  assert.equal(mailbox.status, 200, await mailbox.clone().text());
-  assert.equal((await mailbox.json()).state, 'connected');
+  assert.equal(mailbox.status, 404);
   redirectProvider = true;
-  const reconnect = await mf.dispatchFetch(origin + '/api/inbox/gmail/connect', {method: 'POST', headers: {Cookie: cookie, Origin: origin, 'Content-Type': 'application/json', 'X-CSRF-Token': accountSession.csrf, 'X-Session-Binding': accountSession.sessionBinding}, body: '{}'});
-  assert.equal(reconnect.status, 200);
-  const reconnectConsent = new URL((await reconnect.json()).authorizationUrl);
-  const deniedMail = await mf.dispatchFetch(origin + '/api/auth/gmail/callback?state=' + reconnectConsent.searchParams.get('state') + '&code=fixture-mail-code', {redirect: 'manual', headers: {Cookie: cookie + '; ' + reconnect.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')}});
-  assert.match(await deniedMail.text(), /gmail=error/);
   assert.equal(untrustedRequests, 0);
   const retry = await mf.dispatchFetch(origin + '/api/auth/google/start', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1'}});
   const retryCookies = retry.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');

@@ -1,0 +1,138 @@
+{
+  "runtime": "v24.19.0",
+  "platform": "darwin",
+  "workload": "one work.blocked command, fixed head; alternating indexed/all-event facts; 2 warmups, 12 samples; rollback excluded; synthetic local SQLite",
+  "results": [
+    {
+      "dimension": "messages",
+      "size": 100,
+      "projectionBytes": 44013,
+      "samples": 12,
+      "modes": {
+        "allEvents": {
+          "medianMs": 3.56008300000002,
+          "p95Ms": 4.199999999999989,
+          "maxQueries": 20,
+          "maxBoundBytes": 96488,
+          "maxFactRows": 106
+        },
+        "indexed": {
+          "medianMs": 3.4492079999999987,
+          "p95Ms": 4.3209999999999695,
+          "maxQueries": 20,
+          "maxBoundBytes": 96488,
+          "maxFactRows": 4
+        }
+      }
+    },
+    {
+      "dimension": "messages",
+      "size": 400,
+      "projectionBytes": 172713,
+      "samples": 12,
+      "modes": {
+        "allEvents": {
+          "medianMs": 6.087374999999952,
+          "p95Ms": 7.675957999999923,
+          "maxQueries": 20,
+          "maxBoundBytes": 369488,
+          "maxFactRows": 406
+        },
+        "indexed": {
+          "medianMs": 5.444834000000014,
+          "p95Ms": 6.418458999999984,
+          "maxQueries": 20,
+          "maxBoundBytes": 369488,
+          "maxFactRows": 4
+        }
+      }
+    },
+    {
+      "dimension": "messages",
+      "size": 1000,
+      "projectionBytes": 430113,
+      "samples": 12,
+      "modes": {
+        "allEvents": {
+          "medianMs": 12.605791999999951,
+          "p95Ms": 17.352540999999974,
+          "maxQueries": 20,
+          "maxBoundBytes": 915493,
+          "maxFactRows": 1006
+        },
+        "indexed": {
+          "medianMs": 10.870915999999852,
+          "p95Ms": 13.693749999999909,
+          "maxQueries": 20,
+          "maxBoundBytes": 915493,
+          "maxFactRows": 4
+        }
+      }
+    },
+    {
+      "dimension": "messages",
+      "size": 10000,
+      "supported": false,
+      "rejection": "pilot_limit",
+      "message": "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later."
+    },
+    {
+      "dimension": "workItems",
+      "size": 100,
+      "projectionBytes": 63104,
+      "samples": 12,
+      "modes": {
+        "allEvents": {
+          "medianMs": 4.733332999999675,
+          "p95Ms": 5.915166000000227,
+          "maxQueries": 20,
+          "maxBoundBytes": 144270,
+          "maxFactRows": 106
+        },
+        "indexed": {
+          "medianMs": 4.407083000000057,
+          "p95Ms": 5.847999999999956,
+          "maxQueries": 20,
+          "maxBoundBytes": 144270,
+          "maxFactRows": 104
+        }
+      }
+    },
+    {
+      "dimension": "workItems",
+      "size": 400,
+      "projectionBytes": 249404,
+      "samples": 12,
+      "modes": {
+        "allEvents": {
+          "medianMs": 12.999209000000064,
+          "p95Ms": 18.157458000000133,
+          "maxQueries": 20,
+          "maxBoundBytes": 561270,
+          "maxFactRows": 406
+        },
+        "indexed": {
+          "medianMs": 12.892374999999902,
+          "p95Ms": 13.936666999999943,
+          "maxQueries": 20,
+          "maxBoundBytes": 561270,
+          "maxFactRows": 404
+        }
+      }
+    },
+    {
+      "dimension": "workItems",
+      "size": 1000,
+      "supported": false,
+      "rejection": "workItemsPerRoom",
+      "limit": 500
+    },
+    {
+      "dimension": "workItems",
+      "size": 10000,
+      "supported": false,
+      "rejection": "workItemsPerRoom",
+      "limit": 500
+    }
+  ]
+}

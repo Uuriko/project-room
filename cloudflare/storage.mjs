@@ -73,6 +73,15 @@ export class DurableDatabase {
     });
   }
   prepare(sql) {
+    const db = this;
+    function* iterate(...args) {
+      let cursor;
+      try {
+        cursor = db.storage.sql.exec(sql, ...args);
+        yield* cursor;
+      } catch (error) { throw tooBig(error); }
+      finally { db.#count(cursor); }
+    }
     const all = (...args) => {
       let cursor;
       try { cursor = this.storage.sql.exec(sql, ...args); } catch (error) { throw tooBig(error); }
@@ -82,6 +91,7 @@ export class DurableDatabase {
     };
     return {
       all,
+      iterate,
       get: (...args) => all(...args)[0],
       run: (...args) => durableStorage.transaction(this, () => {
         all(...args);

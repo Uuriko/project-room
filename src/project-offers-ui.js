@@ -52,6 +52,7 @@ function paintList() {
   $('#more-offers').hidden = !cursor;
 }
 async function loadList(more = false, refreshSelection = false) {
+  listStatus.hidden = false;
   listFlight?.abort(); const flight = listFlight = new AbortController();
   $('#refresh-offers').disabled = true; $('#more-offers').disabled = true;
   listStatus.textContent = more ? 'Loading more offers…' : 'Loading offers…'; listStatus.classList.remove('error');
@@ -118,6 +119,7 @@ async function loadContribution(offer, flight) {
     const id = task.claim.submittedReceiptId, record = await read(`/api/public-work/receipts/${encodeURIComponent(id)}`, flight.signal);
     if (!current()) return;
     if (record?.schema !== 'public-work-receipt/1' || record.receiptId !== id || record.taskId !== offer.id || record.termsVersion !== task.termsVersion || record.generation !== task.claim.generation || record.namespaceId !== task.namespaceId || !['submitted', 'verified', 'rejected', 'revision_requested'].includes(record.state) || !['hash_only', 'system_checked'].includes(record.verification) || !record.artifact || !Number.isSafeInteger(record.artifact.bytes) || record.artifact.bytes < 0 || record.artifact.bytes > 65536 || !/^[a-f0-9]{64}$/.test(record.artifact.sha256)) throw new Error('Unsupported receipt');
+    $('.agent-handoff').hidden = record.state === 'verified';
     const receiptPath = apiPath(`/api/public-work/receipts/${encodeURIComponent(id)}`);
     // #3546: an accepted receipt carries the verified successor state. Show
     // it truthfully — the level still separates what the platform executed

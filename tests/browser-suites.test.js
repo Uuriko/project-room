@@ -4,18 +4,30 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  BROWSER_RUN_COMMAND,
   BROWSER_SUITE_EXCLUSIONS,
   browserSuiteProblems,
+  canonicalBrowserScript,
   deriveBrowserSuites,
+  resolveBrowserScript,
 } from "../scripts/browser-suites.mjs";
 
 // Bug sweep 2026-10-16 lane 14 F1 (#3900): test:browser was a hand-kept
 // list that drifted from the disk — four real suites ran in no CI path
-// while the required browser gate reported full coverage. The list is now
-// derived from disk; this test is the drift gate.
-test("package.json test:browser is exactly the disk-derived suite list", () => {
+// while the required browser gate reported full coverage. The npm script
+// now runs the disk derivation; this test is the drift gate.
+test("package.json test:browser runs the disk-derived suite", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  assert.equal(pkg.scripts["test:browser"], BROWSER_RUN_COMMAND);
+  assert.equal(resolveBrowserScript(pkg.scripts["test:browser"]), canonicalBrowserScript());
   const problems = browserSuiteProblems();
-  assert.deepEqual(problems, [], `browser suite list drift (regenerate: node scripts/browser-suites.mjs --write):\n${problems.join("\n")}`);
+  assert.deepEqual(problems, [], problems.join("\n"));
+});
+
+test("an explicit node --test list is kept and any other script is refused", () => {
+  const explicit = "node --test --test-concurrency=1 scripts/a-check.mjs";
+  assert.equal(resolveBrowserScript(explicit), explicit);
+  assert.throws(() => resolveBrowserScript("playwright test"), /test:browser must be/);
 });
 
 test("the formerly orphaned suites are wired into the derived list", () => {
