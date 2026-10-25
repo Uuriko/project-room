@@ -365,11 +365,13 @@ export function sessionCommandType(item, action, nextStatus) {
   return SESSION_EVENT_TYPES.STATUS_CHANGED;
 }
 
+// Monotonic like reportRounds/reportToolCalls below (#3322): a stale or
+// replayed report can never rewind the spend counter of the live attempt.
 function reportSpend(item, incoming) {
   if (incoming.data?.spendCents === undefined) return;
   const value = incoming.data.spendCents;
   if (!Number.isSafeInteger(value) || value < 0) throw new Error("spendCents must be a non-negative integer of cents");
-  item.spend_cents = value;
+  item.spend_cents = Math.max(item.spend_cents ?? 0, value);
 }
 
 // RC-2026-09-19-063: rounds and tool calls are cumulative worker reports —
