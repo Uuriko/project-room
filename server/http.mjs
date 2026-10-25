@@ -118,6 +118,7 @@ import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: ope
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
   frontDoorHtml, GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
+import { authErrorPage, authErrorHtmlApplies } from "./auth-error-page.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
@@ -1384,7 +1385,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === GOOGLE_CALLBACK_PATH) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const signIn = google();
-        if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        if (!signIn) {
+          // DOOR-CURE-2: browser navigations bounce to the sign-in surface,
+          // mirroring the Google start route; API clients keep the flat 503.
+          if ((req.headers.accept || "").includes("text/html")) {
+            res.writeHead(302, { Location: "/?google=unavailable", "Cache-Control": "no-store" });
+            return res.end();
+          }
+          return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        }
         rate(`google-callback:${remoteAddress}`, 20);
         const finishGoogle = href => {
           const html = googlePostLoginPage(href);
@@ -1555,8 +1564,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === GITHUB_CALLBACK_PATH) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
         const oauth = github();
-        if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
-          error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        if (!oauth) {
+          // DOOR-CURE-2: browser navigations (the OAuth callback, a signed-in
+          // link start) get the readable page, mirroring the start route;
+          // API clients keep the flat 503 JSON.
+          if ((req.headers.accept || "").includes("text/html")) {
+            res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+            const bytes = Buffer.from(githubUnavailablePage(), "utf8");
+            res.writeHead(503, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
+            return res.end(bytes);
+          }
+          return json(res, 503, { status: "unavailable", reason: "github_not_configured",
+            error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        }
         rate(`github-callback:${remoteAddress}`, 20);
         // Browser OAuth navigations send Accept: text/html; they get a
         // landing page (slice 7) while API clients keep the JSON body.
@@ -2726,8 +2746,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // GitHub is configured (slice 7 hardening).
         const session = requireAccountSession();
         const oauth = github();
-        if (!oauth) return json(res, 503, { status: "unavailable", reason: "github_not_configured",
-          error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        if (!oauth) {
+          // DOOR-CURE-2: browser navigations (the OAuth callback, a signed-in
+          // link start) get the readable page, mirroring the start route;
+          // API clients keep the flat 503 JSON.
+          if ((req.headers.accept || "").includes("text/html")) {
+            res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+            const bytes = Buffer.from(githubUnavailablePage(), "utf8");
+            res.writeHead(503, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
+            return res.end(bytes);
+          }
+          return json(res, 503, { status: "unavailable", reason: "github_not_configured",
+            error: { code: "github_not_configured", message: "GitHub sign-in is not configured" } });
+        }
         rate(`github-link-start:${remoteAddress}`, 10);
         const slotToken = session.slotToken;
         const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
@@ -2744,7 +2775,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Google is configured.
         const session = requireAccountSession();
         const signIn = google();
-        if (!signIn) return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        if (!signIn) {
+          // DOOR-CURE-2: browser navigations bounce to the sign-in surface,
+          // mirroring the Google start route; API clients keep the flat 503.
+          if ((req.headers.accept || "").includes("text/html")) {
+            res.writeHead(302, { Location: "/?google=unavailable", "Cache-Control": "no-store" });
+            return res.end();
+          }
+          return json(res, 503, { status: "unavailable", reason: "google_not_configured" });
+        }
         rate(`google-link-start:${remoteAddress}`, 10);
         const slotToken = session.slotToken;
         const expectedRevision = store.accountSessionSlot(slotToken).sessionRevision;
@@ -5523,7 +5562,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ? { error: { code, message }, ...errorOverride, operationId, category }
         : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
       error.detail);
-      json(res, httpStatus, errorBody);
+      // DOOR-CURE-2: a browser navigation to the auth surface gets a
+      // readable HTML page for the evidenced failure shapes (403/404/405/
+      // 503); API clients - including Accept: */* - keep the JSON envelope
+      // byte-for-byte, as do all non-auth paths.
+      const errorPathname = (() => { try { return rewriteRoomApiPrefix(new URL(req.url, expectedOrigin()).pathname); } catch { return null; } })();
+      if (authErrorHtmlApplies(errorPathname, httpStatus) && acceptPrefersHtml(req.headers.accept)) {
+        res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+        const bytes = Buffer.from(authErrorPage({ status: httpStatus, code, message, hint: typeof errorBody.hint === "string" ? errorBody.hint : null }), "utf8");
+        res.writeHead(httpStatus, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length });
+        res.end(bytes);
+      } else {
+        json(res, httpStatus, errorBody);
+      }
     }
   });
   server.requestTimeout = 15000;
