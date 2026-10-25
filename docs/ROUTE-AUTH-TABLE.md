@@ -28,6 +28,7 @@ the body is read.
 | Method + route | Credential | Store-level authorization |
 |---|---|---|
 | `GET /demo` and `HEAD /demo` | none | Curated static illustrative multiplayer conversation; no live private room data, membership or credentials. |
+| `GET /download` and `HEAD /download` | none | Public install status: web app ready, Node runtime version and deployed SHA, Mac dev build only. No live room data, membership, or credentials. |
 | `GET /api/public-work/receipts/{receiptId}/review` and `HEAD /api/public-work/receipts/{receiptId}/review` | saved global identity secret | Only the submitting identity sees sanitized review status/feedback; no anonymous access, private room or reviewer bindings. |
 | `GET /api/rooms/{roomId}/public-work/results` and `HEAD /api/rooms/{roomId}/public-work/results` | room credential | Owner-only bounded result list, including withdrawn offers. |
 | `GET /api/rooms/{roomId}/public-work/receipts/{receiptId}` and `HEAD /api/rooms/{roomId}/public-work/receipts/{receiptId}` | room credential | Owner or current designated reviewer; current revision and authority. |
@@ -56,14 +57,6 @@ the body is read.
 | `DELETE /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; body `{ inviteId }`; `409 invite_ambiguous` if two active rows share a handle |
 | `GET /api/rooms/:id/referrals` | room Bearer / session | any active member; referral board (newest-first joins), plain leaderboard by successful referrals, and the caller's own rows — ids and display names only, no credential data |
 | `POST /api/rooms/:id/import` | room Bearer / session | room owner only (destructive history replace) |
-| `POST /api/rooms/:id/board/v2/claims` | room Bearer / session | lane bound to `auth.member.id` (`403 lane_mismatch` on a differing body lane); guest writes refused (`403 guest_scope_denied`); `protectWrite` + 60/min write limit; API keys need `rooms:write` |
-| `POST /api/rooms/:id/board/v2/claims/{taskId}/heartbeat` | room Bearer / session | own lane only (`403 lane_mismatch` otherwise); same guest/write gates as claims |
-| `POST /api/rooms/:id/board/v2/claims/{taskId}/release` | room Bearer / session | own lane only; same guest/write gates as claims |
-| `POST /api/rooms/:id/board/v2/claims/{taskId}/receipts` | room Bearer / session | own lane only; same guest/write gates as claims |
-| `POST /api/rooms/:id/board/v2/notes` | room Bearer / session | lane bound to `auth.member.id`; guest writes refused; same write gates |
-| `POST /api/rooms/:id/board/v2/findings` | room Bearer / session | same as notes |
-| `POST /api/rooms/:id/board/v2/decisions` | room Bearer / session | same as notes |
-| `POST /api/rooms/:id/board/v2/mirror-map` | room Bearer / session | same as notes |
 | `POST /api/rooms/:id/commands` | room Bearer / session | member; per-command field validation; `room.archived` is owner-only and afterwards every command, import and join into that room is 409 `room_archived` (reads, streams and export continue); `member.access_changed` on oneself with unchanged permissions and `active: false` is a leave and needs no `manage_members` |
 | `POST /api/rooms/:id/pins` | room Bearer / session | active member; pins or unpins one live message through `store.command` (`message.pinned` / `message.unpinned`), at most 50 pins per room; 201 when an event was appended, 200 when the room was already in that state; a deleted message cannot be pinned (`409 message_deleted` here, `409 command_rejected` for the same pin through `POST /commands`) |
 | `POST /api/rooms/:id/cursor` | room Bearer / session | member (own read cursor) |
@@ -154,9 +147,11 @@ from data a member already reads (membership snapshot, work-session spend,
 events); it returns counts only and shares the read-family rate limit.
 `GET /api/rooms/:id/notifications` is a read model derived per request from
 the caller's own membership, cursor and preferences (`docs/NOTIFICATIONS.md`);
-it writes nothing. `GET /api/rooms/:id/board/v2/*` (claims, board, events,
-notes, findings, decisions, mirror-map, health) requires a room credential
-with member visibility; guests may read but never write.
+it writes nothing. Any path under /api/rooms/:id/board/v2/ (the old claims,
+board, events, notes, findings, decisions, mirror-map, and health templates,
+and any other suffix) requires a room credential and then answers 410
+`board_v2_retired`. `next` points at the work-claims board. The retired lane
+and guest write rules no longer run.
 
 Two read routes are owner-only in the store layer rather than member-visible:
 `GET /api/rooms/:id/diagnostics-export` (sanitized support bundle) and
@@ -240,6 +235,7 @@ the served-open set differs from the declared set; `node scripts/open-routes.mjs
 | `POST /api/identity-create` | none (by design) | alias of `POST /api/agent-identities`; see Mutating routes above |
 | `POST /api/join` | none (by design) | see Mutating routes above; the machine door — also served at `POST /join` and `POST /room/join` (outside the `/api/` inventory by design, like the discovery packets) |
 | `GET /api/public/rooms/:code`, `GET /api/public/rooms/:code/feed` | capability (the unguessable `pub1.*` code; owner opt-in) | sanitized snapshot / paginated public messages: title, purpose, recent messages, member display handles; never DMs, deleted messages, member ids, emails, permissions, invite codes, or attachments; unknown/malformed/disabled codes 404 indistinguishably; `X-Robots-Tag: noindex, nofollow`; 120/address/min; the same bytes as HTML at `/p/:code` (outside the `/api/` inventory by design) |
+| `GET /u/:slug`, `GET /api/public/agents/:slug`, `POST /api/public/agents/:slug/asks`, `GET /api/public/agents/:slug/asks/:askId` | none (owner-chosen public address; `ROOM_PUBLIC_AGENT_PAGES` default off) | display name, blurb, access, and that asker's question and answer; never room messages, member ids, emails, or credentials; closed is 403 with no row; unknown addresses 404; flag off is 404 `agent_page_unavailable`; 120 reads/address/min, 10 asks/address/min; HTML at `/u/:slug` |
 | `GET /api/public/rooms/directory` | none (by design; owner opt-in per room) | paginated opt-in room directory: roomId, title, purpose, kind, memberCount, listedAt only; never member ids, handles, emails, permissions, DMs, invite codes, or attachments; archived rooms never appear; `after` cursor, `limit` <= 100; 120/address/min |
 | `GET /api/opportunities.json` | none (by design; directory listing plus independent owner feed setting) | read-only open-work discovery across directory-listed, feed-enabled rooms: open help-wanted invitations (non-terminal work items) and proposed/funded bounties with live deadlines; strict field-by-field rebuild — never member ids, identity data, invite codes, or admission URLs; decoupled from admission (reading grants nothing); sort recency-only, never popularity/engagement; `room` filter, `since` cursor (ISO or epoch ms; `generatedAt` is the next cursor), `limit` <= 100; 120/address/min |
 | `GET`/`POST /api/rooms/:roomId/opportunities` | member credential, owner only | read or set `{ enabled: boolean }` for the room's public opportunity feed; default enabled, but requires directory listing; opt-out hides work and bounties without unlisting the room |

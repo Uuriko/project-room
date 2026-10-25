@@ -14,7 +14,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { JOBS, jobEnabled } from "../server/jobs.mjs";
 import { channelJournalSchema } from "../server/channel-journal.mjs";
 import {
-  CRON_JOBS, HEARTBEAT_STORAGE_KEY, applyOutcomes, compactSummary, jobHealthView, redactError, runCronJobs, summaryFailure
+  CRON_JOBS, HEARTBEAT_STORAGE_KEY, OVERDUE_DEGRADE_TICKS, applyOutcomes, compactSummary, jobHealthView, redactError, runCronJobs, summaryFailure
 } from "../cloudflare/job-heartbeat.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -411,20 +411,48 @@ test("channel drain: terminal journal rows alone keep the job enabled (the repor
   db.close();
 });
 
-test("scheduled() makes one safety-net call and fails the invocation when that call fails", async () => {
+test("scheduled() preserves slow-job attempts when the fast safety-net RPC fails", async () => {
   const { stub, calls } = roomStub({
     ensureJobAlarm: () => Promise.reject(new Error("cron jobs failed: land-queue"))
   });
   await assert.rejects(worker.scheduled({ cron: "*/30 * * * *" }, { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } }, { waitUntil() {} }),
-    /cron jobs failed: land-queue/);
-  assert.deepEqual(calls, ["ensureJobAlarm"]);
+    /Scheduled job RPC failed: fast jobs/);
+  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
 });
 
-test("scheduled() resolves after the safety-net call when the room is quiet", async () => {
+test("scheduled() checks each slow job separately after the fast safety-net call", async () => {
   const { stub, calls } = roomStub();
   const env = { ROOM_MAINTENANCE: "0", ROOM_GMAIL_ENABLED: "0", ROOM: { getByName: () => stub } };
   await worker.scheduled({ cron: "*/30 * * * *" }, env, { waitUntil() {} });
-  assert.deepEqual(calls, ["ensureJobAlarm"]);
+  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
+});
+
+test("a failed slow RPC does not prevent later jobs and uses a fresh stub", async () => {
+  const names = [];
+  let bindings = 0;
+  const { stub } = roomStub({ runSlowJob: name => {
+    names.push(name);
+    if (name === "integrity") throw new Error("simulated object reset");
+    return [];
+  } });
+  await assert.rejects(worker.scheduled({}, { ROOM: { getByName() { bindings++; return stub; } } }, {}), /RPC failed: integrity/);
+  assert.deepEqual(names, ["retention", "integrity", "room-backup", "store-growth"]);
+  assert.equal(bindings, 2);
+});
+
+test("concurrent heartbeat commits retain both jobs and recover after a failed put", async () => {
+  const { stub, self } = roomStub();
+  const outcome = job => [{ job, ok: true, at: 1234, durationMs: 0 }];
+  await Promise.all([stub.recordCronTick(outcome("retention")), stub.recordCronTick(outcome("integrity"))]);
+  const stored = self.ctx.storage.map.get(HEARTBEAT_STORAGE_KEY);
+  assert.equal(stored.retention.lastSuccessAt, 1234);
+  assert.equal(stored.integrity.lastSuccessAt, 1234);
+  const put = self.ctx.storage.put;
+  let fail = true;
+  self.ctx.storage.put = async (...args) => { if (fail) { fail = false; throw new Error("storage unavailable"); } return put(...args); };
+  const results = await Promise.allSettled([stub.recordCronTick(outcome("room-backup")), stub.recordCronTick(outcome("store-growth"))]);
+  assert.deepEqual(results.map(result => result.status), ["rejected", "fulfilled"]);
+  assert.equal(self.ctx.storage.map.get(HEARTBEAT_STORAGE_KEY)["store-growth"].lastSuccessAt, 1234);
 });
 
 test("gmail and channel drain stay disabled, not stale, when nothing is configured", () => {
@@ -586,4 +614,62 @@ test("Room boundary passes responses through and retains trusted forwarding head
     assert.equal(await response.text(), "existing response");
     assert.equal(calls, 1);
   }
+});
+
+test("escrow-epochs overdue streak: sustained overdue degrades the job with an age (guardian census F1)", () => {
+  const now = 1_786_000_000_000;
+  const tickAt = (stored, at, overdue) => applyOutcomes(stored,
+    [{ job: "escrow-epochs", ok: true, at, summary: { rooms: 1, due: overdue, overdue } }]);
+  const escrowJob = (stored, at) => jobHealthView(stored, at).jobs.find(job => job.name === "escrow-epochs");
+
+  // One or two ticks of overdue can be a clock race (work that came due
+  // mid-pass): the job stays ok, but the streak is already on the record.
+  // (Base: every job fresh, so the rollup below reflects escrow alone.)
+  let stored = applyOutcomes({}, CRON_JOBS.map(job => ({ job: job.name, ok: true, at: now, summary: { checked: 1 } })));
+  stored = tickAt(stored, now, 2);
+  assert.equal(stored["escrow-epochs"].overdueStreak, 1);
+  assert.equal(stored["escrow-epochs"].overdueSinceAt, now);
+  stored = tickAt(stored, now + 60_000, 2);
+  assert.equal(stored["escrow-epochs"].overdueStreak, 2);
+  assert.equal(stored["escrow-epochs"].overdueSinceAt, now, "the streak keeps its original start");
+  let view = escrowJob(stored, now + 90_000);
+  assert.equal(view.status, "ok");
+  assert.equal(view.degraded, null);
+  assert.equal(view.overdueStreak, 2);
+  assert.equal(view.overdueSinceAt, new Date(now).toISOString());
+
+  // The OVERDUE_DEGRADE_TICKS-th consecutive tick crosses into degraded,
+  // visibly — but not failing, and never a 503 on its own.
+  for (let i = 2; i < OVERDUE_DEGRADE_TICKS; i++) stored = tickAt(stored, now + i * 60_000, 2);
+  assert.equal(stored["escrow-epochs"].overdueStreak, OVERDUE_DEGRADE_TICKS);
+  view = escrowJob(stored, now + 150_000);
+  assert.equal(view.status, "degraded");
+  assert.equal(view.degraded, "escrow_overdue");
+  assert.equal(view.overdueStreak, OVERDUE_DEGRADE_TICKS);
+  assert.equal(view.overdueSinceAt, new Date(now).toISOString());
+  const rollup = jobHealthView(stored, now + 150_000);
+  assert.equal(rollup.status, "degraded");
+
+  // A tick that clears the overdue work closes the streak.
+  stored = tickAt(stored, now + OVERDUE_DEGRADE_TICKS * 60_000, 0);
+  assert.equal(stored["escrow-epochs"].overdueStreak, 0);
+  assert.equal(stored["escrow-epochs"].overdueSinceAt, null);
+  view = escrowJob(stored, now + OVERDUE_DEGRADE_TICKS * 60_000 + 30_000);
+  assert.equal(view.degraded, null);
+  assert.equal(view.overdueStreak, 0);
+  assert.equal(view.overdueSinceAt, null);
+
+  // A thrown tick carries no summary: it neither extends nor clears a
+  // standing streak (the stall's age must survive unrelated failures).
+  let thrown = tickAt({}, now, 1);
+  thrown = applyOutcomes(thrown, [{ job: "escrow-epochs", ok: false, at: now + 60_000, error: "boom" }]);
+  assert.equal(thrown["escrow-epochs"].overdueStreak, 1);
+  assert.equal(thrown["escrow-epochs"].overdueSinceAt, now);
+
+  // Jobs whose summaries never carry `overdue` never gain a streak.
+  const other = applyOutcomes({}, [{ job: "patrol", ok: true, at: now, summary: { checked: 3 } }]);
+  assert.equal(other["patrol"].overdueStreak, undefined);
+  const patrolView = jobHealthView(other, now).jobs.find(job => job.name === "patrol");
+  assert.equal(patrolView.overdueStreak, null);
+  assert.equal(patrolView.overdueSinceAt, null);
 });

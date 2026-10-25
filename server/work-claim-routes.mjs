@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Work-claim HTTP routes (task RC-2026-09-18-041; receipts RC-2026-09-24-205).
 //
 // Room-scoped handlers mounted by server/http.mjs inside the authenticated
@@ -46,6 +47,7 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { alertLeaseRefusal, notifyClaimCollisions } from "./agent-collisions.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -630,6 +632,7 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     if (linked === item) return item;
     registry.set(roomId, linked);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
+    try { notifyClaimCollisions(store, roomId, linked); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
     return linked;
   };
   return registry.transaction ? registry.transaction(run) : run();
@@ -715,6 +718,13 @@ export async function handleWorkClaims(options) {
   } catch (error) {
     if (error?.code === "file_lease_conflict" && error.body) {
       recordBoardRefusal(options, { status: 409, code: error.code, message: error.message });
+      try {
+        alertLeaseRefusal(options.store, options.roomId, {
+          claimId: error.attemptedClaimId, callerId: error.attemptedBy, conflict: error.body
+        });
+      } catch (alertError) {
+        console.error("collision alert failed:", alertError?.message ?? alertError);
+      }
       return helpers.json(res, 409, error.body);
     }
     if (Number.isInteger(error?.status) && error.body && error.code) {
@@ -760,6 +770,25 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
+  // An item-backed card is a view of canonical work acceptance. Its
+  // board bundle/verdict cannot replace signed evidence or designated roles.
+  // Both human and agent callers use the existing command endpoint instead.
+  if (req.method === "POST" && typeof workClaimId === "string") {
+    const linked = registry.get(roomId, workClaimId);
+    const data = body(req);
+    const acceptance = workClaimRoute === "review" && data?.verdict !== undefined
+      || workClaimRoute === "update" && (["done", "delivered"].includes(data?.state)
+        || linked?.state === "delivered" && data?.state === "in_progress");
+    if (linked?.workItemId && acceptance) {
+      const error = new ServiceError(409, "work_claim_conflict", "Open the linked work item to submit evidence, verify its result or request changes.");
+      error.body = { error: error.message, code: error.code,
+        workItemId: linked.workItemId,
+        next: [{ path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(linked.workItemId)}` },
+          { path: `/api/rooms/${encodeURIComponent(roomId)}/commands` }],
+      };
+      throw error;
+    }
+  }
   const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event
@@ -796,6 +825,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // agents that opted in (server/work-wants.mjs). Default off; never throws.
     if (action === "created" || action === "released") noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
     if (action === "state_changed" || action === "claimed") wakeNamedReviewers(store, roomId, item, { actorId: extra.actorId ?? caller });
+    try { notifyClaimCollisions(store, roomId, item); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
     return item;
   };
   const closeLiveClaims = () => {
@@ -863,6 +893,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const error = new Error(body.error.message);
     error.code = "file_lease_conflict";
     error.body = body;
+    error.attemptedClaimId = item.id;
+    error.attemptedBy = caller;
     throw error;
   };
 
@@ -1109,6 +1141,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const error = new Error(body.error.message);
       error.code = "file_lease_conflict";
       error.body = body;
+      error.attemptedClaimId = claimed.id;
+      error.attemptedBy = caller;
       throw error;
     }
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
@@ -1190,7 +1224,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const verdict = requestReplayVerdict(item.requestOutcomes, data.requestId,
         updateRequestDigest({ state: data.state, note: data.note, deliveryMode: data.deliveryMode,
           reviewedBy: data.reviewedBy, tags: data.tags, blobs: data.blobs,
-          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }));
+          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }),
+        item.claimRound);
       if (verdict === "replay") return json(res, 200, item);
       if (verdict === "conflict") reject(409, "work_claim_conflict",
         `requestId "${data.requestId}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
@@ -1503,8 +1538,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     const progressId = data.progressMessageId;
     if (progressId !== undefined && (typeof progressId !== "string" || !progressId.trim())) invalidInput(reject, "progressMessageId as a message id when citing evidence");
-    const messages = progressId ? (store.room(roomId).state.messages ?? []) : [];
-    const message = progressId ? messages.find(entry => entry.id === progressId) : null;
+    const message = progressId ? messageRepository(store, roomId).get(progressId) : null;
     if (progressId) {
       if (!message || message.deletedAt) {
         reject(422, "claim_renewal_source_required",

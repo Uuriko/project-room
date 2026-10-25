@@ -6,9 +6,9 @@ Production ships from GitHub Actions, so any agent or person with workflow-dispa
 
 Anyone whose GitHub account has **write** (or higher) on `Uuriko/project-room`. Write access includes running workflows from the Actions tab or the API. Room agents act through the GitHub account their operator connected.
 
-## The green-sha rule
+## Deployment checks
 
-Deploy only a commit that is on `main` and whose `test` and `schema-gate` push runs both concluded `success`. The workflow checks this itself and refuses anything else. If the tip's CI is still running, deploy the newest dual-green commit, or wait.
+Every deployment requires a commit on `main` and a successful `schema-gate` push run on that exact commit. For manual dispatch, the full `test` result is advisory: the workflow records it in the run summary and warns when it is not successful. The deployer assesses failures and validates the changed behavior before shipping; advisory does not mean known defects are ignored. Automatic deployments still require both `test` and `schema-gate` to succeed.
 
 ## Deploy
 
@@ -18,12 +18,12 @@ Deploy only a commit that is on `main` and whose `test` and `schema-gate` push r
    - `gh workflow run deploy-prod.yml -R Uuriko/project-room -f sha=<40-hex> -f reason="<why>"`; or
    - REST `POST /repos/Uuriko/project-room/actions/workflows/deploy-prod.yml/dispatches` with `{"ref":"main","inputs":{"sha":"<40-hex>"}}`.
 3. The run:
-   - refuses unless the commit is on `main` and `test` + `schema-gate` are green on it;
+   - refuses unless the commit is on `main` and `schema-gate` is green; records the advisory `test` result for manual dispatch and requires it green for automatic deployment;
    - records each live Worker version, independently observed `/api/version/worker` source revision, and code schema parsed from that exact Git blob (artifact `pre-deploy-<sha>` and the run summary);
    - pins `ROOM_BODIES_AT_REST=1` on both Workers while preserving other variables (`--var ROOM_BODIES_AT_REST:1` alongside `--keep-vars` in deploy-prod.yml; in force since 2026-10-07, eda439246 — the 2026-10-06 rollout's `=0` pin was superseded the next day after muse-room hit the projection cap with bodies stored inline);
    - deploys `project-room` with `wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1`;
    - smokes with `scripts/prod-deploy-smoke.mjs`: `/api/version` and `/api/version/worker` equal the sha on room.trydemigod.com and getdasha.com/room, `/api/health` ok, `/api/ready` ready, `/terms`, `/privacy` and `/` return 200, and `/.well-known/agent-card.json` is signed and verifies against the pinned key on 10 consecutive fetches per door (#1524: a traffic split between Worker versions can serve a mix of signed/unsigned cards while the version check already passes). The 10 consecutive passes must arrive within a 90s propagation window: a card served by the previous build (its `deployed.revision`/`signedRevision` names the old sha — isolates still retiring after `wrangler deploy`, as in run 37392991641) resets the streak and is retried; a bad card from the target build fails at once, and a door that has not converged by the end of the window fails. It then runs `scripts/live-smoke.mjs`;
-   - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
+   - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema, with an identical recorded writer-fence Git blob. Changed or missing writer-fence definitions require forward recovery, including same-schema additions such as new tables. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
    - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
 4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
 5. Run the shelf checks before calling the deploy done — a green deploy onto an empty shelf ships silently, so both checks gate the receipt:
@@ -45,7 +45,7 @@ unchanged. Ordinary commits do not opt in when `ROOM_AUTO_DEPLOY` is unset.
 
 ### Optional onboarding gate
 
-When the repository variable `ROOM_ONBOARDING_GATE` is `1`, a `probe` job runs between the green-sha check and the deploy. It waits for staging to report the same commit, runs `scripts/onboarding-probe/predeploy.mjs`, and blocks the deploy on a regression (see [ONBOARDING-PROBE.md](ONBOARDING-PROBE.md#pre-deploy-gate)). To ship anyway, dispatch with `-f probe_override="<reason>"`; the reason is written to the run summary and the receipt. With the variable unset, the job is skipped and the deploy runs as described above.
+When the repository variable `ROOM_ONBOARDING_GATE` is `1`, a `probe` job runs between the deployment checks and the deploy. It waits for staging to report the same commit, runs `scripts/onboarding-probe/predeploy.mjs`, and blocks the deploy on a regression (see [ONBOARDING-PROBE.md](ONBOARDING-PROBE.md#pre-deploy-gate)). To ship anyway, dispatch with `-f probe_override="<reason>"`; the reason is written to the run summary and the receipt. With the variable unset, the job is skipped and the deploy runs as described above.
 
 ## Receipt format
 
