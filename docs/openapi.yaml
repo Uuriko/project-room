@@ -2170,9 +2170,13 @@ paths:
     post:
       summary: Stage one room file
       description: |
-        Stage a file (canonical base64 `data`, at most 1 MiB) for the signed-in
-        member. Commit it onto a message the member already posted. A repeat of
-        the same id and bytes is 200; a conflicting id is 409.
+        Stage a file (canonical base64 `data`, at most 1 MiB decoded) for the
+        signed-in member. png, jpeg, gif, webp, and pdf are stored as the
+        type their bytes are. text/html and image/svg+xml that are not one of
+        those are stored as application/octet-stream. A body past 1 MiB
+        decoded is 413 attachment_too_large naming that decoded size. Commit
+        it onto a message the member already posted. A repeat of the same id
+        and bytes is 200; a conflicting id is 409.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       requestBody:
@@ -2195,7 +2199,7 @@ paths:
         '401':
           description: No room credential
         '413':
-          description: File or request exceeds the room attachment limit
+          description: "413 attachment_too_large — decoded file bytes exceed 1 MiB"
         '422':
           description: Attachment was rejected
   /api/rooms/{roomId}/files/{id}:
@@ -11332,7 +11336,7 @@ paths:
         Credential: the `pri_` identity secret or a `rak_` API key with the
         `webhooks:manage` scope. The signing secret is never returned — not
         even once: the 201 carries an opaque `secretRef` sentinel
-        (`pr_sentinel_<subscriptionId>`) instead, and inbound deliveries are
+        (`not-a-secret:<subscriptionId>`; the legacy `pr_sentinel_<subscriptionId>` form still resolves) instead, and inbound deliveries are
         verified server-side via POST
         /api/agent-webhooks/{subscriptionId}/verify-delivery (RC-2026-09-27-2729).
         20 per address per minute. The identity-scoped event

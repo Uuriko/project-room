@@ -24,17 +24,29 @@ const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const SUBSCRIPTION_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 // UFO-steal slice 2 (RC-2026-09-27-2729): sentinel-swapped secrets. An
-// agent never holds a raw signing secret — it only ever sees the opaque
-// sentinel `pr_sentinel_<subscriptionId>`, e.g. in the subscription view's
-// `secretRef` field. The raw value lives server-side only (the caller's
-// Map / the `agent_webhook_subs.secret` column) and is resolved to a real
-// value at exactly one trusted boundary — resolveSentinel() below — used
-// only by the delivery signer and verifier. Fail-closed: an unknown or
-// malformed sentinel throws; it never resolves to null, "", or another
+// agent never holds a raw signing secret — it only ever sees a handle in
+// the subscription view's `secretRef` field. The handle is
+// `not-a-secret:<subscriptionId>` so it cannot be mistaken for a `pri_`
+// identity secret. Reads still accept the legacy `pr_sentinel_<id>` form.
+// The raw value lives server-side only (the caller's Map / the
+// `agent_webhook_subs.secret` column) and is resolved to a real value at
+// exactly one trusted boundary — resolveSentinel() below — used only by
+// the delivery signer and verifier. Fail-closed: an unknown or malformed
+// sentinel throws; it never resolves to null, "", or another
 // subscription's secret.
-export const SENTINEL_PREFIX = "pr_sentinel_";
+export const SENTINEL_PREFIX = "not-a-secret:";
+export const LEGACY_SENTINEL_PREFIX = "pr_sentinel_";
 export const sentinelFor = subscriptionId => `${SENTINEL_PREFIX}${subscriptionId}`;
-const SENTINEL_PATTERN = new RegExp(`^${SENTINEL_PREFIX}[A-Za-z0-9_-]{1,64}$`);
+const SENTINEL_ID = /^[A-Za-z0-9_-]{1,64}$/;
+function subscriptionIdFromSentinel(sentinel) {
+  if (typeof sentinel !== "string") return null;
+  for (const prefix of [SENTINEL_PREFIX, LEGACY_SENTINEL_PREFIX]) {
+    if (!sentinel.startsWith(prefix)) continue;
+    const id = sentinel.slice(prefix.length);
+    return SENTINEL_ID.test(id) ? id : null;
+  }
+  return null;
+}
 
 // The canonical dotted event catalog: every room event the subscription
 // surface can filter on, derived from EVENT_TYPES so the taught list can
@@ -107,9 +119,9 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
   // null, an empty string, or another subscription's secret. No logging
   // of the raw value anywhere at this boundary.
   const resolveSentinel = sentinel => {
-    const ok = typeof sentinel === "string" && SENTINEL_PATTERN.test(sentinel);
-    if (!ok) fail("unknown_sentinel", "unknown signing-secret reference");
-    const sub = subs.get(sentinel.slice(SENTINEL_PREFIX.length));
+    const id = subscriptionIdFromSentinel(sentinel);
+    if (!id) fail("unknown_sentinel", "unknown signing-secret reference");
+    const sub = subs.get(id);
     if (!sub || typeof sub.secret !== "string" || sub.secret.length === 0) {
       fail("unknown_sentinel", "unknown signing-secret reference");
     }

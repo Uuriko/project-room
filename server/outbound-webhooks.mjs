@@ -146,17 +146,13 @@ export function validateWebhookUrl(url) {
 // is resolved through DNS-over-HTTPS and every A/AAAA answer is classified
 // with the same private-range checks. A Node lookup passed in from a test
 // is ignored on Workers. A resolution failure is not treated as public.
-const DOH_CACHE_CAP_MS = 5 * 60 * 1000;
-const dohCache = new Map();
-
-async function resolveWebhookAddressesViaDoh(hostname, { dohFetch = globalThis.fetch, now = Date.now() } = {}) {
+// No answer cache. A cached public answer would authorize a later send
+// after the name had rebound to a private address (QA5 P3-4). Every
+// check queries DNS-over-HTTPS again.
+async function resolveWebhookAddressesViaDoh(hostname, { dohFetch = globalThis.fetch } = {}) {
   const key = hostname.toLowerCase();
-  const hit = dohCache.get(key);
-  if (hit && hit.expiresAt > now) return hit.addresses;
-  if (hit) dohCache.delete(key);
   if (typeof dohFetch !== "function") throw new Error("webhook hostname does not resolve");
   const addresses = [];
-  let minTtlSec = null;
   for (const type of ["A", "AAAA"]) {
     const response = await dohFetch(`https://cloudflare-dns.com/dns-query?name=${encodeURIComponent(key)}&type=${type}`, {
       headers: { accept: "application/dns-json" },
@@ -170,14 +166,9 @@ async function resolveWebhookAddressesViaDoh(hostname, { dohFetch = globalThis.f
       const data = String(answer?.data ?? "").trim();
       if (!data) continue;
       addresses.push(data);
-      const ttl = Number(answer?.TTL);
-      if (Number.isFinite(ttl) && ttl >= 0) minTtlSec = minTtlSec === null ? ttl : Math.min(minTtlSec, ttl);
     }
   }
   if (addresses.length === 0) throw new Error("webhook hostname does not resolve");
-  if (minTtlSec !== null && minTtlSec > 0) {
-    dohCache.set(key, { addresses, expiresAt: now + Math.min(minTtlSec * 1000, DOH_CACHE_CAP_MS) });
-  }
   return addresses;
 }
 

@@ -222,7 +222,7 @@ test("webhook subscribe list and unsubscribe stay on this identity", async t => 
   // sentinel; no `secret` field exists on the response at all.
   assert.equal("secret" in generated.value, false);
   assert.equal(typeof generated.value.secretRef, "string");
-  assert.ok(generated.value.secretRef.startsWith("pr_sentinel_"));
+  assert.ok(generated.value.secretRef.startsWith("not-a-secret:"));
   assert.ok(generated.value.secretRef.endsWith(generated.value.subscriptionId));
   assert.equal(generated.raw.includes(owner.secret), false);
   const shown = generated.value.secretRef;
@@ -232,7 +232,7 @@ test("webhook subscribe list and unsubscribe stay on this identity", async t => 
   for (const sub of listed.value.subscriptions) {
     assert.equal("secret" in sub, false);
     assert.equal(typeof sub.secretRef, "string");
-    assert.ok(sub.secretRef.startsWith("pr_sentinel_"));
+    assert.ok(sub.secretRef.startsWith("not-a-secret:"));
   }
   assert.equal(listed.raw.includes(callerSecret), false);
   const otherList = await call(origin, "webhook.list", {}, other.secret);

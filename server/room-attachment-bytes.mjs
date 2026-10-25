@@ -39,6 +39,43 @@ export function base64LengthForBytes(byteLength) {
 // MCP JSON bodies that carry one max-size file, plus a small envelope.
 export const mcpAttachmentBodyBytes = base64LengthForBytes(attachmentLimits.fileBytes) + 8192;
 
+// The shared JSON reader counts the raw body. A file upload past that cap
+// names the decoded size instead: the 8192-byte slack is the JSON envelope,
+// not file bytes. A body inside the cap is left to the exact decoded check.
+export function fileUploadLimitMessage(contentLength) {
+  const declared = Number(contentLength);
+  if (!Number.isFinite(declared) || declared <= mcpAttachmentBodyBytes) return null;
+  const base64Bytes = Math.max(0, declared - 8192);
+  const decoded = Math.floor(base64Bytes * 3 / 4);
+  const about = (Math.max(decoded, attachmentLimits.fileBytes + 1) / (1024 * 1024)).toFixed(1);
+  return `Files can be up to 1 MiB; this one is about ${about} MiB`;
+}
+
+const SNIFFED_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "application/pdf"]);
+
+export function sniffMediaType(bytes) {
+  const b = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  if (b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47
+    && b[4] === 0x0D && b[5] === 0x0A && b[6] === 0x1A && b[7] === 0x0A) return "image/png";
+  if (b.length >= 3 && b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return "image/jpeg";
+  if (b.length >= 6) {
+    const head = b.subarray(0, 6).toString("ascii");
+    if (head === "GIF87a" || head === "GIF89a") return "image/gif";
+  }
+  if (b.length >= 12 && b.subarray(0, 4).toString("ascii") === "RIFF" && b.subarray(8, 12).toString("ascii") === "WEBP") return "image/webp";
+  if (b.length >= 5 && b.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
+  return null;
+}
+
+// Known image and PDF bytes are stored as that type. HTML, SVG, and a
+// declared image or PDF that the bytes are not become opaque bytes.
+export function mediaTypeToStore(declared, bytes) {
+  const sniffed = sniffMediaType(bytes);
+  if (sniffed) return sniffed;
+  if (declared === "text/html" || declared === "image/svg+xml" || SNIFFED_TYPES.has(declared)) return "application/octet-stream";
+  return declared;
+}
+
 const MEDIA_TYPE = /^[a-z0-9][a-z0-9!#$&^_.+-]{0,126}\/[a-z0-9][a-z0-9!#$&^_.+-]{0,126}$/;
 
 // Encoding validity ONLY (#3436): the size cap is not part of this check.
@@ -79,11 +116,11 @@ function checkedFile(filename, mediaType, bytes) {
     fail(error.code === "file_too_large" ? 413 : 422, error.code, error.message);
   }
   if (!validated.filename.isWellFormed()) fail(422, "invalid_attachment", "filename must be well-formed text");
-  const type = validated.mimeType.toLowerCase();
-  if (!MEDIA_TYPE.test(type) || BLOCKED_MEDIA_TYPES.has(type) || type.startsWith("application/x-ms") || type.startsWith("application/x-dos")) {
+  const declared = validated.mimeType.toLowerCase();
+  if (!MEDIA_TYPE.test(declared) || BLOCKED_MEDIA_TYPES.has(declared) || declared.startsWith("application/x-ms") || declared.startsWith("application/x-dos")) {
     fail(422, "blocked_media_type", "That media type is not accepted for a room file");
   }
-  return { filename: validated.filename, mediaType: type };
+  return { filename: validated.filename, mediaType: mediaTypeToStore(declared, bytes) };
 }
 
 function view(row) {

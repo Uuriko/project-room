@@ -10,7 +10,7 @@
 // a stored secret). Webhook signing secrets ARE persisted because the server
 // needs them to sign deliveries, but they are never returned over HTTP at
 // all: agent-visible views carry only an opaque sentinel
-// (`pr_sentinel_<subscriptionId>`, UFO-steal slice 2, RC-2026-09-27-2729),
+// (`not-a-secret:<subscriptionId>`, UFO-steal slice 2, RC-2026-09-27-2729),
 // and the raw value is resolved server-side at the single dispatch/verify
 // boundary. Agents verify inbound deliveries through verifyWebhookDelivery,
 // which checks the signature server-side and answers valid/invalid.

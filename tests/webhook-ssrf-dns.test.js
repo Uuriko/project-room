@@ -228,6 +228,48 @@ test("QA2 P2-8: webhook DNS stays on public addresses", async (t) => {
     assert.equal(blockedName.classification, "dead");
     assert.match(blockedName.error, /webhook_url_not_public/);
     assert.equal(fetches, 0);
+
+    // A public answer must not be reused after the name rebinds. The next
+    // send re-checks and refuses; it does not POST.
+    let answers = ["93.184.216.34"];
+    let dohCalls = 0;
+    const flipping = async (url) => {
+      dohCalls += 1;
+      const type = new URL(url).searchParams.get("type");
+      const data = type === "A" ? answers : [];
+      return { ok: true, json: async () => ({ Status: 0, Answer: data.map(address => ({ type: 1, TTL: 300, data: address })) }) };
+    };
+    let reboundFetches = 0;
+    const first = await postDelivery({
+      url: "https://flip.example/hook",
+      envelope: {},
+      headers: {},
+      dnsResolvers: { dohFetch: flipping },
+      fetchImpl: async () => {
+        reboundFetches += 1;
+        return { status: 204, text: async () => "", headers: { get: () => null } };
+      },
+    });
+    assert.equal(first.ok, true);
+    assert.equal(reboundFetches, 1);
+    const checksBeforeRebind = dohCalls;
+    answers = ["10.9.8.7"];
+    reboundFetches = 0;
+    const rebound = await postDelivery({
+      url: "https://flip.example/hook",
+      envelope: {},
+      headers: {},
+      dnsResolvers: { dohFetch: flipping },
+      fetchImpl: async () => {
+        reboundFetches += 1;
+        return { status: 204, text: async () => "", headers: { get: () => null } };
+      },
+    });
+    assert.ok(dohCalls > checksBeforeRebind, "the second send resolves again");
+    assert.equal(rebound.ok, false);
+    assert.equal(rebound.classification, "dead");
+    assert.match(rebound.error, /private or reserved/);
+    assert.equal(reboundFetches, 0);
   } finally {
     if (prior) Object.defineProperty(globalThis, "navigator", prior);
   }

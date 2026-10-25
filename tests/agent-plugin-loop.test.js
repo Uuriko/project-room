@@ -83,7 +83,7 @@ test("reference walkthrough: new agent plugs in end-to-end", t => {
     events: ["message.posted"], secret,
   });
   assert.equal(view.agentId, identityId);
-  assert.equal(view.secretRef, `pr_sentinel_${view.subscriptionId}`,
+  assert.equal(view.secretRef, `not-a-secret:${view.subscriptionId}`,
     "the subscription view carries the opaque sentinel, not the secret");
   assert.ok(!("secret" in view));
   assert.equal(subs.match(identityId, "message.posted").length, 1);

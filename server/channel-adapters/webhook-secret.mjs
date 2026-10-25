@@ -4,6 +4,7 @@
 // mounted on a route.
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { validateWebhookUrl, resolveWebhookTarget } from "../outbound-webhooks.mjs";
+import { pinnedDispatchPost } from "../webhook-dispatch.mjs";
 
 export class RelayError extends Error {
   constructor(code, message) { super(message); this.name = "RelayError"; this.code = code; }
@@ -77,30 +78,56 @@ const headerValue = (headers, name) => {
 // One POST. A 429 waits out Retry-After when that wait fits in the 5s budget,
 // then tries once more. A longer Retry-After is returned as retryAt so the
 // caller can defer without blocking. The URL is not part of the result.
-export async function postWebhook({ url, body, fetchFn = fetch, sleep = null, timeoutMs = 5000, lookup = undefined, now = Date.now }) {
-  let target;
+//
+// Each attempt resolves the name and connects to those addresses. A later
+// DNS answer is never consulted (QA5 P3-4). fetchFn is a test override;
+// production does not pass it.
+async function postPinned(url, addresses, body, timeoutMs) {
   try {
-    target = await resolveWebhookTarget(url, lookup ? { lookup } : {});
-  } catch {
-    fail("invalid_webhook_url", "Webhook URL is not an allowed https endpoint");
+    const response = await pinnedDispatchPost(url, addresses, {
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      timeoutMs,
+    });
+    return {
+      ok: response.status >= 200 && response.status < 300,
+      status: response.status,
+      headers: response.headers,
+    };
+  } catch (error) {
+    const timedOut = error?.name === "AbortError" || error?.name === "TimeoutError";
+    return { ok: false, status: 0, reason: timedOut ? "timeout" : "delivery_failed", headers: { get: () => null } };
   }
+}
+
+export async function postWebhook({ url, body, fetchFn = null, sleep = null, timeoutMs = 5000, lookup = undefined, now = Date.now }) {
+  const resolvers = lookup ? { lookup } : {};
   const attempt = async () => {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let target;
     try {
-      return await fetchFn(target.url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-        redirect: "error"
-      });
-    } catch (error) {
-      const timedOut = error?.name === "AbortError" || error?.name === "TimeoutError";
-      return { ok: false, status: 0, reason: timedOut ? "timeout" : "delivery_failed", headers: { get: () => null } };
-    } finally {
-      clearTimeout(timer);
+      target = await resolveWebhookTarget(url, resolvers);
+    } catch {
+      fail("invalid_webhook_url", "Webhook URL is not an allowed https endpoint");
     }
+    if (typeof fetchFn === "function") {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        return await fetchFn(target.url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: controller.signal,
+          redirect: "error"
+        });
+      } catch (error) {
+        const timedOut = error?.name === "AbortError" || error?.name === "TimeoutError";
+        return { ok: false, status: 0, reason: timedOut ? "timeout" : "delivery_failed", headers: { get: () => null } };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    return postPinned(target.url, target.addresses, body, timeoutMs);
   };
   let response = await attempt();
   if (response.status === 429) {

@@ -56,7 +56,7 @@ const SKILLS_CATALOG_DOC = discoveryDoc(SKILLS_CATALOG_PATH);
 const MCP_SERVER_CARD_DOC = discoveryDoc(MCP_SERVER_CARD_PATH);
 import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
-import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
+import { mcpAttachmentBodyBytes, fileUploadLimitMessage } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
@@ -942,12 +942,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Shared JSON object reader. `allowEmpty` treats a blank body as {}.
   // `fields` names the only accepted keys: any other key is 422 and the
   // message lists it. Nesting past JSON_STRICT_DEPTH is malformed.
-  async function body(req, { limit = JSON_BODY_BYTES, allowEmpty = false, fields = null, unknownCode = "invalid_body" } = {}) {
+  async function body(req, { limit = JSON_BODY_BYTES, allowEmpty = false, fields = null, unknownCode = "invalid_body", tooLarge = null } = {}) {
     const jsonType = /^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "");
     if (!jsonType && !allowEmpty) reject(415, "json_required", "Use application/json");
     // G7 (#940): the body-cap rejection names the limit and the actual size.
     // Code stays too_large; the AX layer adds the next step.
-    const text = await readText(req, limit, actualBytes => new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${limit} bytes`));
+    const text = await readText(req, limit, actualBytes => tooLarge
+      ? tooLarge(actualBytes)
+      : new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${limit} bytes`));
     if (text.trim() === "") {
       if (allowEmpty) return {};
       reject(400, "invalid_json", "Expected a JSON object");
@@ -1230,7 +1232,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // RFC 7235: auth scheme is case-insensitive ("bearer"/"BEARER"
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
-          const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
+          const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, actualBytes => fileBody
+            ? new ServiceError(413, "attachment_too_large", fileUploadLimitMessage(actualBytes) ?? "Files can be up to 1 MiB")
+            : new ServiceError(413, "too_large", "Request is too large"));
           return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress });
         }
         return writeRoomMcpNode(req, res, url);
@@ -3805,7 +3809,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           if (!exact(data, ["messageId"]) || typeof data.messageId !== "string") reject(422, "invalid_message", "messageId is required");
           return json(res, 200, store.roomAttachments.commit(selected.token, roomId, { id: fileId, messageId: data.messageId }));
         }
-        const data = await body(req, { limit: mcpAttachmentBodyBytes });
+        const data = await body(req, {
+          limit: mcpAttachmentBodyBytes,
+          tooLarge: actualBytes => new ServiceError(413, "attachment_too_large", fileUploadLimitMessage(actualBytes) ?? "Files can be up to 1 MiB"),
+        });
         if (!data || typeof data.id !== "string" || typeof data.filename !== "string" || typeof data.mediaType !== "string" || typeof data.data !== "string"
           || !exact(data, ["id", "filename", "mediaType", "data"])) {
           reject(422, "invalid_attachment", "id, filename, mediaType, and data are required");
