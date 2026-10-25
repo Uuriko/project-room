@@ -1058,6 +1058,14 @@ export function publicLotReceiptById(store, id) {
       roomTitle = cleanName(store.db.prepare("SELECT title FROM public_rooms WHERE slug=?").get(roomId)?.title ?? null);
     }
   } catch { roomTitle = null; }
+  // F-4: stop naming a receipt across a broken (unpublished) link.
+  // Unpublish is a read-time per-id veto, so filter the receipt ids this
+  // lot names by the same veto instead of propagating writes: an
+  // unpublished receipt's id discloses its parties and amounts when a
+  // live public lot names it in signedReceiptIds / workReceiptId.
+  const signedReceiptIds = [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))]
+    .filter(receiptId => !isUnpublished(store.db, "receipt", receiptId));
+  const workReceiptId = signedReceiptIds.find(receiptId => typeof receiptId === "string" && receiptId.startsWith("pwr_")) ?? null;
   const debit = entries.find(entry => entry.amount < 0) ?? null;
   const credit = entries.find(entry => entry.amount > 0) ?? null;
   const principal = credit ?? first;
@@ -1115,8 +1123,8 @@ export function publicLotReceiptById(store, id) {
         amountMillis: entry.amount,
       })),
       entries: entries.map(entry => entry.entry_id),
-      signedReceiptIds: [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))],
-      workReceiptId: entries.map(entry => entry.receipt_id).find(id => typeof id === "string" && id.startsWith("pwr_")) ?? null,
+      signedReceiptIds,
+      workReceiptId,
       journalHash: HEX64.test(first.hash ?? "") ? first.hash : null,
       prevHash: HEX64.test(first.prev_hash ?? "") ? first.prev_hash : null,
       bountyCreatedAt: iso(bounty.created_at),
