@@ -108,7 +108,7 @@ export async function redeemAgentInvite(ctx) {
     throwJoinProfile({ code: "join_profile_invalid", reason: "type" });
   }
   const diagnosis = diagnoseArguments({
-    required: ["code", "displayName"],
+    required: ["code"],
     properties: {
       code: { type: "string" },
       displayName: { type: "string" },
@@ -122,7 +122,7 @@ export async function redeemAgentInvite(ctx) {
     if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
     if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
     for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-    ctx.reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName} with an optional requestId and an optional profile.`);
+    ctx.reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send {code} with an optional displayName, an optional requestId, and an optional profile. displayName is optional for an existing identity.`);
   }
   let requestId = null;
   if (data.requestId !== undefined) {
@@ -167,7 +167,7 @@ export const AGENT_JOIN_PROFILE_ROUTES = Object.freeze([
     auth: "none", capability: null, scope: "public", handler: redeemAgentInvite,
     schema: {
       body: {
-        type: "object", additionalProperties: false, required: ["code", "displayName"],
+        type: "object", additionalProperties: false, required: ["code"],
         properties: {
           code: { type: "string" }, displayName: { type: "string" }, requestId: { type: "string" }, profile: { type: "object" },
         },

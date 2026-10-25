@@ -3,6 +3,7 @@
 // at composition, avoiding a dependency cycle back to the event coordinator.
 import { normalizePoll } from './polls.js';
 import { prepareReplyPost, recordReplyPost } from './reply-requests.js';
+import { uiText } from './strings.js';
 
 // Receipt-card cost, kept only in its recorded shape: non-negative integer
 // cents or null, and a short model string or null. Anything else is dropped
@@ -177,7 +178,7 @@ export function createMessageReducers({ requireMember, knownMember, requireField
     const expected = incoming.data?.expectedMessageRevision;
     // A missing or non-integer fence is a malformed command. An integer that
     // does not match is a real conflict: the message moved since the caller read it.
-    if (!Number.isInteger(expected)) throw new Error(`expectedMessageRevision is required (current revision is ${current})`);
+    if (!Number.isInteger(expected)) throw new Error(uiText("message.expectedRevisionRequired", { current }));
     if (expected !== current) throw new Error(`Message changed; refresh before editing (current revision is ${current})`);
     return { message, actor };
   }

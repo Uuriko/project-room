@@ -154,7 +154,10 @@ test("canonical errors: 401s on listed routes preserve saved connections with re
     const body = await res.json();
     assertCanonicalEnvelope(t, body, `${method} ${path}`);
     const text = JSON.stringify(body);
-    assert.equal(body.next[0].tool, "room_check_access");
+    const first = body.next[0];
+    const firstText = first.command ?? first.path ?? first.tool ?? "";
+    assert.match(firstText, /POST \/api\/agent-identities/, `${method} ${path} leads with the mint`);
+    assert.ok(body.next.some(step => step.tool === "room_check_access"), `${method} ${path} still offers room_check_access`);
     assert.ok(!body.next.some(step => step.method === "POST"), "no automatic credential issuance step");
     assert.match(text, /saved connection/i);
   }
