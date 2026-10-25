@@ -242,6 +242,64 @@ test("a settled work receipt names its payout lot, and the lot names the receipt
   assert.equal(receiptJson(lot).lot.workReceiptId, PWR_ID);
 });
 
+test("F-2: a work receipt does not disclose its payout lot when the lot is not public", () => {
+  const { escrow, db, store } = makeEscrow();
+  const { lotId } = runToPaidCrossReferenced(escrow, db);
+  // Premise: with no recorded opt-in the lot itself is private (404).
+  assert.equal(publicReceiptById(store, lotId), null,
+    "never opted in: the lot itself stays private");
+
+  // The work receipt is visible on its own visibility, but it must not
+  // disclose the lot id, the settled amount, or the lot state of a lot
+  // that is not itself public.
+  const hidden = publicReceiptById(store, PWR_ID);
+  assert.ok(hidden, "the stored work receipt itself still resolves");
+  assert.equal(hidden.lotId, undefined, "no lot id leaks for a never-opted-in room");
+  assert.equal("settlement" in hidden, false, "no settlement block leaks for a never-opted-in room");
+
+  // A recorded opt-out keeps the lot fields withheld.
+  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 0)")
+    .run(ROOM);
+  const optedOut = publicReceiptById(store, PWR_ID);
+  assert.ok(optedOut, "the stored work receipt itself still resolves");
+  assert.equal(optedOut.lotId, undefined, "no lot id leaks for an opted-out room");
+  assert.equal("settlement" in optedOut, false, "no settlement block leaks for an opted-out room");
+
+  // Recording the opt-in restores the cross-reference exactly.
+  db.prepare("UPDATE room_public_receipts_setting SET enabled=1 WHERE room_id=?").run(ROOM);
+  const visible = publicReceiptById(store, PWR_ID);
+  assert.ok(visible, "the stored work receipt still resolves");
+  assert.equal(visible.lotId, lotId, "the lot id is attached when the lot gate passes");
+  assert.equal(visible.settlement.lotId, lotId);
+  assert.equal(visible.settlement.amountCredits, 9.9);
+});
+
+test("F-2: an unpublished or directory-hidden lot is not disclosed through a work receipt", () => {
+  const { escrow, db, store } = makeEscrow();
+  const { lotId } = runToPaidCrossReferenced(escrow, db);
+  recordOptIn(db);
+  assert.equal(publicReceiptById(store, PWR_ID)?.lotId, lotId,
+    "recorded opt-in: the lot cross-reference is attached");
+
+  // Operator unpublish of the lot itself withholds the cross-reference.
+  db.prepare("INSERT INTO public_unpublish (kind, target) VALUES ('receipt', ?)").run(lotId);
+  const unpublished = publicReceiptById(store, PWR_ID);
+  assert.ok(unpublished, "the stored work receipt itself still resolves");
+  assert.equal(unpublished.lotId, undefined, "no lot id leaks for an operator-unpublished lot");
+  assert.equal("settlement" in unpublished, false);
+  db.prepare("DELETE FROM public_unpublish").run();
+  assert.equal(publicReceiptById(store, PWR_ID)?.lotId, lotId,
+    "clearing the unpublish restores the cross-reference");
+
+  // The owner's directory receipts toggle off withholds it too.
+  db.prepare("INSERT INTO room_directory_settings (room_id, discoverable, public_receipts) VALUES (?, 0, 0)")
+    .run(ROOM);
+  const toggledOff = publicReceiptById(store, PWR_ID);
+  assert.ok(toggledOff, "the stored work receipt itself still resolves");
+  assert.equal(toggledOff.lotId, undefined, "no lot id leaks when the room's receipts are toggled off");
+  assert.equal("settlement" in toggledOff, false);
+});
+
 test("a work receipt with no journal lot row gains no lot fields", () => {
   const { escrow, db, store } = makeEscrow();
   runToPaid(escrow); // a settled ledger exists, but nothing references this receipt
