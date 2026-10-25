@@ -4789,7 +4789,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
-          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])) },
+          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])),
+          // The board projection needs halts. The HTTP work view strips this
+          // before it is sent; it is not part of that response's state keys.
+          agentHalts: room.state.agentHalts || {} },
         charter: charterContext(room.state.room), viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
       if (messageLimit !== null && (!Number.isSafeInteger(messageLimit) || messageLimit < 1 || messageLimit > 1000)) fail(422, "invalid_snapshot_view", "Choose a bounded message window");
