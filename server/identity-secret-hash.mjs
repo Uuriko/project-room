@@ -10,15 +10,15 @@ import { createHash, createHmac, scryptSync } from "node:crypto";
 export const IDENTITY_HASH_SALT = "project-room-agent-identity-v2";
 export const IDENTITY_HASH_PARAMS = Object.freeze({ N: 16384, r: 8, p: 1 });
 export const IDENTITY_V2_PREFIX = "v2:";
-export const IDENTITY_FAST_PREFIX = "v3:";
+const IDENTITY_FAST_PREFIX = "v3:";
 // Worker secret / Node env. Unset uses the fallback below so a deploy that
 // has not been given the secret still verifies and issues verifiers.
-export const IDENTITY_HASH_KEY_ENV = "ROOM_IDENTITY_HASH_KEY";
+const IDENTITY_HASH_KEY_ENV = "ROOM_IDENTITY_HASH_KEY";
 // Built-in key for local Node, self-hosted installs, and a Worker deploy
 // that has not set ROOM_IDENTITY_HASH_KEY. Not a substitute for the Worker
 // secret once an operator sets one: verification accepts this key as well,
 // so adding or omitting the secret cannot strand a verifier written with it.
-export const IDENTITY_HASH_KEY_FALLBACK = "project-room-agent-identity-v3";
+const IDENTITY_HASH_KEY_FALLBACK = "project-room-agent-identity-v3";
 const SCRYPT_CACHE_MAX = 256;
 
 const scryptCache = new Map();
@@ -34,7 +34,7 @@ export function legacyIdentityHash(secret) {
 
 // `source` is a key string, null/undefined (fallback only), or an env object
 // such as process.env. A string shorter than 16 characters is ignored.
-export function configuredIdentityHashKey(source) {
+function configuredIdentityHashKey(source) {
   const value = typeof source === "string" ? source : source?.[IDENTITY_HASH_KEY_ENV];
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -46,7 +46,7 @@ export function configuredIdentityHashKey(source) {
 // so rows written before the secret was set, or by a local process, still
 // verify after the secret is added — and rows written with the fallback
 // still verify when the secret is absent.
-export function identityHashKeys(source) {
+function identityHashKeys(source) {
   const configured = configuredIdentityHashKey(source);
   if (!configured || configured === IDENTITY_HASH_KEY_FALLBACK) return [IDENTITY_HASH_KEY_FALLBACK];
   return [configured, IDENTITY_HASH_KEY_FALLBACK];
@@ -64,9 +64,6 @@ export function fastIdentityHashCandidates(secret, source) {
   return identityHashKeys(source).map(key => hmacVerifier(secret, key));
 }
 
-export function isFastIdentityHash(stored) {
-  return typeof stored === "string" && stored.startsWith(IDENTITY_FAST_PREFIX) && /^v3:[a-f0-9]{64}$/.test(stored);
-}
 
 export function isV2IdentityHash(stored) {
   return typeof stored === "string" && stored.startsWith(IDENTITY_V2_PREFIX) && /^v2:[a-f0-9]{64}$/.test(stored);
@@ -101,6 +98,3 @@ export function scryptIdentityHash(secret) {
   return stored;
 }
 
-export function hashIdentitySecret(secret, source) {
-  return fastIdentityHash(secret, source);
-}

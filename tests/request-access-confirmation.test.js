@@ -74,6 +74,7 @@ test("request confirmation has no hidden ancestor after the form submits", async
   await import("../src/join.js");
   const form = get("join-request-form"), status = get("join-request-status");
   assert.equal(form.dataset.requestWired, "1", "the door's submit listener is wired");
+  get("join-request").open = true;
   // The visitor is on the bare entry page and fills the request door
   // (after boot, as a person would — boot prefills the room field).
   get("join-request-room").value = "commons";
