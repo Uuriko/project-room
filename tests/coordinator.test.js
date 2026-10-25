@@ -7,7 +7,8 @@ import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
-import { claimHistoryLength, claimWork, createWork } from "../server/work-claims.mjs";
+import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
+import { claimHistoryLength, claimWork, createWork, updateWork } from "../server/work-claims.mjs";
 import { COORDINATOR_ACTIONS_PER_HOUR, COORDINATOR_MAX_HOPS } from "../server/coordinator.mjs";
 
 async function fixture(t) {
@@ -290,4 +291,178 @@ test("a coordinator action is recorded when the audit table exists", async t => 
   assert.deepEqual(detail, {
     kind: "assign", workClaimId: "audit-1", targetMemberId: "helper", status: "applied", hop: 1, requestId: "audit-assign"
   });
+});
+
+function connectLive(store, memberId, at) {
+  const identityId = `ai-${memberId}`;
+  store.db.prepare("INSERT INTO agent_identities (identity_id, secret_hash, display_name, created_at) VALUES (?,?,?,?)")
+    .run(identityId, `hash-${identityId}`, memberId, at);
+  store.db.prepare("INSERT INTO identity_links (room_id, identity_id, member_id, linked_at) VALUES (?,?,?,?)")
+    .run("commons", identityId, memberId, at);
+  store.db.prepare(`INSERT INTO agent_hosts (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)
+    VALUES (?,?,?,?,?,?,?)`).run(identityId, "host", "pull-only", null, at, at, at);
+  return identityId;
+}
+
+async function openRoom(t, specs) {
+  const store = new RoomStore(":memory:");
+  store.initialize(initialRoom("commons"));
+  let now = store.now();
+  store.now = () => now;
+  const ownerKey = store.issueAccessKey("commons", "owner");
+  const keys = { owner: ownerKey };
+  for (const spec of specs) {
+    store.command(ownerKey, "commons", {
+      id: `add-${spec.id}`, type: "member.added",
+      data: { memberId: spec.id, displayName: spec.id, kind: "agent", agentType: spec.agentType, permissions: ["accept_work", "complete_work"] }
+    });
+    keys[spec.id] = store.issueAccessKey("commons", spec.id);
+    connectLive(store, spec.id, now);
+    if (spec.coordinator) {
+      store.command(keys[spec.id], "commons", {
+        id: `caps-${spec.id}`, type: "capabilities.advertised",
+        data: { capabilities: ["coordinator"] }
+      });
+    }
+    if (spec.done) {
+      const room = { workClaims: store.workClaims.rawConfig("commons") };
+      let item = createWork({ id: `done-${spec.id}` }, { now, agentId: "owner" });
+      item = claimWork(item, spec.id, { now, room });
+      item = updateWork(item, spec.id, { state: "in_progress", now, authority: true });
+      item = updateWork(item, spec.id, { state: "done", now, authority: true, policy: "self_attested" });
+      store.workClaims.set("commons", item);
+    }
+  }
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams();
+    server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const call = async (actor, body, method = "POST") => {
+    const response = await fetch(`${origin}/api/rooms/commons/assistant`, {
+      method,
+      headers: { authorization: `Bearer ${keys[actor]}`, "content-type": "application/json" },
+      body: method === "POST" ? JSON.stringify(body) : undefined
+    });
+    return { status: response.status, body: await response.json() };
+  };
+  const choices = async actor => {
+    const response = await fetch(`${origin}/api/rooms/commons/events?after=0`, {
+      headers: { authorization: `Bearer ${keys[actor]}` }
+    });
+    const body = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(body));
+    return body.events.map(row => row.event).filter(event => event?.data?.coordinatorSource);
+  };
+  return { store, call, choices, advance(ms) { now += ms; } };
+}
+
+test("a room with no coordinator picks the highest-ranked live member", async t => {
+  const room = await openRoom(t, [
+    { id: "plain", agentType: "generic" },
+    { id: "claude", agentType: "claude-code" }
+  ]);
+  const owner = await room.call("owner", null, "GET");
+  assert.equal(owner.status, 200, JSON.stringify(owner.body));
+  assert.equal(owner.body.assistant.coordinatorMemberId, "claude");
+  assert.equal(owner.body.assistant.coordinatorSource, "auto");
+  assert.equal(owner.body.assistant.revision, 0);
+  assert.match(owner.body.assistant.coordinatorReason, /Claude Code \(claude\)/);
+  assert.match(owner.body.assistant.coordinatorReason, /supports push wakes or webhooks/);
+  assert.match(owner.body.assistant.coordinatorReason, /no claim attempts in this room/);
+  assert.match(owner.body.assistant.coordinatorReason, /Ranking version 1/);
+  const agent = await room.call("plain", null, "GET");
+  assert.equal(agent.body.assistant.coordinatorMemberId, owner.body.assistant.coordinatorMemberId);
+  assert.equal(agent.body.assistant.coordinatorSource, "auto");
+  assert.equal(agent.body.assistant.coordinatorReason, owner.body.assistant.coordinatorReason);
+  const logged = await room.choices("plain");
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].type, "message.posted");
+  assert.equal(logged[0].data.coordinatorSource, "auto");
+  assert.equal(logged[0].data.coordinatorMemberId, "claude");
+  assert.equal(logged[0].data.rankingVersion, 1);
+  assert.equal(logged[0].data.body, owner.body.assistant.coordinatorReason);
+  assert.equal((await room.choices("owner")).length, 1);
+
+  const finished = await openRoom(t, [
+    { id: "idle", agentType: "generic" },
+    { id: "closer", agentType: "generic", done: true }
+  ]);
+  const byWork = await finished.call("idle", null, "GET");
+  assert.equal(byWork.status, 200, JSON.stringify(byWork.body));
+  assert.equal(byWork.body.assistant.coordinatorMemberId, "closer");
+  assert.match(byWork.body.assistant.coordinatorReason, /claim completion 1\/1/);
+  assert.equal((await finished.choices("closer"))[0].data.body, byWork.body.assistant.coordinatorReason);
+
+  const declared = await openRoom(t, [
+    { id: "idle", agentType: "generic" },
+    { id: "lead", agentType: "generic", coordinator: true }
+  ]);
+  const byAbility = await declared.call("idle", null, "GET");
+  assert.equal(byAbility.status, 200, JSON.stringify(byAbility.body));
+  assert.equal(byAbility.body.assistant.coordinatorMemberId, "lead");
+  assert.match(byAbility.body.assistant.coordinatorReason, /declares coordinator/);
+  assert.equal((await declared.choices("lead"))[0].data.coordinatorMemberId, "lead");
+});
+
+test("a stale automatic coordinator is replaced by the next live member", async t => {
+  const room = await openRoom(t, [
+    { id: "plain", agentType: "generic" },
+    { id: "claude", agentType: "claude-code" }
+  ]);
+  const first = await room.call("owner", null, "GET");
+  assert.equal(first.body.assistant.coordinatorMemberId, "claude");
+  room.advance(HEARTBEAT_STALE_AFTER_MS + 1);
+  room.store.db.prepare("UPDATE agent_hosts SET last_seen_at=? WHERE agent_id=?").run(room.store.now(), "ai-plain");
+  const second = await room.call("plain", null, "GET");
+  assert.equal(second.status, 200, JSON.stringify(second.body));
+  assert.equal(second.body.assistant.coordinatorMemberId, "plain");
+  assert.equal(second.body.assistant.coordinatorSource, "auto");
+  assert.match(second.body.assistant.coordinatorReason, /Generic MCP or REST \(plain\)/);
+  assert.match(second.body.assistant.coordinatorReason, /heartbeat went stale/);
+  const logged = await room.choices("claude");
+  assert.equal(logged.length, 2);
+  assert.equal(logged[0].data.coordinatorMemberId, "claude");
+  assert.equal(logged[1].data.coordinatorMemberId, "plain");
+  assert.equal(logged[1].data.body, second.body.assistant.coordinatorReason);
+  assert.equal(logged[1].data.coordinatorSource, "auto");
+});
+
+test("an owner override sticks until the owner clears it", async t => {
+  const room = await openRoom(t, [
+    { id: "plain", agentType: "generic" },
+    { id: "claude", agentType: "claude-code" }
+  ]);
+  const auto = await room.call("claude", null, "GET");
+  assert.equal(auto.body.assistant.coordinatorMemberId, "claude");
+  assert.equal(auto.body.assistant.revision, 0);
+  const named = await room.call("owner", {
+    requestId: "owner-pick", action: "configure", name: "Room",
+    coordinatorMemberId: "plain", expectedRevision: 0
+  });
+  assert.equal(named.status, 200, JSON.stringify(named.body));
+  room.advance(HEARTBEAT_STALE_AFTER_MS + 1);
+  const stuck = await room.call("plain", null, "GET");
+  assert.equal(stuck.status, 200, JSON.stringify(stuck.body));
+  assert.equal(stuck.body.assistant.coordinatorMemberId, "plain");
+  assert.equal(stuck.body.assistant.coordinatorSource, "owner");
+  assert.equal(stuck.body.assistant.coordinatorReason, "The room owner named plain as coordinator.");
+  const logged = await room.choices("claude");
+  assert.ok(logged.some(event => event.data.coordinatorSource === "owner" && event.data.body === stuck.body.assistant.coordinatorReason));
+  const cleared = await room.call("owner", {
+    requestId: "owner-clear", action: "configure", name: "Room",
+    coordinatorMemberId: null, expectedRevision: 1
+  });
+  assert.equal(cleared.status, 200, JSON.stringify(cleared.body));
+  room.store.db.prepare("UPDATE agent_hosts SET last_seen_at=? WHERE agent_id=?").run(room.store.now(), "ai-claude");
+  const again = await room.call("owner", null, "GET");
+  assert.equal(again.status, 200, JSON.stringify(again.body));
+  assert.equal(again.body.assistant.coordinatorMemberId, "claude");
+  assert.equal(again.body.assistant.coordinatorSource, "auto");
+  assert.match(again.body.assistant.coordinatorReason, /Claude Code \(claude\)/);
+  assert.equal((await room.choices("plain")).filter(event => event.data.coordinatorSource === "auto").length, 2);
 });

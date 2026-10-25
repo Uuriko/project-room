@@ -1,14 +1,21 @@
 // One optional coordinator per room. The owner names them with the existing
-// assistant configure action (coordinatorMemberId). That agent may assign an
-// open claim or ask another agent for help. Stop, by the coordinator or a
-// room administrator, halts asks that have not been applied.
+// assistant configure action (coordinatorMemberId). With no owner choice, the
+// room picks the highest-ranked live member and replaces that pick when its
+// heartbeat goes stale. That agent may assign an open claim or ask another
+// agent for help. Stop, by the coordinator or a room administrator, halts
+// asks that have not been applied.
 //
-// room-assistant.mjs is left unchanged: open pulls already edit it. This
-// module wraps RoomAssistant.apply when the server graph loads it.
+// room-assistant.mjs and src/events.js are left unchanged: open pulls already
+// edit them. This module wraps RoomAssistant when the server graph loads it.
+// A choice is a message.posted event so people and agents can both read the
+// reason. The message body is that reason; coordinatorSource marks the choice.
+import { createHash } from "node:crypto";
 import { canAdministerRoom } from "../src/room-administration.js";
-import { ownMember, validId } from "../src/events.js";
+import { EVENT_TYPES, event, ownMember, validId } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { fileLeaseConflictBody, fileLeaseConflicts } from "./claim-coordination.mjs";
+import { COORDINATOR_RANKING_VERSION, kindFor, scoreCandidate } from "./coordinator-ranking.mjs";
+import { syncMessageRows } from "./messages-store.mjs";
 import { RoomAssistant } from "./room-assistant.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake } from "./work-claim-events.mjs";
 import { ACTIVE_CLAIM_STATES, isTerminalClaimState, reassignWork } from "./work-claims.mjs";
@@ -28,6 +35,18 @@ export function installCoordinator() {
   if (installed) return;
   installed = true;
   const original = RoomAssistant.prototype.apply;
+  const originalList = RoomAssistant.prototype.list;
+  RoomAssistant.prototype.list = function listWithCoordinator(roomId, authorize) {
+    authorize();
+    ensurePick(this, roomId);
+    const body = originalList.call(this, roomId, authorize);
+    const assistant = body?.assistant;
+    if (assistant?.coordinatorMemberId && assistant.coordinatorSource !== "auto" && assistant.coordinatorSource !== "owner") {
+      assistant.coordinatorSource = "owner";
+      assistant.coordinatorReason = ownerReason(assistant.coordinatorMemberId);
+    }
+    return body;
+  };
   RoomAssistant.prototype.apply = function applyWithCoordinator(roomId, input, authorize, postToken = null) {
     const action = input && !Array.isArray(input) ? input.action : undefined;
     if (action === "assign" || action === "ask" || action === "stop") return perform(this, roomId, input, authorize);
@@ -39,24 +58,39 @@ export function installCoordinator() {
 function preserveOnConfigure(assistant, original, roomId, input, authorize, postToken) {
   const before = readConfig(assistant, roomId);
   const response = original.call(assistant, roomId, input, authorize, postToken);
-  const actions = Array.isArray(before.coordinatorActions) ? before.coordinatorActions : [];
-  if (!actions.length) return response;
   const after = readConfig(assistant, roomId);
   // A retry of this configure replays the stored receipt and does not wipe
-  // the row. A fresh configure replaces the row; put the action log back
-  // without the stop latch. A different coordinator halts asks still pending.
-  if (Array.isArray(after.coordinatorActions)) return response;
+  // the row. A fresh configure replaces the row and moves the revision.
+  if (before.revision === after.revision && before.name === after.name && before.coordinatorMemberId === after.coordinatorMemberId) return response;
+  const actions = Array.isArray(before.coordinatorActions) ? before.coordinatorActions : [];
   const memberChanged = before.coordinatorMemberId !== after.coordinatorMemberId;
   const now = assistant.store.now();
   const kept = memberChanged
     ? actions.map(entry => entry?.status === "pending" ? { ...entry, status: "halted", haltedAt: now } : entry)
     : actions;
-  writeConfig(assistant, roomId, { ...after, coordinatorActions: kept, stoppedAt: undefined });
+  const owner = typeof after.coordinatorMemberId === "string" && after.coordinatorMemberId;
+  const reason = owner ? ownerReason(after.coordinatorMemberId) : undefined;
+  const sameOwner = before.coordinatorSource === "owner" && before.coordinatorMemberId === after.coordinatorMemberId;
+  assistant.store.transaction(() => {
+    writeConfig(assistant, roomId, {
+      ...after,
+      coordinatorActions: kept.length ? kept : undefined,
+      stoppedAt: undefined,
+      coordinatorSource: owner ? "owner" : undefined,
+      coordinatorReason: reason,
+      coordinatorChosenAt: owner ? now : undefined
+    });
+    if (owner && !sameOwner) recordChoice(assistant.store, roomId, { memberId: after.coordinatorMemberId, source: "owner", reason, at: now });
+  });
   return response;
 }
 
 function perform(assistant, roomId, input, authorize) {
   assertEnvelope(input);
+  if (input.action !== "stop") {
+    authorize();
+    ensurePick(assistant, roomId);
+  }
   const canonical = JSON.stringify(Object.fromEntries(Object.entries(input).sort(([left], [right]) => left.localeCompare(right))));
   return assistant.store.transaction(() => {
     assistant.init();
@@ -236,12 +270,17 @@ function readConfig(assistant, roomId) {
 
 function writeConfig(assistant, roomId, config) {
   const stored = {
-    name: config.name,
-    coordinatorMemberId: config.coordinatorMemberId,
-    revision: config.revision
+    name: typeof config.name === "string" && config.name.trim() ? config.name : "Room",
+    coordinatorMemberId: config.coordinatorMemberId ?? null,
+    revision: Number.isSafeInteger(config.revision) ? config.revision : 0
   };
   if (Array.isArray(config.coordinatorActions) && config.coordinatorActions.length) stored.coordinatorActions = config.coordinatorActions;
   if (Number.isFinite(config.stoppedAt)) stored.stoppedAt = config.stoppedAt;
+  if (config.coordinatorSource === "auto" || config.coordinatorSource === "owner") {
+    stored.coordinatorSource = config.coordinatorSource;
+    if (typeof config.coordinatorReason === "string" && config.coordinatorReason.trim()) stored.coordinatorReason = config.coordinatorReason;
+    if (Number.isFinite(config.coordinatorChosenAt)) stored.coordinatorChosenAt = config.coordinatorChosenAt;
+  }
   assistant.store.db.prepare("INSERT INTO room_assistant_config VALUES(?,?) ON CONFLICT(room_id) DO UPDATE SET value=excluded.value")
     .run(roomId, JSON.stringify(stored));
 }
@@ -295,6 +334,212 @@ function recordAudit(assistant, roomId, memberId, at, kind, result, requestId) {
   };
   assistant.store.db.prepare("INSERT INTO agent_audit_log (room_id, member_id, at, action, detail) VALUES (?,?,?,?,?)")
     .run(roomId, memberId, at, `coordinator_${kind}`, JSON.stringify(detail));
+}
+
+function ownerReason(memberId) {
+  return `The room owner named ${memberId} as coordinator.`;
+}
+
+function stickyOwner(config) {
+  return Boolean(config.coordinatorMemberId) && config.coordinatorSource !== "auto";
+}
+
+// An owner choice stays until configure clears it. An automatic choice stays
+// while that member is still a live candidate, and is replaced when they are
+// not. The settings revision is left alone: it fences configure, not a pick.
+function ensurePick(assistant, roomId) {
+  let state;
+  try { state = assistant.store.room(roomId).state; }
+  catch { return; }
+  if (state.room?.archivedAt) return;
+  const config = readConfig(assistant, roomId);
+  if (stickyOwner(config)) return;
+  const ranked = rankMembers(assistant, roomId, state);
+  if (config.coordinatorSource === "auto" && ranked.some(row => row.member.id === config.coordinatorMemberId)) return;
+  const winner = ranked[0] ?? null;
+  if (!winner) {
+    if (config.coordinatorSource !== "auto" || !config.coordinatorMemberId) return;
+    const online = presenceOf(assistant.store, roomId, config.coordinatorMemberId).online;
+    const reason = online
+      ? `Coordinator choice: the previous coordinator is no longer a live choice and no other live member can coordinate. Ranking version ${COORDINATOR_RANKING_VERSION}.`
+      : `Coordinator choice: the previous coordinator's heartbeat went stale and no other live member can coordinate. Ranking version ${COORDINATOR_RANKING_VERSION}.`;
+    commitChoice(assistant, roomId, config, null, reason);
+    return;
+  }
+  const note = replacementNote(assistant, roomId, config);
+  commitChoice(assistant, roomId, config, winner, autoReason(winner, note));
+}
+
+function replacementNote(assistant, roomId, config) {
+  if (config.coordinatorSource !== "auto" || !config.coordinatorMemberId) return "";
+  const online = presenceOf(assistant.store, roomId, config.coordinatorMemberId).online;
+  return online
+    ? " The previous coordinator is no longer a live choice."
+    : " The previous coordinator's heartbeat went stale.";
+}
+
+function autoReason(row, note) {
+  const bits = ["live heartbeat"];
+  if (row.pushRegistered) bits.push("push wake or webhook registered");
+  else if (row.kind.push) bits.push("supports push wakes or webhooks");
+  if (row.completion.attempted) bits.push(`claim completion ${row.completion.done}/${row.completion.attempted}`);
+  else bits.push("no claim attempts in this room");
+  if (row.declares) bits.push("declares coordinator");
+  return `Coordinator choice: ${row.kind.label} (${row.member.id}) is the coordinator: ${bits.join(", ")}. Ranking version ${COORDINATOR_RANKING_VERSION}.${note}`;
+}
+
+function commitChoice(assistant, roomId, config, winner, reason) {
+  const now = assistant.store.now();
+  assistant.init();
+  assistant.store.transaction(() => {
+    const current = readConfig(assistant, roomId);
+    if (stickyOwner(current)) return;
+    const memberId = winner ? winner.member.id : null;
+    if (current.coordinatorSource === "auto" && current.coordinatorMemberId === memberId && current.coordinatorReason === reason) return;
+    writeConfig(assistant, roomId, {
+      ...current,
+      name: current.name ?? config.name,
+      revision: Number.isSafeInteger(current.revision) ? current.revision : config.revision,
+      coordinatorMemberId: memberId,
+      coordinatorSource: "auto",
+      coordinatorReason: reason,
+      coordinatorChosenAt: now
+    });
+    recordChoice(assistant.store, roomId, { memberId, source: "auto", reason, at: now });
+  });
+}
+
+function rankMembers(assistant, roomId, state) {
+  const claims = listClaims(assistant.store, roomId);
+  const ranked = [];
+  for (const member of Object.values(state.members ?? {})) {
+    if (!eligible(member)) continue;
+    const presence = presenceOf(assistant.store, roomId, member.id);
+    if (!presence.online) continue;
+    const kind = kindFor(member.agentType);
+    const completion = completionOf(claims, member.id);
+    const declares = kind.coordinator || declaresCoordinator(member);
+    const score = scoreCandidate({
+      kindPush: kind.push,
+      pushRegistered: presence.pushRegistered,
+      heartbeatFreshness: 1,
+      completionRate: completion.rate,
+      declaresCoordinator: declares
+    });
+    ranked.push({ member, kind, score, pushRegistered: presence.pushRegistered, completion, declares });
+  }
+  ranked.sort((left, right) => right.score - left.score || left.kind.rank - right.kind.rank || (left.member.id < right.member.id ? -1 : left.member.id > right.member.id ? 1 : 0));
+  return ranked;
+}
+
+function eligible(member) {
+  if (!member || member.kind !== "agent" || member.active === false) return false;
+  if (typeof member.id !== "string" || member.id.startsWith("guest-agent-")) return false;
+  if (member.permissions?.some(permission => String(permission).startsWith("guest:"))) return false;
+  return Boolean(member.permissions?.includes("accept_work"));
+}
+
+function declaresCoordinator(member) {
+  return Array.isArray(member.capabilities) && member.capabilities.some(capability => String(capability).trim().toLowerCase() === "coordinator");
+}
+
+function presenceOf(store, roomId, memberId) {
+  const heartbeats = store.agentHeartbeats;
+  if (!heartbeats?.statusOf) return { online: false, pushRegistered: false };
+  let links = [];
+  try {
+    links = store.db.prepare("SELECT identity_id AS identityId FROM identity_links WHERE room_id=? AND member_id=?").all(roomId, memberId);
+  } catch (error) {
+    if (!String(error?.message ?? "").includes("no such table")) throw error;
+    return { online: false, pushRegistered: false };
+  }
+  let online = false;
+  let pushRegistered = false;
+  for (const link of links) {
+    let status;
+    try { status = heartbeats.statusOf(link.identityId); }
+    catch (error) {
+      if (error?.code === "invalid_heartbeat") continue;
+      throw error;
+    }
+    if (status?.status === "online") online = true;
+    if (pushRegisteredFor(store, link.identityId)) pushRegistered = true;
+  }
+  return { online, pushRegistered };
+}
+
+function pushRegisteredFor(store, identityId) {
+  if (hasRow(store.db, "SELECT 1 AS ok FROM agent_hosts WHERE agent_id=? AND (mode='wakeable' OR (wake_url IS NOT NULL AND length(wake_url)>0)) LIMIT 1", identityId)) return true;
+  if (hasRow(store.db, "SELECT 1 AS ok FROM agent_push_configs WHERE agent_id=? AND push_url IS NOT NULL AND length(push_url)>0 LIMIT 1", identityId)) return true;
+  return hasRow(store.db, "SELECT 1 AS ok FROM agent_webhook_subs WHERE agent_id=? AND enabled=1 LIMIT 1", identityId);
+}
+
+function hasRow(db, sql, identityId) {
+  try { return Boolean(db.prepare(sql).get(identityId)); }
+  catch (error) {
+    if (String(error?.message ?? "").includes("no such table")) return false;
+    throw error;
+  }
+}
+
+function listClaims(store, roomId) {
+  try { return store.workClaims?.list?.(roomId) ?? []; }
+  catch { return []; }
+}
+
+function completionOf(claims, memberId) {
+  let attempted = 0;
+  let done = 0;
+  for (const claim of claims) {
+    const stamps = Array.isArray(claim?.history) ? claim.history : [];
+    const acted = stamps.some(stamp => stamp?.agentId === memberId && (stamp.action === "claimed" || String(stamp.action).startsWith("state:")));
+    const received = stamps.some(stamp => stamp?.action === `reassigned:${memberId}`);
+    const holds = claim?.owner === memberId && claim.state && claim.state !== "unclaimed";
+    if (!acted && !received && !holds) continue;
+    attempted += 1;
+    if (stamps.some(stamp => stamp?.agentId === memberId && stamp.action === "state:done") || (claim.owner === memberId && claim.state === "done")) done += 1;
+  }
+  return attempted ? { rate: done / attempted, done, attempted } : { rate: null, done: 0, attempted: 0 };
+}
+
+// src/events.js cannot gain a type while other pulls edit it. message.posted
+// is already on the log both humans and agents read. The body is the reason.
+function recordChoice(store, roomId, { memberId, source, reason, at }) {
+  const room = store.room(roomId);
+  const actorId = room.state.room?.ownerId;
+  if (!validId(actorId) || typeof reason !== "string" || !reason.trim()) return;
+  const atMs = Number.isFinite(at) ? at : store.now();
+  const digest = createHash("sha256").update(`${roomId}|${source}|${memberId ?? ""}|${reason}|${atMs}`).digest("hex").slice(0, 40);
+  const id = `coordinator-${digest}`;
+  if (store.db.prepare("SELECT 1 FROM events WHERE id=?").get(id)) return;
+  const incoming = event({
+    id,
+    idempotencyKey: id,
+    type: EVENT_TYPES.MESSAGE_POSTED,
+    actorId,
+    roomId,
+    at: new Date(atMs).toISOString(),
+    data: {
+      messageId: `cmsg-${digest}`,
+      body: reason,
+      reason,
+      coordinatorSource: source,
+      coordinatorMemberId: memberId ?? null,
+      rankingVersion: COORDINATOR_RANKING_VERSION
+    }
+  });
+  let sequence;
+  try { sequence = store.appendSideTableEvent(roomId, incoming); }
+  catch (error) {
+    if (error?.code === "pilot_limit") return;
+    throw error;
+  }
+  try { syncMessageRows(store.db, { roomId, sequence, event: incoming, state: store.room(roomId).state }); }
+  catch (error) {
+    if (!String(error?.message ?? "").includes("no such table")) throw error;
+  }
+  try { store.agentPlugin?.fanoutRoomEvent?.({ roomId, event: incoming }); }
+  catch (error) { console.error("coordinator choice fan-out failed:", error?.message ?? error); }
 }
 
 installCoordinator();
