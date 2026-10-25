@@ -425,6 +425,50 @@ export class AgentHeartbeats {
     });
   }
 
+  // Room fan-out uses the same window as GET /api/wake-status?roomId=.
+  // An unscoped poll counts in every room. A room-scoped stamp counts only
+  // in that room. Another room's stamp does not. A missing table reads as
+  // not wakeable, matching wakeStatusOf. Never throws for a bad id: the
+  // fan-out must not fail the post.
+  wakeableInRoom(agentId, roomId) {
+    if (typeof agentId !== "string" || agentId.length === 0) return false;
+    const at = this.now();
+    const fresh = stamp => Number.isFinite(stamp) && at - stamp <= WAKEABLE_WINDOW_MS;
+    let globalStamp = null;
+    try {
+      globalStamp = this.db.prepare(
+        "SELECT last_polled_at AS lastPolledAt FROM agent_wake_polls WHERE agent_id=?").get(agentId)?.lastPolledAt ?? null;
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return false;
+    }
+    if (fresh(globalStamp)) return true;
+    if (typeof roomId !== "string" || roomId.length === 0) return false;
+    try {
+      const roomStamp = this.db.prepare(
+        "SELECT last_polled_at AS lastPolledAt FROM agent_wake_room_activity WHERE agent_id=? AND room_id=?")
+        .get(agentId, roomId)?.lastPolledAt ?? null;
+      return fresh(roomStamp);
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      return false;
+    }
+  }
+
+  // True when this identity has ever joined the wake census: a host, an
+  // unscoped poll, or a room-scoped poll. Push-only webhook subscribers
+  // with none of those are not census members.
+  registeredForWake(agentId) {
+    if (typeof agentId !== "string" || agentId.length === 0) return false;
+    const present = (sql) => {
+      try { return !!this.db.prepare(sql).get(agentId); }
+      catch (error) { if (!isMissingTable(error)) throw error; return false; }
+    };
+    return present("SELECT 1 FROM agent_hosts WHERE agent_id=? LIMIT 1")
+      || present("SELECT 1 FROM agent_wake_polls WHERE agent_id=? LIMIT 1")
+      || present("SELECT 1 FROM agent_wake_room_activity WHERE agent_id=? LIMIT 1");
+  }
+
   // CX5-FIX: wakeStatusList attributed to ONE room. An agent is wakeable
   // for this room when it has fresh identity-level activity (an unscoped
   // listener hears every room it belongs to) OR fresh room-scoped activity
