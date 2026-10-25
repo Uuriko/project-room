@@ -37,7 +37,15 @@ function fixture(t, route) {
     // page. Not a snapshot read — it does not consume the route's numbering.
     if (url.startsWith("/api/rooms/commons/conversation")) {
       const whole = route(FULL, nth());
-      return response({ ...owner, generatedAt: "2026-01-01T00:00:00.000Z", conversationVersion: 1, mode: "replace", limit: 100, messageId: null, channelId: null, checkpoint: null, sequence: whole.sequence, messages: whole.state.messages, nextCursor: null, hasMore: false });
+      const messages = whole.state.messages;
+      const cursor = new URL(url, "http://127.0.0.1").searchParams.get("cursor");
+      // Head page is the held window; the next page is exactly the older prefix.
+      const older = cursor ? messages.slice(0, Math.max(0, messages.length - 3)) : messages.slice(-3);
+      return response({ ...owner, generatedAt: "2026-01-01T00:00:00.000Z", conversationVersion: 1, mode: "replace", limit: 100, messageId: null, channelId: null, checkpoint: null, sequence: whole.sequence, messages: older, nextCursor: cursor ? null : "older", hasMore: !cursor });
+    }
+    if (url.includes("view=work")) {
+      calls += 1;
+      return response({ ...owner, snapshotView: "work", snapshotVersion: 1, sequence: route(FULL, nth()).sequence, state: { room: { id: "commons" }, members: {}, workItems: {} } });
     }
     reads.push(url); calls += 1;
     // A fresh client's first read is the newest window; answer it from the same room the full read would show.
@@ -62,6 +70,7 @@ const history = ["m1", "m2", "m3", "m4", "m5"].map(message);
 test('activity headers negotiate without changing URLs and full audit ignores a late lean response', async t => {
   const seen = [], headers = []; let release;
   const client = new RoomClient({ events: null, auditView: 'activity', onSnapshot: value => seen.push(value), fetcher: async (url, options) => {
+    if (url.includes('view=work')) return response({ ...owner, snapshotView: 'work', snapshotVersion: 1, sequence: 9, state: { room: { id: 'commons' }, members: {}, workItems: {} } });
     headers.push(options.headers['X-Project-Room-Audit-View']);
     if (headers.length === 1) {
       await new Promise(resolve => { release = resolve; });
@@ -81,7 +90,8 @@ test('activity headers negotiate without changing URLs and full audit ignores a 
 test('a server ignoring activity negotiation remains usable and default clients request the full audit', async t => {
   for (const auditView of ['activity', 'full']) {
     let header; const seen = [];
-    const client = new RoomClient({ events: null, auditView, onSnapshot: value => seen.push(value), fetcher: async (_url, options) => {
+    const client = new RoomClient({ events: null, auditView, onSnapshot: value => seen.push(value), fetcher: async (url, options) => {
+      if (url.includes('view=work')) return response({ ...full(1, [message('m1')]), snapshotView: 'work', snapshotVersion: 1, state: { room: { id: 'commons' }, members: {}, workItems: {} } });
       header = options.headers['X-Project-Room-Audit-View']; return response(full(1, [message('m1')]));
     } });
     client.session = identity(); t.after(() => client.disconnect()); await client.refresh();
@@ -96,7 +106,7 @@ test('a full Record read refuses a partial activity response instead of presenti
   } });
   client.session = identity(); t.after(() => client.disconnect());
   await client.refresh(); await assert.rejects(client.setAuditView('full'));
-  assert.equal(calls, 2); assert.equal(seen.length, 1);
+  assert.equal(calls, 3); assert.equal(seen.length, 1);
 });
 
 test("a new message on the stream re-reads only the newest messages and keeps older history", async t => {
@@ -115,20 +125,21 @@ test("a new message on the stream re-reads only the newest messages and keeps ol
   assert.equal(f.reads.at(-1), RECENT);
 });
 
-test("anything that can change an older message reads the full snapshot", async t => {
+test("anything that can change an older message re-reads the window and never the unbounded snapshot", async t => {
   for (const type of ["message.edited", "message.deleted", "message.redacted", "message.reaction_set", "member.removed", "some.future_event"]) {
     await t.test(type, async t => {
-      const f = fixture(t, url => url === FULL ? full(9, history) : assert.fail(`windowed read for ${type}`));
+      const f = fixture(t, url => url === FULL ? full(9, history) : url === RECENT ? recent(10, history.slice(-3), 2) : assert.fail(`unbounded read for ${type}`));
       await f.warm();
       f.connect(); await f.settle();
       const opened = f.reads.length;
       f.notify(hint(10, type, { messageId: "m1" })); await f.settle();
-      assert.deepEqual(f.reads.slice(opened), [FULL]);
+      assert.deepEqual(f.reads.slice(opened), [RECENT]);
+      assert.equal(f.reads.includes(FULL), false);
     });
   }
 });
 
-test("a window that does not line up with held history falls back to one full read", async t => {
+test("a window that does not line up with held history is not applied and does not fetch the unbounded snapshot", async t => {
   for (const [label, window] of [
     ["unknown first message", recent(10, [message("x"), message("m6")], 4)],
     ["omitted count disagrees", recent(10, [message("m4"), message("m5"), message("m6")], 2)],
@@ -139,9 +150,9 @@ test("a window that does not line up with held history falls back to one full re
       f.connect(); await f.settle();
       const opened = f.reads.length, applied = f.seen.length;
       f.notify(hint(10, "message.posted", { messageId: "m6" })); await f.settle();
-      assert.deepEqual(f.reads.slice(opened), [RECENT, FULL]);
-      assert.equal(f.seen.length, applied + 1, "the unaligned window is never shown");
-      assert.deepEqual(ids(f.seen.at(-1).state.messages), ["m1", "m2", "m3", "m4", "m5", "m6"]);
+      assert.deepEqual(f.reads.slice(opened), [RECENT, RECENT]);
+      assert.equal(f.reads.includes(FULL), false);
+      assert.equal(f.seen.length, applied, "the unaligned window is never shown");
     });
   }
 });
@@ -168,7 +179,7 @@ test("an edit receipt that arrives after a newer windowed read still reads the f
   assert.equal(f.client.sequence, 10);
   f.route.receipt = hint(9, "message.edited", { messageId: "m1" });
   await f.client.send({ id: "edit", type: "message.edited", data: { messageId: "m1", body: "edited" } });
-  assert.equal(f.reads.at(-1), FULL);
+  assert.equal(f.reads.includes(FULL), false);
   assert.equal(f.seen.at(-1).state.messages[0].body, "edited");
 });
 
@@ -195,7 +206,8 @@ test("a mutation that joins a windowed read in flight gets its own full read", a
   // The reaction (10) is older than the windowed read it joins.
   f.notify(hint(10, "message.reaction_set", { messageId: "m1" }));
   release(); await f.settle();
-  assert.deepEqual(f.reads.slice(opened), [RECENT, FULL]);
+  assert.deepEqual(f.reads.slice(opened), [RECENT]);
+  assert.equal(f.reads.includes(FULL), false);
 });
 
 test("a stream open or error re-reads with the recent window once history is held", async t => {
@@ -209,10 +221,10 @@ test("a stream open or error re-reads with the recent window once history is hel
     assert.deepEqual(f.reads.slice(before), [RECENT], type);
     assert.deepEqual(ids(f.seen.at(-1).state.messages), ["m1", "m2", "m3", "m4", "m5"], type);
   }
-  // A manual refresh still reads in full.
+  // A manual refresh re-reads the window. It does not download the unbounded room.
   const before = f.reads.length;
   await f.client.refresh();
-  assert.deepEqual(f.reads.slice(before), [FULL]);
+  assert.deepEqual(f.reads.slice(before), [RECENT]);
 });
 
 test("after a failed read, the retry is a cheap window and a quiet full fill follows", async t => {
@@ -228,36 +240,51 @@ test("after a failed read, the retry is a cheap window and a quiet full fill fol
   f.client.stream.dispatchEvent(new Event("open")); await f.settle();
   assert.deepEqual(f.reads.slice(before), [RECENT]);
   await new Promise(resolve => setTimeout(resolve, 400));
-  assert.deepEqual(f.reads.slice(before), [RECENT, FULL]);
+  assert.deepEqual(f.reads.slice(before), [RECENT]);
+  assert.equal(f.reads.includes(FULL), false);
   assert.equal(ids(f.seen.at(-1).state.messages).includes("m1"), true);
 });
 
 test("a failing background fill retries quietly and never changes the status", async t => {
-  let fail = false;
-  const f = fixture(t, url => { if (url === FULL && fail) throw new Error("offline"); return url === FULL ? full(9, history) : recent(9, [message("m4"), message("m5"), message("m6")], 3); });
+  let fail = false; const statuses = [];
+  const f = fixture(t, url => url === FULL ? full(9, history) : recent(9, [message("m4"), message("m5"), message("m6")], 3));
+  const previous = f.client.fetcher;
+  f.client.fetcher = async (url, options) => {
+    if (fail && url.includes("/conversation")) throw new Error("offline");
+    return previous(url, options);
+  };
+  f.client.onStatus = text => statuses.push(text);
   await f.client.refresh();
   fail = true;
   await new Promise(resolve => setTimeout(resolve, 400));
-  assert.equal(f.reads.filter(u => u === FULL).length >= 1, true);
+  assert.equal(f.reads.includes(FULL), false);
   assert.equal(f.client.heldMessages().partial, true);
   fail = false;
   await new Promise(resolve => setTimeout(resolve, 1400));
   assert.equal(f.client.heldMessages().partial, false);
+  assert.equal(statuses.length, 0);
 });
 
-test("a replaced stream resumes from the last full read, so an edit a window read passed is replayed", async t => {
+test("a replaced stream resumes from the completed history, so a newer window does not skip events", async t => {
   const urls = [];
   let stream, windows = 0;
   class Events extends EventTarget { constructor(url) { super(); urls.push(url); stream = this; this.readyState = 1; } close() {} }
-  const client = new RoomClient({ events: Events, onSnapshot: () => {}, fetcher: async url => response(url === FULL ? full(9, history)
-    : recent(++windows === 1 ? 9 : 12, [message("m4"), message("m5"), message("m6")], 3)) });
+  const client = new RoomClient({ events: Events, onSnapshot: () => {}, fetcher: async url => {
+    if (url.includes("view=work")) return response({ ...owner, snapshotView: "work", snapshotVersion: 1, sequence: 9, state: { room: { id: "commons" }, members: {}, workItems: {} } });
+    if (url.includes("/conversation")) {
+      const cursor = url.includes("cursor=");
+      const messages = cursor ? history.slice(0, 2) : [message("m3"), message("m4"), message("m5")];
+      return response({ ...owner, generatedAt: "2026-01-01T00:00:00.000Z", conversationVersion: 1, mode: "replace", limit: 100, messageId: null, channelId: null, checkpoint: null, sequence: 9, messages, nextCursor: cursor ? null : "older", hasMore: !cursor });
+    }
+    return response(recent(++windows === 1 ? 9 : 12, [message("m3"), message("m4"), message("m5")], 2));
+  } });
   client.session = identity();
   t.after(() => client.disconnect());
   await client.refresh(); await new Promise(resolve => setTimeout(resolve, 320)); client.connect();
   stream.dispatchEvent(new Event("open")); await client.flight?.promise;
   stream.readyState = 2; stream.dispatchEvent(new Event("error")); await new Promise(resolve => setImmediate(resolve)); await client.flight?.promise;
   await new Promise(resolve => setTimeout(resolve, 1500));
-  assert.match(urls.at(-1), /\/stream\?after=9(&|$)/, "resumes after the full read at 9, not the window read at 12");
+  assert.match(urls.at(-1), /\/stream\?after=9(&|$)/, "resumes after the completed history at 9, not the window read at 12");
 });
 
 test("a window that already holds the whole room counts as a full read: no fill, resume from its sequence", async t => {
@@ -269,7 +296,7 @@ test("a window that already holds the whole room counts as a full read: no fill,
   client.session = identity();
   t.after(() => client.disconnect());
   await client.refresh(); await new Promise(resolve => setTimeout(resolve, 400));
-  assert.deepEqual(reads, [RECENT], "no background fill for a room the window already covers");
+  assert.deepEqual(reads, [RECENT, "/api/rooms/commons?view=work"], "no background fill for a room the window already covers");
   client.connect();
   assert.match(urls.at(-1), /\/stream\?after=11(&|$)/, "the stream resumes after the window read, not from 0");
 });
@@ -279,24 +306,26 @@ test("a background fill refused with 401 ends access once, stops retrying and ne
   const refused = { ok: false, status: 401, json: async () => ({ error: { code: "invalid_session", message: "Sign in again" } }) };
   const client = new RoomClient({ onSnapshot: () => {}, onStatus: text => statuses.push(text), fetcher: async url => {
     reads.push(url);
+    if (url.includes("view=work")) return response({ ...owner, snapshotView: "work", snapshotVersion: 1, sequence: 9, state: { room: { id: "commons" }, members: {}, workItems: {} } });
     return url === RECENT ? response(recent(9, [message("m3"), message("m4"), message("m5")], 2)) : refused;
   } });
   client.session = identity();
   t.after(() => client.disconnect());
   await client.refresh();
   await new Promise(resolve => setTimeout(resolve, 1500));
-  assert.deepEqual(reads, [RECENT, "/api/rooms/commons/conversation?limit=100"], "one window read, one paged fill refused, no retries after a 401");
+  assert.deepEqual(reads, [RECENT, "/api/rooms/commons?view=work", "/api/rooms/commons/conversation?limit=100"], "one window read, the work view, one paged fill refused, no retries after a 401");
   assert.equal(client.session, null, "access ended");
   assert.equal(statuses.some(text => /Connection interrupted/.test(text)), false);
 });
 
-test("an edit that arrives while only the first window is held reads the full snapshot, not another window", async t => {
+test("an edit that arrives while only the first window is held reloads history from pages", async t => {
   const edited = history.map(item => item.id === "m1" ? { ...item, body: "edited" } : item);
   const f = fixture(t, url => url === FULL ? full(10, edited) : recent(10, [message("m3"), message("m4"), message("m5")], 2));
   await f.client.refresh(); // first window only: the 250ms fill has not run yet
   assert.equal(f.client.heldMessages().partial, true);
   await f.client.refresh(hint(10, "message.edited", { messageId: "m1" }));
-  assert.deepEqual(f.reads.slice(0, 2), [RECENT, FULL]);
+  assert.deepEqual(f.reads.slice(0, 2), [RECENT, RECENT]);
+  assert.equal(f.reads.includes(FULL), false);
   assert.equal(f.seen.at(-1).state.messages.find(item => item.id === "m1").body, "edited");
   assert.equal(f.client.heldMessages().partial, false);
 });
@@ -314,5 +343,6 @@ test("an aborted first window read reports the interruption, then the retry is w
   await assert.rejects(client.refresh(), /aborted/);
   assert.equal(client.heldMessages(), null, "nothing is held after the failed read");
   await client.refresh();
-  assert.deepEqual(reads, [RECENT, RECENT], "a client holding nothing asks for the window again");
+  assert.deepEqual(reads.filter(url => !url.includes("view=work")), [RECENT, RECENT], "a client holding nothing asks for the window again");
+  assert.equal(reads.includes(FULL), false);
 });

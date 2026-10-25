@@ -1092,6 +1092,28 @@ paths:
         '404': { description: Record unavailable }
         '409': { description: Stale state or changed retry input }
         '422': { description: Invalid fields }
+  /api/rooms/{roomId}/messages:
+    get:
+      summary: Read one page of visible messages older than a sequence
+      description: >-
+        Pages the same visible messages as the default room snapshot, oldest
+        first. `before` is a posting sequence: the page contains messages
+        whose sequence is strictly less than it. Omit `before` for the newest
+        page. `limit` defaults to 50 and cannot exceed 100. Hidden direct
+        messages are omitted. Each message is redacted the same way as a
+        snapshot message. `messagesPage.before` is the posting sequence of
+        the oldest message on this page (null when that message has no
+        sequence row) and `messagesPage.hasMore` says whether an older page
+        exists. This route does not return the room, members, or work items.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: before, in: query, schema: { type: integer, minimum: 0 }, description: Return messages posted strictly before this sequence }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+      responses:
+        '200': { description: messagesVersion 1 with roomId, sequence, messages, messagesPage, and the viewer binding }
+        '401': { description: Credential expired or revoked }
+        '403': { description: Current membership or rooms read scope required }
+        '422': { description: invalid_message_page }
   /api/rooms/{roomId}/conversation:
     get:
       summary: Read a bounded viewer-scoped conversation window
@@ -13802,12 +13824,22 @@ paths:
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
         session, or a signed-in account session with `?auth=account`.
-        `?messages=recent` (full view only, no other filters) returns the
-        full snapshot with only the newest 100 visible messages in
-        `state.messages` and a `messagesWindow` `{ mode: recent, limit,
-        omitted, older: conversation }`; the first
-        `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
-        so older history pages from its `nextCursor`.
+        The default read (no `view`, no `messages`) returns that snapshot
+        with only the newest 50 visible messages in `state.messages`, plus
+        `messagesPage` `{ before, hasMore }`. `before` is the posting
+        sequence of the oldest included message, or null when that message
+        has no sequence row. The next page is
+        `GET /api/rooms/{roomId}/messages?before=<before>&limit=50`.
+        `?messages=recent` (no other filters) keeps the newest 100 visible
+        messages and a `messagesWindow` `{ mode: recent, limit, omitted,
+        older: conversation }`, and also includes `messagesPage`. The first
+        `/api/rooms/{roomId}/conversation?limit=100` page is that same
+        recent window, so older history can also page from its `nextCursor`.
+        `?full=1` is the legacy unbounded document. It is served only when
+        the deployment sets `ROOM_SNAPSHOT_FULL_COMPAT=1`, and then the
+        response carries `Deprecation: true`. Otherwise it is
+        `422 invalid_snapshot_view`. It cannot be combined with `messages`
+        or `view`.
         The optional `x-project-room-audit-view: activity-v1` header on
         full/recent snapshots preserves decision/work/claim activity from
         the same audit tail while omitting other audit events (messages
@@ -13822,6 +13854,10 @@ paths:
         - name: messages
           in: query
           schema: { type: string, enum: [recent] }
+        - name: full
+          in: query
+          schema: { type: string, enum: ["1"] }
+          description: Legacy unbounded snapshot. Served only while ROOM_SNAPSHOT_FULL_COMPAT=1.
         - name: X-Project-Room-Audit-View
           in: header
           schema: { type: string, enum: [activity-v1] }

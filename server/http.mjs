@@ -5,6 +5,7 @@ import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
+import { SNAPSHOT_PAGE_MESSAGES, messageSeqs, messagesPageOf, noteFullSnapshotRead, readMessagePage } from "./message-page.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
@@ -324,6 +325,8 @@ const rateHash = value => createHash("sha256").update(String(value)).digest("hex
 const STREAM_DRAIN_GRACE_MS = 5000;
 // Messages a `?messages=recent` room snapshot carries (the /conversation page maximum).
 const SNAPSHOT_RECENT_MESSAGES = 100;
+// The default room document. A busy room's history stays on /messages.
+const snapshotFullCompat = () => process.env.ROOM_SNAPSHOT_FULL_COMPAT === "1";
 
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
@@ -3828,7 +3831,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|messages|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -4362,6 +4365,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return current;
           }, helpers: { json, reject, body } });
       }
+      if (route === "messages" && req.method === "GET") {
+        const params = url.searchParams;
+        if ([...params.keys()].some(key => !["before", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
+          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))
+          || params.has("before") && !/^(0|[1-9]\d*)$/.test(params.get("before"))) reject(422, "invalid_message_page", "Choose a page of at most 100 messages");
+        const limit = params.has("limit") ? Number(params.get("limit")) : SNAPSHOT_PAGE_MESSAGES;
+        if (limit > 100) reject(422, "invalid_message_page", "Choose a page of at most 100 messages");
+        return json(res, 200, readMessagePage(store, selected.token, roomId, {
+          limit, before: params.has("before") ? Number(params.get("before")) : null, expectedSessionBinding: fence
+        }));
+      }
+      if (route === "messages") reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
       if (route === "conversation" && req.method === "GET") {
         const params = url.searchParams;
         if ([...params.keys()].some(key => !["limit", "cursor", "since", "messageId", "channelId", "auth"].includes(key) || params.getAll(key).length !== 1)
@@ -4382,11 +4397,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
-        // `?messages=recent`: the full snapshot with only the newest
-        // SNAPSHOT_RECENT_MESSAGES visible messages. A busy room's full
-        // history (muse-room: 5,300+ messages, ~5 MB) no longer has to ship
-        // on every open; older history pages through /conversation.
+        // The default document is the newest SNAPSHOT_PAGE_MESSAGES visible
+        // messages plus messagesPage { before, hasMore }. Older pages are
+        // GET /messages?before=<seq>. `?messages=recent` stays the 100-message
+        // window. `?full=1` is the legacy unbounded document, and only while
+        // ROOM_SNAPSHOT_FULL_COMPAT=1.
         const recentMessages = params.has("messages");
+        const fullCompat = params.has("full");
+        if (fullCompat && (params.get("full") !== "1" || params.getAll("full").length !== 1 || recentMessages || params.has("view")
+          || [...params.keys()].some(key => !["full", "auth"].includes(key)))) {
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        }
+        if (fullCompat && !snapshotFullCompat()) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         if (recentMessages && (params.has("view") || params.get("messages") !== "recent"
           || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
@@ -4402,7 +4424,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const snapshotView = params.has("view") ? "work" : "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
+        const messageLimit = snapshotView === "work" || fullCompat ? null
+          : recentMessages ? SNAPSHOT_RECENT_MESSAGES : SNAPSHOT_PAGE_MESSAGES;
+        if (fullCompat) {
+          noteFullSnapshotRead();
+          res.setHeader("Deprecation", "true");
+        }
+        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", messageLimit);
         if (snapshotView === "work") delete snapshot.state.agentHalts;
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
@@ -4413,15 +4441,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // existence. The work view carries none of these.
           const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
           const visibleIds = new Set(visibleMessages.map(message => message.id));
-          // The recent window trims after DM filtering, so hidden DMs never
-          // count toward it; pins still follow every visible message.
-          const windowed = recentMessages ? visibleMessages.slice(-SNAPSHOT_RECENT_MESSAGES) : visibleMessages;
+          // The window trims after DM filtering, so hidden DMs never count
+          // toward it; pins still follow every visible message.
+          const windowed = messageLimit !== null ? visibleMessages.slice(-messageLimit) : visibleMessages;
           const nextState = { ...snapshot.state,
             messages: windowed,
             eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
-            pins: recentMessages ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
+            pins: messageLimit !== null ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
           if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
           snapshot.state = redactSnapshotState(nextState);
+          if (messageLimit !== null) {
+            const omitted = snapshot.messagesWindow?.omitted ?? 0;
+            snapshot.messagesPage = messagesPageOf(windowed, messageSeqs(store.db, roomId, windowed[0] ? [windowed[0].id] : []), omitted > 0);
+          }
         }
         return json(res, 200, snapshot);
       }

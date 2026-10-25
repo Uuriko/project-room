@@ -10,7 +10,8 @@
 //
 // The load path is covered too: after a windowed first read, history is
 // paged in over /conversation and merged only when the segment provably
-// continues the window; otherwise the legacy full fill runs.
+// continues the window. A page that does not join leaves the window held.
+// Opening also reads the work view. The unbounded room document is never requested.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -22,7 +23,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
-const FULL = "/api/rooms/commons", RECENT = "/api/rooms/commons?messages=recent";
+const FULL = "/api/rooms/commons", RECENT = "/api/rooms/commons?messages=recent", WORK = "/api/rooms/commons?view=work";
 const response = body => ({ ok: true, status: 200, json: async () => body });
 const owner = { roomId: "commons", cursor: 0, viewerId: "human", viewerAccountId: "account-human", viewerAuthEpoch: 0, viewerSessionBinding: "session-human" };
 const identity = () => ({ account: { id: "account-human", authEpoch: 0 }, member: { id: "human" }, roomId: "commons", csrf: "c", sessionBinding: "session-human" });
@@ -154,11 +155,12 @@ test("a sequence gap falls back to a read and self-heals (the missed delta is no
 
 test("an unknown event type keeps the refetch fallback", async t => {
   let seq = 9;
-  const f = fixture(t, { read: () => full(seq, history()), page: () => assert.fail("no paging") });
+  const f = fixture(t, { read: () => full(seq, history()), page: () => page(seq, history(), null) });
   await f.warm();
   seq = 10;
   f.notify(receipt(10, envelope("message.reaction_set", 10, { messageId: "m1", emoji: "x", action: "add" }))); await f.settle();
-  assert.deepEqual(f.reads, [FULL]);
+  assert.deepEqual(f.reads, [RECENT], "the fallback is the newest window, not the unbounded snapshot");
+  assert.ok(f.pages.length >= 1, "older history is rebuilt from pages");
   assert.equal(f.client.deltaStats.applied, 0);
   assert.equal(f.client.deltaStats.fallback, 0, "non-covered types are the design's fallback, not a delta failure");
 });
@@ -192,7 +194,7 @@ test("my own send() receipt applies as a delta — no read after posting", async
 test("the background fill pages history over /conversation instead of one full read", async t => {
   const all = history();
   const f = fixture(t, {
-    read: url => url === RECENT ? recent(9, all.slice(-3), 2) : assert.fail("the paged fill must not read a full snapshot"),
+    read: url => url === RECENT || url === WORK ? recent(9, all.slice(-3), 2) : assert.fail("the paged fill must not read a full snapshot"),
     page: url => url.includes("cursor=c1") ? page(9, all.slice(0, 2), null) : page(9, all, "c1")
   });
   await f.client.refresh(); // windowed first read: m3..m5 held, m1..m2 owed
@@ -202,27 +204,32 @@ test("the background fill pages history over /conversation instead of one full r
   assert.equal(held.partial, false);
   assert.deepEqual(held.messages.map(message => message.id), ["m1", "m2", "m3", "m4", "m5"]);
   assert.equal(f.pages.length, 2, "anchor page plus one older page");
-  assert.deepEqual(f.reads, [RECENT], "no full snapshot read at any point");
+  assert.deepEqual(f.reads, [RECENT, WORK], "the open is the window plus the work view, never the unbounded snapshot");
   assert.deepEqual(f.seen.at(-1).state.messages.map(message => message.id), ["m1", "m2", "m3", "m4", "m5"], "the app was handed the completed history");
 });
 
-test("a paged fill that cannot prove the segment falls back to the legacy full read", async t => {
+test("a paged fill that cannot prove the segment leaves the window held", async t => {
   const all = history();
   const f = fixture(t, {
-    read: url => url === RECENT ? recent(9, all.slice(-3), 2) : full(9, all),
+    read: url => url === RECENT || url === WORK ? recent(9, all.slice(-3), 2) : full(9, all),
     page: url => url.includes("cursor=c1") ? page(9, all.slice(0, 1), null) : page(9, all, "c1") // one older message short
   });
   await f.client.refresh();
   await new Promise(resolve => setTimeout(resolve, 400));
   const held = f.client.heldMessages();
-  assert.equal(held.partial, false);
-  assert.deepEqual(held.messages.map(message => message.id), ["m1", "m2", "m3", "m4", "m5"]);
-  assert.deepEqual(f.reads, [RECENT, FULL], "the short segment was rejected and the full read completed history");
+  assert.equal(held.partial, true, "a short page does not complete history");
+  assert.deepEqual(held.messages.map(message => message.id), ["m3", "m4", "m5"]);
+  assert.equal(f.reads.includes(FULL), false, "the unbounded snapshot is not the repair");
+  assert.deepEqual(f.reads, [RECENT, WORK]);
 });
 
 test("the liveness probe ends access when the credential dies under live deltas", async t => {
   const dead = Object.assign(new Error("Session or key expired or revoked"), { status: 401, code: "unauthenticated" });
-  const f = fixture(t, { read: url => { if (url.includes("view=work")) throw dead; return full(9, history()); }, page: () => assert.fail("no paging") });
+  let probes = 0;
+  const f = fixture(t, { read: url => {
+    if (url.includes("view=work") && probes++ > 0) throw dead;
+    return full(9, history());
+  }, page: () => assert.fail("no paging") });
   f.client.livenessInterval = 40;
   await f.warm();
   // A covered event applies as a delta: no read happens, so without the
