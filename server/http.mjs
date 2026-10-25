@@ -117,7 +117,7 @@ import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planA
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
-  GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
+  frontDoorHtml, GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
@@ -2366,8 +2366,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        // The front door keeps the GitHub anchor in source. Omit it from the
+        // served bytes unless this server was given a GitHub auth config.
+        const payload = path === "index.html"
+          ? Buffer.from(frontDoorHtml(data, { githubConfigured: Boolean(githubAuth) }))
+          : data;
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
-        return res.end(req.method === "HEAD" ? undefined : data);
+        return res.end(req.method === "HEAD" ? undefined : payload);
         }
       }
       if (url.pathname === "/api/account-rooms" && req.method === "GET") {
