@@ -38,10 +38,11 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
   let serial = 0;
   let resolvedFor = null;
   let subscribed = false;
-  let lastPrefs = { mention: true, dm: true };
+  let lastPrefs = { mention: true, dm: true, decision: true };
   const prefBox = prefs?.box ?? null;
   const prefMention = prefs?.mention ?? null;
   const prefDm = prefs?.dm ?? null;
+  const prefDecision = prefs?.decision ?? null;
 
   const hide = () => {
     button.hidden = true;
@@ -64,7 +65,8 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
   };
   const prefsFrom = values => ({
     mention: values?.mention !== false,
-    dm: values?.dm !== false
+    dm: values?.dm !== false,
+    decision: values?.decision !== false
   });
   const showPrefs = values => {
     if (!prefBox || !prefMention || !prefDm) return;
@@ -74,6 +76,10 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
     prefDm.checked = current.dm;
     prefMention.disabled = false;
     prefDm.disabled = false;
+    if (prefDecision) {
+      prefDecision.checked = current.decision;
+      prefDecision.disabled = false;
+    }
     prefBox.hidden = false;
   };
   const flashNote = text => {
@@ -141,7 +147,9 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
     const ticket = ++serial;
     prefMention.disabled = true;
     prefDm.disabled = true;
+    if (prefDecision) prefDecision.disabled = true;
     const values = { mention: prefMention.checked, dm: prefDm.checked };
+    if (prefDecision) values.decision = prefDecision.checked;
     try {
       const result = await client.saveHumanPushPreferences(values);
       if (ticket !== serial || !eligible()) return;
@@ -155,12 +163,16 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
         flashNote(uiText("push.copy.013"));
       }
     } finally {
-      if (ticket === serial) { prefMention.disabled = false; prefDm.disabled = false; }
+      if (ticket === serial) {
+        prefMention.disabled = false; prefDm.disabled = false;
+        if (prefDecision) prefDecision.disabled = false;
+      }
     }
   }
 
   if (prefMention) prefMention.addEventListener("change", savePrefs);
   if (prefDm) prefDm.addEventListener("change", savePrefs);
+  if (prefDecision) prefDecision.addEventListener("change", savePrefs);
 
   button.addEventListener("click", async () => {
     const ticket = serial;

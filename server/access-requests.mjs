@@ -389,6 +389,33 @@ export class AccessRequests {
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    // Decision push class (charter B-3 step 3, E63): a filed ask wakes
+    // its deciders in the browser — the owner and manage_members humans,
+    // the same audience the notification feed gives access_request
+    // items. Counts only; the ask's content stays in the room. The push
+    // is confirmed against the request row at send time, so a rolled
+    // back filing never fires it. Best-effort by contract: notifyDecision
+    // never throws, and a push problem never fails the request.
+    try {
+      const push = this.store.humanPush;
+      if (push) {
+        const pending = this.db.prepare(
+          "SELECT COUNT(*) AS n FROM access_requests WHERE room_id=? AND status IN ('pending','pending_upgrade')"
+        ).get(roomId)?.n ?? 1;
+        const ownerId = state?.room?.ownerId;
+        for (const [memberId, member] of Object.entries(state?.members ?? {})) {
+          if (!member || member.kind !== "human" || member.active === false) continue;
+          if (memberId !== ownerId && !(member.permissions ?? []).includes("manage_members")) continue;
+          push.notifyDecision({
+            roomId, state, memberId, count: pending,
+            confirm: () => {
+              const row = this.db.prepare("SELECT status FROM access_requests WHERE request_id=?").get(requestId);
+              return row?.status === "pending" || row?.status === "pending_upgrade";
+            }
+          });
+        }
+      }
+    } catch { /* the push path never fails the request */ }
   }
 
   // The durable row distinguishes upgrades from legacy admission requests,
