@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // ACT-1a: Room Guide, a deterministic demo agent. No LLM calls.
 // After the first real agent is assigned, Guide does nothing here.
 // ACT-4 owns later nudges. If JOBS lands server/jobs.mjs, register room-guide
@@ -70,8 +71,8 @@ function choiceClaims(registry, roomId) {
   return registry.list(roomId).filter(item => (item.tags ?? []).includes("starter-choice"));
 }
 
-function pickedChoice(state, choices) {
-  for (const message of state.messages ?? []) {
+function pickedChoice(messages, choices) {
+  for (const message of messages) {
     if (!message || message.authorId === ROOM_GUIDE_ID || message.kind === "receipt_card") continue;
     if (typeof message.body !== "string") continue;
     const text = message.body.trim();
@@ -108,7 +109,7 @@ function step(store, roomId, now) {
   const registry = store.workClaims;
   if (!registry) return null;
   const welcome = welcomeId(roomId);
-  if (!state.messages?.some(message => message.id === welcome)) {
+  if (!messageRepository(store, roomId, state).get(welcome)) {
     const choices = choiceClaims(registry, roomId);
     appendRoomEvent(store, roomId, {
       id: welcome,
@@ -129,7 +130,7 @@ function step(store, roomId, now) {
   }
   const starter = registry.get(roomId, STARTER_CLAIM_ID);
   const choices = choiceClaims(registry, roomId);
-  const choice = pickedChoice(store.room(roomId).state, choices);
+  const choice = pickedChoice(messageRepository(store, roomId).records(), choices);
   if (choice && starter && starter.owner === ROOM_GUIDE_ID && starter.state !== "done") {
     let item = starter;
     if (item.state === "claimed") {
@@ -151,7 +152,7 @@ function step(store, roomId, now) {
     const chosen = choiceId ? registry.get(roomId, choiceId) : null;
     if (!agent || !chosen) return null;
     const messageId = stableEventId("ga", `${roomId}\0${agent.id}`);
-    if (store.room(roomId).state.messages?.some(message => message.id === messageId)) return null;
+    if (messageRepository(store, roomId).get(messageId)) return null;
     if (chosen.state === "unclaimed") {
       commitClaim(store, roomId, claimWork(chosen, agent.id, { leaseHours: null, now, note: "Assigned by Room Guide" }), "claimed", ROOM_GUIDE_ID, now);
     } else if (chosen.owner !== agent.id || chosen.state === "done" || chosen.state === "closed") {

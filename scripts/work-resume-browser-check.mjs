@@ -5,6 +5,7 @@ import { rmSync } from 'node:fs';
 import { chromium } from 'playwright';
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
+import { contrastRatio } from '../src/design-tokens.js';
 import { EVENT_TYPES as T } from '../src/events.js';
 import { signInFixture } from './auth-signin.mjs';
 
@@ -18,7 +19,10 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   });
   const send = (type, data) => f.store.command(f.keys.producer, 'commons', { id: crypto.randomUUID(), type, data });
   send(T.WORK_ACCEPTED, { workItemId: 'test-handoff', expectedRevision: 0 });
-  send(T.WORK_HANDOFF_RECORDED, { workItemId: 'test-handoff', expectedRevision: 1,
+  send(T.SESSION_STARTED, { workItemId: 'test-handoff', expectedRevision: 1 });
+  send(T.SESSION_STOPPED, { workItemId: 'test-handoff', expectedRevision: 2, status: 'failed' });
+  send(T.WORK_ACCEPTED, { workItemId: 'test-handoff', expectedRevision: 3 });
+  send(T.WORK_HANDOFF_RECORDED, { workItemId: 'test-handoff', expectedRevision: 4,
     doneSummary: 'Parser built; escaped separators still need testing.', nextAction: 'Check escaped separators.', limitReason: '<script>window.handoffExecuted=true</script>Session ended.' });
   const before = f.store.snapshot(f.keys.owner, 'commons');
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -28,16 +32,28 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   await context.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
   const page = await context.newPage(); page.setDefaultTimeout(12000);
   const errors = []; page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(theme => localStorage.setItem('project-room-theme', theme), mobile ? 'light' : 'dark');
   await page.goto(origin); await signInFixture(page, f.keys.owner);
   const card = page.locator('[data-work-record-id="test-handoff"]');
   const handoff = card.locator('[data-work-handoff]'); await handoff.waitFor({ state: 'visible' });
   assert.match(await handoff.innerText(), /Check escaped separators/);
-  assert.equal(await handoff.getByRole("link", { name: "Open discussion" }).count(), 1);
+  assert.equal(await card.getByRole("link", { name: "From this conversation" }).count(), 1);
+  assert.equal(await card.getByRole("link", { name: "From this conversation" }).isVisible(), true, "source conversation is available without opening Details");
+  const colors = await handoff.evaluate(node => ({ background: getComputedStyle(node).backgroundColor,
+    foregrounds: ['summary', 'strong', 'p'].map(selector => getComputedStyle(node.querySelector(selector)).color) }));
+  const hex = color => '#' + color.match(/\d+/g).slice(0, 3).map(value => Number(value).toString(16).padStart(2, '0')).join('');
+  for (const color of colors.foregrounds) assert.ok(contrastRatio(hex(color), hex(colors.background)) >= 4.5, 'handoff text meets AA in the selected theme');
+  await card.screenshot({ path: `/tmp/project-room-focused-card-${mobile ? 'phone' : 'desktop'}.png` });
   await handoff.scrollIntoViewIfNeeded();
   await page.screenshot({ path: `/tmp/project-room-resume-${mobile ? 'phone' : 'desktop'}.png`, fullPage: true });
   assert.equal(await handoff.getByText('Session ended.', { exact: false }).isVisible(), false);
   await handoff.getByText('Why work paused', { exact: true }).click();
   assert.equal(await page.evaluate(() => window.handoffExecuted), undefined);
+  await card.getByRole('button', { name: 'Continue with saved context' }).click();
+  assert.equal(await page.locator('#portable-progress').isChecked(), true);
+  assert.match(await page.locator('#packet-preview').inputValue(), /Parser built/);
+  assert.equal((await page.locator('#packet-preview').inputValue()).includes('Please prepare an agenda'), false);
+  await page.locator('#portable-close').click();
   await card.locator('details.work-details > summary').click();
   await card.getByRole('button', { name: 'Use my AI', exact: true }).click();
   const preview = page.locator('#packet-preview');
@@ -58,6 +74,14 @@ for (const mobile of [false, true]) test(`resume handoff ${mobile ? 'phone' : 'd
   assert.deepEqual(f.store.snapshot(f.keys.owner, 'commons').state.workItems, before.state.workItems);
   assert.deepEqual(errors, []);
   // A subsequent real transition closes the handoff; its urgent card disappears.
-  send(T.WORK_STARTED, { workItemId: 'test-handoff', expectedRevision: 2 });
+  send(T.WORK_STARTED, { workItemId: 'test-handoff', expectedRevision: 5 });
   await handoff.waitFor({ state: 'detached' });
+  send(T.WORK_BLOCKED, { workItemId: 'test-handoff', expectedRevision: 6, reason: 'Need the agreed input format', nextAction: 'Confirm the format' });
+  if (await card.locator('.work-details').evaluate(node => node.open)) await card.locator('.work-details > summary').click();
+  await card.getByText('Need the agreed input format', { exact: true }).waitFor({ state: 'visible' });
+  assert.equal(await card.getByText('Need the agreed input format', { exact: true }).count(), 1);
+  await page.locator('#message-input').fill('Keep my follow-up while finding the request');
+  await card.getByRole('link', { name: 'From this conversation' }).click();
+  await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, before.state.workItems['test-handoff'].sourceMessageId);
+  assert.equal(await page.locator('#message-input').inputValue(), 'Keep my follow-up while finding the request');
 });
