@@ -409,13 +409,36 @@ const client = new RoomClient({
   lazyHistory: true,
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
+  onOptimistic(command) {
+    const data = command?.data;
+    const authorId = session?.member?.id;
+    if (!state || !authorId || !state.members?.[authorId] || typeof data?.body !== "string" || !data.body) return;
+    const id = typeof data.messageId === "string" ? data.messageId : command.id;
+    if (state.messages.some(message => message.id === id)) return;
+    state = { ...state, messages: [...state.messages, {
+      id, authorId, body: data.body, createdAt: new Date().toISOString(),
+      replyToId: data.replyToId ?? null, toMemberId: data.toMemberId ?? null,
+      channelId: data.channelId || activeChannelId, pendingSend: true
+    }] };
+    render();
+  },
+  onSendSettled({ command, ok, maybeSaved }) {
+    if (!state || ok) return;
+    const id = command?.data?.messageId || command?.id;
+    state = maybeSaved
+      ? { ...state, messages: state.messages.map(message => message.pendingSend && message.id === id ? { ...message, pendingSend: "maybe" } : message) }
+      : { ...state, messages: state.messages.filter(message => !(message.pendingSend && message.id === id)) };
+    render();
+  },
   onSnapshot(snapshot, identity) {
     snapshotAuditView = snapshot.auditView ?? "full";
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
     if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
-    state = snapshot.state; session = identity;
+    const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
+    state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
+    session = identity;
     displayNames = createMemberDisplayNames(state.members);
     announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary);
     void refreshRequestRuns();
@@ -2781,7 +2804,7 @@ function renderSearch(now = Date.now()) {
   if (!active) searchCollapsed = false;
   $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const loadingOlder = client.loadHistory(); // search covers the whole room, not just the held window
+  const loadingOlder = false; // the first page is the held window; older pages load on scroll
   const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;

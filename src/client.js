@@ -7,6 +7,7 @@ import { validateCharterRead } from "./room-charter.js";
 import { DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { BOND_REFUSAL_CODES } from "./friend-bond.js";
 import { humanErrorMessage } from "./error-copy.js";
+import { requestFailureMessage } from "./share-links.js";
 
 // C2: the read-only "what this agent can access" preview must describe exactly the
 // selected work the browser asked about and repeat the server's own omission list;
@@ -110,10 +111,12 @@ function firstWindow(read) {
 // Single source for the connected status line; app.js matches this exact text.
 const CONNECTED_STATUS = "Connected to room service · no peer read or processing receipt";
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {} } = {}) {
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
     if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
     this.auditView = auditView;
-    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange });
+    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange, onOptimistic, onSendSettled });
+    this.getFlights = new Map();
+    this.paging = false;
     this.session = null;
     this.sequence = 0;
     this.generation = 0;
@@ -148,7 +151,27 @@ export class RoomClient {
     if (hadSession) this.onAccessEnded();
     return this;
   }
-  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
+  async request(path, options = {}) {
+    const method = options.method ?? "GET";
+    if (method !== "GET" || options.fresh === true) return this.performRequest(path, options);
+    const key = [path, options.authMode ?? this.session?.authMode ?? "", options.offerContext ? "1" : "", options.auditView ?? "", options.authSession?.sessionBinding ?? this.session?.sessionBinding ?? ""].join("\n");
+    const pending = this.getFlights.get(key);
+    if (pending) return pending;
+    const run = this.performRequest(path, options);
+    this.getFlights.set(key, run);
+    // finally() returns its own promise. Swallow that one so a failed read
+    // still rejects for the caller without an unhandled rejection beside it.
+    const tracked = run.finally(() => { if (this.getFlights.get(key) === run) this.getFlights.delete(key); });
+    void tracked.catch(() => {});
+    return run;
+  }
+  unconfirmed(status) {
+    const error = new Error(requestFailureMessage(new SyntaxError("html")));
+    error.code = "unconfirmed";
+    error.status = status;
+    return error;
+  }
+  async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
@@ -158,7 +181,17 @@ export class RoomClient {
           ...(auditView === "activity" ? { "X-Project-Room-Audit-View": "activity-v1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-      const body = await response.json();
+      const type = response.headers?.get?.("content-type") ?? "";
+      if (type && !/json/i.test(type)) {
+        if (typeof response.text === "function") await response.text().catch(() => {});
+        throw this.unconfirmed(response.status);
+      }
+      let body;
+      try { body = await response.json(); }
+      catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw this.unconfirmed(response.status);
+      }
       if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; throw error; }
       return body;
     } finally { clearTimeout(timer); }
@@ -323,6 +356,7 @@ export class RoomClient {
     this.flight = flight;
     flight.promise = (async () => {
       try {
+        if (typeof indexedDB !== "undefined" && !this.heldMessages() && this.sequence === 0) await this.paintBoot();
         let covered = held?.fullSequence ?? 0;
         do {
           const session = this.session, holding = this.heldMessages();
@@ -330,7 +364,7 @@ export class RoomClient {
           const full = flight.again || flight.fullNow || flight.fullSequence > covered;
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
           const auditView = this.auditView;
-          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView });
+          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView, fresh: true });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
           this.lastReadAt = Date.now();
@@ -339,7 +373,11 @@ export class RoomClient {
           if (read.auditView !== undefined && (read.auditView !== "activity" || read.auditVersion !== 1 || auditView !== "activity"))
             throw new Error(uiText("record.invalidView"));
           // A server without the recent view ignores the parameter and answers in full.
-          const whole = full || !Object.hasOwn(read, "messagesWindow");
+          // A window on the unqueried path means the unbounded document is retired:
+          // hold the window and do not ask for it again.
+          const bounded = Object.hasOwn(read, "messagesWindow");
+          const whole = !bounded;
+          const stopFill = Boolean(full && bounded);
           if (!whole && read.messagesWindow?.mode === "recent" && Number.isSafeInteger(read.messagesWindow.omitted)) this.windowOmitted = read.messagesWindow.omitted;
           let snapshot, partial = false, complete = whole;
           if (whole) snapshot = read;
@@ -355,7 +393,8 @@ export class RoomClient {
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
-              partial, owesFull: !complete && (partial || Boolean(holding?.owesFull)) };
+              partial, owesFull: stopFill ? false : (!complete && (partial || Boolean(holding?.owesFull))) };
+            void this.rememberBoot(snapshot);
             this.live = { generation, session, snapshot };
             this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
             this.onSnapshot(snapshot, this.session);
@@ -386,13 +425,25 @@ export class RoomClient {
   // True while a lazy client holds only the newest window of the room.
   get owesHistory() {
     const held = this.heldMessages();
-    return Boolean(held?.partial && held.owesFull);
+    if (!held?.partial) return false;
+    if (held.owesFull) return true;
+    return Boolean(this.live?.snapshot?.messagesPage?.hasMore);
   }
   // Ask for older history now (a reader gesture). Returns whether a fill was
   // owed; repeated calls while one runs are no-ops.
   loadHistory() {
     if (!this.owesHistory) return false;
     this.historyWanted = true;
+    const held = this.heldMessages();
+    if (held?.partial && !held.owesFull && this.live?.snapshot?.messagesPage?.hasMore) {
+      if (!this.paging) {
+        this.paging = true;
+        this.pageOlder().catch(error => {
+          if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") this.handleFailure(error);
+        }).finally(() => { this.paging = false; });
+      }
+      return true;
+    }
     if (!this.flight) this.scheduleFill(0);
     return true;
   }
@@ -457,7 +508,7 @@ export class RoomClient {
     if (!session) return;
     if (session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
     try {
-      const read = await this.request(this.path("?view=work"));
+      const read = await this.request(this.path("?view=work"), { fresh: true });
       if (generation !== this.generation || this.session !== session) return;
       if (!this.ownsResponse(read, session)) { this.endAccess(); return; }
       this.lastReadAt = Date.now();
@@ -578,11 +629,97 @@ export class RoomClient {
     this.onSnapshot(snapshot, this.session);
     return true;
   }
+  async pageOlder() {
+    const generation = this.generation, session = this.session;
+    const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
+    let before = anchored()?.snapshot?.messagesPage?.before;
+    const held0 = this.heldMessages();
+    if (!held0?.partial || !Number.isSafeInteger(before)) return false;
+    let older = [], more = false;
+    const seen = new Set(held0.messages.map(message => message.id));
+    for (let pageIndex = 0; pageIndex < 40; pageIndex++) {
+      const page = await this.request(this.path(`/messages?before=${before}&limit=100`), { fresh: true });
+      if (generation !== this.generation || this.session !== session) return false;
+      if (!this.ownsResponse(page, session)) { this.endAccess(); throw new Error(uiText("error.connection_changed")); }
+      const batch = [];
+      for (const message of page.messages ?? []) if (message?.id && !seen.has(message.id)) { seen.add(message.id); batch.push(message); }
+      older = [...batch, ...older];
+      const next = page.messagesPage?.before;
+      more = Boolean(page.messagesPage?.hasMore);
+      if (!more || !Number.isSafeInteger(next) || next === before) {
+        if (Number.isSafeInteger(next)) before = next;
+        more = false;
+        break;
+      }
+      before = next;
+    }
+    const heldNow = this.heldMessages(), live = anchored();
+    if (!heldNow || !live) return false;
+    const messages = [...older, ...heldNow.messages];
+    const snapshot = { ...live.snapshot, state: { ...live.snapshot.state, messages }, messagesPage: { ...(live.snapshot.messagesPage ?? {}), before, hasMore: more } };
+    this.held = { ...heldNow, messages: messages.slice(), partial: more, owesFull: false, fullSequence: live.snapshot.sequence };
+    this.live = { generation, session, snapshot };
+    this.onSnapshot(snapshot, session);
+    return true;
+  }
+  async bootstrap() {
+    return this.request(this.path("/bootstrap"), { fresh: true });
+  }
+  async paintBoot() {
+    if (typeof indexedDB === "undefined" || !this.session) return;
+    try {
+      const cached = await readBootSnapshot(this.session.roomId);
+      if (!cached || cached.viewerId !== this.session.member?.id) return;
+      if (this.sequence !== 0 || this.heldMessages()) return;
+      this.onSnapshot(cached, this.session);
+    } catch { /* a missing warm snapshot still loads from the network */ }
+  }
+  async rememberBoot(snapshot) {
+    if (typeof indexedDB === "undefined" || !this.session || !snapshot || snapshot.viewerId !== this.session.member?.id) return;
+    try { await writeBootSnapshot(this.session.roomId, snapshot); } catch { /* the network snapshot already painted */ }
+  }
+  outboxKey() { return `room-outbox:${this.session?.roomId ?? ""}`; }
+  storageArea() {
+    try { return globalThis.localStorage ?? null; } catch { return null; }
+  }
+  rememberOutbox(command) {
+    const store = this.storageArea();
+    if (!store || !this.session?.roomId || !command?.id) return;
+    let items = [];
+    try { items = JSON.parse(store.getItem(this.outboxKey()) || "[]"); } catch { items = []; }
+    if (!Array.isArray(items)) items = [];
+    items = [...items.filter(item => item?.id !== command.id), { id: command.id, command }];
+    try { store.setItem(this.outboxKey(), JSON.stringify(items.slice(-20))); } catch { /* private mode keeps the optimistic row only */ }
+  }
+  forgetOutbox(command) {
+    const store = this.storageArea();
+    if (!store || !this.session?.roomId) return;
+    let items = [];
+    try { items = JSON.parse(store.getItem(this.outboxKey()) || "[]"); } catch { return; }
+    if (!Array.isArray(items)) return;
+    try { store.setItem(this.outboxKey(), JSON.stringify(items.filter(item => item?.id !== command?.id))); } catch { /* private mode */ }
+  }
+  outbox() {
+    const store = this.storageArea();
+    if (!store || !this.session?.roomId) return [];
+    try {
+      const items = JSON.parse(store.getItem(this.outboxKey()) || "[]");
+      return Array.isArray(items) ? items : [];
+    } catch { return []; }
+  }
   async send(command) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before sending"); }
     const generation = this.generation;
+    const durable = command?.type === "message.posted" || command?.type === "dm.posted";
+    if (durable) {
+      this.rememberOutbox(command);
+      if (typeof this.onOptimistic === "function") this.onOptimistic(command);
+    }
+    const settle = (ok, maybeSaved) => { if (typeof this.onSendSettled === "function") this.onSendSettled({ command, ok, maybeSaved }); };
     try {
       const receipt = await this.request(this.path("/commands"), { method: "POST", data: command });
+      if (durable) this.forgetOutbox(command);
+      settle(true, false);
       // A committed receipt remains a success even when the subsequent snapshot fetch fails.
       if (generation === this.generation && this.session) {
         if (!this.ownsAccountSession()) this.endAccess();
@@ -592,6 +729,10 @@ export class RoomClient {
       }
       return receipt;
     } catch (error) {
+      const unconfirmed = error?.code === "unconfirmed" || error?.name === "AbortError";
+      if (durable && unconfirmed) error.maybeSaved = true;
+      else if (durable) this.forgetOutbox(command);
+      settle(false, Boolean(error.maybeSaved));
       if (generation === this.generation) {
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) this.endAccess();
         // Gate refusals are 403s but the session is still valid — ending
@@ -1069,6 +1210,30 @@ export class RoomClient {
     this.stream?.close(); this.stream = null;
   }
   endAccess() { this.disconnect(); this.session = null; this.sequence = 0; this.accountOwnership = null; this.onAccessEnded(); }
+}
+
+function openBootDb() {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open("room-boot", 1);
+    open.onupgradeneeded = () => { if (!open.result.objectStoreNames.contains("snapshots")) open.result.createObjectStore("snapshots"); };
+    open.onsuccess = () => resolve(open.result);
+    open.onerror = () => reject(open.error);
+  });
+}
+function readBootSnapshot(roomId) {
+  return openBootDb().then(db => new Promise((resolve, reject) => {
+    const request = db.transaction("snapshots", "readonly").objectStore("snapshots").get(roomId);
+    request.onsuccess = () => resolve(request.result ?? null);
+    request.onerror = () => reject(request.error);
+  }));
+}
+function writeBootSnapshot(roomId, snapshot) {
+  return openBootDb().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction("snapshots", "readwrite");
+    tx.objectStore("snapshots").put(snapshot, roomId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
 }
 
 // The explicit name documents the legacy room-key session transport while RoomClient

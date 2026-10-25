@@ -13807,18 +13807,21 @@ paths:
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
         session, or a signed-in account session with `?auth=account`.
-        `?messages=recent` (full view only, no other filters) returns the
-        full snapshot with only the newest 100 visible messages in
-        `state.messages` and a `messagesWindow` `{ mode: recent, limit,
-        omitted, older: conversation }`; the first
-        `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
-        so older history pages from its `nextCursor`.
+        The default full-view read and `?messages=recent` (no other filters)
+        are the same window: the newest 100 visible messages that fit the
+        byte budget, in `state.messages`, plus `messagesWindow`
+        `{ mode: recent, limit, omitted, older: conversation }` and
+        `messagesPage` `{ before, hasMore }`. Older messages are
+        `GET /api/rooms/{roomId}/messages?before={messagesPage.before}`.
+        `?full=1` is the retired unbounded document. It is refused unless
+        the server runs with `ROOM_SNAPSHOT_FULL_COMPAT=1`, and then the
+        response sets `Deprecation: true`.
         The optional `x-project-room-audit-view: activity-v1` header on
-        full/recent snapshots preserves decision/work/claim activity from
-        the same audit tail while omitting other audit events (messages
-        still appear in the projection). The response declares
+        the window preserves decision/work/claim activity from the same
+        audit tail while omitting other audit events (messages still
+        appear in the projection). The response declares
         `auditView: activity` and `auditVersion: 1`. Omit the header for
-        the complete default audit tail. Older servers may ignore it.
+        the default audit tail. Older servers may ignore it.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
@@ -13834,6 +13837,43 @@ paths:
         '200': { description: Snapshot }
         '401': { description: unauthenticated }
         '422': { description: "invalid_snapshot_view, invalid_help_context or invalid_offer_context" }
+  /api/rooms/{roomId}/bootstrap:
+    get:
+      summary: Room open bundle
+      description: >-
+        One read for opening a room. `snapshot` is the same window as
+        `GET /api/rooms/{roomId}` (newest messages that fit the byte budget,
+        `messagesWindow`, `messagesPage`). Alongside it: `needsAttention`,
+        `presence`, `readHorizon`, `saved`, and `updates`. A section the
+        caller cannot read is `{ available: false, code }` (for example
+        needs-attention is owner-only). A section that succeeded is
+        `{ available: true, value }`. Same read as MCP room_read_bootstrap.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ bootstrapVersion, roomId, sequence, snapshot, needsAttention, presence, readHorizon, saved, updates }" }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_snapshot_view }
+  /api/rooms/{roomId}/messages:
+    get:
+      summary: Older room messages
+      description: >-
+        One page of visible messages older than `before` (a posting
+        sequence from `messagesPage.before`). `limit` defaults to 100 and
+        cannot exceed 100. The page is the same byte budget as the room
+        window. `messagesPage.hasMore` says whether another older page exists.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: before
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        '200': { description: "{ messagesVersion, roomId, sequence, messages, messagesPage }" }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_snapshot_view }
   /api/rooms/{roomId}/agent-connections:
     get:
       summary: Owner's agent connections
