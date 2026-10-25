@@ -1,20 +1,21 @@
-// WAKE-S34: POST /api/agent-heartbeats/claim — the started door for
-// the durable listener queue.
+// WAKE-S34: POST /api/agent-heartbeats/claim — the claim door for
+// the durable listener queue (WAKE-QUEUE-1 SPEC §4 Stage 2, Claimed).
 //
 // The listener lease/claim layer (server/agent-heartbeats.mjs) decides
 // WHO may drain a wake queue: a lease heartbeat issues a fencing
-// token, claims mark a batch started under that token, and only an ack
+// token, claims mark a batch claimed under that token, and only an ack
 // carrying the token (or a re-claim) settles the batch. Until now the
 // claim step existed only in the store — no door reached it, so the
-// started state was unusable by any real consumer. This route is that
+// claimed state was unusable by any real consumer. This route is that
 // door, with the same credential and scope contract as the ack door
 // (POST /api/agent-heartbeats/ack): the pri_ identity secret or a rak_
 // API key with the heartbeats:report scope; a room-scoped credential
 // claims only its bound room's queue; an identity credential naming a
 // roomId must be a live agent member of that room (claimRoomScope
 // mirrors the lease-acquisition rules, so claim never widens past
-// lease). Claiming is not completion: claimed signals stay queued
-// until acked, and their started state expires with the lease.
+// lease). Claiming is not completion and not a turn start: claimed
+// signals stay queued until acked, and their claimed state expires
+// with the lease.
 //
 // Route-table row: the OpenAPI route gate forbids new legacy-chain
 // registrations, so the route lives here, not in

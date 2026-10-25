@@ -14,18 +14,20 @@
 // first, at most 50, with more:true when the page is truncated. The poll
 // does not acknowledge. The host acknowledges with ackWakes.
 //
-// WAKE-S34 lifecycle states (MIG-WAKE Specs S3/S4): a signal's life is
-// received -> started -> acked, and the three stamps stay distinct.
-// servedAt (the pickup stamp) is written the first time a page served
-// on any door includes the signal for a given host — being served a
-// page is pickup, not completion. startedAt is the listener claim
-// layer's claim stamp: a consumer holding a live listener lease claims
-// a batch (POST /api/agent-heartbeats/claim, MCP heartbeat_claim) when
-// it begins handling it, and the started state expires with that
-// lease's fencing if the consumer dies. delivered_at, despite its
-// name, is the ACK stamp: it is written only by ackWakes, and a signal
-// leaves the pending set only through that ack — serving and claiming
-// never remove it.
+// WAKE-S34 lifecycle states, re-cut by WAKE-QUEUE-1 (SPEC §9): a
+// signal's life is queued -> claimed -> acked, and the stages stay
+// distinct. A page serve is pickup, not a stage: it is counted on the
+// wake accounting served leg and stamps nothing (SPEC §9 dropped the
+// per-(signal, host) serves table). claimedAt is the listener claim
+// layer's claim stamp (SPEC §4 Stage 2, Claimed): a consumer holding
+// a live listener lease claims a batch (POST
+// /api/agent-heartbeats/claim, MCP heartbeat_claim) when it begins
+// handling it, and the claimed state expires with that lease's
+// fencing if the consumer dies. A claim is NOT a turn start
+// (TurnStarted, SPEC §4 Stage 4, is a separate record that does not
+// exist yet). delivered_at, despite its name, is the ACK stamp: it
+// is written only by ackWakes, and a signal leaves the pending set
+// only through that ack — serving and claiming never remove it.
 //
 // Push is a separate doorbell. An offline wakeable host with a usable
 // push subscription receives a pointer-only POST. Push does not decide
@@ -39,7 +41,7 @@ import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
-const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land"]);
+const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land", "ask"]);
 const STATUSES = Object.freeze(["online", "offline", "unregistered"]);
 // RC-2026-09-24-203: the default reachability window is 180s (was 60s).
 // Per host the window is max(180s, cadenceSeconds * 1.5).
@@ -92,7 +94,7 @@ export const agentHeartbeatSchema = `
   CREATE INDEX IF NOT EXISTS agent_hosts_seen ON agent_hosts(agent_id, last_seen_at);
   CREATE TABLE IF NOT EXISTS agent_wake_signals (
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land')),
+    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land','ask')),
     room_id TEXT, message_id TEXT,
     created_at INTEGER NOT NULL, delivered_at INTEGER
   );
@@ -144,21 +146,6 @@ export const wakeListenerLeaseSchema = `
 // A claim is abandoned when its fencing token no longer holds a live lease;
 // redelivery replays the batch with redelivered=true.
 export const WAKE_LISTENER_LEASE_TTL_MS = 60000;
-
-// WAKE-S34 (Spec S3): first-pickup stamps, one row per (signal, host).
-// A signal's servedAt is the earliest row's served_at; re-serves insert
-// nothing (INSERT OR IGNORE), so the stamp is the FIRST time that host
-// was served the signal. Lazy like the lease tables above, for the same
-// reason: kept out of agentHeartbeatSchema so old databases keep
-// passing the strict DDL-text verifySchema.
-export const wakeSignalServesSchema = `
-  CREATE TABLE IF NOT EXISTS agent_wake_signal_serves (
-    signal_id TEXT NOT NULL, host_id TEXT NOT NULL DEFAULT '',
-    served_at INTEGER NOT NULL, door TEXT NOT NULL DEFAULT '',
-    PRIMARY KEY(signal_id, host_id)
-  );
-  CREATE INDEX IF NOT EXISTS agent_wake_signal_serves_signal ON agent_wake_signal_serves(signal_id, served_at);
-`;
 
 // CX5-FIX: room-attributed listener activity. agent_wake_polls is the
 // identity-GLOBAL last-activity stamp; activity performed under a
@@ -213,6 +200,24 @@ const checkCadenceSeconds = cadenceSeconds =>
   check(Number.isFinite(cadenceSeconds) && cadenceSeconds > 0 && cadenceSeconds <= MAX_CADENCE_SECONDS,
     422, "invalid_heartbeat", `cadenceSeconds must be a positive number of seconds, at most ${MAX_CADENCE_SECONDS} (7 days)`);
 
+// BUILD-HEARTBEAT-CADENCE: cadence is server-dictated. The host's
+// declaration is a hint; the server assigns the governing value:
+//   - a hint inside the server bounds is honoured as the assignment;
+//   - a hint above the ceiling is assigned the ceiling — the 7-day
+//     declaration (and its ~10.5-day reachability window) stops being
+//     reachable by declaration alone;
+//   - no hint (never declared, or explicitly cleared) is assigned the
+//     default. 120s is chosen so the default's window — max(180s,
+//     120 x 1.5) = 180s — equals the pre-assignment undeclared window
+//     exactly: a host that never declares and never reads the response
+//     field observes no behaviour change.
+export const DEFAULT_CADENCE_SECONDS = 120;
+export const MAX_ASSIGNED_CADENCE_SECONDS = 3600;
+export const assignedCadenceSeconds = hint =>
+  (typeof hint === "number" && Number.isFinite(hint) && hint > 0)
+    ? Math.min(hint, MAX_ASSIGNED_CADENCE_SECONDS)
+    : DEFAULT_CADENCE_SECONDS;
+
 // RC-2026-09-24-203: validate a pushNotification subscription body.
 // Returns the normalized { url, token, authJson }. The sync shape checks
 // live here; the async DNS-rebinding check runs in assertPushDns (the route
@@ -254,9 +259,10 @@ const hostView = (row, cadenceSeconds = null) => Object.freeze({
   agentId: row.agent_id, hostId: row.host_id, mode: row.mode,
   wakeUrl: row.wake_url, lastSeenAt: row.last_seen_at,
   createdAt: row.created_at, updatedAt: row.updated_at,
-  // RC-2026-09-24-203: the host's declared poll cadence (null when none
-  // is in effect — never declared, or cleared by an explicit null);
-  // drives the per-host reachability window.
+  // The host's governing poll cadence: the server-assigned value
+  // (BUILD-HEARTBEAT-CADENCE) — a number on every read path that
+  // resolves assignments; null only in a view built without one.
+  // Drives the per-host reachability window.
   cadenceSeconds,
 });
 // work-claim:{id}:{reason}:… is the claim wake id. Poll and heartbeat
@@ -268,24 +274,31 @@ const claimWakeOf = messageId => {
   if (parts.length < 3 || parts[1].length === 0 || parts[2].length === 0) return null;
   return { workClaim: parts[1], reason: parts[2] };
 };
-// WAKE-S34: every signal view carries its lifecycle stamps (see the
-// file header): servedAt = first pickup (Spec S3), startedAt /
-// startedLive = the listener claim layer's started state (Spec S4),
-// redelivered = the claim layer's replay flag. deliveredAt is the ack
-// stamp. Callers that read rows pass the lifecycle map built by
-// lifecycleOfSignals; a row read without one (a fresh enqueue) reports
-// the unclaimed, unserved defaults.
+// WAKE-S34 / WAKE-QUEUE-1: every signal view carries its claim stamps
+// (see the file header): claimedAt / claimedLive = the listener claim
+// layer's claimed state (SPEC §4 Stage 2), redelivered = the claim
+// layer's replay flag. deliveredAt is the ack stamp. Callers that
+// read rows pass the lifecycle map built by lifecycleOfSignals; a
+// row read without one (a fresh enqueue) reports the unclaimed
+// defaults. No servedAt: a page serve is a diagnostic counted on the
+// accounting served leg, not a per-item stamp (SPEC §9).
+const publicAskOf = messageId => {
+  if (typeof messageId !== "string") return null;
+  const match = /^public-ask:(ask_[A-Za-z0-9_-]{8,80})$/.exec(messageId);
+  return match ? match[1] : null;
+};
 const signalView = (row, lifecycle = null) => {
   const claim = claimWakeOf(row.message_id);
+  const publicAsk = publicAskOf(row.message_id);
   return Object.freeze({
     signalId: row.signal_id, agentId: row.agent_id, kind: row.kind,
     roomId: row.room_id, messageId: row.message_id,
     createdAt: row.created_at, deliveredAt: row.delivered_at,
-    servedAt: lifecycle?.servedAt ?? null,
-    startedAt: lifecycle?.startedAt ?? null,
-    startedLive: lifecycle?.startedLive === true,
+    claimedAt: lifecycle?.claimedAt ?? null,
+    claimedLive: lifecycle?.claimedLive === true,
     redelivered: lifecycle?.redelivered === true,
     ...(claim ? { workClaim: claim.workClaim, reason: claim.reason } : {}),
+    ...(publicAsk ? { publicAsk } : {}),
     // The explicit ack copy rides the journaled pending-wake signal too.
     ackHint: WAKE_ACK_HINT,
   });
@@ -533,23 +546,32 @@ export class AgentHeartbeats {
   // Pending signals are NOT marked delivered here — the host acknowledges
   // them via ackWakes once it has actually handled them.
   //
-  // RC-2026-09-24-203: cadenceSeconds (optional) declares the host's poll
-  // cadence and drives its reachability window; pushNotification (optional)
-  // registers a push subscription for the wake path. One subscription per
-  // (agent, host): each heartbeat replaces the host's push config — a body
-  // that carries pushNotification stores it fresh (resetting the failure
-  // counters, which re-arms a suspended subscription); a body without it
-  // leaves the existing subscription untouched, so old heartbeat bodies
-  // keep working unchanged.
+  // RC-2026-09-24-203: cadenceSeconds (optional) started as the host's
+  // declared poll cadence; pushNotification (optional) registers a push
+  // subscription for the wake path. One subscription per (agent, host):
+  // each heartbeat replaces the host's push config — a body that carries
+  // pushNotification stores it fresh (resetting the failure counters,
+  // which re-arms a suspended subscription); a body without it leaves
+  // the existing subscription untouched, so old heartbeat bodies keep
+  // working unchanged.
   //
-  // Cadence is sticky (rotation review P5-F2): cadenceSeconds defaults to
-  // undefined, and omission is distinct from an explicit null. Omitting
-  // the field preserves the stored declaration; a number replaces it;
-  // only an explicit null clears it (back to the 180s default window).
-  // The old shape defaulted to null, so any bare heartbeat silently
-  // erased a declared cadence — collapsing the presence window, and
-  // with #3592 the wakeability window too — for a host that had
-  // declared its cadence once and then heartbeated bare.
+  // BUILD-HEARTBEAT-CADENCE: the declaration is now a HINT and the
+  // server assigns the governing cadence (assignedCadenceSeconds): a
+  // hint inside the server bounds is honoured, a hint above
+  // MAX_ASSIGNED_CADENCE_SECONDS is assigned the ceiling, and no hint
+  // (never declared, or cleared) is assigned DEFAULT_CADENCE_SECONDS —
+  // whose window equals the old 180s undeclared window, so a host that
+  // never reads the response field observes no change. The stored value
+  // and every response carry the assignment, never the raw hint.
+  //
+  // The hint is sticky (rotation review P5-F2): cadenceSeconds defaults
+  // to undefined, and omission is distinct from an explicit null.
+  // Omitting the field re-presents the stored value as the hint; a
+  // number replaces it; only an explicit null clears it (back to the
+  // server default). The old shape defaulted omission to null, so any
+  // bare heartbeat silently erased a declared cadence — collapsing the
+  // presence window, and with #3592 the wakeability window too — for a
+  // host that had declared its cadence once and then heartbeated bare.
   heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = undefined, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat" }) {
     checkAgentId(agentId);
     checkHostId(hostId);
@@ -590,13 +612,15 @@ export class AgentHeartbeats {
     // The push/cadence row tracks the latest heartbeat; push fields change
     // only when the body carries pushNotification (never on bare
     // heartbeats), and a fresh subscription resets failures/suspension.
-    // Cadence is sticky (see the heartbeat() header): an omitted
-    // cadenceSeconds resolves to the stored declaration before the
-    // upsert, so the upsert itself always writes the effective value.
-    const cadence = cadenceSeconds === undefined
+    // Cadence is server-assigned (see the heartbeat() header): an omitted
+    // cadenceSeconds re-presents the stored value as the hint before the
+    // upsert, and the upsert always writes the ASSIGNED value, so the
+    // stored row is the governing cadence, never a raw declaration.
+    const hint = cadenceSeconds === undefined
       ? this.db.prepare("SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
           .get(agentId, hostId)?.cadenceSeconds ?? null
       : cadenceSeconds;
+    const cadence = assignedCadenceSeconds(hint);
     this.db.prepare(`INSERT INTO agent_push_configs
       (agent_id, host_id, cadence_seconds, updated_at)
       VALUES (?, ?, ?, ?)
@@ -915,33 +939,21 @@ export class AgentHeartbeats {
     return this;
   }
 
-  // Idempotent DDL for the pickup-stamp table (no-op on warm databases).
-  ensureSignalServesSchema() {
-    this.db.exec(wakeSignalServesSchema);
-    return this;
-  }
-
-  // WAKE-S34: the lifecycle map for a set of signals — first-pickup
-  // stamp from the serves sidecar, started stamp + liveness from the
-  // claims sidecar joined to the lease that fences the claim. A claim
-  // whose token no longer holds a live lease reads startedLive=false:
-  // the started state expired with the lease, the stamp stays as
-  // history. Missing sidecars (a database from before these tables)
-  // read as no lifecycle — never an error, like the other read paths.
+  // WAKE-S34 / WAKE-QUEUE-1: the lifecycle map for a set of signals —
+  // claim stamp + liveness from the claims sidecar joined to the
+  // lease that fences the claim. A claim whose token no longer holds
+  // a live lease reads claimedLive=false: the claimed state expired
+  // with the lease, the stamp stays as history. Missing sidecar (a
+  // database from before these tables) reads as no lifecycle — never
+  // an error, like the other read paths.
   lifecycleOfSignals(signalIds, at = this.now()) {
     const lifecycle = new Map();
     if (!Array.isArray(signalIds) || signalIds.length === 0) return lifecycle;
     const entryFor = signalId => {
       if (!lifecycle.has(signalId))
-        lifecycle.set(signalId, { servedAt: null, startedAt: null, startedLive: false, redelivered: false });
+        lifecycle.set(signalId, { claimedAt: null, claimedLive: false, redelivered: false });
       return lifecycle.get(signalId);
     };
-    try {
-      const marks = [...sqlChunks(signalIds)].flatMap(chunk => this.db.prepare(
-        `SELECT signal_id AS signalId, MIN(served_at) AS servedAt FROM agent_wake_signal_serves
-         WHERE signal_id IN (${sqlPlaceholders(chunk)}) GROUP BY signal_id`).all(...chunk));
-      for (const mark of marks) entryFor(mark.signalId).servedAt = mark.servedAt;
-    } catch (error) { if (!isMissingTable(error)) throw error; }
     try {
       const claims = [...sqlChunks(signalIds)].flatMap(chunk => this.db.prepare(
         `SELECT c.signal_id AS signalId, c.claimed_at AS claimedAt, c.claimed_by AS claimedBy,
@@ -953,11 +965,11 @@ export class AgentHeartbeats {
       for (const claim of claims) {
         const entry = entryFor(claim.signalId);
         if (claim.redelivered === 1) entry.redelivered = true;
-        // A released claim (claimed_by='') is no longer started: the
+        // A released claim (claimed_by='') is no longer claimed: the
         // signal waits for its flagged redelivery instead.
         if (claim.claimedBy !== "") {
-          entry.startedAt = claim.claimedAt;
-          entry.startedLive = claim.leaseExpiresAt !== null && claim.leaseExpiresAt > at;
+          entry.claimedAt = claim.claimedAt;
+          entry.claimedLive = claim.leaseExpiresAt !== null && claim.leaseExpiresAt > at;
         }
       }
     } catch (error) { if (!isMissingTable(error)) throw error; }
@@ -1041,23 +1053,24 @@ export class AgentHeartbeats {
         RETURNING signal_id, redelivered`)
       .all(agentId, fencingToken, at, agentId, roomId, roomId, fencingToken, at, agentId, roomKey, fencingToken, at, limit);
     const views = this.db.prepare("SELECT * FROM agent_wake_signals WHERE signal_id=?");
-    // WAKE-S34 (Spec S4): the claim IS the started state — the response
-    // carries it (startedAt, startedLive under this lease, the replay
-    // flag), and the claims just written make it readable on every
-    // later page through lifecycleOfSignals.
+    // WAKE-S34 / WAKE-QUEUE-1 (SPEC §4 Stage 2): the claim IS the
+    // claimed state — the response carries it (claimedAt, claimedLive
+    // under this lease, the replay flag), and the claims just written
+    // make it readable on every later page through
+    // lifecycleOfSignals. Claimed is not TurnStarted (Stage 4).
     const lifecycle = this.lifecycleOfSignals(claimed.map(({ signal_id }) => signal_id), at);
     const signals = claimed.map(({ signal_id, redelivered }) => {
-      const entry = lifecycle.get(signal_id) ?? { servedAt: null, startedAt: at, startedLive: true, redelivered: redelivered === 1 };
-      return signalView(views.get(signal_id), { ...entry, startedAt: at, startedLive: true, redelivered: redelivered === 1 });
+      const entry = lifecycle.get(signal_id) ?? { claimedAt: at, claimedLive: true, redelivered: redelivered === 1 };
+      return signalView(views.get(signal_id), { ...entry, claimedAt: at, claimedLive: true, redelivered: redelivered === 1 });
     });
     // #3345: a claimed batch is a delivery on the listener door.
-    // WAKE-S34: it is also the started leg — counted separately so
-    // received / started / acked reconcile (review seat seq 17376).
+    // WAKE-S34: it is also the claimed leg — counted separately so
+    // served / claimed / acked reconcile (review seat seq 17376).
     for (const signal of signals) {
       recordWakeEvent(this.db, { at, roomId: signal.roomId ?? roomId, store: "signals",
         event: "delivered", door: "listener", kind: signal.kind, subjectId: agentId });
       recordWakeEvent(this.db, { at, roomId: signal.roomId ?? roomId, store: "signals",
-        event: "started", door: "listener", kind: signal.kind, subjectId: agentId });
+        event: "claimed", door: "listener", kind: signal.kind, subjectId: agentId });
     }
     return Object.freeze({ signals: Object.freeze(signals) });
   }
@@ -1080,8 +1093,8 @@ export class AgentHeartbeats {
     return Object.freeze({ released: dropped.changes > 0 });
   }
 
-  // Enqueue a wake signal for an agent (mention, DM, bond, assignment, or
-  // land update — WAKE_KINDS). Coalesced on
+  // Enqueue a wake signal for an agent (mention, DM, bond, assignment,
+  // land update, or public ask — WAKE_KINDS). Coalesced on
   // (agent_id, room_id, message_id) — issue #2913: message ids repeat
   // across rooms, so the same message wakes an agent once per room.
   enqueueWake({ agentId, kind, roomId = null, messageId }) {
@@ -1151,30 +1164,24 @@ export class AgentHeartbeats {
     ].filter(s => !held.has(s.roomId))
       .sort((a, b) => a.createdAt - b.createdAt || (a.signalId < b.signalId ? -1 : a.signalId > b.signalId ? 1 : 0));
     const pageSlice = combined.slice(0, limit);
-    // WAKE-S34 (Spec S3): serving this page is the pickup. Stamp each
-    // signal's first serve for this host (INSERT OR IGNORE: a re-serve
-    // inserts nothing and moves nothing) and count first pickups on the
-    // metrics served leg, batched like the delivered count below.
+    // WAKE-S34 / WAKE-QUEUE-1 (SPEC §9): serving this page is the
+    // pickup — a diagnostic, not a ladder stage. It stamps nothing
+    // per item (the serves table is dropped); pickups are counted on
+    // the metrics served leg, batched like the delivered count below,
+    // so the pickup-vs-ack gap stays measurable without a table.
     const at = this.now();
     const pageRows = pageSlice.filter(s => s.row).map(s => s.row);
     if (pageRows.length > 0) {
-      try {
-        this.ensureSignalServesSchema();
-        const stamp = this.db.prepare(`INSERT OR IGNORE INTO agent_wake_signal_serves
-          (signal_id, host_id, served_at, door) VALUES (?, ?, ?, ?)`);
-        const fresh = new Map();
-        for (const row of pageRows) {
-          if (stamp.run(row.signal_id, hostId ?? "", at, door).changes > 0) {
-            const key = `${row.kind}\0${row.room_id ?? ""}`;
-            fresh.set(key, (fresh.get(key) ?? 0) + 1);
-          }
-        }
-        for (const [key, n] of fresh) {
-          const [kind, room] = key.split("\0");
-          recordWakeEvent(this.db, { at, roomId: room === "" ? null : room,
-            store: "signals", event: "served", door, kind, n });
-        }
-      } catch (error) { if (!isMissingTable(error)) throw error; }
+      const served = new Map();
+      for (const row of pageRows) {
+        const key = `${row.kind}\0${row.room_id ?? ""}`;
+        served.set(key, (served.get(key) ?? 0) + 1);
+      }
+      for (const [key, n] of served) {
+        const [kind, room] = key.split("\0");
+        recordWakeEvent(this.db, { at, roomId: room === "" ? null : room,
+          store: "signals", event: "served", door, kind, n });
+      }
     }
     const lifecycle = this.lifecycleOfSignals(pageRows.map(row => row.signal_id), at);
     const page = pageSlice.map(s => s.row ? signalView(s.row, lifecycle.get(s.row.signal_id)) : s.entry);
@@ -1239,7 +1246,30 @@ export class AgentHeartbeats {
     const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll", cursor });
     return Object.freeze({
       agentId, registered: true, pendingWakes: page.signals, more: page.more, nextCursor: page.nextCursor,
+      // BUILD-HEARTBEAT-CADENCE: the poll response carries the
+      // server-assigned cadence, so a pull-only seat that never reads a
+      // heartbeat response still meets the contract on this door.
+      cadenceSeconds: this.assignedCadenceFor(agentId, hostId),
     });
+  }
+
+  // BUILD-HEARTBEAT-CADENCE: the server-assigned cadence for one host —
+  // its stored value read as the standing hint, run through the
+  // assignment. A hostless read (no hostId) carries the server default:
+  // the assignment a host with no hint would get.
+  assignedCadenceFor(agentId, hostId = null) {
+    checkAgentId(agentId);
+    if (hostId === null || hostId === undefined) return DEFAULT_CADENCE_SECONDS;
+    let stored = null;
+    try {
+      stored = this.db.prepare(
+        "SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+        .get(agentId, hostId)?.cadenceSeconds ?? null;
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      // Older database without the push table: no hint is stored.
+    }
+    return assignedCadenceSeconds(stored);
   }
 
   // RC-2026-09-28-3602: register one in-process waiter per HOST for the
@@ -1289,8 +1319,10 @@ export class AgentHeartbeats {
   // unregistered when no host ever reported.
   //
   // RC-2026-09-24-203: the window is per host — max(180s, cadenceSeconds *
-  // 1.5) — read from the host's push/cadence row; hosts that never declared
-  // a cadence read the 180s default.
+  // 1.5) — computed from the host's push/cadence row. BUILD-HEARTBEAT-
+  // CADENCE: the cadence in that formula is the server-assigned value for
+  // the host's stored hint; hosts that never declared read the assigned
+  // default, whose window is the same 180s.
   statusOf(agentId) {
     checkAgentId(agentId);
     const at = this.now();
@@ -1320,7 +1352,12 @@ export class AgentHeartbeats {
       // default window (read-only never migrates).
     }
     const withState = hosts.map(row => {
-      const cadenceSeconds = cadences.get(row.host_id) ?? null;
+      // BUILD-HEARTBEAT-CADENCE: the stored value is read as the host's
+      // standing hint and the ASSIGNED value governs — so a row stored
+      // under the old declaration contract (up to a 7-day declaration)
+      // is enforced at the server ceiling on read, with no migration;
+      // each host's next heartbeat rewrites its row as an assignment.
+      const cadenceSeconds = assignedCadenceSeconds(cadences.get(row.host_id) ?? null);
       const windowMs = this.windowFor(cadenceSeconds);
       const view = hostView(row, cadenceSeconds);
       return Object.freeze({ ...view, state: at - view.lastSeenAt <= windowMs ? "online" : "stale" });

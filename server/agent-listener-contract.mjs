@@ -54,8 +54,8 @@ export function heartbeatWithListener(store, auth, data, { roomKey = false, door
   const result = store.agentHeartbeats.heartbeat({
     agentId: auth.identityId, hostId, mode: data.mode,
     wakeUrl: data.wakeUrl ?? null,
-    // Cadence is sticky in the store: data.cadenceSeconds passes through
-    // untouched — undefined (omitted) preserves the stored declaration,
+    // The cadence hint is sticky in the store: data.cadenceSeconds passes
+    // through untouched — undefined (omitted) preserves the stored hint,
     // an explicit null clears it. Collapsing it with ?? null here would
     // re-create the reset-by-omit hazard the store no longer has.
     cadenceSeconds: data.cadenceSeconds,

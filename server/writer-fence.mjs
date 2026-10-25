@@ -228,6 +228,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "peer_dm_threads",
   "peer_dm_messages",
   "room_public_settings",
+  // agent_public_pages + agent_public_asks: one public URL per agent and the
+  // questions asked there. Additive, outside the fence: older writers have no
+  // code path, and the module is the integrity gate. Questions are not events.
+  "agent_public_pages",
+  "agent_public_asks",
   // room_directory_settings (#605 opt-in public room directory) is purely
   // additive and intentionally NOT fenced, same as room_public_settings.
   "room_directory_settings",
@@ -522,10 +527,8 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
 // Wake-lease tables (durable listener queue, server/agent-heartbeats.mjs):
 // purely additive, created lazily on first lease use. CX5-FIX adds
 // agent_wake_room_activity (room-attributed listener activity), created
-// lazily on first room-scoped poll/heartbeat. WAKE-S34 adds
-// agent_wake_signal_serves (per-host first-pickup stamps), created
-// lazily on first served wake page.
-const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity", "agent_wake_signal_serves"]);
+// lazily on first room-scoped poll/heartbeat.
+const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity"]);
 // Wake-reliability accounting (#3345, server/wake-metrics.mjs): counters +
 // loss journal, purely additive, created lazily on first recorded outcome;
 // kind/timestamp/subject only, never content. Older writers have no code

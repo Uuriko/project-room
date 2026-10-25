@@ -1,18 +1,21 @@
-// WAKE-S34: wake lifecycle states — pickup distinct from ack, and a
-// started state productised from the listener lease/claim layer.
+// WAKE-S34, re-cut by WAKE-QUEUE-1 Step 1 (SPEC §9): wake lifecycle
+// states — pickup distinct from ack, and a CLAIMED state productised
+// from the listener lease/claim layer (SPEC §4 Stage 2). A claim is
+// not a turn start: TurnStarted (Stage 4) is a separate record that
+// does not exist yet, and nothing here claims or implies it.
 //
-// Contract (MIG-WAKE Specs S3 + S4; review seat seq 17376: received /
-// started / evidence / accepted stay DISTINCT):
-// 1. A signal a consumer's poll or heartbeat retrieves shows a pickup
-//    stamp (servedAt) while its ack stamp (deliveredAt) stays null —
-//    pickup is not completion. The first serve wins: another host's
-//    later serve does not move the stamp, and each host's first pickup
-//    counts once in the wake accounting (served leg, distinct from acked).
-// 2. A claimed signal reads as started (startedAt + startedLive) with
+// Contract (MIG-WAKE Specs S3 + S4 as re-cut; review seat seq 17376:
+// served / claimed / evidence / accepted stay DISTINCT):
+// 1. A signal a consumer's poll or heartbeat retrieves is counted as
+//    a pickup on the wake accounting served leg while its ack stamp
+//    (deliveredAt) stays null — pickup is not completion. A serve
+//    stamps nothing per item: views carry no servedAt, and no serves
+//    table exists (SPEC §9 dropped it; the counter leg needs no table).
+// 2. A claimed signal reads as claimed (claimedAt + claimedLive) with
 //    its lease, on the claim response AND on plain poll/heartbeat reads,
-//    so a bystander consumer can tell started from merely pending.
+//    so a bystander consumer can tell claimed from merely pending.
 // 3. A consumer dying mid-work (lease lapses, no ack) leaves the signal
-//    pending with started expired (startedAt kept, startedLive false),
+//    pending with claimed expired (claimedAt kept, claimedLive false),
 //    never acked; the next listener's claim replays it flagged
 //    redelivered, and only its ack removes it.
 // 4. Ack-only removal: serving and claiming never shrink the pending
@@ -56,71 +59,77 @@ const register = (hb, hostId = "host-1") =>
 
 const servedTotal = hb =>
   Object.values(hb.accounting().byStore.signals.servedByDoor ?? {}).reduce((a, b) => a + b, 0);
-const startedTotal = hb =>
-  Object.values(hb.accounting().byStore.signals.startedByDoor ?? {}).reduce((a, b) => a + b, 0);
+const claimedTotal = hb =>
+  Object.values(hb.accounting().byStore.signals.claimedByDoor ?? {}).reduce((a, b) => a + b, 0);
 
-test("specimen 1: pickup is stamped at first serve and stays distinct from ack", t => {
-  const { hb, advance, db, at } = unit(t);
+test("specimen 1: pickup is counted at serve and stays distinct from ack", t => {
+  const { hb, advance, db } = unit(t);
   register(hb);
   const { signal } = hb.enqueueWake({ agentId: AGENT, kind: "mention", roomId: ROOM, messageId: "m1" });
-  assert.equal(signal.servedAt, null, "a fresh signal has never been picked up");
+  assert.equal(signal.claimedAt, null, "a fresh signal is queued, not claimed");
   assert.equal(signal.deliveredAt, null);
+  assert.ok(!("servedAt" in signal) && !("startedAt" in signal),
+    "views carry no serve stamp and no started stamp (SPEC §9 re-cut)");
   advance(5000);
   const page = hb.pendingWakes(AGENT, { hostId: "host-1", roomId: ROOM });
   assert.equal(page.length, 1);
-  assert.equal(page[0].servedAt, at(), "first serve stamps the pickup at serve time");
   assert.equal(page[0].deliveredAt, null, "pickup is not ack: the ack stamp stays null");
-  // A second host's first serve does not move the pickup stamp.
+  assert.equal(servedTotal(hb), 1, "the serve counted once on the served leg");
+  // A second host's serve is another pickup, counted, stamping nothing.
   register(hb, "host-2");
   advance(7000);
   const page2 = hb.pendingWakes(AGENT, { hostId: "host-2", roomId: ROOM });
-  assert.equal(page2[0].servedAt, page[0].servedAt, "first pickup wins across hosts");
   assert.equal(page2[0].deliveredAt, null);
+  assert.ok(!("servedAt" in page2[0]), "a serve never mints a per-item stamp");
   // The row is untouched by serving: still pending, still unacked.
   const row = db.prepare("SELECT delivered_at FROM agent_wake_signals WHERE signal_id=?").get(signal.signalId);
   assert.equal(row.delivered_at, null, "serving never writes the ack stamp");
-  // Accounting: one first-pickup per host (two hosts), zero acks.
-  assert.equal(servedTotal(hb), 2, "each host's first pickup counts once on the served leg");
+  // No serves table exists to stamp into (SPEC §9: the table is dropped).
+  const servesTable = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_wake_signal_serves'").get();
+  assert.equal(servesTable, undefined, "serving creates no agent_wake_signal_serves table");
+  // Accounting: one pickup per serve (two serves), zero acks.
+  assert.equal(servedTotal(hb), 2, "each serve counts on the served leg");
   assert.deepEqual(hb.accounting().byStore.signals.ackedByDoor, {}, "nothing was acked");
 });
 
-test("specimen 2: a claimed signal reads started with its live lease on every read", t => {
+test("specimen 2: a claimed signal reads claimed with its live lease on every read", t => {
   const { hb, at } = unit(t);
   register(hb);
   hb.enqueueWake({ agentId: AGENT, kind: "mention", roomId: ROOM, messageId: "m1" });
   const lease = hb.acquireListenerLease({ agentId: AGENT, roomId: ROOM, listenerId: "host-1", ttlMs: 60000 });
   const { signals } = hb.claimWakeBatch({ agentId: AGENT, roomId: ROOM, fencingToken: lease.fencingToken });
   assert.equal(signals.length, 1);
-  assert.equal(signals[0].startedAt, at(), "the claim stamps started at claim time");
-  assert.equal(signals[0].startedLive, true, "the claiming lease is live");
+  assert.equal(signals[0].claimedAt, at(), "the claim stamps claimed at claim time");
+  assert.equal(signals[0].claimedLive, true, "the claiming lease is live");
   assert.equal(signals[0].redelivered, false, "first claim is not a redelivery");
   const page = hb.pendingWakes(AGENT, { hostId: "host-1", roomId: ROOM });
-  assert.equal(page[0].startedAt, at(), "plain pending reads show the started stamp");
-  assert.equal(page[0].startedLive, true);
-  assert.equal(page[0].deliveredAt, null, "started is not acked");
-  assert.equal(startedTotal(hb), 1, "the started leg counts the claim");
+  assert.equal(page[0].claimedAt, at(), "plain pending reads show the claimed stamp");
+  assert.equal(page[0].claimedLive, true);
+  assert.equal(page[0].deliveredAt, null, "claimed is not acked");
+  assert.equal(claimedTotal(hb), 1, "the claimed leg counts the claim");
 });
 
-test("specimen 3: consumer death leaves the signal pending, started expired, never acked", t => {
+test("specimen 3: consumer death leaves the signal pending, claimed expired, never acked", t => {
   const { hb, advance } = unit(t);
   register(hb);
   const { signal } = hb.enqueueWake({ agentId: AGENT, kind: "mention", roomId: ROOM, messageId: "m1" });
   const lease = hb.acquireListenerLease({ agentId: AGENT, roomId: ROOM, listenerId: "host-1", ttlMs: 30000 });
   hb.claimWakeBatch({ agentId: AGENT, roomId: ROOM, fencingToken: lease.fencingToken });
-  const claimedAt = hb.pendingWakes(AGENT, { hostId: "host-1", roomId: ROOM })[0].startedAt;
+  const claimedStamp = hb.pendingWakes(AGENT, { hostId: "host-1", roomId: ROOM })[0].claimedAt;
   // The consumer dies: its lease lapses with no ack and no release.
   advance(31000);
   const page = hb.pendingWakes(AGENT, { hostId: "host-1", roomId: ROOM });
   assert.equal(page.length, 1, "the signal is still pending after the consumer died");
   assert.equal(page[0].deliveredAt, null, "it was never acked");
-  assert.equal(page[0].startedAt, claimedAt, "the started stamp survives as history");
-  assert.equal(page[0].startedLive, false, "the started state expired with the lease's fencing");
-  // A fresh listener re-claims: redelivery is flagged, started is live again.
+  assert.equal(page[0].claimedAt, claimedStamp, "the claimed stamp survives as history");
+  assert.equal(page[0].claimedLive, false, "the claimed state expired with the lease's fencing");
+  // A fresh listener re-claims: redelivery is flagged, claimed is live again.
   const lease2 = hb.acquireListenerLease({ agentId: AGENT, roomId: ROOM, listenerId: "host-2", ttlMs: 30000 });
   const again = hb.claimWakeBatch({ agentId: AGENT, roomId: ROOM, fencingToken: lease2.fencingToken });
   assert.equal(again.signals.length, 1);
   assert.equal(again.signals[0].redelivered, true, "the reclaim replays the batch flagged redelivered");
-  assert.equal(again.signals[0].startedLive, true);
+  assert.equal(again.signals[0].claimedLive, true);
   const acked = hb.ackWakes({ agentId: AGENT, signalIds: [signal.signalId], roomId: ROOM, fencingToken: lease2.fencingToken });
   assert.deepEqual(acked.acknowledged, [signal.signalId]);
   assert.equal(hb.pendingWakes(AGENT, { hostId: "host-1", roomId: ROOM }).length, 0, "only the ack removed it");
@@ -135,7 +144,7 @@ test("specimen 4: ack-only removal — serve, claim and release never shrink the
   assert.equal(pending(), 2);
   const lease = hb.acquireListenerLease({ agentId: AGENT, roomId: ROOM, listenerId: "host-1", ttlMs: 60000 });
   hb.claimWakeBatch({ agentId: AGENT, roomId: ROOM, fencingToken: lease.fencingToken });
-  assert.equal(pending(), 2, "claiming started both; both are still pending");
+  assert.equal(pending(), 2, "claiming both; both are still pending");
   hb.releaseListenerLease({ agentId: AGENT, roomId: ROOM, fencingToken: lease.fencingToken });
   assert.equal(pending(), 2, "releasing the lease frees the claims, not the signals");
   const ids = hb.pendingWakes(AGENT, { hostId: "host-1", roomId: ROOM }).map(s => s.signalId);
@@ -190,7 +199,7 @@ test("the claim route row is registered once, with MCP parity declared", () => {
   assert.equal(row.schema.body.required[0], "fencingToken");
 });
 
-test("specimen 5: the claim doors — HTTP route and MCP heartbeat_claim mark started; a stale token is refused", async t => {
+test("specimen 5: the claim doors — HTTP route and MCP heartbeat_claim mark claimed; a stale token is refused", async t => {
   const { origin, store } = await serve(t);
   const owner = store.identities.create("Lifecycle owner");
   const agentId = owner.identityId;
@@ -208,8 +217,8 @@ test("specimen 5: the claim doors — HTTP route and MCP heartbeat_claim mark st
   assert.equal(res.status, 200, "the claim route answers");
   const claimed = await res.json();
   assert.equal(claimed.signals.length, 1);
-  assert.equal(typeof claimed.signals[0].startedAt, "number", "the HTTP claim marks the signal started");
-  assert.equal(claimed.signals[0].startedLive, true);
+  assert.equal(typeof claimed.signals[0].claimedAt, "number", "the HTTP claim marks the signal claimed");
+  assert.equal(claimed.signals[0].claimedLive, true);
   // MCP claim door exists in the full catalog.
   const names = (await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json())
     .result.tools.map(tool => tool.name);

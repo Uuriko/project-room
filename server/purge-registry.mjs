@@ -499,21 +499,6 @@ const ROWS = [
     }
   },
   {
-    "table": "agent_wake_signal_serves",
-    "key": "signal_id",
-    "action": "delete",
-    "optional": true,
-    "match": {},
-    "via": {
-      "room": {
-        "parent": "agent_wake_signals",
-        "parentKey": "signal_id",
-        "childKey": "signal_id",
-        "scope": "room_id"
-      }
-    }
-  },
-  {
     "table": "bounty_disputes",
     "key": "room_id",
     "action": "delete",
@@ -1113,6 +1098,26 @@ const ROWS = [
   },
   {
     "table": "agent_wants_work",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_public_pages",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_public_asks",
     "key": "room_id",
     "action": "delete",
     "match": {

@@ -5,7 +5,8 @@ import { createHash } from "node:crypto";
 // public_rooms, public_receipts, and public_directory_entries. They do not read
 // rooms.projection, and a GET does not mint a share link. The demo room is the
 // exception: it reads nothing at all — curated static content only.
-import { escapeHtml, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { escapeHtml } from "./html-escape.mjs";
+import { RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
 import { roomSetupPrompt } from "../src/room-setup-prompt.js";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
