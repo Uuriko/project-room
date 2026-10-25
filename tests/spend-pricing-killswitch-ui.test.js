@@ -46,7 +46,7 @@ function fakeContainer() {
 }
 const clickOn = spendPricingAction => ({ target: { closest: () => ({ dataset: { spendPricing: spendPricingAction } }) } });
 
-test("isSpendPricingOwner: only the human room owner qualifies", () => {
+test("isSpendPricingOwner: owner or authorized administrator qualifies", () => {
   const state = ownerState();
   assert.equal(isSpendPricingOwner({ session: ownerSession, state }), true);
   assert.equal(isSpendPricingOwner({ session: memberSession, state }), false, "plain member is not owner");
@@ -62,7 +62,7 @@ test("spendPricingViewOf: projection state, default enabled when absent", () => 
   assert.equal(spendPricingViewOf({ room: { id: "r" }, members: {} }).enabled, true, "absent spendPricing means enabled");
 });
 
-test("non-owner never sees the toggle: container hidden, no content", () => {
+test("ordinary members do not see the toggle; agent owner can administer it", () => {
   const box = fakeContainer();
   const sw = createSpendPricingKillSwitch();
   assert.equal(sw.sync(box, { session: memberSession, state: ownerState(true) }), "hidden");
@@ -72,8 +72,8 @@ test("non-owner never sees the toggle: container hidden, no content", () => {
   const agentBox = fakeContainer();
   const agentOwnerState = ownerState(true);
   agentOwnerState.room.ownerId = "agent9";
-  assert.equal(sw.sync(agentBox, { session: agentSession, state: agentOwnerState }), "hidden");
-  assert.ok(!agentBox.innerHTML.includes("kill switch"));
+  assert.equal(sw.sync(agentBox, { session: agentSession, state: agentOwnerState }), "shown");
+  assert.ok(agentBox.innerHTML.includes("kill switch"));
 });
 
 test("owner sees the labeled emergency toggle with the current state", () => {
@@ -143,4 +143,15 @@ test("a failed flip surfaces the error in the panel instead of failing silently"
   await box.fireAsync("click", clickOn("arm"));
   await box.fireAsync("click", clickOn("confirm"));
   assert.ok(box.innerHTML.toLowerCase().includes("only the room owner can set spend pricing"), "error text is shown");
+});
+
+
+test('pricing toggle is available to human and delegated agent administrators', () => {
+  const state=ownerState();
+  state.members.viewer2.permissions=['manage_members'];
+  state.members.agent9.permissions=['manage_members'];
+  state.members.agent9.delegatedAdmin=true;
+  for(const session of [memberSession,agentSession]) assert.equal(isSpendPricingOwner({session,state}),true);
+  state.members.agent9.active=false;
+  assert.equal(isSpendPricingOwner({session:agentSession,state}),false);
 });
