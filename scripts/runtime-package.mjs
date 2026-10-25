@@ -268,6 +268,7 @@ optional.push("server/agent-plugin-manifest.mjs"); // Lane D: plug-in manifest b
 optional.push("server/ip-blocklist.mjs"); // RC-2026-09-25: shared SSRF IP blocklist + pinned lookup (imported by server/web-fetch.mjs, server/outbound-webhooks.mjs, server/webhook-dispatch.mjs; pure, no imports)
 optional.push("server/outbound-webhooks.mjs"); // webhook URL validation (imported by server/agent-webhook-subscriptions.mjs; pure, no imports)
 optional.push("server/agent-webhook-subscriptions.mjs"); // Lane D: per-agent webhook subscriptions (imported by server/agent-plugin-store.mjs; imports outbound-webhooks.mjs)
+optional.push("server/webhook-room-scope.mjs"); // room list on agent webhook subscriptions (imported by server/agent-plugin-routes.mjs and server/mcp-room-profile.mjs)
 optional.push("server/webhook-dispatch.mjs"); // RC-2026-09-19-064: signed dispatch engine (imported by server/agent-plugin-store.mjs; pure, node:crypto only)
 optional.push("server/identity-verification.mjs"); // RC-2026-09-18-049: pure agent verification tiers (imported by server/agent-plugin-store.mjs; pure, no imports)
 optional.push("server/agent-plugin-store.mjs"); // Lane D: plug-in sub-store, SQLite bridge + ownership (imported by server/store.mjs and server/agent-plugin-routes.mjs)

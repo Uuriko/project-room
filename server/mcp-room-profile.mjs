@@ -19,6 +19,7 @@ import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
 import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
 import { AgentPluginError } from "./agent-plugin-store.mjs";
+import { resolveMcpWebhookScope } from "./webhook-room-scope.mjs";
 import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscriptions.mjs";
 import { BOND_SCOPES } from "./bonds.mjs";
 import { EscrowError } from "./bounty-escrow.mjs";
@@ -330,7 +331,9 @@ function validWakeArgs(name, args) {
   }
   if (name === "webhook_subscribe") {
     const secretOk = args.secret === undefined || typeof args.secret === "string" && args.secret.length >= 16 && args.secret.length <= 2000;
-    return validUrlString(args.url) && validEvents(args.events) && secretOk;
+    const roomsOk = args.rooms === undefined || args.rooms === "*"
+      || (Array.isArray(args.rooms) && args.rooms.length >= 1 && args.rooms.length <= 50 && args.rooms.every(id => validId(id)));
+    return validUrlString(args.url) && validEvents(args.events) && secretOk && roomsOk;
   }
   if (name === "webhook_unsubscribe") return SUBSCRIPTION_ID_PATTERN.test(args.subscriptionId);
   return false;
@@ -729,7 +732,7 @@ function wakeFailure(error) {
   return failureValue(error);
 }
 
-async function callWakeTool(store, secret, identity, name, args) {
+async function callWakeTool(store, secret, identity, name, args, { searchParams } = {}) {
   enforceMcpCallVisibility(store, identity, name);
   const agentId = identity.identityId;
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
@@ -788,8 +791,12 @@ async function callWakeTool(store, secret, identity, name, args) {
   }
   if (name === "webhook_subscribe") {
     await store.agentPlugin.assertWebhookUrl(args.url);
+    const scope = resolveMcpWebhookScope({
+      store, secret, identityId: agentId, searchParams, rooms: args.rooms,
+    });
     const { subscription } = store.agentPlugin.subscribeWebhook({
-      identityId: agentId, url: args.url, events: args.events, secret: args.secret ?? null
+      identityId: agentId, url: args.url, events: args.events, secret: args.secret ?? null,
+      roomIds: scope.roomIds, roomsSpecified: scope.roomsSpecified,
     });
     return webhookSubscribeBody(subscription);
   }
@@ -956,12 +963,12 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         if (!mcpKeyGrantsScope(store, secret, MCP_WAKE_SCOPE)) {
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WAKE_SCOPE} scope` });
         }
-        // R274-1: a webhook subscription fans out every room the identity is
-        // linked in, so hold API keys to webhooks:manage like /api/agent-webhooks.
+        // R274-1: hold API keys to webhooks:manage like /api/agent-webhooks.
+        // A subscription can still name every seated room with rooms "*".
         if (name.startsWith("webhook_") && !mcpKeyGrantsScope(store, secret, MCP_WEBHOOKS_SCOPE)) {
           return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${MCP_WEBHOOKS_SCOPE} scope` });
         }
-        return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
+        return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args, { searchParams })) };
       }
       const value = await callRoomTool(store, secret, identity, name, args, agentRooms);
       // A minted invite code is a one-time credential: it rides in

@@ -24,6 +24,7 @@ import { validatePluginManifest, WELL_KNOWN_PATH } from "./agent-plugin-manifest
 import { AgentPluginError } from "./agent-plugin-store.mjs";
 import { API_KEY_SCOPES, API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { EVENT_CATALOG, MAX_SUBSCRIPTION_EVENTS } from "./agent-webhook-subscriptions.mjs";
+import { resolveHttpWebhookScope } from "./webhook-room-scope.mjs";
 import { isRoomAccessToken } from "./guest-agent-links.mjs";
 import { assertRoomKeyPullOnly, roomKeyPresenceAuth, roomKeyHostId, roomKeyPresenceView, scopedKeyRoomBinding, assertScopedKeyListener, scopedKeyHostId, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HOST_ID_PATTERN } from "./agent-heartbeats.mjs";
@@ -462,8 +463,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`agent-webhook-subscribe:${remoteAddress}`, 20);
     const auth = agentAuth(req, requiredScope("webhooks:manage"));
     const data = await body(req);
-    if (!data || !(exact(data, ["url", "events"]) || exact(data, ["url", "events", "secret"])))
-      reject(422, "invalid_subscription_request", "url, events, and optional secret are the accepted fields");
+    if (!data || !(exact(data, ["url", "events"]) || exact(data, ["url", "events", "secret"])
+      || exact(data, ["url", "events", "rooms"]) || exact(data, ["url", "events", "secret", "rooms"])))
+      reject(422, "invalid_subscription_request", "url and events are required; secret and rooms are optional");
     if (!Array.isArray(data.events) || data.events.length === 0 || !data.events.every(e => typeof e === "string"))
       reject(422, "invalid_subscription_request", "events must be a non-empty string array");
     // RC-2026-09-18-031: fail fast on unknown event names instead of a 201
@@ -481,12 +483,18 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       reject(422, "invalid_subscription_request", "secret must be a string when given");
     // QA2 finding P2-8: resolve before the write. Private answers are 422
     // webhook_url_not_public and are not stored.
+    const scope = resolveHttpWebhookScope({
+      store, identityId: auth.identityId, hasRooms: Object.hasOwn(data, "rooms"),
+      rooms: data.rooms, now: store.now(),
+    });
     await store.agentPlugin.assertWebhookUrl(data.url);
     const { subscription } = store.agentPlugin.subscribeWebhook({
       identityId: auth.identityId,
       url: data.url,
       events: distinctEvents,
       secret: data.secret ?? null,
+      roomIds: scope.roomIds,
+      roomsSpecified: scope.roomsSpecified,
     });
     // RC-2026-09-27-2729 (UFO-steal slice 2): the signing secret never
     // leaves the server — not even once. The 201 carries the subscription
@@ -505,6 +513,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
         description: "Read the per-subscription delivery journal: pending/delivered/failed/dead_letter states, attempts, and errors. Dead letters redrive at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive; the delivery rate is at GET /api/agent-webhooks/metrics." }),
     ]);
     const responseBody = { ...subscription, next: subscribeNext(subscription.subscriptionId) };
+    if (scope.warning && subscription.rooms === "all") {
+      responseBody.scope = { rooms: "all" };
+      responseBody.warning = scope.warning;
+    }
     return json(res, 201, responseBody);
   });
 

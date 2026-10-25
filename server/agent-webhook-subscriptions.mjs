@@ -95,6 +95,7 @@ export function createAgentWebhookSubscriptions({ store, clock, id } = {}) {
     secretRef: sentinelFor(sub.subscriptionId),
     url: sub.url,
     events: Object.freeze([...sub.events]),
+    rooms: sub.roomIds == null ? "all" : Object.freeze([...sub.roomIds]),
     enabled: sub.enabled,
     createdAt: sub.createdAt,
     deliveries: sub.deliveries.length,

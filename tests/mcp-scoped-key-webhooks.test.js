@@ -1,8 +1,8 @@
 // R274-1 (John's Tab): hosted MCP webhook_subscribe/webhook_list/webhook_unsubscribe
 // must hold an API key to the webhooks:manage scope, like /api/agent-webhooks.
-// A webhook subscription is identity-wide: it fans out every room the identity
-// is linked in, so a key scoped to one room (mcp:wake + mcp:room:<id>) must not
-// be able to subscribe a URL to its other rooms' messages.
+// A key scoped to one room (mcp:wake + mcp:room:<id>) does not have that scope,
+// so it cannot subscribe a URL. A subscription that does get created can name
+// one room, several rooms, or every seated room.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";

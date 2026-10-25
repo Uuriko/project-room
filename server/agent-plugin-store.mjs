@@ -79,7 +79,11 @@ export const agentPluginSchema = `
     secret TEXT NOT NULL,
     enabled INTEGER NOT NULL DEFAULT 1 CHECK(enabled IN (0,1)),
     created_at INTEGER NOT NULL,
-    journal_json TEXT NOT NULL DEFAULT '[]'
+    journal_json TEXT NOT NULL DEFAULT '[]',
+    -- NULL receives every room the identity is seated in. A JSON array of
+    -- room ids limits delivery to those rooms. Empty array is a disabled
+    -- subscription that lost its last room.
+    room_ids_json TEXT
   );
   CREATE INDEX IF NOT EXISTS agent_webhook_sub_agent ON agent_webhook_subs(agent_id);
   -- RC-2026-09-19-064: durable per-delivery journal for signed dispatch.
@@ -207,6 +211,21 @@ function cachedDelivery(row) {
   };
 }
 
+function storedRoomIds(raw) {
+  if (raw == null) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
+    return parsed.filter(id => typeof id === "string");
+  } catch {
+    return null;
+  }
+}
+
+function webhookRoomsField(sub) {
+  return sub.roomIds == null ? "all" : Object.freeze([...sub.roomIds]);
+}
+
 export class AgentPluginError extends Error {
   constructor(status, code, message) {
     super(message);
@@ -312,6 +331,12 @@ export class AgentPluginStore {
     if (deliveryColumns.size > 0 && !deliveryColumns.has("claim_expires_at")) {
       this.db.exec("ALTER TABLE agent_webhook_deliveries ADD COLUMN claim_expires_at INTEGER");
     }
+    // Room scope. NULL is every seated room (legacy rows). Existing
+    // databases keep the column additive; the agent_id index is unchanged.
+    const subColumns = new Set(this.db.prepare("PRAGMA table_info(agent_webhook_subs)").all().map(c => c.name));
+    if (subColumns.size > 0 && !subColumns.has("room_ids_json")) {
+      this.db.exec("ALTER TABLE agent_webhook_subs ADD COLUMN room_ids_json TEXT");
+    }
     const keyColumns = new Set(this.db.prepare("PRAGMA table_info(agent_api_keys)").all().map(c => c.name));
     if (keyColumns.size > 0 && !keyColumns.has("last_used_ua")) {
       this.db.exec("ALTER TABLE agent_api_keys ADD COLUMN last_used_ua TEXT");
@@ -363,6 +388,7 @@ export class AgentPluginStore {
         secret: row.secret,
         enabled: row.enabled === 1,
         createdAt: row.created_at,
+        roomIds: storedRoomIds(row.room_ids_json),
         journalJson: row.journal_json ?? "[]",
         deliveries: [],
         deliveriesLoaded: false,
@@ -1024,22 +1050,31 @@ export class AgentPluginStore {
   // HTTP and MCP await assertWebhookUrl before this write. The pure
   // module still rejects IP literals and metadata names; the DNS lookup
   // stays outside the transaction.
-  subscribeWebhook({ identityId, url, events, secret = null }) {
+  subscribeWebhook({ identityId, url, events, secret = null, roomIds = null, roomsSpecified = false }) {
     return this.mutate(() => {
       // R277-1: a dropped 201 makes the client retry the same subscribe,
       // which used to leave a second subscription and double every
       // delivery. A subscribe for the same (identity, url, event set)
       // returns the existing subscription instead; a retry that also
       // re-enables a subscription the agent had disabled. Both HTTP and
-      // MCP call this one path, so they dedupe identically.
+      // MCP call this one path, so they dedupe identically. An explicit
+      // rooms value on that retry replaces room_ids_json. Omitting rooms
+      // leaves the stored scope alone.
       const wantedEvents = [...new Set(events)].sort().join("\u0000");
+      const storedRooms = roomIds == null ? null : [...roomIds];
       for (const existing of this.subs.values()) {
         if (existing.agentId !== identityId || existing.url !== url) continue;
         if ([...existing.events].sort().join("\u0000") !== wantedEvents) continue;
+        let becameEnabled = false;
         if (!existing.enabled) {
           this.webhooks.setEnabled(existing.subscriptionId, { agentId: identityId, enabled: true });
-          this.db.prepare("UPDATE agent_webhook_subs SET enabled=1 WHERE subscription_id=?").run(existing.subscriptionId);
           existing.enabled = true;
+          becameEnabled = true;
+        }
+        if (roomsSpecified) existing.roomIds = storedRooms;
+        if (becameEnabled || roomsSpecified) {
+          this.db.prepare("UPDATE agent_webhook_subs SET enabled=?, room_ids_json=? WHERE subscription_id=?")
+            .run(existing.enabled ? 1 : 0, existing.roomIds == null ? null : JSON.stringify(existing.roomIds), existing.subscriptionId);
         }
         this.hydrateDeliveries(existing.subscriptionId);
         return { subscription: Object.freeze({
@@ -1048,6 +1083,7 @@ export class AgentPluginStore {
           secretRef: this.webhooks.sentinelFor(existing.subscriptionId),
           url: existing.url,
           events: Object.freeze([...existing.events]),
+          rooms: webhookRoomsField(existing),
           enabled: existing.enabled,
           createdAt: existing.createdAt,
           deliveries: existing.deliveries.length,
@@ -1056,15 +1092,22 @@ export class AgentPluginStore {
       const signingSecret = secret ?? randomBytes(32).toString("base64url");
       const view = this.webhooks.subscribe({ agentId: identityId, url, events, secret: signingSecret });
       const sub = this.subs.get(view.subscriptionId);
+      sub.roomIds = storedRooms;
       this.db.prepare(`INSERT INTO agent_webhook_subs
-        (subscription_id, agent_id, url, events_json, secret, enabled, created_at, journal_json)
-        VALUES (?, ?, ?, ?, ?, 1, ?, '[]')`)
-        .run(sub.subscriptionId, sub.agentId, sub.url, JSON.stringify([...sub.events]), sub.secret, sub.createdAt);
+        (subscription_id, agent_id, url, events_json, secret, enabled, created_at, journal_json, room_ids_json)
+        VALUES (?, ?, ?, ?, ?, 1, ?, '[]', ?)`)
+        .run(sub.subscriptionId, sub.agentId, sub.url, JSON.stringify([...sub.events]), sub.secret, sub.createdAt,
+          storedRooms == null ? null : JSON.stringify(storedRooms));
       // RC-2026-09-27-2729 (UFO-steal slice 2): the raw signing secret is
       // never returned over HTTP — not even once. The view carries the
       // opaque `secretRef` sentinel instead; the agent holds no raw token.
       // Inbound-delivery verification moved server-side (verifyWebhookDelivery).
-      return { subscription: view };
+      // Rebuild after roomIds is stored: the pure subscribe view was taken
+      // before that field existed on the row.
+      return { subscription: Object.freeze({
+        ...view,
+        rooms: webhookRoomsField(sub),
+      }) };
     });
   }
 
@@ -1085,6 +1128,28 @@ export class AgentPluginStore {
       }
       return rows.length;
     });
+  }
+
+  // Leaving a room drops it from this identity's scoped subscriptions.
+  // NULL (every room) stays NULL; seating is still checked at fan-out.
+  // An array that becomes empty disables the row and does not delete it.
+  dropWebhookRoom(identityId, roomId) {
+    if (typeof identityId !== "string" || !identityId || typeof roomId !== "string" || !roomId) return 0;
+    let changed = 0;
+    const update = this.db.prepare(
+      "UPDATE agent_webhook_subs SET room_ids_json=?, enabled=? WHERE subscription_id=?");
+    for (const sub of this.subs.values()) {
+      if (sub.agentId !== identityId || !Array.isArray(sub.roomIds) || !sub.roomIds.includes(roomId)) continue;
+      const next = sub.roomIds.filter(id => id !== roomId);
+      sub.roomIds = next;
+      if (next.length === 0 && sub.enabled) {
+        this.webhooks.setEnabled(sub.subscriptionId, { agentId: identityId, enabled: false });
+        sub.enabled = false;
+      }
+      update.run(JSON.stringify(next), sub.enabled ? 1 : 0, sub.subscriptionId);
+      changed += 1;
+    }
+    return changed;
   }
 
   // R282-1: whether the identity's secret is revoked. Fail-open on a store
@@ -1250,23 +1315,29 @@ export class AgentPluginStore {
   }
 
   // RC-2026-09-19-064: fan out a persisted room event to every enabled
-  // subscription whose event filter matches. RC-2026-09-24 fanout scope:
-  // delivery is scoped to room membership — only subscriptions whose
-  // agent_id is seated in the event's room are considered. A subscription
-  // that never joined the room hears nothing from it, the same way the
-  // /events and /stream read paths behave. #3777: seating resolves
-  // through the shared guest-aware resolver (identity_links first,
-  // guest_members fallback) — trial seats hold subscriptions too, and an
-  // identity_links-only join silently starved them of every delivery.
-  // Called from the room store's command() inside the same transaction as
-  // the event insert, so a delivery is never journaled without its
-  // triggering event.
+  // subscription whose event filter matches. The SQL keeps unscoped rows
+  // (room_ids_json NULL, every room) and rows whose room list contains
+  // this room, so a scoped hook is not read for other rooms. Membership,
+  // revocation, the event filter, and the DM fence still apply.
+  // RC-2026-09-24 fanout scope: delivery is scoped to room membership —
+  // only subscriptions whose agent_id is seated in the event's room are
+  // considered. A subscription that never joined the room hears nothing
+  // from it, the same way the /events and /stream read paths behave.
+  // #3777: seating resolves through the shared guest-aware resolver
+  // (identity_links first, guest_members fallback) — trial seats hold
+  // subscriptions too, and an identity_links-only join silently starved
+  // them of every delivery. Called from the room store's command() inside
+  // the same transaction as the event insert, so a delivery is never
+  // journaled without its triggering event.
   fanoutRoomEvent({ roomId, event }) {
     const rows = this.db.prepare(
       `SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,
               s.events_json AS eventsJson
        FROM agent_webhook_subs s
-       WHERE s.enabled = 1`).all();
+       WHERE s.enabled = 1
+         AND (s.room_ids_json IS NULL OR EXISTS (
+           SELECT 1 FROM json_each(s.room_ids_json) WHERE value = ?
+         ))`).all(roomId);
     let created = 0;
     // Q3-D: the actor's kind and name come from the room roster, read once.
     let members;
