@@ -7518,7 +7518,8 @@ const usageNumber = value => Number(value).toLocaleString("en-US");
 const usageMoney = cents => cents === "unknown" ? "unknown" : `$${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const usageBytes = bytes => bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} B`;
 function usageCapRow(label, cap, format = usageNumber) {
-  return `<dt>${esc(label)}</dt><dd>${esc(format(cap.used))} of ${esc(format(cap.limit))}<small>${esc(format(cap.remaining))} left</small></dd>`;
+  const warning = cap.warning === true ? `<small class="form-error" data-cap-warning>${esc(uiText("usage.roomSizeNearLimit"))}</small>` : "";
+  return `<dt>${esc(label)}</dt><dd>${esc(format(cap.used))} of ${esc(format(cap.limit))}<small>${esc(format(cap.remaining))} left</small>${warning}</dd>`;
 }
 async function loadUsage() {
   if (!state || !client.session) return;

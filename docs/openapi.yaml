@@ -3858,13 +3858,14 @@ paths:
                     $ref: '#/components/schemas/SpendAllowanceLedger'
                   caps:
                     type: object
-                    description: members, events, workItems and projectionBytes, each { used, limit, remaining }.
+                    description: members, events, workItems and projectionBytes, each { used, limit, remaining }. projectionBytes.warning is true when the stored projection is at or over 3.5 MiB, under the 4 MiB cap.
                     additionalProperties:
                       type: object
                       properties:
                         used: { type: integer }
                         limit: { type: integer }
                         remaining: { type: integer }
+                        warning: { type: boolean }
         '422': { description: invalid_usage_period }
   /api/rooms/{roomId}/invitations:
     get:

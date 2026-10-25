@@ -147,7 +147,7 @@ function releaseUnreferencedBodies(db, roomId, referenced) {
 export function storedProjection(db, roomId, state, options = {}) {
   return serializeProjection(db, roomId, referenceWorkItems(db, roomId, state, { enabled: options.workEntities }), options);
 }
-function serializeProjection(db, roomId, state, { enabled = false, messageEntities = false, pendingMessageIds = [] } = {}) {
+function serializeProjection(db, roomId, state, { enabled = false, messageEntities = false, pendingMessageIds = [], releaseBodies = true } = {}) {
   if (state?.messages?.some(isMessageEntityRef)) state = { ...state, messages: hydrateMessageEntities(db,roomId,state.messages) };
   if (messageEntities && Array.isArray(state?.messages)) {
     if (state.messages.some(message => typeof message?.bodyRef === "string" || hasMarker(message))) {
@@ -156,7 +156,7 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
       state = hydrated.state;
     }
     const messages = referenceMessageEntities(db,roomId,state.messages,pendingMessageIds);
-    if (markedRooms(db).has(roomId)) releaseUnreferencedBodies(db,roomId,new Set());
+    if (releaseBodies && markedRooms(db).has(roomId)) releaseUnreferencedBodies(db,roomId,new Set());
     return JSON.stringify({...state,messages});
   }
   const messages = Array.isArray(state?.messages) ? state.messages : null;
@@ -167,18 +167,19 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
     // holds are unreferenced by definition. Only rooms this process has
     // seen holding rows pay the scan (a write always follows a load,
     // which marks the room in hydrateProjection).
-    if (markedRooms(db).has(roomId)) releaseUnreferencedBodies(db, roomId, new Set());
+    if (releaseBodies && markedRooms(db).has(roomId)) releaseUnreferencedBodies(db, roomId, new Set());
     return JSON.stringify(state);
   }
   if (!enabled) {
     const text = JSON.stringify(hydrateProjection(db, roomId, structuredClone(state), { workEntities: false }).state);
-    releaseUnreferencedBodies(db, roomId, new Set());
+    if (releaseBodies) releaseUnreferencedBodies(db, roomId, new Set());
     return text;
   }
   if (!messages.some(message => slimmable(message) || nullEnvelope(message))) {
     const referenced = new Set();
     for (const message of messages) if (message && typeof message.bodyRef === "string") referenced.add(message.bodyRef);
-    if (referenced.size || markedRooms(db).has(roomId)) releaseUnreferencedBodies(db, roomId, referenced);
+    if (releaseBodies && (referenced.size || markedRooms(db).has(roomId))) releaseUnreferencedBodies(db, roomId, referenced);
+    else if (referenced.size) markedRooms(db).add(roomId);
     return JSON.stringify(state);
   }
   const { known, insert } = prepared(db);
@@ -199,15 +200,44 @@ function serializeProjection(db, roomId, state, { enabled = false, messageEntiti
   // The `present` set above is the pre-write index (plus this write's
   // inserts, all of which are referenced), so the release diff needs no
   // second scan of the table.
-  const { release } = prepared(db);
-  let remaining = 0;
-  for (const sha of present) {
-    if (referenced.has(sha)) { remaining += 1; continue; }
-    release.run(roomId, sha);
-  }
-  if (remaining || referenced.size) markedRooms(db).add(roomId);
-  else markedRooms(db).delete(roomId);
+  if (releaseBodies) {
+    const { release } = prepared(db);
+    let remaining = 0;
+    for (const sha of present) {
+      if (referenced.has(sha)) { remaining += 1; continue; }
+      release.run(roomId, sha);
+    }
+    if (remaining || referenced.size) markedRooms(db).add(roomId);
+    else markedRooms(db).delete(roomId);
+  } else if (referenced.size || present.size) markedRooms(db).add(roomId);
   return JSON.stringify({ ...state, messages: slim });
+}
+
+// The write path can skip the body-table scan. This sweep deletes shas the
+// stored projection no longer names. A room with a corrupt projection is
+// left alone. Callers bound the batch with roomLimit and deadline.
+export function sweepUnreferencedBodies(db, { roomLimit = 20, deadline = Infinity } = {}) {
+  const cap = Number.isInteger(roomLimit) && roomLimit > 0 ? roomLimit : 20;
+  const rooms = db.prepare("SELECT DISTINCT room_id FROM projection_bodies ORDER BY room_id LIMIT ?").all(cap);
+  let scanned = 0, released = 0;
+  for (const { room_id: roomId } of rooms) {
+    if (Date.now() >= deadline) return { scanned, released, budgetExceeded: true };
+    scanned += 1;
+    const row = db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
+    let referenced = null;
+    if (row) {
+      try {
+        const messages = JSON.parse(row.projection)?.messages;
+        referenced = new Set();
+        if (Array.isArray(messages)) for (const message of messages) if (typeof message?.bodyRef === "string") referenced.add(message.bodyRef);
+      } catch { referenced = null; }
+    }
+    if (!referenced) continue;
+    const before = db.prepare("SELECT COUNT(*) AS n FROM projection_bodies WHERE room_id=?").get(roomId).n;
+    releaseUnreferencedBodies(db, roomId, referenced);
+    released += before - db.prepare("SELECT COUNT(*) AS n FROM projection_bodies WHERE room_id=?").get(roomId).n;
+  }
+  return { scanned, released, budgetExceeded: false };
 }
 
 // Put bodies back into a state parsed from rooms.projection. Mutates and

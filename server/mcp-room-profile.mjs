@@ -23,6 +23,7 @@ import { EVENT_CATALOG, WebhookSubscriptionError } from "./agent-webhook-subscri
 import { BOND_SCOPES } from "./bonds.mjs";
 import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
+import { parseUsageDays, roomUsageSummary } from "./usage-summary.mjs";
 import { buildOrient } from "./orient.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
@@ -247,6 +248,9 @@ function validRoomArgs(name, args) {
     const requestIdOk = args.requestId === undefined
       || (typeof args.requestId === "string" && args.requestId.length >= 1 && args.requestId.length <= 64);
     return validId(args.itemId) && sourceOk && buildOk && requestIdOk && (args.sourceRevision !== undefined || args.buildId !== undefined);
+  }
+  if (name === "room_usage") {
+    return args.days === undefined || Number.isSafeInteger(args.days) && args.days >= 1 && args.days <= 365;
   }
   return false;
 }
@@ -508,6 +512,11 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_activation_pack") {
     const auth = store.authenticate(secret, roomId);
     return buildActivationPack(store, roomId, auth.member.id, { boardList: memoizeBoardList(store) });
+  }
+  if (name === "room_usage") {
+    const options = {};
+    if (args.days !== undefined && args.days !== null) options.days = parseUsageDays(String(args.days));
+    return roomUsageSummary(store, secret, roomId, options);
   }
   if (name === "room_member_card") {
     // plan-dir-card: the member chip's card over MCP. Same read as

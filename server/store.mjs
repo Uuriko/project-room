@@ -51,6 +51,8 @@ import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { STORAGE_MODE_COLUMN, ensureStorageModeColumn, readStorageMode, maintainSlimProjection, flipRoomToSlim as flipStorageMode } from "./storage-mode.mjs";
+import { compactRoomProjection } from "./projection-compact.mjs";
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
@@ -1144,7 +1146,7 @@ function roomSchemaStamp() {
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
-    INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
+    INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN, STORAGE_MODE_COLUMN,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
@@ -1367,9 +1369,10 @@ class ProjectionCache {
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
-    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto", deferBodyRelease = false } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    this.deferBodyRelease = deferBodyRelease === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
     if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
       throw new Error("messageProjectionWindow must be a positive integer or null");
@@ -1614,6 +1617,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       ${referralSchema}`);
       this.storagePlatform.setVersion(this.db, 4);
     }
+    ensureStorageModeColumn(this.db);
     this.db.exec(WORK_REPOSITORY_SCHEMA);
     if (version > 0 && version < 26 && (
       this.db.prepare("SELECT 1 FROM events WHERE json_extract(body,'$.type')='work.completed' AND json_type(body,'$.data.externalProducer') IS NOT NULL LIMIT 1").get()
@@ -2238,6 +2242,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const row = archivedMessageRow(this.db, roomId, messageId, marker);
       return row && row.to_member_id ? [row.author_id, row.to_member_id] : null;
     };
+  }
+
+  // Per-room switch. Refuses unless verification and the dual-read pass.
+  // Rollback is rehydrateAllProjections, which writes the full projection
+  // and sets storage_mode back to blob.
+  flipRoomToSlim(roomId) {
+    return flipStorageMode(this, roomId);
   }
 
   // Default-off compaction (dry run unless dryRun:false). See archiveRoomMessages.
@@ -3388,8 +3399,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const pending = this._pendingProjectionFrames?.at(-1);
     if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
       || !freezeJsonState(state)) return;
-    const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
-    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
+    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) });
   }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
@@ -3555,8 +3565,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection), { verifyBodyHashes });
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
+    // The stored row is the cache's cost. Adding hydrated bodies and work
+    // items again counted that text twice and evicted large rooms early.
     return { value: Object.freeze({ sequence, state }),
-      weight: Buffer.byteLength(row.projection) + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
+      weight: Buffer.byteLength(row.projection) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
   // requester/target pair needs a sequenced receipt so open sessions refresh
@@ -3583,12 +3595,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   rehydrateAllProjections() {
     return this.transaction(() => {
       let count = 0;
-      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_entity\":1') > 0 OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0").all()) {
+      for (const { id } of this.db.prepare("SELECT id FROM rooms WHERE projection LIKE '%\"bodyRef\"%' OR instr(projection, '\"_entity\":1') > 0 OR instr(projection, '\"_nul\":1') > 0 OR instr(projection, '\"messagesArchive\"') > 0 OR storage_mode='slim'").all()) {
         // Migration validates stored authority, never a previously hydrated cache.
         this._dropProjectionCache();
         restoreArchivedMessages(this, id);
         const state = this.room(id).state;
-        this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
+        this.db.prepare("UPDATE rooms SET projection=?, storage_mode='blob' WHERE id=?").run(storedProjection(this.db, id, state, { enabled: false }), id);
         this._projectionCache?.clear?.();
         count += 1;
       }
@@ -3597,7 +3609,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // Phase 1a: the one serializer for rooms.projection. Every writer uses it.
   storedProjection(roomId, state) {
-    return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest });
+    const releaseBodies = !this.deferBodyRelease;
+    if (readStorageMode(this.db, roomId) === "slim") {
+      return storedProjection(this.db, roomId, state, { enabled: false, messageEntities: true, releaseBodies });
+    }
+    return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest, releaseBodies });
   }
   // A body row can only go missing through a write outside storedProjection.
   // The event log is still the source of truth: replay it and refill.
@@ -6450,10 +6466,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       if (this.messageProjectionWindow !== null && (state.messages?.length ?? 0) > this.messageProjectionWindow * 2) {
-        // Archive only at an exact certified head; unsafe transitions defer to
-        // backfill. This is the existing reversible format, not another store.
-        this.archiveMessages(roomId, { keepNewest: this.messageProjectionWindow, dryRun: false });
+        // A room that still holds about four windows of history is the
+        // store-growth job's chunked settle. Doing that scan inside the
+        // posting request would spend the request budget on the whole log.
+        const count = state.messages.length;
+        if (count <= this.messageProjectionWindow * 4) {
+          const keepNewest = this.messageProjectionWindow;
+          const archived = this.archiveMessages(roomId, { keepNewest, dryRun: false });
+          const stillHot = archived?.ok && archived.archived > 0
+            ? 0
+            : (this.room(roomId).state.messages?.length ?? count);
+          if (stillHot > keepNewest * 2) compactRoomProjection(this, roomId, { keepNewest });
+        }
       }
+      // A room that has already flipped stays on the hot window. Rooms still
+      // in blob mode are not archived here.
+      maintainSlimProjection(this, roomId);
       return { sequence, event: incoming, duplicate: false, ...(note ? { note } : {}),
         ...((Array.isArray(mentionWarnings) && mentionWarnings.length > 0) ? { mentionWarnings } : {}) };
     });

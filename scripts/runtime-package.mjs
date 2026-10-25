@@ -346,6 +346,7 @@ optional.push("server/routes/agent-work.mjs"); // bounded agent pickup route
 optional.push("server/routes/typing.mjs", "server/routes/room-digest.mjs", "server/room-digest.mjs", "server/message-read-index.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
+optional.push("server/storage-mode.mjs"); // per-room blob|slim switch (imported by server/store.mjs)
 optional.push("server/legacy-message-shape.mjs"); // projection shape upgrade v1: legacy message records (imported by server/store.mjs)
 optional.push("server/routes/wake-status.mjs"); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/agent-presence.mjs"); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)
@@ -359,6 +360,8 @@ optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-g
 optional.push("server/usage-summary.mjs");
 optional.push("server/operator-archive.mjs"); // operator archive door for the projection cap (imported by server/operator-routes.mjs)
 optional.push("server/store-relief.mjs"); // store-growth automatic projection relief (imported by server/jobs.mjs)
+optional.push("server/projection-compact.mjs"); // settled projection compact (imported by server/store.mjs and server/store-relief.mjs)
+optional.push("server/projection-account.mjs"); // stored projection size account (imported by server/operator-status.mjs)
 optional.push("server/channel-adapters/telegram-config.mjs", "server/channel-adapters/telegram-transport.mjs", "scripts/telegram-set-webhook.mjs", "scripts/telegram-rotate-webhook.mjs");
 optional.push("server/receipts-page.mjs", "server/receipts-live.mjs"); // public receipts page + live room reader (imported by server/http.mjs)
 optional.push("server/receipt-share.mjs"); // EXP-5: receipt verdict line, JSON-LD, share text, OG fields (imported by server/http.mjs, server/receipts-page.mjs, server/proof-page.mjs)

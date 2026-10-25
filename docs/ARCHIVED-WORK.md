@@ -437,6 +437,21 @@ PRs closed in the 2026-10-25 repo cleanup whose branches were deleted. Each row 
 | #4858 | Wake webhook retries at the delivery's next attempt | `cursor/webhook-retry-schedule-da81` | `dba5f8413752ea1b5991b5cf671de28eac28ff1d` | conflicts with main and is stale; idea recorded in docs/ARCHIVED-WORK.md |
 | #4889 | Cure: guard signin-navigation sync() against absent provider anchors | `cure/signin-navigation-absent-anchor` | `efaa8a9ecc75b3fec780510f9ab94fb926f1e909` | contained in #4922 |
 
+## G6 combined
+
+Per-room storage slimming, combined into the G6 follow-through PR. Head SHAs are the commits these rows closed.
+
+| PR | Title / idea | Branch | Head SHA | Why closed |
+|---|---|---|---|---|
+| #4843 | Keep message text out of the room row on each write | `cursor/side-table-projection-6692` | `abbf0cba84ecd0750a63a8979057789d98ea93db` | superseded by the per-room slim flip; the `_m` side table is not the storage mode |
+| #4842 | Sweep unreferenced message bodies off the write path | `cursor/defer-body-sweep-6692` | `dfb47d632d562c506b2bacd72008c70817162237` | combined into the G6 follow-through |
+| #4847 | Flip a room to slim storage only after its messages verify | `cursor/per-room-storage-mode-6692` | `a5f6a668bc54965dfb2d7bec6d3b06af06996fef` | combined into the G6 follow-through |
+| #4848 | Count projection cache weight as the stored row | `cursor/projection-cache-weight-6692` | `38ecc552a3a103d5e2055a882bd26bb9aae1b24c` | combined into the G6 follow-through |
+| #4846 | Unpark a messages backfill that already certified the failing event | `cursor/backup-health-alert-5afa` | `640147bd37c0f4e4b614388fbc60ab1138dd0162` | combined into the G6 follow-through; the backup-late alert was already dropped on that branch and is not included |
+| #4738 | Bound the hot room projection so a busy room stays near 100KB | `cursor/projection-hot-window-aa42` | `000b73ab8eb67f41773606759b639d64c008d91a` | combined into the G6 follow-through |
+| #4561 | Alert when the database nears 8 GB or a room nears 3.5 MiB | `grok/storage-alerts` | `cce56e16a85d340d144d4939ff49b3ec374edc32` | combined into the G6 follow-through |
+| #4900 | store-growth: bound the relief leg by the job deadline (reliefDeferred) | `cure/store-growth-deadline` | `cc42221cee886274fa0b00b574c5a0302ecde63a` | combined into the G6 follow-through |
+
 ## Branches with no PR (deleted in cleanup)
 
 | Branch | Head SHA |
