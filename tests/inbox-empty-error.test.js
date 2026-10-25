@@ -7,7 +7,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-const ui = readFileSync(new URL("../src/inbox-ui.js", import.meta.url), "utf8");
+const ui = readFileSync(new URL("../archive/deferred-email/src/inbox-ui.js", import.meta.url), "utf8");
 
 test("load() hides the empty note on a failed inbox read", () => {
   assert.ok(

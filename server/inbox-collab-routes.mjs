@@ -18,7 +18,7 @@
 // pure modules see them. Approval verdicts additionally require a human
 // caller — an agent can never clear its own draft, enforced both here (403)
 // and by the queue itself (approval_not_human).
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { recordWakeEvent } from "./wake-metrics.mjs";
 
