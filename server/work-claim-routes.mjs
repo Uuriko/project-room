@@ -637,6 +637,13 @@ export async function handleWorkClaims(options) {
   // round trip never holds the room write lock. No webhook receiver is
   // mounted; sweep is the member-triggered poll, and the cron uses the same
   // lookup. An empty room, or a sweep with nothing due, does not call fetch.
+  // S7: the wrapper's pre-transaction clocks (deploy-status cache freshness
+  // and the pull-budget gate) read store.now() like every other consumer
+  // in this file (handleWorkClaimsCore and the claim-pr-sync /
+  // work-claim-integrity readers) — never the wall clock directly. A
+  // frozen or shifted store clock (fixtures, tests) must govern the gate
+  // too; in production store.now() IS the wall clock, so nothing changes.
+  const storeNowMs = () => (typeof options.store?.now === "function" ? options.store.now() : Date.now());
   let pullBatch = { results: [], rateLimitedUntil: null, skipped: false };
   let deployStatus = null;
   if (options.workClaimRoute === "status" && req.method === "GET") {
@@ -650,7 +657,7 @@ export async function handleWorkClaims(options) {
     deployStatus = await readBoardDeployStatus(options.store, {
       fetchImpl: options.fetchPullRequest ?? fetch,
       token: credential || null,
-      nowMs: Date.now(),
+      nowMs: storeNowMs(),
       force,
     });
   }
@@ -660,7 +667,7 @@ export async function handleWorkClaims(options) {
     try { refuseSweep(); } catch (error) { return helpers.json(res, error.status, error.body); }
   }
   if (options.workClaimRoute === "sweep") {
-    const nowMs = Date.now();
+    const nowMs = storeNowMs();
     const budget = readClaimPullBudget(options.store);
     if (budget > nowMs) {
       pullBatch = { results: [], rateLimitedUntil: budget, skipped: true };

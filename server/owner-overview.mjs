@@ -341,6 +341,10 @@ function openDisputes(store, roomId) {
 
 function collectDisputes(store, roomId, base, nowMs, decisions, exceptions) {
   for (const dispute of openDisputes(store, roomId)) {
+    // S6 note: this is a display/near-default warning instant, not an
+    // enforcement consumer. Enforcement fires at opened + TIMEOUT + 1ms
+    // (strict > in _keeperPass / DUE_WHERE; see bounty-escrow.mjs), so
+    // this surface warns one millisecond before the default can land.
     const consequenceAtMs = dispute.openedMs === null ? null : dispute.openedMs + DISPUTE_TIMEOUT_MS;
     decisions.push(enrichDecision(Object.freeze({
       kind: "dispute",
