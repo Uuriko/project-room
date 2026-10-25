@@ -17,7 +17,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
   BountyEscrow, pruneBountyIdempotency,
-  IDEMPOTENCY_RETENTION_MS, IDEMPOTENCY_MAX_ROWS_PER_ROOM, IDEMPOTENCY_COUNT_FLOOR_MS
+  IDEMPOTENCY_RETENTION_MS, IDEMPOTENCY_MAX_ROWS_PER_ROOM
 } from "../server/bounty-escrow.mjs";
 
 const ROOM = "room-prune";
