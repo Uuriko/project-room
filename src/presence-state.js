@@ -23,7 +23,12 @@ export function presenceState({
   const validHostObservation = Number.isFinite(hostLastSeenAt)
     && Number.isFinite(now) && hostLastSeenAt <= now;
   if (validHostObservation && hostStatus === "online") return "listening";
-  if (validHostObservation && hostStatus === "offline") return "unreachable";
+  if (validHostObservation && hostStatus === "offline") {
+    // A newer successful command proves recent activity, not a listening
+    // transport. Keep the offline host observation in presence.status.
+    if (lastCommandAt > hostLastSeenAt && within(lastCommandAt, now, PRESENCE_LIVE_WINDOW_MS)) return "idle";
+    return "unreachable";
+  }
   if (within(lastCommandAt, now, PRESENCE_IDLE_WINDOW_MS)
     || within(lastSeenAt, now, PRESENCE_IDLE_WINDOW_MS)) return "idle";
   return "unknown";

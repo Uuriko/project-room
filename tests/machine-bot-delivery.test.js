@@ -123,8 +123,12 @@ for (const reviewPolicy of ['distinct_member', 'independent_principal']) {
     assert.equal(result.awaitingReview, true);
     assert.equal(resumed.active, null);
     const work = (await api.claim('commons', 'review-work')).value;
-    assert.equal(work.state, 'in_progress');
+    // #3546: the bot's finish occupies delivered with its receipt bundle;
+    // only the reviewer's verify can move it to done.
+    assert.equal(work.state, 'delivered');
     assert.equal(work.reviewedBy, null);
+    assert.equal(work.verification, null);
+    assert.ok(work.delivery?.digest, 'the delivery bundle is recorded on the claim');
     assert.ok(work.history.some(entry => entry.note?.includes('Receipt sha256:')), 'reviewer can inspect receipt before approving');
     assert.equal((await api.claim('commons', 'review-lease')).value.state, 'done');
     assert.equal(f.store.room('commons').state.messages.filter(m => m.body.startsWith('Result ready for review.')).length, 1);

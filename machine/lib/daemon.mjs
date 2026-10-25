@@ -9,7 +9,7 @@ import { configHome, loadConfig, saveConfig } from "./config.mjs";
 import { readSecret } from "./secrets.mjs";
 import { connectSocket } from "./ws.mjs";
 import { dispatchTool } from "./tools.mjs";
-import { approvalClass, requestApproval, takeApproval } from "./approvals.mjs";
+import { approvalClass, requestApproval, takeApproval, waitForDecision } from "./approvals.mjs";
 import {
   appendManifest, captureConsoleFrame, keyframes, manifestBytes, pruneRecordings, sha256, startFrameLoop,
 } from "./recording.mjs";
@@ -242,6 +242,14 @@ export class MachineDaemon {
     const className = approvalClass({ tool, slot: caller.slot, args: message.args ?? {} });
     if (className) {
       const secret = await identitySecret(this.home);
+      // Research r7 (R327-1): registering first also reads the room Pause. A
+      // machine whose room member the owner paused starts no approval-class
+      // call (nothing is asked in the room), and a Pause that lands during
+      // the wait ends it at once: the server releases the held poll on pause.
+      const wakes = daemonWakeApi(this.config.roomOrigin, secret);
+      const registered = await wakes.register();
+      const ownerPaused = () => wakes.paused.some(p => p?.roomId === this.config.roomId && p?.heldBy !== "self");
+      if (ownerPaused()) return errorResult(id, ERROR.PAUSED, "The room owner paused this machine's member");
       const requested = await requestApproval({
         home: this.home, origin: this.config.roomOrigin, roomId: this.config.roomId, secret,
         ownerMemberId: this.config.ownerMemberId, className, detail: `${caller.identityId} ${className}`,
@@ -250,18 +258,23 @@ export class MachineDaemon {
       const waitMs = Number(this.env.ROOM_MACHINE_APPROVAL_WAIT_MS);
       const budget = Number.isFinite(waitMs) && waitMs >= 0 ? waitMs : APPROVAL_TTL_MS;
       const deadline = Date.now() + budget;
-      let taken = { ok: false, reason: ERROR.APPROVAL_REQUIRED };
-      while (Date.now() <= deadline && !this.refusal(id)) {
-        taken = await takeApproval({
+      // Research r6: the wait rides the identity's wake queue (its own host
+      // id, so the bot's held poll on "room-machine" is never displaced)
+      // instead of rereading the room every 40 ms. takeApproval still decides.
+      const scanMs = Number(this.env.ROOM_MACHINE_APPROVAL_SCAN_MS) || 5000;
+      const waited = await waitForDecision({
+        take: () => takeApproval({
           home: this.home, origin: this.config.roomOrigin, roomId: this.config.roomId, secret, code: requested.code,
-        });
-        if (taken.ok || taken.reason === ERROR.APPROVAL_DENIED) break;
-        await new Promise(resolve => setTimeout(resolve, 40));
-      }
+        }),
+        poll: registered ? (ms, after) => wakes.poll(ms, after) : null,
+        deadline, scanMs, stopped: () => Boolean(this.refusal(id)) || ownerPaused(),
+      });
+      const taken = waited.taken ?? { ok: false, reason: ERROR.APPROVAL_REQUIRED };
       // A Halt, Pause or dead-man that landed during the wait outranks the
       // approval: the relay already told the caller the call was stopped.
       const late = this.refusal(id);
       if (late) return late;
+      if (ownerPaused()) return errorResult(id, ERROR.PAUSED, "The room owner paused this machine's member");
       if (!taken.ok) return errorResult(id, taken.reason, "The owner has not approved this");
     }
     if (caller.slot && !this.frameStops.has(caller.claimId) && tool.startsWith("desktop.")) {
@@ -370,4 +383,41 @@ export class MachineDaemon {
       connections: this.connections,
     };
   }
+}
+
+// Research r6 (R327-1): the daemon's own wake channel for approval waits. A
+// separate host id keeps the bot's long-poll waiter (host "room-machine") in
+// place. `paused` carries the room Pause list from the last heartbeat or poll
+// reply ([] from a server that does not report it).
+export const DAEMON_APPROVAL_HOST_ID = "room-machine-approvals";
+export function daemonWakeApi(origin, secret, fetchImpl = globalThis.fetch) {
+  const call = async (path, init = {}) => {
+    try {
+      const headers = { accept: "application/json", origin, authorization: `Bearer ${secret}` };
+      if (init.body !== undefined) headers["content-type"] = "application/json";
+      const response = await fetchImpl(new URL(path, origin), { method: init.method ?? "GET", headers,
+        body: init.body === undefined ? undefined : JSON.stringify(init.body) });
+      const text = await response.text();
+      let value = null;
+      try { value = text ? JSON.parse(text) : null; } catch { value = null; }
+      return { ok: response.ok, status: response.status, value };
+    } catch { return { ok: false, status: 0, value: null }; }
+  };
+  const api = {
+    paused: [],
+    async register() {
+      if (!origin || !secret) return false;
+      const beat = await call("/api/agent-heartbeats", { method: "POST",
+        body: { hostId: DAEMON_APPROVAL_HOST_ID, mode: "wakeable", cadenceSeconds: 300 } });
+      if (beat.ok) api.paused = Array.isArray(beat.value?.paused) ? beat.value.paused : [];
+      return beat.ok;
+    },
+    async poll(waitMs, after = null) {
+      const cursor = typeof after === "string" && after ? `&after=${encodeURIComponent(after)}` : "";
+      const page = await call(`/api/agent-wakes/poll?hostId=${encodeURIComponent(DAEMON_APPROVAL_HOST_ID)}&waitMs=${Math.max(0, Math.floor(waitMs))}${cursor}`);
+      if (page.ok) api.paused = Array.isArray(page.value?.paused) ? page.value.paused : [];
+      return page;
+    },
+  };
+  return api;
 }

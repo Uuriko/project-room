@@ -18,7 +18,13 @@ import { canonicalJson } from "../src/audit-receipts.mjs";
 //
 //   Acceptance track (verdict on work, evidence-cited):
 //     claimed --submit--> submitted --accept--> accepted --challenge--> approved
-//     submitted|accepted --dispute--> disputed --release--> approved | --cancel--> refunded
+//     accepted --dispute--> disputed --release--> approved | --cancel--> refunded
+//
+// #3726 (Option A): disputes open ONLY on accepted work. Submitted work has
+// no acceptance verdict to re-decide, so a dispute there could vest the award
+// without acceptance, attestation, or the challenge window (the settle-kind
+// fall-through). The gate is structural: disputeBounty refuses any other
+// state and the acceptance track has no submitted -> disputed edge.
 //   Finality track (credit-lot movements; requires a terminal acceptance verdict):
 //     locked --attribute--> attributed --approve--> approved --payout--> paid
 //     locked|attributed --refund--> refunded
@@ -91,17 +97,17 @@ export const CLAIM_BOND_MILLIS = 1000; // 1 credit anti-flake bond, fixed per ro
 // never touches payouts and never bans.
 export const FLAKE_DECAY_MS = 30 * 24 * 3600 * 1000; // strikes older than 30d stop counting
 export const FLAKE_COOLDOWN_MS = 7 * 24 * 3600 * 1000; // rung 3+: no new claims for 7d
-export const FLAKE_BOND_MULTIPLIER = 2; // rung 2+: the claim bond doubles
-export const FLAKE_COOLDOWN_RUNG = 3;
+const FLAKE_BOND_MULTIPLIER = 2; // rung 2+: the claim bond doubles
+const FLAKE_COOLDOWN_RUNG = 3;
 export const FEE_NUMERATOR = 1;
 export const FEE_DENOMINATOR = 100; // 1% of the award to the room pool, on released payouts only
 export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the bounty (<=25% total dispute cost, per v2)
-export const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
+const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
 export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
 export const MAX_CREDITS = 1000000;
-export const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
-export const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
+const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
+const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
 
 // Journal kinds eligible for an Ed25519-signed, externally verifiable
 // receipt, mapped to the receipt type issued for them. approve / fee /
@@ -127,7 +133,7 @@ export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in
 // AI verifier lane judges against the pinned rubric. Chosen at post time,
 // pinned at fund time, immutable after.
 export const APPROVAL_MODES = Object.freeze(["human", "agent"]);
-export function stateGroup(state) {
+function stateGroup(state) {
   switch (state) {
     case "proposed": return "proposed";
     case "funded": return "funded";
@@ -163,7 +169,7 @@ export const SETTLEMENT_KINDS = new Set(["verified-complete", "failed", "unverif
 // "refunded"). Every acceptance transition is evidence-cited.
 const ACCEPTANCE_TRACK = new Map([
   ["claimed", new Set(["submitted"])],              // work enters review
-  ["submitted", new Set(["accepted", "disputed", "refunded"])], // verdict | challenge | reject
+  ["submitted", new Set(["accepted", "refunded"])], // verdict | reject (no dispute edge: #3726)
   ["accepted", new Set(["disputed"])],              // challenge within the window
   ["disputed", new Set(["approved", "refunded"])], // release: verdict affirmed; cancel: verdict rejected
 ]);
@@ -174,7 +180,7 @@ const STATE_TRANSITION_TRACK = new Map([
   ["proposed", new Map([["funded", null], ["cancelled", null]])],
   ["funded", new Map([["claimed", null], ["refunded", TRACK_FINALITY]])],
   ["claimed", new Map([["submitted", TRACK_ACCEPTANCE], ["refunded", TRACK_FINALITY]])],
-  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE], ["disputed", TRACK_ACCEPTANCE],
+  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE],
     ["refunded", TRACK_ACCEPTANCE]])], // reject: the verdict failed the work (free-miss settlement)
   ["accepted", new Map([["approved", TRACK_FINALITY], ["disputed", TRACK_ACCEPTANCE]])],
   ["disputed", new Map([["approved", TRACK_ACCEPTANCE], ["refunded", TRACK_ACCEPTANCE]])],
@@ -230,6 +236,7 @@ export const bountyEscrowSchema = `
   );
   CREATE INDEX IF NOT EXISTS bounty_journal_account ON bounty_journal(room_id, account_id, seq);
   CREATE INDEX IF NOT EXISTS bounty_journal_bounty ON bounty_journal(room_id, bounty_id);
+  CREATE INDEX IF NOT EXISTS bounty_journal_lot_state ON bounty_journal(room_id, account_id, lot_state, seq);
   CREATE TABLE IF NOT EXISTS bounty_records (
     bounty_id TEXT PRIMARY KEY,
     room_id TEXT NOT NULL,
@@ -238,6 +245,7 @@ export const bountyEscrowSchema = `
     amount_millis INTEGER NOT NULL CHECK(amount_millis > 0),
     poster TEXT NOT NULL,
     verifier TEXT,
+    dispute_decider TEXT,
     approval_mode TEXT NOT NULL DEFAULT 'legacy' CHECK(approval_mode IN ('legacy','human','agent')),
     claimant TEXT,
     state TEXT NOT NULL,
@@ -476,7 +484,7 @@ export function convergeBountyDeployedSchema(db) {
 // slice 6, and record each pin in bounty_rubric_versions. Exported for the
 // _migrateColumns fallback path (older test doubles); the boot convergence
 // above is the production path.
-export function _backfillRubricPins(db) {
+function _backfillRubricPins(db) {
   const rows = db.prepare(
     "SELECT bounty_id, room_id, criteria, poster, created_at FROM bounty_records WHERE rubric_json IS NULL").all();
   const insert = db.prepare(`INSERT OR IGNORE INTO bounty_rubric_versions
@@ -587,6 +595,19 @@ export const toCredits = millis => millis / MILLIS_PER_CREDIT;
 
 const sha256 = value => createHash("sha256").update(value, "utf8").digest("hex");
 
+// The journal hash core — the ONE computation _append writes with, the
+// conservation audit re-checks with, and receipt verification at read time
+// (server/receipt-verify.mjs) re-validates with. Track attribution joins
+// the core only when the row carries one, so pre-track rows keep verifying
+// against their original 12-element core.
+export function journalEntryHash(entry) {
+  const coreParts = [entry.prev_hash, entry.entry_id, entry.account_id, entry.at, entry.kind,
+    entry.bounty_id ?? "", entry.lot_id ?? "", String(entry.amount), entry.lot_state,
+    entry.memo ?? "", entry.actor_kind ?? "", entry.actor_id ?? ""];
+  if (entry.track != null) coreParts.push(entry.track);
+  return sha256(coreParts.join("|"));
+}
+
 // Slice 10: sybil-cluster detection thresholds (integration map #10).
 // Review-only: crossing a threshold creates an arbiter-review flag — it
 // never auto-bans, auto-slashes, or moves balances, bonds, or reputation.
@@ -595,7 +616,7 @@ export const SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES = 3;  // one lane's shared finger
 
 // Slice 4: probation-gate review-packet dedupe window. One packet per lane
 // per 24h — a lane retrying a denied claim does not spam the arbiter queue.
-export const REPUTATION_PACKET_DEDUPE_MS = 24 * 3600 * 1000;
+const REPUTATION_PACKET_DEDUPE_MS = 24 * 3600 * 1000;
 
 // Slice 10: normalized text for the submission fingerprint. Deterministic:
 // line endings -> \n, horizontal whitespace runs collapse to one space,
@@ -642,8 +663,8 @@ const isoNow = ms => new Date(ms).toISOString();
 // verdict} against the pinned version; arbiters re-check against the exact
 // pinned version from bounty_rubric_versions. Canonical form is sorted by
 // criterionId so the hash is stable.
-export const RUBRIC_MAX_CRITERIA = 50;
-export const CITATION_VERDICTS = Object.freeze(["pass", "fail"]);
+const RUBRIC_MAX_CRITERIA = 50;
+const CITATION_VERDICTS = Object.freeze(["pass", "fail"]);
 
 export function canonicalRubric(rubric) {
   check(Array.isArray(rubric) && rubric.length >= 1 && rubric.length <= RUBRIC_MAX_CRITERIA,
@@ -956,7 +977,7 @@ export class BountyEscrow {
       bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
       bounty_events: ["actor_kind", "before_state", "after_state", "track"],
       bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label",
-        "rubric_json", "rubric_hash", "rubric_version", "approval_mode"],
+        "rubric_json", "rubric_hash", "rubric_version", "approval_mode", "dispute_decider"],
     };
     for (const [table, cols] of Object.entries(required)) {
       const have = colsOf(table);
@@ -991,6 +1012,7 @@ export class BountyEscrow {
     // "written before tracks existed" (or a null-track kind like
     // genesis/transfer); nothing reads the column yet.
     addCol("bounty_records", "state_changed_ms INTEGER");
+    addCol("bounty_records", "dispute_decider TEXT");
     addCol("bounty_records", "snoozed_until_ms INTEGER");
     addCol("bounty_records", "decline_reason TEXT");
     addCol("bounty_records", "duplicate_of TEXT");
@@ -1018,6 +1040,15 @@ export class BountyEscrow {
     for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags",
       "bounty_reputation_packets"])
       for (const ddl of schemaChunks(name)) this.db.exec(ddl);
+    // Journal lot_state index (AUDIT-50X X-08 / M-4): every balance SUM in
+    // _balanceMillis, _requirePayable, _settleClaimBond and _approvedMillis
+    // filters on (room_id, account_id, lot_state); without this index each
+    // SUM scans the account's whole journal, so a settlement's cost grows
+    // with the account's entire history. Purely additive (IF NOT EXISTS):
+    // the RoomStore boot path creates it via bountyEscrowSchema /
+    // convergeBountyDeployedSchema step 3 (which replays every index DDL),
+    // and this covers direct construction on a pre-index database.
+    for (const ddl of schemaChunks("bounty_journal_lot_state")) this.db.exec(ddl);
     // Legacy rows (NULL rubric): pin the default derived v1, same as the
     // boot convergence backfill.
     if (!hadRubricCols) _backfillRubricPins(this.db);
@@ -1059,11 +1090,9 @@ export class BountyEscrow {
     // genesis/transfer) keep the original 12-element core so their stored
     // hashes keep verifying.
     const track = trackOfJournalKind(kind);
-    const coreParts = [prevHash, entryId, accountId, at, kind, bountyId ?? "", lotId ?? "", String(amount),
-      lotState, memo ?? "", actorKind ?? "", actorId ?? ""];
-    if (track != null) coreParts.push(track);
-    const core = coreParts.join("|");
-    const hash = sha256(core);
+    const hash = journalEntryHash({ prev_hash: prevHash, entry_id: entryId, account_id: accountId,
+      at, kind, bounty_id: bountyId, lot_id: lotId, amount, lot_state: lotState, memo,
+      actor_kind: actorKind, actor_id: actorId, track });
     this.db.prepare(`INSERT INTO bounty_journal
       (room_id, entry_id, account_id, at, kind, bounty_id, lot_id, amount, lot_state, prev_hash, hash, memo, actor_kind, actor_id, track)
       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
@@ -1273,6 +1302,7 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
+      disputeDecider: row.dispute_decider ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
@@ -1297,12 +1327,12 @@ export class BountyEscrow {
 
   _saveBounty(bounty) {
     const at = isoNow(this.nowMs());
-    this.db.prepare(`UPDATE bounty_records SET title=?, criteria=?, amount_millis=?, poster=?, verifier=?,
+    this.db.prepare(`UPDATE bounty_records SET title=?, criteria=?, amount_millis=?, poster=?, verifier=?, dispute_decider=?,
       claimant=?, state=?, state_changed_ms=?, deadline_ms=?, challenge_ends_ms=?, dispute_id=?, dispute_opened_ms=?,
       snoozed_until_ms=?, decline_reason=?, duplicate_of=?, label=?,
       evidence_json=?, attestation_json=?, resolution_json=?,
       rubric_json=?, rubric_hash=?, rubric_version=?, submission_hash=?, updated_at=? WHERE bounty_id=?`)
-      .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier,
+      .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier, bounty.disputeDecider ?? null,
         bounty.claimant ?? null, bounty.state, bounty.stateChangedMs, bounty.deadlineMs,
         bounty.challengeEndsMs ?? null, bounty.disputeId ?? null, bounty.disputeOpenedMs ?? null,
         bounty.snoozedUntilMs ?? null, bounty.declineReason ?? null, bounty.duplicateOf ?? null, bounty.label ?? null,
@@ -1319,6 +1349,7 @@ export class BountyEscrow {
     return {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amountMillis: row.amount_millis, poster: row.poster, verifier: row.verifier, claimant: row.claimant,
+      disputeDecider: row.dispute_decider ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, stateChangedMs: row.state_changed_ms, deadlineMs: row.deadline_ms,
       challengeEndsMs: row.challenge_ends_ms, disputeId: row.dispute_id, disputeOpenedMs: row.dispute_opened_ms,
@@ -1377,7 +1408,7 @@ export class BountyEscrow {
   // POST /bounties creates PROPOSED: a holding state outside the claimable
   // work graph and outside metrics. Submission != commitment: no budget is
   // locked, so posting never needs funds.
-  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, approvalMode = "human", rubric = null, actor } = {}) {
+  postBounty(roomId, { poster, title, criteria, amount, deadline, verifierId = null, disputeDeciderId = null, approvalMode = "human", rubric = null, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);
@@ -1404,6 +1435,24 @@ export class BountyEscrow {
           check(GENESIS_LANES.includes(verifier), "invalid_input", "verifier must be one of the room's agent lanes");
         check(verifier !== lane, "invalid_input", "the verifier must be a third lane, distinct from the poster");
       }
+      let decider = null;
+      if (disputeDeciderId !== null && disputeDeciderId !== undefined) {
+        // The designated dispute decider is the tier-1 arbiter seated by
+        // disputeBounty (through the same resolveTier1 path as the
+        // verifier) when no verifier designation seats one. The office is
+        // adjudication, not work verification, so any current member may
+        // hold it — human-mode rooms seat human reviewers in the role —
+        // but it is always a third party, never the poster, and seating
+        // re-checks independence from the claimant. Without a membership
+        // source the decider must still be a genesis lane.
+        const members = this._members(roomId);
+        decider = members === null
+          ? canonicalLane(disputeDeciderId)
+          : this._requireLane(roomId, disputeDeciderId, "dispute decider");
+        if (members === null)
+          check(GENESIS_LANES.includes(decider), "invalid_input", "dispute decider must be one of the room's lanes");
+        check(decider !== lane, "invalid_input", "the dispute decider must be a third lane, distinct from the poster");
+      }
       // Agent-approve mode needs its approver up front: the designated
       // verifier is the only identity that may render the verdict.
       check(approvalMode !== "agent" || verifier !== null, "invalid_input",
@@ -1415,12 +1464,12 @@ export class BountyEscrow {
       const at = isoNow(this.nowMs());
       const bountyId = this._nextBountyId(roomId);
       this.db.prepare(`INSERT INTO bounty_records
-        (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, approval_mode, claimant, state, state_changed_ms,
+        (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, dispute_decider, approval_mode, claimant, state, state_changed_ms,
          deadline_ms, challenge_ends_ms, dispute_id, dispute_opened_ms, snoozed_until_ms, decline_reason,
          duplicate_of, label, evidence_json, attestation_json, resolution_json,
          rubric_json, rubric_hash, rubric_version, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, approvalMode, null, "proposed", this.nowMs(),
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+        .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, decider, approvalMode, null, "proposed", this.nowMs(),
           deadlineMs, null, null, null, null, null, null, null, null, null, null,
           rubricJson, rubricHash, 1, at, at);
       this.db.prepare(`INSERT INTO bounty_rubric_versions
@@ -2287,7 +2336,8 @@ export class BountyEscrow {
 
   // Arbitrator cards are drawn from CURRENT room membership — never a
   // hardcoded lane list. A lane that leaves (or never joined) cannot be
-  // seated; the dispute path then reports honestly-unavailable.
+  // seated; a dispute that would need that seat is refused as honestly
+  // unavailable (#3727).
   _laneCards(roomId) {
     const members = this._members(roomId);
     if (members === null) {
@@ -2310,17 +2360,71 @@ export class BountyEscrow {
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
       check(!bounty.disputeId, "dispute_exists", "this bounty already has a dispute");
-      check(bounty.state === "submitted" || bounty.state === "accepted", "invalid_state", `bounty is ${bounty.state}, not disputable`);
+      // #3726 (Option A): a dispute re-decides an acceptance verdict, so it
+      // can only open on accepted work. Submitted work has no verdict yet —
+      // the poster's reject path and the free-miss deadline settlement are
+      // its remedies. The refusal fires BEFORE the bond is checked or locked,
+      // so a challenger bond can never be locked by a dispute that cannot
+      // open.
+      check(bounty.state === "accepted", "invalid_state",
+        `bounty is ${bounty.state}, not disputable: disputes open only on accepted work`);
+      // The challenge window IS the dispute window for an accepted bounty:
+      // at challengeEndsMs the keeper auto-approves, so a dispute filed at
+      // or after close could never be a sponsor protection — it could only
+      // freeze a settled payout until the timeout default pays it out
+      // anyway (#3703).
+      if (bounty.challengeEndsMs !== null
+          && this.nowMs() >= bounty.challengeEndsMs)
+        fail("invalid_state", "the challenge window for this bounty has closed");
       check(lane !== bounty.claimant, "not_authorized", "the claimant cannot dispute their own submission");
       check(typeof grounds === "string" && grounds.length >= 1 && grounds.length <= 2000, "invalid_input", "grounds must be 1..2000 characters");
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
       this._acceptanceTransition(bounty, "disputed", { evidence: grounds });
       const bondMillis = toMillis(bond);
-      // The dispute bond is exactly 25% of the bounty: the >= 25% minimum
-      // and the <= 25% total-dispute-cost cap (v2 economics) coincide.
+      // The dispute bond is exactly 25% of the bounty (#3307). That is
+      // this production rule, not a machine minimum: the dispute machine's
+      // own floor is 5% (MIN_BOND_RATIO in server/bounty-disputes.mjs),
+      // which 25% satisfies, and the machine's 25% is its cap on total
+      // recorded dispute cost — so the bond equals the maximum total
+      // dispute cost the machine will record (v2 economics).
       const required = Math.ceil(bounty.amountMillis * DISPUTE_BOND_RATIO);
       check(bondMillis === required, "invalid_bond",
         `dispute bond must be exactly 25% of the bounty (${toCredits(required)} credits)`);
+      // Seat-or-refuse (#3727): a dispute must never open into an empty
+      // decider seat. The designated tier-1 decider is the only
+      // authorized decider in slice 1 — panel-majority voting arrives
+      // in a later slice — so when no decider can be seated (no decider
+      // designated at posting, or the designee cannot sit: no longer an
+      // enrolled lane or active member, or not independent of the
+      // claimant or the challenger) the dispute is honestly unavailable
+      // and is refused HERE, before the challenger's bond locks. Opening
+      // anyway froze the bounty and the bond for 14 days in a record
+      // nobody could ever rule on; the timeout default is the backstop
+      // for disputes that stall, not for disputes undecidable from the
+      // start. The designation is the bounty's named dispute decider
+      // when one was set at posting, else its designated verifier.
+      const designatedDecider = bounty.disputeDecider ?? bounty.verifier;
+      let seating = null;
+      if (designatedDecider) {
+        const lanes = this._laneCards(roomId);
+        // Lane cards enumerate agent members; a designated HUMAN decider
+        // (a human-mode room's named reviewer) is seated from their live
+        // membership instead. Independence from the claimant — and from
+        // the challenger, an independence input since #3866: a designee
+        // who raised this dispute is ineligible for its seat
+        // (party-as-judge) — remains resolveTier1's check, keyed off the
+        // same `unavailable` signal the decide-time guard uses.
+        if (!lanes.some(card => card.lane === designatedDecider)) {
+          const member = this._memberOf(roomId, designatedDecider);
+          if (member && member.active !== false)
+            lanes.push({ lane: designatedDecider, trust_level: "standard" });
+        }
+        seating = this._arbiters.resolveTier1({ verifierId: designatedDecider,
+          executor: { lane: bounty.claimant }, challenger: { lane }, lanes });
+      }
+      check(seating !== null && !seating.unavailable, "dispute_unavailable",
+        `dispute is unavailable for this bounty: ${seating?.reason
+          ?? "no designated decider — a dispute needs a dispute decider (or verifier) named at posting to seat its decider"}`);
       this._requirePayable(roomId, lane, bondMillis, "dispute bond");
       const at = isoNow(this.nowMs());
       const disputeId = newId("dsp_");
@@ -2340,21 +2444,9 @@ export class BountyEscrow {
         this._persistDispute(roomId, dispute);
         dispute = machine.submitEvidence(disputeId, { by: lane, summary: grounds });
         this._persistDispute(roomId, dispute);
-        // Seat the decider: the designated third-lane verifier (tier 1) is the
-        // only authorized decider in slice 1. Panel-majority voting arrives
-        // in a later slice, so without a designated verifier there is no
-        // authorized decider: the dispute is marked honestly unavailable and
-        // the 14-day timeout default (RELEASE) is the backstop.
-        let seating = null;
-        if (bounty.verifier)
-          seating = this._arbiters.resolveTier1({ verifierId: bounty.verifier,
-            executor: { lane: bounty.claimant }, lanes: this._laneCards(roomId) });
-        if (!seating || seating.unavailable) {
-          dispute = machine.markUnavailable(disputeId,
-            seating?.reason ?? "no-designated-verifier: panel-majority voting is not in slice 1");
-        } else {
-          dispute = machine.seatDecider(disputeId, { decider: seating.decider.lane });
-        }
+        // Seat the decider resolved (and required) above: the dispute
+        // reaches the machine only once a tier-1 decider exists (#3727).
+        dispute = machine.seatDecider(disputeId, { decider: seating.decider.lane });
         this._persistDispute(roomId, dispute);
       } catch (error) {
         // #3275: the machine Map is not transactional — a rollback here
@@ -2394,6 +2486,11 @@ export class BountyEscrow {
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
       const dispute = this._disputes.get(bounty.disputeId);
       check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
+      // Defense in depth: seating now refuses a challenger-designee, but a
+      // dispute seated before that exclusion existed (or recorded by any
+      // other path) still cannot be ruled on by the party who raised it.
+      check(dispute.raisedBy !== lane, "not_authorized",
+        "the seated decider cannot rule on a dispute they raised");
       // Slice 6: the arbiter may re-check the work against the pinned
       // rubric version. When supplied, the citations are validated against
       // the pin before the ruling lands, and recorded on the resolution.
@@ -2482,15 +2579,17 @@ export class BountyEscrow {
       forfeitedBond: packet.forfeitedBond, actor }) ?? [];
   }
 
-  _settleDispute(bounty, { outcome, terminal, reasonCodes = [], bondSnapshot, forfeitedBond, actor }) {
+  _settleDispute(bounty, { outcome, terminal, reasonCodes = [], bondSnapshot, forfeitedBond, actor, bondToChallenger = false }) {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
     const at = isoNow(this.nowMs());
     const amount = bounty.amountMillis;
     const challenger = this._disputeRecords.get(bounty.disputeId)?.raisedBy;
     const worker = bounty.claimant;
     const lotId = newId("lot_");
-    // Where the award currently sits: disputed from `submitted` -> still
-    // locked with the poster; disputed from `accepted` -> attributed.
+    // Where the award currently sits: disputed from `accepted` -> attributed.
+    // The from-`submitted` arm (award still locked with the poster) survives
+    // only so disputes persisted before the #3726 gate can still settle —
+    // no new dispute can open from submitted.
     const awardFrom = this._disputeWasFromSubmitted(bounty)
       ? { account: bounty.poster, state: "locked" } : { account: worker, state: "attributed" };
     const settleKind = outcome === "upheld" ? "cancel" : outcome === "split" ? "split" : "release";
@@ -2556,9 +2655,15 @@ export class BountyEscrow {
             amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "dispute bond returned", actor });
       } else {
         // RELEASE: the award vests with the worker (swept at the epoch, 1% fee
-        // then); the challenger's bond compensates the worker for the delay —
-        // in full, no fee on penalty compensation. A forfeited bond (frivolous
-        // ruling, withdrawn challenge) goes to the room pool instead.
+        // then); on a DECIDED release the challenger's bond compensates the
+        // worker for the delay — in full, no fee on penalty compensation. A
+        // forfeited bond (frivolous ruling, withdrawn challenge) goes to the
+        // room pool instead. A TIMEOUT default is a no-verdict settlement:
+        // the reputation projector already scores it as the challenger's
+        // loss (dispute_lost), so the bond follows the forfeiture precedent
+        // to the pool — never to the claimant. Compensating the claimant on
+        // timeout made a confederate dispute a free money pump on any
+        // bounty whose dispute could not be decided (#3702).
         if (awardFrom.state === "locked") {
           this._requireFinalityMove(bounty, "attribute");
           collect(this._move({ roomId, at, from: awardFrom, to: { account: worker, state: "attributed" },
@@ -2569,7 +2674,15 @@ export class BountyEscrow {
         this._move({ roomId, at, from: { account: worker, state: "attributed" }, to: { account: worker, state: "approved" },
           amountMillis: amount, kind: "approve", bountyId, lotId, memo: `dispute ${outcome}: award vests`, actor });
         if (typeof bondSnapshot === "number") {
-          if (forfeited)
+          if (bondToChallenger)
+            // #3727 legacy guard: the record carries no seated decider
+            // (opened before disputeBounty learned to refuse an empty
+            // seat), so no ruling was ever possible and the challenger
+            // was never heard. Their bond comes home — it never
+            // compensates the worker for a hearing that could not happen.
+            this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: challenger, state: "payable" },
+              amountMillis: bondSnapshot, kind: "bond-return", bountyId, lotId: newId("lot_"), memo: "undecidable dispute: bond returned to challenger", actor });
+          else if (forfeited || terminal === "timeout")
             this._move({ roomId, at, from: { account: challenger, state: "locked" }, to: { account: POOL_ACCOUNT, state: "payable" },
               amountMillis: bondSnapshot, kind: "bond-forfeit", bountyId, lotId: newId("lot_"), memo: `dispute ${outcome}: bond forfeited to pool`, actor });
           else
@@ -2606,8 +2719,8 @@ export class BountyEscrow {
     // 14-day timeout-default, which reaches no other producer). Without
     // this, timeout-default settlements never landed on the event stream
     // and the reputation projector (server/bounty-reputation.mjs) never
-    // applied their signals. Outcome-less settlements (a withdrawn dispute
-    // carries no verdict) emit nothing, as before.
+    // applied their signals. Outcome-less settlements (a settlement carrying
+    // no verdict) emit nothing, as before.
     if (typeof outcome === "string" && outcome.length > 0) {
       this._settlementDecidedEvent = this._event(roomId, "bounty.decided",
         { bountyId, actor, before: "disputed", after: bounty.state,
@@ -2794,8 +2907,12 @@ export class BountyEscrow {
       }
       if (bounty.disputeOpenedMs !== null && now - bounty.disputeOpenedMs > DISPUTE_TIMEOUT_MS) {
         // Unresolved > 14d: permissionless finalize defaults to RELEASE.
+        // A record with no seated decider is a pre-#3727 legacy row —
+        // undecidable from the start — so its bond returns to the
+        // challenger instead of compensating the worker.
         const signed = this._settleDispute(bounty, { outcome: "timeout-default", terminal: "timeout",
-          bondSnapshot: dispute.bondSnapshot, forfeitedBond: 0, actor });
+          bondSnapshot: dispute.bondSnapshot, forfeitedBond: 0, actor,
+          bondToChallenger: !dispute.decider });
         return { action: "released", signed };
       }
     }
@@ -2824,7 +2941,17 @@ export class BountyEscrow {
       const triggeredBy = caller === undefined ? null : this._requireLane(roomId, caller, "caller");
       const now = this.nowMs(), at = isoNow(now);
       const summary = { approved: [], swept: [], refunded: [], released: [], paid: [], expiredUnfunded: [] };
-      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','accepted','disputed','approved') ORDER BY created_at").all(roomId);
+      // The snapshot MUST cover every state the epoch keeper's due-scan
+      // (bounty-epoch-keeper.mjs DUE_WHERE) can count as due — including
+      // 'submitted': _keeperPass has the free-miss refund for it, but a
+      // snapshot that never selects the row makes that branch unreachable
+      // from closeEpoch. That omission was the live stall behind the
+      // guardian census F1 finding (2026-10-18): submitted bounties past
+      // their deadline counted due + overdue every tick while no keeper
+      // action could ever touch them (failed stayed 0 — nothing threw;
+      // the rows were simply never read). finalizeBounty was unaffected
+      // (it selects by id), which is why manual closes always worked.
+      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','submitted','accepted','disputed','approved') ORDER BY created_at").all(roomId);
       for (const row of rows) {
         const bounty = this._mutable(row);
         // #3275: each bounty's keeper action is atomic. Keeper actions are
@@ -3120,14 +3247,7 @@ export class BountyEscrow {
         let prev = "genesis";
         for (const e of this.db.prepare("SELECT * FROM bounty_journal WHERE room_id=? AND account_id=? ORDER BY seq").all(roomId, account_id)) {
           if (e.prev_hash !== prev) { violations.push(`hash chain break for ${account_id} at ${e.entry_id}`); break; }
-          // Mirror _append: the track element joins the core only when the
-          // row carries one, so pre-track rows verify against their original
-          // 12-element core.
-          const coreParts = [e.prev_hash, e.entry_id, e.account_id, e.at, e.kind, e.bounty_id ?? "", e.lot_id ?? "",
-            String(e.amount), e.lot_state, e.memo ?? "", e.actor_kind ?? "", e.actor_id ?? ""];
-          if (e.track != null) coreParts.push(e.track);
-          const core = coreParts.join("|");
-          if (sha256(core) !== e.hash) { violations.push(`hash mismatch for ${account_id} at ${e.entry_id}`); break; }
+          if (journalEntryHash(e) !== e.hash) { violations.push(`hash mismatch for ${account_id} at ${e.entry_id}`); break; }
           prev = e.hash;
         }
       }

@@ -607,11 +607,21 @@ import {
 
 const NOW = Date.parse("2026-10-07T00:00:00Z");
 const OPENER = "ai_opener", HOLDER = "ai_holder", OTHER = "ai_other";
-const VERB_STATE = { start: "in_progress", block: "blocked", release: "unclaimed", pause: "claimed", finish: "done" };
+const VERB_STATE = { start: "in_progress", block: "blocked", release: "unclaimed", pause: "claimed", finish: "delivered", verify: "done", changes_requested: "in_progress" };
+// #3546/#3547 split the old one-call finish into finish -> delivered and
+// verify -> done. The split is only visible under a reviewed policy: under
+// self_attested a done call on in_progress work collapses both verbs into
+// one step, so the traces below run items under distinct_member, where the
+// table's moves stay distinct. A reviewed finish must hand over a delivery
+// bundle, and verify is the reviewer's authority call, not the holder's.
+const FINISH_BUNDLE = { artifact: { kind: "file", ref: "result.txt", sha256: "ab".repeat(32) },
+  checks: [{ name: "unit", result: "pass" }], criteria: [] };
 
 function apply(item, verb, actor, { authority = false, t }) {
   if (verb === "claim") return claimWork(item, actor, { now: t });
   if (verb === "close" || verb === "cancel") return closeWork(item, actor, { verb, authority, now: t });
+  if (verb === "verify") return updateWork(item, OTHER, { state: "done", now: t, authority: true, reviewedBy: OTHER });
+  if (verb === "finish") return updateWork(item, actor, { state: VERB_STATE.finish, now: t, authority, delivery: FINISH_BUNDLE });
   return updateWork(item, actor, { state: VERB_STATE[verb], now: t, authority });
 }
 
@@ -633,11 +643,21 @@ test("the table covers every stored state and only names known states", () => {
 });
 
 test("random verb traces follow the table exactly (holder acting; a manager retires)", () => {
+  // start and changes_requested are one in_progress move wearing the name
+  // the lifecycle gives it at each state (start from claimed/blocked, the
+  // send-back from delivered): the pure update call cannot tell the two
+  // apart, so the pair shares one expectation per state. Every other verb
+  // is checked against the table strictly.
+  const expectedFor = (state, verb) => {
+    const direct = nextClaimState(state, verb);
+    if (direct !== null || (verb !== "start" && verb !== "changes_requested")) return direct;
+    return nextClaimState(state, verb === "start" ? "changes_requested" : "start");
+  };
   fc.assert(fc.property(fc.array(fc.constantFrom(...CLAIM_VERBS), { maxLength: 25 }), verbs => {
-    let item = createWork({ id: "w1", title: "t" }, { now: NOW, agentId: OPENER });
+    let item = createWork({ id: "w1", title: "t", reviewPolicy: "distinct_member" }, { now: NOW, agentId: OPENER });
     verbs.forEach((verb, i) => {
       const t = NOW + (i + 1) * 1000;
-      const expected = nextClaimState(item.state, verb);
+      const expected = expectedFor(item.state, verb);
       let next;
       try { next = apply(item, verb, HOLDER, { t, authority: verb === "close" || verb === "cancel" }); } catch (error) {
         assert.ok(error instanceof ClaimError, String(error));

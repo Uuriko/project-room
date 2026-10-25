@@ -5,7 +5,7 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { executeAccountDeletion, planAccountDeletion } from "./account-deletion.mjs";
 import { PURGE_TABLES } from "./purge-registry.mjs";
 import { appendOperatorAction } from "./operator-actions.mjs";

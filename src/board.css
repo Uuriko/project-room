@@ -3,9 +3,9 @@
 /* QA5R-UI-1: the sidebar Board entry is a nav row like the channel rows, not a
    browser-default grey button. M-02: the Squads entry in the same Tasks nav
    gets the same treatment (44px touch floor on phones). */
-#tasks-board-open, #squads-open { display: block; width: 100%; min-height: 44px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: var(--text-sm); font-weight: 600; text-align: left; cursor: pointer; }
-#tasks-board-open:hover, #squads-open:hover { background: rgb(255 255 255 / 4%); }
-:root[data-theme="light"] #tasks-board-open:hover, :root[data-theme="light"] #squads-open:hover { background: rgb(0 0 0 / 5%); }
+#tasks-board-open { display: block; width: 100%; min-height: 44px; padding: .45rem .6rem; border: 0; border-radius: .5rem; background: transparent; color: var(--text); font-size: var(--text-sm); font-weight: 600; text-align: left; cursor: pointer; }
+#tasks-board-open:hover { background: rgb(255 255 255 / 4%); }
+:root[data-theme="light"] #tasks-board-open:hover { background: rgb(0 0 0 / 5%); }
 /* The owner-only "Save cap" submit has no .button class (markup in board-ui.js);
    give it the secondary button look instead of the browser default. */
 [data-claim-cap] button { padding: .58rem .85rem; border: 1px solid var(--line); border-radius: .42rem; background: var(--panel-raised); color: var(--text); font-size: var(--text-xs); font-weight: 600; }
@@ -22,7 +22,7 @@
    control. */
 .board-filter { display: flex; flex-wrap: wrap; align-items: end; gap: var(--space-2); margin: 0 0 var(--space-3); }
 .board-filter-q { display: grid; gap: var(--space-1); font-size: var(--text-sm); font-weight: 600; flex: 1 1 16rem; max-width: 28rem; }
-.board-filter-q input { min-height: 44px; padding: .45rem .6rem; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); font-size: var(--text-sm); }
+.board-filter-q input { min-height: 44px; padding: .45rem .6rem; border: 1px solid var(--line-control); border-radius: var(--radius-sm); background: var(--panel); color: var(--text); font-size: var(--text-sm); }
 .board-filter-mine { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 44px; font-size: var(--text-sm); }
 .board-filter-mine input { width: 1.25rem; height: 1.25rem; accent-color: var(--accent); }
 .board-filter-empty { margin: 0 0 var(--space-3); }
@@ -42,6 +42,13 @@
 .claim-owner { display: flex; align-items: center; gap: var(--space-2); }
 .claim-deps, .claim-chain { overflow-wrap: anywhere; }
 .claim-files, .claim-reviews, .claim-deps { margin: 0 0 var(--space-2); }
+/* #3795: the claim record disclosure gets the same touch sizing as the file
+   list; its labelled sections read as a compact record, not a second card. */
+.claim-record { margin: 0 0 var(--space-2); overflow-wrap: anywhere; }
+.claim-record summary { min-height: 44px; padding-block: .65rem; cursor: pointer; }
+.claim-record ul { margin: 0 0 var(--space-2); }
+.claim-record p { margin: 0 0 var(--space-2); }
+.claim-record-label { font-weight: 600; }
 .claim-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .claim-actions button, .claim-actions select { min-height: 44px; }
 .ci-badge { display: inline-block; padding: 0 .4rem; border: 1px solid var(--line); border-radius: 99px; font-size: var(--text-xs); text-transform: uppercase; }

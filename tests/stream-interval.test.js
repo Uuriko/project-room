@@ -9,7 +9,10 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
-// One open stream on a server with the given pump interval. `post` commits a
+// Delta sync: a committed event wakes its room's streams immediately — the
+// pump interval no longer gates delivery. The interval now paces only the
+// idle cadence (typing, keepalive, and the periodic authed re-check), so an
+// idle stream must not re-read the store on every tick. `post` commits a
 // message in-process; `next` resolves with the elapsed time when the stream
 // parses the next room-event frame, or with null when `limitMs` passes first.
 async function fixture(t, streamInterval) {
@@ -17,6 +20,9 @@ async function fixture(t, streamInterval) {
   const store = new RoomStore(join(directory, "room.sqlite"));
   store.initialize(initialRoom());
   const key = store.issueAccessKey("commons", "owner"), sequence = store.room("commons").sequence;
+  let reads = 0;
+  const eventsAfter = store.eventsAfter.bind(store);
+  store.eventsAfter = (...args) => { reads++; return eventsAfter(...args); };
   const server = createRoomServer({ store, streamInterval });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const response = await fetch(`http://127.0.0.1:${server.address().port}/api/rooms/commons/stream?after=${sequence}`, { headers: { Authorization: `Bearer ${key}` } });
@@ -41,16 +47,25 @@ async function fixture(t, streamInterval) {
     }
     return performance.now() - started;
   };
-  return { post, next };
+  return { post, next, reads: () => reads };
 }
 
-test("a shorter pump interval delivers a committed message sooner", async t => {
-  const fast = await fixture(t, 20), slow = await fixture(t, 2000);
-  slow.post("Waits for the next pump");
-  fast.post("Arrives on the next pump");
-  const fastElapsed = await fast.next(1500);
-  assert.notEqual(fastElapsed, null, "20 ms pump delivered within 1.5 s");
-  assert.ok(fastElapsed < 1000, `20 ms pump delivered in ${fastElapsed} ms`);
-  // The 2000 ms pump has not ticked again yet, so nothing is on the wire.
-  assert.equal(await slow.next(400), null, "2000 ms pump delivered nothing within 400 ms");
+test("a committed message wakes the stream promptly, whatever the pump interval", async t => {
+  const slow = await fixture(t, 2000);
+  slow.post("Arrives on commit, not on the next pump");
+  const elapsed = await slow.next(1500);
+  assert.notEqual(elapsed, null, "2000 ms interval stream delivered within 1.5 s");
+  assert.ok(elapsed < 1000, `commit-woken stream delivered in ${elapsed} ms`);
+});
+
+test("an idle stream does not re-read the store on every tick", async t => {
+  const f = await fixture(t, 50);
+  const opened = f.reads();
+  assert.equal(opened, 2, "open validates once and pumps once");
+  await sleep(1200);
+  // The re-check cadence at a 50 ms interval is 250 ms, so ~5 light re-reads
+  // in 1.2 s — against the legacy pump's ~24 full reads in the same window.
+  const idleReads = f.reads() - opened;
+  assert.ok(idleReads <= 7, `idle stream re-read the store ${idleReads} times in 1.2 s`);
+  assert.equal(await f.next(300), null, "an idle stream receives no room events");
 });

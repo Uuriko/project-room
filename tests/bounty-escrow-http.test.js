@@ -272,7 +272,9 @@ test("error mapping: unknown bounty, invalid input, unauthenticated", async t =>
 
 test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t => {
   const { origin, keys } = await startServer(t);
-  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ amount: 100 }), keys.owner);
+  // #3727: the dispute below can only open if a decider seats, so the bounty
+  // names its designated verifier (the reviewer) at posting.
+  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ amount: 100, verifierId: "reviewer" }), keys.owner);
   const bountyId = (await createRes.json()).bounty.bountyId;
   await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner);
   await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/claim`, {}, keys.producer);
@@ -291,10 +293,13 @@ test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t =
   }, keys.reviewer);
   assert.equal(badBond.status, 422);
 
-  // Exactly 25% opens the dispute.
+  // Exactly 25% opens the dispute. The challenger is a third member:
+  // the designated verifier (reviewer) cannot raise it — seating would
+  // refuse the designee-as-challenger dispute as unavailable (#3866),
+  // so a neutral member challenges and the reviewer seats as decider.
   const dispute = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/dispute`, {
     bond: 25, grounds: "deliverable incomplete",
-  }, keys.reviewer);
+  }, keys.guest);
   assert.equal(dispute.status, 201);
 
   // Credit history is movement-level with before/after and hash links.
@@ -305,6 +310,28 @@ test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t =
   assert.ok(receipts.every(r => r.after && r.hash), "every receipt carries after and a hash link");
   assert.ok(receipts.every(r => r.kind === "genesis" || r.before),
     "every non-genesis movement receipt carries before");
+});
+
+test("#3726: dispute on submitted (unaccepted) work is refused 422 invalid_state over HTTP", async t => {
+  const { origin, keys } = await startServer(t);
+  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ amount: 100 }), keys.owner);
+  const bountyId = (await createRes.json()).bounty.bountyId;
+  await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner);
+  await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/claim`, {}, keys.producer);
+  await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/submit`, {
+    evidenceUrl: "https://room.example/receipts/2",
+    summary: "Done.",
+    producerId: "producer",
+  }, keys.producer);
+
+  // No acceptance yet: the dispute cannot open, whatever the bond.
+  const refused = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/dispute`, {
+    bond: 25, grounds: "deliverable incomplete",
+  }, keys.reviewer);
+  assert.equal(refused.status, 422);
+  const body = await refused.json();
+  assert.equal(body.error.code, "invalid_state");
+  assert.match(body.error.message, /only on accepted work/);
 });
 
 test("rubric route: post with rubric, re-pin pre-funding, frozen after fund", async t => {

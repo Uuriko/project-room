@@ -44,16 +44,17 @@
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { resolveGrants } from "./grants.mjs"; // UFO-steal slice 1: live grant edges feed the catalog seam
+import { identityRoomSeats } from "./membership-resolution.mjs";
 
 // Write tools a guest agent may still invoke. The store.command guest
 // gate (server/store.mjs) admits MESSAGE_POSTED chat posts — but drafts
 // carrying a workItemId need the contributor tier — and
-// MESSAGE_REACTION_SET; every other command type is 403
+// POLL_VOTED; every other command type is 403
 // guest_scope_denied, and #1166 extended the same denial to attachment
 // staging, moderation reports, and wake-queue intents. Draft posts
 // stay call-time-gated for observer-tier guests: the check remains as
 // defense in depth.
-export const GUEST_WRITABLE_TOOLS = Object.freeze(new Set(["room_post_message", "room_react"]));
+export const GUEST_WRITABLE_TOOLS = Object.freeze(new Set(["room_post_message"]));
 
 // Write tools a t1_readonly agent may still invoke. The tier contract
 // (server/autonomy-tiers.mjs T1_READONLY_ALLOWED_COMMANDS) keeps
@@ -138,11 +139,12 @@ export function resolveCatalogAgent(store, identity) {
   const memberships = [];
   const identityId = identity?.identityId ?? null;
   if (store?.db && typeof identityId === "string" && identityId) {
+    // Seats come from the shared resolver (#3882): identity_links plus
+    // guest_members trial seats — an identity whose only seat is a guest
+    // seat holds a membership here, classified guest by its member id.
     let links = [];
     try {
-      links = store.db.prepare(
-        "SELECT room_id AS roomId, member_id AS memberId FROM identity_links WHERE identity_id = ?"
-      ).all(identityId);
+      links = identityRoomSeats(store.db, identityId);
     } catch {
       links = [];
     }
