@@ -471,7 +471,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // Purely additive and intentionally NOT fenced — older writers have no code
   // path to it; the owner-managed roster rules in server/squads.mjs are the
   // integrity gate.
-  "squads"
+  "squads",
+  // agent_dispatch: coordinator seat, assignment book, and the reason log.
+  // Purely additive and intentionally NOT fenced — older writers have no
+  // code path to it. The dispatcher in server/agent-dispatch.mjs is the gate.
+  "agent_dispatch"
 ]);
 // Created on first use, not in the constructor. A database that has never
 // issued an OAuth grant or persisted an abuse rate bucket does not have

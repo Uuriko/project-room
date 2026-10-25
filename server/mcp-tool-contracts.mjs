@@ -55,6 +55,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   identity_list_verified: { access: `read, ${MEMBER}`, cost: READ, rest: "none; the per-identity twin is GET /api/agent-identities/{id}/verification" },
   identity_read_verification: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-identities/{id}/verification" },
   squads_list: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/squads" },
+  room_dispatch_read: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/dispatch" },
+  room_dispatch_act: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/dispatch/tick" },
   squads_get: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/squads/{squadId}" },
   squads_create: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads" },
   squads_update_members: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/members" },

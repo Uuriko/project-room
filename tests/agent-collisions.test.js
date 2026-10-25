@@ -80,6 +80,11 @@ const posts = async client => (await client.changes(0, 100)).events
   .filter(row => row.event.type === "message.posted")
   .map(row => row.event.data.body);
 
+// Collision wakes use a cx… message id. Assignment wakes share the inbox and
+// are a separate contract.
+const collisionWakes = (store, identityId) => store.agentHeartbeats.pendingWakes(identityId)
+  .filter(row => /^cx[a-f0-9]{40}$/.test(row.messageId));
+
 test("flag on: both agents are named and woken for a shared file, branch, or pull request", async t => {
   const { store, origin, ada, bea, adaSecret, beaSecret, adaId, beaId } = await room(t, { ROOM_COLLISION_ALERTS: "on" });
   await ada.workClaim("lane-a", { files: ["server/a.mjs"], advisory: true });
@@ -88,7 +93,7 @@ test("flag on: both agents are named and woken for a shared file, branch, or pul
   const fileAlert = bodies.find(body => body.includes("server/a.mjs") && body.includes("Coordinate the merge."));
   assert.ok(fileAlert, bodies.join("\n"));
   assert.match(fileAlert, /Ada \(lane-a\) and Bea \(lane-b\)/);
-  const fileWakes = [adaId, beaId].map(identityId => store.agentHeartbeats.pendingWakes(identityId));
+  const fileWakes = [adaId, beaId].map(identityId => collisionWakes(store, identityId));
   assert.equal(fileWakes[0].length, 1);
   assert.equal(fileWakes[1].length, 1);
   assert.equal(fileWakes[0][0].messageId, fileWakes[1][0].messageId);
@@ -104,7 +109,7 @@ test("flag on: both agents are named and woken for a shared file, branch, or pul
   await bea.workClaim("pull-b", { files: ["docs/b.md"], pullRequest: pull });
   const pullAlert = (await posts(ada)).find(body => body.includes(pull));
   assert.match(pullAlert, /Ada \(pull-a\) and Bea \(pull-b\)/);
-  assert.equal(store.agentHeartbeats.pendingWakes(adaId).length, 3);
+  assert.equal(collisionWakes(store, adaId).length, 3);
 });
 
 test("flag off posts nothing, and a hard file lease still refuses the second claim while alerting the holder when the flag is on", async t => {
@@ -112,7 +117,7 @@ test("flag off posts nothing, and a hard file lease still refuses the second cla
   await quiet.ada.workClaim("quiet-a", { files: ["server/quiet.mjs"], advisory: true });
   await quiet.bea.workClaim("quiet-b", { files: ["server/quiet.mjs"], advisory: true });
   assert.equal((await posts(quiet.ada)).some(body => body.includes("Coordinate the merge.")), false);
-  assert.equal(quiet.store.agentHeartbeats.pendingWakes(quiet.adaId).length, 0);
+  assert.equal(collisionWakes(quiet.store, quiet.adaId).length, 0);
 
   const loud = await room(t, { ROOM_COLLISION_ALERTS: "on" });
   await loud.ada.workClaim("held", { files: ["server/held.mjs"] });
@@ -125,6 +130,6 @@ test("flag off posts nothing, and a hard file lease still refuses the second cla
   const refusal = (await posts(loud.ada)).find(body => body.includes("server/held.mjs") && body.includes("tried to claim"));
   assert.match(refusal, /Bea tried to claim other/);
   assert.match(refusal, /Ada \(held\)/);
-  assert.equal(loud.store.agentHeartbeats.pendingWakes(loud.adaId).length, 1);
-  assert.equal(loud.store.agentHeartbeats.pendingWakes(loud.beaId).length, 1);
+  assert.equal(collisionWakes(loud.store, loud.adaId).length, 1);
+  assert.equal(collisionWakes(loud.store, loud.beaId).length, 1);
 });

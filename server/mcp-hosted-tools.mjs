@@ -176,6 +176,24 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     claimId: { ...idField, maxLength: 128, description: "Work-claim id to walk downstream from." }
   }, ["roomId", "claimId"])),
+  tool("room_dispatch_read", "Read agent capacity for this room: who is idle or busy, current claims, open pull requests, recent throughput (merged per day), failure rate, and strengths by area. Also the ranked work queue, the coordinator seat, and utilization metrics (busy share, merged per day, duplicate rate, collision rate). Same read as GET /api/rooms/{roomId}/dispatch. view is capacity, queue, metrics, or all.", schema({
+    roomId: roomIdField,
+    view: { type: "string", enum: ["all", "capacity", "queue", "metrics"], description: "capacity, queue, metrics, or all. Omit for all." }
+  }, ["roomId"])),
+  tool("room_dispatch_act", "Dispatch write: tick the coordinator, accept or decline an assignment, claim or release the coordinator seat, or let the owner override. A decline puts the task back on the queue for someone else. action is tick, respond, claim_seat, release_seat, assign, pause, resume, seat, or fix_plan. REST writes are POST /api/rooms/{roomId}/dispatch/tick, POST /api/rooms/{roomId}/dispatch/respond, POST /api/rooms/{roomId}/dispatch/seat, POST /api/rooms/{roomId}/dispatch/override, and POST /api/rooms/{roomId}/dispatch/fix-plans.", schema({
+    roomId: roomIdField,
+    action: { type: "string", enum: ["tick", "respond", "claim_seat", "release_seat", "assign", "pause", "resume", "seat", "fix_plan"] },
+    assignmentId: { ...idField, description: "Assignment id from the wake or the queue. Required for respond." },
+    decision: { type: "string", enum: ["accept", "decline"], description: "Required for respond." },
+    memberId: { ...idField, description: "Agent member id. Required for assign. Optional for seat." },
+    taskKey: { type: "string", minLength: 1, maxLength: 400, description: "Queue task key. Required for assign." },
+    note: { type: "string", maxLength: 200 },
+    id: { type: "string", minLength: 1, maxLength: 80, description: "Fix-plan id." },
+    title: { type: "string", minLength: 1, maxLength: 200 },
+    files: { type: "array", items: { type: "string", minLength: 1, maxLength: 300 }, maxItems: 64 },
+    value: { type: "number", minimum: 0, maximum: 100 },
+    blockedBy: { type: "array", items: { type: "string", minLength: 1, maxLength: 128 }, maxItems: 20 }
+  }, ["roomId", "action"]), false),
   tool("squads_list", "List the squads in a room: id, name, goal, members, channel (the thread-root message id), owner, and state. Same call as GET /api/rooms/:roomId/squads. @squad/<name> in a message fans out to every active member. This read does not create, change, or disband a squad.", schema({
     roomId: roomIdField
   }, ["roomId"])),

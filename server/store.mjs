@@ -74,6 +74,7 @@ import { Attention, attentionSchema } from "./attention.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "./work-claim-sqlite.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA, ensurePublicReceiptVerificationColumn, ensurePublicReceiptAgentIdsColumn, noteWorkClaimChange, syncRoomPublication } from "./public-read-model.mjs";
 import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-09-25-911: ranked per-agent next actions.
+import { AgentDispatch, agentDispatchSchema } from "./agent-dispatch.mjs";
 import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
 import { buildRoomDigest } from "./room-digest.mjs"; // C-06 room digest composition.
 import { roomAttention } from "./needs-me.mjs"; // C-06: per-room needs-me slice for the digest.
@@ -1130,7 +1131,7 @@ function roomSchemaStamp() {
     shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema, reminderSchema, agentConnectionSchema,
     inboxSchema, inboxReadSchema, emailImportSchema, wakeQueueSchema, wakeQueuePauseSchema,
     wakeQueuePauseBySchema,
-    attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
+    attentionSchema, workClaimSchema, nextActionsSchema, agentDispatchSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
     roomPublicFaceSchema, agentPublicPageSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
@@ -1426,8 +1427,13 @@ export class RoomStore {
     this.attention = new Attention(this);
     this.workClaims = createDurableWorkClaimRegistry(this.db, {
       transaction: fn => this.transaction(fn),
-      onChange: roomId => noteWorkClaimChange(this, roomId),
+      onChange: roomId => {
+        noteWorkClaimChange(this, roomId);
+        try { this.agentDispatch?.onClaimsChanged(roomId); }
+        catch { /* a dispatch failure must not roll back the claim write */ }
+      },
     });
+    this.agentDispatch = new AgentDispatch(this);
     this.nextActions = new NextActions(this); // RC-2026-09-25-911: ranked next-actions (private dismissals/suppressions).
     this.readOnly = readOnly;
     this.agentConnections = new AgentConnections(this);
@@ -1756,6 +1762,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-25-911: next-action dismissals/suppressions are purely
       // additive as well: IF NOT EXISTS is idempotent, no schema version bump.
       this.db.exec(nextActionsSchema);
+      this.db.exec(agentDispatchSchema);
       // Updates marks are purely additive: IF NOT EXISTS, no schema version bump.
       this.db.exec(updatesSchema);
       this.workClaims.verifySchema({ allowAbsent: true });
