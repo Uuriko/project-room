@@ -54,7 +54,8 @@ Set these on the staging script only, with `pnpm exec wrangler secret put NAME -
 - `ROOM_AGENT_CARD_SIGNING_KEY`
 - `TELEGRAM_BOT_TOKEN`
 - `TELEGRAM_WEBHOOK_SECRET`
-- `ROOM_BACKUP_TOKEN`
+- `ROOM_EXPORT_TOKEN`
+- `ROOM_RESTORE_TOKEN`
 
 `CHANNEL_SEND_BUDGET` settings and `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present. Names only. Leave them unset unless you are rehearsing that path.
 

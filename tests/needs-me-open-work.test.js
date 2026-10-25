@@ -158,7 +158,10 @@ test('openWork stays small on a crowded board', t => {
   assert.equal(open.count, 40);
   assert.equal(open.top.length, 3);
   assert.ok(open.top.every(row => row.title.length <= 80));
-  assert.ok(JSON.stringify(open).length < 600, `openWork was ${JSON.stringify(open).length} bytes`);
+  assert.ok(open.top.every(row => row.untrusted === true), 'open rows are marked as member-authored data');
+  // The old 600-byte budget plus exactly the 18-byte `,"untrusted":true`
+  // mark stampNeedsMe adds to each of the 3 top rows (measured 564 -> 618).
+  assert.ok(JSON.stringify(open).length < 654, `openWork was ${JSON.stringify(open).length} bytes`);
 });
 
 test('hard work (tag hard / hard-problem) ranks first and says how to close it', t => {

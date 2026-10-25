@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html-escape.js";
 import { workStatus } from "./work-status.js";
 // Tasks › Board. Claims come from GET /work-claims. Live updates follow
 // work_claim.updated on the room snapshot the client already applies.
@@ -15,12 +16,6 @@ const COLUMNS = Object.freeze([
   ["review", "In review"],
   ["landed", "Landed"]
 ]);
-
-export function escapeHtml(text) {
-  return String(text ?? "").replace(/[&<>"']/g, char => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
-  }[char]));
-}
 
 function updatedAt(item) {
   const history = Array.isArray(item?.history) ? item.history : [];

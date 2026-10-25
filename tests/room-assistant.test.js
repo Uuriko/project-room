@@ -637,3 +637,29 @@ test('R366-1: a coordinator the owner paused reads paused, not awaiting a host',
   f.store.wakeQueue.resume(f.keys.owner, 'commons', { requestId: randomUUID() }, null, { memberId: 'producer' });
   assert.equal((await api('guest')).assistant.availability, 'awaiting_host', 'resume clears the paused reading');
 });
+
+
+test('room admins configure and control assistants; revocation removes access', async t => {
+  const { f, api, message } = await setup(t);
+  const grant = (id, permissions) => {
+    const m = f.store.room('commons').state.members[id];
+    f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'member.access_changed', data: { memberId: id, expectedMemberRevision: m.revision, permissions, active: true } });
+  };
+  const configure = { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' };
+  await api('guest', configure, 403);
+  const prior = f.store.room('commons').state.members.producer.permissions;
+  grant('producer', [...new Set([...prior, 'manage_members'])]);
+  await api('producer', configure);
+  grant('guest', ['manage_members']);
+  // Human room admins can ask without a second steer grant.
+  message('guest', 'admin-question');
+  await api('guest', {action:'invoke',runId:'admin-run',sourceMessageId:'admin-question'});
+  await api('producer', {action:'pause',runId:'admin-run',expectedRevision:0});
+  await api('guest', {action:'resume',runId:'admin-run',expectedRevision:1});
+  await api('producer', {action:'cancel',runId:'admin-run',expectedRevision:2});
+  grant('producer', prior);
+  await api('producer', {...configure, expectedRevision:1}, 403);
+  grant('guest', []);
+  await api('guest', {...configure, expectedRevision:1}, 403);
+  assert.equal((await api('owner')).assistant.revision, 1);
+});

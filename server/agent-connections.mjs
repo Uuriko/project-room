@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { EVENT_TYPES as T, validId, ownMember } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { LINK_CODE_RE } from "./agent-identities.mjs";
 import { isCatalogAgentType } from "../src/room-roster.js";
 

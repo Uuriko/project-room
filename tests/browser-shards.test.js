@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 import { browserPlan, parseShard } from "../scripts/browser-shards.mjs";
+import { canonicalBrowserScript } from "../scripts/browser-suites.mjs";
 
 // Real Node tests, real wrapper and real CLI gate: covers omission/duplication,
 // lost child exit codes, missing matrix jobs and stale success artifacts.
@@ -84,7 +85,7 @@ test("single-shard re-run: latest attempt per shard wins, untouched shards keep 
 });
 
 test("canonical suite partition is complete and deterministic with bounded timing estimates", () => {
-  const script = JSON.parse(readFileSync("package.json", "utf8")).scripts["test:browser"];
+  const script = canonicalBrowserScript();
   const plan = browserPlan(script);
   assert.deepEqual(browserPlan(script), plan);
   assert.deepEqual(plan.shards.flatMap(shard => shard.files).sort(), plan.files.toSorted());
@@ -101,7 +102,7 @@ test("browser shard plan is balanced on measured runtimes: full timing coverage,
   // data: an unmeasured file falls back to a 10s guess and the greedy
   // partition optimizes fiction (28 of 123 files were unmeasured, and the two
   // slowest measured shards ran ~1.5x their estimate).
-  const script = JSON.parse(readFileSync("package.json", "utf8")).scripts["test:browser"];
+  const script = canonicalBrowserScript();
   const measured = JSON.parse(readFileSync("scripts/browser-ci-durations.json", "utf8")).milliseconds;
   const plan = browserPlan(script);
   const unmeasured = plan.files.filter(file => !(Number.isFinite(measured[file]) && measured[file] > 0));

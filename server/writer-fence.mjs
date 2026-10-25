@@ -228,6 +228,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "peer_dm_threads",
   "peer_dm_messages",
   "room_public_settings",
+  // agent_public_pages + agent_public_asks: one public URL per agent and the
+  // questions asked there. Additive, outside the fence: older writers have no
+  // code path, and the module is the integrity gate. Questions are not events.
+  "agent_public_pages",
+  "agent_public_asks",
   // room_directory_settings (#605 opt-in public room directory) is purely
   // additive and intentionally NOT fenced, same as room_public_settings.
   "room_directory_settings",
@@ -235,6 +240,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // purely additive and intentionally NOT fenced: older writers have no code
   // path to them, and the lifecycle module owns its schema.
   "mention_states",
+  "mention_observations", // Durable acknowledgment/reply facts; additive lifecycle-owned schema.
   "room_mention_settings",
   // agent_key_registry (integration map slice 9): Ed25519 public-key
   // directory with validity windows and rotation overlap. Purely additive

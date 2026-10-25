@@ -11,7 +11,7 @@ Three Workers run the same code. Only one of them owns production data.
 | Script | Role | How it is reached |
 | --- | --- | --- |
 | `project-room-stage` | Isolated staging. Its own Durable Object. No `script_name` on `ROOM`. | `https://project-room-stage.getdasha.workers.dev` only. No custom domain. |
-| `project-room` | Canonical production. Owns the live Durable Object, the minute cron, and `room.trydemigod.com`. | `wrangler deploy --env production` |
+| `project-room` | Canonical production. Owns the live Durable Object, the every-30-minutes cron (`*/30 * * * *`), and `room.trydemigod.com`. | `wrangler deploy --env production` |
 | `project-room-staging` | Public entry for `getdasha.com/room`. Forwards to the production Durable Object with `script_name: project-room`. | `wrangler deploy` with no `--env` |
 
 The entry script is still named `project-room-staging`. That name is historical. Do not rename the deployed script: the getdasha route and email routing are bound to it. `wrangler.jsonc` cannot carry comments (`JSON.parse` reads it), so this page and `cloudflare/README.md` are where the role is named. The entry's role is entry, not a second room.
@@ -35,7 +35,7 @@ The first staging deploy creates the `room-sqlite-v1` class on `project-room-sta
 
 GitHub Actions deploys `main` to this Worker on every push, and from the Actions tab (`.github/workflows/staging.yml`). The workflow needs the Actions secrets `CLOUDFLARE_API_TOKEN` (Workers script edit on this account) and `ROOM_AGENT_CARD_SIGNING_KEY`. If that token can see more than one account, also set `CLOUDFLARE_ACCOUNT_ID`. When a secret is missing the workflow fails with `missing <NAME>` and deploys nothing. It does not deploy production, and it is not a required check on `main`.
 
-Worker secrets on `project-room-stage` are optional for the public smoke. Set a name only when the rehearsal needs it, with `pnpm exec wrangler secret put NAME --env staging`. Names only, never values in git: `ROOM_IDENTITY_HASH_KEY`, `ROOM_MAINTENANCE`, `ROOM_BOOTSTRAP_OWNER_HASH`, `ROOM_BOOTSTRAP_EXPIRES_AT`, `ROOM_VAPID_PUBLIC_KEY`, `ROOM_VAPID_PRIVATE_KEY`, `ROOM_VAPID_SUBJECT`, `ROOM_GOOGLE_CLIENT_ID`, `ROOM_GOOGLE_CLIENT_SECRET`, `ROOM_GMAIL_TOKEN_KEY`, `ROOM_GMAIL_PILOT_ACCOUNT_ID`, `RESEND_API_KEY`, `ROOM_MAGIC_FROM`, `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `ROOM_BOARD_V2_ENABLED`, `ROOM_RETENTION_ALLOW_DELETION`, `STITCHING_ENABLED`, `ROOM_PASSKEY_RP_ID`, `ROOM_OPERATOR_ACCOUNT_ID`, `ROOM_OPERATOR_TOKEN_SHA256`, `ROOM_OPERATOR_PROTECTED_ROOMS`, `ROOM_AGENT_CARD_SIGNING_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ROOM_BACKUP_TOKEN`. `CHANNEL_SEND_BUDGET`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present.
+Worker secrets on `project-room-stage` are optional for the public smoke. Set a name only when the rehearsal needs it, with `pnpm exec wrangler secret put NAME --env staging`. Names only, never values in git: `ROOM_IDENTITY_HASH_KEY`, `ROOM_MAINTENANCE`, `ROOM_BOOTSTRAP_OWNER_HASH`, `ROOM_BOOTSTRAP_EXPIRES_AT`, `ROOM_VAPID_PUBLIC_KEY`, `ROOM_VAPID_PRIVATE_KEY`, `ROOM_VAPID_SUBJECT`, `ROOM_GOOGLE_CLIENT_ID`, `ROOM_GOOGLE_CLIENT_SECRET`, `ROOM_GMAIL_TOKEN_KEY`, `ROOM_GMAIL_PILOT_ACCOUNT_ID`, `RESEND_API_KEY`, `ROOM_MAGIC_FROM`, `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `ROOM_BOARD_V2_ENABLED`, `ROOM_RETENTION_ALLOW_DELETION`, `STITCHING_ENABLED`, `ROOM_PASSKEY_RP_ID`, `ROOM_OPERATOR_ACCOUNT_ID`, `ROOM_OPERATOR_TOKEN_SHA256`, `ROOM_OPERATOR_PROTECTED_ROOMS`, `ROOM_AGENT_CARD_SIGNING_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ROOM_EXPORT_TOKEN`, `ROOM_RESTORE_TOKEN`. `CHANNEL_SEND_BUDGET`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present.
 
 ## 2. Verify staging
 
@@ -58,9 +58,11 @@ Do not pull, commit, or rebuild from a different tree between staging and produc
 
 ```sh
 cd cloudflare
-pnpm exec wrangler deploy --env production --keep-vars
-pnpm exec wrangler deploy --keep-vars
+pnpm exec wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1
+pnpm exec wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1
 ```
+
+Both commands carry the `--var ROOM_BODIES_AT_REST:1` pin, exactly as `deploy-prod` does; the pin is load-bearing (see [DEPLOY-LANE.md](DEPLOY-LANE.md)) and must not be dropped in the manual path.
 
 Keep `env.production.limits.cpu_ms` at `30000`. A 1000 ms budget on the owning script caused repeated CPU resets and HTTP 500 / 1101 on 25 September 2026. The entry can keep its own 1000 ms forwarding budget. Do not let the top-level limit overwrite production. See [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md).
 
@@ -104,12 +106,14 @@ Record the version ids you rolled back to in `docs/CURRENT-ROOM.md`.
 
 ## Backups
 
-The Durable Object cannot hand out its sqlite file. `GET /api/operator/export` streams the event log and the other tables as NDJSON. Secret and token columns are sha256 hex. Already-hashed columns stay. `auth_epoch` stays a number. The route answers 404 until `ROOM_BACKUP_TOKEN` (at least 16 characters) is set on the script that owns the object:
+The Durable Object cannot hand out its sqlite file. `GET /api/operator/export` streams the event log and the other tables as NDJSON. Secret and token columns are sha256 hex. Already-hashed columns stay. `auth_epoch` stays a number. The route answers 404 until `ROOM_EXPORT_TOKEN` (at least 16 characters) is set on the script that owns the object:
 
 ```sh
 cd cloudflare
-pnpm exec wrangler secret put ROOM_BACKUP_TOKEN --env production
+pnpm exec wrangler secret put ROOM_EXPORT_TOKEN --env production
 ```
+
+TM-2 split the backup credential: `ROOM_EXPORT_TOKEN` opens the export door only and may stay armed standing; the restore doors (`POST /api/operator/restore`, `POST /api/operator/restore-from-backup`) answer only to `ROOM_RESTORE_TOKEN`, which stays unset outside a restore incident. The retired `ROOM_BACKUP_TOKEN` opens nothing.
 
 Set it on `--env staging` as well if operators will pull a staging export. The check runs inside the Durable Object, so a secret only on the entry Worker does not unlock the route.
 
