@@ -117,11 +117,14 @@ test("the expiry sweeps judge a seat by its latest-expiring unrevoked credential
   const cardBody = { name: "Double", description: "sweep probe", capabilities: ["chat"] };
   const card = { ...cardBody, publicKey: keys.publicKey,
     signature: signCard({ agentId: identity.identityId, card: cardBody, privateKey: keys.privateKey }) };
-  const redeem = async code => {
+  const redeem = async (code, expected = 201) => {
     const res = await request("/api/guest-invites/redeem", {
       method: "POST", token: identity.secret, data: { inviteCode: code, card },
     });
-    assert.equal(res.status, 201);
+    // A re-redemption into a seat the identity already holds is the
+    // route's idempotent duplicate: 200, not 201 (server/http.mjs:
+    // result.duplicate ? 200 : 201).
+    assert.equal(res.status, expected);
     return res.json();
   };
   const invited = await mintInvite(request, ownerKey, { credentialTtlMs: ONE_HOUR });
@@ -134,7 +137,7 @@ test("the expiry sweeps judge a seat by its latest-expiring unrevoked credential
   // first. An arbitrary-row sweep reads the older (expired) row and kills
   // a live seat; the fix judges by the latest expiry at every site.
   const invited2 = await mintInvite(request, ownerKey, { credentialTtlMs: ONE_HOUR });
-  const second = await redeem(invited2.code);
+  const second = await redeem(invited2.code, 200);
   assert.equal(second.member.id, memberId, "re-redemption reuses the seat");
 
   advance(31 * 60 * 1000); // first row now expired, second still live

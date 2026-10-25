@@ -387,6 +387,10 @@ test("GET /api/wake-status?roomId= admits a guest caller and lists the guest sea
     displayName: "wake guest linked", permissions: ["write_external"],
   });
   // The guest seat lives in guest_members only - no identity_links row.
+  // Fixture cure (the insert below names invite 'inv-wake-guest'; the
+  // guest_members FK requires its parent row to exist).
+  f.store.db.prepare("INSERT INTO guest_invites(id, code_hash, room_id, tier, credential_ttl_ms, guest_label, minted_by_member_id, issue_request_id, created_at, redeem_by, status) VALUES ('inv-wake-guest', '0000000000000000000000000000000000000000000000000000000000000000', 'commons', 'contributor', 3600000, 'wake guest fixture', 'owner', 'req-wake-guest', 1, 2000000000000, 'redeemed')")
+    .run();
   f.store.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES ('mem-wake-guest', 'commons', ?, 'contributor', 'inv-wake-guest', 1)")
     .run(guest.identity.identityId);
   // F-8 fixture cure (live-seat composition): in a database that HAS the
