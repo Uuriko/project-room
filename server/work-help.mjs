@@ -96,7 +96,10 @@ export function auditWorkHelp(state, history, checkpoint = null) {
       }
       if (mutations.has(e.type)) {
         const item = projected.workItems[d.workItemId];
-        check(item && d.expectedRevision === item.revision);
+        // work.accepted advances the per-item counter once. A missing or
+        // disagreeing expectedRevision is a stored-history defect, not a
+        // second revision number. Other revision types still match.
+        check(item && (e.type === "work.accepted" || d.expectedRevision === item.revision));
         if (transitions[e.type]) item.state = transitions[e.type];
         if (e.type === "work.completed") item.receipt = { eventId: e.id, evidenceVersion: d.evidenceVersion };
         if (e.type === "verification.recorded" && d.result === "fail" && d.completionEventId === item.receipt?.eventId

@@ -406,6 +406,7 @@ const AX_NAMED_RECOVERIES = {
   invalid_reply_update: ["Choose the exact dispatched update, then resend.", "Re-read the updates and choose the exact dispatched one."],
   invalid_request: ["The request could not be processed as sent — the message names why. Fix it and resend; for a stored access request, ask a room owner to review it.", "Fix the problem named in the message and resend."],
   invalid_request_run: ["Choose one request, attempt, and supported action, then resend.", "Resend with one request, one attempt, and a supported action."],
+  invalid_time_zone: ["That timestamp needs a timezone. Resend an ISO 8601 value with Z or a numeric offset, for example 2026-10-24T20:30:00Z. The message names the parameter.", "Resend with an ISO 8601 timestamp that includes Z or a numeric offset. The message names the parameter."],
   invalid_url: ["The url must be a non-empty string up to 2048 characters. Fix it and resend.", "Fix the url (non-empty, up to 2048 characters) and resend."],
   invitation_conflict: ["An active invitation already reserves that Room identity. Wait for it to resolve or ask an administrator to revoke it.", "Ask an administrator to revoke the active invitation, or wait for it to resolve."],
   invitation_not_pending: ["Only a pending invitation can be revoked. Read the invitation's current state; nothing was revoked.", "Re-read the invitation; only a pending one can be revoked."],

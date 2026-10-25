@@ -46,10 +46,12 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     since_version: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Previous context_version. Omit for a full read." }
   }, ["roomId"])),
-  tool("room_list_events", "List room events after a sequence number, oldest first. Use after (a sequence), never afterSequence. Optional server-side filters: type (comma-separated event types, e.g. message.posted), mentions (a member id, or me — only events that @mention that member), compact (true drops envelope noise: idempotency keys, the repeated room id, null causation ids, mention display names). Targeted DMs and peer-bond receipts stay filtered to their parties. Reading does not mark anything read.", schema({
+  tool("room_list_events", "List room events after a sequence number, oldest first. Use after (a sequence), never afterSequence. A cursor at or past the room head returns an empty page whose next is the room head. since and until are ISO 8601 timestamps with Z or a numeric offset (for example 2026-10-24T20:30:00Z); a zone-less value is refused. Optional server-side filters: type (comma-separated event types, e.g. message.posted), mentions (a member id, or me — only events that @mention that member), compact (true drops envelope noise: idempotency keys, the repeated room id, null causation ids, mention display names). Targeted DMs and peer-bond receipts stay filtered to their parties. Reading does not mark anything read.", schema({
     roomId: roomIdField,
     after: { type: "integer", minimum: 0, default: 0 },
     limit: { type: "integer", minimum: 1, maximum: 100, default: 50 },
+    since: { type: "string", minLength: 1, maxLength: 80, description: "Only events at or after this instant. ISO 8601 with Z or a numeric offset, for example 2026-10-24T20:30:00Z. A zone-less value is invalid_time_zone." },
+    until: { type: "string", minLength: 1, maxLength: 80, description: "Only events at or before this instant. ISO 8601 with Z or a numeric offset, for example 2026-10-24T20:30:00Z. A zone-less value is invalid_time_zone." },
     type: { type: "string", description: "Comma-separated event types to return, e.g. \"message.posted,work_item.updated\"." },
     mentions: { type: "string", description: "Member id whose @mentions to return, or \"me\"." },
     compact: { type: "boolean", default: false, description: "Drop per-event envelope noise (idempotencyKey, roomId, null causationId, mention display names)." }

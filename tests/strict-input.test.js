@@ -129,17 +129,21 @@ test("search names unknown and repeated keys, and cursor walks every match", asy
 test("events require a zoned timestamp and a plain integer limit and after", async t => {
   const { request, postMessage } = await serve(t);
   postMessage("q9 event note");
-  const timestamp = async (query, field) => {
+  const zoneLess = async (query, field) => {
     const body = await errorOf(await request(`/api/rooms/commons/events?${query}`));
-    assert.equal(body.status, 422, query);
-    assert.equal(body.code, "invalid_event_cursor", query);
+    assert.equal(body.status, 400, query);
+    assert.equal(body.code, "invalid_time_zone", query);
     assert.match(body.message, new RegExp(field), query);
     assert.match(body.message, new RegExp(EXAMPLE), query);
   };
-  await timestamp("since=2026-10-24T20:30:00", "since");
-  await timestamp("since=2026-10-24", "since");
-  await timestamp("until=2026-10-24", "until");
-  await timestamp("since=2026-02-31T00:00:00Z", "since");
+  await zoneLess("since=2026-10-24T20:30:00", "since");
+  await zoneLess("since=2026-10-24", "since");
+  await zoneLess("until=2026-10-24", "until");
+  const impossible = await errorOf(await request("/api/rooms/commons/events?since=2026-02-31T00:00:00Z"));
+  assert.equal(impossible.status, 422);
+  assert.equal(impossible.code, "invalid_event_cursor");
+  assert.match(impossible.message, /since/);
+  assert.match(impossible.message, new RegExp(EXAMPLE));
 
   const reversed = await errorOf(await request("/api/rooms/commons/events?since=2026-10-24T20:30:01-07:00&until=2026-10-25T03:30:00Z"));
   assert.equal(reversed.status, 422);

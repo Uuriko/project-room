@@ -13,6 +13,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { TIMESTAMP_EXAMPLE, timeZoneMessage, zoneLessTime, zonedTimestampMillis } from "./iso-time.mjs";
 import { sqliteValueLimit } from "./storage-limits.mjs"; // r56: runtime row-limit fact on /api/version
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
@@ -293,25 +294,9 @@ function jsonNestingExceeds(value, max, depth = 1) {
   }
   return false;
 }
-// Events since/until. RFC 3339 with Z or a numeric offset. A zone-less
-// timestamp and a bare date do not match. Returns epoch millis, or null.
-const EVENT_TIMESTAMP_EXAMPLE = "2026-10-24T20:30:00Z";
-const RFC3339_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-](\d{2}):(\d{2}))$/;
-function eventTimestampMillis(value) {
-  if (typeof value !== "string") return null;
-  const match = RFC3339_TIMESTAMP.exec(value);
-  if (!match) return null;
-  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
-  const hour = Number(match[4]), minute = Number(match[5]), second = Number(match[6]);
-  const zone = match[8];
-  const offHour = zone === "Z" ? 0 : Number(match[9]);
-  const offMinute = zone === "Z" ? 0 : Number(match[10]);
-  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 60 || offHour > 23 || offMinute > 59) return null;
-  const probe = new Date(Date.UTC(year, month - 1, day));
-  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return null;
-  const ms = Date.parse(value);
-  return Number.isNaN(ms) ? null : ms;
-}
+// Events since/until. A zone-less timestamp is 400 invalid_time_zone. Any
+// other value that is not RFC 3339 with Z or a numeric offset stays 422.
+const EVENT_TIMESTAMP_EXAMPLE = TIMESTAMP_EXAMPLE;
 function eventTimestampMessage(name) {
   return `${name} must be an RFC 3339 timestamp with Z or an offset, for example ${EVENT_TIMESTAMP_EXAMPLE}`;
 }
@@ -5322,8 +5307,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const sinceRaw = params.get("since");
         const untilRaw = params.get("until");
-        const sinceMs = sinceRaw === null ? null : eventTimestampMillis(sinceRaw);
-        const untilMs = untilRaw === null ? null : eventTimestampMillis(untilRaw);
+        if (sinceRaw !== null && zoneLessTime(sinceRaw)) reject(400, "invalid_time_zone", timeZoneMessage("since"));
+        if (untilRaw !== null && zoneLessTime(untilRaw)) reject(400, "invalid_time_zone", timeZoneMessage("until"));
+        const sinceMs = sinceRaw === null ? null : zonedTimestampMillis(sinceRaw);
+        const untilMs = untilRaw === null ? null : zonedTimestampMillis(untilRaw);
         if (sinceRaw !== null && sinceMs === null) reject(422, "invalid_event_cursor", eventTimestampMessage("since"));
         if (untilRaw !== null && untilMs === null) reject(422, "invalid_event_cursor", eventTimestampMessage("until"));
         if (sinceMs !== null && untilMs !== null && sinceMs > untilMs) reject(422, "invalid_event_cursor", "since is after until");

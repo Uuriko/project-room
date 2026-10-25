@@ -184,6 +184,8 @@ test("snooze defers a proposal: stays open, keeps time-in-state", () => {
   // Snooze does not reset time-in-state (no state change).
   assert.ok(snoozed.timeInStateMs >= 60_000, `timeInStateMs=${snoozed.timeInStateMs}`);
   expectCode(() => escrow.snoozeBounty(ROOM, bounty.bountyId, { snoozer: JILL, until: isoFuture(-1) }), "invalid_input");
+  expectCode(() => escrow.snoozeBounty(ROOM, bounty.bountyId, { snoozer: JILL, until: "2099-01-01T00:00:00" }), "invalid_time_zone");
+  expectCode(() => escrow.history(ROOM, JILL, { since: "2026-10-25T10:00:00" }), "invalid_time_zone");
   // A snoozed proposal is protected from expired-unfunded while deferred.
   tick(3_600_000 + 1);
   expectCode(() => escrow.finalizeBounty(ROOM, bounty.bountyId, {}), "invalid_state");

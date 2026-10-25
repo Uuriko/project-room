@@ -172,8 +172,10 @@ function validRoomArgs(name, args) {
   }
   if (name === "get_room_context") return args.since_version === undefined || typeof args.since_version === "string" && /^[a-f0-9]{64}$/.test(args.since_version);
   if (name === "room_list_events") {
+    const time = value => value === undefined || typeof value === "string" && value.length >= 1 && value.length <= 80;
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
-      && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100);
+      && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100)
+      && time(args.since) && time(args.until);
   }
   if (name === "room_work_claim_provenance") {
     return typeof args.claimId === "string" && args.claimId.length >= 1 && args.claimId.length <= 128;
@@ -548,7 +550,9 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     return stampEvents(redactEventPage(store.eventsAfter(secret, roomId, args.after ?? 0, args.limit ?? 50, {
       types: typeof args.type === "string" ? args.type.split(",").map(part => part.trim()).filter(part => part.length > 0) : null,
       mentions: typeof args.mentions === "string" ? args.mentions : null,
-      compact: args.compact === true
+      compact: args.compact === true,
+      since: typeof args.since === "string" ? args.since : null,
+      until: typeof args.until === "string" ? args.until : null
     }), store.redactionMessages(roomId)), auth.member.id);
   }
   if (name === "room_work_claim_provenance") {
