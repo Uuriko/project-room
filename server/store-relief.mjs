@@ -46,6 +46,27 @@ function errorCode(error) {
   return typeof error?.code === "string" ? error.code : "relief_failed";
 }
 
+// The caller's tick deadline (ms epoch, the ctx.deadline convention the
+// other slow jobs already honour). Relief is the expensive leg of the
+// store-growth tick: unbounded, it outlived the job budget, the RPC was
+// terminated, and the tick's breach failure was never recorded. When the
+// deadline passes, relief stops cleanly instead: rooms past the line that
+// were not attempted are counted as deferred, and the events still
+// awaiting catch-up replay are counted too, so the tick returns, records
+// its breach, and the next tick resumes from the per-chunk cursor the
+// backfill commits (progress accumulates across ticks).
+function deadlineExpired(deadline) {
+  return Number.isFinite(deadline) && Date.now() > deadline;
+}
+
+function catchUpRemaining(db, roomId) {
+  try {
+    const row = db.prepare(`SELECT r.sequence - COALESCE(c.applied_seq, 0) AS remaining
+      FROM rooms r LEFT JOIN messages_backfill_cursor c ON c.room_id = r.id WHERE r.id = ?`).get(roomId);
+    return Number.isInteger(row?.remaining) && row.remaining > 0 ? row.remaining : 0;
+  } catch { return 0; }
+}
+
 // Production's 4,000-event synchronous catch-up exceeded the DO CPU limit
 // even in a separate RPC. Bound total replay and yield between small commits
 // so serving requests can run. The final plan/apply remains synchronous and
@@ -53,31 +74,28 @@ function errorCode(error) {
 export async function relieveProjectionsIncrementally(store, options = {}) {
   const { limitBytes, recovery = null, maxRooms = RELIEF_ROOMS_PER_TICK,
     eventCap = RELIEF_CATCH_UP_EVENTS, chunkSize = RELIEF_CATCH_UP_CHUNK,
-    deadline = null,
+    deadline = Infinity,
     yieldWork = () => new Promise(resolve => setTimeout(resolve, 0)) } = options;
   if (!Number.isInteger(eventCap) || eventCap < 1 || !Number.isInteger(chunkSize) || chunkSize < 1) {
     throw new TypeError("Relief catch-up limits must be positive integers");
   }
-  // The caller's cooperative deadline (a ms epoch, as handed to the job in
-  // ctx.deadline): when it passes, catch-up stops and the archive leg
-  // defers its remaining rooms, so the tick returns and its outcome is
-  // recorded instead of dying unrecorded in its RPC. Catch-up progress is
-  // committed per chunk, so a deferred room resumes where it left off on
-  // the next tick.
-  const deadlinePassed = () => Number.isFinite(deadline) && Date.now() >= deadline;
-  let catchUpEvents = 0, catchUpChunks = 0;
+  let catchUpEvents = 0, catchUpChunks = 0, deferredEvents = 0;
   if (!store?.readOnly && Number.isFinite(limitBytes) && recovery && typeof recovery === "object") {
     // A quarantined event must not keep this room out of catch-up. The
     // heal is the same one the integrity tick runs; a real park (skipped=0)
     // still skips catch-up and archives below the cursor.
     try { healBackfillQuarantines(store); } catch { /* parked() still treats an unreadable row as not parked */ }
-    for (const roomId of roomsPastLine(store.db, limitBytes, maxRooms)) {
-      if (deadlinePassed()) break;
+    const pastLine = roomsPastLine(store.db, limitBytes, maxRooms);
+    for (let index = 0; index < pastLine.length; index++) {
+      const roomId = pastLine[index];
       if (parked(store.db, roomId)) continue;
+      let stopped = false;
       while (catchUpEvents < eventCap && !messagesBackfillCaughtUp(store.db, roomId)) {
-        if (deadlinePassed()) break;
+        // Each chunk commits its own cursor, so stopping here loses
+        // nothing: the deferred events are replayed by a later tick.
+        if (deadlineExpired(deadline)) { stopped = true; break; }
         await yieldWork();
-        if (deadlinePassed()) break;
+        if (deadlineExpired(deadline)) { stopped = true; break; }
         let result;
         try { result = store.backfillMessages({ limit: Math.min(chunkSize, eventCap - catchUpEvents) }); }
         catch {
@@ -90,6 +108,14 @@ export async function relieveProjectionsIncrementally(store, options = {}) {
         catchUpEvents += events;
         if (!events || result.done || result.budgetExceeded || parked(store.db, roomId)) break;
       }
+      if (stopped) {
+        // Count every event this tick leaves unreplayed: the rest of this
+        // room's replay plus every later past-line room not yet visited.
+        for (let later = index; later < pastLine.length; later++) {
+          if (!parked(store.db, pastLine[later])) deferredEvents += catchUpRemaining(store.db, pastLine[later]);
+        }
+        break;
+      }
     }
   }
   const result = relieveProjections(store, { ...options, archive: (target, request) =>
@@ -98,29 +124,25 @@ export async function relieveProjectionsIncrementally(store, options = {}) {
       // message named by a later event, including edits, replies and pins.
       belowCursor: request.belowCursor || !messagesBackfillCaughtUp(target.db, request.roomId)
     }, null, { eventCap: 0 }) });
-  return { ...result, catchUpEvents, catchUpChunks };
+  return { ...result, catchUpEvents, catchUpChunks, ...(deferredEvents > 0 ? { deferredEvents } : {}) };
 }
 
 // Returns { attempted, relieved, freedBytes, refused } with counts only:
 // the summary rides the public health surface, so no room ids or text.
-// When a deadline is given and passes between rooms, the rooms not yet
-// attempted are counted as `deferred` (the field is present only then):
-// they stay past the line, the breach still fails the tick, and the next
-// tick resumes them.
-export function relieveProjections(store, { limitBytes, recovery = null, keepNewest = ARCHIVE_DEFAULT_KEEP, maxRooms = RELIEF_ROOMS_PER_TICK, archive = operatorArchive, deadline = null } = {}) {
+// When a deadline is handed in and passes mid-pass, rooms not yet
+// attempted are counted as deferred (present only when nonzero, like
+// backupMissing) and the pass stops instead of overrunning the tick.
+export function relieveProjections(store, { limitBytes, recovery = null, keepNewest = ARCHIVE_DEFAULT_KEEP, maxRooms = RELIEF_ROOMS_PER_TICK, archive = operatorArchive, deadline = Infinity } = {}) {
   const result = { attempted: 0, relieved: 0, freedBytes: 0, refused: 0 };
   if (store?.readOnly || !Number.isFinite(limitBytes)) return result;
   if (!recovery || typeof recovery !== "object") {
     const waiting = roomsPastLine(store.db, limitBytes, maxRooms).length;
     return waiting ? { ...result, backupMissing: 1 } : result;
   }
-  const roomIds = roomsPastLine(store.db, limitBytes, maxRooms);
-  for (let index = 0; index < roomIds.length; index += 1) {
-    if (Number.isFinite(deadline) && Date.now() >= deadline) {
-      result.deferred = roomIds.length - index;
-      break;
-    }
-    const roomId = roomIds[index];
+  const pastLine = roomsPastLine(store.db, limitBytes, maxRooms);
+  for (let index = 0; index < pastLine.length; index++) {
+    if (deadlineExpired(deadline)) { result.deferred = pastLine.length - index; break; }
+    const roomId = pastLine[index];
     result.attempted += 1;
     const request = { roomId, keepNewest, reason: RELIEF_REASON, belowCursor: parked(store.db, roomId) };
     try {

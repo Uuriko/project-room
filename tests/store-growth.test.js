@@ -15,7 +15,6 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { STORE_GROWTH_LIMITS, jobByName, jobsFor, measureStoreGrowth, storeGrowthBreach } from "../server/jobs.mjs";
-import { relieveProjectionsIncrementally } from "../server/store-relief.mjs";
 
 function fixtureStore(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-store-growth-"));
@@ -56,39 +55,25 @@ test("a room projection past the escalation line is a named breach", t => {
   assert.equal(storeGrowthBreach(gauges, STORE_GROWTH_LIMITS), "maxProjectionBytes");
 });
 
-test("relief catch-up stops at the deadline and defers the rooms past the line", async t => {
+test("a tick whose relief exhausts its deadline still returns a breach result with the deferral counted", async t => {
   const store = fixtureStore(t);
+  const job = jobByName("store-growth");
   store.db.prepare("UPDATE rooms SET projection = ?").run("x".repeat(3_600_000));
-  // A deadline already in the past: no catch-up chunk may run and no room
-  // may be attempted; the one room past the line is deferred, not lost.
-  const result = await relieveProjectionsIncrementally(store, {
-    limitBytes: STORE_GROWTH_LIMITS.maxProjectionBytes,
-    recovery: { key: "verified-fixture", target: "kv", ageDays: 0 },
+  // The deadline is already past when relief starts: the catch-up and
+  // archive legs must stop cleanly instead of running unbounded (the
+  // failure mode that left ticks unrecorded), and the tick must still
+  // return its breach result so the heartbeat records the failure.
+  const summary = await job.run(store, {
+    recoveryPoint: () => ({ key: "fixture-backup", target: "kv", ageDays: 0 }),
     deadline: Date.now() - 1
   });
-  assert.equal(result.catchUpEvents, 0);
-  assert.equal(result.catchUpChunks, 0);
-  assert.equal(result.attempted, 0);
-  assert.equal(result.deferred, 1);
-});
-
-test("a tick whose relief exhausts the budget still returns a recorded breach outcome", async t => {
-  const store = fixtureStore(t);
-  store.db.prepare("UPDATE rooms SET projection = ?").run("x".repeat(3_600_000));
-  const job = jobByName("store-growth");
-  // The deadline the RPC hands the job has already passed, and a verified
-  // recovery point exists, so relief would run unbounded without the
-  // deadline check. The tick must still return its breach result — the
-  // return value is what recordCronTick turns into a heartbeat outcome.
-  const result = await job.run(store, {
-    deadline: Date.now() - 1,
-    recoveryPoint: async () => ({ key: "verified-fixture", target: "kv", ageDays: 0 })
-  });
-  assert.equal(result.errors, 1);
-  assert.equal(result.failureDetail?.code, "store_growth_limit");
-  assert.equal(result.reliefDeferred, 1);
-  assert.equal(result.reliefAttempted, 0);
-  assert.equal(result.maxProjectionBytes, 3_600_000);
+  assert.equal(summary.errors, 1);
+  assert.equal(summary.failureDetail?.code, "store_growth_limit");
+  assert.equal(summary.maxProjectionBytes, 3_600_000);
+  assert.equal(summary.reliefAttempted, 0);
+  assert.equal(summary.reliefRelieved, 0);
+  assert.equal(summary.reliefDeferred, 1, "the one room past the line is deferred, not attempted");
+  assert.ok(summary.reliefDeferredEvents > 0, `deferred catch-up events counted: ${summary.reliefDeferredEvents}`);
 });
 
 test("the db-size breach is judged against the same limits", () => {
