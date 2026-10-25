@@ -89,7 +89,7 @@
     "src/events.js": "sha256:f1f5fdfdbb6e9f02d8b83f76dc3149d726ed5438c0a0bec870218dfae66daecc",
     "src/first-room-copy.js": "sha256:f5c0dab67dc03e4024ae2ae3692ac6d134251d9fe0b130d40c567999ac98175f",
     "src/friend-bond.js": "sha256:585f2a15ab46ca2319a8546a5c7e674804940bb4edf64e05a50b2bdcade36c09",
-    "src/front-door.js": "sha256:a628e03fe676ba7ada2d2d1c079bdc51d5279a82a72b047a644aa60bf88f1c38",
+    "src/front-door.js": "sha256:7daf7792aed326cb005c5b1f0d5d9c1aec71f4780a729e9570b59a9fc50b0c20",
     "src/handoff-envelope-ui.js": "sha256:9f7c44a5ad717afe1059c6f84036b0b55fff1f4a59ed0525f805b29c8b43dfec",
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
     "src/html-escape.js": "sha256:c11803b39ce9bb53a49d7bad6e7f520b556d8a1b2247c24060392dc6e4dd90ca",

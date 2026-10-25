@@ -19,9 +19,9 @@ Nothing is auto-approved.
 
 **3. You want your own room.** The front door asks what you are working on.
 Sign in with GitHub and the room opens from that answer, with Needs you, the
-room, and Tasks. Two cards are already there: Connect an agent (one copy line
-each for Claude Code, Codex, Cursor, and Grok, and one address) and your first
-task, with an acceptance line. After that first room, creating more rooms
+room, and Tasks. Two cards are already there: Connect an agent (pick Claude
+Code, Codex, Cursor, or Grok, then copy that one line) and your first task on
+a single row, with an acceptance line. After that first room, creating more rooms
 needs owner or member-manager standing in a room you already belong to.
 Invites and approved requests are the way into the rest.
 

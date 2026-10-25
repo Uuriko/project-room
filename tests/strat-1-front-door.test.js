@@ -60,9 +60,31 @@ test("front door opens a room with two seeded cards", { timeout: 60000 }, async 
   await page.locator("#front-door-work").press("Enter");
   await page.locator("#main").waitFor({ state: "visible" });
   const ms = Date.now() - started;
-  await page.locator("#message-list").getByText("Connect an agent").waitFor({ state: "visible" });
-  await page.locator("#message-list").getByText(answer).first().waitFor({ state: "visible" });
-  await page.locator("#message-list").getByText("Acceptance:").waitFor({ state: "visible" });
+  const connect = page.locator("#message-list li.message", { hasText: "Connect an agent" });
+  const task = page.locator("#message-list li.message", { hasText: "Acceptance:" });
+  await connect.waitFor({ state: "visible" });
+  await task.waitFor({ state: "visible" });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await connect.locator("select").waitFor({ state: "visible" });
+  const copy = connect.getByRole("button", { name: "Copy" });
+  await copy.waitFor({ state: "visible" });
+  assert.deepEqual(await connect.locator("select option").allTextContents(), ["Claude Code", "Codex", "Cursor", "Grok"]);
+  assert.equal(await connect.locator("button").count(), 1);
+  assert.equal(await connect.locator("a, summary").count(), 0);
+  assert.equal(await task.locator("button, a, select, summary, input, textarea").count(), 0);
+  const selectBox = await connect.locator("select").boundingBox();
+  const copyBox = await copy.boundingBox();
+  const taskBox = await task.boundingBox();
+  assert.ok(selectBox && selectBox.x >= 0 && selectBox.x + selectBox.width <= 390);
+  assert.ok(copyBox && copyBox.height >= 44 && copyBox.x >= 0 && copyBox.x + copyBox.width <= 390);
+  assert.ok(taskBox && taskBox.x >= 0 && taskBox.x + taskBox.width <= 390);
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
+  await connect.locator("select").selectOption({ label: "Codex" });
+  await copy.click();
+  assert.equal(
+    await page.evaluate(() => navigator.clipboard.readText()),
+    "codex mcp add project-room --url https://room.trydemigod.com/mcp"
+  );
   assert.ok(ms < 60000, `time to first room ${ms}ms`);
   const room = fixture.store.db.prepare("SELECT id FROM rooms WHERE id LIKE 'room-%'").all();
   assert.equal(room.length, 1);

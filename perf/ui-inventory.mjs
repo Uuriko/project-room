@@ -92,6 +92,8 @@ async function afterFlow(origin, token) {
   const ms = Date.now() - started;
   await page.locator("#message-list").getByText("Connect an agent").waitFor({ state: "visible" });
   await page.locator("#message-list").getByText("Ship the login fix").first().waitFor({ state: "visible" });
+  await page.locator("#message-list select").waitFor({ state: "visible" });
+  await page.locator("#message-list").getByRole("button", { name: "Copy" }).waitFor({ state: "visible" });
   const controls = await countControls(page);
   await browser.close();
   return { ms, controls };

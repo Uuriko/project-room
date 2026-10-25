@@ -101,8 +101,98 @@ function installRoomCreate() {
   };
 }
 
+function stripCardChrome(item) {
+  item.querySelectorAll("a.message-time, .message-links").forEach(node => node.remove());
+}
+
+function collapseConnect(item) {
+  const body = item.querySelector(".message-body");
+  if (!body) return;
+  if (body.querySelector("select")) { stripCardChrome(item); return; }
+  const lines = (body.textContent || "").split("\n").map(line => line.trim()).filter(Boolean);
+  const options = [];
+  let titleText = "";
+  for (const line of lines) {
+    const split = line.indexOf(": ");
+    if (split <= 0) { if (!titleText) titleText = line; continue; }
+    options.push([line.slice(0, split), line.slice(split + 2)]);
+  }
+  if (!titleText || !options.length) return;
+  const title = document.createElement("span");
+  title.id = ["connect-agent", item.dataset.messageRecordId || "card"].join("-");
+  title.textContent = titleText;
+  const picker = document.createElement("select");
+  picker.style.width = "auto";
+  picker.style.maxWidth = "100%";
+  picker.setAttribute("aria-labelledby", title.id);
+  for (const [name, command] of options) {
+    const option = document.createElement("option");
+    option.value = command;
+    option.textContent = name;
+    picker.append(option);
+  }
+  const copy = document.createElement("button");
+  copy.type = "button";
+  copy.className = "button secondary";
+  copy.textContent = "Copy";
+  copy.addEventListener("click", event => {
+    event.preventDefault();
+    event.stopPropagation();
+    const value = picker.value;
+    const done = () => { copy.textContent = "Copied"; };
+    const write = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText(value)
+      : copyWithSelection(value);
+    write.then(done, () => copyWithSelection(value).then(done, () => {}));
+  });
+  body.replaceChildren(title, document.createTextNode("\n"), picker, document.createTextNode(" "), copy);
+  stripCardChrome(item);
+}
+
+function copyWithSelection(value) {
+  return new Promise((resolve, reject) => {
+    const area = document.createElement("textarea");
+    area.value = value;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.left = "-9999px";
+    document.body.append(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    area.remove();
+    if (ok) resolve();
+    else reject(new Error("copy failed"));
+  });
+}
+
+function collapseTask(item) {
+  const body = item.querySelector(".message-body");
+  if (!body) return;
+  stripCardChrome(item);
+  if (body.dataset.firstRoomRow === "1") return;
+  const text = (body.textContent || "").replace(/\s+/g, " ").trim();
+  body.replaceChildren(document.createTextNode(text));
+  body.dataset.firstRoomRow = "1";
+}
+
+function collapseCards(list) {
+  const connect = list.querySelector("li.message[data-message-record-id^='mc-']");
+  const task = list.querySelector("li.message[data-message-record-id^='mt-']");
+  if (connect) collapseConnect(connect);
+  if (task) collapseTask(task);
+}
+
+function installCardCollapse() {
+  const list = document.getElementById("message-list");
+  if (!list) return;
+  const run = () => collapseCards(list);
+  new MutationObserver(run).observe(list, { childList: true, subtree: true });
+  run();
+}
+
 installFrontDoor();
 installRoomCreate();
+installCardCollapse();
 
 if (document.getElementById("fd-verified")) {
 (async () => {
