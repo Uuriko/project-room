@@ -29,7 +29,6 @@ import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work
 import { ACTIVE_CLAIM_STATES, STALE_SWEEP_BATCH, STALE_UNCLAIMED_DAYS, closeStaleUnclaimed, closeWhenLive, notePullMerged, recordCi, releaseExpired } from "./work-claims.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { appendRoomEvent, stableEventId, ROOM_GUIDE_ID } from "./receipt-cards.mjs";
-import { renderMergeReply } from "./github-app/render.mjs";
 import { validResultBody } from "../src/work-packet.js";
 import {
   PULL_CANDIDATE_CAP, PULL_MISSING_BACKOFF_MS, holdForRateLimit, nextPullBackoff,
@@ -1198,6 +1197,18 @@ export function staleSweepDueAt(store, _nowMs) {
   const last = lastStaleSweep.get(store);
   if (typeof last === "number" && Number.isFinite(last)) due = Math.max(due, last + STALE_SWEEP_INTERVAL_MS);
   return due;
+}
+
+const MERGE_REPLY_URL = /^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9]\d{0,9}$/;
+const MERGE_REPLY_CONTROLS = /[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu;
+
+// One plain sentence for the source thread. The pull URL is the link.
+function renderMergeReply({ url, title } = {}) {
+  if (typeof url !== "string" || !MERGE_REPLY_URL.test(url)) return "";
+  const name = typeof title === "string"
+    ? [...title.replace(MERGE_REPLY_CONTROLS, "").replace(/\s+/g, " ").trim()].slice(0, 120).join("")
+    : "";
+  return name ? `${name} is done. ${url}` : `Done. ${url}`;
 }
 
 // Who may post the merge reply. The room guide speaks when this room has
