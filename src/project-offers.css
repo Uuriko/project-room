@@ -209,6 +209,16 @@ h1 {
   font-size:18px;
   color:var(--accent)
 }
+.server-offer-card .card-links {
+  display:flex;
+  flex-wrap:wrap;
+  gap:12px;
+  margin-top:19px;
+  font-size:14px
+}
+.server-offer-card .card-links a {
+  color:var(--accent)
+}
 .offer-detail {
   min-width:0;
   border:1px solid var(--line);

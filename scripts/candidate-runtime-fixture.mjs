@@ -191,6 +191,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/public-agent-page.mjs'); // Public agent page (imported by server/store.mjs)
   paths.add('server/routes/public-agent-page.mjs'); // Public agent page routes (imported by server/routes/table.mjs)
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
+  paths.add('server/offers-page.mjs'); // DOOR-CURE-3: server-rendered offers shelf (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
   paths.add('server/public-visibility.mjs'); // The one visibility definition (imported by server/public-read-model.mjs)

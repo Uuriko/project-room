@@ -89,6 +89,7 @@ import { listPins, setPin } from "./pins.mjs";
 // (squad roster handlers moved to server/routes/squads.mjs, batch RT)
 import { clearBeat, currentTypists, typingBeats, typingKey } from "./typing.mjs";
 import { renderReceiptsHtml, renderReceiptDetailHtml, receiptsListJson, receiptJson, RECEIPTS_PAGE_CSP } from "./receipts-page.mjs";
+import { renderOffersHtml } from "./offers-page.mjs";
 import { renderOgPng } from "./og-render.mjs";
 import { receiptBadgeSvg, receiptOgFields } from "./receipt-share.mjs";
 import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLIC_RECEIPT_ID, verifyPublicReceipt } from "./receipts-live.mjs";
@@ -2150,6 +2151,28 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const gr2Alias = gr2PublicPath(url.pathname);
       if (gr2Alias) url.pathname = gr2Alias;
       // --- end GR2 ---
+      // DOOR-CURE-3: GET /offers is server-rendered like /receipts. The
+      // packaged offers.html shell is the template; the published set
+      // behind /api/project-offers is rendered into it at read time, and
+      // the client script repaints from the live API as an enhancement.
+      // Query is sanitised, never rejected: a malformed limit/after from
+      // a typed link still gets the first page, not an error page.
+      if (url.pathname === "/offers" && ["GET", "HEAD"].includes(req.method)) {
+        rate(`offers-page:${remoteAddress}`, 120);
+        const limitRaw = Number(url.searchParams.get("limit"));
+        const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 100 ? limitRaw : 20;
+        const afterRaw = url.searchParams.get("after");
+        const after = afterRaw && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(afterRaw) ? afterRaw : null;
+        const page = store.projectOffers.list({ limit, after });
+        const shell = await loadAsset("offers.html");
+        const html = Buffer.from(renderOffersHtml(shell.toString("utf8"), page));
+        if (!url.search) res.setHeader("X-Robots-Tag", "all");
+        res.setHeader("Cache-Control", "no-store");
+        res.setHeader("Link", publicPageLinks(url, "/offers"));
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
+        return res.end(req.method === "HEAD" ? undefined : html);
+      }
+      if (url.pathname === "/offers") reject(405, "method_not_allowed", "Method not allowed");
       // GET /api/public/front-door (EXP-7 Variant B live facts) is a
       // route-table row: server/routes/front-door.mjs, dispatched above.
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
