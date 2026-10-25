@@ -100,7 +100,8 @@ function sweep() {
 
   step(T.MESSAGE_POSTED, "producer", { messageId: "chat-1", body: "hello room" });
   step(T.MESSAGE_EDITED, "producer", { messageId: "chat-1", body: "hello room, again", expectedMessageRevision: 0 });
-  step(T.MESSAGE_REACTION_SET, "reviewer", { messageId: "chat-1", reaction: "like", active: true });
+  step(T.MESSAGE_POSTED, "producer", { messageId: "poll-1", body: "Pick one", kind: "poll", poll: { question: "Pick one", options: ["a", "b"] } });
+  step(T.POLL_VOTED, "reviewer", { messageId: "poll-1", option: 0, active: true });
   step(T.MESSAGE_PINNED, "owner", { messageId: "chat-1" });
   step(T.MESSAGE_UNPINNED, "owner", { messageId: "chat-1" });
   step(T.MESSAGE_DELETED, "producer", { messageId: "chat-1", expectedMessageRevision: 1, reason: "tidy" });

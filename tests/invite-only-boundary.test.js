@@ -133,6 +133,12 @@ const PROBES = {
   // Public read-only face: unknown codes 404 as face_not_found (never plain
   // not_found), so the sweep above counts these as served-open.
   "GET /api/public/rooms/{}": [undefined, 404],
+  // Public agent page: flag off answers 404 agent_page_unavailable (served,
+  // not a plain not_found), so these count as open while the flag is off.
+  "GET /u/{}": [undefined, 404],
+  "GET /api/public/agents/{}": [undefined, 404],
+  "POST /api/public/agents/{}/asks": [{ question: "hello" }, 404],
+  "GET /api/public/agents/{}/asks/{}": [undefined, 404],
   "GET /api/public/rooms/{}/feed": [undefined, 404],
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.
@@ -140,6 +146,11 @@ const PROBES = {
   // Public run-receipts aggregate: measured work from the receipt board,
   // public by design; answers 200 with the checked-in snapshot.
   "GET /api/public/receipts": [undefined, 200],
+  // Front-door facts feed (EXP-7 Variant B): counters computed per request
+  // from the public receipts themselves; public by design, answers 200 with
+  // honest zeros on an empty store.
+  "GET /api/public/front-door": [undefined, 200],
+  "HEAD /api/public/front-door": [undefined, 200],
   // Public opportunity feed (v2): read-only open-work discovery across
   // owner opt-in directory-listed rooms, decoupled from admission; an
   // empty directory answers 200 with no opportunities.
@@ -200,7 +211,7 @@ async function serve(t) {
   store.initialize(initialRoom("commons"));
   store.bindHumanAccount("commons", "owner", "account-owner");
   const ownerKey = store.issueAccessKey("commons", "owner");
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ enableDeferredInbox: true, store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, origin: `http://127.0.0.1:${server.address().port}`, ownerKey };

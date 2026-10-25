@@ -1,7 +1,8 @@
 // #662 — "Needs your attention" owner-gate card: a single rollup of every
 // place a human owner decision is required (pending access requests, work
-// awaiting verification/decision, spend-allowance headroom, expiring claim
-// leases). Owner-only (403 otherwise); every item carries the concrete
+// awaiting verification/decision, board work-claims awaiting review, spend-
+// allowance headroom, expiring claim leases). Owner-only (403 otherwise);
+// every item carries the concrete
 // next action, following the existing `next`-action convention, so approvals
 // live in the conversation surface instead of a separate admin area.
 //
@@ -10,9 +11,11 @@
 //
 // Local ServiceError (mirrors server/access-requests.mjs): store.mjs imports
 // are avoided here to keep the Workers bundle cycle-free; http.mjs injects
-// its store and AccessRequests instances.
+// its store and AccessRequests instances. The work-claims kernel is a pure
+// module (no store import), so its close/review predicates are safe to use.
 import { createHash } from "node:crypto";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
+import { canCloseWork, hasCurrentReview, resolveNamedReviewers } from "./work-claims.mjs";
 
 class ServiceError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -53,9 +56,46 @@ function decideActions(roomId, request) {
   ]);
 }
 
+// The one #662 item shape with a true inline action. Exported for the
+// cross-room Owner Cockpit (#3342), which merges these items across rooms
+// and must not grow a second copy of the decide contract.
+export function accessRequestAttentionItem(roomId, request) {
+  return Object.freeze({
+    kind: "access_request",
+    id: request.requestId,
+    severity: "action",
+    title: request.kind === "permissions" ? `${request.displayName} wants: ${request.requestedPermissions.join(", ")}` : `${request.displayName} asks to join`,
+    detail: `Requested ${request.requestedPermissions.join(", ")}`,
+    actions: decideActions(roomId, request),
+  });
+}
+
 function reviewAction(roomId, workItemId) {
   return Object.freeze({ action: "review", method: "GET",
     path: `/api/rooms/${roomId}/work-context?workItemId=${encodeURIComponent(workItemId)}` });
+}
+
+function boardReviewAction(roomId, claimId) {
+  return Object.freeze({ action: "review", method: "GET",
+    path: `/api/rooms/${roomId}/work-claims/${encodeURIComponent(claimId)}` });
+}
+
+// Mirror of the work-claim routes' mayReviewWorkClaims (work-claim-routes.mjs:
+// mayWriteWorkClaims || the verify permission), computed over a members map.
+// The routes re-check on POST; this only decides whose delivered claims the
+// rollup may call the owner's business.
+const CLAIM_PROFILES = Object.freeze({
+  contribute: ["accept_work", "complete_work"],
+  review: ["verify"],
+  collaborate: ["steer", "accept_work", "complete_work", "verify"],
+});
+function mayReviewClaimMember(member, ownerId) {
+  if (!member || member.active === false) return false;
+  if (ownerId && member.id === ownerId) return true;
+  const permissions = new Set(member.permissions ?? []);
+  if (permissions.has("verify")) return true;
+  if (member.kind === "human") return permissions.has("accept_work") || permissions.has("complete_work");
+  return Object.values(CLAIM_PROFILES).some(profile => profile.every(name => permissions.has(name)));
 }
 
 export function attentionReport(deps, token, roomId, expectedSessionBinding = null, nowMs = Date.now(), { cursor = null, includeShadow = false } = {}) {
@@ -67,14 +107,7 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
 
   // 1. Pending access requests — the only item with true inline approve/deny.
   for (const request of accessRequests.list(token, roomId, { status: "pending" }, expectedSessionBinding)) {
-    items.push(Object.freeze({
-      kind: "access_request",
-      id: request.requestId,
-      severity: "action",
-      title: request.kind === "permissions" ? `${request.displayName} wants: ${request.requestedPermissions.join(", ")}` : `${request.displayName} asks to join`,
-      detail: `Requested ${request.requestedPermissions.join(", ")}`,
-      actions: decideActions(roomId, request),
-    }));
+    items.push(accessRequestAttentionItem(roomId, request));
   }
 
   const room = store.room(roomId);
@@ -114,6 +147,67 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
           actions: Object.freeze([reviewAction(roomId, item.id)]),
         }));
       }
+    }
+  }
+
+  // 2b. Board work-claims delivered and awaiting the owner's review or
+  // verification (#3754). The claims registry is the record now; the legacy
+  // workItems loop above never sees board-native work, so before this input
+  // existed a delivered claim awaiting its reviewer produced no item at all.
+  // Eligibility mirrors the work-claim routes' verify gate: the claim's
+  // review policy (room default when unset); a claim naming other reviewers
+  // (rev-<memberId> tags) awaits them, not the owner; and once the owner
+  // holds a current approval, canCloseWork decides whether the pending act
+  // is the owner's verify or somebody else's.
+  const claims = typeof store.workClaims?.list === "function" ? store.workClaims.list(roomId) : [];
+  if (claims.length) {
+    const members = room.state.members ?? {};
+    const ownerId = auth.member.id;
+    const roomOwnerId = room.state.room?.ownerId ?? null;
+    const reviewMembers = Object.values(members)
+      .filter(member => mayReviewClaimMember(member, roomOwnerId)).map(member => member.id);
+    const verifyMembers = Object.values(members)
+      .filter(member => member && member.active !== false && (member.permissions ?? []).includes("verify"))
+      .map(member => member.id);
+    const roomPolicy = typeof store.workClaims?.configFor === "function"
+      ? store.workClaims.configFor(roomId)?.reviewPolicy : undefined;
+    for (const item of claims) {
+      if (!item || item.state !== "delivered") continue;
+      const policy = item.reviewPolicy ?? roomPolicy ?? "self_attested";
+      if (canCloseWork(item, ownerId, { policy, verifyMembers, reviewMembers })) {
+        items.push(Object.freeze({
+          kind: "board_review",
+          id: item.id,
+          severity: "action",
+          title: `Review: ${item.title}`,
+          detail: policy === "self_attested"
+            ? "Delivered work is waiting for your verification"
+            : "Delivered work you approved is waiting for your verification",
+          actions: Object.freeze([boardReviewAction(roomId, item.id)]),
+        }));
+        continue;
+      }
+      // Not the owner's to close: their review is the pending act only when
+      // the claim is someone else's under a reviewed policy, they are an
+      // eligible reviewer, no other reviewer is named, and they have not
+      // already approved (an approved-but-unclosable claim waits on a
+      // verifier, not on another review).
+      if (policy === "self_attested" || !item.owner || item.owner === ownerId) continue;
+      if (!reviewMembers.includes(ownerId)) continue;
+      const named = resolveNamedReviewers(item, members);
+      if (named.length > 0 && !named.includes(ownerId)) continue;
+      const review = (item.reviews ?? []).find(entry => entry?.memberId === ownerId && entry?.verdict === "approve");
+      const approved = Boolean(review && hasCurrentReview(item, ownerId)
+        && (item.attestations ?? []).some(entry => entry?.memberId === ownerId && entry?.at === review.at));
+      if (approved) continue;
+      items.push(Object.freeze({
+        kind: "board_review",
+        id: item.id,
+        severity: "action",
+        title: `Review: ${item.title}`,
+        detail: "Delivered work is waiting for your review",
+        actions: Object.freeze([boardReviewAction(roomId, item.id)]),
+      }));
     }
   }
 

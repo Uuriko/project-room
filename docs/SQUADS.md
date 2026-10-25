@@ -53,8 +53,6 @@ the work-claims route is the only gate. The squad must exist and be active.
   stay listed, do not fan out, and cannot be targeted
 
 MCP: `squads_list`, `squads_get` (reads) and `squads_create`,
-`squads_update_members`, `squads_disband` (writes, full profile). UI: the
-Squads panel lists squads and offers create (any member) and disband
-(owner, on their own squads).
-UI: the **Squads** button next to Board opens the read-only roster panel
-(`src/squads-ui.js`, lazy-loaded).
+`squads_update_members`, `squads_disband` (writes, full profile).
+
+The v1 human interface has no separate Squads panel. Existing squads and agent APIs remain available; people collaborate through rooms, threads and work ownership.

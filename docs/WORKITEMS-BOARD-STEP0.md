@@ -97,6 +97,9 @@ last three carry state with no board field (§4.5).
   `server/needs-me.mjs`, `server/public-read-model.mjs`.
 - **Attention:** `server/inbox.mjs`, `server/notifications.mjs`,
   `server/updates.mjs`, `server/owner-attention.mjs`,
+  `server/owner-overview.mjs` (Owner Cockpit slice 1, PR #3572 —
+  read-only cross-room fan-out over the per-room attention readers;
+  recorded 2026-10-16),
   `server/reminders.mjs`, `server/reply-requests.mjs`,
   `server/return-brief.mjs`, `src/reminders.js`, `src/reply-requests.js`.
 - **Work surfaces (server):** `server/work-context.mjs`,
@@ -110,7 +113,7 @@ last three carry state with no board field (§4.5).
   `src/conversation.js`, `src/growth-emit.js`, `src/help-offers.js`,
   `src/human-experience.js`, `src/portable-work.js`, `src/room-layout.js`,
   `src/room-templates.js`, `src/work-help.js`, `src/work-packet.js`,
-  `src/work-recipes.js`, `src/work-selectors.js`.
+  `src/work-selectors.js`.
 
 Direct `state.workItems` reads concentrate in `server/store.mjs` (≈42
 sites: validation, search, sessions, integrity) and `src/app.js` (≈40: the
@@ -222,6 +225,23 @@ post-migration world) would report finished work that its owner has
 re-opened. A mapping for rework cannot be a field mapping: the board
 lifecycle itself refuses the transition.
 
+**Disposition (2026-10-16): repaired.** Appendix D §D.2 ruled this
+divergence a live proof-layer defect — escalate, repair, monitor;
+"tolerate" was not an available ruling. B-4′ Phase 0 slice 1 (#3607)
+implemented the transition-lite repair: a planner-classified `rework`
+row (board `done`, the item provably completed before, the item now
+mapping to a non-terminal state) reconciles to the mapped row with an
+explicit divergence-repair stamp after `state:done`, and in the sync a
+rework primary flows through the normal write/event path instead of
+the silent skip. `board_native` divergences (foreign-owner active
+claims, closed mismatches, unprovable cases) keep the refusal exactly —
+forcing those rows stays prohibited. A per-room divergence snapshot
+(the §D.2.3 monitor) counts both classes; zero is the only healthy
+value, and any non-zero reading re-opens the defect. The census
+divergence pin now records the repaired behavior; the deep contract
+(sync end-to-end, backfill repair, classification proof rules) is
+pinned in `tests/workitems-board-divergence.test.js`.
+
 ### 4.7 NOT orphaned (named derivations / acceptable homes)
 - Session counters `round_count / tool_calls / suspended_by`: no board
   field, by E6's ratified decision — sessions are event-derived and
@@ -296,3 +316,50 @@ at characterization, council re-convenes with the census; the sync stays
 (named, costed) rather than a forced fit" — is **triggered** by §4.1,
 §4.5, and §4.6 (with §4.2–4.4 as supporting orphans). Tracking: #3221
 item 3. Slices after step 0 do not start until the council re-convenes.
+
+### Message-domain extraction (2026-10-18)
+
+`src/message-reducers.js` now owns the existing message reducers' work-item
+references: proposal context, evidence immutability checks, and receipt text
+withdrawal on delete/redaction. These moved from `src/events.js`; field fates and
+board synchronization semantics are unchanged. The reference-site inventory adds
+this module. This extraction does not complete the work-item/board migration.
+
+
+## 2026-10-18 lifecycle integration amendment
+
+The live reference-site census is now 58 files. `src/work-reducers.js` owns the
+existing work lifecycle transitions extracted from `src/events.js`; the event
+coordinator composes those reducers with the same authority guards. No work
+fields, event semantics or persistence owners changed in that extraction.
+
+The board mapper now retains board review/attestation basis, claimRound and
+linked PR polling outcomes. A board delivery (including its retained send-back
+record) is protected as board-native divergence when the work projection cannot
+reproduce it. Work completion is not fabricated from board verification. The
+remaining field losses above still prohibit replacing work items with claims.
+The event-fact reader uses the existing event-type index and retains mapping
+parity; whole-room mapping and serialization remain open architecture work.
+
+
+## Canonical storage and acceptance amendment (2026-10-18)
+
+The 57 source references now include work-repository.mjs; agent-identities uses
+the work_projection_items view instead of reading raw workItems. Canonical work
+payloads retain all fields outside the room carrier. The board remains a view and
+execution reservation record, not a lossy replacement for the work aggregate.
+Completed items awaiting required verification/owner acceptance map to delivered.
+Item-backed board acceptance controls open canonical work; API attempts to approve
+through board bundles return a conflict with the canonical context/command paths.
+Native board deliveries retain their existing workflow. See
+[cutover qualification](WORK-CUTOVER-PLAN.md).
+
+### Result reader extraction (2026-10-19)
+
+The reference census now has 58 files. `src/result-reader.js` owns the
+read-only result view previously embedded in `src/app.js`: selected receipt,
+current/earlier labeling, and discussion eligibility. It reads the existing
+authorized work-items projection through an accessor; it introduces no writer,
+board mapping, or second state store. The application retains work mutations.
+
+2026-10-19 subtraction: removed the human recipe catalog and its reader `src/work-recipes.js`; backend work-item mapping is unchanged.

@@ -51,7 +51,6 @@ try {
   assert.equal(typeof message.event.id, 'string');
   assert.equal(replay.event.id, message.event.id);
   await call('room_post_message', { ...messageInput, body: 'Changed input must fail' }, true);
-  await call('room_react', { id: 'robot-op', messageId: 'hello', reaction: '🤖', active: true });
   await call('room_post_message', { id: 'reply-op', messageId: 'reply', replyToId: 'hello', body: 'Thread reply, directly.' });
   // Test missing channel support rather than silently posting to the wrong place.
   const channelError = await rpc('tools/call', { name: 'room_post_message', arguments: {
@@ -66,7 +65,7 @@ try {
   const current = await call('room_read_work', { workItemId });
   assert.equal(current.work.state, 'working', JSON.stringify(begin));
   await call('room_accept_work', { requestId: 'stale-op', workItemId, expectedRevision: 0 }, true);
-  const body = 'Direct-tool result: messages, reaction, thread, retries and files verified locally.';
+  const body = 'Direct-tool result: messages, thread, retries and files verified locally.';
   const draftInput = { requestId: 'draft-op', workItemId, packetId: 'result-packet', basisRevision: current.work.revision, body };
   const draft = await call('room_post_draft', draftInput);
   assert.equal((await call('room_post_draft', draftInput)).duplicate, true);
@@ -99,7 +98,7 @@ try {
     elapsedMs: Math.round(performance.now() - started), beginWorking: begin.working,
     workState: completed.work.state,
     assertions: ['new enrollment', 'owner room', 'focused discovery', 'message', 'exact retry', 'changed retry rejected',
-      'reaction', 'thread', 'channel parameter gap', 'propose', 'begin', 'stale revision rejected', 'draft', 'preview',
+      'thread', 'channel parameter gap', 'propose', 'begin', 'stale revision rejected', 'draft', 'preview',
       'text result', 'completion retry', 'file upload/commit/read', 'parallel reads', 'other room denied'], timings }, null, 2));
 } finally {
   server.closeStreams(); server.closeAllConnections();

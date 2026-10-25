@@ -71,7 +71,7 @@ test("focused discussion selects exact anchors and descendants without importing
   assert.equal(f.view("nested-work").discussion.items[0].message.body, "nested");
 });
 
-test("frozen sequence pages survive sparse activity, reactions, new replies, read-marker changes and restart", async t => {
+test("frozen sequence pages survive sparse activity, pins, new replies, read-marker changes and restart", async t => {
   const f = await fixture(t);
   let at = Date.now();
   f.store.now = () => at;
@@ -84,7 +84,7 @@ test("frozen sequence pages survive sparse activity, reactions, new replies, rea
   f.store.now = () => fixedTime;
   const initial = f.view("test-handoff", { limit: 17 }), frozen = initial.discussion.horizon, firstItems = structuredClone(initial.discussion.items);
   f.post("arrived-later", { replyToId: "reply-114" });
-  f.send("owner", T.MESSAGE_REACTION_SET, { messageId: "test-request", reaction: "like", active: true });
+  f.send("owner", T.MESSAGE_PINNED, { messageId: "test-request" });
   f.store.markCaughtUp(f.keys.producer, "commons", f.store.room("commons").sequence);
   let page = initial, all = [...ids(page)];
   const reopened = new RoomStore(join(f.directory, "room.sqlite"), { readOnly: true, now: () => fixedTime });

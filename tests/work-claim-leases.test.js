@@ -271,17 +271,17 @@ test("handler: create → claim → complete with delivery mode → release cycl
 
 test("handler: review policies enforced on the done transition", async () => {
   const registry = createWorkClaimRegistry();
-  // distinct_member: owner alone cannot close
+  const BUNDLE = { artifact: { kind: "text", ref: "room://artifacts/p", sha256: "a".repeat(64) },
+    checks: [{ name: "unit", result: "pass" }], criteria: [] };
+  // distinct_member: #3546 — nobody closes from in_progress any more; the
+  // holder delivers, then the reviewer verifies from their own session.
   await runRoute({ route: "create", body: { id: "p1", reviewPolicy: "distinct_member" }, registry });
   await runRoute({ route: "claim", id: "p1", registry });
   await runRoute({ route: "update", id: "p1", body: { state: "in_progress" }, registry });
   const selfClose = await runRoute({ route: "update", id: "p1", body: { state: "done" }, registry }).catch(error => error);
-  assert.equal(selfClose.code, "work_review_rejected");
-  // QA-Sec 2026-09-19: naming a reviewer who never attested is rejected —
-  // the confused-deputy hole (owner closes by naming anyone) is closed.
+  assert.equal(selfClose.code, "work_not_delivered");
   const spoofed = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
-  assert.equal(spoofed.code, "work_review_rejected");
-  assert.match(spoofed.message, /no review attestation recorded by grok/);
+  assert.equal(spoofed.code, "work_not_delivered");
   // SEC-2: a review note needs the review profile (verify), the room owner,
   // or manage_claims; a contribute-only member is refused.
   const { out: refusedNote } = await runRoute({ route: "review", id: "p1", memberId: "grok", body: { note: "looks good" }, registry });
@@ -292,31 +292,50 @@ test("handler: review policies enforced on the done transition", async () => {
   assert.equal(review.value.attestations.length, 1);
   assert.equal(review.value.attestations[0].memberId, "vera");
   const noteOnly = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "vera" }, registry }).catch(error => error);
-  assert.equal(noteOnly.code, "work_review_rejected");
+  assert.equal(noteOnly.code, "work_not_delivered");
   await runRoute({ route: "review", id: "p1", memberId: "grok", body: { verdict: "approve", summary: "Checked current work" }, registry });
-  const attested = await runRoute({ route: "update", id: "p1", body: { state: "done", reviewedBy: "grok" }, registry });
+  // the holder delivers with the bundle; the delivery alone is not done
+  const { out: delivered } = await runRoute({ route: "update", id: "p1", body: { state: "delivered", delivery: BUNDLE }, registry });
+  assert.equal(delivered.value.state, "delivered");
+  // the holder cannot verify their own delivery
+  const ownerVerify = await runRoute({ route: "update", id: "p1", body: { state: "done" }, registry }).catch(error => error);
+  assert.equal(ownerVerify.code, "work_review_rejected");
+  assert.match(ownerVerify.message, /no review attestation recorded by quill/);
+  // QA-Sec 2026-09-19, at the verify step: the reviewer acts from their own
+  // session — naming another member is the confused-deputy hole, closed.
+  const deputy = await runRoute({ route: "update", id: "p1", memberId: "grok", body: { state: "done", reviewedBy: "vera" }, registry }).catch(error => error);
+  assert.equal(deputy.code, "work_review_rejected");
+  assert.match(deputy.message, /cannot name another member/);
+  // the attested reviewer verifies from their own session
+  const attested = await runRoute({ route: "update", id: "p1", memberId: "grok", body: { state: "done" }, registry });
   assert.equal(attested.out.value.state, "done");
   assert.equal(attested.out.value.reviewedBy, "grok");
-  // independent_principal: attester needs the verify permission
+  assert.equal(attested.out.value.verification.state, "verified");
+  // independent_principal: the verifying reviewer needs the verify permission
   await runRoute({ route: "create", body: { id: "p2", reviewPolicy: "independent_principal" }, registry });
   await runRoute({ route: "claim", id: "p2", registry });
   await runRoute({ route: "update", id: "p2", body: { state: "in_progress" }, registry });
-  // an attestation from a member without verify does not close the work
+  // an attestation from a member without verify does not verify the work
   await runRoute({ route: "review", id: "p2", memberId: "grok", body: { verdict: "approve", summary: "Checked work" }, registry });
-  const noVerify = await runRoute({ route: "update", id: "p2", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
+  const noVerifyEarly = await runRoute({ route: "update", id: "p2", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
+  assert.equal(noVerifyEarly.code, "work_not_delivered");
+  await runRoute({ route: "update", id: "p2", body: { state: "delivered", delivery: BUNDLE }, registry });
+  const noVerify = await runRoute({ route: "update", id: "p2", memberId: "grok", body: { state: "done" }, registry }).catch(error => error);
   assert.equal(noVerify.code, "work_review_rejected"); // grok lacks verify
-  // a verifier attests from their own session, then the owner closes
+  // a verifier reviews the delivery and verifies from their own session
   await runRoute({ route: "review", id: "p2", memberId: "quill2", body: { verdict: "approve", summary: "Verified current work" }, registry,
     storeMembers: { quill2: { id: "quill2", kind: "human", active: true, permissions: ["verify"] } } });
-  const { out: verified } = await runRoute({ route: "update", id: "p2", body: { state: "done", reviewedBy: "quill2" }, registry,
+  const { out: verified } = await runRoute({ route: "update", id: "p2", memberId: "quill2", body: { state: "done" }, registry,
     storeMembers: { quill2: { id: "quill2", kind: "human", active: true, permissions: ["verify"] } } });
   assert.equal(verified.value.state, "done"); // quill2 != claimant and holds verify
   assert.equal(verified.value.reviewedBy, "quill2");
+  assert.equal(verified.value.verification.state, "verified");
   // attestation from one claim does not transfer to another claim
   await runRoute({ route: "create", body: { id: "p3", reviewPolicy: "distinct_member" }, registry });
   await runRoute({ route: "claim", id: "p3", registry });
   await runRoute({ route: "update", id: "p3", body: { state: "in_progress" }, registry });
-  const crossClaim = await runRoute({ route: "update", id: "p3", body: { state: "done", reviewedBy: "grok" }, registry }).catch(error => error);
+  await runRoute({ route: "update", id: "p3", body: { state: "delivered", delivery: BUNDLE }, registry });
+  const crossClaim = await runRoute({ route: "update", id: "p3", memberId: "grok", body: { state: "done" }, registry }).catch(error => error);
   assert.equal(crossClaim.code, "work_review_rejected"); // grok attested p1, not p3
 });
 

@@ -1,8 +1,9 @@
-// Room-native spend grants: per-agent capability="spend" edges with credit
-// caps, plus the charge-then-forward trust boundary for priced MCP tools.
+// Room-native spend grants: per-agent capability="spend" edges with caps
+// denominated in cents, plus the charge-then-forward trust boundary for
+// priced MCP tools.
 //
 // Design: ~/workspace/research_notes/spend-primitive-design-2026-10-04.md
-// (§3a–§3c, MVP items 1–3 and 5). Credits-denominated, fully reversible:
+// (§3a–§3c, MVP items 1–3 and 5). Cents-denominated, fully reversible:
 // removing every priced tool from PRICED_MCP_TOOLS returns the room to
 // exactly its previous behavior.
 //
@@ -52,7 +53,12 @@
 //     a crashed caller's orphan does.
 //
 // Money is integer cents as TEXT (string-decimal, no floats, D12). Only the
-// "credits" denomination exists in v1; "usdc" issuance is refused fail-closed.
+// "cents" denomination exists in v1; "usdc" issuance is refused fail-closed.
+// (#3305: the unit was always integer cents — the pre-rename label for this
+// denomination was "credits", which collided with the bounty ledger's
+// credit (1 credit = 1000 milli-credits). No conversion exists between the
+// two units and none is implied by the rename; stored "credits" labels are
+// converged to "cents" in ensureSpendGrantsSchema.)
 //
 // Tables are registered in server/writer-fence.mjs and the schema is ensured
 // from the writer boot path next to ensureGrantsSchema. This module does not
@@ -66,10 +72,10 @@ import { spendAllowanceReport } from "./spend-allowance.mjs";
 import { ownMember, spendPricingEnabled } from "../src/events.js";
 
 export const SPEND_CAPABILITY = "spend";
-export const SPEND_DENOMINATION = "credits";
+export const SPEND_DENOMINATION = "cents";
 
 // Priced MCP tools, integer cents per call. The price ALSO lives in each
-// tool's public description ("[paid: room-credits] N credits per call") —
+// tool's public description ("[paid: room-cents] N cents per call") —
 // the description is advertising, the runtime charge here is authoritative
 // (the x402 doctrine). Removing a tool from this map un-prices it
 // completely: no other code path charges.
@@ -99,7 +105,7 @@ export const SPEND_GRANTS_SCHEMA = `
 CREATE TABLE IF NOT EXISTS spend_grant_terms (
   room_id TEXT NOT NULL,
   agent_id TEXT NOT NULL,
-  denomination TEXT NOT NULL DEFAULT 'credits',
+  denomination TEXT NOT NULL DEFAULT 'cents',
   cap_cents TEXT NOT NULL,
   per_tx_cap_cents TEXT NOT NULL,
   allowlist TEXT NULL,
@@ -146,6 +152,11 @@ CREATE INDEX IF NOT EXISTS idx_spend_room_reservations_active
 
 export function ensureSpendGrantsSchema(db) {
   db.exec(SPEND_GRANTS_SCHEMA);
+  // #3305: pre-rename grant rows stored the denomination label "credits"
+  // for what was always integer cents. Converge the LABEL only — no cap,
+  // price, or authorization changes meaning. Idempotent: once converged
+  // this matches zero rows.
+  db.exec(`UPDATE spend_grant_terms SET denomination = 'cents' WHERE denomination = 'credits'`);
   // #1525: lease expiry on reserves — additive column, following the
   // codebase's column-migration pattern (agent-identities, credentials):
   // existing databases converge via ALTER TABLE, rows written before the
@@ -381,15 +392,15 @@ export function revokeSpendGrant(db, roomId, agentId, { nowMs = Date.now() } = {
 }
 
 function paymentRefusal({ roomId, agentId, toolName, priceCents, reason, extra = {} }) {
-  const price = `${priceCents} credit${priceCents === 1 ? "" : "s"}`;
+  const price = `${priceCents} cent${priceCents === 1 ? "" : "s"}`;
   const obtain = `Ask the room owner for a spend grant (POST /api/rooms/${roomId}/spend-grants).`;
   const messages = {
     no_spend_grant: `Payment required: ${toolName} costs ${price} per call and ${agentId} holds no live spend grant. ${obtain} No call was made and nothing was charged.`,
     grant_expired: `Payment required: ${toolName} costs ${price} per call and ${agentId}'s spend grant has expired. ${obtain} No call was made and nothing was charged.`,
     grant_revoked: `Payment required: ${toolName} costs ${price} per call and ${agentId}'s spend grant was revoked. ${obtain} No call was made and nothing was charged.`,
-    cap_exceeded: `Payment required: ${toolName} costs ${price} per call but ${agentId}'s spend grant has ${extra.remainingCents} credits remaining. Ask the room owner to raise the cap. No call was made and nothing was charged.`,
-    per_tx_cap_exceeded: `Payment required: ${toolName} costs ${price} per call, above ${agentId}'s per-call cap of ${extra.perTxCapCents} credits. Ask the room owner to raise the per-call cap. No call was made and nothing was charged.`,
-    room_allowance_exceeded: `Payment required: ${toolName} costs ${price} per call but the room's spend allowance has ${extra.roomHeadroomCents} credits of headroom left. Ask the room owner to raise the allowance. No call was made and nothing was charged.`,
+    cap_exceeded: `Payment required: ${toolName} costs ${price} per call but ${agentId}'s spend grant has ${extra.remainingCents} cents remaining. Ask the room owner to raise the cap. No call was made and nothing was charged.`,
+    per_tx_cap_exceeded: `Payment required: ${toolName} costs ${price} per call, above ${agentId}'s per-call cap of ${extra.perTxCapCents} cents. Ask the room owner to raise the per-call cap. No call was made and nothing was charged.`,
+    room_allowance_exceeded: `Payment required: ${toolName} costs ${price} per call but the room's spend allowance has ${extra.roomHeadroomCents} cents of headroom left. Ask the room owner to raise the allowance. No call was made and nothing was charged.`,
   };
   return refuse(402, "payment_required", messages[reason] ?? messages.no_spend_grant, {
     tool: toolName, priceCents, denomination: SPEND_DENOMINATION, reason,

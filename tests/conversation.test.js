@@ -7,7 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, replay } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { menuOpensUp, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberPresence, memberOnLine, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember, reactionPills, REACTIONS } from "../src/conversation.js";
+import { menuOpensUp, conversationIndex, searchMessages, ConversationDrafts, DraftRecovery, messageCluster, mentionQuery, mentionMatches, insertMention, mentionHtml, GROUP_WINDOW_MS, kindLabel, memberStatus, memberHandle, memberPresence, memberOnLine, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, escapeChatAction, composerPlaceholder, removeMention, parseSearchQuery, messageAddressesMember } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 function room(t) {
@@ -46,23 +46,32 @@ test("historical reply chains form one thread and survive restart without copyin
   assert.equal(f.store.snapshot(f.owner, "commons").state.workItems.reading.sourceMessageId, "nested");
 });
 
-test("reaction choices belong to their actors and old retries never reverse a later removal", t => {
+test("poll votes belong to their actors and old retries never reverse a later removal", t => {
   const f = room(t);
-  f.send(f.human, T.MESSAGE_POSTED, { messageId: "topic", body: "Friday gathering" });
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "topic", body: "Friday?", kind: "poll", poll: { question: "Friday?", options: ["yes", "no"], allowMultiple: true } });
   const before = f.store.snapshot(f.owner, "commons").state;
-  const choice = { messageId: "topic", reaction: "heart", active: true };
-  const first = f.send(f.human, T.MESSAGE_REACTION_SET, choice, "like-once");
-  f.send(f.agent, T.MESSAGE_REACTION_SET, choice);
-  f.send(f.human, T.MESSAGE_REACTION_SET, choice);
-  assert.deepEqual(f.store.snapshot(f.owner, "commons").state.messages[0].reactions["❤️"], ["agent", "human"]);
-  f.send(f.human, T.MESSAGE_REACTION_SET, { ...choice, active: false });
+  const choice = { messageId: "topic", option: 0, active: true };
+  const first = f.send(f.human, T.POLL_VOTED, choice, "vote-once");
+  f.send(f.agent, T.POLL_VOTED, choice);
+  f.send(f.human, T.POLL_VOTED, choice);
+  assert.deepEqual(f.store.snapshot(f.owner, "commons").state.messages[0].pollVotes[0], ["agent", "human"]);
+  f.send(f.human, T.POLL_VOTED, { ...choice, active: false });
   f.restart();
-  const retry = f.send(f.human, T.MESSAGE_REACTION_SET, choice, "like-once");
+  const retry = f.send(f.human, T.POLL_VOTED, choice, "vote-once");
   assert.equal(retry.duplicate, true); assert.equal(retry.sequence, first.sequence);
   const after = f.store.snapshot(f.owner, "commons").state;
-  assert.deepEqual(after.messages[0].reactions["❤️"], ["agent"]);
+  assert.deepEqual(after.messages[0].pollVotes[0], ["agent"]);
   assert.deepEqual(after.members, before.members); assert.deepEqual(after.workItems, before.workItems);
   assert.deepEqual(replay(after.eventLog).messages, after.messages);
+});
+
+test("historical message.reaction_set events replay as no-ops and new ones are refused", t => {
+  const f = room(t);
+  f.send(f.human, T.MESSAGE_POSTED, { messageId: "topic", body: "Old chat" });
+  const state = f.store.snapshot(f.owner, "commons").state;
+  const legacy = { ...state.eventLog.at(-1), id: "legacy-reaction", idempotencyKey: "legacy-reaction", type: "message.reaction_set", data: { messageId: "topic", reaction: "like", active: true } };
+  assert.deepEqual(replay([...state.eventLog, legacy]).messages, state.messages);
+  assert.throws(() => f.send(f.human, "message.reaction_set", { messageId: "topic", reaction: "like", active: true }), /Unknown command type/);
 });
 
 test("invalid or unauthorized conversation references leave both history and projection unchanged", t => {
@@ -73,17 +82,17 @@ test("invalid or unauthorized conversation references leave both history and pro
   f.store.command(elsewhere, "separate", { id: "foreign-message", type: T.MESSAGE_POSTED, data: { messageId: "foreign", body: "Other room" } });
   const before = f.store.snapshot(f.owner, "commons");
   for (const data of [
-    { messageId: "foreign", reaction: "heart", active: true },
-    { messageId: "topic", reaction: "unbounded-choice", active: true },
-    { messageId: "topic", reaction: "heart", active: "yes" },
-    { messageId: "topic", reaction: "heart", active: true, memberId: "owner" }
-  ]) assert.throws(() => f.send(f.human, T.MESSAGE_REACTION_SET, data));
+    { messageId: "foreign", option: 0, active: true },
+    { messageId: "topic", option: 0, active: true },
+    { messageId: "topic", option: 0, active: "yes" },
+    { messageId: "topic", option: 0, active: true, memberId: "owner" }
+  ]) assert.throws(() => f.send(f.human, T.POLL_VOTED, data));
   assert.throws(() => f.send(f.human, T.MESSAGE_POSTED, { body: "Reply", replyToId: "foreign" }));
   assert.throws(() => f.store.snapshot(elsewhere, "commons"), /does not grant access/);
   assert.deepEqual(f.store.snapshot(f.owner, "commons"), before);
   f.send(f.owner, T.MEMBER_ACCESS_CHANGED, { memberId: "human", expectedMemberRevision: 0, permissions: [], active: false });
   const removed = f.store.snapshot(f.owner, "commons");
-  assert.throws(() => f.send(f.human, T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "heart", active: true }), /revoked/);
+  assert.throws(() => f.send(f.human, T.MESSAGE_POSTED, { messageId: "after", body: "still here?" }), /revoked/);
   assert.deepEqual(f.store.snapshot(f.owner, "commons"), removed);
 });
 
@@ -212,6 +221,9 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.equal(memberStatus({ kind: "agent", active: true }), "Agent");
   assert.equal(memberStatus({ kind: "human", active: true }), "Person");
   assert.equal(memberStatus({ kind: "agent", active: false }), "access revoked");
+  // R350-n1: an active seat whose identity signed out for good says so; removal still wins.
+  assert.equal(memberStatus({ kind: "agent", active: true, identityRevoked: true }), "Signed out for good");
+  assert.equal(memberStatus({ kind: "agent", active: false, identityRevoked: true }), "access revoked");
   assert.equal(memberHandle({ kind: "agent", displayName: "Codex" }), "@Codex");
   assert.equal(memberHandle({ kind: "human", displayName: "Maya" }), "Maya");
   assert.equal(memberHandle({ kind: "agent", displayName: "Codex" }, "Codex (codex)"), "@Codex (codex)");
@@ -274,18 +286,6 @@ test("removeMention strips one @Name token without eating longer names", () => {
   assert.equal(removeMention("Ask @Maya @Maya", maya), "Ask @Maya");
   assert.equal(removeMention("hello", null), "hello");
   assert.equal(removeMention("Ask @Maya tomorrow", {}), "Ask @Maya tomorrow");
-});
-
-test("reaction pills list used emoji and fold legacy aliases into the same glyph", () => {
-  assert.deepEqual(reactionPills(), []);
-  assert.deepEqual(Object.keys(REACTIONS), ["like", "heart", "celebrate", "thinking"]);
-  const used = reactionPills({ like: ["maya"], heart: ["maya", "instinct"], "🔥": ["ada"] });
-  assert.equal(used.find(p => p.key === "👍").count, 1);
-  assert.equal(used.find(p => p.key === "👍").symbol, "👍");
-  assert.deepEqual(used.find(p => p.key === "❤️").memberIds, ["instinct", "maya"]);
-  assert.equal(used.find(p => p.key === "🔥").count, 1);
-  assert.equal(used.some(p => p.key === "🤔"), false);
-  assert.equal(reactionPills({ like: ["maya"], "👍": ["maya"] }).find(p => p.key === "👍").count, 1);
 });
 
 test("Escape peels mention picker, then reply quote, then thread, and never implies clearing a draft", () => {

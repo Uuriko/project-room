@@ -73,7 +73,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(text.includes("lobby.getdasha.com"), false); // dead door, never advertised
   assert.match(text, /Humans: open this invite link/);
-  assert.match(text, /https:\/\/www\.getdasha\.com\/room\/#join\//);
+  assert.match(text, /https:\/\/room\.trydemigod\.com\/#join\//);
   assert.match(text, /#room\/\{roomId\} is not an invite/);
   assert.match(text, /Agent invite code \/ redeem-invite is labeled below/);
   assert.match(text, /packet \(live, no account\)/);
@@ -133,7 +133,7 @@ test("short and full packets tell a pasted agent the next action; kits and door 
     assert.ok(afterAt > joinAt, "After paste follows Join");
     assert.ok(routesAt > afterAt, "Routes follow After paste");
     assert.equal(packet.includes(AFTER_PASTE_SECTION), true);
-    assert.match(packet, /Humans: open this invite link \(https:\/\/www\.getdasha\.com\/room\/#join\/…\)/);
+    assert.match(packet, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
     assert.match(packet, /#room\/\{roomId\} is not an invite/);
   }
   assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
@@ -799,5 +799,38 @@ test("llms packets describe /openapi.json as the curated machine surface, not ev
     assert.ok(!text.includes("Every route is in"), `${name}: no 'Every route is in' overclaim`);
     assert.ok(!text.includes("(every route)"), `${name}: no '(every route)' overclaim`);
     assert.match(text, /curated machine[ -]surface/, `${name}: states the actual coverage rule`);
+  }
+});
+
+// AEO Lane 3 (2026-10-17): the money truth after the settlement rail landed.
+// The packets and card once said volunteer/reputation-only; funded work now
+// settles in ledger credits through escrow. Pin the new truth and the
+// llms-full superset so the stale lines cannot return silently.
+test("packets and card state the funded-work truth, never the stale volunteer-only line", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!text.includes("Only volunteer work is executable here"), `${name}: stale volunteer-only line`);
+    assert.ok(text.includes("locked in escrow"), `${name}: escrow funding stated`);
+    assert.ok(text.includes("not cash"), `${name}: credits-not-cash stated`);
+  }
+  const card = agentCard();
+  assert.ok(!card.description.includes("reputation receipts only"), "card: stale reputation-only line");
+  assert.ok(card.description.includes("ledger credits"), "card: ledger credits stated");
+  assert.ok(card.description.includes("not cash"), "card: credits-not-cash stated");
+});
+
+test("llms-full.txt is a section superset of llms.txt and no smaller", () => {
+  const text = llmsTxt(), full = llmsFullTxt();
+  const headings = packet => [...packet.matchAll(/^## .+$/gm)].map(match => match[0]);
+  for (const heading of headings(text)) {
+    assert.ok(headings(full).includes(heading), `llms-full.txt missing section: ${heading}`);
+  }
+  assert.ok(full.length >= text.length, `llms-full.txt (${full.length}) must not be smaller than llms.txt (${text.length})`);
+});
+
+test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extended", async t => {
+  const origin = await serve(t);
+  const robots = await (await fetch(`${origin}/robots.txt`)).text();
+  for (const bot of ["Google-Extended", "CCBot", "Applebot-Extended"]) {
+    assert.ok(robots.includes(`User-agent: ${bot}\nAllow: /`), `robots.txt must explicitly allow ${bot}`);
   }
 });

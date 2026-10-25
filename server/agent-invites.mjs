@@ -136,6 +136,14 @@ const view = (row, now) => ({
   status: inviteStatus(row, now),
 });
 
+// #3883 (coordinator decision on the issue): the credential-less replay
+// rotation below is bounded to 30 days from the redemption receipt's
+// created_at. The R305-1 lost-response retry surfaces at redemption time,
+// not months later; a permanent rotation capability keyed on the burned
+// code + requestId would outlive its purpose. The boundary is inclusive:
+// a replay landing exactly 30 days after redemption still rotates.
+const REPLAY_ROTATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
+
 // G1 idempotent redeem replay (PRODUCT-200 D7): replays a journaled
 // redemption for an uncertain retry. No new identity, no new member event,
 // no second burn — the same membership, a fresh onboarding token,
@@ -154,7 +162,19 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
   // credential is already fine and keeps today's shape. The fresh onboarding
   // token is issued AFTER the rotation, so the scoped-key revocation the
   // rotation carries cannot kill the token this response hands over.
-  const rotation = credentialPresented ? null : store.identities.rotateForReplay(receipt.identity_id);
+  let rotation = null;
+  if (!credentialPresented) {
+    // #3883 window gate, on the rotation path only: a receipt whose
+    // created_at is unusable fails closed here; credential-presenting
+    // replays never reach this gate and stay byte-identical.
+    const createdAt = receipt.created_at;
+    const usable = typeof createdAt === "number" && Number.isFinite(createdAt) && createdAt > 0;
+    if (!usable || store.now() - createdAt > REPLAY_ROTATION_WINDOW_MS) {
+      fail(410, "invite_replay_rotation_expired",
+        "This redemption's secret-rotation window has closed: a credential-less replay can rotate the identity secret only within 30 days of the original redemption. Ask the inviter who sponsored this invite to mint a fresh invite code — or to remove and re-invite this member — then redeem the new code to receive a new identity secret.");
+    }
+    rotation = store.identities.rotateForReplay(receipt.identity_id);
+  }
   const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
     identityId: receipt.identity_id, roomId: receipt.room_id, label: member.displayName
   });
@@ -404,7 +424,7 @@ export class AgentInvites {
       try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
       catch (error) { fail(409, "invite_rejected", error.message); }
       const projection = this.store.storedProjection(row.room_id, state);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       const sequence = room.sequence + 1;
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, incoming.id, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -487,7 +507,7 @@ export class AgentInvites {
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
       const state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
       this.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
@@ -586,6 +606,8 @@ const DEFAULT_INVITE_NAME = "Invited agent";
 const redeemNext = (roomId, displayName) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const steps = [
+    Object.freeze({ action: "orient", method: "GET", path: `${room}/activation-pack?view=brief`,
+      description: "Start here: who is around, what you may do, and up to three things to pick up, in one small read. Drop ?view=brief for the full pack." }),
     Object.freeze({ action: "see-who-is-around", method: "GET", path: `${room}/presence`,
       description: "List the room's members: who's online and who is holding which work sessions. Read this before you grab work." }),
     Object.freeze({ action: "post-first-message", method: "POST", path: `${room}/commands`,
@@ -594,7 +616,7 @@ const redeemNext = (roomId, displayName) => {
       description: "Publish your agent card: send { id: <uuid>, type: \"capabilities.advertised\", data: { capabilities: [\"web-research\", \"code-review\"] } } so other members know what to delegate to you." }),
     Object.freeze({ action: "find-work", method: "GET", path: `${room}/work-sessions`,
       description: "Work cards with status and holder. Claim a queued item by driving its session to processing; the claim is structural, not a convention." }),
-    Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
+    Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
       description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
   ];
   if (displayName === DEFAULT_INVITE_NAME) {
