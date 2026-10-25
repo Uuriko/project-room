@@ -19,6 +19,9 @@
 //   - a trial fee's credit is single-use: one application, up to the fee
 //     amount; any remainder is forfeited.
 //   - all amounts and timestamps are STRINGS (minor units / ISO-8601).
+//   - amounts are minor units of Demigod's pinned currency, USD
+//     (DEMIGOD_CURRENCY in server/demigod-policy-adapter.mjs) — this
+//     ledger never converts between currencies and never mixes units.
 
 export const CREDIT_EXPIRY_DAYS = 180;
 

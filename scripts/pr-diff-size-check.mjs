@@ -7,10 +7,18 @@
 // you can; justify it when you cannot.
 //
 // Pure contract: checkDiffSize({ numstat, prBody, threshold? }) -> { ok, counted, message }.
+// The verdict is a deterministic function of (numstat, prBody, threshold):
+// the same inputs always produce the same verdict. Two runs at the same head
+// SHA can still disagree when an *input* moved — the base ref (a stacked PR
+// retargeted when its parent merges) or the PR body (a justification section
+// added by an edit). Every message therefore carries an input fingerprint
+// (body sha256 + justification status) so a flipped verdict is attributable
+// from the check output alone instead of reading as nondeterminism.
 // CLI: BASE_SHA/HEAD_SHA (env or --base/--head), PR_BODY or PR_BODY_B64
 // (env) or --body/--body-b64/--body-file args. DIFF_SIZE_THRESHOLD overrides
 // the single constant without a code change.
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 
 // Single configurable constant. Override per-run with DIFF_SIZE_THRESHOLD.
@@ -53,12 +61,116 @@ export function resolveThreshold() {
   return MAX_DIFF_LINES;
 }
 
+// Git C-quotes a numstat path when it is not plain ASCII. Octal escapes are
+// UTF-8 bytes. A still-quoted generated file does not match dist/ or .min.js,
+// so the size gate counts lines that should be excluded. Fail-safe: a token
+// that does not decode cleanly comes back unchanged, so it is tested as-is
+// and counts — decoding can only ever correct a path git actually quoted.
+function unquoteGitPath(token) {
+  if (token.length < 2 || token[0] !== '"' || token.at(-1) !== '"') return token;
+  const body = token.slice(1, -1);
+  const bytes = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] !== "\\") {
+      const code = body.charCodeAt(i);
+      if (code > 0xff) return token;
+      bytes.push(code);
+      i += 1;
+      continue;
+    }
+    const next = body[i + 1];
+    if (next == null) return token;
+    if (next === "n") { bytes.push(0x0a); i += 2; continue; }
+    if (next === "t") { bytes.push(0x09); i += 2; continue; }
+    if (next === "r") { bytes.push(0x0d); i += 2; continue; }
+    if (next === "\\" || next === '"') { bytes.push(next.charCodeAt(0)); i += 2; continue; }
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      let j = i + 1;
+      while (oct.length < 3 && j < body.length && body[j] >= "0" && body[j] <= "7") {
+        oct += body[j];
+        j += 1;
+      }
+      const value = Number.parseInt(oct, 8);
+      if (!Number.isInteger(value) || value > 0xff) return token;
+      bytes.push(value);
+      i = j;
+      continue;
+    }
+    return token;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+// Split a numstat path field on the rename arrow ` => ` where it appears
+// outside C-quotes; quoted sides keep their quotes for unquoteGitPath.
+function splitRenameArrow(field) {
+  const sides = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < field.length; i += 1) {
+    const ch = field[i];
+    if (quoted && ch === "\\") {
+      current += ch + (field[i + 1] ?? "");
+      if (field[i + 1] !== undefined) i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      quoted = !quoted;
+      current += ch;
+      continue;
+    }
+    if (!quoted && field.startsWith(" => ", i)) {
+      sides.push(current);
+      current = "";
+      i += 3;
+      continue;
+    }
+    current += ch;
+  }
+  sides.push(current);
+  return sides;
+}
+
+// Brace rename form: `prefix{old => new}suffix` shares the prefix and suffix,
+// so the destination is prefix + new + suffix. Returns null when the two
+// halves are not brace fragments.
+function braceDestination(left, right) {
+  const open = left.lastIndexOf("{");
+  const close = right.indexOf("}");
+  if (open === -1 || close === -1) return null;
+  return left.slice(0, open) + right.slice(0, close) + right.slice(close + 1);
+}
+
+// The path the gate must test is the destination: a generated file renamed
+// into source still counts, and a source file renamed into dist/ does not.
+// Rename numstat is `old => new`, with each side quoted on its own, or the
+// brace form above (one token, C-quoted whole when it is not plain ASCII).
+function numstatDestination(field) {
+  const sides = splitRenameArrow(field);
+  if (sides.length > 1) {
+    const left = unquoteGitPath(sides[0]);
+    const right = unquoteGitPath(sides.at(-1).trim());
+    return braceDestination(left, right) ?? right;
+  }
+  const path = unquoteGitPath(sides[0].trim());
+  // Whole-token-quoted brace form: the arrow sat inside the quotes, so the
+  // split above never saw it; it is visible now the token is decoded.
+  const arrow = path.indexOf(" => ");
+  if (arrow !== -1) {
+    return braceDestination(path.slice(0, arrow), path.slice(arrow + 4)) ?? path;
+  }
+  return path;
+}
+
 function countedLines(numstat) {
   let total = 0;
   for (const line of String(numstat).split("\n")) {
     const parts = line.split("\t");
     if (parts.length < 3) continue;
-    const [added, removed, path] = parts;
+    const [added, removed] = parts;
+    const path = numstatDestination(parts.slice(2).join("\t"));
     if (isExcluded(path)) continue;
     const a = Number.parseInt(added, 10);
     const b = Number.parseInt(removed, 10);
@@ -68,19 +180,32 @@ function countedLines(numstat) {
   return total;
 }
 
+// Short fingerprint of the exact body the verdict was computed from, so two
+// runs' outputs can be compared without echoing body text into the log.
+export function bodyFingerprint(prBody) {
+  return createHash("sha256").update(String(prBody || ""), "utf8").digest("hex").slice(0, 12);
+}
+
 function findJustification(prBody) {
   const lines = String(prBody || "").split("\n");
-  const headingRe = /^\s*#{0,6}\s*large\s+diff\s+justification\b\s*:?\s*$/i;
+  // The heading line may carry justification text after the colon
+  // ("## Large diff justification: <reason>") — the failure message shows the
+  // heading with a trailing colon, so authors naturally write it that way;
+  // that text counts as the section's first content line.
+  const headingRe = /^\s*#{0,6}\s*large\s+diff\s+justification\b\s*:?\s*(.*)$/i;
   let start = -1;
+  let inline = "";
   for (let i = 0; i < lines.length; i++) {
-    if (headingRe.test(lines[i])) {
+    const m = headingRe.exec(lines[i]);
+    if (m) {
       start = i + 1;
+      inline = m[1] || "";
       break;
     }
   }
   if (start === -1) return null;
   // Justification runs to the next markdown heading or the end of the body.
-  const content = [];
+  const content = inline ? [inline] : [];
   for (let i = start; i < lines.length; i++) {
     if (/^\s*#{1,6}\s+\S/.test(lines[i])) break;
     content.push(lines[i]);
@@ -89,22 +214,31 @@ function findJustification(prBody) {
   return nonWs >= MIN_JUSTIFICATION_CHARS ? content.join("\n").trim() : null;
 }
 
+function inputsLine(counted, prBody, justificationStatus) {
+  return `inputs: counted ${counted} · body sha256 ${bodyFingerprint(prBody)} · justification ${justificationStatus}`;
+}
+
 export function checkDiffSize({ numstat, prBody, threshold } = {}) {
   const limit = threshold ?? resolveThreshold();
   const counted = countedLines(numstat);
+  const justification = counted > limit ? findJustification(prBody) : null;
+  const inputs = inputsLine(
+    counted,
+    prBody,
+    counted <= limit ? "not needed" : justification ? "found" : "missing",
+  );
   if (counted <= limit) {
     return {
       ok: true,
       counted,
-      message: `ok: ${counted} changed lines (threshold ${limit}) — no justification needed.`,
+      message: `ok: ${counted} changed lines (threshold ${limit}) — no justification needed.\n${inputs}`,
     };
   }
-  const justification = findJustification(prBody);
   if (justification) {
     return {
       ok: true,
       counted,
-      message: `ok: ${counted} changed lines exceed the ${limit}-line threshold, but the PR body carries a justification section.`,
+      message: `ok: ${counted} changed lines exceed the ${limit}-line threshold, but the PR body carries a justification section.\n${inputs}`,
     };
   }
   return {
@@ -112,6 +246,7 @@ export function checkDiffSize({ numstat, prBody, threshold } = {}) {
     counted,
     message: [
       `PR diff size check failed: ${counted} changed lines exceed the ${limit}-line threshold.`,
+      inputs,
       "",
       "Why: smaller diffs mean fewer rebase conflicts (PR #1530 needed five rebase",
       "cycles partly because of diff size) and faster reviews.",
@@ -121,6 +256,7 @@ export function checkDiffSize({ numstat, prBody, threshold } = {}) {
       "  1. Split this PR into smaller PRs (preferred), or",
       "  2. Add a '## Large diff justification:' section to the PR body explaining",
       "     why this diff cannot be split (about 40 characters of real content or more).",
+      "     The reason may start on the heading line itself, after the colon.",
     ].join("\n"),
   };
 }
@@ -162,6 +298,7 @@ if (isCli) {
     process.exit(2);
   }
   const result = checkDiffSize({ numstat, prBody });
+  console.log(`diff-size inputs: base ${base.slice(0, 12)} head ${head.slice(0, 12)}`);
   console.log(result.message);
   process.exit(result.ok ? 0 : 1);
 }

@@ -146,7 +146,7 @@ test("recovery: re-join with the original expired code + identity secret returns
   assert.equal(memberCount(store, "commons"), 1, "recovery created no second membership");
 });
 
-test("the redeem door shows the minted secret once; the requestId replay cannot re-reveal it", async t => {
+test("the requestId replay of a lost join rotates a fresh durable secret", async t => {
   const { origin, ownerKey } = await serve(t);
   const minted = await mint(origin, ownerKey);
   const redeemed = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Redeem Bot" });
@@ -154,9 +154,9 @@ test("the redeem door shows the minted secret once; the requestId replay cannot 
   assert.match(redeemed.json.identitySecret, /^pri_/, "the sibling door's server-minted fallback reveals the secret the same way");
   const rooms = await get(origin, "/api/agent-rooms", redeemed.json.identitySecret);
   assert.equal(rooms.status, 200, JSON.stringify(rooms.json));
-  // #3260's journal under the new shape: the first join carries the secret;
-  // the replay returns the same membership with a fresh room token but no
-  // secret — shown once means once (it is stored hash-only).
+  // R305-1 fix shape: the first join carries the secret once; a replay of
+  // the same requestId re-rotates and reveals a FRESH durable secret, and
+  // the lost one is retired (one live secret at any time).
   const minted2 = await mint(origin, ownerKey);
   const body = { displayName: "Journal Bot", inviteCode: minted2.json.code, requestId: "join-recovery-0001" };
   const first = await post(origin, "/api/join", body);
@@ -166,8 +166,13 @@ test("the redeem door shows the minted secret once; the requestId replay cannot 
   assert.equal(replay.status, 201, JSON.stringify(replay.json));
   assert.equal(replay.json.duplicate, true);
   assert.equal(replay.json.identityId, first.json.identityId);
-  assert.ok(!("identitySecret" in replay.json), "the replay does not re-reveal the shown-once secret");
+  assert.match(replay.json.identitySecret, /^pri_/, "the replay rotates a fresh durable secret");
+  assert.notEqual(replay.json.identitySecret, first.json.identitySecret, "the lost secret is never re-revealed, a new one is minted");
   assert.match(replay.json.roomToken, /^rak_/, "the replay still recovers the working room credential");
+  const dead = await get(origin, "/api/agent-rooms", first.json.identitySecret);
+  assert.equal(dead.status, 401, "the lost first secret no longer authenticates");
+  const live = await get(origin, "/api/agent-rooms", replay.json.identitySecret);
+  assert.equal(live.status, 200, "the rotated fresh secret authenticates");
 });
 
 test("a caller that presents its own identity secret is never echoed one", async t => {

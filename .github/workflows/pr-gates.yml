@@ -1,0 +1,107 @@
+# Small pull-request gates that do not need their own runner slot.
+#
+# One job runs, in order:
+#   - diff size (pull requests only; body edits re-run this workflow)
+#   - quarantine registry contract (pull requests and pushes to main)
+#   - invariant suite, with the PR comment and JSONL artifact
+#
+# schema-gate stays its own workflow: deploy-prod and auto-revert select the
+# workflow by the name `schema-gate`. None of these checks are in the merge
+# gate's required set (test, contract, lint, browser, cloudflare, plus the
+# room/release-lease status).
+#
+# Quarantined tests are slow and non-blocking. They run on the nightly
+# schedule and on workflow_dispatch, not on every main push.
+
+name: pr-gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled]
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+  schedule:
+    - cron: "29 5 * * *"
+
+permissions:
+  contents: read
+
+# Pushes to main and merge-group runs are not cancelled mid-flight. Pull
+# requests cancel their own older runs.
+concurrency:
+  group: ${{ github.event_name == 'schedule' && 'pr-gates-nightly' || github.event_name == 'workflow_dispatch' && format('pr-gates-dispatch-{0}', github.run_id) || format('pr-gates-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gates:
+    # Main pushes, merge-group, and manual runs stay. Pull requests run this
+    # job only when ready-to-land is set and the PR is not a draft.
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      INVARIANTS_RESULTS_FILE: results/invariants-${{ github.sha }}.jsonl
+      INVARIANTS_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Check diff size
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/pr-diff-size-check.mjs
+      - name: Enforce quarantine contract
+        run: node scripts/quarantine-check.mjs
+      - run: npm ci
+      - name: Run invariant suite
+        id: invariants
+        run: node scripts/invariants-ci.mjs --report-out "$RUNNER_TEMP/invariants-report.md"
+      - name: Upload invariant results
+        if: steps.invariants.conclusion == 'success' || steps.invariants.conclusion == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: invariants-results-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: ${{ env.INVARIANTS_RESULTS_FILE }}
+          if-no-files-found: error
+      - name: Comment invariant results on PR
+        if: github.event_name == 'pull_request' && (steps.invariants.conclusion == 'success' || steps.invariants.conclusion == 'failure')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          for id in $(gh api "repos/Uuriko/project-room/issues/$PR_NUMBER/comments" --paginate \
+              -q '.[] | select(.body | contains("<!-- invariants-ci -->")) | .id' 2>/dev/null); do
+            gh api -X DELETE "repos/Uuriko/project-room/issues/comments/$id" >/dev/null 2>&1 || true
+          done
+          gh pr comment "$PR_NUMBER" --repo Uuriko/project-room \
+            --body-file "$RUNNER_TEMP/invariants-report.md" || echo "comment failed"
+
+  quarantined-tests:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run quarantined tests (non-blocking)
+        run: scripts/test-env.sh npm run test:quarantined

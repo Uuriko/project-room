@@ -105,7 +105,7 @@ test("email-link alternative is available within recovery without an extra optio
   await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "magic" }));
   assert.match(container.innerHTML, /data-signin-form="password"/);
   assert.doesNotMatch(container.innerHTML, /data-signin-form="magic-request"/);
-  assert.match(container.innerHTML, /Leave it blank/, "the merged form teaches the blank-password link path");
+  assert.match(container.innerHTML, /name="method" value="email"/, "the merged form teaches the blank-password link path");
 });
 test("unconfigured delivery stays visible after pending state clears", async () => {
   const { container, ui } = mount({ "/api/auth/magic/request": { status: "unavailable", message: "Delivery unavailable" } });
@@ -234,11 +234,11 @@ test("merged form: a blank password asks for an email link, a filled one logs in
 test("merged form: password is optional only when mail can send a link (#3341)", async () => {
   const { container } = mount();
   assert.doesNotMatch(container.innerHTML, /name="password"[^>]*required/, "no required attribute while a link fallback exists");
-  assert.match(container.innerHTML, /Leave it blank/);
+  assert.match(container.innerHTML, /name="method" value="email"/);
   const unconfigured = mountWithOptions({ providers: { mail: { configured: false } } });
   await flushOptions();
   assert.match(unconfigured.container.innerHTML, /name="password"[^>]*required/, "password is required when no link can be sent");
-  assert.doesNotMatch(unconfigured.container.innerHTML, /Leave it blank/);
+  assert.doesNotMatch(unconfigured.container.innerHTML, /name="method" value="email"/);
 });
 test("declining password authentication sends no request", async () => {
   const client = stubClient(); const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, beforeSignIn: () => false });
@@ -384,4 +384,45 @@ test("configured mail keeps the email-link offers (#3341)", async () => {
   await container.listeners.click[0](clickOnDataset("forgot-password"));
   assert.match(container.innerHTML, /data-email-method="magic"/);
   assert.match(container.innerHTML, /Email me a sign-in link instead/);
+});
+
+test("provider capabilities reach the host so an unconfigured OAuth anchor can hide (F1)", async () => {
+  const seen = [];
+  const client = stubClient({});
+  const ui = createAuthSigninUI({
+    accountClient: client,
+    ensureAccountSession: async () => {},
+    onSignedIn: async () => {},
+    loadSigninOptions: async () => ({ providers: { github: { configured: false }, google: { configured: true }, mail: { configured: true } } }),
+    onProviderCapabilities: providers => seen.push(providers)
+  });
+  ui.mount(fakeContainer());
+  await flushOptions();
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].github.configured, false);
+  assert.equal(seen[0].google.configured, true);
+});
+
+test("a failed capability load never reports providers to the host (F1 fail-open)", async () => {
+  const seen = [];
+  const client = stubClient({});
+  const ui = createAuthSigninUI({
+    accountClient: client,
+    ensureAccountSession: async () => {},
+    onSignedIn: async () => {},
+    loadSigninOptions: async () => { throw new Error("offline"); },
+    onProviderCapabilities: providers => seen.push(providers)
+  });
+  ui.mount(fakeContainer());
+  await flushOptions();
+  assert.equal(seen.length, 0, "no answer means the anchors keep the historical behavior");
+});
+
+test("explicit email sign-in ignores a filled password without authenticating", async () => {
+  const { container, client, signins } = mount({ "/api/auth/magic/request": { status: "sent" } });
+  const event = submitForm("password", { email: "m@example.invalid", password: "synthetic-password" });
+  event.submitter = { value: "email" };
+  await container.listeners.submit[0](event);
+  assert.deepEqual(client.calls.map(call => call.path), ["/api/auth/magic/request"]);
+  assert.equal(signins.length, 0);
 });

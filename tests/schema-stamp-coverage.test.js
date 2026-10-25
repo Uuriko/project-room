@@ -64,13 +64,13 @@ test("every additive schema step in the full pass is part of the warm-wake stamp
 // ensure*Schema helper and this fails until you bump its @revision in
 // ADDITIVE_SCHEMA_ENSURES (so deployed rooms re-run the pass) and update the pin.
 const SOURCE_PINS = {
-  "ensureIdentitySecretSchema@1": "2e0e097a8be76772",
+  "ensureIdentitySecretSchema@2": "751798e9c7c60b6f",
   "ensureIdentityCapacitySchema@1": "33e15d3c51616945",
   "ensureIdentityLinkCodeSchema@1": "2e027731951257ac",
   "ensureAutonomyTiersSchema@1": "10220d71e7134ef8",
   "ensureOperatorActionsSchema@1": "766e8f9fed79c6e6",
   "ensureGrantsSchema@1": "fe4b311a64923973",
-  "ensureSpendGrantsSchema@2": "83476d36f1c8cadf",
+  "ensureSpendGrantsSchema@3": "0f3f6dab2ae7d25b",
   "ensureAccountProfileSchema@1": "3fb6bfb33febc621",
   "ensureVerifiedEmailSchema@1": "a8321ba9d34e6ad4",
   "ensureAttachmentSchema@1": "3189ca5ebea7bf33"
@@ -116,6 +116,38 @@ test("a room stamped by the pre-CX4 deploy converges account-session slot column
       for (const column of SLOT_COLUMNS) assert.ok(present.includes(column), `${column} missing after warm wake`);
       // The session-slot write that 500s on prod must succeed.
       woken.db.prepare("UPDATE account_session_slots SET login_method_kind=?, login_method_ref=? WHERE account_id=?").run("password", "m1", "acc-x");
+    } finally { woken.close(); }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Warm-wake stamp coverage for the R306 rotation receipts table. The
+// receipts CREATE TABLE converged inside ensureIdentitySecretSchema without
+// a stamp-label bump, so a room stamped by the pre-receipts deploy skips
+// the whole schema pass on a warm wake and the first rotation with a
+// requestId dies on "no such table" (the priced-tool 500 shape, #3500).
+// roomSchemaStamp() as written by the c0e5aefb deploy (prod, deploy 51),
+// identical to every stamp since the CX4 fix: the receipts table changed no
+// hashed label.
+const PRE_RECEIPT_STAMP = "f4e351d62069a933536ab880929fc5e1d8af328c57640b1fa267568c053bb7a6";
+
+test("a room stamped by the pre-receipts deploy converges the rotation-receipts table on a warm wake", () => {
+  const dir = mkdtempSync(join(tmpdir(), "receipt-stamp-"));
+  try {
+    const filename = join(dir, "room.sqlite");
+    const first = new RoomStore(filename, { now: () => NOW });
+    first.db.exec("DROP TABLE IF EXISTS agent_identity_rotation_receipts");
+    first.db.prepare("UPDATE room_schema_stamp SET stamp=? WHERE singleton=1").run(PRE_RECEIPT_STAMP);
+    first.close();
+
+    const woken = new RoomStore(filename, { now: () => NOW, integrity: "deferred" });
+    try {
+      const present = woken.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_identity_rotation_receipts'").get();
+      assert.ok(present, "agent_identity_rotation_receipts missing after warm wake");
+      // The first receipt insert a lost-response retry performs must work.
+      woken.db.prepare("INSERT INTO agent_identities(identity_id, secret_hash, display_name, created_at) VALUES(?,?,?,?)")
+        .run("ai_probe", "h", "Stamp Probe", NOW);
+      woken.db.prepare("INSERT INTO agent_identity_rotation_receipts(identity_id, request_id, pre_hash, pre_fallback_hash, pre_legacy_hash, created_at) VALUES(?,?,?,?,?,?)")
+        .run("ai_probe", "req-1", "h", null, null, NOW);
     } finally { woken.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

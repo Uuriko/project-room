@@ -21,9 +21,12 @@ function freezeVia(via) {
 }
 
 const ROWS = [
+  { table: "mention_observations", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   { table: "share_link_join_redemptions", key: "account_id", action: "retain", reason: "Immutable link-redemption journal prevents cross-account replay; retained alongside share_link_joins", match: { account: ["account_id"] } },
 
   ...["room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: {room:["room_id"]} })),
+  { table: "message_replay_snapshots", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "work_entities", key: "room_id", action: "delete", match: { room: ["room_id"] } },
   { table: "projection_bodies", key: "room_id", action: "delete", match: { room: ["room_id"] } },
   ...["room_assistant_config", "room_assistant_runs", "room_assistant_ops"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   // Retired schemas remain in upgraded databases but are never created on a
@@ -289,6 +292,16 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_identity_rotation_receipts",
+    "key": "identity_id",
+    "action": "delete",
+    "match": {
+      "identity": [
+        "identity_id"
+      ]
+    }
+  },
+  {
     "table": "agent_invite_redeem_receipts",
     "key": "room_id",
     "action": "delete",
@@ -414,6 +427,31 @@ const ROWS = [
     "match": {
       "room": [
         "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_counters",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_wake_failures",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "room": [
+        "room_id"
+      ],
+      "identity": [
+        "subject_id"
       ]
     }
   },
@@ -705,6 +743,16 @@ const ROWS = [
   },
   {
     "table": "guest_members",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "guest_invite_authority",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1016,9 +1064,60 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_public_pages",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_public_asks",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "messages_backfill_cursor",
     "key": "room_id",
     "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "messages_backfill_blocks",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "messages_backfill_state",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "projection_shape_upgrades",
+    "key": "room_id",
+    "action": "delete",
+    "optional": true,
     "match": {
       "room": [
         "room_id"
@@ -1336,6 +1435,16 @@ const ROWS = [
     }
   },
   {
+    "table": "public_work_review_versions",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "public_work_successor_requests",
     "key": "room_id",
     "action": "delete",
@@ -1347,6 +1456,16 @@ const ROWS = [
   },
   {
     "table": "public_work_successors",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "public_work_settlements",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1467,6 +1586,16 @@ const ROWS = [
   },
   {
     "table": "room_mention_settings",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "room_public_receipts_setting",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1695,6 +1824,16 @@ const ROWS = [
     }
   },
   {
+    "table": "wake_queue_pause_by",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "web_fetch_cache_rooms",
     "key": "room_id",
     "action": "delete",
@@ -1744,11 +1883,24 @@ const ROWS = [
       ]
     }
   },
+  {
+    "table": "work_claim_history",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
   // Decision #10: per-room marker for the workItems -> board-claims
   // backfill (server/work-item-board.mjs). Room-owned migration state:
   // deleted with the room (a purged room must not leave a marker behind;
   // the table is lazy-additive, hence optional).
-  { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
+  // monitor state, deleted with the room; lazy-additive, hence optional.
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({

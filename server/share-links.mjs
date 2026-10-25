@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
-import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, canInviteMembers, historyVisibility } from "../src/events.js";
+import { validId, event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, INVITATION_ROLE_POLICY_VERSION, INVITATION_ROLES, PERMISSIONS, NEVER_GRANT, canInviteMembers, historyVisibility } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { invitationJoinedEvent } from "./invitation-evidence.mjs";
-import { canonicalInvitationData } from "./invitation-journal.mjs";
+import { canonicalInvitationData } from "./journal.mjs";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
@@ -72,10 +72,13 @@ export const shareLinkCodeSchema = `
 
 // Link access (John, 2026-10-06). A link without a row here is a guest link,
 // exactly as before. "member" grants the member role's work permissions.
-// "co_admin" grants every room permission (PERMISSIONS) to whoever joins,
-// human or agent. Owner-only settings stay owner-only. It is a room key:
-// only the room owner can mint one. The row is written
-// with the link and can never change.
+// "co_admin" grants every permission an invitation may carry to whoever
+// joins, human or agent — PERMISSIONS minus NEVER_GRANT, the same ceiling
+// the agent-invite door enforces (#3549): no invitation mechanism confers
+// manage_members, decide, or invite_member, so a link joiner can never
+// administer membership or mint further invitations. Owner-only settings
+// stay owner-only. It is a room key: only the room owner can mint one. The
+// row is written with the link and can never change.
 export const LINK_ACCESS = Object.freeze(["guest", "member", "co_admin"]);
 export const shareLinkAccessSchema = `
   CREATE TABLE IF NOT EXISTS share_link_access (
@@ -89,12 +92,12 @@ function roleMatchesLink(record, access) {
   return record?.intended_role === role && record.intended_permissions_json === JSON.stringify(INVITATION_ROLES[role]);
 }
 export function linkPermissions(access) {
-  return access === "co_admin" ? [...PERMISSIONS] : access === "member" ? [...INVITATION_ROLES.member] : [];
+  return access === "co_admin" ? PERMISSIONS.filter(permission => !NEVER_GRANT.includes(permission)) : access === "member" ? [...INVITATION_ROLES.member] : [];
 }
 const ACCESS_TEXT = Object.freeze({
   guest: "Read the room and its history, post messages, and react. No membership administration or work approvals.",
   member: "Read and post, take work, complete it and verify others' work. No membership administration.",
-  co_admin: "Every room permission: invite and remove members, change access, decide and approve work. Room settings such as instructions, history visibility, export, publishing, archive and ownership stay with the room creator."
+  co_admin: "Every working permission: steer, manage claims, accept, complete and verify work, and write externally. Inviting or removing members, changing member access, and room decisions are never granted by a link — they stay with the room creator and administrators. Room settings such as instructions, history visibility, export, publishing, archive and ownership stay with the room creator."
 });
 // QA8 (2026-10-08, live prod): a link guest in a room on the default
 // history policy (PRIV-2: guests see only messages from after they join)
@@ -509,14 +512,15 @@ export class ShareLinks {
       refuseArchivedWrite(room.state);
       let state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       // Co-admin: the room creator, who minted the link, raises the new
-      // member from moderator to every permission in the same transaction.
+      // member from moderator to the link grant (linkPermissions, capped at
+      // the NEVER_GRANT ceiling) in the same transaction.
       const grant = access === "co_admin" ? event({ id: `la_${invitationId.replaceAll("-", "")}`, idempotencyKey: `link-access:${invitationId}`,
         roomId: row.room_id, actorId: row.issuer_member_id, type: T.MEMBER_ACCESS_CHANGED, at: new Date(now).toISOString(),
         data: { memberId, expectedMemberRevision: state.members[memberId].revision, permissions: linkPermissions("co_admin"), active: true,
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } }) : null;
       if (grant) state = { ...applyEventWithGrowth(state, grant, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
       const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + (grant ? 2 : 1);
-      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+      if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to have older messages archived to free space.");
       this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, room.sequence + 1, incoming.id, JSON.stringify(incoming));
       if (grant) this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, grant.id, JSON.stringify(grant));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
@@ -554,7 +558,7 @@ export class ShareLinks {
       data: { memberId, expectedMemberRevision: member.revision, permissions: access === "co_admin" ? linkPermissions("co_admin") : [...INVITATION_ROLES[role]], active: true, authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION } });
     const state = { ...applyEventWithGrowth(room.state, rejoin, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     const projection = this.store.storedProjection(row.room_id, state), sequence = room.sequence + 1;
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to raise the room's limit, or try again later.");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "This room has reached its storage limit; no data was changed. Ask the room owner to have older messages archived to free space.");
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(row.room_id, sequence, rejoin.id, JSON.stringify(rejoin));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, row.room_id);
   }

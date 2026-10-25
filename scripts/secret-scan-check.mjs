@@ -70,6 +70,9 @@ export const ALLOWLIST = [
   /GSM7_BASIC\s*=\s*".*/, // GSM-7 SMS alphabet constant (server/sms-outbound.mjs) — character set for segmentation accounting, not a secret.
     // Anchored to the assignment and spanning the value: the charset splits into several high-entropy tokens.
   /github\.com\/Uuriko\/[A-Za-z0-9_.-]+\/(pull|issues)\/\d+/, // repo PR/issue URLs (evidence links)
+  /room\.trydemigod\.com\/receipts\/pwr_[0-9a-f]{64}/, // public-work receipt URLs: a pwr_ id is a
+    // published content identifier — the anonymous gallery lists every one — not a credential.
+    // (F2/README link one real receipt as the worked example.)
   /hidden_files\/claimbond-shadow\/BASELINE-2026-10-05\.md/, // server/claim-reputation.mjs:4 —
     // relative path to the P0 shadow-mode baseline doc, in a header comment. A file path,
     // not a credential; the high-entropy detector joins the path's tokens into a match.

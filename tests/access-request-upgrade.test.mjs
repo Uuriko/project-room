@@ -256,6 +256,24 @@ test("upgrade pending state obeys cap, cancellation and expiry", t => {
   assert.deepEqual(f.member().permissions, ["steer"]);
 });
 
+// #3745: the cap test above frees slots by polling and listing — the two
+// read paths that materialize expiry. With no reader at all, lapsed
+// upgrade rows used to consume the cap forever; the create path now
+// expires the caller's own lapsed rows before counting.
+test("lapsed upgrade pendings are expired on create and do not consume the cap (#3745)", t => {
+  const f = setup(t);
+  const requests = new AccessRequests(f.store, { rateLimiter: createRateLimiter({ capacity: 100, refillPerSecond: 100 }) });
+  const input = { identityId: f.identity.identityId, displayName: "Existing Agent", requestedPermissions: ["accept_work"] };
+  for (let i = 0; i < 5; i++) requests.request("commons", { ...input, requestId: `ar_lapse_${i}` }, f.identity.secret);
+  // Nobody lists, decides, or polls: past the TTL the rows are still
+  // stored 'pending_upgrade'.
+  f.advance(REQUEST_TTL_MS + 1);
+  const sixth = requests.request("commons", { ...input, requestId: "ar_lapse_new" }, f.identity.secret);
+  assert.equal(sixth.status, "pending");
+  assert.equal(requests.list(f.ownerToken, "commons", { status: "expired" }).length, 5);
+  assert.equal(requests.list(f.ownerToken, "commons").length, 1);
+});
+
 test("the pre-upgrade writer rejects pending upgrades even with explicit grants", async t => {
   const f = setup(t);
   // Exercise the actual predecessor decision handler, not a double that

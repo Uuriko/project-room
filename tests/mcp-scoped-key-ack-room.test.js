@@ -25,6 +25,10 @@ async function setup(t) {
   rooms.create(owner.secret, { roomId: "other-den", title: "O", purpose: "p", kind: "personal", displayName: "Wren" });
   const peer = store.identities.create("Lark");
   for (const roomId of ["wake-den", "other-den"]) store.identities.link(owner.secret, roomId, { identityId: peer.identityId, displayName: "Lark", permissions: [] });
+  // #3266: ackWakes enforces poll's registration gate — an identity no host
+  // has reported for gets 404 agent_not_registered before scoping is even
+  // evaluated. These tests are about the room scoping, so register a host.
+  store.agentHeartbeats.heartbeat({ agentId: peer.identityId, hostId: "wake-den-host", mode: "pull-only" });
   const key = store.agentPlugin.issueApiKey({ identityId: peer.identityId, scopes: ["mcp:wake", "mcp:room:wake-den"] });
   const enqueue = (roomId, messageId) => store.agentHeartbeats.enqueueWake({ agentId: peer.identityId, kind: "mention", roomId, messageId }).signal;
   const pending = signalId => store.db.prepare("SELECT delivered_at AS d FROM agent_wake_signals WHERE signal_id=?").get(signalId)?.d == null;

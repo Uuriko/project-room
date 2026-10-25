@@ -1,7 +1,8 @@
 import { uiText } from './strings.js';
 // Email sign-in uses a delivered single-use link. The account cookie stays
 // HttpOnly; authentication writes use the current browser slot and CSRF token.
-import { escapeHtml, base64urlToBytes, bytesToBase64url } from "./account-settings-ui.js";
+import { base64urlToBytes, bytesToBase64url } from "./account-settings-ui.js";
+import { escapeHtml } from "./html-escape.js";
 
 export function toAuthenticationPublicKey(options) {
   const { challengeId: _challengeId, ...publicKey } = options;
@@ -39,9 +40,14 @@ export function classifyAuthLink(params) {
   return { kind: hasReset ? "reset" : "magic", proof, email };
 }
 
-export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions }) {
+export function createAuthSigninUI({ accountClient, ensureAccountSession, onSignedIn, onMagicLinkFailure, onBusyChange, beforeSignIn, onSignInUncertain, onMagicLinkRequest, onAccountSwitch, onPasswordResetComplete, onViewChange, onBack, credentials, loadSigninOptions, onProviderCapabilities }) {
   let container = null, welcome = false, mountedBefore = false;
   let emailMethod = "password", passwordMode = "login", passwordEmail = "";
+  // Front-door batch B-1 (#3771): the typed password survives a
+  // Log-in <-> Create-account mode switch. render() rebuilds the form, so
+  // the value is kept here and restored into the fresh input — the switch
+  // used to clear it silently (17 chars -> 0) while keeping the email.
+  let preservedPassword = "";
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
   let magicManualCode = false, pendingLink = null, pendingTerms = null, statusText = "", statusError = false;
@@ -80,10 +86,27 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     try {
       const options = await loadSigninOptions();
       if (options?.providers?.mail?.configured === false) {
+        const inputs = [...(surface()?.querySelectorAll("input[name]") ?? [])];
+        const focused = inputs.find(input => input === input.ownerDocument.activeElement);
+        const selection = focused && [focused.selectionStart, focused.selectionEnd];
+        const values = new Map(inputs.map(input => [input.name, input.value]));
         mailConfigured = false;
         if (emailMethod === "magic" && !pendingLink) { emailMethod = "password"; passwordMode = "login"; }
         render();
+        for (const input of surface()?.querySelectorAll("input[name]") ?? []) {
+          if (values.has(input.name)) input.value = values.get(input.name);
+          if (input.name === focused?.name) {
+            input.focus();
+            if (selection?.[0] != null) input.setSelectionRange(...selection);
+          }
+        }
       }
+      // The OAuth anchors are static HTML outside this component; the host
+      // owns them. Hand it the same feed answer so an OAuth provider this
+      // deployment cannot serve (its start route answers 503) is never
+      // offered (§8.1, same rule as mail above). Fires only on a successful
+      // load — a missing loader or any failure leaves the anchors as-is.
+      if (options?.providers) onProviderCapabilities?.(options.providers);
     } catch { /* fail open — see the mailConfigured note above */ }
   }
   const api = (session, path, data) => accountClient.request(path, { method: "POST", session, data });
@@ -245,6 +268,12 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   }
   const onClick = async event => {
     if (busy) return;
+    const emailLink = event.target?.closest?.('[name="method"][value="email"]');
+    if (emailLink) {
+      const form = emailLink.closest('[data-signin-form]');
+      if (form?.reportValidity()) await onSubmit({ target: form, submitter: emailLink, preventDefault() {} });
+      return;
+    }
     if (event.target?.closest?.("[data-passkey-signin]")) {
       const provider = credentials ?? globalThis.navigator?.credentials;
       if (!provider?.get || await beforeSignIn?.() === false) return;
@@ -299,11 +328,19 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       welcome = false;
       const currentEmail = surface()?.querySelector('[name="email"]')?.value;
       if (currentEmail) { magicEmail = currentEmail; passwordEmail = currentEmail; }
+      const currentPassword = surface()?.querySelector('[name="password"]')?.value;
+      if (typeof currentPassword === "string") preservedPassword = currentPassword;
       // One merged email form (#3341): every method/mode switch lands
       // on it; the mode switch still chooses login vs signup.
       emailMethod = "password";
       if (mode) passwordMode = mode.dataset.passwordMode === "signup" ? "signup" : "login";
       pendingLink = null; magicPhase = "request"; setStatus(""); render();
+      // B-1: restore the password captured at this switch — and only here.
+      // A submit repaint (e.g. after a rejected password) must never
+      // repaint it; preservation is a mode-switch behavior, not a render
+      // behavior.
+      const switchedPassword = surface()?.querySelector('[name="password"]');
+      if (switchedPassword && preservedPassword) switchedPassword.value = preservedPassword;
       surface()?.querySelector('[name="email"]')?.focus(); return;
     }
     if (event.target?.closest?.("[data-magic-switch]")) {
@@ -379,7 +416,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       // magic-request submit it does not consult beforeSignIn (asking
       // for a link signs nothing in and clears nothing; the host's gate
       // applies when a password is presented or a code/link redeemed).
-      const linkRequest = passwordMode !== "signup" && !fields.password && mailConfigured;
+      const linkRequest = passwordMode !== "signup" && mailConfigured && (event.submitter?.value === "email" || !fields.password);
       if (!linkRequest && await beforeSignIn?.() === false) return;
       await withBusy(async () => {
         const session = await authedSession();
@@ -483,6 +520,13 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   function bind(node) {
     node.addEventListener("click", onClick);
     node.addEventListener("submit", onSubmit);
+    // B-1 (#3771): a refused submit names its field instead of silence.
+    node.addEventListener("invalid", event => {
+      const field = event.target;
+      if (field?.name === "password" && passwordMode === "signup") setStatus(uiText("signin.copy.024"), true);
+      else if (field?.name === "email") setStatus(uiText("signin.copy.036"), true);
+      else if (field?.name) setStatus(uiText("signin.copy.037"), true);
+    }, true);
   }
   return {
     canLeave() { return !busy && !pendingTerms; },

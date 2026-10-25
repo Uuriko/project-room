@@ -383,3 +383,44 @@ test("close/cancel permission matrix over HTTP: the holder retires their own cla
   assert.equal(registry.get("room1", "held").state, "claimed");
   assert.equal(registry.get("room1", "held").owner, "holder");
 });
+
+// Route refusals surface either as a returned error body (production
+// reject plumbing) or as a thrown status/code error (this harness's
+// reject) — normalize both, like the outcome() helpers above.
+const claimAttempt = async promise => {
+  try { const result = await promise; return { status: result.status, code: result.value?.error?.code, message: result.value?.error?.message, value: result.value }; }
+  catch (error) { if (!Number.isInteger(error?.status)) throw error; return { status: error.status, code: error.code, message: error.message }; }
+};
+
+test("claim refuses work whose dependsOn are not done, naming the unmet deps (#3880)", async () => {
+  const registry = createWorkClaimRegistry();
+  assert.equal((await call(registry, "owner", "create", null, { id: "dep" })).status, 201);
+  assert.equal((await call(registry, "owner", "create", null, { id: "blocked", dependsOn: ["dep"] })).status, 201);
+  // The AvailableWork projection excludes "blocked" while its dep is not
+  // done; the claim write path must enforce the same definition instead
+  // of silently succeeding for callers who skip the projection.
+  const refused = await claimAttempt(call(registry, "contribute", "claim", "blocked", {}));
+  assert.equal(refused.status, 409);
+  assert.equal(refused.code, "work_claim_dependencies_unmet");
+  assert.match(refused.message, /"dep" \(unclaimed\)/);
+  assert.equal(registry.get("room1", "blocked").state, "unclaimed");
+  // Once the dep is done, the same claim succeeds.
+  registry.set("room1", { ...registry.get("room1", "dep"), state: "done" });
+  const claimed = await call(registry, "contribute", "claim", "blocked", {});
+  assert.equal(claimed.status, 200);
+  assert.equal(claimed.value.owner, "contribute");
+});
+
+test("a superseded dependency does not satisfy dependsOn at claim time (#3880)", async () => {
+  const registry = createWorkClaimRegistry();
+  assert.equal((await call(registry, "owner", "create", null, { id: "old-dep" })).status, 201);
+  assert.equal((await call(registry, "owner", "create", null, { id: "next", dependsOn: ["old-dep"] })).status, 201);
+  // Done-but-superseded is not "done" in the projection's definition
+  // (availableBoardRows counts only usable claims), so it cannot
+  // satisfy the gate at claim time either.
+  registry.set("room1", { ...registry.get("room1", "old-dep"), state: "done", supersededBy: "replacement" });
+  const refused = await claimAttempt(call(registry, "contribute", "claim", "next", {}));
+  assert.equal(refused.status, 409);
+  assert.equal(refused.code, "work_claim_dependencies_unmet");
+  assert.equal(registry.get("room1", "next").state, "unclaimed");
+});
