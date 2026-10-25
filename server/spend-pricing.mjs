@@ -1,4 +1,5 @@
-// Spend-pricing kill switch: the owner-only emergency lever for the
+import { canAdministerRoom } from '../src/room-administration.js';
+// Spend-pricing kill switch: the administrator-only emergency lever for the
 // priced-tool gate (promised to Dot's QA lane, room seq 2748).
 //
 // The owner records { enabled: boolean } as a room event
@@ -38,17 +39,17 @@ export function readSpendPricing(store, token, roomId, expectedSessionBinding = 
   });
 }
 
-// POST /api/rooms/:id/spend-pricing - owner only (403 for everyone else,
-// checked here before the request shape is parsed so a non-owner learns
+// POST /api/rooms/:id/spend-pricing - administrators only (403 for everyone else,
+// checked here before the request shape is parsed so a non-administrator learns
 // nothing about accepted fields from a malformed write). Body:
 // { enabled: boolean, requestId? }.
 export function setSpendPricing(store, token, roomId, request, expectedSessionBinding = null) {
-  // Authenticate and authorize before parsing the request shape: a non-owner
+  // Authenticate and authorize before parsing the request shape: a non-administrator
   // learns nothing about accepted fields from a malformed write.
   store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const room = store.room(roomId);
-    if (auth.member.id !== room.state.room.ownerId) refuse(403, "owner_required", "Only the room owner can set spend pricing");
+    if (!canAdministerRoom(room.state, auth.member.id)) refuse(403, "owner_required", "A room administrator can set spend pricing");
   });
   if (!request || Array.isArray(request) || typeof request !== "object")
     refuse(422, "invalid_spend_pricing", "Supply { enabled } and an optional requestId");
