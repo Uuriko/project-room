@@ -11,6 +11,7 @@
 // never started). Webhook retries of an existing delivery are unchanged.
 
 import { WAKE_PING_EVENT } from "./outbound-webhooks.mjs";
+import { activeMemberIdForWakeIdentity } from "./wake-identity-resolution.mjs";
 
 const FLAG = "ROOM_OWNER_ASLEEP_WAKE";
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -108,6 +109,7 @@ function deliverable(store, row) {
   if (!row?.signalId || !SLEEPER_KINDS.has(row.kind)) return false;
   if (!sleeperWakeEnabled(store, row.roomId)) return false;
   if (store.agentPlugin?.identityRevoked?.(row.agentId)) return false;
+  if (row.roomId && !activeMemberIdForWakeIdentity(store, row.roomId, row.agentId)) return false;
   return hasWakeSubscription(store, row.agentId);
 }
 

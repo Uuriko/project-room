@@ -13,12 +13,13 @@
 //      prune only removes delivered/dead_letter rows, so the stranded
 //      rows accumulated unboundedly).
 //
-// Both gates now resolve through memberIdForWakeIdentity, the resolver
-// the fan-out already uses. These tests pin the dispatch behavior end to
-// end: a guest-seated identity's queued delivery drains to delivered, a
-// link-seated control still drains, and an identity seated in NEITHER
-// table still fails closed — its delivery is skipped, stays pending,
-// and is delivered once the identity is seated later.
+// Both gates now resolve through activeMemberIdForWakeIdentity: the
+// guest-aware resolver, then an active roster seat and (for a guest
+// seat) a live access credential. These tests pin the dispatch behavior
+// end to end: a guest-seated identity's queued delivery drains to
+// delivered, a link-seated control still drains, and an identity seated
+// in NEITHER table still fails closed — its delivery is skipped, stays
+// pending, and is delivered once the identity is seated later.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -66,12 +67,19 @@ function seatGuest(f, name) {
   f.store.db.prepare(`INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at)
     VALUES(?,?,?,?,?,?)`)
     .run(name, ROOM, identity.identityId, "contributor", `inv-${name}`, T0);
-  // A redeemed seat always holds an access credential (the redeem flow
-  // mints it, expiring with the invite TTL); the wake gates judge the
-  // seat by that credential, so the direct-insert seat carries one too.
-  f.store.db.prepare(`INSERT INTO credentials(hash, room_id, member_id, kind, parent_hash, expires_at, account_id, account_auth_epoch)
-    VALUES(?,?,?,'access',NULL,?,NULL,NULL)`)
-    .run(`cred-${name}`.padEnd(64, "0"), ROOM, name, T0 + 3_600_000);
+  // Dispatch now requires an active roster seat and, for a guest seat, a
+  // live access credential. The link row alone is not enough. The pass
+  // has to be live against the wall clock: the active-seat resolver asks
+  // guest liveness with Date.now(), not the drain's frozen now.
+  const ownerKey = f.store.issueAccessKey(ROOM, "owner");
+  f.store.command(ownerKey, ROOM, {
+    id: `add-${name}`, type: "member.added",
+    data: { memberId: name, displayName: name, kind: "agent", permissions: [] },
+  });
+  f.store.db.prepare(
+    `INSERT INTO credentials (hash, room_id, member_id, kind, parent_hash, expires_at, revoked, account_id, account_auth_epoch)
+     VALUES (?, ?, ?, 'access', NULL, ?, 0, NULL, NULL)`
+  ).run(`cred-${name}`, ROOM, name, Date.now() + 3_600_000);
   assert.equal(f.store.db.prepare(
     "SELECT COUNT(*) AS n FROM identity_links WHERE room_id=? AND identity_id=?")
     .get(ROOM, identity.identityId).n, 0, "trial seat has no identity_links row");

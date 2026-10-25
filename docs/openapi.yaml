@@ -11352,12 +11352,12 @@ paths:
         should deduplicate on deliveryId. Retryable failures (429/5xx)
         back off exponentially (5s doubling, 10m cap) up to 5 attempts, then
         dead-letter; other 4xx responses are never retried. Room scope: a
-        subscription receives only events from rooms its identity is linked
-        in (identity_links) — a subscription whose identity never joined a
-        room hears nothing from it. Targeted DMs additionally deliver only
-        to the sender's and the addressed member's subscriptions. A pending
-        delivery whose identity is unlinked before dispatch is skipped, not
-        sent.
+        subscription receives only events from rooms its identity is an
+        active member of — a subscription whose identity is not an active
+        member of a room hears nothing from it. Targeted DMs additionally
+        deliver only to the sender's and the addressed member's
+        subscriptions. A pending delivery whose identity is unlinked or no
+        longer an active member before dispatch is skipped, not sent.
       security:
         - bearerAuth: []
       requestBody:
