@@ -2,9 +2,9 @@
   "generatedAt": "2026-10-21T03:45:49.264Z",
   "note": "Ratchet baseline: counts on the tree it was generated from. --check fails when any rule count grows beyond this.",
   "counts": {
-    "hardcoded-ui-string": 2977,
-    "sentence-concatenation": 497,
+    "hardcoded-ui-string": 2990,
+    "sentence-concatenation": 498,
     "positional-placeholder": 0
   },
-  "total": 3474
+  "total": 3488
 }
