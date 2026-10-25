@@ -155,11 +155,21 @@ export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, 
   }
   if (documented.size < 20 || !documented.has("/api/rooms/{}/commands")) throw new Error("docs/openapi.yaml parse sanity failed");
   const failures = [];
-  for (const [key, template] of served) if (!documented.has(key)) failures.push(`served but not documented in docs/openapi.yaml: ${template}`);
+  // /download is public install-status HTML (web, Node runtime, Mac). It is
+  // classified with the other human pages and excluded from the served machine
+  // spec. /demo stays a required OpenAPI path.
+  const statusPage = templateKey("/download");
+  const statusExempt = served.has(statusPage) && !documented.has(statusPage);
+  if (!served.has(statusPage)) failures.push("route doc exemption matches no served route: /download");
+  else if (documented.has(statusPage)) failures.push("/download is documented in docs/openapi.yaml; remove its route doc exemption");
+  for (const [key, template] of served) {
+    if (key === statusPage && statusExempt) continue;
+    if (!documented.has(key)) failures.push(`served but not documented in docs/openapi.yaml: ${template}`);
+  }
   for (const [key, path] of documented) if (!served.has(key)) failures.push(`documented in docs/openapi.yaml but not served: ${path}`);
   for (const op of operations) if (op.security === null && /^\/api\/(inbox|account-)/.test(op.path))
     failures.push(`${op.method} ${op.path} inherits the room-credential default; account routes must declare accountSession or security: []`);
-  return { failures, served: served.size, documented: documented.size, operations: operations.length };
+  return { failures, served: served.size - (statusExempt ? 1 : 0), documented: documented.size, operations: operations.length };
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
