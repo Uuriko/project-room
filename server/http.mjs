@@ -2291,6 +2291,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // --- end LEGAL ---
       if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
+        rate(`sitemap:${remoteAddress}`, 120);
         // Confirm bytes exist before advertising an asset-backed canonical URL.
         const candidates = [...publicSearchAssets(publicAssetPaths)]
           .filter(([path]) => reviewedPublicSearchPaths.includes(path));
