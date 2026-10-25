@@ -169,7 +169,7 @@ function enforceHostedStdioCallVisibility(store, secret, memberId, name) {
 const HOSTED_STDIO_WRITE_TOOLS = new Set([
   "room_assistant_action",
   "room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop",
-  "room_assistant_accept", "room_assistant_decline",
+  "room_assistant_accept", "room_assistant_decline", "room_assistant_claim",
   "room_introduce_outside_agent",
   "room_begin_work", "room_link_work_claim_pr", "room_set_member_claim_cap",
   "room_post_draft", "room_close_work_claim",
@@ -242,6 +242,11 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     const assistant = new RoomAssistant(store);
     const authorize = () => store.authenticate(secret, roomId);
     return { value: assistant.candidates(roomId, authorize), isError: false };
+  }
+  if (name === "room_assistant_claim") {
+    const assistant = new RoomAssistant(store);
+    const authorize = () => store.authenticate(secret, roomId);
+    return { value: assistant.claimEmptySeat(roomId, authorize), isError: false };
   }
   if (isAssistantTool(name)) {
     const assistant = new RoomAssistant(store);

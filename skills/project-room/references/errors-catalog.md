@@ -238,6 +238,7 @@ response's own `hint`/`next` when it names something more specific.
 | `conflicting_reply_update_acknowledgment` | 409 | The acknowledgment does not match this dispatched update. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `connection_changed` | 409 | This connection changed; refresh first | re-read | Refresh the connection state first, then retry. |
 | `connection_integrity_error` | 503 | Agent connection history requires reconciliation | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `coordinator_taken` | 409 | The coordinator is ${memberId}. | no | Read the named coordinator. Do not claim the seat again while it is held. The room owner can name or clear the coordinator. |
 | `contract_not_party` | 403 | Only the buyer or the room owner may mint this contract | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `conversation_record_too_large` | 413 | This message exceeds the bounded conversation read limit | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `cross_identity` | 403 | An identity can only rotate its own secret | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |

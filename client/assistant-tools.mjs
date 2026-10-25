@@ -12,6 +12,7 @@ export const assistantTools = [
   coordinatorTool('room_assistant_stop','Stop the coordinator. Same call as POST /api/rooms/{roomId}/assistant action stop. Halts pending asks and refuses later assign and ask until the owner configures the assistant again. The coordinator or a room administrator. A read-only coordinator may stop.',{requestId:id},['requestId']),
   coordinatorTool('room_assistant_accept','Accept a coordinator ask addressed to you. Same call as POST /api/rooms/{roomId}/assistant action accept. askRequestId is the ask requestId. Wakes the coordinator. Does not take ownership of the claim.',{requestId:id,askRequestId:id},['requestId','askRequestId']),
   coordinatorTool('room_assistant_decline','Decline a coordinator ask addressed to you. Same call as POST /api/rooms/{roomId}/assistant action decline. askRequestId is the ask requestId. Wakes the coordinator. Does not change the claim.',{requestId:id,askRequestId:id},['requestId','askRequestId']),
+  {name:'room_assistant_claim',description:'Take the empty coordinator seat for yourself. Same call as POST /api/rooms/{roomId}/assistant/claim. An active room agent who can take work. Guests cannot. When a coordinator is already set, the result is 409 coordinator_taken and names that member. The owner can still name or clear the coordinator. A self-set ranking role still scores 0.',inputSchema:{type:'object',properties:{},required:[],additionalProperties:false},annotations:{readOnlyHint:false,destructiveHint:false,idempotentHint:false,openWorldHint:false}},
   {name:'room_assistant_candidates',description:'Read ranked coordinator candidates for this room. Each row has score and heartbeat, push, completion, and coordinator signals, plus rolesSetBy. A self-set coordinator role scores 0. Guests cannot read it. Reading does not assign work or change the coordinator.',inputSchema:{type:'object',properties:{},required:[],additionalProperties:false},annotations:{readOnlyHint:true,destructiveHint:false,idempotentHint:true,openWorldHint:false}}
 ];
 const COORDINATOR_ACTIONS={
@@ -29,7 +30,7 @@ export const isAssistantTool = name => assistantTools.some(tool=>tool.name===nam
 export function validAssistantArguments(name,args) {
   const tool=assistantTools.find(tool=>tool.name===name);
   if(!tool || !args || typeof args!=='object' || Array.isArray(args) || Object.keys(args).some(key=>!Object.hasOwn(tool.inputSchema.properties,key)) || tool.inputSchema.required.some(key=>args[key]===undefined)) return false;
-  if(name==='room_assistant_context' || name==='room_assistant_candidates') return true;
+  if(name==='room_assistant_context' || name==='room_assistant_candidates' || name==='room_assistant_claim') return true;
   if(assistantToolAction(name)) return validCoordinatorArguments(name,args);
   if(!['claim','report','publish','draft'].includes(args.action) || !['requestId','runId','attemptId'].every(key=>validId(args[key])) || !Number.isSafeInteger(args.expectedRevision) || args.expectedRevision<0) return false;
   if(args.action==='draft') return Number.isSafeInteger(args.sequence) && args.sequence>0 && typeof args.body==='string' && args.body.length<=65536 && args.body.isWellFormed() && !['state','summary','resultMessageId','appliedInputMessageIds'].some(key=>Object.hasOwn(args,key));

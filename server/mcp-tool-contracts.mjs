@@ -62,7 +62,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
   webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" },
-  room_assistant_candidates: { access: "read, room member; guests are denied", cost: READ, rest: "GET /api/rooms/{roomId}/assistant/candidates" }
+  room_assistant_candidates: { access: "read, room member; guests are denied", cost: READ, rest: "GET /api/rooms/{roomId}/assistant/candidates" },
+  room_assistant_claim: { access: "write, active room agent who can take work; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/rooms/{roomId}/assistant/claim" }
 });
 
 export function mcpToolContractLine(name) {

@@ -170,7 +170,7 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   const releaseTools = new Set([
     "room_assistant_context", "room_assistant_action", "room_assistant_configure",
     "room_assistant_assign", "room_assistant_ask", "room_assistant_stop",
-    "room_assistant_accept", "room_assistant_decline", "room_assistant_candidates", "room_work_claim_provenance"
+    "room_assistant_accept", "room_assistant_decline", "room_assistant_claim", "room_assistant_candidates", "room_work_claim_provenance"
   ]);
   for (const name of releaseTools) {
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);

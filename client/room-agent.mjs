@@ -620,6 +620,14 @@ export class RoomAgentClient {
       throw new RoomClientError(200, "invalid_response", "Coordinator candidate response does not match this room");
     return value;
   }
+  async assistantClaim({ signal } = {}) {
+    const value = await this.#request("/assistant/claim", {}, signal);
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.action !== "claim"
+      || value.result?.coordinatorMemberId !== this.#memberId || value.result?.coordinatorSource !== "self"
+      || value.result?.coordinatorReason !== "self-claimed empty seat")
+      throw new RoomClientError(200, "invalid_response", "Coordinator claim response does not match this agent");
+    return value;
+  }
   async assistant(input, { signal } = {}) {
     const value = await this.#request("/assistant", input, signal);
     if (value?.contractVersion !== 1 || value.roomId !== this.#roomId

@@ -42,11 +42,15 @@ export function installCoordinator(Assistant) {
     const body = originalList.call(this, roomId, authorize);
     const assistant = body?.assistant;
     if (assistant && Object.hasOwn(assistant, "coordinatorRoleGrants")) delete assistant.coordinatorRoleGrants;
-    if (assistant?.coordinatorMemberId && assistant.coordinatorSource !== "auto" && assistant.coordinatorSource !== "owner") {
+    if (assistant?.coordinatorMemberId && assistant.coordinatorSource !== "auto" && assistant.coordinatorSource !== "owner" && assistant.coordinatorSource !== "self") {
       assistant.coordinatorSource = "owner";
       assistant.coordinatorReason = ownerReason(assistant.coordinatorMemberId);
     }
     return body;
+  };
+  Assistant.prototype.claimEmptySeat = function claimEmptySeat(roomId, authorize) {
+    authorize();
+    return takeEmptySeat(this, roomId, authorize);
   };
   Assistant.prototype.candidates = function listCandidates(roomId, authorize) {
     const auth = authorize();
@@ -309,7 +313,7 @@ function writeConfig(assistant, roomId, config) {
   };
   if (Array.isArray(config.coordinatorActions) && config.coordinatorActions.length) stored.coordinatorActions = config.coordinatorActions;
   if (Number.isFinite(config.stoppedAt)) stored.stoppedAt = config.stoppedAt;
-  if (config.coordinatorSource === "auto" || config.coordinatorSource === "owner") {
+  if (config.coordinatorSource === "auto" || config.coordinatorSource === "owner" || config.coordinatorSource === "self") {
     stored.coordinatorSource = config.coordinatorSource;
     if (typeof config.coordinatorReason === "string" && config.coordinatorReason.trim()) stored.coordinatorReason = config.coordinatorReason;
     if (Number.isFinite(config.coordinatorChosenAt)) stored.coordinatorChosenAt = config.coordinatorChosenAt;
@@ -384,9 +388,52 @@ function stickyOwner(config) {
   return Boolean(config.coordinatorMemberId) && config.coordinatorSource !== "auto";
 }
 
-// An owner choice stays until configure clears it. An automatic choice stays
-// while that member is still a live candidate, and is replaced when they are
-// not. The settings revision is left alone: it fences configure, not a pick.
+const SELF_CLAIM_REASON = "self-claimed empty seat";
+
+// An active agent takes the seat only while it is empty. Auto-pick, an owner
+// choice, and an earlier claim all count as set. The read and the write share
+// one immediate transaction, so a second racer sees the winner. The owner
+// still replaces this choice with configure. The settings revision is left
+// alone: it fences configure, not a claim.
+function takeEmptySeat(assistant, roomId, authorize) {
+  return assistant.store.transaction(() => {
+    assistant.init();
+    const auth = authorize();
+    const actor = auth.member;
+    if (isGuestActor(actor)) fail("assistant_denied", "Guests cannot claim the coordinator seat.", 403);
+    const state = assistant.store.room(roomId).state;
+    if (state.room?.archivedAt) fail("assistant_archived", "This room is archived");
+    if (actor?.kind !== "agent" || actor.active === false || !actor.permissions?.includes("accept_work"))
+      fail("assistant_denied", "Only an active room agent who can take work can claim an empty coordinator seat.", 403);
+    const current = readConfig(assistant, roomId);
+    const holder = typeof current.coordinatorMemberId === "string" && current.coordinatorMemberId ? current.coordinatorMemberId : null;
+    if (holder) {
+      throw Object.assign(new Error(`The coordinator is ${holder}.`), {
+        code: "coordinator_taken", status: 409, detail: { coordinatorMemberId: holder }
+      });
+    }
+    const now = assistant.store.now();
+    writeConfig(assistant, roomId, {
+      ...current,
+      coordinatorMemberId: actor.id,
+      coordinatorSource: "self",
+      coordinatorReason: SELF_CLAIM_REASON,
+      coordinatorChosenAt: now,
+      stoppedAt: undefined
+    });
+    recordChoice(assistant.store, roomId, { memberId: actor.id, source: "self", reason: SELF_CLAIM_REASON, at: now });
+    return {
+      contractVersion: 1, roomId, action: "claim",
+      result: { coordinatorMemberId: actor.id, coordinatorSource: "self", coordinatorReason: SELF_CLAIM_REASON }
+    };
+  });
+}
+
+// An owner choice stays until configure clears it. A self-claimed seat stays
+// the same way, until the owner names or clears a coordinator. An automatic
+// choice stays while that member is still a live candidate, and is replaced
+// when they are not. The settings revision is left alone: it fences
+// configure, not a pick.
 function ensurePick(assistant, roomId) {
   let state;
   try { state = assistant.store.room(roomId).state; }

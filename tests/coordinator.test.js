@@ -357,6 +357,14 @@ async function openRoom(t, specs) {
     });
     return { status: response.status, body: await response.json() };
   };
+  const claimSeat = async actor => {
+    const response = await fetch(`${origin}/api/rooms/commons/assistant/claim`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${keys[actor]}`, "content-type": "application/json" },
+      body: "{}"
+    });
+    return { status: response.status, body: await response.json() };
+  };
   const candidates = async actor => {
     const response = await fetch(`${origin}/api/rooms/commons/assistant/candidates`, {
       headers: { authorization: `Bearer ${keys[actor]}` }
@@ -372,7 +380,7 @@ async function openRoom(t, specs) {
     assert.equal(response.status, 200, JSON.stringify(body));
     return body.events.map(row => row.event).filter(event => event?.data?.coordinatorSource);
   };
-  return { store, call, candidates, choices, advance(ms) { now += ms; } };
+  return { store, call, claimSeat, candidates, choices, advance(ms) { now += ms; } };
 }
 
 test("a room with no coordinator picks the highest-ranked live member", async t => {
@@ -491,7 +499,100 @@ test("a self-set coordinator role does not outrank an equal member, an owner-set
   assert.equal(ranked.body.candidates[0].memberId, "fresh");
 });
 
-test("guests cannot read coordinator candidates", async t => {
+test("an agent claims an empty coordinator seat, a taken seat is 409, and the owner can name someone else", async t => {
+  const room = await openRoom(t, [
+    { id: "ada", agentType: "generic" },
+    { id: "dax", agentType: "claude-code" }
+  ]);
+  const claimed = await room.claimSeat("ada");
+  assert.equal(claimed.status, 200, JSON.stringify(claimed.body));
+  assert.equal(claimed.body.result.coordinatorMemberId, "ada");
+  assert.equal(claimed.body.result.coordinatorSource, "self");
+  assert.equal(claimed.body.result.coordinatorReason, "self-claimed empty seat");
+  const ranked = await room.candidates("ada");
+  const ada = ranked.body.candidates.find(row => row.memberId === "ada");
+  assert.equal(ada.signals.coordinator, 0);
+  assert.equal(ada.rolesSetBy, null);
+  assert.equal(ada.coordinatorRoleCounts, false);
+  const held = await room.call("owner", null, "GET");
+  assert.equal(held.status, 200, JSON.stringify(held.body));
+  assert.equal(held.body.assistant.coordinatorMemberId, "ada");
+  assert.equal(held.body.assistant.coordinatorSource, "self");
+  assert.equal(held.body.assistant.coordinatorReason, "self-claimed empty seat");
+  assert.equal(held.body.assistant.revision, 0);
+  const logged = await room.choices("dax");
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].data.reason, "self-claimed empty seat");
+  assert.equal(logged[0].data.body, "self-claimed empty seat");
+  assert.equal(logged[0].data.coordinatorSource, "self");
+  assert.equal(logged[0].data.coordinatorMemberId, "ada");
+  const taken = await room.claimSeat("dax");
+  assert.equal(taken.status, 409);
+  assert.equal(taken.body.error.code, "coordinator_taken");
+  assert.equal(taken.body.coordinatorMemberId, "ada");
+  assert.match(taken.body.error.message, /ada/);
+  assert.equal((await room.call("dax", null, "GET")).body.assistant.coordinatorMemberId, "ada");
+  const override = await room.call("owner", {
+    requestId: "owner-override", action: "configure", name: "Room",
+    coordinatorMemberId: "dax", expectedRevision: 0
+  });
+  assert.equal(override.status, 200, JSON.stringify(override.body));
+  const named = await room.call("ada", null, "GET");
+  assert.equal(named.body.assistant.coordinatorMemberId, "dax");
+  assert.equal(named.body.assistant.coordinatorSource, "owner");
+  assert.match(named.body.assistant.coordinatorReason, /named dax/);
+  const item = putClaim(room.store, { id: "after-override" });
+  const refused = await room.call("ada", assignBody(item, "ada", "ada-after-override"));
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.error.code, "assistant_denied");
+  const assigned = await room.call("dax", assignBody(item, "ada", "dax-after-override"));
+  assert.equal(assigned.status, 200, JSON.stringify(assigned.body));
+  assert.equal(room.store.workClaims.get("commons", "after-override").owner, "ada");
+});
+
+test("an auto-picked coordinator refuses an empty-seat claim", async t => {
+  const room = await openRoom(t, [
+    { id: "plain", agentType: "generic" },
+    { id: "claude", agentType: "claude-code" }
+  ]);
+  const picked = await room.call("owner", null, "GET");
+  assert.equal(picked.body.assistant.coordinatorMemberId, "claude");
+  assert.equal(picked.body.assistant.coordinatorSource, "auto");
+  const taken = await room.claimSeat("plain");
+  assert.equal(taken.status, 409);
+  assert.equal(taken.body.error.code, "coordinator_taken");
+  assert.equal(taken.body.coordinatorMemberId, "claude");
+  assert.match(taken.body.error.message, /claude/);
+  const still = await room.call("plain", null, "GET");
+  assert.equal(still.body.assistant.coordinatorMemberId, "claude");
+  assert.equal(still.body.assistant.coordinatorSource, "auto");
+});
+
+test("two agents racing for an empty coordinator seat produce one winner", async t => {
+  const room = await openRoom(t, [
+    { id: "ada", agentType: "generic" },
+    { id: "bo", agentType: "generic" }
+  ]);
+  const [left, right] = await Promise.all([room.claimSeat("ada"), room.claimSeat("bo")]);
+  const wins = [left, right].filter(row => row.status === 200);
+  const losses = [left, right].filter(row => row.status === 409);
+  assert.equal(wins.length, 1, JSON.stringify([left, right]));
+  assert.equal(losses.length, 1, JSON.stringify([left, right]));
+  const winner = wins[0].body.result.coordinatorMemberId;
+  assert.ok(winner === "ada" || winner === "bo");
+  assert.equal(losses[0].body.error.code, "coordinator_taken");
+  assert.equal(losses[0].body.coordinatorMemberId, winner);
+  assert.match(losses[0].body.error.message, new RegExp(winner));
+  const view = await room.call("owner", null, "GET");
+  assert.equal(view.body.assistant.coordinatorMemberId, winner);
+  assert.equal(view.body.assistant.coordinatorSource, "self");
+  const logged = await room.choices("owner");
+  assert.equal(logged.length, 1);
+  assert.equal(logged[0].data.reason, "self-claimed empty seat");
+  assert.equal(logged[0].data.coordinatorMemberId, winner);
+});
+
+test("guests cannot read coordinator candidates or claim the seat", async t => {
   const store = new RoomStore(":memory:");
   store.initialize(initialRoom("commons"));
   const ownerKey = store.issueAccessKey("commons", "owner");
@@ -534,8 +635,16 @@ test("guests cannot read coordinator candidates", async t => {
   assert.equal(denied.status, 403);
   const body = await denied.json();
   assert.equal(body.error.code, "assistant_denied");
+  const claim = await request("/api/rooms/commons/assistant/claim", { method: "POST", token: guest.token, data: {} });
+  assert.equal(claim.status, 403);
+  const claimBody = await claim.json();
+  assert.equal(claimBody.error.code, "assistant_denied");
   const allowed = await request("/api/rooms/commons/events", { token: guest.token });
   assert.equal(allowed.status, 200);
+  const seat = await request("/api/rooms/commons/assistant", { token: ownerKey });
+  assert.equal(seat.status, 200);
+  const seatBody = await seat.json();
+  assert.equal(seatBody.assistant.coordinatorMemberId, null);
 });
 
 test("a stale automatic coordinator is replaced by the next live member", async t => {
@@ -659,17 +768,21 @@ test("MCP configure, assign, ask and stop use the assistant actions", async t =>
     assert.equal(response.status, 200, JSON.stringify(body));
     return body;
   };
+  const listed = await rpc(lead.secret, "tools/list", { focus: "work" });
+  const names = listed.result.tools.map(tool => tool.name);
+  for (const name of ["room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop", "room_assistant_accept", "room_assistant_decline", "room_assistant_claim", "room_assistant_candidates"]) {
+    assert.ok(names.includes(name), name);
+  }
+  const claimed = await rpc(hand.secret, "tools/call", { name: "room_assistant_claim", arguments: { roomId: "commons" } });
+  assert.equal(claimed.result?.isError, undefined, JSON.stringify(claimed));
+  assert.equal(claimed.result.structuredContent.result.coordinatorMemberId, "hand");
+  assert.equal(claimed.result.structuredContent.result.coordinatorReason, "self-claimed empty seat");
   const ownerCall = await fetch(`${origin}/api/rooms/commons/assistant`, {
     method: "POST",
     headers: { authorization: `Bearer ${ownerKey}`, "content-type": "application/json" },
     body: JSON.stringify({ requestId: "mcp-owner-cfg", action: "configure", name: "Room", coordinatorMemberId: "lead", expectedRevision: 0 })
   });
   assert.equal(ownerCall.status, 200, await ownerCall.text());
-  const listed = await rpc(lead.secret, "tools/list", { focus: "work" });
-  const names = listed.result.tools.map(tool => tool.name);
-  for (const name of ["room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop", "room_assistant_accept", "room_assistant_decline", "room_assistant_candidates"]) {
-    assert.ok(names.includes(name), name);
-  }
   const seen = store.now();
   for (const identity of [lead, hand]) {
     store.db.prepare(`INSERT INTO agent_hosts (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)

@@ -67,10 +67,10 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
       ? readFileSync(join(destination, "client/assistant-tools.mjs"), "utf8") : "";
     const coordinatorTools = packagedAssistant.includes("room_assistant_decline");
     const assistantNames = coordinatorTools
-      ? ["room_assistant_context", "room_assistant_action", "room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop", "room_assistant_accept", "room_assistant_decline", "room_assistant_candidates"]
+      ? ["room_assistant_context", "room_assistant_action", "room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop", "room_assistant_accept", "room_assistant_decline", "room_assistant_claim", "room_assistant_candidates"]
       : ["room_assistant_context", "room_assistant_action"];
     const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
-      : coordinatorTools ? 51
+      : coordinatorTools ? 52
       : packagedTools.includes("\"room_close_work_claim\"") ? 44
       : packagedTools.includes("...assistantTools") ? 43
       : packagedTools.includes('"room_link_work_claim_pr"') ? 41
