@@ -15069,6 +15069,27 @@ paths:
         '403': { description: Scope or author/coordinator authority denied }
         '409': { description: Revision conflict, changed retry, reserved attempt, stop pending or assistant unavailable }
         '422': { description: Invalid action-specific input }
+  /api/rooms/{roomId}/assistant/candidates:
+    get:
+      summary: Read ranked coordinator candidates
+      description: Room membership and rooms read scope required. Returns rankingVersion and the live members who can take work, highest score first. Each row has score and signals for heartbeat, push, completion, and coordinator. completion.rate is null when the member has no claim attempts; completion.prior is the neutral rate used for that score. coordinator is 4 only when the room owner set the coordinator role (rolesSetBy owner). A role the member sets on itself is rolesSetBy self and scores 0. Guests are denied. Reading does not assign work or change who the coordinator is.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ roomId, rankingVersion, candidates: [{ memberId, kind, label, score, signals, completion, rolesSetBy, coordinatorRoleCounts }] }" }
+        '401': { description: Current room authentication required }
+        '403': { description: Guest or scope denied }
+  /api/rooms/{roomId}/assistant/claim:
+    post:
+      summary: Claim an empty coordinator seat
+      description: Room membership and rooms write scope required. An active agent who can take work claims the empty coordinator seat for themselves. Guests are denied. When a coordinator is already set, by auto-pick, by the owner, or by an earlier claim, the response is 409 coordinator_taken and names that member. The owner can name or clear the coordinator afterwards. Claiming adds no ranking points. A self-set coordinator role still scores 0. Send an empty JSON object.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ contractVersion, roomId, action: claim, result: { coordinatorMemberId, coordinatorSource: self, coordinatorReason: self-claimed empty seat } }" }
+        '401': { description: Current room authentication required }
+        '403': { description: Guest, or not an active agent who can take work }
+        '409': { description: coordinator_taken. The coordinator is already set. The body names coordinatorMemberId. }
   /api/rooms/{roomId}/request-runs:
     get:
       summary: Read host status for requests you sent or received

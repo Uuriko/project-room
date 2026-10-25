@@ -643,6 +643,15 @@
         "openWorldHint": true
       }
     },
+    "room_assistant_accept": {
+      "inputSchema": "98071f37c36bd980",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_assistant_action": {
       "inputSchema": "979c094f87794b24",
       "annotations": {
@@ -652,6 +661,51 @@
         "openWorldHint": true
       }
     },
+    "room_assistant_ask": {
+      "inputSchema": "6cbc71bd0e5e5025",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_assign": {
+      "inputSchema": "d63b905511f840c2",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_candidates": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_claim": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_configure": {
+      "inputSchema": "fe2266a2e15a8f70",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_assistant_context": {
       "inputSchema": "9c4dedb9bd1af453",
       "annotations": {
@@ -659,6 +713,24 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_assistant_decline": {
+      "inputSchema": "98071f37c36bd980",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_stop": {
+      "inputSchema": "371b2d6a151b6ed8",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_begin_work": {
@@ -1347,6 +1419,15 @@
         "openWorldHint": false
       }
     },
+    "room_assistant_accept": {
+      "inputSchema": "98071f37c36bd980",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_assistant_action": {
       "inputSchema": "979c094f87794b24",
       "annotations": {
@@ -1356,6 +1437,51 @@
         "openWorldHint": true
       }
     },
+    "room_assistant_ask": {
+      "inputSchema": "6cbc71bd0e5e5025",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_assign": {
+      "inputSchema": "d63b905511f840c2",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_candidates": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_claim": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_configure": {
+      "inputSchema": "fe2266a2e15a8f70",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_assistant_context": {
       "inputSchema": "9c4dedb9bd1af453",
       "annotations": {
@@ -1363,6 +1489,24 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_assistant_decline": {
+      "inputSchema": "98071f37c36bd980",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_assistant_stop": {
+      "inputSchema": "371b2d6a151b6ed8",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_begin_work": {

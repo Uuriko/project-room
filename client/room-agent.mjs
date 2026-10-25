@@ -614,6 +614,20 @@ export class RoomAgentClient {
     const result = await this.#request(route + "?" + new URLSearchParams(args), undefined, signal);
     return validateReplyRead(result, { name, args, roomId: this.#roomId });
   }
+  async assistantCandidates({ signal } = {}) {
+    const value = await this.#request("/assistant/candidates", undefined, signal);
+    if (!Number.isInteger(value?.rankingVersion) || value.roomId !== this.#roomId || !Array.isArray(value.candidates))
+      throw new RoomClientError(200, "invalid_response", "Coordinator candidate response does not match this room");
+    return value;
+  }
+  async assistantClaim({ signal } = {}) {
+    const value = await this.#request("/assistant/claim", {}, signal);
+    if (value?.contractVersion !== 1 || value.roomId !== this.#roomId || value.action !== "claim"
+      || value.result?.coordinatorMemberId !== this.#memberId || value.result?.coordinatorSource !== "self"
+      || value.result?.coordinatorReason !== "self-claimed empty seat")
+      throw new RoomClientError(200, "invalid_response", "Coordinator claim response does not match this agent");
+    return value;
+  }
   async assistant(input, { signal } = {}) {
     const value = await this.#request("/assistant", input, signal);
     if (value?.contractVersion !== 1 || value.roomId !== this.#roomId

@@ -1,5 +1,5 @@
 import { RoomAssistant } from "./room-assistant.mjs";
-import { isAssistantTool } from "../client/assistant-tools.mjs";
+import { assistantToolAction, isAssistantTool } from "../client/assistant-tools.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 // Hosted MCP full profile: the local stdio room tools, on the same URL as
@@ -168,6 +168,8 @@ function enforceHostedStdioCallVisibility(store, secret, memberId, name) {
 // reads, bounty reads) default to rooms:read.
 const HOSTED_STDIO_WRITE_TOOLS = new Set([
   "room_assistant_action",
+  "room_assistant_configure", "room_assistant_assign", "room_assistant_ask", "room_assistant_stop",
+  "room_assistant_accept", "room_assistant_decline", "room_assistant_claim",
   "room_introduce_outside_agent",
   "room_begin_work", "room_link_work_claim_pr", "room_set_member_claim_cap",
   "room_post_draft", "room_close_work_claim",
@@ -236,10 +238,22 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   const auth = store.authenticate(secret, roomId);
   enforceHostedStdioCallVisibility(store, secret, auth.member.id, name);
   const identity = { roomId, memberId: auth.member.id };
+  if (name === "room_assistant_candidates") {
+    const assistant = new RoomAssistant(store);
+    const authorize = () => store.authenticate(secret, roomId);
+    return { value: assistant.candidates(roomId, authorize), isError: false };
+  }
+  if (name === "room_assistant_claim") {
+    const assistant = new RoomAssistant(store);
+    const authorize = () => store.authenticate(secret, roomId);
+    return { value: assistant.claimEmptySeat(roomId, authorize), isError: false };
+  }
   if (isAssistantTool(name)) {
     const assistant = new RoomAssistant(store);
     const authorize = () => store.authenticate(secret, roomId);
-    return { value: stampAssistantResult(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, rest, authorize, secret)), isError: false };
+    const action = assistantToolAction(name);
+    const input = action ? { ...rest, action } : rest;
+    return { value: stampAssistantResult(name === "room_assistant_context" ? assistant.list(roomId, authorize) : assistant.apply(roomId, input, authorize, secret)), isError: false };
   }
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };

@@ -34,4 +34,53 @@ export async function roomAssistantRoute(ctx) {
   const value=write ? assistant.apply(roomId,input,authorize,selected.token) : assistant.list(roomId,authorize);
   return ctx.json(ctx.res,200,value,ctx.req.method==='HEAD');
 }
-export const ROOM_ASSISTANT_ROUTES=Object.freeze(['GET','HEAD','POST'].map(method=>Object.freeze({id:`room-assistant-${method.toLowerCase()}`,method,path:'/api/rooms/{roomId}/assistant',auth:'room',capability:null,scope:'room',handler:roomAssistantRoute,schema:{params,...(method==='POST'?{body}:{}),response:{type:'object'}},events:[]})));
+export async function roomAssistantCandidatesRoute(ctx) {
+  const roomId=ctx.params.roomId;
+  if(!validId(roomId)) ctx.reject(422,'invalid_room','Choose a room ID');
+  const selected=ctx.roomCredentials(ctx.req,ctx.url);
+  const fence=selected.mode==='account' ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
+  const authorize=()=>{
+    const auth=ctx.roomAuth(selected,roomId,fence);
+    if(selected.bearer && auth.credentialScope!=='room') ctx.reject(403,'access_denied','Bearer account sessions are not accepted');
+    if(!selected.bearer && auth.kind!=='session') ctx.reject(401,'unauthenticated','Browser session required');
+    if(auth.kind==='api-key') {
+      const needed='rooms:read';
+      if(!(auth.apiKeyScopes??[]).some(scope=>scope===needed || scope.endsWith(':*') && needed.startsWith(scope.slice(0,-1)))) ctx.reject(403,'insufficient_scope',`API key lacks ${needed}`);
+    }
+    return auth;
+  };
+  const auth=authorize();
+  ctx.rate(`read:${auth.credentialHash}`,600);
+  const assistant=new RoomAssistant(ctx.store);
+  return ctx.json(ctx.res,200,assistant.candidates(roomId,authorize),ctx.req.method==='HEAD');
+}
+export async function roomAssistantClaimRoute(ctx) {
+  const roomId=ctx.params.roomId;
+  if(!validId(roomId)) ctx.reject(422,'invalid_room','Choose a room ID');
+  const selected=ctx.roomCredentials(ctx.req,ctx.url);
+  const fence=selected.mode==='account' ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
+  const authorize=()=>{
+    const auth=ctx.roomAuth(selected,roomId,fence);
+    if(selected.bearer && auth.credentialScope!=='room') ctx.reject(403,'access_denied','Bearer account sessions are not accepted');
+    if(!selected.bearer && auth.kind!=='session') ctx.reject(401,'unauthenticated','Browser session required');
+    if(auth.kind==='api-key') {
+      const needed='rooms:write';
+      if(!(auth.apiKeyScopes??[]).some(scope=>scope===needed || scope.endsWith(':*') && needed.startsWith(scope.slice(0,-1)))) ctx.reject(403,'insufficient_scope',`API key lacks ${needed}`);
+    }
+    ctx.protectWrite(ctx.req,auth,selected.bearer);
+    return auth;
+  };
+  const auth=authorize();
+  ctx.rate(`write:${auth.credentialHash}`,60);
+  const input=await ctx.body(ctx.req,{limit:1024});
+  if(input!==null && (typeof input!=='object' || Array.isArray(input) || Object.keys(input).length>0)) ctx.reject(422,'invalid_assistant_action','Claim the empty coordinator seat with an empty body.');
+  const assistant=new RoomAssistant(ctx.store);
+  return ctx.json(ctx.res,200,assistant.claimEmptySeat(roomId,authorize));
+}
+const candidateParity='mcp:room_assistant_candidates';
+const claimParity='mcp:room_assistant_claim';
+export const ROOM_ASSISTANT_ROUTES=Object.freeze([
+  ...['GET','HEAD','POST'].map(method=>Object.freeze({id:`room-assistant-${method.toLowerCase()}`,method,path:'/api/rooms/{roomId}/assistant',auth:'room',capability:null,scope:'room',handler:roomAssistantRoute,schema:{params,...(method==='POST'?{body}:{}),response:{type:'object'}},events:[]})),
+  Object.freeze({id:'room-assistant-candidates-get',method:'GET',path:'/api/rooms/{roomId}/assistant/candidates',auth:'room',capability:null,scope:'room',handler:roomAssistantCandidatesRoute,schema:{params,response:{type:'object'}},events:[],parity:candidateParity}),
+  Object.freeze({id:'room-assistant-claim-post',method:'POST',path:'/api/rooms/{roomId}/assistant/claim',auth:'room',capability:null,scope:'room',handler:roomAssistantClaimRoute,schema:{params,body:{type:'object',additionalProperties:false,properties:{}},response:{type:'object'}},events:[],parity:claimParity})
+]);
