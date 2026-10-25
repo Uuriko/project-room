@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Search, event filters, and strict write bodies refuse unknown keys with
+  422. The error `next` names the offending key and the accepted keys.
+  GET /agent-signin.html serves the same page as GET /agent-signin.
+
 - First-room setup failure no longer reads as an empty account ("No rooms
   yet."). It now says the setup failed and names the retry: "Couldn’t set
   up your first room. Choose Rooms to retry."

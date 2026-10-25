@@ -13,6 +13,7 @@ import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { ServiceError } from "./store.mjs";
+import { applyStrictInputNext, EVENT_QUERY_KEYS, SEARCH_QUERY_KEYS } from "./strict-input.mjs";
 import { sqliteValueLimit } from "./storage-limits.mjs"; // r56: runtime row-limit fact on /api/version
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
@@ -150,7 +151,11 @@ const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/ve
 // W009: the wiki read API owns every /api/wiki/ template inside
 // server/wiki-read-api.mjs (reads are lazy per request; import is side-effect-free).
 const wikiReadApi = createWikiReadApi();
-const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
+const reject = (status, code, message, headers, strictInput) => {
+  const error = new ServiceError(status, code, message, headers ?? null);
+  if (strictInput) error.strictInput = strictInput;
+  throw error;
+};
 
 // RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
 // a mailto URI. Anything else must already be mailto: or https:, with no
@@ -960,7 +965,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (fields && jsonNestingExceeds(value, JSON_STRICT_DEPTH)) reject(400, "invalid_json", "Expected a JSON object");
     if (fields) {
       const unknown = Object.keys(value).filter(key => !fields.includes(key));
-      if (unknown.length) reject(422, unknownCode, `unknown fields: ${unknown.join(", ")}`);
+      if (unknown.length) reject(422, unknownCode, `unknown fields: ${unknown.join(", ")}`, null, { offending: unknown, accepted: fields });
     }
     return value;
   }
@@ -3181,7 +3186,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // Standalone agent sign-in page (decision #37): GET /agent-signin
       // plus the /room twin; same component and endpoints as the wall's
       // former step, unauthenticated and stateless like /join.
-      const agentSigninPageMatch = /^\/(?:room\/)?agent-signin\/?$/.exec(url.pathname);
+      const agentSigninPageMatch = /^\/(?:room\/)?agent-signin(?:\.html)?\/?$/.exec(url.pathname);
       if (agentSigninPageMatch) {
         if (req.method !== "GET" && req.method !== "HEAD") reject(405, "method_not_allowed", "Method not allowed");
         const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
@@ -4536,8 +4541,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const params = url.searchParams;
         const allowed = new Set(["q", "kind", "limit", "before", "cursor", "auth"]);
         const bad = [...new Set(params.keys())].filter(key => !allowed.has(key) || params.getAll(key).length !== 1);
-        if (bad.length) reject(422, "invalid_search", `unknown or repeated search parameters: ${bad.join(", ")}`);
-        if (params.has("before") && params.has("cursor")) reject(422, "invalid_search", "send before or cursor, not both");
+        if (bad.length) reject(422, "invalid_search", `unknown or repeated search parameters: ${bad.join(", ")}`, null, { offending: bad, accepted: SEARCH_QUERY_KEYS });
+        if (params.has("before") && params.has("cursor")) reject(422, "invalid_search", "send before or cursor, not both", null, { offending: ["before", "cursor"], accepted: SEARCH_QUERY_KEYS });
         const q = params.get("q");
         const kind = params.get("kind") ?? "all";
         const limitRaw = params.get("limit");
@@ -5295,11 +5300,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // reread the whole log. Refuse it and name `after`.
         if (params.has("afterSequence")) {
           reject(422, "invalid_event_cursor",
-            "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.");
+            "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.",
+            null, { offending: ["afterSequence"], accepted: EVENT_QUERY_KEYS });
         }
         if (params.has("tail")) {
-          if ([...params.keys()].some(key => !["tail", "auth"].includes(key) || params.getAll(key).length !== 1)) {
-            reject(422, "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200");
+          const tailKeys = [...new Set(params.keys())].filter(key => !["tail", "auth"].includes(key) || params.getAll(key).length !== 1);
+          if (tailKeys.length) {
+            reject(422, "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200", null, { offending: tailKeys, accepted: EVENT_QUERY_KEYS });
           }
           const tail = Number(params.get("tail"));
           return json(res, 200, redactEventPage(readEventTail(store, selected.token, roomId, tail, fence), store.redactionMessages(roomId)));
@@ -5309,24 +5316,24 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // response is byte-identical to the unfiltered read.
         const compactParam = params.get("compact");
         if (compactParam !== null && !["1", "0", "true", "false"].includes(compactParam)) {
-          reject(422, "invalid_event_cursor", "compact must be 1 or 0");
+          reject(422, "invalid_event_cursor", "compact must be 1 or 0", null, { offending: ["compact"], accepted: EVENT_QUERY_KEYS });
         }
         const typeParam = params.get("type");
         const limitRaw = params.get("limit");
         if (limitRaw !== null && (!/^[1-9]\d*$/.test(limitRaw) || Number(limitRaw) > 100)) {
-          reject(422, "invalid_event_cursor", "limit must be an integer from 1 to 100");
+          reject(422, "invalid_event_cursor", "limit must be an integer from 1 to 100", null, { offending: ["limit"], accepted: EVENT_QUERY_KEYS });
         }
         const afterRaw = params.get("after");
         if (afterRaw !== null && (!/^(0|[1-9]\d*)$/.test(afterRaw) || !Number.isSafeInteger(Number(afterRaw)))) {
-          reject(422, "invalid_event_cursor", "after must be an integer of 0 or more");
+          reject(422, "invalid_event_cursor", "after must be an integer of 0 or more", null, { offending: ["after"], accepted: EVENT_QUERY_KEYS });
         }
         const sinceRaw = params.get("since");
         const untilRaw = params.get("until");
         const sinceMs = sinceRaw === null ? null : eventTimestampMillis(sinceRaw);
         const untilMs = untilRaw === null ? null : eventTimestampMillis(untilRaw);
-        if (sinceRaw !== null && sinceMs === null) reject(422, "invalid_event_cursor", eventTimestampMessage("since"));
-        if (untilRaw !== null && untilMs === null) reject(422, "invalid_event_cursor", eventTimestampMessage("until"));
-        if (sinceMs !== null && untilMs !== null && sinceMs > untilMs) reject(422, "invalid_event_cursor", "since is after until");
+        if (sinceRaw !== null && sinceMs === null) reject(422, "invalid_event_cursor", eventTimestampMessage("since"), null, { offending: ["since"], accepted: EVENT_QUERY_KEYS });
+        if (untilRaw !== null && untilMs === null) reject(422, "invalid_event_cursor", eventTimestampMessage("until"), null, { offending: ["until"], accepted: EVENT_QUERY_KEYS });
+        if (sinceMs !== null && untilMs !== null && sinceMs > untilMs) reject(422, "invalid_event_cursor", "since is after until", null, { offending: ["since", "until"], accepted: EVENT_QUERY_KEYS });
         return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
           afterRaw === null ? 0 : Number(afterRaw), limitRaw === null ? 100 : Number(limitRaw),
           { actor: params.get("actor"),
@@ -5523,6 +5530,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         ? { error: { code, message }, ...errorOverride, operationId, category }
         : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
       error.detail);
+      applyStrictInputNext(errorBody, error.strictInput);
       json(res, httpStatus, errorBody);
     }
   });

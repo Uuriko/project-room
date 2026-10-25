@@ -23,7 +23,7 @@ async function serve(t) {
 
 test("agent sign-in page is public: GET /agent-signin and its /room twin serve the page without auth", async t => {
   const { origin } = await serve(t);
-  for (const path of ["/agent-signin", "/agent-signin/", "/room/agent-signin"]) {
+  for (const path of ["/agent-signin", "/agent-signin/", "/agent-signin.html", "/room/agent-signin", "/room/agent-signin.html"]) {
     const response = await fetch(`${origin}${path}`);
     assert.equal(response.status, 200, path);
     assert.match(response.headers.get("content-type"), /text\/html/);
