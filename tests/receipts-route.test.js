@@ -142,6 +142,14 @@ test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner togg
   assert.ok((await badge.text()).includes("Artifact hash recorded"));
   const post = await raw(origin, `/receipts/${PWR}/og.png`, { method: "POST" });
   assert.equal(post.status, 405);
+  // DOOR-CURE-10: an error on the share-image route must never carry the
+  // public cache header — a platform must not be able to cache a failure
+  // as if it were the card. (The public header is set only after a
+  // successful render; this block's responses start from no-store.)
+  const missingOg = await fetch(`${origin}/receipts/wcr_${"0".repeat(32)}/og.png`);
+  assert.equal(missingOg.status, 404);
+  assert.match(missingOg.headers.get("cache-control"), /no-store/);
+  assert.doesNotMatch(missingOg.headers.get("cache-control"), /public/);
   // A claim receipt joins once the owner publishes; unpublishing removes
   // the page and the card together — the card never outlives the toggle.
   await raw(origin, "/api/rooms/commons/commands", {
