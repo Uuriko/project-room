@@ -1,7 +1,7 @@
 // Local test entrypoint only. The hostile storage accessor must never be read.
 import assert from 'node:assert/strict';
-import worker, { ProjectRoom } from './room.mjs';
-import { strictBinding, TestDurableObjectBase } from './platform-fakes.mjs';
+import worker, { ProjectRoom } from '../../cloudflare/room.mjs';
+import { strictBinding, TestDurableObjectBase } from '../../cloudflare/platform-fakes.mjs';
 
 // ProjectRoom extends DurableObject, whose workerd constructor only accepts a
 // real DurableObjectState. These checks build the object directly with a

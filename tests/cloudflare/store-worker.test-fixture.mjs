@@ -2,20 +2,20 @@
 // MUST NOT be deployed. The eventual public entrypoint must not include it.
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { RoomStore } from '../server/store.mjs';
-import { createWork, claimWork } from '../server/work-claims.mjs';
-import { initialRoom } from '../server/bootstrap.mjs';
-import { EVENT_TYPES as T } from '../src/events.js';
-import { DurableDatabase, durableStorage } from './storage.mjs';
-import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
-import { textVersion } from '../server/text-results.mjs';
-import { auditRecovery } from '../server/recovery.mjs';
-import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
-import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
-import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation, prepareGraphReplyUpdate } from '../server/graph-reply-draft.mjs';
-import { generateVapidKeys } from '../server/web-push.mjs';
-import { exportNdjsonText } from '../server/room-export.mjs';
-import { replayNdjsonInto } from '../server/restore-ndjson.mjs';
+import { RoomStore } from '../../server/store.mjs';
+import { createWork, claimWork } from '../../server/work-claims.mjs';
+import { initialRoom } from '../../server/bootstrap.mjs';
+import { EVENT_TYPES as T } from '../../src/events.js';
+import { DurableDatabase, durableStorage } from '../../cloudflare/storage.mjs';
+import { STORE_SCHEMA_VERSION } from '../../server/writer-fence.mjs';
+import { textVersion } from '../../server/text-results.mjs';
+import { auditRecovery } from '../../server/recovery.mjs';
+import { emailContractFixture } from '../../scripts/email-contract-fixture.mjs';
+import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../../server/graph-fixture-sync.mjs';
+import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation, prepareGraphReplyUpdate } from '../../server/graph-reply-draft.mjs';
+import { generateVapidKeys } from '../../server/web-push.mjs';
+import { exportNdjsonText } from '../../server/room-export.mjs';
+import { replayNdjsonInto } from '../../server/restore-ndjson.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;

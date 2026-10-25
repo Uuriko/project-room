@@ -1,8 +1,8 @@
 // Disposable local test only. Never a deployment entrypoint.
 import assert from 'node:assert/strict';
-import { RoomStore } from '../server/store.mjs';
-import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
-import { DurableDatabase, durableStorage } from './storage.mjs';
+import { RoomStore } from '../../server/store.mjs';
+import { STORE_SCHEMA_VERSION } from '../../server/writer-fence.mjs';
+import { DurableDatabase, durableStorage } from '../../cloudflare/storage.mjs';
 
 // Frozen v7 write behavior from 884d086: an already-constructed adapter does not
 // acquire a v8 permit. Keep this independent of the current implementation.
