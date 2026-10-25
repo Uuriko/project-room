@@ -82,15 +82,6 @@ test("parity poison: one drifted room is isolated and reported until repaired; t
     steps.add(last.deferred.next);
   }
   assert.ok(last.failures.some(f => f.step === "messages_parity" && f.recordId === "alpha"), "the parity step reaches alpha and records the failure");
-  for (let i = 0; i < 6; i++) {
-    last = await tick(store);
-    steps.add(last.deferred.next);
-    assert.ok(
-      last.failures.some(f => f.step === "messages_parity" && f.recordId === "alpha"),
-      "alpha's parity failure is reported on every tick until repaired"
-    );
-  }
-  assert.ok(steps.size > 3, "the deferred cursor kept rotating past the poisoned pair");
   const failure = last.failures.find(f => f.step === "messages_parity" && f.recordId === "alpha");
   assert.match(failure.message, /messages parity failed for alpha/);
   assert.equal(failure.code, "messages_parity_failed");
@@ -103,25 +94,37 @@ test("parity poison: one drifted room is isolated and reported until repaired; t
     "the failure is recorded durably"
   );
 
-  // The job still fails the tick — isolation is not a silent pass — and
-  // the public error string names the sub-check without the room id (the
-  // failure detail itself names the room — see integrity-naming.test.js).
+  // The job still fails the tick while the row stands — isolation is not
+  // a silent pass — and the public error string names the sub-check
+  // without the room id (the failure detail itself names the room — see
+  // integrity-naming.test.js).
   const run = await integrityJob.run(store, { deadline: Date.now() + 5000 });
   assert.ok(Number(run.errors) >= 1);
   assert.equal(run.failureDetail.subcheck, "messages_parity");
   assert.equal(run.failureDetail.recordClass, "message");
   assert.ok(!run.scanError.includes("alpha"), "the room id never reaches the public error");
 
-  // Repair the drift (the event log is authoritative): the record clears
-  // and the job recovers.
-  store.db.prepare("UPDATE messages SET body='hello alpha' WHERE room_id='alpha'").run();
+  // PARITY-REPAIR-1 supersedes the old "reported on every tick until an
+  // operator repairs it" contract for covered shapes: the standing row
+  // earns a gated repair attempt (never on first failure; the failures
+  // counter must cross a power of two), the tick re-derives alpha's table
+  // from its event log, and the row clears with no operator act. Until
+  // the gate fires, every tick still reports the failure.
   let recovered = null;
-  for (let i = 0; i < 15 && !recovered; i++) {
-    const result = await tick(store);
-    if (!result.failures.length) recovered = result;
+  for (let i = 0; i < 30 && !recovered; i++) {
+    last = await tick(store);
+    steps.add(last.deferred.next);
+    if (!last.failures.some(f => f.step === "messages_parity" && f.recordId === "alpha")) recovered = last;
   }
-  assert.ok(recovered, "the repaired room clears the failure");
+  assert.ok(steps.size > 3, "the deferred cursor kept rotating past the poisoned pair");
+  assert.ok(recovered, "the gated parity repair clears the failure without an operator act");
+  assert.equal(
+    store.db.prepare("SELECT body FROM messages WHERE room_id='alpha'").get().body,
+    "hello alpha", "the drifted row was re-derived from the event log"
+  );
   assert.deepEqual(failureRows(store), []);
+  const healedRun = await integrityJob.run(store, { deadline: Date.now() + 5000 });
+  assert.equal(Number(healedRun.errors ?? 0), 0, "the job recovers once the repair clears the row");
 });
 
 test("backfill poison: a room whose log cannot replay is skipped while other rooms backfill in the same call", async t => {

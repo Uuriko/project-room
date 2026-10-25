@@ -9,6 +9,7 @@ export { closeKeepSet };
 // do not double-write. The integrity cron runs that replay.
 import { applyEvent, emptyRoomState } from "../src/events.js";
 import { isDeepStrictEqual } from "node:util";
+import { createHash } from "node:crypto";
 
 export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.posted",
@@ -113,6 +114,12 @@ export const MESSAGES_BLOCK_REDIAGNOSIS_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const BLOCK_REDIAGNOSIS_PER_CALL = 1;
 
 export const MESSAGES_BACKFILL_BATCH = 200;
+// PARITY-REPAIR-1: whole-log replay is the tick leg's expensive step, so a
+// room whose event log passes this ceiling is never replayed by a tick;
+// its standing parity row is classified repair_deferred_ceiling instead
+// and the room stays reachable by a direct (operator) invocation of
+// repairMessagesParityDrift with a raised ceiling.
+export const MESSAGES_PARITY_REPAIR_EVENT_CEILING = 25000;
 const BACKFILL_COMMIT = 25;
 const SWEEP_ID = "";
 const POSTED = "message.posted";
@@ -1451,6 +1458,197 @@ function certifyMessagesParity(store, target = null) {
   store.transaction(() => store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=applied_seq WHERE room_id=?").run(roomId));
   if (target === null) rememberSweep(store, roomId);
   return { ok: true, checked: 1, roomId, ...numbers };
+}
+
+const sha256Hex = body => createHash("sha256").update(body, "utf8").digest("hex");
+
+// certifyMessagesParity (and the transaction discipline around it) takes a
+// store; resyncRoomMessageRows and the other primitives here take a raw
+// db. repairMessagesParityDrift composes both, so it accepts either: a
+// store (the tick leg passes the RoomStore, keeping its writer discipline)
+// or a bare db, wrapped in the same BEGIN IMMEDIATE discipline the store
+// itself uses outside a transaction.
+function parityRepairStore(storeOrDb) {
+  const db = storeOrDb?.db ?? storeOrDb;
+  if (storeOrDb && storeOrDb.db && typeof storeOrDb.transaction === "function") {
+    return { db, transaction: fn => storeOrDb.transaction(fn) };
+  }
+  return {
+    db,
+    transaction: fn => {
+      if (db.isTransaction) return fn();
+      db.exec("BEGIN IMMEDIATE");
+      try { const result = fn(); db.exec("COMMIT"); return result; }
+      catch (error) {
+        if (db.isTransaction) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } }
+        throw error;
+      }
+    }
+  };
+}
+
+// Re-derive one room's replay state from its full event log: the same
+// from-log reducer path diagnoseBlock runs for diagnosis, batched like
+// fillRoom so the caller's deadline is honored between batches. Also
+// collects the provenance the reconciliation legs need: each message's
+// first posting sequence (the same map certifyMessagesParity builds) and
+// every message id any logged message event names.
+function replayRoomLogForParityRepair(db, roomId, deadline) {
+  let state = emptyRoomState();
+  const sequences = new Map();
+  const loggedMessageIds = new Set();
+  let eventCount = 0;
+  let after = 0;
+  for (;;) {
+    if (Date.now() > deadline) return { aborted: true, eventCount };
+    const rows = db.prepare("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT ?")
+      .all(roomId, after, BACKFILL_COMMIT);
+    if (!rows.length) break;
+    for (const row of rows) {
+      const incoming = JSON.parse(row.body);
+      if (MESSAGE_ROW_TYPE_SET.has(incoming?.type)) {
+        for (const id of affectedMessageIds(incoming)) {
+          loggedMessageIds.add(id);
+          if (incoming.type === POSTED && !sequences.has(id)) sequences.set(id, row.sequence);
+        }
+      }
+      state = compactState(applyEvent(state, incoming));
+      after = row.sequence;
+      eventCount += 1;
+    }
+  }
+  return { state, sequences, loggedMessageIds, eventCount };
+}
+
+// PARITY-REPAIR-1: the clearing path for a caught-up room whose messages
+// table has drifted from its projection (the NO-PATH parity row: the
+// backfill never rewrites a caught-up room, and parity only revokes and
+// re-records). The event log is the authority both sides derive from, so
+// the repair re-derives the room's state from the log and reconciles the
+// TABLE to it — the live projection is never read as a state input and
+// never written — then re-runs certification once against the untouched
+// projection. A pass is therefore earned, never constructed: if the
+// projection is the side that drifted, the room still fails and the
+// outcome is projection_divergent.
+//
+// Outcome classes (tokens only; no error text ever rides them):
+//   healed                  — re-certification passed after reconciliation
+//   archive_marker          — archived rows != the archive marker count;
+//                             excluded by design (the marker is written
+//                             only by the archive door's machinery and is
+//                             never recomputed or touched here)
+//   projection_divergent    — the table was reconciled to the log (or the
+//                             hash gate refused a re-spill) and the room
+//                             still does not certify against the live
+//                             projection, or the log itself cannot replay
+//   repair_deferred_ceiling — the room's log exceeds the event ceiling;
+//                             nothing was replayed or written
+// A deadline abort returns outcome:null with aborted:true and writes
+// nothing at all — never a half-reconciled table (the reconciliation
+// below is one transaction, and it has not started yet).
+export function repairMessagesParityDrift(storeOrDb, roomId, { deadline = Infinity, ceiling = MESSAGES_PARITY_REPAIR_EVENT_CEILING } = {}) {
+  const store = parityRepairStore(storeOrDb);
+  const db = store.db;
+  if (!db || typeof db.prepare !== "function") throw new TypeError("repairMessagesParityDrift requires a store or database");
+  if (typeof roomId !== "string" || !roomId) throw new TypeError("roomId must be a non-empty string");
+  if (!db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) throw new Error(`messages parity repair: room ${roomId} not found`);
+  const base = { roomId, attempted: true, healed: false };
+  const eventCount = db.prepare("SELECT COUNT(*) AS n FROM events WHERE room_id=?").get(roomId).n;
+  if (Number.isInteger(ceiling) && ceiling >= 0 && eventCount > ceiling) {
+    return { ...base, attempted: false, outcome: "repair_deferred_ceiling", eventCount };
+  }
+  // P3 pre-check, before any write: an archived-count mismatch is the
+  // archive door's case, never this repair's.
+  const marker = archiveMarker(db, roomId);
+  if (marker.throughSeq) {
+    const archivedRows = db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))")
+      .get(roomId, marker.throughSeq, marker.retainedJson).n;
+    if (archivedRows !== marker.count) return { ...base, outcome: "archive_marker", eventCount };
+  }
+  let replay;
+  try {
+    replay = replayRoomLogForParityRepair(db, roomId, deadline);
+  } catch (error) {
+    if (!isRoomDataError(error)) throw error;
+    return { ...base, outcome: "projection_divergent", eventCount };
+  }
+  if (replay.aborted) return { ...base, attempted: false, aborted: true, outcome: null, eventCount: replay.eventCount };
+  const rebuilt = new Map((replay.state.messages ?? [])
+    .filter(message => message && typeof message.id === "string")
+    .map(message => [message.id, message]));
+  // P2 leg, hash-gated, prepared before any write: for each body the
+  // certification would flag missing, the re-derived bytes may be
+  // re-spilled ONLY if they hash to the projection's bodyRef (the same
+  // relation verifyBodyHashes checks in certifyMessagesParity). A
+  // mismatch means the log and the projection's reference disagree —
+  // projection-side drift — so the whole repair writes nothing.
+  const rawProjection = JSON.parse(db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection);
+  const bodyRefs = new Map();
+  for (const message of rawProjection.messages ?? []) {
+    if (message && typeof message.id === "string" && typeof message.bodyRef === "string") bodyRefs.set(message.id, message.bodyRef);
+  }
+  const hydration = hydrateProjection(db, roomId, rawProjection, { verifyBodyHashes: true });
+  const respill = [];
+  for (const id of hydration.missing) {
+    const sha = bodyRefs.get(id);
+    const source = rebuilt.get(id);
+    if (typeof sha !== "string" || !source || typeof source.body !== "string" || sha256Hex(source.body) !== sha) {
+      return { ...base, outcome: "projection_divergent", eventCount };
+    }
+    respill.push({ sha, body: source.body });
+  }
+  if (Date.now() > deadline) return { ...base, attempted: false, aborted: true, outcome: null, eventCount };
+  // Reconcile the table to the re-derived state in ONE transaction:
+  // update drifted rows via the existing resync primitive, insert rows
+  // the rebuilt state has and the table lacks (at their posting
+  // sequences), delete only orphan rows provably absent from BOTH the
+  // rebuilt state AND the room's logged message events, re-spill the
+  // hash-gated bodies, and restore the cursor to caught-up with
+  // parity_at_seq = NULL — the repair never certifies by construction;
+  // the re-certification below records the verdict.
+  const counts = store.transaction(() => {
+    // Posting-seq drift (a P4 sub-shape): resyncRoomMessageRows keeps each
+    // row's existing sequence by design, so correct it first from the
+    // replay's posting provenance — every row's seq is its posting
+    // event's sequence, the same value certifyMessagesParity compares.
+    const fixSeq = db.prepare("UPDATE messages SET seq=? WHERE room_id=? AND message_id=?");
+    for (const row of db.prepare("SELECT message_id, seq FROM messages WHERE room_id=?").all(roomId)) {
+      const expected = replay.sequences.get(row.message_id);
+      if (Number.isSafeInteger(expected) && row.seq !== expected) fixSeq.run(expected, roomId, row.message_id);
+    }
+    const updated = resyncRoomMessageRows(db, roomId, replay.state);
+    const existing = new Set(db.prepare("SELECT message_id FROM messages WHERE room_id=?").all(roomId).map(row => row.message_id));
+    const missingSeq = new Map();
+    for (const id of rebuilt.keys()) {
+      if (existing.has(id)) continue;
+      const seq = replay.sequences.get(id);
+      if (Number.isSafeInteger(seq)) missingSeq.set(id, seq);
+    }
+    const inserted = missingSeq.size
+      ? writeMessageRows(db, { roomId, state: replay.state, sequenceById: missingSeq, messageIndex: rebuilt, exactSequence: true })
+      : 0;
+    let deletedOrphans = 0;
+    const deleteRow = db.prepare("DELETE FROM messages WHERE room_id=? AND message_id=?");
+    for (const id of existing) {
+      if (rebuilt.has(id) || replay.loggedMessageIds.has(id)) continue;
+      deletedOrphans += deleteRow.run(roomId, id).changes;
+    }
+    const spill = db.prepare(`INSERT INTO projection_bodies (room_id, sha, body) VALUES (?, ?, ?)
+      ON CONFLICT(room_id, sha) DO UPDATE SET body=excluded.body`);
+    for (const entry of respill) spill.run(roomId, entry.sha, entry.body);
+    db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id=?").run(roomId);
+    return { updated, inserted, deletedOrphans, respilled: respill.length };
+  });
+  let certified;
+  try {
+    certified = certifyMessagesParity(store, roomId);
+  } catch (error) {
+    const text = String(error?.message ?? error);
+    if (!text.startsWith(`messages parity failed for ${roomId}:`)) throw error;
+    return { ...base, outcome: /archived rows/.test(text) ? "archive_marker" : "projection_divergent", eventCount, ...counts };
+  }
+  if (!certified?.ok) return { ...base, outcome: "projection_divergent", eventCount, ...counts };
+  return { ...base, healed: true, outcome: "healed", eventCount, ...counts };
 }
 
 // Messages that must stay in the projection: pinned, the source or evidence of
