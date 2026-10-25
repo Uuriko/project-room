@@ -31,9 +31,9 @@ function snapshotClaimState(f, actor, workItemId) {
   };
 }
 
-function assertUnchanged(f, ctx, why) {
+function assertUnchanged(f, ctx, why, code = "command_rejected") {
   assert.equal(ctx.error?.status, 422, `${why}: the update must be refused with 422`);
-  assert.equal(ctx.error?.code, "command_rejected", `${why}: the refusal code must be command_rejected`);
+  assert.equal(ctx.error?.code, code, `${why}: the refusal code must be ${code}`);
   const after = snapshotClaimState(f, f.keys.owner, ctx.workItemId);
   assert.equal(after.json, ctx.before.json, `${why}: claim state must be byte-identical after a failed update`);
   assert.equal(after.sequence, ctx.before.sequence, `${why}: a failed update must not journal an event`);
@@ -57,7 +57,7 @@ invariantSuite([
       });
     })
     .then((f, ctx) => {
-      assertUnchanged(f, ctx, "failed-update-preserves-claim");
+      assertUnchanged(f, ctx, "failed-update-preserves-claim", "invalid_command");
     })
     .build(),
 

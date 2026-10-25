@@ -75,6 +75,12 @@ test("offer refusals separate refused attempts from unknown outcomes without ech
   }
   assert.equal(helpActionRefusal({ code: "invalid_help_action" }).outcome, "this_attempt_not_sent");
   assert.equal(helpActionRefusal({ status: 503, code: "private" }), null);
+  for (const [status, code] of [[403, "permission_denied"], [422, "invalid_command"]]) {
+    const result = helpActionRefusal({ status, code, message: "PRIVATE SECRET" });
+    assert.equal(result.outcome, "this_attempt_refused");
+    assert.equal(result.code, code);
+    assert.equal(JSON.stringify(result).includes("PRIVATE SECRET"), false);
+  }
 });
 
 test("direct client exposes the same strict action with identity preflight and no context read or retry", async () => {

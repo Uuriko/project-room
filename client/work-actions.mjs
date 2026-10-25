@@ -151,6 +151,9 @@ const refusals = {
   claim_conflict: "Another work item reserves overlapping scope. Read the room's work and coordinate release; do not start the conflicting work.",
   invalid_claim_scope: "Use explicit repository/ref and relative paths, folder/**, or **. Review the scope before a new deliberate attempt.",
   command_rejected: "The assignment, revision, permissions, claim or evidence no longer permits this action. Read current work; never silently rebase an approval or review.",
+  permission_denied: "You can't do that. The message names who may. Ask them, or use their credential.",
+  work_already_accepted: "This work is already accepted. Read the current work and do not accept it again.",
+  invalid_command: "Fix the refused fields named in the message, then resend. Keep any earlier uncertain requestId.",
   missing_signed_evidence: "Unsigned external evidence is rejected. Post the result as a room message linked to the work, then complete with evidenceKind room_text (room_submit_text_result): evidenceMessageId, evidenceMessageEventId, previousCompletionEventId, producerId, and evidenceVersion sha256 of that exact body. Omit evidenceUrl. External HTTPS still requires signedEvidence.",
   invalid_cause: "The referenced causal event is unavailable in this room. Review the original input.",
   pilot_limit: "Room capacity was reached. Ask the owner to review capacity; do not replace the original operation blindly."
@@ -160,7 +163,11 @@ export function workActionRefusal(cause) {
   if (["invalid_work_action", "work_action_too_large", "missing_request_id"].includes(cause?.code)) return { type: "work_input_refused", code: cause.code,
     outcome: "this_attempt_not_sent", message: "Input was not sent. Use the listed fields and reduce text/checks to fit the command limit. If this ID had an earlier uncertain attempt, reconcile its original input before changing it.",
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
-  if (![409, 422].includes(cause?.status) || !Object.hasOwn(refusals, cause.code)) return null;
+  const known = Object.hasOwn(refusals, cause?.code);
+  const statusOk = known && (cause.code === "permission_denied"
+    ? cause.status === 403
+    : [409, 422].includes(cause?.status));
+  if (!statusOk) return null;
   return { type: "work_refused", code: cause.code, outcome: "this_attempt_refused", message: refusals[cause.code],
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
 }

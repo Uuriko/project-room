@@ -148,7 +148,8 @@ test("http: channel lifecycle through /commands and per-channel posting", async 
 
   res = await send(f.keys.guest, { id: randomUUID(), type: T.CHANNEL_RENAMED,
     data: { channelId: created.id, name: "ux" } });
-  assert.equal(res.status, 422, "non-owner rename rejected");
+  assert.equal(res.status, 403, "non-owner rename rejected");
+  assert.equal((await res.json()).error.code, "permission_denied");
   res = await send(f.keys.owner, { id: randomUUID(), type: T.CHANNEL_RENAMED,
     data: { channelId: created.id, name: "ux" } });
   assert.equal(res.status, 201);

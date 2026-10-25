@@ -110,6 +110,13 @@ test("known business refusals have fixed recovery guidance and never echo servic
   }
   assert.equal(workActionRefusal({ status: 503, code: "private-code" }), null);
   assert.equal(workActionRefusal({ status: 422, code: "unrecognized" }), null);
+  assert.equal(workActionRefusal({ status: 409, code: "permission_denied", message: "PRIVATE SECRET" }), null);
+  for (const [status, code] of [[403, "permission_denied"], [409, "work_already_accepted"], [422, "invalid_command"]]) {
+    const response = workActionRefusal({ status, code, message: "PRIVATE SECRET" });
+    assert.equal(response.code, code);
+    assert.equal(response.outcome, "this_attempt_refused");
+    assert.equal(JSON.stringify(response).includes("PRIVATE SECRET"), false);
+  }
   const unsigned = workActionRefusal({ status: 422, code: "missing_signed_evidence", message: "PRIVATE SECRET" });
   assert.equal(unsigned.code, "missing_signed_evidence");
   assert.equal(unsigned.outcome, "this_attempt_refused");

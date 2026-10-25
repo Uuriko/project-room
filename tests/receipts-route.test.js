@@ -62,7 +62,8 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
     headers: { authorization: `Bearer ${adaKey}`, "content-type": "application/json" },
     body: JSON.stringify({ id: "nope", type: "room.public_receipts_set", data: { enabled: true } }),
   });
-  assert.equal(denied.status, 422);
+  assert.equal(denied.status, 403);
+  assert.equal(JSON.parse(denied.text).error.code, "permission_denied");
   assert.equal(store.room("commons").state.room.publicReceipts, undefined);
   assert.equal((await raw(origin, "/receipts")).text.includes("Ship the door"), false);
   const allowed = await raw(origin, "/api/rooms/commons/commands", {

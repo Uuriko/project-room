@@ -103,7 +103,7 @@ function openRawStream(origin, key, after = 0) {
 test("ramp-up/ramp-down: commands scale with concurrency, latency recovers", () => {
   // Claim races are benign here: every attempted op is either counted or lands
   // in errors as a claim conflict, so ops + error count is exact.
-  const benign = new Set(["session_claimed", "command_rejected", "No queued session card for that work item"]);
+  const benign = new Set(["session_claimed", "command_rejected", "permission_denied", "No queued session card for that work item"]);
   const run = agents => {
     const report = reportOf(runScript(["--mode", "commands", "--agents", String(agents), "--iterations", "1", "--quiet"])).commands;
     assert.equal(report.agents, agents);
@@ -166,7 +166,7 @@ test("concurrency contention on the same key: exactly one claim wins", async () 
       const code = loser.reason?.code ?? String(loser.reason?.message ?? loser.reason);
       // losers race the winner's write: held session (409), reducer conflict
       // (422), or the card already moved before their read — all clean 4xx.
-      const clean = code === "session_claimed" || code === "command_rejected" || /No queued session card/.test(code);
+      const clean = code === "session_claimed" || code === "command_rejected" || code === "permission_denied" || /No queued session card/.test(code);
       assert.ok(clean, `loser rejected cleanly, got ${code}`);
     }
     // reads stay healthy through the contention storm

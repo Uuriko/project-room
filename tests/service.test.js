@@ -73,7 +73,8 @@ test("work concurrency admits one revision winner across two database connection
   const other = new RoomStore(filename);
   try {
     store.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "w1", expectedRevision: 0 }));
-    assert.throws(() => other.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "w1", expectedRevision: 0 })), /Invalid transition|Stale/);
+    assert.throws(() => other.command(human, "commons", command(T.WORK_ACCEPTED, { workItemId: "w1", expectedRevision: 0 })),
+      error => error.code === "work_already_accepted" && /^Already accepted by .+ at rev \d+$/.test(error.message));
     assert.equal(other.snapshot(human, "commons").state.workItems.w1.revision, 1);
   } finally { other.close(); }
 });

@@ -61,7 +61,9 @@ test("HTTP uses the authenticated actor, strict fields and existing failure sema
   const url = `http://127.0.0.1:${server.address().port}/api/rooms/commons/commands`;
   const post = (command, actor = "producer") => fetch(url, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${f.keys[actor]}` }, body: JSON.stringify(command) });
   const before = auditRecovery(f.store).dataSha256;
-  assert.equal((await post(f.command(), "reviewer")).status, 422);
+  const reviewerDenied = await post(f.command(), "reviewer");
+  assert.equal(reviewerDenied.status, 403);
+  assert.equal((await reviewerDenied.json()).error.code, "permission_denied");
   assert.equal((await post(f.command({ actorId: "owner" }))).status, 422);
   assert.equal((await post(f.command({ expectedHelpRevision: 0.5 }))).status, 422);
   assert.equal(auditRecovery(f.store).dataSha256, before);
