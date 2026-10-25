@@ -1,0 +1,42 @@
+name: rerun-superseded
+
+# Reruns, once, a pull-request check that was cancelled because a newer
+# commit superseded it. The pull request must be open, not a draft, and
+# labeled ready-to-land. The new attempt is the current head's first
+# attempt; a second cancel is left alone. A cancel of the current head
+# with no older cancelled run is left alone. Does not delete runs and does
+# not create statuses.
+on:
+  workflow_run:
+    workflows: [test, schema-gate, pr-gates, machine, relay, pin-gate, review-mechanical]
+    types: [completed]
+
+permissions:
+  actions: write
+  contents: read
+  pull-requests: read
+  checks: read
+
+concurrency:
+  group: rerun-${{ github.event.workflow_run.workflow_id }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'cancelled' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Rerun the superseded head check once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          RUN_EVENT: ${{ github.event.workflow_run.event }}
+          RUN_SHA: ${{ github.event.workflow_run.head_sha }}
+          RUN_NAME: ${{ github.event.workflow_run.name }}
+          RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id }}
+        run: node scripts/repo-automations.mjs rerun

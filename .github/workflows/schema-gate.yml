@@ -22,27 +22,31 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review, labeled]
     # Docs-only diffs cannot move the schema migration. This check is not in
-    # the merge gate's required set. deploy-prod reads the push run, which
-    # stays unfiltered. A required check would need a companion job instead
-    # of this skip.
+    # the merge gate's required set. A manual deploy-prod reads the push run.
+    # The hourly schedule accepts a workflow_dispatch run as well, because a
+    # GITHUB_TOKEN merge does not start a push run. A required check would
+    # need a companion job instead of this skip.
     paths-ignore:
       - "**/*.md"
       - "docs/**"
   push:
     branches: [main]
+  # land-ready dispatches this after a GITHUB_TOKEN merge. That push does not
+  # start workflows by itself.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 # Pull requests each have their own group (workflow name plus ref) and cancel
-# their own older runs. Pushes to main share that same ref key, because every
-# main push uses refs/heads/main, and do not cancel the run already in
+# their own older runs. Only a pull_request event cancels an in-progress run.
+# Pushes to main share that same ref key and do not cancel the run already in
 # progress. The running main SHA can finish, and only the newest pending main
-# run stays queued. workflow_dispatch is keyed by run id so a manual run stays
-# independent.
+# run stays queued. workflow_dispatch is keyed by run id so a dispatched run
+# neither joins the main group nor cancels it.
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || format('{0}-{1}', github.workflow, github.ref) }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   schema-gate:

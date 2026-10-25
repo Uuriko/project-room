@@ -23,14 +23,14 @@ permissions:
   contents: read
 
 # Pull requests each have their own group and cancel their own older runs.
-# Pushes to main share `test-main` and do not cancel the run already in
-# progress: GitHub finishes that main SHA and keeps only the newest pending
-# run (any older pending run in the group is cancelled). A main SHA can
-# therefore finish `test` between merges. workflow_dispatch is keyed by run
-# id: a manual run neither cancels the tip nor is cancelled by it.
+# Only a pull_request event cancels an in-progress run. Pushes to main share
+# `test-main` and do not cancel the run already in progress: GitHub finishes
+# that main SHA and keeps only the newest pending run. merge_group, schedule,
+# and workflow_dispatch do not cancel. workflow_dispatch is keyed by run id,
+# so a manual run neither cancels the tip nor is cancelled by it.
 concurrency:
   group: ${{ github.event_name == 'workflow_dispatch' && format('{0}-dispatch-{1}', github.workflow, github.run_id) || (github.event_name == 'push' && github.ref == 'refs/heads/main' && 'test-main') || format('{0}-{1}', github.workflow, github.ref) }}
-  cancel-in-progress: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') && github.event_name != 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # Pull requests only. Push to main skips this job so the full matrix starts

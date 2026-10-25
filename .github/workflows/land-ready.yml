@@ -1,0 +1,46 @@
+name: land-ready
+
+# Merges open, non-draft ready-to-land pull requests whose current head
+# checks are green. One job merges the whole batch, oldest number first.
+# It does not update other pull request branches and does not wait for main
+# CI, so a merge does not cancel the other pull requests' runs.
+#
+# A GITHUB_TOKEN merge does not start push workflows. After a direct merge
+# the job dispatches test and schema-gate once. If an admin later requires
+# the merge queue (.github/rulesets/main.json), gh pr merge enqueues instead
+# and this job does not dispatch. It does not bypass protections, create a
+# status, or delete a run.
+on:
+  workflow_run:
+    workflows: [test, schema-gate, pr-gates, machine, relay, pin-gate, review-mechanical]
+    types: [completed]
+  schedule:
+    - cron: "8 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: write
+  checks: read
+
+concurrency:
+  group: land-ready
+  cancel-in-progress: false
+
+jobs:
+  land:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Merge green ready-to-land pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: node scripts/repo-automations.mjs land

@@ -33,7 +33,27 @@ These stay ungated. They do not look at `ready-to-land` and they run on drafts:
 
 ## What stays on its previous trigger
 
-Pushes to `main` still run `test`, `schema-gate`, `pr-gates`, `machine`, and `relay` the same way they did before the label. `deploy-prod.yml` and `rollback-prod.yml` are unchanged. Post-merge `pull_request_target` workflows (`room-work-sync`, `trace-entry`) are unchanged.
+Pushes to `main` still run `test`, `schema-gate`, `pr-gates`, `machine`, and `relay` the same way they did before the label. `rollback-prod.yml` is unchanged. Post-merge `pull_request_target` workflows (`room-work-sync`, `trace-entry`) are unchanged. `deploy-prod.yml` adds an hourly schedule; the manual path and the optional `ROOM_AUTO_DEPLOY` path are unchanged.
+
+## Landing
+
+`land-ready` merges open, non-draft pull requests to `main` that carry `ready-to-land` and whose current head checks are green. One job merges that batch, oldest pull request number first. It does not push to the other pull request branches and it does not wait for main CI between merges, so those merges do not cancel the other pull requests' runs.
+
+A direct merge uses `gh pr merge --merge --match-head-commit`. The workflow does not pass `--admin`, does not create statuses, and does not delete runs. A `GITHUB_TOKEN` push does not start workflows, so after a direct merge the job dispatches `test` and `schema-gate` once on `main`. If an admin has required the merge queue, the same command adds the pull request to the queue and does not dispatch; the queue's own push starts CI.
+
+The label is still applied with a user token. This workflow only merges.
+
+## Superseded reruns
+
+`rerun-superseded` reruns a check once when a newer commit cancelled it. The pull request must be open, not a draft, and labeled `ready-to-land`. The rerun is the current head's first attempt, and only when an older run of that workflow was cancelled and the head has no live or successful run. A cancel of the current head with no older cancelled run is left alone. The job does not delete runs and does not create statuses.
+
+## Merge queue settings
+
+`.github/rulesets/main.json` is the branch ruleset for `main`. GitHub does not apply that file by itself. A repository admin creates it from Settings → Rules → Rulesets. The queue groups with `HEADGREEN` so one merge-group CI run covers the batch. Required checks are `test`, `contract`, `lint`, `browser`, and `cloudflare`, with "Require branches to be up to date before merging" off. `room/release-lease` stays off that list. It is an external status, and requiring it would stall the queue.
+
+## Hourly production deploy
+
+See [DEPLOY-LANE.md](DEPLOY-LANE.md#hourly-deploy).
 
 The label gate is on the pull-request jobs in:
 

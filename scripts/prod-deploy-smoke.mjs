@@ -19,8 +19,10 @@
 // Waits until /api/version and /api/version/worker report --sha on both the
 // canonical host and the public entry (edge propagation takes a few seconds),
 // then requires /api/health status "ok", /api/ready status "ready", and HTTP
-// 200 for /terms, /privacy and / on both doors. Prints one JSON report;
-// exits 1 on any failure.
+// 200 for /terms, /privacy and / on both doors. On the canonical host only,
+// / must include the sign-in control, /demo must include "Demo snapshot",
+// and /agents.json must be a JSON object. The public entry does not serve
+// the demo room. Prints one JSON report; exits 1 on any failure.
 // Without --sha it skips the revision wait (used after a rollback, where the
 // old revision is the expected one and is checked by the caller), but still
 // checks health, readiness and pages on both doors.
@@ -91,9 +93,9 @@ const get = async (url, accept = "application/json") => {
     const text = await res.text();
     let json = null;
     try { json = JSON.parse(text); } catch {}
-    return { status: res.status, json, ms: Date.now() - started };
+    return { status: res.status, json, text, ms: Date.now() - started };
   } catch (error) {
-    return { status: 0, json: null, ms: Date.now() - started, error: String(error?.message ?? error) };
+    return { status: 0, json: null, text: "", ms: Date.now() - started, error: String(error?.message ?? error) };
   }
 };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -257,9 +259,20 @@ async function main() {
     record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", { status: ready.status, body: ready.json?.status ?? null, emailVerification: ready.json?.emailVerification ?? "unknown", emailVerificationScope: ready.json?.emailVerificationScope ?? "unknown" });
     for (const page of ["/terms", "/privacy", "/"]) {
       const r = await get(`${door}${page}`, "text/html");
-      record(`page ${door}${page}`, r.status === 200, { status: r.status });
+      const signIn = door === origin && page === "/";
+      const pass = r.status === 200 && (!signIn || (r.text ?? "").includes('id="auth-signin-ui"'));
+      record(`page ${door}${page}`, pass, { status: r.status });
     }
   }
+
+  // Canonical host only. /demo is not a public-entry path; a check there
+  // would fail a healthy production deploy. /agents.json is the agent read.
+  const demo = await get(`${origin}/demo`, "text/html");
+  record(`page ${origin}/demo`, demo.status === 200 && (demo.text ?? "").includes("Demo snapshot"), { status: demo.status });
+  const agents = await get(`${origin}/agents.json`);
+  const agentsBody = agents.json;
+  const agentsOk = agents.status === 200 && agentsBody !== null && typeof agentsBody === "object" && !Array.isArray(agentsBody);
+  record(`agents ${origin}/agents.json`, agentsOk, { status: agents.status });
 
   // #1524: repeated signed-card assertion on both doors. The entry door is
   // the /room-prefixed public door, so its A2A card twin resolves at the

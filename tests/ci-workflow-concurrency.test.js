@@ -196,6 +196,12 @@ function assertMainDoesNotCancelInProgress(file) {
   assert.equal(cancel(dispatch), false, `${file}: workflow_dispatch must not cancel in progress`);
   assert.notEqual(group(dispatch), group(mainA), `${file}: a manual run must not join the main group`);
   assert.notEqual(group(dispatch), group(otherDispatch), `${file}: manual runs must not cancel each other`);
+
+  const mergeGroup = context(concurrency.name, { event_name: "merge_group", ref: "refs/heads/gh-readonly-queue/main/pr-1", run_id: "4001" });
+  const schedule = context(concurrency.name, { event_name: "schedule", ref: "refs/heads/main", run_id: "5001" });
+  assert.equal(cancel(mergeGroup), false, `${file}: merge_group must not cancel an in-progress run`);
+  assert.equal(cancel(schedule), false, `${file}: schedule must not cancel an in-progress run`);
+  assert.notEqual(group(mergeGroup), group(pull), `${file}: a merge queue run must not join a pull request group`);
 }
 
 test("main pushes never cancel an in-progress test or schema-gate run", () => {
