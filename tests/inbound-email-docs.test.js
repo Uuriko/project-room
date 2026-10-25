@@ -1,5 +1,5 @@
 // Inbound email stays off until a durable consumer is wired. Served discovery
-// documents and the two operator docs this batch owns must not say otherwise.
+// documents and the operator docs that describe mail must not say otherwise.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -16,7 +16,7 @@ test("inbound email is off, and served docs do not promise a live mailbox", () =
   for (const packet of [llmsTxt(), llmsFullTxt()]) {
     assert.equal(liveClaim.test(packet), false);
   }
-  for (const name of ["docs/ADMIN-GUIDE.md", "docs/CURRENT-ROOM.md"]) {
+  for (const name of ["docs/ADMIN-GUIDE.md", "docs/CURRENT-ROOM.md", "docs/UNIFIED-INBOX.md", "docs/DATA-BOUNDARIES.md", "docs/analytics/EVENTS.md"]) {
     const text = readFileSync(join(root, name), "utf8");
     assert.match(text, /inbound email is off/i);
     assert.equal(liveClaim.test(text), false);

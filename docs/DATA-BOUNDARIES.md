@@ -22,7 +22,7 @@ compliance claim.
 The event log, projections, work items, inbox connection records
 (`private_email_connections`, `data_json`) and journaled webhook updates
 (`pending_channel_updates`) all live in that same SQLite database
-(`docs/UNIFIED-INBOX.md` "Connection record"; `docs/EMAIL-ROUTING.md` "Worker email() handler").
+(`docs/UNIFIED-INBOX.md` "Connection record"). Inbound email is off, so the Worker `email()` handler writes no messages into that database.
 
 Message reports (`message_reports`, `server/moderation.mjs`) live in the same
 database but outside the room event log. A report contains the reported
@@ -136,8 +136,10 @@ Values are never recorded here or anywhere in the repository.
 | Wrangler operator OAuth credential | The deploying operator's own keychain | Deploys | Personal to the operator | `cloudflare/README.md` "Deployment gate and next steps" |
 
 Not yet existing: a Telegram bot token binding (B21 work, needs a Worker
-secret set by the owner; `docs/UNIFIED-INBOX.md` "Worker mount (proposal for Grok)"). Cloudflare
-Email Routing needs no secret or API token (`docs/EMAIL-ROUTING.md` "What John must do").
+secret set by the owner; `docs/UNIFIED-INBOX.md` "Worker mount (proposal for Grok)").
+Inbound email is off. There is no Email Routing secret to set. The Worker
+`email()` handler is mounted and rejects every message because no durable
+consumer is wired (`cloudflare/room.mjs`, `server/email-routing-inbound.mjs`).
 CI never receives operator credentials and never runs the hosted acceptance
 script (`cloudflare/README.md` "Reproduce").
 
@@ -146,7 +148,7 @@ script (`cloudflare/README.md` "Reproduce").
 | Party | Role today | Data it can see | Cited in |
 | --- | --- | --- | --- |
 | Cloudflare (Workers, Durable Objects with SQLite, static assets, TLS, routes on `getdasha.com`) | Hosting and edge for the live staging deployment | All request and response traffic at the edge; all stored room data inside the Durable Object. Workers observability is disabled in the deploy configuration. | `cloudflare/wrangler.jsonc` (`observability.enabled: false`), `cloudflare/README.md` |
-| Cloudflare Email Routing | Planned inbound mail; code and tests only, not enabled | When enabled: every message to the routed addresses passes Cloudflare's SMTP edge into the Worker `email()` handler, and the parsed, capped content is stored in the Durable Object | `docs/EMAIL-ROUTING.md` opening status paragraph, "What John must do", "Caps" |
+| Cloudflare Email Routing | Inbound email is off. The Worker `email()` handler is mounted and rejects every message; no durable consumer is wired | No message content. A rejected message is not stored in the Durable Object | `cloudflare/room.mjs` `email()`, `server/email-routing-inbound.mjs` |
 | Telegram Bot API | Fixture-only adapter; no bot token, no network calls, no webhook registration in this tree | None today. When live: Telegram holds the bot's chats and would deliver updates to `POST /api/inbox/webhooks/{connectionId}` | `docs/UNIFIED-INBOX.md` "Status: fixtures only" and "Routes", `server/channel-adapters/index.mjs` |
 | Microsoft Graph | Profile shape only; no Graph calls exist | None | `docs/EMAIL-ROUTING.md` "Modules" (connection record shape), `server/channel-adapters/email.mjs` |
 | Dasha Compute (`lobby.getdasha.com`) | Reached only by the operator-run `scripts/dasha-bridge.mjs`, never by the hosted service | The text of `[dasha]` work items sent to it (section 6) | `scripts/dasha-bridge.mjs` |
