@@ -59,6 +59,12 @@ export const unfencedAdditiveTables = Object.freeze([
   // code path to them, and the owner-only grant rule is the integrity gate.
   "owner_delegate_grants",
   "owner_delegate_journal",
+  // oauth_grant_agents (AGENT-DOOR-AUTH stage 2, server/oauth-grant-agents.mjs):
+  // the (account, client) -> owned agent identity binding for OAuth
+  // grants; purely additive and intentionally NOT fenced — older writers
+  // have no code path to it, and the account-ownership rule on resolve /
+  // remove is the integrity gate.
+  "oauth_grant_agents",
   // account_login_methods + account_passkey_credentials + account_magic_codes
   // + account_recovery_codes (multi-method login, slice 1): purely additive,
   // outside the fence like access_requests — older writers have no code path
