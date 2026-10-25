@@ -11,7 +11,7 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import {
-  CORE_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
+  PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
 } from "../src/room-mcp-join.js";
 import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 import { FOLDED_MCP_TOOLS, familyToolDefs } from "../server/mcp-folded-catalog.mjs";
@@ -21,8 +21,6 @@ const fullFront = [
   ...HOSTED_ROOM_MCP_TOOLS.filter(name => !foldedNames.has(name)),
   ...familyToolDefs.map(tool => tool.name)
 ];
-
-const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-core-"));

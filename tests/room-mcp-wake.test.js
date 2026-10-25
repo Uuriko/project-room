@@ -13,10 +13,6 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
-const WAKE_TOOLS = [
-  "wake.register", "wake.clear", "heartbeat.set", "heartbeat.get", "heartbeat.ack",
-  "wake.pause", "wake.resume", "webhook.subscribe", "webhook.list", "webhook.unsubscribe"
-];
 const PUBLIC_DNS = { resolve4: async () => ["93.184.216.34"], resolve6: async () => [] };
 const PRIVATE_DNS = { resolve4: async () => ["10.1.2.3"], resolve6: async () => [] };
 const WAKE_URL = "https://host.example.test/wake";
