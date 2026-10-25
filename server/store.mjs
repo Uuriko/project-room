@@ -4886,7 +4886,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // a caller that smuggles them in is rejected, not silently honoured.
     const required = ["requestId", "workItemId", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "outputs"] : [])];
+    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "outputs", "attemptCount"] : [])];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, and set_status or request_stop. expectedRevision is optional");
     }
@@ -4905,6 +4905,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       fail(422, "invalid_session_rounds", "rounds must be a non-negative integer");
     if (request.toolCalls !== undefined && (!Number.isSafeInteger(request.toolCalls) || request.toolCalls < 0))
       fail(422, "invalid_session_tool_calls", "toolCalls must be a non-negative integer");
+    // #3322: a usage report may name the attempt it belongs to — the
+    // session's attempt_count at claim time, read from the session card.
+    if (request.attemptCount !== undefined && (!Number.isSafeInteger(request.attemptCount) || request.attemptCount < 0))
+      fail(422, "invalid_session_attempt", "attemptCount must be a non-negative integer");
     // W4-46 H5: the budget trip-wire fires before anything else touches the
     // session — any interaction with a runaway session stops it first. A
     // spend report on this mutation counts: the limit trips on the number
@@ -4920,9 +4924,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
       const session = sessionRecord(item);
-      const pendingRounds = request.rounds ?? session.round_count;
-      const pendingToolCalls = request.toolCalls ?? session.tool_calls;
-      const pendingSpend = request.spendCents ?? session.spend_cents;
+      // Attempt binding (#3322): a usage report binds to the attempt it
+      // names via attemptCount — the session's attempt_count at claim
+      // time. A report naming another attempt is stale and the wire never
+      // fires for it. A report naming no attempt fires only on numbers
+      // already stored for the live attempt, never on numbers the request
+      // itself carries. Only a report naming the live attempt counts its
+      // own numbers, as RC-2026-09-19-063 established.
+      const binding = request.attemptCount === undefined ? "absent"
+        : request.attemptCount === session.attempt_count ? "matched" : "stale";
+      if (binding === "stale") return null;
+      const pendingRounds = binding === "matched" ? request.rounds ?? session.round_count : session.round_count;
+      const pendingToolCalls = binding === "matched" ? request.toolCalls ?? session.tool_calls : session.tool_calls;
+      const pendingSpend = binding === "matched" ? request.spendCents ?? session.spend_cents : session.spend_cents;
       // A session already paused by its round limit stays paused until the
       // owner resumes it — the resume gate below owns that path, so the wire
       // does not re-fire here.
@@ -4948,8 +4962,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           this.command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
             data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
               budgetEnforced: true, reason: "budget_exceeded", limit: wire,
-              ...(request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
-              ...(request.rounds !== undefined ? { rounds: request.rounds } : {}),
+              ...(binding === "matched" && request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
+              ...(binding === "matched" && request.rounds !== undefined ? { rounds: request.rounds } : {}),
               // #3349: a spend trip records the spend figure that
               // tripped it, mirroring the toolCalls/rounds payload.
               ...(wire === "maxSpendCents" && pendingSpend !== null ? { spendCents: pendingSpend } : {}) } }, expectedSessionBinding);
@@ -5044,9 +5058,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (type === T.SESSION_STARTED && environment) data.environment = environment;
       if (type === T.SESSION_STARTED && model) data.model = model;
       if (type === T.SESSION_STOPPED && outputs) data.outputs = outputs;
-      if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
-      if (request.rounds !== undefined && type !== T.SESSION_STOP_REQUESTED) data.rounds = request.rounds;
-      if (request.toolCalls !== undefined && type !== T.SESSION_STOP_REQUESTED) data.toolCalls = request.toolCalls;
+      // #3322: a report naming another attempt is still recorded, so its
+      // requestId replays idempotently, but its usage numbers are not
+      // copied into the event — they must not move the live attempt's
+      // counters. The rest of the mutation applies under the usual gates.
+      const staleAttemptReport = request.attemptCount !== undefined
+        && request.attemptCount !== sessionRecord(item).attempt_count;
+      if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED && !staleAttemptReport) data.spendCents = request.spendCents;
+      if (request.rounds !== undefined && type !== T.SESSION_STOP_REQUESTED && !staleAttemptReport) data.rounds = request.rounds;
+      if (request.toolCalls !== undefined && type !== T.SESSION_STOP_REQUESTED && !staleAttemptReport) data.toolCalls = request.toolCalls;
       if (resumeApproved) data.resumeApproved = true;
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });
