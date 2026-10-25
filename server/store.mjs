@@ -6251,7 +6251,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (command.type === T.WORK_ACCEPTED && error.message === "Invalid transition from accepted") {
           const item = room.state.workItems?.[command.data?.workItemId];
           if (item?.state === "accepted") {
-            const member = room.state.members?.[item.accountableMemberId];
+            const member = ownMember(room.state.members, item.accountableMemberId);
             const name = typeof member?.displayName === "string" && member.displayName.trim()
               ? member.displayName.trim()
               : (item.accountableMemberId || "another member");

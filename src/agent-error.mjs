@@ -324,8 +324,9 @@ export const ERROR_REGISTRY = {
     status: "action_required",
     hint: ({ message }) => {
       const parsed = /^Already accepted by (.+) at rev (\d+)$/.exec(String(message || ""));
-      const text = parsed
-        ? `${parsed[1]} already accepted this work at rev ${parsed[2]}. Read it; do not accept again.`
+      const who = parsed ? [parsed[1], "at rev", parsed[2]].join(" ") : "";
+      const text = who
+        ? `${who} already accepted this work. Read it; do not accept again.`
         : "This work is already accepted. Read the current work and do not accept it again.";
       return text.length < 160 ? text : "This work is already accepted. Read the current work and do not accept it again.";
     },
