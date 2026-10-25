@@ -190,6 +190,7 @@ test("walkthrough: one word (invite) joins through all four mechanisms", async t
 test("scanner: user-facing surfaces carry no internal mechanism names", t => {
   const files = [
     "index.html",
+    "src/workspace-shell.html",
     "server/room-entry.mjs",
     "server/agent-discovery.mjs",
     "docs/openapi.yaml",
@@ -219,6 +220,7 @@ test("JOINING.md admin instructions name only controls in the client", () => {
   const adminPara = doc.split("**Making someone an additional room admin:**")[1]?.split("\n\n")[0] ?? "";
   assert.ok(adminPara.length > 0, "JOINING.md should keep the admin paragraph");
   const client = readFileSync(join(ROOT, "index.html"), "utf8")
+    + readFileSync(join(ROOT, "src/workspace-shell.html"), "utf8")
     + readFileSync(join(ROOT, "src/app.js"), "utf8");
   const labels = [...adminPara.matchAll(/\*\*([^*]+)\*\*/g)]
     .flatMap(m => m[1].split("→"))

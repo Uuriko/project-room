@@ -11,6 +11,10 @@ server-emitted code is missing here.
 The full table sits at the bottom. Read the sections above it first — they
 carry the rules agents actually need.
 
+MCP tool descriptions stay within 400 characters. When a description says
+`tool-notes`, the rest of that tool's note is
+[tool-notes.md](tool-notes.md).
+
 ## How to read any error
 
 Every failure keeps `error.code` and `error.message`, plus the AX layer's

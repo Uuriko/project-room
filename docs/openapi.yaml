@@ -2944,6 +2944,38 @@ paths:
                 $ref: '#/components/schemas/ErrorBody'
         '405':
           description: Method not allowed
+  /api/openapi.json:
+    get:
+      summary: Full OpenAPI document as JSON
+      description: >-
+        Open (also HEAD). The OpenAPI 3.1 document in docs/openapi.yaml,
+        served as JSON. Public and cacheable. This is the full route
+        reference. GET /openapi.json remains the smaller curated inventory.
+      security: []
+      responses:
+        '200': { description: OpenAPI 3.1 document }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/openapi.yaml:
+    get:
+      summary: Full OpenAPI document
+      description: >-
+        Open (also HEAD). The bytes of docs/openapi.yaml. Public and
+        cacheable. GET /api/openapi.json is the same document as JSON.
+        GET /openapi.json remains the smaller curated inventory.
+      security: []
+      responses:
+        '200': { description: OpenAPI 3.1 document }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
   /api/opportunities.json:
     get:
       summary: Public opportunity feed

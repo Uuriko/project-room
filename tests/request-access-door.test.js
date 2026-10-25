@@ -88,7 +88,8 @@ test("build: a pasted room link resolves to its room id", () => {
 });
 
 test("the account panel no longer carries a request-access door (#3293 step 2)", () => {
-  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8")
+    + readFileSync(new URL("../src/workspace-shell.html", import.meta.url), "utf8");
   assert.doesNotMatch(html, /account-request-(access|form|room|name|note|referred|submit|status)/);
 });
 

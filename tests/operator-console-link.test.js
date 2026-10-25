@@ -11,7 +11,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
-const html = readFileSync(join(repoRoot, "index.html"), "utf8");
+const html = readFileSync(join(repoRoot, "src/workspace-shell.html"), "utf8");
 const appJs = readFileSync(join(repoRoot, "src", "app.js"), "utf8");
 
 // The #room-health <details> block: from its opening tag to the first

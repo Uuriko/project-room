@@ -87,7 +87,7 @@ test("catalog door cards reuse existing Join anchors and stay off a public store
 });
 
 test("Add agent markup renders the catalog with roster aliases on the four named assistants", () => {
-  const html = readFileSync(join(checkout, "index.html"), "utf8");
+  const html = readFileSync(join(checkout, "src/workspace-shell.html"), "utf8");
   assert.match(html, /id="agent-type-catalog"/);
   assert.doesNotMatch(html, /marketplace/i);
   for (const id of AGENT_TYPE_CATALOG.map(row => row.id)) {

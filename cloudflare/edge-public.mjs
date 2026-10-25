@@ -8,6 +8,7 @@ import { frontDoorHtml, githubConfig } from '../server/github-oauth.mjs';
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
 import { buildOpenApiJson } from '../server/discoverability.mjs';
+import { ifNoneMatch, openApiDocumentFromYaml } from '../server/openapi-document.mjs';
 import { MCP_SERVER_CARD_PATH, MCP_DISCOVERY_CACHE_CONTROL, MCP_SERVER_CARD_CORS } from '../src/mcp-server-card.mjs';
 import { agentErrorBody, errorCategory } from '../src/agent-error.mjs';
 import { randomBytes } from 'node:crypto';
@@ -27,6 +28,7 @@ const assetType = path => path.endsWith('.js') || path.endsWith('.mjs') ? 'text/
   : path.endsWith('.svg') ? 'image/svg+xml'
   : path.endsWith('.webmanifest') ? 'application/manifest+json'
   : path.endsWith('.json') ? 'application/json'
+  : path.endsWith('.yaml') ? 'application/yaml'
   : path.endsWith('.sh') ? 'text/plain'
   : 'text/markdown; charset=utf-8';
 
@@ -145,6 +147,7 @@ function securityTxtResponse(request, url, contact) {
 export function classifyEdgePath(pathname) {
   if (pathname === '/.well-known/security.txt' || pathname === '/room/.well-known/security.txt') return 'security-txt';
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
+  if (pathname === '/api/openapi.yaml' || pathname === '/api/openapi.json') return 'openapi-spec';
   const doc = discoveryDoc(pathname);
   if (doc && doc !== skillsDoc) return 'discovery';
   if (assets.has(pathname) || roomMarketingPath(pathname)) return 'asset';
@@ -211,6 +214,28 @@ function openApiBody(origin) {
     openApiCache = { origin, body: JSON.stringify(buildOpenApiJson({ origin })) };
   }
   return openApiCache.body;
+}
+
+async function openApiSpecResponse(request, env, url) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') return null;
+  const bytes = await loadCachedAsset(env, 'docs/openapi.yaml');
+  if (!bytes) return null;
+  let document;
+  try { document = openApiDocumentFromYaml(bytes); }
+  catch { return null; }
+  const headers = baseHeaders(url);
+  const yaml = url.pathname.endsWith('.yaml');
+  const body = yaml ? document.yamlBytes : document.jsonBytes;
+  headers.set('Cache-Control', 'public, max-age=300');
+  headers.set('ETag', document.etag);
+  headers.set('X-Robots-Tag', 'all');
+  if (ifNoneMatch(request.headers.get('if-none-match'), document.etag)) {
+    headers.set('Content-Length', '0');
+    return new Response(null, { status: 304, headers });
+  }
+  headers.set('Content-Type', `${yaml ? 'application/yaml' : 'application/json'}; charset=utf-8`);
+  headers.set('Content-Length', String(body.byteLength));
+  return new Response(request.method === 'HEAD' ? null : body, { status: 200, headers });
 }
 
 function openApiResponse(request, url) {
@@ -318,6 +343,7 @@ export async function edgePublicResponse(request, env, url) {
   if (!kind) return null;
   if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
   if (kind === 'openapi') return openApiResponse(request, url);
+  if (kind === 'openapi-spec') return openApiSpecResponse(request, env, url);
   if (kind === 'discovery') return discoveryResponse(request, url);
   // #3274: POST / is 404 on Node (the app root is the SPA shell route, not a
   // method-guarded document) but the edge classified '/' as an asset and
