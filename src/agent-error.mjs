@@ -429,6 +429,7 @@ const AX_NAMED_RECOVERIES = {
   message_archived: ["Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it.", "Start a new message; do not retry changes against the archived one."],
   message_deleted: ["A deleted message cannot be saved. Work with a current message instead.", "Use a current, undeleted message."],
   ndjson_required: ["This route requires an NDJSON body. Resend with Content-Type application/x-ndjson.", "Resend the request as application/x-ndjson."],
+  no_access: [uiText("agentError.noAccess.hint"), uiText("agentError.noAccess.next")],
   nonprogressing_email_page: ["The sync page did not advance. Restart the sync from a fresh cursor; do not re-fetch the same page.", "Restart the sync from a fresh cursor."],
   not_declared: ["Declare what you are looking for before asking for a match.", "Declare what you are looking for, then ask for a match."],
   nothing_to_request: ["You already hold the permissions named in the message — nothing to request.", "Treat it as done; the permissions are already held."],
