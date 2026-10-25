@@ -3,7 +3,7 @@ import { uiText } from './strings.js';
 // from the claims the Board already loaded (no extra request, no polling).
 // One object (a claim with an owner, a partner and a lease), one inbox:
 //   - leases you are about to lose (owned, open, under an hour left or ended)
-//   - reviews you owe (tagged rev-<you> on open work you have not reviewed)
+//   - reviews you owe (tagged rev-<you> on open or delivered work you have not reviewed)
 //   - your claims gone quiet (owned, open, no update for two hours)
 //   - the rest of what you own, and what you are partnered on (rev-/build- tags), behind More
 // Partner tags accept a member id, or a display-name slug (rev-codexqa) when that
@@ -59,10 +59,19 @@ export function myBoardWork(items, viewerId, members = {}, now = Date.now()) {
     }
     if (item.owner === viewerId) continue;
     const reviewer = tagged(item, "rev-", viewerId, viewerSlug);
+    // Basis currency mirrors the kernel's currentReviewBasis (see board-ui's
+    // basisCurrent): the delivery binding included, so an approval recorded
+    // against a delivery that has since been replaced no longer hides the
+    // review that is owed on the new delivery.
     const reviewed = (Array.isArray(item.reviews) ? item.reviews : []).some(review => review?.memberId === viewerId && review.basis?.version === 1
       && review.basis.owner === item.owner && review.basis.claimedAt === (item.claimedAt ?? null)
-      && review.basis.revision === (item.revision ?? null) && review.basis.headSha === (item.ci?.headSha ?? null));
-    const reviewable = open || Boolean(item.pullRequest?.url && !item.pullRequest.outcome);
+      && review.basis.revision === (item.revision ?? null) && review.basis.headSha === (item.ci?.headSha ?? null)
+      && (review.basis.deliveryDigest !== null && review.basis.deliveryDigest !== undefined
+        ? review.basis.deliveryDigest === (item.delivery?.digest ?? null)
+        : (review.basis.deliveryGeneration ?? 0) === 0 && (item.deliveryGeneration ?? 0) <= 1));
+    // Delivered work is reviewable too — recordReview accepts it, and the
+    // verdict on the delivery is the review that matters (#3754).
+    const reviewable = open || item.state === "delivered" || Boolean(item.pullRequest?.url && !item.pullRequest.outcome);
     if (reviewer && reviewable && item.owner && !reviewed) { out.reviews.push({ item }); continue; }
     if ((reviewer || tagged(item, "build-", viewerId, viewerSlug)) && (open || item.state === "unclaimed")) out.partnered.push({ item });
   }

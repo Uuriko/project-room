@@ -218,7 +218,7 @@ test("stale refusal with no live updates provides an owned refresh before rebasi
   assert.equal(await f.save.isDisabled(), true); assert.equal(attempts.length, 1);
   await page.locator("#refresh-action").click(); await f.save.waitFor({ state: "visible" });
   await page.waitForFunction(() => !document.querySelector("#action-form button[type=submit]").disabled);
-  assert.match(await page.locator("#action-context").textContent(), /revision 2/); assert.equal(await f.input("summary").inputValue(), attempts[0].data.summary);
+  assert.equal(await page.locator("#action-context").textContent(), "Synthetic room result"); assert.equal(await f.input("summary").inputValue(), attempts[0].data.summary);
   assert.equal(attempts.length, 1, "refresh reads but does not resubmit");
   await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
   assert.notEqual(attempts[0].id, attempts[1].id); assert.equal(attempts[1].data.expectedRevision, 2);
@@ -232,9 +232,9 @@ test("a failed explicit refresh keeps old evidence and notes until a later succe
   await f.save.click(); await page.locator("#refresh-action").waitFor({ state: "visible" });
   await page.route("**/api/rooms/commons", route => fail ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic read failure" } } }) : route.continue());
   await page.locator("#refresh-action").click(); await page.getByText("Could not load current work. Try again.", { exact: true }).waitFor();
-  assert.match(await page.locator("#action-context").textContent(), /evidence v1/); assert.equal(await f.input("result").inputValue(), "pass");
+  assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v1"); assert.equal(await f.input("result").inputValue(), "pass");
   assert.equal(await f.input("summary").inputValue(), "Checked this exact result"); assert.equal(await f.save.isDisabled(), true);
-  fail = false; await page.locator("#refresh-action").click(); await page.waitForFunction(() => document.querySelector("#action-context").textContent.includes("evidence v2"));
+  fail = false; await page.locator("#refresh-action").click(); await page.waitForFunction(() => document.querySelector("#action-evidence").getAttribute("href") === "https://example.invalid/result/v2");
   assert.equal(await f.input("result").inputValue(), ""); assert.notEqual(f.evidence().completionEventId, old.completionEventId);
   assert.equal(f.item().verification, null); assert.equal(f.item().decision, null);
 });
@@ -270,10 +270,10 @@ for (const action of ["verify", "decide"]) {
     f.complete("v2", action === "verify" ? null : "owner");
     if (action === "decide") f.mutate(T.VERIFICATION_RECORDED, { ...f.evidence(), result: "pass", summary: "Checked v2" }, "human-reviewer");
     await page.locator("#refresh-action").waitFor({ state: "visible" }); assert.equal(await f.save.isDisabled(), true);
-    assert.match(await page.locator("#action-context").textContent(), /evidence v1/);
+    assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v1");
     assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v1");
     await page.locator("#refresh-action").click();
-    await page.waitForFunction(() => document.querySelector("#action-context").textContent.includes("evidence v2"));
+    await page.waitForFunction(() => document.querySelector("#action-evidence").getAttribute("href") === "https://example.invalid/result/v2");
     assert.equal(await f.input(verdict).inputValue(), ""); assert.equal(await f.input(notes).inputValue(), note);
     assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v2");
     if (action === "verify") {
@@ -385,7 +385,7 @@ for(const replacement of ['revision','session','account']) test(`human approval 
     f.mutate(T.VERIFICATION_RECORDED,{...f.evidence(),result:'pass',summary:'Checked v2'},'human-reviewer');
     release();await page.locator('#refresh-action').waitFor({state:'visible'});
     assert.equal(f.item().decision,null);assert.equal(attempts.filter(c=>c.type===T.OWNER_DECISION_RECORDED).length,0);
-    await page.locator('#refresh-action').click();await page.waitForFunction(()=>document.querySelector('#action-context').textContent.includes('evidence v2'));
+    await page.locator('#refresh-action').click();await page.waitForFunction(()=>document.querySelector('#action-evidence').getAttribute('href') === 'https://example.invalid/result/v2');
     assert.equal(await f.input('decision').inputValue(),'');assert.equal(await f.input('reason').inputValue(),'Original checked rationale.');
     await page.unroute('**/commands');await f.input('decision').selectOption('approved');await f.save.click();await f.dialog.waitFor({state:'hidden'});
     assert.equal(f.item().decision.evidenceVersion,'v2');

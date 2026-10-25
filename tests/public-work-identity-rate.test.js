@@ -76,30 +76,38 @@ test('MCP door: claims within the per-identity ceiling succeed, beyond it are ra
 test('match autoClaim door: claims within the per-identity ceiling succeed, beyond it are rate_limited even from a fresh IP', async t => {
   const f = await fixture(t);
   // The ceiling counts claims, not searches: a match that finds nothing
-  // claimable performs no claim and burns nothing, so this test stocks 61
-  // distinct claimable tasks (disjoint files, so no claimed task's files
-  // overlap-filter the rest) and every autoClaim below really claims one.
-  for (let i = 1; i <= 60; i++) {
+  // claimable performs no claim and burns nothing, so every autoClaim
+  // below must really claim one. A few extra tasks (disjoint files, so no
+  // claimed task's files overlap-filter the rest) keep supply claimable.
+  for (let i = 1; i <= 3; i++) {
     const offerId = `rate:task-${i}`;
     f.store.projectOffers.create('commons', 'owner', { requestId: `rate-create-${i}`, offerId, reviewerMemberIds: ['owner'], terms: { kind: 'task', title: 'JavaScript volunteer task', summary: 'Synthetic public work', acceptanceCriteria: ['Return exact bytes'], repositoryUrl: 'https://github.com/example/project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' } } });
     f.store.projectOffers.transition('commons', 'owner', offerId, 'publish', { requestId: `rate-publish-${i}`, expectedRevision: 1 });
     f.store.publicWorkClaims.enable('commons', 'owner', offerId, { requestId: `rate-enable-${i}`, expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: [`result-${i}.js`] });
   }
   // 60 real auto-claims fill the identity bucket, each from a fresh address
-  // so the per-IP public-work-match bucket cannot trip.
+  // so the per-IP public-work-match bucket cannot trip. Since #3707 an
+  // identity may hold only 3 live public-work claims at once, so each claim
+  // is released before the next and the same small shelf is re-claimed:
+  // this test isolates the RATE ceiling, not the live-claim ceiling. The
+  // release goes through the in-process domain entry on purpose — the REST
+  // act door charges EVERY act call (releases included) to this same
+  // bucket, which would halve the claims counted here; the in-process
+  // entry is the uncharged domain path (#3271).
   for (let i = 0; i < 60; i++) {
     const reply = await f.matchAutoClaim(f.first.secret, `match-claim-${i}`);
     assert.equal(reply.status, 200, `claim ${i + 1}: ${JSON.stringify(reply.body)}`);
     assert.equal(reply.body.claim.action, 'claimed', `claim ${i + 1}`);
+    f.store.publicWorkClaims.act(reply.body.claim.task.taskId, f.first.secret, 'release',
+      { requestId: `match-release-${i}`, expectedTermsVersion: 1, generation: reply.body.claim.task.claim.generation });
   }
-  // The 61st claim (one task remains) is refused with the direct REST
-  // door's rate-limit shape.
+  // The 61st claim is refused with the direct REST door's rate-limit shape.
   const limited = await f.matchAutoClaim(f.first.secret, 'match-over');
   assert.equal(limited.status, 429);
   assert.equal(limited.body.error.code, 'rate_limited');
   assert.equal(limited.headers.get('x-ratelimit-bucket'), 'public-work-identity');
   assert.equal(limited.headers.get('x-ratelimit-limit'), '60');
-  // A different identity keeps its own allowance and claims the last task.
+  // A different identity keeps its own allowance and claims a task.
   const other = await f.matchAutoClaim(f.second.secret, 'match-other');
   assert.equal(other.status, 200);
   assert.equal(other.body.claim.action, 'claimed');
