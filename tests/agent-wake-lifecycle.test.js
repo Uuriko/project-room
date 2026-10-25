@@ -75,8 +75,11 @@ test("specimen 1: pickup is counted at serve and stays distinct from ack", t => 
   assert.equal(page.length, 1);
   assert.equal(page[0].deliveredAt, null, "pickup is not ack: the ack stamp stays null");
   assert.equal(servedTotal(hb), 1, "the serve counted once on the served leg");
-  // A second host's serve is another pickup, counted, stamping nothing.
+  // A second host's serve is another pickup, counted, stamping
+  // nothing. The host-2 heartbeat is itself a serve on the heartbeat
+  // door, so it counts too — per-serve counting has no dedupe table.
   register(hb, "host-2");
+  assert.equal(servedTotal(hb), 2, "the second host's heartbeat serve counts as a pickup");
   advance(7000);
   const page2 = hb.pendingWakes(AGENT, { hostId: "host-2", roomId: ROOM });
   assert.equal(page2[0].deliveredAt, null);
@@ -88,8 +91,9 @@ test("specimen 1: pickup is counted at serve and stays distinct from ack", t => 
   const servesTable = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_wake_signal_serves'").get();
   assert.equal(servesTable, undefined, "serving creates no agent_wake_signal_serves table");
-  // Accounting: one pickup per serve (two serves), zero acks.
-  assert.equal(servedTotal(hb), 2, "each serve counts on the served leg");
+  // Accounting: one pickup per serve (three serves across two doors
+  // and two hosts), zero acks.
+  assert.equal(servedTotal(hb), 3, "each serve counts on the served leg");
   assert.deepEqual(hb.accounting().byStore.signals.ackedByDoor, {}, "nothing was acked");
 });
 
