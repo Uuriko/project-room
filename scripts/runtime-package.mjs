@@ -288,6 +288,7 @@ optional.push("server/retention-run.mjs"); // dry-run retention caller (imported
 optional.push("cloudflare/job-heartbeat.mjs"); // per-job cron heartbeat (imported by cloudflare/room.mjs)
 optional.push("cloudflare/channel-drain-tick.mjs"); // channel-drain RPC decision table (imported by cloudflare/room.mjs)
 optional.push("cloudflare/edge-public.mjs"); // static assets and discovery docs answered outside the Durable Object (imported by cloudflare/room.mjs)
+optional.push("cloudflare/edge-mcp.mjs"); // anonymous MCP answered outside the Durable Object (imported by cloudflare/room.mjs)
 optional.push("cloudflare/request-timing.mjs"); // Server-Timing and per-request duration logs (imported by cloudflare/room.mjs)
 optional.push("cloudflare/health-probe.mjs"); // Worker-side /api/ready SELECT 1 probe (imported by cloudflare/room.mjs)
 optional.push("server/identity-secret-hash.mjs"); // HMAC identity verifiers and legacy scrypt upgrade (imported by server/agent-identities.mjs)
