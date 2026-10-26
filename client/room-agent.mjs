@@ -1130,14 +1130,21 @@ export class RoomAgentClient {
     }
     return value;
   }
-  async createAgentInvite({ permissions, profile, expiresInMinutes, displayName } = {}, { signal } = {}) {
+  async createAgentInvite({ permissions, profile, ownerEquivalent, expiresInMinutes, displayName } = {}, { signal } = {}) {
     const attempt = body => this.#inviteAdmin("/agent-invites", body, { signal });
     const options = {
       ...(expiresInMinutes === undefined ? {} : { expiresInMinutes }),
       ...(displayName === undefined ? {} : { displayName }),
     };
     let value;
-    if (profile === "collaborate") {
+    if (ownerEquivalent === true) {
+      value = await attempt({
+        ownerEquivalent: true,
+        ...(profile === undefined ? {} : { profile }),
+        ...(permissions === undefined ? {} : { permissions }),
+        ...options,
+      });
+    } else if (profile === "collaborate") {
       try {
         value = await attempt({ profile, ...options });
       } catch (error) {
