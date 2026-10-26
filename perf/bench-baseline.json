@@ -1,0 +1,36 @@
+{
+  "config": {
+    "messages": 2000,
+    "seed": 24301
+  },
+  "seed": {
+    "messages": 2000,
+    "wallMs": 24282,
+    "writePerMessageP50": 11.24,
+    "writePerMessageP95": 22.57
+  },
+  "server": {
+    "snapshotFullKB": 614,
+    "snapshotRecentKB": 71.4,
+    "postAckP50": 20.27,
+    "postAckP95": 36.56,
+    "sendToStreamMs": 112.83
+  },
+  "search": {
+    "queriesRun": 42,
+    "coreP50": 0.64,
+    "coreP95": 0.87,
+    "htmlP50": 0.07,
+    "htmlP95": 0.12,
+    "keystrokeP50": 0.71,
+    "keystrokeP95": 0.99
+  },
+  "browser": {
+    "firstMessageMs": 1399,
+    "jsKB": 1575.1,
+    "requestCount": 112,
+    "ownSendToVisibleMs": 211,
+    "typeToResultP50": 16.5,
+    "typeToResultP95": 18.4
+  }
+}
