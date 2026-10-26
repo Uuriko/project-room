@@ -58,6 +58,13 @@ if (wiki.status !== 0) process.exit(wiki.status || 1);
 // Wiki read API (W009): the build-time embedded wiki data stays current with the planes.
 const wikiBuild = spawnSync(process.execPath, ["scripts/wiki-build.mjs", "--check"], { stdio: "inherit" });
 if (wikiBuild.status !== 0) process.exit(wikiBuild.status || 1);
+// Metric registry gate (freeze-now definitions): metrics/registry.yaml
+// stays well-formed under the five registry rules — ratio metrics carry
+// denominators, every metric names its first decision, report citations
+// carry id@version, definition edits bump the version, and retired
+// entries stay as tombstones.
+const metricRegistry = spawnSync(process.execPath, ["scripts/metric-registry-check.mjs"], { stdio: "inherit" });
+if (metricRegistry.status !== 0) process.exit(metricRegistry.status || 1);
 const workflowPins = spawnSync(process.execPath, ["scripts/check-workflow-pins.mjs"], { stdio: "inherit" });
 if (workflowPins.status !== 0) process.exit(workflowPins.status ?? 1);
 const docLinks = spawnSync(process.execPath, ["scripts/docs-link-check.mjs"], { stdio: "inherit" });
