@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, rmSync, writeFileSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { manifestDrift } from "../scripts/candidate-manifest.mjs";
+import { manifestDrift, formatManifestDrift } from "../scripts/candidate-manifest.mjs";
 
 const SCHEMA = "export const STORE_SCHEMA_VERSION = 27;\n";
 const PKG = JSON.stringify({ name: "fake", engines: { node: ">=24.19.0" } });
@@ -83,7 +83,22 @@ test("frozen deployment manifest pins the recovery helper and production workflo
   const root = new URL("..", import.meta.url).pathname;
   const files = ["scripts/deploy-recovery.mjs", ".github/workflows/deploy-prod.yml"];
   const actual = pinFiles(root, files);
-  for (const file of files) assert.equal(manifest.deployment[file], actual[file], file);
+  for (const file of files) assert.equal(manifest.deployment[file], actual[file],
+    `${file}: committed ${manifest.deployment[file]}, tree ${actual[file]}. Cure: node scripts/candidate-manifest.mjs --write`);
+});
+
+test("formatManifestDrift prints the real hashes and the cure command", t => {
+  const root = fakeRoot(t);
+  const expected = { contractVersion: 1, runtime: pinRuntime(root), storeSchemaVersion: 27,
+    assets: pinFiles(root, ["package.json"]), deployment: {}, packages: {} };
+  const actual = JSON.parse(JSON.stringify(expected));
+  actual.assets["package.json"] = "sha256:" + "0".repeat(64);
+  const report = formatManifestDrift(expected, actual);
+  assert.match(report, /assets:package\.json: hash differs/);
+  assert.ok(report.includes(actual.assets["package.json"]), "prints the committed hash");
+  assert.ok(report.includes(expected.assets["package.json"]), "prints the tree hash");
+  assert.match(report, /node scripts\/candidate-manifest\.mjs --write/);
+  assert.equal(formatManifestDrift(expected, expected), "");
 });
 
 test("committed candidate manifest has zero drift from the tree", async () => {
@@ -96,6 +111,7 @@ test("committed candidate manifest has zero drift from the tree", async () => {
   const { buildCandidateManifest } = await import("../scripts/candidate-manifest.mjs");
   const root = new URL("..", import.meta.url).pathname;
   const committed = JSON.parse(readFileSync(join(root, "scripts/CANDIDATE-MANIFEST.json"), "utf8"));
-  const drift = manifestDrift(buildCandidateManifest(root), committed);
-  assert.deepEqual(drift, [], `candidate manifest drift (run: node scripts/candidate-manifest.mjs --write): ${drift.join(", ")}`);
+  const built = buildCandidateManifest(root);
+  const drift = manifestDrift(built, committed);
+  assert.deepEqual(drift, [], `candidate manifest drift — the committed manifest does not match the tree:\n${formatManifestDrift(built, committed)}`);
 });

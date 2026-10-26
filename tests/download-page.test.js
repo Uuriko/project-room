@@ -56,7 +56,11 @@ test("setup skill and the short agent index state that there is no public Mac ap
     assert.ok(text.includes(MAC));
   }
   const packet = llmsTxt();
-  assert.ok(Buffer.byteLength(packet) < 5120, `llms.txt is ${Buffer.byteLength(packet)} bytes`);
+  // llms.txt is zero-sum: the <5120-byte cap is fixed. Adding bytes to
+  // llmsTxt() requires removing at least as many bytes elsewhere in the
+  // same packet, facts preserved. Do not raise this cap and do not split
+  // the index to get around it.
+  assert.ok(Buffer.byteLength(packet) < 5120, `llms.txt is ${Buffer.byteLength(packet)} bytes; the cap is <5120 and it does not move. llms.txt is zero-sum: adding bytes requires removing at least as many bytes elsewhere in llms.txt (llmsTxt() in server/agent-discovery.mjs), facts preserved.`);
   assert.ok(packet.includes(RUNTIME_RELEASE_URL));
   assert.equal(JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version, PACKAGE_VERSION);
 });
