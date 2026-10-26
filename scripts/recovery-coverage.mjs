@@ -145,8 +145,13 @@ export async function seedRecoveryCoverage(f) {
   // Seed wakeable-presence rows so the capture covers agent_hosts and agent_wake_signals (RC-2026-09-18-051).
   f.store.db.prepare(`INSERT INTO agent_hosts(agent_id,host_id,mode,wake_url,last_seen_at,created_at,updated_at) VALUES(?,?,?,?,?,?,?)`)
     .run(identityId, "recovery-host", "wakeable", "https://recovery.example.test/wake", f.now(), f.now(), f.now());
-  f.store.db.prepare(`INSERT INTO agent_wake_signals(signal_id,agent_id,kind,room_id,message_id,created_at,delivered_at) VALUES(?,?,?,?,?,?,?)`)
-    .run("recovery-signal", identityId, "mention", "commons", "recovery-message", f.now(), null);
+  // The seeded signal carries its WAKE-QUEUE-1 idempotency key, as every
+  // row written through enqueueWake does: a keyless row is a pre-key row,
+  // and the recovered store's boot convergence mints one at random for it
+  // (backfillWakeIdempotencyKeys), mutating the captured row so the
+  // post-recovery audit can never equal the pre-capture audit.
+  f.store.db.prepare(`INSERT INTO agent_wake_signals(signal_id,agent_id,kind,room_id,message_id,created_at,delivered_at,idempotency_key) VALUES(?,?,?,?,?,?,?,?)`)
+    .run("recovery-signal", identityId, "mention", "commons", "recovery-message", f.now(), null, "wk_recovery_signal_key");
   // Seed a push-subscription row so the capture covers agent_push_configs
   // (push wake path RC-2026-09-24-203). Written directly: the subscribe path
   // needs a public-resolving push url the fixture has no reason to own.
