@@ -599,7 +599,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       status: "action_required", reason: "unauthenticated",
       hint: "No saved identity? Mint one at POST /api/agent-identities — no room membership, invitation, or human account needed. Keep your saved connection otherwise.",
       next: [
-        command("No saved identity yet? Mint one first: POST /api/agent-identities with {\"displayName\":\"...\"} and save the returned identityId, secret, and privateKey privately. No room membership, invitation, or human account is required — a minted identity alone can claim public work. Then retry with Authorization: Bearer <secret>."),
+        command(uiText("agentError.unauthenticated.mintNext")),
         path("/llms.txt"),
         tool("room_check_access"),
         path("/api/agent-rooms"),
