@@ -5,8 +5,7 @@ import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
-import { buildRoomBootstrap } from "./room-bootstrap.mjs";
-import { readMessagePage, readRoomSnapshot, SNAPSHOT_WINDOW_MESSAGES } from "./snapshot-window.mjs";
+import { readRoomSnapshot } from "./snapshot-window.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
@@ -324,9 +323,6 @@ const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
-// Messages a room window carries. Default GET, ?messages=recent, and /messages share it.
-const SNAPSHOT_RECENT_MESSAGES = SNAPSHOT_WINDOW_MESSAGES;
-
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
 // absent, makeValue() builds it, the least-recently-used entry is evicted at
@@ -1312,6 +1308,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
         publicAgentPages,
+        streams,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
@@ -3839,7 +3836,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved|bootstrap|messages))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -4390,26 +4387,6 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const stripDmReplies = message => ({ ...message,
           replies: (message.replies ?? []).filter(dmMessageVisible).map(stripDmReplies) });
         return json(res, 200, { ...thread, thread: redactMessageTree(stripDmReplies(thread.thread)) });
-      }
-      if (route === "bootstrap" && req.method === "GET") {
-        if ([...url.searchParams.keys()].some(key => key !== "auth" || url.searchParams.getAll(key).length !== 1)) {
-          reject(422, "invalid_snapshot_view", "This read takes no query filters");
-        }
-        const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
-        return json(res, 200, buildRoomBootstrap(store, selected.token, roomId, fence, { accessRequests, watchers }));
-      }
-      if (route === "messages" && req.method === "GET") {
-        const params = url.searchParams;
-        if ([...params.keys()].some(key => !["before", "limit", "auth"].includes(key) || params.getAll(key).length !== 1)
-          || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))
-          || params.has("before") && !/^(0|[1-9]\d*)$/.test(params.get("before"))) {
-          reject(422, "invalid_snapshot_view", "Choose a message page");
-        }
-        return json(res, 200, readMessagePage(store, selected.token, roomId, {
-          before: params.has("before") ? Number(params.get("before")) : null,
-          limit: params.has("limit") ? Number(params.get("limit")) : SNAPSHOT_RECENT_MESSAGES,
-          expectedSessionBinding: fence
-        }));
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;

@@ -90,7 +90,14 @@ test(`${indexed ? 'certified index' : 'projection fallback'}: bounded HTTP conve
 test(`${indexed ? 'certified index' : 'projection fallback'}: conversation payload stays bounded and malformed selections cannot widen it`, async t => {
   const f = await setup(t, indexed);
   for (let i = 0; i < 24; i++) f.post(`large-${i}`, 'x'.repeat(60000));
-  const full = await f.get({}, f.owner, '');
+  const previousFull = process.env.ROOM_SNAPSHOT_FULL_COMPAT;
+  process.env.ROOM_SNAPSHOT_FULL_COMPAT = "1";
+  let full;
+  try { full = await f.get({ full: "1" }, f.owner, ""); }
+  finally {
+    if (previousFull === undefined) delete process.env.ROOM_SNAPSHOT_FULL_COMPAT;
+    else process.env.ROOM_SNAPSHOT_FULL_COMPAT = previousFull;
+  }
   const page = await f.get({ limit: 100 });
   assert.equal(page.status, 200, JSON.stringify(page.value));
   assert.ok(page.value.messages.length < 24 && page.value.messages.length > 0);

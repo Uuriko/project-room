@@ -79,6 +79,7 @@ optional.push("offers.html", "src/project-offers-ui.js", "src/owner-project-offe
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
 optional.push("server/snapshot-window.mjs"); // shared room-read window (imported by server/http.mjs and server/room-bootstrap.mjs)
+optional.push("server/routes/room-window.mjs"); // windowed bootstrap and older-message page (imported by server/routes/table.mjs)
 optional.push("server/room-bootstrap.mjs"); // one-read room open (imported by server/http.mjs and server/mcp-room-profile.mjs)
 optional.push("src/curiosity-rank.mjs"); // curiosity sort for room_list_work (imported by server/mcp-room-profile.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)

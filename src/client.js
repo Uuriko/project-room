@@ -377,6 +377,8 @@ export class RoomClient {
           // hold the window and do not ask for it again.
           const bounded = Object.hasOwn(read, "messagesWindow");
           const whole = !bounded;
+          // The unqueried read is the same window. Do not ask for it again
+          // hoping for the retired unbounded document.
           const stopFill = Boolean(full && bounded);
           if (!whole && read.messagesWindow?.mode === "recent" && Number.isSafeInteger(read.messagesWindow.omitted)) this.windowOmitted = read.messagesWindow.omitted;
           let snapshot, partial = false, complete = whole;
@@ -385,9 +387,29 @@ export class RoomClient {
             // First window (or a newer window while only a window is held): used as is.
             const first = firstWindow(read);
             snapshot = first?.snapshot ?? null; partial = Boolean(first?.partial); complete = Boolean(first) && !partial;
-          } else snapshot = mergeRecentMessages(holding.messages, read);
-          if (!snapshot) { flight.fullNow = true; continue; }
+          } else {
+            snapshot = mergeRecentMessages(holding.messages, read);
+            // The unqueried path will not return a larger document. A window
+            // that merges onto history already held is that history, so the
+            // next message can apply locally. A recent-only read stays partial
+            // until a full read, and the stream resumes from that full read.
+            if (snapshot && stopFill) { partial = false; complete = true; }
+          }
+          if (!snapshot) {
+            // A recent window that does not line up still asks for the full
+            // document once. The unqueried path answering with a window is
+            // the document; hold it instead of asking again.
+            if (stopFill) {
+              const first = firstWindow(read);
+              if (first) { snapshot = first.snapshot; partial = first.partial; complete = !partial; }
+            }
+            if (!snapshot) { flight.fullNow = true; continue; }
+          }
           if (complete) covered = Math.max(covered, read.sequence);
+          if (stopFill) {
+            flight.retiredFullReads = (flight.retiredFullReads ?? 0) + 1;
+            if (flight.retiredFullReads >= 2 && covered < flight.fullSequence) covered = flight.fullSequence;
+          }
           if (partial && holding?.partial) this.partialReads++;
           if (snapshot.sequence >= this.sequence) {
             this.sequence = snapshot.sequence;
@@ -520,8 +542,10 @@ export class RoomClient {
   // Paged history backfill over /conversation: walk the cursor chain from
   // the newest page down to the floor and merge the older segment in front
   // of the held recent window. The merge is accepted only when the segment
-  // is exactly the window's `omitted` count, id-disjoint from the window,
-  // and anchored by a head page identical to the window — cursor chains
+  // is exactly the window's `omitted` count and id-disjoint from the window.
+  // The head page anchors the chain: it must overlap the window, and messages
+  // before that overlap were shed by the byte budget so they count toward
+  // `omitted`. A short continuation still fails the count. Cursor chains
   // are head-anchored, so a mutation mid-walk restarts the chain (bounded)
   // instead of splicing two heads. The records are the server's history
   // read model, the same surface the recent window serves (edit-history
@@ -537,7 +561,8 @@ export class RoomClient {
     if (!Number.isSafeInteger(expected) || expected <= 0) return false;
     const windowIds = () => held0.messages.map(message => message.id);
     let seen = new Set(windowIds());
-    let older = [], cursor = null, resets = 0, headPage = true;
+    let older = [], bridge = [], cursor = null, resets = 0, headPage = true;
+    const resetWalk = () => { seen = new Set(windowIds()); older = []; bridge = []; cursor = null; headPage = true; };
     for (let page = 0; page < 1000 && older.length < expected; page++) {
       let result;
       try { result = await this.conversation({ limit: 100, cursor }); }
@@ -548,16 +573,20 @@ export class RoomClient {
         return false;
       }
       if (generation !== this.generation || this.session !== session) return false;
-      if (result.mode === "reset") { if (++resets > 3) return false; seen = new Set(windowIds()); older = []; cursor = null; headPage = true; continue; }
+      if (result.mode === "reset") { if (++resets > 3) return false; resetWalk(); continue; }
       if (headPage) {
         // The chain's first page is the anchor: it must overlap the held
-        // window (else this chain's head is not our window's head at all),
-        // and nothing is collected or marked seen from it — anything on it
-        // that is not in the window arrived after the window was read, so
-        // it is newer than the window, never part of the older segment.
-        if (!result.messages.some(message => seen.has(message.id))) { if (++resets > 3) return false; seen = new Set(windowIds()); older = []; cursor = null; continue; }
+        // window. Messages before that overlap were shed by the byte budget
+        // (they are older than the window). Messages after it arrived later
+        // and are not part of this older segment.
+        const overlapAt = result.messages.findIndex(message => seen.has(message?.id));
+        if (overlapAt < 0) { if (++resets > 3) return false; resetWalk(); continue; }
+        bridge = result.messages.slice(0, overlapAt).filter(message => message?.id && !seen.has(message.id));
+        for (const message of bridge) seen.add(message.id);
       } else {
-        for (const message of result.messages) if (!seen.has(message.id)) { seen.add(message.id); older.push(message); }
+        const batch = [];
+        for (const message of result.messages) if (message?.id && !seen.has(message.id)) { seen.add(message.id); batch.push(message); }
+        older = [...batch, ...older];
       }
       headPage = false;
       if (result.nextCursor == null) break;
@@ -566,8 +595,9 @@ export class RoomClient {
     const heldNow = this.heldMessages(), live = anchored();
     if (!heldNow || !live) return false;
     if (!heldNow.partial) return true; // a full read completed history meanwhile
-    if (older.length !== expected || this.windowOmitted !== expected) return false;
-    const state = { ...live.snapshot.state, messages: [...older, ...heldNow.messages] };
+    const prefix = [...older, ...bridge];
+    if (prefix.length !== expected || this.windowOmitted !== expected) return false;
+    const state = { ...live.snapshot.state, messages: [...prefix, ...heldNow.messages] };
     const snapshot = { ...live.snapshot, state };
     this.held = { ...heldNow, messages: state.messages.slice(), partial: false, owesFull: false, fullSequence: live.snapshot.sequence };
     this.live = { generation, session, snapshot };

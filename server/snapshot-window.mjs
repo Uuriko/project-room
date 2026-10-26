@@ -73,10 +73,18 @@ export function fitWindowedSnapshot(snapshot, { maxBytes = SNAPSHOT_WINDOW_BYTES
     messagesWindow = { ...messagesWindow, limit: messages.length, omitted: (messagesWindow.omitted ?? 0) + dropped };
   }
   // Size the audit tail once. Re-encoding the whole snapshot per dropped
-  // event made the small window slower than the unbounded read.
-  const events = slimEventBodies(state.eventLog ?? []);
+  // event made the small window slower than the unbounded read. Message
+  // bodies stay on the tail while the snapshot fits; they are shed only
+  // when that is what keeps the window inside the cap.
   const baseState = { ...state, messages, eventLog: [] };
   const base = { ...snapshot, ...(messagesWindow ? { messagesWindow } : {}), state: baseState };
+  const raw = Array.isArray(state.eventLog) ? state.eventLog : [];
+  const withBodies = fitEvents(base, raw, maxBytes);
+  if (Buffer.byteLength(JSON.stringify(withBodies)) <= maxBytes) return withBodies;
+  return fitEvents(base, slimEventBodies(raw), maxBytes);
+}
+
+function fitEvents(base, events, maxBytes) {
   const baseBytes = Buffer.byteLength(JSON.stringify(base));
   if (baseBytes >= maxBytes || events.length === 0) return base;
   const sizes = events.map(event => Buffer.byteLength(JSON.stringify(event)) + 1);
@@ -90,10 +98,10 @@ export function fitWindowedSnapshot(snapshot, { maxBytes = SNAPSHOT_WINDOW_BYTES
     if (next > maxBytes) break;
   }
   let chosen = events.slice(start);
-  let fitted = { ...base, state: { ...baseState, eventLog: chosen } };
+  let fitted = { ...base, state: { ...base.state, eventLog: chosen } };
   while (chosen.length > 0 && Buffer.byteLength(JSON.stringify(fitted)) > maxBytes) {
     chosen = chosen.slice(1);
-    fitted = { ...base, state: { ...baseState, eventLog: chosen } };
+    fitted = { ...base, state: { ...base.state, eventLog: chosen } };
   }
   return fitted;
 }

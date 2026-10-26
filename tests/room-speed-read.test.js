@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { buildRoomBootstrap } from "../server/room-bootstrap.mjs";
 import { fitWindowedSnapshot, SNAPSHOT_WINDOW_BYTES } from "../server/snapshot-window.mjs";
+import { ROOM_WINDOW_ROUTES } from "../server/routes/room-window.mjs";
 
 const WINDOW_BYTES = 30 * 1024;
 const HARD_CEILING = 64 * 1024;
@@ -89,6 +90,10 @@ test("a 2000-message room opens as a window under 30 KB, and bootstrap matches i
 
 test("the shared window fitter and bootstrap builder are the modules the read uses", () => {
   assert.equal(typeof buildRoomBootstrap, "function");
+  assert.deepEqual(ROOM_WINDOW_ROUTES.map(row => `${row.method} ${row.path}`), [
+    "GET /api/rooms/{roomId}/bootstrap",
+    "GET /api/rooms/{roomId}/messages"
+  ]);
   const messages = Array.from({ length: 40 }, (_, index) => ({ id: `m${index}`, body: "x".repeat(800) }));
   const eventLog = messages.map(message => ({ type: "message.posted", data: { body: message.body, messageId: message.id } }));
   const fitted = fitWindowedSnapshot({
