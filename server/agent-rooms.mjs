@@ -163,10 +163,11 @@ export class AgentRooms {
     // and the cursor is null.
     const pageSize = 100;
     const rooms = [];
+    const seatNow = this.store.now();
     let cursor = after;
     let nextCursor = null;
     while (rooms.length < pageSize) {
-      const seats = identityRoomSeats(this.store.db, identity.identityId, { after: cursor, limit: pageSize + 1 });
+      const seats = identityRoomSeats(this.store.db, identity.identityId, { after: cursor, limit: pageSize + 1, liveGuestsOnly: true, now: seatNow });
       if (seats.length === 0) break;
       // A batch is pageSize + 1 seats (the look-ahead); bind its rooms
       // rows in slices of at most 100 so no statement passes the
