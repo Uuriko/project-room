@@ -9,6 +9,54 @@ import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-session.js";
 
+// --- Kernel types -----------------------------------------------------------
+// JSDoc shapes for the event kernel, checked by `tsc --checkJs` over the
+// kernel paths only (tsconfig.kernel.json; gate: scripts/check-kernel-types.mjs).
+// The typedefs name the GLOBAL RULES of the room: the envelope every event
+// carries and the reducer state every handler folds into. Both shapes are
+// OPEN: handlers own per-type `data` payloads and per-feature state branches,
+// so each typedef names the principal fields and admits the rest through an
+// index signature rather than pretending the shape is closed.
+
+/**
+ * The event envelope. `event()` builds one; `validateEnvelope` enforces the
+ * required fields at apply time. Handlers read only these fields plus `data`.
+ * @typedef {Object} RoomEvent
+ * @property {string} id
+ * @property {string} idempotencyKey
+ * @property {string} roomId
+ * @property {string} type - one of the EVENT_TYPES values
+ * @property {string} actorId
+ * @property {string} at - ISO-8601 timestamp
+ * @property {string | null} [causationId]
+ * @property {Object.<string, any>} data - per-type payload; each handler owns its shape
+ */
+
+/**
+ * The reducer state: the room projection `applyEvent` folds events into.
+ * `emptyRoomState()` returns the empty value. Principal branches are named;
+ * feature branches (bonds, pins, helpOffers, ...) ride the index signature.
+ * @typedef {{ [key: string]: any,
+ *   room: Object.<string, any> | null,
+ *   members: Object.<string, Object.<string, any>>,
+ *   channels: Object.<string, Object.<string, any>>,
+ *   messages: Array<Object.<string, any>>,
+ *   workItems: Object.<string, Object.<string, any>>,
+ *   eventLog: Array<RoomEvent>,
+ *   seenEvents: Object.<string, string>,
+ *   seenIdempotencyKeys: Object.<string, string> }} RoomState
+ */
+
+/**
+ * Replay bookkeeping shared across one fold (see replayEvents): the three
+ * containers cloneStateForApply must isolate per returned state.
+ * @typedef {Object} RoomJournal
+ * @property {Array<RoomEvent>} eventLog
+ * @property {Object.<string, string>} seenEvents
+ * @property {Object.<string, string>} seenIdempotencyKeys
+ */
+
+
 // message.posted and message.edited bodies. Other event strings stay at 4,096.
 // 65,536 characters is far under the 4 MiB room projection and Durable Object
 // SQLite row limits. Worst-case JSON escaping is 6 bytes per character
@@ -313,7 +361,7 @@ export function roomTrustBlocks(state, actorId, targetId) {
 
 export function assertRoomTrust(state, actorId, targetId) {
   if (!roomTrustBlocks(state, actorId, targetId)) return;
-  const error = new Error(trustOffMessage(targetId));
+  const error = /** @type {Error & { code: string }} */ (new Error(trustOffMessage(targetId)));
   error.code = TRUST_OFF_CODE;
   throw error;
 }
@@ -502,6 +550,7 @@ export const WORK_STATES = Object.freeze({
   SUPERSEDED: "superseded"
 });
 
+/** @returns {RoomState} the empty reducer state (no room yet). */
 export function emptyRoomState() {
   return {
     room: null,
@@ -515,6 +564,12 @@ export function emptyRoomState() {
   };
 }
 
+/**
+ * Build a complete envelope from partial overrides; type, actorId and roomId
+ * are required, the bookkeeping fields are minted here.
+ * @param {{ type: string, actorId: string, roomId: string, [key: string]: any }} overrides
+ * @returns {RoomEvent}
+ */
 export function event(overrides) {
   if (!overrides?.type || !overrides?.actorId || !overrides?.roomId) {
     throw new Error("Events require type, actorId, and roomId");
@@ -531,6 +586,10 @@ export function event(overrides) {
   };
 }
 
+/**
+ * @param {Array<RoomEvent>} events
+ * @returns {RoomState}
+ */
 export function replay(events) {
   return events.reduce((state, next) => applyEvent(state, next), emptyRoomState());
 }
@@ -605,6 +664,13 @@ function cloneStateForApply(current, incoming, journal = null) {
   return state;
 }
 
+/**
+ * Fold one event into the state. Pure: the input state is never mutated and
+ * the returned state owns fresh bookkeeping containers.
+ * @param {RoomState} current
+ * @param {RoomEvent} incoming
+ * @returns {RoomState}
+ */
 export function applyEvent(current, incoming) {
   return applyEventWithJournal(current, incoming);
 }
@@ -613,6 +679,12 @@ export function applyEvent(current, incoming) {
 // copying every accumulated event ID and log entry for each subsequent event.
 // Domain state still goes through the same immutable reducer path; callers never
 // observe intermediate journal aliases and the input state remains untouched.
+/**
+ * Fold a batch of events under one shared journal (see RoomJournal).
+ * @param {RoomState} current
+ * @param {Iterable<RoomEvent>} events - an array or a lazy iterable (store replays from a cursor generator)
+ * @returns {RoomState}
+ */
 export function replayEvents(current, events) {
   const journal = {eventLog:[...(current.eventLog ?? [])],
     seenEvents:{...(current.seenEvents ?? {})},
@@ -622,6 +694,12 @@ export function replayEvents(current, events) {
   return state;
 }
 
+/**
+ * @param {RoomState} current
+ * @param {RoomEvent} incoming
+ * @param {RoomJournal | null} [journal]
+ * @returns {RoomState}
+ */
 function applyEventWithJournal(current, incoming, journal = null) {
   const state = cloneStateForApply(current, incoming, journal);
   validateEnvelope(incoming);

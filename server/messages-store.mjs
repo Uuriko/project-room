@@ -10,6 +10,43 @@ export { closeKeepSet };
 import { applyEvent, emptyRoomState } from "../src/events.js";
 import { isDeepStrictEqual } from "node:util";
 
+// --- Kernel types -----------------------------------------------------------
+// JSDoc shapes for the messages kernel, checked by `tsc --checkJs` over the
+// kernel paths only (tsconfig.kernel.json; gate: scripts/check-kernel-types.mjs).
+
+/**
+ * The host surface this module needs from the room store: the database
+ * handle, the read-only flag, and the projection accessors the parity and
+ * archive paths call. The concrete RoomStore lives in store.mjs, which
+ * imports this module; the structural typedef keeps the cycle out of the
+ * types while naming exactly what is consumed.
+ * @typedef {Object} MessageStoreHost
+ * @property {any} db - the node:sqlite DatabaseSync handle
+ * @property {boolean} [readOnly]
+ * @property {boolean} [bodiesAtRest]
+ * @property {boolean} [messageEntityProjection]
+ * @property {(fn: (...args: any[]) => any) => any} transaction - the store's transaction runner
+ * @property {(roomId: string) => any} [room]
+ * @property {(state: any) => string} [storedProjection]
+ * @property {(roomId: string, through?: number) => any} [_replayRoom] - store-internal replay entry the archive path drives
+ * @property {any} [_projectionCache] - store-internal projection cache the restore path invalidates
+ */
+
+/**
+ * One row of the messages table (the MSG-1 double-write of the event log):
+ * the columns the read, parity and archive paths consume. The table carries
+ * more columns; these are the principal ones.
+ * @typedef {Object} MessageRow
+ * @property {string} message_id
+ * @property {string} [author_id]
+ * @property {string | null} [to_member_id]
+ * @property {string | null} [reply_to_id]
+ * @property {number} [seq]
+ * @property {string} [record_json]
+ * @property {string} [reducer_extras_json]
+ */
+
+
 export const MESSAGE_ROW_TYPES = Object.freeze([
   "message.posted",
   "message.edited",
@@ -213,6 +250,10 @@ function currentRecord(message) {
 // Upsert one row per message the event touched. seq stays at the earliest
 // event that wrote the row, so an edit does not reorder history. Calling
 // this twice for the same event leaves one row.
+/**
+ * @param {any} db
+ * @param {{ roomId: string, sequence: number, event: import("../src/events.js").RoomEvent, state: import("../src/events.js").RoomState }} args
+ */
 export function syncMessageRows(db, { roomId, sequence, event, state }) {
   if (!MESSAGE_ROW_TYPE_SET.has(event?.type)) return 0;
   const affected = affectedMessageIds(event);
@@ -267,6 +308,10 @@ function writeMessageRows(db, {roomId,state,sequenceById,messageIndex=null,exact
 const CERTIFIED_MESSAGE_TRANSITIONS = new Set([
   "message.posted", "message.edited", "poll.voted", "message.pinned", "message.unpinned"
 ]);
+/**
+ * @param {any} db
+ * @param {{ roomId: string, sequence: number, event: import("../src/events.js").RoomEvent }} args
+ */
 export function captureMessageCertification(db, { roomId, sequence, event }) {
   if (!db.isTransaction || !CERTIFIED_MESSAGE_TRANSITIONS.has(event?.type)) return null;
   const row = db.prepare(`SELECT c.applied_event_id AS anchor FROM messages_backfill_cursor c
@@ -1203,6 +1248,10 @@ function isRoomDataError(error) {
 // overlaid from the projection, and the room keeps catching up. One bad
 // event cannot park the room. `blocked` is the standing park set; `quarantined`
 // is the skipped-event set; `failed` is this call's fresh parks.
+/**
+ * @param {MessageStoreHost} store
+ * @param {{ limit?: number, deadline?: number, yieldBetween?: () => (Promise<void> | void) }} [options]
+ */
 export function runMessagesBackfill(store, { limit = MESSAGES_BACKFILL_BATCH, deadline = Infinity, yieldBetween = () => {} } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not backfill messages");
   if (typeof yieldBetween !== "function") throw new TypeError("yieldBetween must be a function");
@@ -1345,6 +1394,10 @@ function rememberSweep(store, roomId) {
 // fields and original posting sequences as well as aggregate count/order.
 // A room still being replayed is left for a later call. Certification is
 // recorded only after all comparisons pass; a mismatch clears it and throws.
+/**
+ * @param {MessageStoreHost} store
+ * @param {{ roomId?: string | null }} [options]
+ */
 export function checkMessagesParity(store, { roomId = null } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not check message parity");
   if (roomId !== null && typeof roomId !== "string") throw new TypeError("roomId must be a string");
@@ -1370,6 +1423,10 @@ export function checkMessagesParity(store, { roomId = null } = {}) {
 // a per-room parity verdict — schema, storage — still throws. A failed
 // room keeps its cleared certification, so the verdict is unchanged; only
 // the blast radius shrinks.
+/**
+ * @param {MessageStoreHost} store
+ * @param {{ report?: (entry: { roomId: string, error: any }) => void }} [options]
+ */
 export function runMessagesParityCheck(store, { report = () => {} } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not check message parity");
   const failures = [];
@@ -1495,6 +1552,11 @@ function idsNamedAfter(db, roomId, afterSeq, candidates) {
 // certified messages table (parity at the room head). dryRun reports what
 // would move and changes nothing. Returns { ok, ... } and never throws for
 // "not ready" conditions.
+/**
+ * @param {MessageStoreHost} store
+ * @param {string} roomId
+ * @param {{ keepNewest?: number, dryRun?: boolean, belowCursor?: boolean }} [options]
+ */
 export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun = true, belowCursor = false } = {}) {
   if (store?.readOnly) throw new Error("Read-only stores do not archive messages");
   if (!Number.isInteger(keepNewest) || keepNewest < 1) throw new Error("keepNewest must be a positive integer");
@@ -1609,6 +1671,10 @@ export function compactReplayLikeArchive(db, roomId, state) {
 // flag-off deploy, the old recovery audit) sees the whole room again. The
 // archived records come from replaying the event log; nothing else in the
 // projection changes. Returns how many messages were restored.
+/**
+ * @param {MessageStoreHost} store
+ * @param {string} roomId
+ */
 export function restoreArchivedMessages(store, roomId) {
   if (store?.readOnly) throw new Error("Read-only stores do not restore archived messages");
   return store.transaction(() => {
@@ -1638,6 +1704,14 @@ export function restoreArchivedMessages(store, roomId) {
 // state. Keep the committed serving projection intact throughout admission.
 // An owner/author deletion may load its private target without loading ancestors;
 // other references only load ancestry visible to the actor.
+/**
+ * @param {MessageStoreHost} store
+ * @param {string} roomId
+ * @param {{ state: import("../src/events.js").RoomState, [key: string]: any }} room - the store's room() result
+ * @param {string} messageId
+ * @param {{ actorId?: string, ancestors?: boolean, allowPrivate?: boolean }} options
+ * @returns {{ state: import("../src/events.js").RoomState, [key: string]: any }} the room, with archived ancestors loaded
+ */
 export function archivedMessageCommandContext(store, roomId, room, messageId, { actorId, ancestors = true, allowPrivate = false } = {}) {
   if (typeof messageId !== 'string' || !messageId) return room;
   const marker = archiveMarker(store.db, roomId), rows = [], seen = new Set();
