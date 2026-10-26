@@ -38,7 +38,7 @@ import { countOpenPublicReports } from '../server/legal-store.mjs'; // open publ
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
-import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { appDurationMs, logDoRequest, logRoomRequest, requestPath, storeCounterDeltas, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
@@ -208,6 +208,10 @@ export class ProjectRoom extends DurableObject {
   async fetch(request) {
     const started = Date.now();
     const cold = this.store?.coldStart;
+    // SPEED-PLAN 0.2: snapshot the store's cumulative counters before any
+    // work in this fetch (job-health refresh, operator doors, handler), so
+    // respond() can report the per-request delta on room.do_request.
+    const countersAtStart = this.store?.storeCounters() ?? null;
     const respond = response => {
       const appMs = Date.now() - started;
       if (cold && !this.coldStartRequestLogged) {
@@ -220,10 +224,13 @@ export class ProjectRoom extends DurableObject {
         if (cold.phases) line.phases = cold.phases;
         console.info(JSON.stringify(line));
       }
-      console.info(JSON.stringify({
-        event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
-      }));
-      return withServerTiming(response, 'app', appMs);
+      const counters = storeCounterDeltas(countersAtStart, this.store?.storeCounters());
+      logDoRequest({ method: request.method, path: requestPath(request.url), status: response.status, appMs, counters });
+      const timed = withServerTiming(response, 'app', appMs);
+      // rowsRead also rides Server-Timing as its own metric so clients and
+      // the latency probe can read it without log access; for this metric
+      // the dur value carries the row count, not a duration.
+      return counters && Number.isFinite(counters.rowsRead) ? withServerTiming(timed, 'rowsread', counters.rowsRead) : timed;
     };
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
