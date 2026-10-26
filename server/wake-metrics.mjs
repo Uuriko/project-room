@@ -32,6 +32,14 @@
 // outcomes are counted separately (doorbell_delivered / doorbell_failed,
 // failures journaled) and never enter the delivery rate.
 //
+// WAKE-S34 adds the two lifecycle legs the review seat's distinct-states
+// rule needs counted separately from both delivery and ack: "served" is
+// a page serve (pickup — a diagnostic, not a ladder stage; WAKE-QUEUE-1
+// SPEC §9 dropped the per-item serves table, the counter leg stays),
+// and "claimed" is a listener claim marking the signal as claimed
+// under a lease (SPEC §4 Stage 2). Served / claimed / acked now
+// reconcile per door.
+//
 // failureRate = (failed + suppressed_no_identity)
 //             / (emitted + coalesced + failed + suppressed_no_identity)
 // Designed suppressions (no_host, policy) are excluded from both sides:
@@ -43,15 +51,27 @@
 // reasons come from the frozen allowlist below, not from error objects.
 // Both tables are lazy/additive (created on first record, like the
 // listener-lease tables) and registered in writer-fence lazyAdditiveTables.
+//
+// Stale-write journal (WAKE-QUEUE-1 Step 1 substrate): a post-claim
+// write refused on fencing grounds — a claim under a dead lease, an
+// ack against a live lease or another listener's claim, a release
+// under a stale token — is recorded as a `stale_write_refused` event
+// whose failure-journal row carries the refusal code as its reason,
+// the item (item_id, when the refusal names one), the writing holder
+// (holder_id) and the refusal time, so a second reader can audit
+// fencing refusals after the fact (SPEC §5.3: a stale write is
+// refused AND journaled).
 
 export const WAKE_STORES = Object.freeze(["signals", "work", "queue"]);
 export const WAKE_EVENTS = Object.freeze([
   "emitted", "coalesced", "suppressed_no_host", "suppressed_no_identity",
   "suppressed_policy", "failed", "delivered", "acked", "invalidated",
   "doorbell_delivered", "doorbell_failed", "ack_unregistered",
+  "served", "claimed", "stale_write_refused",
 ]);
 export const WAKE_FAILURE_REASONS = Object.freeze([
   "no_identity_link", "enqueue_error", "push_delivery_failed",
+  "stale_listener", "listener_fenced", "wake_signal_fenced",
 ]);
 // A pending signal older than the 24h wakeability window whose agent has
 // never polled is reported as aged stock, not silently young forever.
@@ -68,7 +88,8 @@ export const wakeMetricsSchema = `
   CREATE TABLE IF NOT EXISTS agent_wake_failures (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     at INTEGER NOT NULL, room_id TEXT, store TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT '', subject_id TEXT, reason TEXT NOT NULL
+    kind TEXT NOT NULL DEFAULT '', subject_id TEXT, reason TEXT NOT NULL,
+    item_id TEXT, holder_id TEXT
   );
   CREATE INDEX IF NOT EXISTS agent_wake_failures_room ON agent_wake_failures(room_id, at);
 `;
@@ -77,6 +98,14 @@ const ensured = new WeakSet();
 export function ensureWakeMetricsSchema(db) {
   if (!db || ensured.has(db)) return false;
   db.exec(wakeMetricsSchema);
+  // WAKE-QUEUE-1 Step 1: the stale-write journal columns (item_id,
+  // holder_id) ride the failure journal; databases created before
+  // them converge by additive ALTER (lazy DDL, never strict-verified).
+  try {
+    const cols = new Set(db.prepare("SELECT name FROM pragma_table_info(?)").all("agent_wake_failures").map(r => r.name));
+    if (cols.size > 0 && !cols.has("item_id")) db.exec("ALTER TABLE agent_wake_failures ADD COLUMN item_id TEXT");
+    if (cols.size > 0 && !cols.has("holder_id")) db.exec("ALTER TABLE agent_wake_failures ADD COLUMN holder_id TEXT");
+  } catch { /* a read-only or pre-journal database: recordWakeEvent fails soft */ }
   ensured.add(db);
   return true;
 }
@@ -87,7 +116,7 @@ const isMissingTable = error => /no such (table|column)/i.test(String(error?.mes
 // wake path and must not be able to fail a message post, a heartbeat or
 // an ack. (Tests pin that counters DO move on every real path, so a
 // silent no-op here cannot hide.) Returns true when recorded.
-export function recordWakeEvent(db, { at, roomId = null, store, event, door = "", kind = "", n = 1, subjectId = null, reason = null } = {}) {
+export function recordWakeEvent(db, { at, roomId = null, store, event, door = "", kind = "", n = 1, subjectId = null, reason = null, itemId = null, holderId = null } = {}) {
   try {
     if (!WAKE_STORES.includes(store) || !WAKE_EVENTS.includes(event)) return false;
     if (reason !== null && !WAKE_FAILURE_REASONS.includes(reason)) return false;
@@ -100,8 +129,8 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
         n = n + excluded.n, last_at = excluded.last_at`)
       .run(roomId ?? "", store, event, door ?? "", kind ?? "", n, stamp, stamp);
     if (reason !== null) {
-      db.prepare("INSERT INTO agent_wake_failures (at, room_id, store, kind, subject_id, reason) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(stamp, roomId ?? null, store, kind ?? "", subjectId ?? null, reason);
+      db.prepare("INSERT INTO agent_wake_failures (at, room_id, store, kind, subject_id, reason, item_id, holder_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
+        .run(stamp, roomId ?? null, store, kind ?? "", subjectId ?? null, reason, itemId ?? null, holderId ?? null);
       db.prepare(`DELETE FROM agent_wake_failures WHERE id <=
         (SELECT MAX(id) FROM agent_wake_failures) - ?`).run(FAILURE_JOURNAL_CAP);
     }
@@ -114,7 +143,8 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
 const emptyCounters = () => ({ emitted: 0, coalesced: 0, suppressed_no_host: 0,
   suppressed_no_identity: 0, suppressed_policy: 0, failed: 0, invalidated: 0,
   doorbell_delivered: 0, doorbell_failed: 0, ack_unregistered: 0,
-  deliveredByDoor: {}, ackedByDoor: {} });
+  stale_write_refused: 0,
+  deliveredByDoor: {}, ackedByDoor: {}, servedByDoor: {}, claimedByDoor: {} });
 
 // Aggregate the counters + the stores' own stock into the accounting
 // view. One bounded read per table; safe on pre-metrics databases (every
@@ -137,6 +167,8 @@ export function wakeAccounting(db, { now = 0, roomId = null } = {}) {
       if (!bucket) continue;
       if (row.event === "delivered") bucket.deliveredByDoor[row.door] = (bucket.deliveredByDoor[row.door] ?? 0) + row.n;
       else if (row.event === "acked") bucket.ackedByDoor[row.door] = (bucket.ackedByDoor[row.door] ?? 0) + row.n;
+      else if (row.event === "served") bucket.servedByDoor[row.door] = (bucket.servedByDoor[row.door] ?? 0) + row.n;
+      else if (row.event === "claimed") bucket.claimedByDoor[row.door] = (bucket.claimedByDoor[row.door] ?? 0) + row.n;
       else if (Object.hasOwn(bucket, row.event)) bucket[row.event] += row.n;
     }
     const journal = roomFilter === null
@@ -144,8 +176,8 @@ export function wakeAccounting(db, { now = 0, roomId = null } = {}) {
       : db.prepare("SELECT reason, COUNT(*) AS n FROM agent_wake_failures WHERE room_id=? GROUP BY reason").all(roomFilter);
     for (const row of journal) { failures.byReason[row.reason] = row.n; failures.total += row.n; }
     failures.recent = (roomFilter === null
-      ? db.prepare("SELECT at, room_id AS roomId, store, kind, subject_id AS subjectId, reason FROM agent_wake_failures ORDER BY id DESC LIMIT 20").all()
-      : db.prepare("SELECT at, room_id AS roomId, store, kind, subject_id AS subjectId, reason FROM agent_wake_failures WHERE room_id=? ORDER BY id DESC LIMIT 20").all(roomFilter))
+      ? db.prepare("SELECT at, room_id AS roomId, store, kind, subject_id AS subjectId, reason, item_id AS itemId, holder_id AS holderId FROM agent_wake_failures ORDER BY id DESC LIMIT 20").all()
+      : db.prepare("SELECT at, room_id AS roomId, store, kind, subject_id AS subjectId, reason, item_id AS itemId, holder_id AS holderId FROM agent_wake_failures WHERE room_id=? ORDER BY id DESC LIMIT 20").all(roomFilter))
       .map(row => Object.freeze(row));
   } catch (error) { if (!isMissingTable(error)) throw error; }
   const count = (sql, ...params) => {

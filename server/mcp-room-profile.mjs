@@ -14,7 +14,7 @@ import { ServiceError } from "./store.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
-import { heartbeatWithListener, validListenerLease } from "./agent-listener-contract.mjs";
+import { heartbeatWithListener, validListenerLease, claimRoomScope } from "./agent-listener-contract.mjs";
 import { createHeartbeatActor } from "./agent-plugin-routes.mjs";
 import { assertScopedKeyListener, scopedKeyPresenceView } from "./room-key-presence.mjs";
 import { HeartbeatError } from "./agent-heartbeats.mjs";
@@ -322,6 +322,12 @@ function validWakeArgs(name, args) {
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
   if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && (args.fencingToken === undefined || typeof args.fencingToken === "string" && args.fencingToken.length > 0);
+  if (name === "heartbeat_claim") return typeof args.fencingToken === "string" && args.fencingToken.length > 0
+    && (args.limit === undefined || Number.isInteger(args.limit) && args.limit >= 1 && args.limit <= 50)
+    && (args.roomId === undefined || validId(args.roomId));
+  if (name === "heartbeat_release_claim") return typeof args.fencingToken === "string" && args.fencingToken.length > 0
+    && validSignalIds(args.signalIds)
+    && (args.roomId === undefined || validId(args.roomId));
   if (name === "wake_pause" || name === "wake_resume") {
     const reasonOk = args.reason === undefined || args.reason === null || typeof args.reason === "string" && args.reason.length <= 200;
     const memberOk = args.memberId === undefined || validId(args.memberId);
@@ -775,6 +781,30 @@ async function callWakeTool(store, secret, identity, name, args) {
       const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
       if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
       return store.agentHeartbeats.ackWakes({ agentId, signalIds: args.signalIds, roomId: auth.roomId ?? null, fencingToken: args.fencingToken ?? null, door: "mcp" });
+    });
+  }
+  if (name === "heartbeat_claim") {
+    // WAKE-S34: the claim door for the listener lease/claim layer, with
+    // the same scope resolution as POST /api/agent-heartbeats/claim
+    // (claimRoomScope mirrors the lease-acquisition rules), so a
+    // room-scoped key can only claim its bound room's queue.
+    return store.transaction(() => {
+      const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+      if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
+      const roomId = claimRoomScope(store, auth, args.roomId ?? null);
+      return store.agentHeartbeats.claimWakeBatch({ agentId, roomId, fencingToken: args.fencingToken, limit: args.limit ?? 50 });
+    });
+  }
+  if (name === "heartbeat_release_claim") {
+    // WAKE-QUEUE-1 Step 1: the release door, mirroring heartbeat_claim's
+    // scope resolution exactly — the holder returns named claims to
+    // Queued before lease expiry; the store checks the token against
+    // the live lease and journals a stale refusal.
+    return store.transaction(() => {
+      const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+      if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
+      const roomId = claimRoomScope(store, auth, args.roomId ?? null);
+      return store.agentHeartbeats.releaseWakeClaims({ agentId, roomId, fencingToken: args.fencingToken, signalIds: args.signalIds });
     });
   }
   if (name === "wake_pause") {
