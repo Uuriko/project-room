@@ -466,6 +466,7 @@ export default {
   "agentError.memberPaused.hint": "The room owner paused this member, so its posting is locked. Nothing was applied.",
   "agentError.memberPaused.next": "Ask the room owner to resume the member; do not retry until they do.",
   "agentError.unauthenticated.mintNext": "No saved identity yet? Mint one first: POST /api/agent-identities with {\"displayName\":\"...\"} and save the returned identityId, secret, and privateKey privately. No room membership, invitation, or human account is required — a minted identity alone can claim public work. Then retry with Authorization: Bearer <secret>.",
+  "agentError.unauthenticated.savedHint": "Keep your saved connection and check existing access before creating another identity. An expired room token (rak_) recovers with your identity secret.",
   "work.announce.claimed": "{actor} claimed '{title}'.",
   "work.announce.completed": "{actor} completed '{title}' — ready for your review.",
   "work.announce.review_passed": "{actor} recorded a passing review for '{title}'.",

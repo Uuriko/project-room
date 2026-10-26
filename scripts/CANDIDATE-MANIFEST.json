@@ -151,8 +151,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:77e41a1389a8372e191d87fad6043d10e693618c08cf04ec2e5e4acb4ae68382",
-    "strings/en.json": "sha256:12cb6afb28afbd8071d24c2ff542e56a88bf3131673d1704dc01af8402e6277d"
+    "strings/en.js": "sha256:3b53f3492de1f80668029d421add882a8f903e45131a753ae43f0b89e33d2ca8",
+    "strings/en.json": "sha256:516eaf729dc1ed75fb2aaf5055371d6d4b91ca64209eb690beea459455af2d88"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:ebdfd3d7cc7118098ad4e3280a0af4567d4c2d8322e88483f0cdcebc15245512",
