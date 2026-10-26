@@ -21,7 +21,8 @@ const scopesField = { type: "array", items: { type: "string", enum: [...BOND_SCO
 
 export const hostedRoomTools = [
   tool("room_check_access", "Check this identity secret's Room access. Pass roomId for one room. Omit it to list linked rooms. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
-  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me, schema({
+  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read.", schema({
+    roomId: roomIdField,
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
   tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({

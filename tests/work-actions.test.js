@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { buildWorkCommand, confirmsAgentCommand, validWorkArguments, workTools, submitWorkAction, workActionRefusal } from "../client/work-actions.mjs";
+import { deriveRequestId } from "../client/request-id.mjs";
 
 const identity = { roomId: "commons", memberId: "agent" };
 const base = { requestId: "operation", workItemId: "work", expectedRevision: 2 };
@@ -85,24 +86,52 @@ test("strict action inputs preserve null/omission, reject extras and bound comma
   assert.equal(validWorkArguments("room_acquire_claim", { ...claim, paths: ["a".repeat(513)] }), false);
 });
 
-test("work actions require a caller-supplied requestId so retries keep one command id", () => {
-  // Regression (issue #2862): requestId used to be optional in every work
-  // tool schema and buildWorkCommand silently substituted randomUUID() when
-  // it was absent or invalid. A retry after an uncertain result therefore
-  // minted a second command id, the server could not deduplicate, and the
-  // claim/completion/handoff was applied twice.
-  for (const tool of workTools) assert.ok(tool.inputSchema.required.includes("requestId"), `${tool.name} requires requestId`);
+test("work actions derive an omitted requestId or require one without an actor", () => {
+  // Issue #2862 made requestId explicit so a retry after an uncertain result
+  // could not mint a second command. MCP now derives it from the tool, room,
+  // actor and unchanged input, then returns it. A direct caller without an
+  // actor still has no safe derivation and must supply its own stable id.
+  for (const tool of workTools) assert.equal(tool.inputSchema.required.includes("requestId"), false, `${tool.name} makes requestId optional`);
   for (const [action, , args] of cases) {
     const name = "room_" + action, omitted = structuredClone(args); delete omitted.requestId;
-    assert.equal(validWorkArguments(name, omitted), false, `${name} refuses a missing requestId`);
+    assert.equal(validWorkArguments(name, omitted), true, `${name} accepts a missing requestId`);
     assert.throws(() => buildWorkCommand(name, omitted), { code: "missing_request_id" });
+    const derived = buildWorkCommand(name, omitted, identity);
+    assert.match(derived.id, /^mcp-[a-f0-9]{64}$/);
+    assert.deepEqual(buildWorkCommand(name, omitted, identity), derived);
     const invalid = { ...args, requestId: "constructor" };
     assert.equal(validWorkArguments(name, invalid), false, `${name} refuses an invalid requestId`);
-    assert.throws(() => buildWorkCommand(name, invalid), { code: "missing_request_id" });
-    // A retry is the exact same input, so it rebuilds the exact same
-    // command: one id, one idempotency key, one application.
-    assert.deepEqual(buildWorkCommand(name, structuredClone(args)), buildWorkCommand(name, structuredClone(args)));
+    assert.throws(() => buildWorkCommand(name, invalid, identity), { code: "missing_request_id" });
+    assert.deepEqual(buildWorkCommand(name, structuredClone(args), identity), buildWorkCommand(name, structuredClone(args), identity));
   }
+});
+
+test("handoff aliases normalize before derivation and explicit expectedRevision wins", async () => {
+  const aliases = { workItemId: "work", done: "3 of 5 done", next: "Reassign the adapter", reason: "context exhausted" };
+  assert.equal(validWorkArguments("room_record_handoff", aliases), true);
+  assert.equal(validWorkArguments("room_record_handoff", { ...aliases, doneSummary: "both" }), false);
+  const command = buildWorkCommand("room_record_handoff", aliases, identity);
+  assert.equal(command.id, deriveRequestId("room_record_handoff", identity, {
+    workItemId: "work", doneSummary: "3 of 5 done", nextAction: "Reassign the adapter", limitReason: "context exhausted"
+  }));
+  assert.deepEqual(command.data, { workItemId: "work", doneSummary: "3 of 5 done", nextAction: "Reassign the adapter", limitReason: "context exhausted" });
+  assert.throws(() => buildWorkCommand("room_record_handoff", { ...aliases, nextAction: "both" }, identity), { code: "invalid_work_action" });
+
+  const reads = [];
+  const submitted = await submitWorkAction({
+    workContext: async workItemId => { reads.push(workItemId); return { work: { revision: 4 } }; },
+    command: async value => receipt(value)
+  }, identity, "room_record_handoff", aliases);
+  assert.equal(submitted.status, "recorded");
+  assert.deepEqual(reads, ["work"]);
+  assert.equal(submitted.requestId, command.id);
+
+  reads.length = 0;
+  await submitWorkAction({
+    workContext: async workItemId => { reads.push(workItemId); return { work: { revision: 99 } }; },
+    command: async value => receipt(value)
+  }, identity, "room_record_handoff", { ...aliases, expectedRevision: 2 });
+  assert.deepEqual(reads, []);
 });
 
 test("exact receipts bind operation fingerprint, event identity, cause, ordered arrays and omitted fields", () => {

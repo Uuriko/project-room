@@ -4,13 +4,14 @@ import { EVENT_TYPES as T, validId } from "../src/events.js";
 import { replyPostMode, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
 import { reportedProducer } from "../src/work-packet.js";
 import { agentErrorAx } from "../src/agent-error.mjs";
+import { withDerivedRequestId } from "./request-id.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
 const bool = { type: "boolean" }, revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const object = (properties, required = Object.keys(properties)) => ({ type: "object", properties, required, additionalProperties: false });
-const common = { requestId: { ...id, description: "Stable business operation ID. Keep this ID and ALL input unchanged after an uncertain result, cancellation or reconnect." },
-  workItemId: id, expectedRevision: { ...revision, description: "The exact work revision you inspected. Never automatically replace it on retry." } };
+const common = { requestId: { ...id, description: "Optional stable business operation ID. Omit on the first call and the service derives one from the tool, room, actor and input; keep the returned ID and ALL input unchanged after an uncertain result, cancellation or reconnect." },
+  workItemId: id, expectedRevision: { ...revision, description: "Optional exact work revision you inspected. Omit to use the current revision; a conflict means the work changed before this attempt was recorded." } };
 const retry = " Preserve the exact input across retries. A saved receipt confirms this operation, not current ownership or approval; read the task again for its current next step.";
 const externalProducer = { ...text, maxLength: 160, description: "Optional reported outside person, team or AI credit. Use only with producerId=null (or omitted for external evidence). Does not create membership, verify identity or establish reviewer independence." };
 // RC-2026-09-19-063: fact / inference / proposal marks on a result. A
@@ -69,10 +70,21 @@ const definitions = [
   }, ["memberId", "haltEventId"]]
 ];
 
+export const HANDOFF_ALIASES = Object.freeze({ done: "doneSummary", next: "nextAction", reason: "limitReason" });
+
 const actions = new Map(definitions.map(([name, title, type, description, properties, required = Object.keys(properties)]) => {
   const fields = type === T.WORK_PROPOSED ? { requestId: common.requestId, workItemId: id } : type === T.WORK_HALT_CLEARED ? { requestId: common.requestId } : common;
+  const aliases = name === "record_handoff" ? {
+    done: { ...text, description: "Alias for doneSummary." },
+    next: { ...text, description: "Alias for nextAction." },
+    reason: { ...text, description: "Alias for limitReason." }
+  } : {};
+  const handoffCanonical = new Set(Object.values(HANDOFF_ALIASES));
+  const requiredFields = [...new Set([...Object.keys(fields), ...required])]
+    .filter(field => field !== "requestId" && (field !== "expectedRevision" || !Object.hasOwn(fields, "expectedRevision"))
+      && (name !== "record_handoff" || !handoffCanonical.has(field)));
   return ["room_" + name, { type, tool: { name: "room_" + name, title, description: description + retry,
-    inputSchema: object({ ...fields, ...properties }, [...new Set([...Object.keys(fields), ...required])]),
+    inputSchema: object({ ...fields, ...aliases, ...properties }, requiredFields),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
 }));
 // Consolidated front door for the four legacy claim/handoff names. `room_claim`
@@ -86,7 +98,7 @@ const renew = actions.get("room_renew_claim").tool.inputSchema.properties;
 const claimTool = {
   name: "room_claim",
   title: "Claim, renew, or release work",
-  description: "Claim work with one tool. action=take reserves a declared repository/ref/path scope for your assigned write-mode task (same rules and permissions as room_acquire_claim); action=renew extends the lease with a new explicit expiresAt (same rules as room_renew_claim); action=release gives the scope back (same rules as room_release_claim). Taking requires repository, ref, paths and expiresAt. Retry the exact same input and requestId; a saved receipt does not prove current ownership." + retry,
+  description: "Claim work with one tool. action=take reserves a declared repository/ref/path scope for your assigned write-mode task (same rules and permissions as room_acquire_claim); action=renew extends the lease with a new explicit expiresAt (same rules as room_renew_claim); action=release gives the scope back (same rules as room_release_claim). Taking requires repository, ref, paths and expiresAt. Omit requestId and expectedRevision on the first call; retry the exact same input; a saved receipt does not prove current ownership." + retry,
   inputSchema: {
     ...object({
       requestId: common.requestId,
@@ -101,7 +113,7 @@ const claimTool = {
       pullRequests: acquire.pullRequests,
       blocks: acquire.blocks,
       progressMessageId: renew.progressMessageId
-    }, ["requestId", "workItemId", "expectedRevision", "action"]),
+    }, ["workItemId", "action"]),
     allOf: [
       { if: { properties: { action: { const: "take" } }, required: ["action"] },
         then: { required: ["repository", "ref", "paths", "expiresAt"] } },
@@ -145,6 +157,24 @@ function validCanonicalWorkArguments(name, args) {
   return validWorkArguments(canonical.to, args);
 }
 
+export function normalizeHandoffArguments(name, args) {
+  if (name === "room_handoff") return normalizeHandoffArguments("room_record_handoff", args);
+  if (name !== "room_record_handoff" || !args || typeof args !== "object" || Array.isArray(args)) return { args };
+  const value = { ...args };
+  for (const [alias, canonical] of Object.entries(HANDOFF_ALIASES)) {
+    if (!Object.hasOwn(value, alias)) continue;
+    if (Object.hasOwn(value, canonical)) return { error: `${alias} and ${canonical} cannot both be supplied` };
+    value[canonical] = value[alias];
+    delete value[alias];
+  }
+  return { args: value };
+}
+
+export function workUsesExpectedRevision(name) {
+  if (canonicalActions.has(name)) return true;
+  return actions.get(name)?.tool.inputSchema.properties.expectedRevision !== undefined;
+}
+
 // Validator for this finite descriptor vocabulary, not a general JSON Schema engine.
 export function conforms(value, shape) {
   if (value === null) return Array.isArray(shape.type) && shape.type.includes("null");
@@ -164,26 +194,35 @@ export function conforms(value, shape) {
 }
 export function validWorkArguments(name, args) {
   if (canonicalActions.has(name)) return validCanonicalWorkArguments(name, args);
-  if (!actions.has(name) || !conforms(args, actions.get(name).tool.inputSchema)) return false;
-  try { if (actions.get(name).type === T.WORK_COMPLETED) reportedProducer(args); } catch { return false; }
+  if (!actions.has(name)) return false;
+  const normalized = normalizeHandoffArguments(name, args);
+  if (normalized.error || !conforms(normalized.args, actions.get(name).tool.inputSchema)) return false;
+  if (name === "room_record_handoff" && !["doneSummary", "nextAction", "limitReason"].every(key =>
+    typeof normalized.args[key] === "string" && normalized.args[key].length > 0)) return false;
+  try { if (actions.get(name).type === T.WORK_COMPLETED) reportedProducer(normalized.args); } catch { return false; }
   return true;
 }
-export function buildWorkCommand(name, args) {
-  // #2862: requestId is the command id / idempotency key, so it must be
-  // caller-supplied and stable across retries. Substituting a fresh
-  // randomUUID() for a missing/invalid one minted a second command on
-  // retry, the server could not deduplicate, and the action applied twice.
-  // Name the missing field (as room_reply does) so the caller can repair it.
-  if (isWorkTool(name) && args && !validId(args.requestId))
-    throw Object.assign(new Error(`${name} requires requestId: supply one stable id per operation and keep it unchanged when retrying an unknown result`), { code: "missing_request_id" });
-  if (!validWorkArguments(name, args)) throw Object.assign(new Error("Invalid work action input"), { code: "invalid_work_action" });
-  if (name === "room_claim") {
+export function buildWorkCommand(name, args, identity = null, options = {}) {
+  const { expectedRevision } = options;
+  if (canonicalActions.has(name)) {
+    if (!validCanonicalWorkArguments(name, args)) throw Object.assign(new Error("Invalid work action input"), { code: "invalid_work_action" });
+    if (name === "room_handoff") return buildWorkCommand("room_record_handoff", args, identity, options);
     const { action, ...rest } = args;
-    return buildWorkCommand(claimDelegates[action], rest);
+    return buildWorkCommand(claimDelegates[action], rest, identity, options);
   }
-  if (name === "room_handoff") return buildWorkCommand("room_record_handoff", args);
-  const requestId = args.requestId;
-  const { requestId: _requestId, ...data } = structuredClone(args), command = { id: requestId, type: actions.get(name).type, data };
+  if (!actions.has(name)) throw Object.assign(new Error("Invalid work action input"), { code: "invalid_work_action" });
+  const normalized = normalizeHandoffArguments(name, args);
+  if (normalized.error) throw Object.assign(new Error(`Invalid work action input: ${normalized.error}`), { code: "invalid_work_action" });
+  let prepared = withDerivedRequestId(name, normalized.args, identity);
+  if (expectedRevision !== undefined && workUsesExpectedRevision(name) && prepared && typeof prepared === "object"
+      && prepared.expectedRevision === undefined && Object.hasOwn(prepared, "workItemId")) {
+    prepared = { ...prepared, expectedRevision };
+  }
+  if (prepared && !validId(prepared.requestId))
+    throw Object.assign(new Error(`${name} requires requestId: supply one stable id per operation, or use an MCP connection that can derive and return one`), { code: "missing_request_id" });
+  if (!validWorkArguments(name, prepared)) throw Object.assign(new Error("Invalid work action input"), { code: "invalid_work_action" });
+  const requestId = prepared.requestId;
+  const { requestId: _requestId, ...data } = structuredClone(prepared), command = { id: requestId, type: actions.get(name).type, data };
   if (name === "room_submit_text_result") data.evidenceKind = "room_text";
   if (Buffer.byteLength(JSON.stringify(command)) > 16384) throw Object.assign(new Error("Work action exceeds the command limit"), { code: "work_action_too_large" });
   return command;
@@ -220,7 +259,14 @@ export function withWorkDeprecation(name, recorded) {
 }
 export async function submitWorkAction(client, identity, name, args, { signal } = {}) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
-  const command = buildWorkCommand(name, args), receipt = await client.command(command, { signal });
+  let expectedRevision;
+  if (workUsesExpectedRevision(name) && args && typeof args === "object" && !Array.isArray(args)
+      && args.expectedRevision === undefined && validId(args.workItemId)) {
+    const context = await client.workContext(args.workItemId, { signal });
+    if (!Number.isSafeInteger(context?.work?.revision)) throw Object.assign(new Error("Current work revision unavailable"), { code: "invalid_work_action" });
+    expectedRevision = context.work.revision;
+  }
+  const command = buildWorkCommand(name, args, identity, { expectedRevision }), receipt = await client.command(command, { signal });
   if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
     message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
   return withWorkDeprecation(name, recordedWorkAction(name, command, receipt));
@@ -235,8 +281,8 @@ const refusals = {
   invalid_cause: "The referenced causal event is unavailable in this room. Review the original input.",
   pilot_limit: "Room capacity was reached. Ask the owner to review capacity; do not replace the original operation blindly."
 };
-export function workActionRefusal(cause) {
-  const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: cause?.code, message: cause?.message });
+export function workActionRefusal(cause, { workItemId } = {}) {
+  const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: cause?.code, message: cause?.message, workItemId });
   if (["invalid_work_action", "work_action_too_large", "missing_request_id"].includes(cause?.code)) return { type: "work_input_refused", code: cause.code,
     outcome: "this_attempt_not_sent", message: "Input was not sent. Use the listed fields and reduce text/checks to fit the command limit. If this ID had an earlier uncertain attempt, reconcile its original input before changing it.",
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
