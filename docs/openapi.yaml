@@ -4730,7 +4730,7 @@ paths:
                 requestId: { type: string, description: Idempotency key }
                 workItemId: { type: string }
                 expectedRevision: { type: integer, description: Optional compare-and-swap. Omit for last-writer-wins. A stale value is 409. }
-                attemptCount: { type: integer, description: "Optional attempt binding for usage reports: the session's attempt_count at claim time, read from the session card. A report naming another attempt is recorded but its spendCents/rounds/toolCalls do not move the live attempt and never trip its budget wire. A report omitting it trips the wire only on numbers already stored for the live attempt." }
+                attemptCount: { type: integer, description: "Optional attempt binding for usage reports: the session's attempt_count at claim time, read from the session card. A report naming another attempt is recorded but its spendCents/rounds/toolCalls do not move the live attempt and never trip its budget wire. A report omitting it trips the wire immediately on its own numbers, exactly like a report naming the live attempt (Ruling 43: attemptCount refines when present; its absence never defers enforcement)." }
                 action: { type: string, enum: [set_status, request_stop] }
                 status:
                   type: string

@@ -55,7 +55,13 @@ export function foldSessionEvents(rows) {
   for (const row of rows) {
     if (row.type === SESSION_EVENT_TYPES.STARTED) { started++; attemptFor(row.workItemId, true); }
     else if (row.type === SESSION_EVENT_TYPES.STOPPED) { stopped++; if (row.budgetEnforced === 1 || row.budgetEnforced === true) budgetStops++; }
-    if (Number.isSafeInteger(row.spendCents) && row.spendCents >= 0) attemptFor(row.workItemId, false).spendCents = row.spendCents;
+    // Ruling 43: trippingSpendCents is non-counted record data — the
+    // refused figure that tripped a budget stop. A row carrying it never
+    // updates the attempt's spend: the fold keeps the last ACCEPTED
+    // number. Accepted spend carried as spendCents (including on a
+    // budget-enforced stop a worker actually reported) still counts.
+    if (!Number.isSafeInteger(row.trippingSpendCents)
+      && Number.isSafeInteger(row.spendCents) && row.spendCents >= 0) attemptFor(row.workItemId, false).spendCents = row.spendCents;
     if (row.type === SESSION_EVENT_TYPES.STOPPED) open.delete(row.workItemId);
   }
   const reported = attempts.filter(attempt => attempt.spendCents !== null);
@@ -86,7 +92,7 @@ export function roomUsageSummary(store, token, roomId, { days = USAGE_DEFAULT_DA
     const projectionBytes = store.db.prepare("SELECT length(CAST(projection AS BLOB)) AS bytes FROM rooms WHERE id=?").get(roomId)?.bytes ?? 0;
     const rows = store.db.prepare(
       `SELECT json_extract(body,'$.type') AS type, json_extract(body,'$.data.workItemId') AS workItemId,
-              json_extract(body,'$.data.spendCents') AS spendCents, json_extract(body,'$.data.budgetEnforced') AS budgetEnforced
+              json_extract(body,'$.data.spendCents') AS spendCents, json_extract(body,'$.data.trippingSpendCents') AS trippingSpendCents, json_extract(body,'$.data.budgetEnforced') AS budgetEnforced
        FROM events WHERE room_id=? AND json_extract(body,'$.type') IN (?,?,?) AND json_extract(body,'$.at')>=? ORDER BY sequence`
     ).all(roomId, SESSION_EVENT_TYPES.STARTED, SESSION_EVENT_TYPES.STATUS_CHANGED, SESSION_EVENT_TYPES.STOPPED, since);
     const folded = foldSessionEvents(rows);

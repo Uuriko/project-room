@@ -14,7 +14,8 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 // issues): usage reports bind to the attempt they name via attemptCount —
 // the session's attempt_count at claim time, read from the session card.
 // A stale report cannot trip the live attempt's budget wire or move its
-// counters; a report naming no attempt trips only on stored history; and
+// counters; a report naming no attempt trips immediately on its own
+// numbers (Ruling 43); and
 // when the wire's generated stop/pause cannot commit, the outcome says so
 // (budget_stop_pending / round_pause_pending) instead of claiming success.
 
@@ -74,7 +75,11 @@ test("a report naming the live attempt trips on its own numbers, and the stop re
   const recorded = await stops(workItemId);
   assert.equal(recorded.length, 1);
   assert.equal(recorded[0].data.limit, "maxSpendCents");
-  assert.equal(recorded[0].data.spendCents, 1500, "#3349: the stop records the spend figure that tripped it");
+  // Ruling 43: the tripping figure is recorded as NON-COUNTED data under
+  // trippingSpendCents, not spendCents — it must not enter accounting as
+  // held or usage (the report was refused, so it is not accepted spend).
+  assert.equal(recorded[0].data.trippingSpendCents, 1500, "#3349/Ruling 43: the stop records the spend figure that tripped it, as non-counted data");
+  assert.equal(recorded[0].data.spendCents, undefined, "Ruling 43: the refused tripping figure is not carried as counted spendCents");
 });
 
 test("a stale report cannot stop the live attempt or move its counters (#3322 probe)", async t => {

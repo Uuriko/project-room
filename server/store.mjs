@@ -764,7 +764,7 @@ const shapes = {
   [T.SESSION_STARTED]: `${work} budget environment model`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
   [T.SESSION_STOP_REQUESTED]: work,
-  [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs`,
+  [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs trippingSpendCents`,
   [T.CAPABILITIES_ADVERTISED]: "capabilities",
   "bond.propose": "to scopes note",
   "bond.accept": "bondId scopes",
@@ -820,7 +820,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "trippingSpendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -4928,19 +4928,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
       const session = sessionRecord(item);
-      // Attempt binding (#3322): a usage report binds to the attempt it
-      // names via attemptCount — the session's attempt_count at claim
-      // time. A report naming another attempt is stale and the wire never
-      // fires for it. A report naming no attempt fires only on numbers
-      // already stored for the live attempt, never on numbers the request
-      // itself carries. Only a report naming the live attempt counts its
-      // own numbers, as RC-2026-09-19-063 established.
+      // Attempt binding (#3322, as amended by Ruling 43): a usage report
+      // binds to the attempt it names via attemptCount — the session's
+      // attempt_count at claim time. A report naming another attempt is
+      // stale and the wire never fires for it. A report naming the live
+      // attempt counts its own numbers, and — Ruling 43 — a report naming
+      // NO attempt also trips immediately on its own numbers (the
+      // pre-D-1 behaviour, RC-2026-09-19-063): attemptCount refines when
+      // present, its absence never defers enforcement.
       const binding = request.attemptCount === undefined ? "absent"
         : request.attemptCount === session.attempt_count ? "matched" : "stale";
       if (binding === "stale") return null;
-      const pendingRounds = binding === "matched" ? request.rounds ?? session.round_count : session.round_count;
-      const pendingToolCalls = binding === "matched" ? request.toolCalls ?? session.tool_calls : session.tool_calls;
-      const pendingSpend = binding === "matched" ? request.spendCents ?? session.spend_cents : session.spend_cents;
+      const pendingRounds = request.rounds ?? session.round_count;
+      const pendingToolCalls = request.toolCalls ?? session.tool_calls;
+      const pendingSpend = request.spendCents ?? session.spend_cents;
       // A session already paused by its round limit stays paused until the
       // owner resumes it — the resume gate below owns that path, so the wire
       // does not re-fire here.
@@ -4968,11 +4969,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             this.command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
               data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
                 budgetEnforced: true, reason: "budget_exceeded", limit: wire,
-                ...(binding === "matched" && request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
-                ...(binding === "matched" && request.rounds !== undefined ? { rounds: request.rounds } : {}),
-                // #3349: a spend trip records the spend figure that
-                // tripped it, mirroring the toolCalls/rounds payload.
-                ...(wire === "maxSpendCents" && pendingSpend !== null ? { spendCents: pendingSpend } : {}) } }, expectedSessionBinding);
+                ...(request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
+                ...(request.rounds !== undefined ? { rounds: request.rounds } : {}),
+                // #3349, as amended by Ruling 43: a spend trip records the
+                // spend figure that tripped it as NON-COUNTED record data
+                // under trippingSpendCents — never as spendCents. The
+                // tripping report was refused, so its figure is not
+                // accepted spend: the applier must not record it as the
+                // attempt's usage (a spend-tripped attempt with no accepted
+                // report stays held as unknown) and the usage fold must
+                // keep the last ACCEPTED number.
+                ...(wire === "maxSpendCents" && pendingSpend !== null ? { trippingSpendCents: pendingSpend } : {}) } }, expectedSessionBinding);
           }, { isolated: true });
         } catch { stopCommitted = false; }
         return { kind: "budget", limit: wire, committed: stopCommitted };

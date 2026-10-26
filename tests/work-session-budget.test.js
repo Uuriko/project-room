@@ -118,25 +118,25 @@ test("spend trips only on reported numbers; unknown spend never authorizes overa
   assert.equal((await mutate(workItemId, 1, { status: "active", spendCents: 60 })).status, 201);
   assert.equal((await card(workItemId)).spendCents, 60);
   assert.equal(budgetLimitExceeded({ status: "active", budget: { maxSpendCents: 100 }, spend_cents: null }, Date.now()), null);
-  // #3322: a report that names no attempt does not trip the wire on its own
-  // carried number — the number is stored, and the NEXT interaction trips
-  // on the stored history. (A report naming the live attempt still trips
-  // on its own number; see work-session-attempt-binding.test.js.)
+  // Ruling 43 (superseding the PR's D-1 amendment of this test): a report
+  // that names no attempt trips immediately on its own number, exactly
+  // like a report naming the live attempt — this restores the pre-PR
+  // immediate-trip semantics (RC-2026-09-19-063). attemptCount refines
+  // when present; its absence never defers enforcement.
+  // Over the cap: this very report stops the session.
   const over = await mutate(workItemId, 2, { status: "active", spendCents: 150 });
-  assert.equal(over.status, 201, JSON.stringify(over.json));
-  assert.equal((await card(workItemId)).spendCents, 150);
-  assert.equal((await card(workItemId)).status, "active");
-  const tripped = await mutate(workItemId, 3, { status: "active" });
-  assert.equal(tripped.status, 409);
-  assert.equal(tripped.json?.error?.code, "budget_exceeded");
+  assert.equal(over.status, 409, JSON.stringify(over.json));
+  assert.equal(over.json?.error?.code, "budget_exceeded");
   assert.equal((await card(workItemId)).status, "failed");
-  // #3349: the generated stop records the spend figure that tripped it.
+  // #3349/Ruling 43: the generated stop records the spend figure that
+  // tripped it as NON-COUNTED trippingSpendCents, not as spendCents.
   const events = await request("/api/rooms/commons/events", { token: agentKey });
   const stop = (events.json?.events ?? []).map(e => e.event ?? e)
     .find(e => e.type === "session.stopped" && e.data?.workItemId === workItemId);
   assert.ok(stop, "a session.stopped event was recorded");
   assert.equal(stop.data.limit, "maxSpendCents");
-  assert.equal(stop.data.spendCents, 150);
+  assert.equal(stop.data.trippingSpendCents, 150);
+  assert.equal(stop.data.spendCents, undefined);
 });
 
 test("budgets are rejected off the start transition and on malformed input", async t => {
