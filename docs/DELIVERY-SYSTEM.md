@@ -166,3 +166,144 @@ verify tested tree equivalence explicitly instead of claiming SHA identity.
 describes strict up-to-date checks and trusted status-check sources. That documents
 available controls; the end-to-end race and tree-equivalence guarantee remains a
 qualification requirement for this implementation.
+
+## Incident research and durable rechecks (2026-10-26 UTC)
+
+The lander's one-pass skip behavior is Grokbot's reported diagnosis; its running
+four-minute loop has not been inspected here. This is distinct from CI saturation
+and actual code failures. Do not turn the report into a verified root cause for
+all queued runs.
+
+Direct GitHub evidence:
+
+- PR #4952's gates job 121314699111 explicitly rejected 3,521 changed lines with
+  a missing large-diff justification. Browser job 121317091730 also observed a
+  429 response where its test expected 200, and job 121317091751 timed out waiting
+  for a dialog to close. These failures do not by themselves establish flakiness.
+- PR #4941 advanced to head `3d8063c370a51abf874141f0213937ec794bcdc0`
+  during research. Failure records from its previous head must not determine the
+  new head's state. The new workflow runs were queued.
+- PR #4946 had attempt-2 runs queued. PR #4954's current workflow run
+  40243002231 was reported queued, while the concurrency-group API showed it as
+  the sole in-progress holder of `test-refs/pull/4954/merge`. Therefore a workflow
+  status alone cannot distinguish concurrency waiting from runner capacity.
+- PR #4948 has failing browser annotations. Its completed contract job log, fetched
+  directly through the job-log API while the overall run remained incomplete,
+  confirms unregistered GET bootstrap and messages routes. The gh run log command
+  refused the incomplete run, but the completed-job endpoint supplied the evidence.
+
+Sources and consequences:
+
+- [GitHub workflow concurrency](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency)
+  now documents `queue: max`, allowing up to 100 pending entries in one serial
+  concurrency group. It cannot be combined with `cancel-in-progress: true`.
+  Use this native capability where appropriate for serialized deploy workflows;
+  it does not replace cross-repository capacity or exact integration checks.
+- [Concurrency-group API](https://docs.github.com/en/rest/actions/concurrency-groups)
+  exposes group members and blocking relationships. Its listing uses cursor
+  pagination, so the existing page-number helper must not be reused for it.
+- [Failed webhook delivery guidance](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries)
+  says GitHub does not automatically redeliver failures. Keep periodic provider
+  reconciliation even after event-driven wakeups are implemented.
+
+Implemented follow-up: `--inspect-pr 4953,4954` registers durable PR observations.
+Subsequent shadow-command invocations recheck due entries without repeating that
+argument. Waiting, failed, cancelled and observation-error entries remain due
+for later checks; closed/merged entries stop. The default next-check interval is
+four minutes. This records a due time; it does not install a background service
+or automation. A hosted scheduler remains required.
+
+The reader selects workflow path, PR event, exact head, run number and attempt;
+a later queued attempt supersedes old cancellation/failure evidence. It reads the
+PR again after observing runs and discards evidence if head/base/state moved.
+All observations explicitly say `mergeAuthorized: false`: successful workflows
+are not proof of trusted job provenance, integration safety or release authority.
+Workflow-level state can remain waiting while some jobs have failed; job-level
+failure drilldown and actual runner occupancy are still required integrations.
+
+
+Firsthand reports also qualify the native-queue recommendation:
+[discussion #206259](https://github.com/orgs/community/discussions/206259)
+describes job-level queue:max stalls on self-hosted runners, while
+[discussion #208347](https://github.com/orgs/community/discussions/208347)
+traces unexpected cancellation to a separate job-level group still using the
+single-pending default. These are reported cases, not proof of our incident's
+cause. Inspect both workflow and job concurrency, and qualify queue:max before
+changing production. No concurrency setting was changed during this research.
+
+Reconciliation follow-up validation: 25 focused delivery tests and 242 affected
+tests pass; lint passes. Live shadow observation covered PRs 4948, 4952, 4941,
+4946, 4953 and 4954. Full suite result remains recorded separately in the PR.
+
+Follow-up room benchmark (complete table; existing workload, not delivery
+throughput). Both sides ran during concurrent verification; all verdicts remain
+inconclusive and are retained rather than rerun for better numbers.
+
+| metric | base median [95% CI] | head median [95% CI] | head/base | p (Holm) | verdict |
+|---|---|---|---|---|---|
+| write p50 (ms) | 8.32 [6.34–8.85] | 8.18 [6.32–8.79] | 0.98x | 1.000 | ~ |
+| write p95 (ms) | 17.1 [12.2–36.1] | 15.2 [11.2–29.2] | 0.89x | 1.000 | ~ |
+| storedProjection (ms) | 1.55 [1.23–3.43] | 1.71 [0.99–1.95] | 1.10x | 1.000 | ~ |
+| cold room() (ms) | 1.57 [1.42–2.00] | 2.25 [1.54–2.69] | 1.43x | 0.173 | ~ |
+| projection (KB) | 1211 [1211–1211] | 1211 [1211–1211] | 1.00x | 1.000 | ~ |
+| snapshot build (ms) | 3.41 [2.27–6.22] | 2.66 [2.12–3.70] | 0.78x | 1.000 | ~ |
+| GET full room (KB) | 1323 [1323–1323] | 1323 [1323–1323] | 1.00x | 1.000 | ~ |
+| GET full room (ms) | 7.95 [6.31–9.71] | 8.84 [5.53–11.42] | 1.11x | 1.000 | ~ |
+| GET recent window (KB) | 221 [221–221] | 221 [221–221] | 1.00x | 1.000 | ~ |
+| GET recent window (ms) | 4.80 [4.47–6.00] | 5.17 [3.07–6.57] | 1.07x | 1.000 | ~ |
+| replay from log (ms) | 159 [127–252] | 168 [102–273] | 1.06x | 1.000 | ~ |
+
+## Adoption and enforcement design
+
+Require coordination at shared side effects, not at every local thought or edit.
+Isolated research, branches, tests and drafts stay independent. Shared resource
+leases, merge admission and production deployment use the delivery authority.
+Submitting once should automatically preserve waiting state, observe CI, explain
+failures and produce a verifiable receipt. Reduce tool calls and manual follow-up
+rather than rewarding chat volume, claim count or PR count.
+
+Enforcement must be external to agent instructions:
+
+1. Issue each agent its own scoped identity. Room membership alone grants no
+   repository installation or production credential access.
+2. Keep merge/deploy credentials in an isolated delivery service. Agents submit
+   exact-revision requests; the service independently reads provider evidence.
+   Unrestricted agents on the owner's Mac can read owner credentials, so local
+   hooks and prompts alone cannot establish this boundary. Account/environment
+   isolation is a prerequisite for adversarial bypass resistance.
+3. Require the Room policy check on the protected target and pin its issuing
+   GitHub App. Test the eligible actor restrictions supported by this repository.
+   If a restriction ruleset exempts the coordinator, keep mandatory CI in a
+   separate non-bypassed ruleset: exemption from an actor restriction must not
+   waive checks. Qualify exact-head/base behavior before activation.
+4. Production credentials and deployment environments enforce equivalent policy.
+   Record provider receipts for completed side effects; an agent's self-reported
+   completion is insufficient.
+5. Provide a human-controlled emergency path with explicit scope, expiry, reason
+   and audit. Keep routine agent tokens unable to invoke it. Preserve durable
+   queued work through outages rather than pretending an offline action passed.
+
+Current observed settings (2026-10-26): required check room/release-lease has
+app_id:null; strict up-to-date mode is false; enforce_admins is true; push
+restrictions are null; repository rulesets are empty. This is a configuration
+snapshot, not evidence that anyone forged or bypassed a check. No settings or
+credentials were changed by this task.
+
+[GitHub protected checks](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)
+allow selecting the expected issuing App.
+[Repository rulesets](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/creating-rulesets-for-a-repository)
+provide additional actor/policy controls; validate exact availability and combined
+rules on this personal-owned repository before promising exclusive merge actors.
+
+Roll out per project: observe first, make the integrated path useful, qualify
+recovery and latency, then enforce merge/deploy boundaries. Existing agents can
+use a thin CLI/MCP adapter rather than moving their entire working environment
+into Room. External contributions remain possible: import a PR into Room's
+policy flow without requiring its author to join a Room or disclose private
+reasoning. Measure verified deliveries, collisions, queue delay, wasted CI work
+and recovery success. Avoid punitive scores that discourage reporting failures.
+
+Final follow-up full suite: 11,634 passed, 31 skipped, one failed (the same
+unchanged-base OG PNG hash mismatch on Node 26.8.2). The prior Room table-registry
+failure is absent. No hosted scheduler, live mutation or enforcement switch has
+been activated.

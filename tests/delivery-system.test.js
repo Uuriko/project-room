@@ -241,3 +241,52 @@ test('operational shadow command persists observations without executing provide
 test('malformed candidate identities never qualify for integration', () => {
   assert.equal(integrationVerdict({ candidate: {}, observation: { checks: [] }, requiredChecks: [] }).ready, false);
 });
+
+import { reconcilePulls, workflowVerdict } from '../delivery/reconcile.mjs';
+const workflow = (extra = {}) => ({ id: 1, path: '.github/workflows/test.yml', event: 'pull_request', head_sha: 'a'.repeat(40), run_number: 1, run_attempt: 1, status: 'queued', conclusion: null, ...extra });
+
+test('a waiting PR is rechecked after restart without being reselected', async t => {
+  const f = fixture(t), journal = f.open().journal;
+  const pull = { state: 'open', head: { sha: 'a'.repeat(40) }, base: { sha: 'b'.repeat(40), ref: 'main', repo: { full_name: 'owner/repo' } } };
+  let completed = false, reads = 0;
+  const reader = { repository: 'owner/repo', pull: async () => { reads += 1; return pull; }, runs: async () => [workflow(completed ? { status: 'completed', conclusion: 'success' } : {})] };
+  const options = { reader, installation: '123', ref: 'main', requiredWorkflows: ['.github/workflows/test.yml'] };
+  assert.equal((await reconcilePulls({ ...options, journal, numbers: [1] })).observations[0].state, 'waiting-checks');
+  assert.equal((await reconcilePulls({ ...options, journal })).observations.length, 0);
+  assert.equal(reads, 2);
+  f.advance(240000); completed = true;
+  const result = await reconcilePulls({ ...options, journal: f.open().journal });
+  assert.equal(result.observations[0].state, 'checks-passed');
+  assert.equal(result.observations[0].mergeAuthorized, false);
+  assert.equal(result.observations[0].changed, true);
+});
+
+test('latest workflow attempt supersedes cancelled runs; other events and heads cannot qualify', () => {
+  const policy = ['.github/workflows/test.yml'];
+  const runs = [workflow({ status: 'completed', conclusion: 'cancelled' }), workflow({ id: 2, run_number: 2 })];
+  assert.equal(workflowVerdict(runs, 'a'.repeat(40), policy).state, 'waiting-checks');
+  assert.equal(workflowVerdict([workflow({ event: 'workflow_dispatch', status: 'completed', conclusion: 'success' })], 'a'.repeat(40), policy).state, 'missing-checks');
+  assert.equal(workflowVerdict([workflow()], 'c'.repeat(40), policy).state, 'missing-checks');
+});
+
+test('head movement during observation invalidates green evidence', async t => {
+  const journal = fixture(t).open().journal;
+  let reads = 0;
+  const reader = { repository: 'owner/repo', pull: async () => ({ state: 'open', head: { sha: (++reads === 1 ? 'a' : 'c').repeat(40) }, base: { sha: 'b'.repeat(40), ref: 'main', repo: { full_name: 'owner/repo' } } }), runs: async () => [workflow({ status: 'completed', conclusion: 'success' })] };
+  const result = await reconcilePulls({ journal, reader, installation: '123', ref: 'main', numbers: [1], requiredWorkflows: ['.github/workflows/test.yml'] });
+  assert.equal(result.observations[0].state, 'changed-during-read');
+  assert.deepEqual(result.observations[0].evidence, []);
+});
+
+test('provider failures remain scheduled and closed PRs stop polling', async t => {
+  const f = fixture(t), journal = f.open().journal;
+  let fail = true;
+  const reader = { repository: 'owner/repo', pull: async () => { if (fail) throw new ProviderFailure('rate-limit', 'limited'); return { state: 'closed', merged: true, head: { sha: 'a'.repeat(40) }, base: { sha: 'b'.repeat(40), ref: 'main', repo: { full_name: 'owner/repo' } } }; } };
+  const options = { journal, reader, installation: '123', ref: 'main' };
+  const result = await reconcilePulls({ ...options, numbers: [1] });
+  assert.equal(result.observations[0].state, 'observation-error');
+  f.advance(240000); fail = false;
+  assert.equal((await reconcilePulls(options)).observations[0].state, 'merged');
+  f.advance(240000);
+  assert.equal((await reconcilePulls(options)).observations.length, 0);
+});

@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { DeliveryJournal, repositoryResource } from '../delivery/journal.mjs';
 import { DeliveryCapacity } from '../delivery/capacity.mjs';
 import { GitHubDeliveryReader } from '../delivery/execution.mjs';
+import { reconcilePulls } from '../delivery/reconcile.mjs';
 import { planAdmissions } from '../delivery/scheduler.mjs';
 
 export async function shadowReconcile({ journal, reader, installation, ref, capacity, slotsPerPr = 1, now = Date.now() }) {
@@ -50,11 +51,11 @@ export async function shadowReconcile({ journal, reader, installation, ref, capa
 async function main() {
   const args = process.argv.slice(2), options = {};
   if (args.includes('--help')) {
-    console.log('Usage: npm run delivery:shadow -- --database PATH --installation ID --repository OWNER/REPO --ref main --capacity N [--slots-per-pr N]');
+    console.log('Usage: npm run delivery:shadow -- --database PATH --installation ID --repository OWNER/REPO --ref main --capacity N [--slots-per-pr N] [--inspect-pr N,N]');
     console.log('Read-only GitHub reconciliation; local database writes only. Admission is illustrative until existing runs and dependencies are imported.');
     return;
   }
-  const allowed = new Set(['database', 'installation', 'repository', 'ref', 'capacity', 'slots-per-pr']);
+  const allowed = new Set(['database', 'installation', 'repository', 'ref', 'capacity', 'slots-per-pr', 'inspect-pr']);
   for (let index = 0; index < args.length; index += 2) {
     const key = args[index]?.replace(/^--/, '');
     if (!args[index]?.startsWith('--') || !allowed.has(key) || !args[index + 1] || Object.hasOwn(options, key)) throw new Error('Invalid command arguments; use --help');
@@ -80,7 +81,9 @@ async function main() {
     journal.initialize();
     const result = await shadowReconcile({ journal, reader, installation: options.installation, ref: options.ref,
       capacity: Number(options.capacity), slotsPerPr: Number(options['slots-per-pr'] ?? 1) });
-    console.log(JSON.stringify(result, null, 2));
+    const reconciliation = await reconcilePulls({ journal, reader, installation: options.installation, ref: options.ref,
+      numbers: options['inspect-pr'] ? options['inspect-pr'].split(',').map(Number) : [] });
+    console.log(JSON.stringify({ ...result, reconciliation }, null, 2));
   } finally { db.close(); }
 }
 

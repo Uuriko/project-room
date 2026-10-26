@@ -85,6 +85,11 @@ export class GitHubDeliveryReader {
     return rows.map(row => ({ name: row.name, appId: row.app?.id, sha: row.head_sha, runId: row.id, status: row.status, conclusion: row.conclusion }));
   }
 
+  async runs(sha) {
+    if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Invalid commit SHA');
+    return this.pages(`/repos/${this.repository}/actions/runs?head_sha=${sha}`, 'workflow_runs');
+  }
+
   async jobs(runId) {
     if (!Number.isSafeInteger(runId) || runId < 1) throw new Error('Invalid run ID');
     return this.pages(`/repos/${this.repository}/actions/runs/${runId}/jobs?filter=latest`, 'jobs');
