@@ -389,7 +389,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
-  publicAgentPages = false }) {
+  publicAgentPages = false,
+  credentialReadBurst = CREDENTIAL_READ_BURST,
+  credentialWriteBurst = CREDENTIAL_WRITE_BURST }) {
   // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
   // (server/boot-config.mjs) runs here, in the shared boot path every entry
   // converges on — the node entry (server.mjs), the Worker entry
@@ -693,8 +695,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
   // the service instance.
   const agentRooms = new AgentRooms(store);
-  const credentialReads = createRateLimiter({ capacity: CREDENTIAL_READ_BURST, refillPerSecond: CREDENTIAL_READ_REFILL_PER_SECOND });
-  const credentialWrites = createRateLimiter({ capacity: CREDENTIAL_WRITE_BURST, refillPerSecond: CREDENTIAL_WRITE_REFILL_PER_SECOND });
+  if (!Number.isInteger(credentialReadBurst) || credentialReadBurst < 1) throw new Error("Credential read burst must be a positive integer");
+  if (!Number.isInteger(credentialWriteBurst) || credentialWriteBurst < 1) throw new Error("Credential write burst must be a positive integer");
+  const credentialReads = createRateLimiter({ capacity: credentialReadBurst, refillPerSecond: CREDENTIAL_READ_REFILL_PER_SECOND });
+  const credentialWrites = createRateLimiter({ capacity: credentialWriteBurst, refillPerSecond: CREDENTIAL_WRITE_REFILL_PER_SECOND });
   function spendCredential(kind, credentialHash) {
     const limiter = kind === "write" ? credentialWrites : credentialReads;
     const decision = limiter.check(credentialHash);
