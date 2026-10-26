@@ -54,7 +54,7 @@ test("ensureAnalyticsSchema is idempotent", () => {
   ensureAnalyticsSchema(db);
   const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'analytics_%' ORDER BY name").all().map(row => row.name);
   assert.deepEqual(tables, [
-    "analytics_ctx", "analytics_daily", "analytics_events", "analytics_firsts", "analytics_room_cursor", "analytics_table_cursor"
+    "analytics_ctx", "analytics_daily", "analytics_events", "analytics_room_cursor", "analytics_table_cursor"
   ]);
   db.close();
 });

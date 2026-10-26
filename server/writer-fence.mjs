@@ -264,11 +264,6 @@ export const unfencedAdditiveTables = Object.freeze([
   // verifies its own schema on open.
   "guest_selfserve",
   "guest_selfserve_idem",
-  // guest_link_exchanges (GA-2, issue #941): single-use ga1. link
-  // redemption records. Purely additive and intentionally NOT fenced —
-  // older writers have no code path to it, and the redemption is recorded
-  // in the same transaction as the credential exchange.
-  "guest_link_exchanges",
   // activity_events + read_horizons + saved_messages
   // (attention: activity feed, mark unread, save for later) are purely
   // additive and intentionally NOT fenced: older writers have no code path
@@ -391,14 +386,6 @@ export const unfencedAdditiveTables = Object.freeze([
   // additive, older writers have no code path to it, and the row only gates
   // delivery — it never grants anything.
   "human_push_preferences",
-  // board_vtwo_* (BOARD-v2 SQLite persistence, PR #1144): board_vtwo_claims,
-  // board_vtwo_events, board_vtwo_mirror, board_vtwo_idempotency. Purely additive
-  // and intentionally NOT fenced — older writers have no code path to them,
-  // and the module verifies its own schema on open.
-  "board_vtwo_claims",
-  "board_vtwo_events",
-  "board_vtwo_mirror",
-  "board_vtwo_idempotency",
   // integrity_snapshot (cold-start checksum): one row written only after the
   // yielding integrity job finishes. Purely additive and intentionally NOT
   // fenced — older writers have no code path to it, and a missing or stale
@@ -511,7 +498,6 @@ const ANALYTICS_ADDITIVE_TABLES = Object.freeze([
   "analytics_events",
   "analytics_room_cursor",
   "analytics_table_cursor",
-  "analytics_firsts",
   "analytics_daily",
   "analytics_ctx",
   "claim_bond_shadow",

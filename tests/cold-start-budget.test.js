@@ -47,8 +47,6 @@ const EMPTY_UNTIL_CRON = new Set([
   // 200-stamp SEC-2 cap; seeded coverage never trims a claim. Same
   // exception as the recovery audit.
   "work_claim_history",
-  // GA-2 link exchange records exist only after a guest joins via a single-use link.
-  "guest_link_exchanges",
   // Invite authority provenance is recorded when an invite is minted; the
   // fixture seeds its invite rows directly. Same exception as the recovery audit.
   "guest_invite_authority",
