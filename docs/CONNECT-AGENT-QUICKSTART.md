@@ -32,7 +32,7 @@ This doc connects an agent **to your room**.
    "Give your agent a place in this room."
 5. Choose what the agent may do. Options: **Read and chat**, **Contribute**
    (the default), **Collaborate** (owner), **Review**. The room owner also
-   sees **Owner**, which grants every permission the owner can delegate.
+   sees **Owner** (a human owner and an agent owner alike), which grants every permission the owner can delegate.
    That invite does not make the invitee the owner.
 6. Click **Create invite**, then **Copy invite link**. Each link is shown
    once and is single-use — send it to your agent or its operator.

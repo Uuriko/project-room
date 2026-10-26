@@ -5,11 +5,12 @@
 // an owner round-trip: redemption mints a fresh agent identity, links it
 // into the room as an agent member with exactly the code's permissions, and
 // burns the code. Redeeming never creates an account session. Ordinary
-// codes cannot grant manage_members, decide, or invite_member. The room
-// owner, authenticated as the owner, may mint an owner-equivalent code
+// codes cannot grant manage_members, decide, or invite_member. The room's
+// owner member, human or agent, may mint an owner-equivalent code
 // (ownerEquivalent: true) that grants every permission the owner can
 // delegate. The invitee is a co-owner-level member, not the owner; the
 // owner seat stays put and the owner can still revoke or downgrade.
+// Co-owners and owner-equivalent members cannot mint another one.
 //
 // The code itself is the bearer credential, so only a hash of it is stored:
 // a deterministic scrypt (so lookup by hash still works, and no deployment
@@ -17,6 +18,8 @@
 // bare sha256. Codes minted before the v2 format (8 symbols, sha256 stored)
 // keep redeeming until they expire. Audit is the table: created_by/at,
 // expires_at, redeemed_at/by, revoked_at, all queryable through list().
+// An owner-equivalent mint also appends agent_invite.minted to the room
+// log, naming the minter. The raw code and its hash stay out of that event.
 
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
@@ -141,16 +144,15 @@ const view = (row, now) => ({
   status: inviteStatus(row, now),
 });
 
-// The owner seat's own credential: a human room owner on a room key or
-// account session. Agent identity bearers and API keys are refused even
-// when that agent is the owner. Delegates are not the owner.
+// The owner seat's own credential. The authenticated member id must be the
+// room owner. A human session, a human room key, the owner agent's identity
+// secret, and that agent's room connection all qualify. Co-owners,
+// owner-equivalent members, and owner delegates do not: a delegate is
+// stamped, and every other member has a different id.
 const isRoomOwnerPrincipal = (auth, authority) => {
   if (!auth?.member || auth.delegate) return false;
   if (auth.member.active === false) return false;
-  if (auth.member.id !== authority?.ownerId) return false;
-  if (auth.member.kind !== "human") return false;
-  if (auth.kind === "identity" || auth.kind === "api-key") return false;
-  return true;
+  return auth.member.id === authority?.ownerId;
 };
 
 const samePermissionSet = (left, right) =>
@@ -417,6 +419,18 @@ export class AgentInvites {
       const expiresAt = now + expiresInMinutes * 60000;
       this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at,owner_equivalent)
         VALUES(?,?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt, ownerLevel ? 1 : 0);
+      if (ownerLevel) {
+        // Room log of who minted the grant. inviteId is the public 8-hex
+        // handle; the raw code and the stored hash never enter the event.
+        this.store.appendSideTableEvent(roomId, event({
+          type: T.AGENT_INVITE_MINTED,
+          actorId: auth.member.id,
+          roomId,
+          at: new Date(now).toISOString(),
+          idempotencyKey: randomUUID(),
+          data: { inviteId: inviteId(stored), ownerEquivalent: true },
+        }));
+      }
       return { code, inviteId: inviteId(stored), roomId, permissions, profile: ownerLevel ? "owner" : profileName, ownerEquivalent: ownerLevel, displayName: name, createdAt: now, expiresAt, next: createNext(roomId, code) };
     });
   }

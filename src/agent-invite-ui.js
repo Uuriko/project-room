@@ -92,7 +92,7 @@ export function installAgentInvites({ client, getState, getSession }) {
     if (ownerChoice) {
       const state = getState();
       const me = member();
-      const show = Boolean(me && me.active !== false && me.kind === "human" && me.id === state?.room?.ownerId);
+      const show = Boolean(me && me.active !== false && me.id === state?.room?.ownerId);
       ownerChoice.hidden = !show;
       ownerChoice.disabled = !show;
       const select = $("#agent-invite-profile");
