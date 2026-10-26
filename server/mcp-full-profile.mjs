@@ -30,7 +30,7 @@ import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.m
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
-import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction } from "../client/work-actions.mjs";
+import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction, withWorkDeprecation } from "../client/work-actions.mjs";
 import { isHelpTool, buildHelpCommand, recordedHelpAction } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
 import { markIfOther, stampAssistantResult, stampBoard, withContentTrust } from "./content-trust.mjs";
@@ -338,7 +338,8 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   }
   if (isWorkTool(name)) {
     const command = buildWorkCommand(name, rest);
-    return recorded(store, secret, roomId, identity, command, receipt => recordedWorkAction(name, command, receipt));
+    return recorded(store, secret, roomId, identity, command,
+      receipt => withWorkDeprecation(name, recordedWorkAction(name, command, receipt)));
   }
   if (name === "room_read_result") {
     return { value: store.workResult(secret, roomId, rest.workItemId, {

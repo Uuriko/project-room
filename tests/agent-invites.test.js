@@ -681,7 +681,7 @@ test("invite redeem returns machine-readable next steps for a redeemed agent (RC
   for (const step of res.json.next) {
     assert.equal(typeof step.action, "string");
     assert.equal(typeof step.description, "string");
-    assert.ok((step.method && step.path) || step.doc, "each step has a method+path or a doc pointer");
+    assert.ok((step.method && step.path) || step.tool || step.doc, "each step has a method+path, a tool, or a doc pointer");
     if (step.path) {
       assert.ok(step.path.includes("/api/rooms/commons/") || step.path === "/api/agent-invites/redeem",
         `step path is concrete and room-scoped: ${step.path}`);

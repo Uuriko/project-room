@@ -697,6 +697,15 @@
         "openWorldHint": false
       }
     },
+    "room_claim": {
+      "inputSchema": "5ed60e70d013ac84",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_clear_halt": {
       "inputSchema": "10ef080c6a66fafb",
       "annotations": {
@@ -776,6 +785,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_handoff": {
+      "inputSchema": "2f690e02f2c13878",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_introduce_outside_agent": {
@@ -1392,6 +1410,15 @@
         "openWorldHint": false
       }
     },
+    "room_claim": {
+      "inputSchema": "5ed60e70d013ac84",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_commit_file": {
       "inputSchema": "e474540a197f0411",
       "annotations": {
@@ -1408,6 +1435,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_handoff": {
+      "inputSchema": "2f690e02f2c13878",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_join_kits": {
