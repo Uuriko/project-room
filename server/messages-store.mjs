@@ -1,6 +1,7 @@
 import { writeMessageReplaySnapshot, discardMessageReplaySnapshot, decodeMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { hydrateProjection, storedProjection } from "./projection-at-rest.mjs";
 import { closeKeepSet } from "./open-questions.mjs";
+import { runStoreTransaction } from "./spend-grants.mjs";
 export { closeKeepSet };
 // MSG-1: the messages table, double-written with the room event log.
 // Read paths still use the projection. The command path writes rows in the
@@ -1466,25 +1467,18 @@ const sha256Hex = body => createHash("sha256").update(body, "utf8").digest("hex"
 // store; resyncRoomMessageRows and the other primitives here take a raw
 // db. repairMessagesParityDrift composes both, so it accepts either: a
 // store (the tick leg passes the RoomStore, keeping its writer discipline)
-// or a bare db, wrapped in the same BEGIN IMMEDIATE discipline the store
-// itself uses outside a transaction.
+// or a bare db, run through the store transaction registered for that
+// database (spend-grants' runner registry, the same discipline
+// authorizeSpend uses): an open transaction is joined, otherwise the
+// registered runner supplies the BEGIN IMMEDIATE/commit/rollback — raw
+// transaction statements are never issued here (room/no-raw-transaction),
+// and a database with no registered store transaction refuses loudly.
 function parityRepairStore(storeOrDb) {
   const db = storeOrDb?.db ?? storeOrDb;
   if (storeOrDb && storeOrDb.db && typeof storeOrDb.transaction === "function") {
     return { db, transaction: fn => storeOrDb.transaction(fn) };
   }
-  return {
-    db,
-    transaction: fn => {
-      if (db.isTransaction) return fn();
-      db.exec("BEGIN IMMEDIATE");
-      try { const result = fn(); db.exec("COMMIT"); return result; }
-      catch (error) {
-        if (db.isTransaction) { try { db.exec("ROLLBACK"); } catch { /* already rolled back */ } }
-        throw error;
-      }
-    }
-  };
+  return { db, transaction: fn => runStoreTransaction(db, fn) };
 }
 
 // Re-derive one room's replay state from its full event log: the same

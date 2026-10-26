@@ -228,6 +228,13 @@ function transact(db, fn) {
   if (typeof run !== "function") throw new Error("spend-grants: no store transaction is registered for this database");
   return run(fn);
 }
+// The registered-runner transaction, exported for server code that composes
+// store-level operations with bare-database primitives and therefore holds
+// only the db (messages-store's parity repair): join an open transaction,
+// delegate to the store runner registered for the database, and refuse
+// loudly when neither exists — never fall back to raw BEGIN/COMMIT/ROLLBACK
+// (room/no-raw-transaction).
+export function runStoreTransaction(db, fn) { return transact(db, fn); }
 // Integer cents as text: no floats, no negatives, no leading zeros, bounded.
 const CENTS_PATTERN = /^(0|[1-9][0-9]{0,8})$/;
 const validCentsText = value => typeof value === "string" && CENTS_PATTERN.test(value);
