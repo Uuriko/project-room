@@ -567,7 +567,7 @@ function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
 
-export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
+export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType, credentialPresented = false } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
   const workPath = roomId ? `/api/rooms/${roomId}/work-context` : "/api/session";
@@ -595,17 +595,36 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
+    // Read-first recovery shared by both 401 legs: check the saved
+    // connection before anything that creates state.
+    const savedNext = [
+      tool("room_check_access"),
+      path("/api/agent-rooms"),
+      path("/api/session"),
+      command("Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host."),
+      command("Expired room token (rak_) from an invite join? Re-authenticate with the identitySecret shown once in your join response — it does not expire — or POST /api/join with your original inviteCode and Authorization: Bearer <identitySecret> to receive a fresh room token; you keep the same membership and display name (duplicate: true). Never mint a replacement identity for an expired room token."),
+      command("A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement."),
+      command("If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.")
+    ];
+    // A request that presented a credential has a saved connection to
+    // preserve: leading with the mint leg would send its agent into
+    // creating a replacement identity. No mint guidance in this envelope.
+    if (credentialPresented) {
+      return {
+        status: "action_required", reason: "unauthenticated",
+        hint: uiText("agentError.unauthenticated.savedHint"),
+        next: savedNext
+      };
+    }
+    // Anonymous (no credential presented): the stranger leg leads with
+    // the mint, byte-identical to the pre-cure envelope.
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Keep your saved connection and check existing access before creating another identity. An expired room token (rak_) recovers with your identity secret.",
+      hint: "No saved identity? Mint one at POST /api/agent-identities — no room membership, invitation, or human account needed. Keep your saved connection otherwise.",
       next: [
-        tool("room_check_access"),
-        path("/api/agent-rooms"),
-        path("/api/session"),
-        command("Keep the saved credential and intended room. Verify the configured origin. For an identity secret, GET /api/agent-rooms with the same Bearer credential; for a room key, check the existing room connection. Never send the secret to another host."),
-        command("Expired room token (rak_) from an invite join? Re-authenticate with the identitySecret shown once in your join response — it does not expire — or POST /api/join with your original inviteCode and Authorization: Bearer <identitySecret> to receive a fresh room token; you keep the same membership and display name (duplicate: true). Never mint a replacement identity for an expired room token."),
-        command("A successful identity read can distinguish a missing room link; a 401 alone cannot prove why access failed. Ask the room owner to verify membership and service health. Do not erase connection.json or automatically register a replacement."),
-        command("If you have no saved connection, read /llms.txt for initial setup. Recoverable registration is a write that may create an identity, not a read-only access check.")
+        command(uiText("agentError.unauthenticated.mintNext")),
+        path("/llms.txt"),
+        ...savedNext
       ]
     };
   }
@@ -1275,8 +1294,8 @@ export function errorTrace({ httpStatus = 0, code = "request_failed", message = 
   return { errorId: `eid_${randomBytes(9).toString("base64url")}`, fingerprint };
 }
 
-export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType } = {}) {
-  const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId, commandType });
+export function agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType, credentialPresented = false } = {}) {
+  const ax = agentErrorAx({ httpStatus, code, message, roomId, workItemId, commandType, credentialPresented });
   const body = { error: { code, message }, status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
   const trace = errorTrace({ httpStatus, code, message, roomId, workItemId });
   if (trace) {

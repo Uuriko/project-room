@@ -694,7 +694,7 @@ function isHumanPublicPath(pathname) {
   return normalized === "/api/public" || normalized.startsWith("/api/public/");
 }
 
-export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
+export function discoverabilityErrorOverride({ pathname, httpStatus, code, credentialPresented = false }) {
   const scope = matchScope(pathname);
   if (!scope) {
     if (httpStatus === 404 && code === "not_found" && isHumanPublicPath(pathname)) {
@@ -707,7 +707,12 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
     }
     return null;
   }
-  const base = agentErrorAx({ httpStatus, code, message: "" });
+  // Listed credential routes are enrolled-agent surfaces, not the
+  // stranger door: their canonical 401 guidance preserves saved
+  // connections with read-first next steps, so the base for those
+  // branches is the presented-credential (saved-connection) variant
+  // regardless of whether this particular request carried a credential.
+  const base = agentErrorAx({ httpStatus, code, message: "", credentialPresented: credentialPresented || httpStatus === 401 });
   let hint = null;
   let next = null;
   if (httpStatus === 401) {

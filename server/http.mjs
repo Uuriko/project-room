@@ -5515,13 +5515,19 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // Burs-IA steal A1: listed routes get route-aware hint/next guidance on
       // top of the canonical envelope; everything else keeps the existing body.
+      // A credential presented on the request (Authorization header, or a
+      // session cookie) marks a saved connection: its 401 envelope must
+      // lead with read-first recovery, never the mint leg. Anonymous
+      // requests keep the mint-first stranger guidance.
+      const credentialPresented = (typeof req.headers.authorization === "string" && req.headers.authorization.trim() !== "")
+        || (typeof req.headers.cookie === "string" && req.headers.cookie.trim() !== "");
       let errorOverride = null;
       try {
-        errorOverride = discoverabilityErrorOverride({ pathname: requestPathname(req.url), httpStatus, code });
+        errorOverride = discoverabilityErrorOverride({ pathname: requestPathname(req.url), httpStatus, code, credentialPresented });
       } catch { /* base envelope keeps its shape on parse failure */ }
       const errorBody = mergeErrorDetail(errorOverride
         ? { error: { code, message }, ...errorOverride, operationId, category }
-        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE] }), operationId, category },
+        : { ...agentErrorBody({ httpStatus, code, message, roomId, workItemId, commandType: error[ERROR_COMMAND_TYPE], credentialPresented }), operationId, category },
       error.detail);
       json(res, httpStatus, errorBody);
     }
