@@ -379,11 +379,14 @@ function defaultAssetLoader(assetRoot) {
 // metrics after these (cloudflare/request-timing.mjs); parsers that read
 // the first value per name get the handler-side phases above.
 export const PERF_PHASES = Object.freeze(["body", "handler", "serialise", "total"]);
+// Measured surfaces as data: the API and MCP prefixes, plus their /room/*
+// edge-door twins. These are prefixes of existing registered routes, not
+// new routes.
+export const PERF_MEASURED_EXACT = Object.freeze(["/api", "/mcp", "/room/api", "/room/mcp"]);
+export const PERF_MEASURED_PREFIXES = Object.freeze(["/api/", "/mcp/", "/room/api/", "/room/mcp/"]);
 export function isPerfMeasuredPath(pathname) {
-  return typeof pathname === "string" && (pathname === "/api" || pathname.startsWith("/api/")
-    || pathname === "/mcp" || pathname.startsWith("/mcp/")
-    || pathname === "/room/api" || pathname.startsWith("/room/api/")
-    || pathname === "/room/mcp" || pathname.startsWith("/room/mcp/"));
+  return typeof pathname === "string" && (PERF_MEASURED_EXACT.includes(pathname)
+    || PERF_MEASURED_PREFIXES.some(prefix => pathname.startsWith(prefix)));
 }
 export function perfSegmentsMs(segments) {
   if (!Array.isArray(segments) || segments.length === 0) return 0;

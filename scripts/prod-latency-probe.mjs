@@ -18,8 +18,8 @@
 //   health            GET  /api/health
 //   health-jobs       GET  /api/health/jobs
 //   room-snapshot     GET  /api/rooms/<room>                    (needs --room + token)
-//   room-events       GET  /api/rooms/<room>/events?after=0&limit=20
-//   room-search       GET  /api/rooms/<room>/search?q=<query>
+//   room-events       GET  /api/rooms/<room>/events             (query: after=0, limit=20)
+//   room-search       GET  /api/rooms/<room>/search             (query: q=<query>)
 //   mcp-tools-list    POST /mcp  tools/list
 //   mcp-read          POST /mcp  tools/call room_read_messages (needs --room + MCP token)
 //                                or room_join_packet (public, no credential)
