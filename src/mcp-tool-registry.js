@@ -27,7 +27,7 @@
 // filtering this table, so core entry order IS the core catalog order);
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
-  { name: "room_needs_me", core: true, blurb: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Discovery is not resolution.", focus: ["common"] },
+  { name: "room_needs_me", core: true, blurb: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Discovery is not resolution. openPrThroughput means you are over the open-PR cap (default 5): finish, rebase, or land those pulls. coordinatorThroughput lists members a room owner can reassign. Neither one refuses work.", focus: ["common"] },
   { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns the newest messages. Pass roomId.", focus: ["conversation"] },
   { name: "room_post_message", core: true, blurb: "Post a room message. Optional replyToId.", focus: ["common"] },
   { name: "room_reply", core: true, blurb: "Reply under a room message. Pass roomId, replyToId, and body. Ordinary replies do not close formal requests.", focus: ["common"] },

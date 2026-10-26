@@ -71,10 +71,16 @@ test("linking a draft after claiming preserves the lease and reconciles exact du
   }
   assert.equal(linked.history.length, claimed.history.length + 1);
   assert.match(linked.history.at(-1).note, /https:\/\/github\.com\/Uuriko\/project-room\/pull\/7/);
+  // The open-PR signal is derived on the write response. It is not stored,
+  // and a later read does not invent it.
+  assert.equal(linked.openPrThroughput.blocking, false);
+  assert.equal(linked.openPrThroughput.over, false);
+  const storedLinked = { ...linked };
+  delete storedLinked.openPrThroughput;
   // #3661: reads derive pullRequest.settlement (never stored), so the read
   // carries exactly one field the mutation response and stored record lack.
   assert.deepEqual(stripTrust((await call("read", "later-pr")).value),
-    { ...linked, pullRequest: { ...linked.pullRequest, settlement: "pending" } });
+    { ...storedLinked, pullRequest: { ...storedLinked.pullRequest, settlement: "pending" } });
   assert.equal(claimEvents(store).length, beforeEvents + 1);
   assert.equal(claimEvents(store).at(-1).data.action, "state_changed");
   assert.equal(claimEvents(store).at(-1).data.reason, undefined);
@@ -85,7 +91,7 @@ test("linking a draft after claiming preserves the lease and reconciles exact du
   const repeated = (await call("update", "later-pr", { ...body, expectedHistoryLength: linked.history.length })).value;
   assert.deepEqual(repeated, linked);
   assert.equal(claimEvents(store).length, beforeEvents + 1);
-  assert.deepEqual(store.workClaims.get("commons", "later-pr"), linked);
+  assert.deepEqual(store.workClaims.get("commons", "later-pr"), storedLinked);
 });
 
 test("a webhook close and a polled pull reduce to the same outcomes", () => {
@@ -337,11 +343,15 @@ test("concurrent PR attachments serialize and invalid update alternatives cannot
   const missing = urls.find(url => !current.pullRequests.some(pull => pull.url === url));
   current = (await call("update", "concurrent", { ...basis, expectedHistoryLength: current.history.length, appendPullRequest: missing })).value;
   assert.deepEqual(new Set(current.pullRequests.map(pull => pull.url)), new Set(urls));
+  assert.equal(current.openPrThroughput.blocking, false);
+  assert.equal(current.openPrThroughput.open, 2);
+  const storedCurrent = { ...current };
+  delete storedCurrent.openPrThroughput;
   const eventsBefore = claimEvents(store);
   for (const extra of [{ state: "done" }, { note: "do more" }, { pullRequests: [] }, { ci: { state: "success" } }, { leaseHours: 12 }]) {
     await assert.rejects(call("update", "concurrent", { ...basis, expectedHistoryLength: current.history.length, appendPullRequest: URL_A, ...extra }), error => error.status === 422 && error.code === "invalid_claim_input");
   }
-  assert.deepEqual(store.workClaims.get("commons", "concurrent"), current);
+  assert.deepEqual(store.workClaims.get("commons", "concurrent"), storedCurrent);
   assert.deepEqual(claimEvents(store), eventsBefore);
 });
 

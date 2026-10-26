@@ -5959,6 +5959,11 @@ paths:
             same files when `advisory` is true; otherwise it is empty.
             `requiredReading` lists the repo-relative docs the claim's kind
             asks the holder to read (advisory; acks go to /update).
+            `openPrThroughput` counts this member's open linked pull requests.
+            The cap defaults to 5. `over: true` is a throughput signal: finish,
+            rebase, or land those pulls. `blocking` is false, and the claim
+            still succeeds. When someone else can reassign, `coordinatorTold`
+            is true and that member is woken.
           content:
             application/json:
               schema:
@@ -5983,6 +5988,19 @@ paths:
                         type: array
                         items: { type: string }
                         description: Advisory per-kind reading list for the claim holder
+                      openPrThroughput:
+                        type: object
+                        description: Open pull requests this member already has. over is a throughput signal, not a refusal.
+                        properties:
+                          cap: { type: integer, description: "Default 5" }
+                          open: { type: integer }
+                          over: { type: boolean }
+                          blocking: { type: boolean, enum: [false] }
+                          steer: { type: [string, 'null'] }
+                          coordinatorTold: { type: boolean }
+                          coordinatorMemberIds:
+                            type: array
+                            items: { type: string }
         '401': { description: unauthenticated }
         '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
         '404': { description: work_claim_not_found }
@@ -6047,6 +6065,10 @@ paths:
         one work_claim.updated/state_changed event. A fresh duplicate returns
         the exact item without another write/event; a stale duplicate conflicts.
         No worker, GitHub fetch, publication, merge or deployment is started.
+        A true addition's response includes `openPrThroughput` for the owner.
+        Over the cap (default 5) the link still succeeds. The steer says to
+        finish, rebase, or land, and a room owner or manage_claims member
+        other than the owner is told.
         After an unknown response or conflict, GET the item and reconcile the
         same owner/round and URL. Never release/reclaim to bypass refusal.
         Automatic all-linked-PR settlement remains separate from manual review.
@@ -6510,8 +6532,10 @@ paths:
         (null for an unclaimed item) and `expectedHistoryLength` must match the
         current item, so a stale replay or delayed duplicate cannot move a newer
         claim generation. A stale round is refused with 409
-        `work_claim_conflict`; re-read the claim and retry. API keys need
-        `rooms:write`.
+        `work_claim_conflict`; re-read the claim and retry. The response
+        includes `openPrThroughput` for the new owner. Over the open-PR cap
+        (default 5) the reassign still succeeds and a coordinator can move
+        the work again. API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: claimId
@@ -10839,7 +10863,7 @@ paths:
           schema: { type: string }
           description: Omit for the current backlog. A number filters each room's event sequence. Pass a returned JSON cursor unchanged, including roomAfter, landIds and floor when present.
       responses:
-        '200': { description: "{ identityId, items, openWork?, reviewAsks?, myWork?, myClaims?, actionsNeeded?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Board section entries (openWork, reviewAsks, myWork, myClaims, and ci_failed actionsNeeded rows) carry a snippet when the claim has one: the first acceptance criterion, else the newest history note, clipped to 140 characters — enough to triage without re-reading the Board. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
+        '200': { description: "{ identityId, items, openWork?, reviewAsks?, myWork?, myClaims?, actionsNeeded?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Board section entries (openWork, reviewAsks, myWork, myClaims, and ci_failed actionsNeeded rows) carry a snippet when the claim has one: the first acceptance criterion, else the newest history note, clipped to 140 characters — enough to triage without re-reading the Board. Cursor retains rooms/land and adds continuation fields; pass it unchanged. openPrThroughput, when present, means you have more than 5 open linked pull requests: finish, rebase, or land them. coordinatorThroughput, when present, lists other members over that cap so a room owner or manage_claims member can reassign them. Neither section refuses work or moves the cursor." }
         '401': { description: unauthenticated }
         '422': { description: invalid_cursor }
         '429': { description: rate_limited }
