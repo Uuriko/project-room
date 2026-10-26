@@ -193,6 +193,52 @@ import {
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
 
+// --- Kernel types -----------------------------------------------------------
+// JSDoc shapes for the store kernel, checked by `tsc --checkJs` over the
+// kernel paths only (tsconfig.kernel.json; gate: scripts/check-kernel-types.mjs).
+// They name the store's GLOBAL RULES: the constructor's option surface, the
+// lazily-initialised instance fields, and the record shapes other modules
+// consume. Open shapes carry an index signature instead of pretending to be
+// closed.
+
+/**
+ * RoomStore constructor options (the destructured second parameter).
+ * @typedef {Object} RoomStoreOptions
+ * @property {() => number} [now] - clock, milliseconds since epoch
+ * @property {boolean} [readOnly]
+ * @property {any} [database] - an open node:sqlite DatabaseSync to adopt instead of opening the filename
+ * @property {Object.<string, any>} [storagePlatform] - schema/version/transaction platform (nodeStorage on Node)
+ * @property {number} [storageFailureThreshold]
+ * @property {any} [stitch]
+ * @property {string} [identityHashKey]
+ * @property {string} [integrity] - "eager" runs schema and integrity work at open
+ * @property {boolean} [workEntities]
+ * @property {boolean} [bodiesAtRest]
+ * @property {boolean} [verifyProjectionCache]
+ * @property {boolean} [maintainMessageCertification]
+ * @property {number | null} [messageProjectionWindow]
+ * @property {boolean} [messageEntityProjection]
+ * @property {string} [workItemBoardBackfill]
+ */
+
+/**
+ * One agent next-step entry (see inboxNext): a frozen literal telling an
+ * agent which read to make next. `required` marks an open formal request.
+ * @typedef {{ [key: string]: any,
+ *   action: string, description: string,
+ *   method?: string, path?: string, actionRole?: string,
+ *   required?: boolean, optional?: boolean,
+ *   requestStatus?: any, nextRead?: any }} AgentStep
+ */
+
+/**
+ * The message lookup the inbox paths consume: the live repository's shape,
+ * with a two-method stub when the repository is unavailable.
+ * @typedef {Object} MessageLookup
+ * @property {(id: any) => any} get
+ * @property {(memberId: string, messageId: any) => boolean} hasReply
+ */
+
 // The Worker's room database (Durable Object SQL) rejects a statement with
 // more than 100 bound values ("too many SQL variables"); Node's SQLite
 // allows 32766, so a list that grows with input passes the Node suite and
@@ -437,6 +483,7 @@ function applyProvenanceRepair(state, events) {
   return changed;
 }
 
+/** @type {(status: number, code: string, message: string) => never} */
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // F5: the bounded pilot caps in one place. The room write paths below enforce
 // them; server/usage-summary.mjs reports them with the remaining headroom.
@@ -880,6 +927,7 @@ export function validateCommand(command) {
 // Conversation history offers optional actions; only an explicitly open
 // formal request establishes a reply obligation. Reading changes neither.
 const inboxNext = (roomId, directMessages, assignments, mentions, directMentions = [], bondProposals = [], peerMessages = [], requestStates = {}) => {
+  /** @type {Array<AgentStep>} */
   const steps = [];
   const requestStatus = item => requestStates[item.nextRead?.arguments.requestMessageId]?.status ?? null;
   const openRequest = item => item.nextRead && requestStatus(item) === "open";
@@ -1105,6 +1153,7 @@ function agentWakeTargetIds(state, senderMemberId, data, db = null, roomId = "")
 // Worker and Node different stamps for the same code (cloudflare CI, #1627).
 // tests/schema-stamp-coverage.test.js pins a digest of each helper's source
 // to its label, so changing a helper without bumping its revision fails CI.
+/** @type {Array<[(db: any) => void, string]>} [ensureFn, label] pairs: additive schema migrations and the stamp label each contributes to roomSchemaStamp. */
 export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@2"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
@@ -1124,6 +1173,7 @@ export const ADDITIVE_SCHEMA_ENSURES = [
 function roomSchemaStamp() {
   const hash = createHash("sha256");
   hash.update(String(STORE_SCHEMA_VERSION));
+  /** @type {Array<string>} */
   const parts = [
     invitationSchema, agentIdentitySchema, accountLoginMethodsSchema, agentInviteSchema,
     referralInviteSchema, referralSchema,
@@ -1365,6 +1415,28 @@ class ProjectionCache {
 }
 
 export class RoomStore {
+  // Lazily-initialised fields (assigned via ??= on first use, so a warm wake
+  // pays for them only when the path runs). Declared here so the class shape
+  // is legible in one place; the declarations themselves hold undefined
+  // until first use, exactly as the absent properties behaved under ??=.
+  /** @type {Map<string, any>} rooms whose stored projection failed to parse (noteCorruptProjections) */
+  corruptRooms;
+  /** @type {ProjectionCache} parsed-projection cache (room()) */
+  _projectionCache;
+  /** @type {Array<Map<string, any>>} stack of pending projection frames */
+  _pendingProjectionFrames;
+  /** @type {import("node:sqlite").StatementSync} */
+  _roomSequenceStmt;
+  /** @type {import("node:sqlite").StatementSync} */
+  _roomProjectionStmt;
+  /** @type {import("node:sqlite").StatementSync} */
+  _roomAuthorityPrefixStmt;
+  /** @type {import("node:sqlite").StatementSync} */
+  _roomAuthorityFullStmt;
+  /**
+   * @param {string} filename
+   * @param {RoomStoreOptions} [options]
+   */
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
@@ -1404,6 +1476,7 @@ export class RoomStore {
     this._pendingAppends = new Set();
     this._appendListeners = new Set();
     this.now = now;
+    // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: createRoomFloodGuard (server/room-flood-guard.mjs), prop: now.
     this.roomFlood = createRoomFloodGuard({ now: () => this.now() });
     this.db = database ?? new DatabaseSync(filename, { readOnly, ...nodeSqlLimits() });
     this.workEntities = workEntities === true;
@@ -1473,6 +1546,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.publicWorkReviews = new PublicWorkReviews(this);
     this.publicWorkSuccessors = new PublicWorkSuccessors(this);
     this.publicWorkSettlement = new PublicWorkSettlement(this);
+    // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: BountyEscrow constructor (server/bounty-escrow.mjs), prop: now.
     this.bountyEscrow = new BountyEscrow(this, { now: () => this.now() }); // Escrowed bounties, agent work exchange slice 1.
     const version = this.storagePlatform.version(this.db);
     // Supported schema versions are the contiguous range 0..STORE_SCHEMA_VERSION.
@@ -2458,6 +2532,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Step names double as the #3334 failure tags: when a step throws, the
     // error carries the step's name so the health surface can name the
     // failing sub-check instead of a bare "1 error(s) in tick".
+    /** @type {Array<[string, () => any]>} */
     const steps = [
       ["share_links", () => this.shareLinks.verify()],
       ["agent_connections", () => this.agentConnections.verify()],
@@ -3699,6 +3774,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, this.storedProjection(state.room.id, stored), archivedAtOf(stored));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
+      // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: syncRoomPublication (server/public-read-model.mjs), props: roomId, state.
       syncRoomPublication(this, { roomId: state.room.id, state: stored, previous: null, auth: null });
       return state.room.id;
     });
@@ -3962,6 +4038,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // authenticated account session once its own verification has passed. `method`
   // is a short audit descriptor: { kind, ref } (ref is a public handle such as
   // the login-methods row id, never a secret).
+  /**
+   * @param {string} slotToken
+   * @param {string} accountId
+   * @param {number} expectedRevision
+   * @param {{ method?: { kind: string, [key: string]: any }, revokeRoomToken?: any, rotateSlot?: boolean }} options - method is the audit descriptor { kind, ref }; required in effect: the body refuses a missing method with fail(422)
+   */
   loginAccountSessionWithMethod(slotToken, accountId, expectedRevision, { method, revokeRoomToken = null, rotateSlot = false } = {}) {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) fail(422, "invalid_session_revision", "A current account session revision is required");
     if (method == null || typeof method !== "object" || typeof method.kind !== "string" || method.kind.trim() === "") fail(422, "invalid_login_method", "A verified login method is required");
@@ -4391,6 +4473,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     });
   }
+  /**
+   * @param {string} accountSessionToken
+   * @param {string} invitationId
+   * @param {{ expectedRevision?: number, reason?: string, expectedSessionBinding?: string | null, expectedRoomId?: string | null }} options - expectedRevision and reason are required in effect: the body refuses their absence with fail(422)
+   */
   revokeInvitation(accountSessionToken, invitationId, { expectedRevision, reason, expectedSessionBinding, expectedRoomId = null } = {}) {
     if (!validId(invitationId) || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0 || typeof reason !== "string" || !reason.trim() || reason.length > 4096) {
       fail(422, "invalid_invitation_change", "Invitation revocation requires its current revision and a reason");
@@ -4449,6 +4536,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     return rows.length;
   }
+  /**
+   * @param {string} accountSessionToken
+   * @param {string} token
+   * @param {{ redemptionId?: string, expectedRevision?: number, expectedSessionBinding?: string }} options - all three are required in effect: the body refuses their absence with fail(422)
+   */
   acceptInvitation(accountSessionToken, token, { redemptionId, expectedRevision, expectedSessionBinding } = {}) {
     if (typeof token !== "string" || !tokenPattern.test(token) || typeof redemptionId !== "string" || !redemptionPattern.test(redemptionId) || expectedRevision !== 0) {
       fail(422, "invalid_invitation_acceptance", "Invitation acceptance requires its token, redemption ID, and expected revision zero");
@@ -4840,6 +4932,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
 
+  /**
+   * @param {string} token
+   * @param {string} roomId
+   * @param {{ revision?: number, expectedSessionBinding?: string | null }} [options]
+   */
   charter(token, roomId, { revision, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding), room = this.room(roomId);
@@ -5303,6 +5400,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       events.forEach((e, i) => insert.run(roomId, i + 1, e.id, JSON.stringify(e)));
       this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(events.length, this.storedProjection(roomId, state), archivedAtOf(state), roomId);
       this.db.prepare("INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)").run(roomId, events.length, JSON.stringify(state));
+      // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: syncRoomPublication (server/public-read-model.mjs), props: roomId, state.
       syncRoomPublication(this, { roomId, state, previous, auth: null });
       return { imported: events.length, sequence: events.length };
     });
@@ -5581,6 +5679,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
   }
+  /**
+   * @param {string} token
+   * @param {string} roomId
+   * @param {string} workItemId
+   * @param {{ cursor?: string | null, since?: any, limit?: number, consistent?: boolean, resumeToken?: string | null, expectedSessionBinding?: string | null }} [options]
+   */
   workDiscussion(token, roomId, workItemId, { cursor = null, since, limit, consistent = false, resumeToken = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
@@ -5710,6 +5814,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const dmVisible = dmEventVisibility(viewerId, () => this.room(roomId).state.messages, events, this.archivedDmPartiesReader(roomId));
       const visible = events.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, viewerId, isOwner)
+        // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: peerEventVisible (server/bonds.mjs), prop: memberId.
         && peerEventVisible(row.event, { memberId: viewerId, identityId, isOwner }));
       // #658: mention chips ride on message views. One batched query for
       // the whole page (no N+1); only members who can read the room see it.
@@ -5861,6 +5966,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // text. Archived messages resolve through current normalized records;
     // only genuinely absent legacy records fall back to the logged body. Deleted rows are skipped
     // inside the scan so they never consume one of the caller's limit slots.
+    /** @type {MessageLookup} */
     let currentById = { get: () => undefined, hasReply: () => false };
     try { currentById = messageRepository(this, roomId); }
     catch (error) { if (error?.code !== 'room_not_found') throw error; }
@@ -5947,6 +6053,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const dmVisible = dmEventVisibility(auth.member.id, room.state.messages, brief.history.items, this.archivedDmPartiesReader(roomId)); // SEC-19
       brief.history.items = brief.history.items.filter(row => rowInHistory(row, floor, floorMessages) && dmVisible(row.event)
         && dmConsentEventVisible(row.event, auth.member.id, isOwner)
+        // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: peerEventVisible (server/bonds.mjs), prop: memberId.
         && peerEventVisible(row.event, { memberId: auth.member.id, identityId, isOwner }));
       return { roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null, ...brief };
     });
@@ -5986,6 +6093,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // command transaction cannot roll back, so remember the spend and refund
     // it in the catch if anything after consume() fails — validation, the
     // reducer, persistence, or the transaction commit itself.
+    /** @type {{ memberId: string, type: string } | null} */
     let floodSpend = null;
     try {
     return this.transaction(() => {
@@ -6205,6 +6313,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         } catch (error) {
           if (error?.code === "display_name_unavailable" && error.reason !== "duplicate") {
             const refused = new ServiceError(422, "display_name_unavailable", error.message);
+            // @ts-expect-error kernel-boundary (ACB typed-kernel): ServiceError (server/service-error.mjs) carries an optional detail payload at runtime but declares no detail field for checkJs. Cure: declare the field on ServiceError.
             if (error.detail) refused.detail = error.detail;
             throw refused;
           }
@@ -6448,6 +6557,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (command.type === T.OWNERSHIP_TRANSFERRED) {
         state = this.lapseDelegationOnTransfer(roomId, state, room.state.room.ownerId, sequence, incoming);
       }
+      // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: syncRoomPublication (server/public-read-model.mjs), props: roomId, state.
       syncRoomPublication(this, { roomId, state, previous: room.state, auth });
       if (this.messageProjectionWindow !== null && (state.messages?.length ?? 0) > this.messageProjectionWindow * 2) {
         // Archive only at an exact certified head; unsafe transitions defer to
@@ -6526,6 +6636,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const evidenceUrl = typeof data.evidenceUrl === "string" ? data.evidenceUrl : "";
     const priorAt = priorItem?.updatedAt ? Date.parse(priorItem.updatedAt) : null;
     const decision = evaluateReceipt({
+      // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: evaluateReceipt (server/jev-receipts.mjs), prop: workId.
       workId: data.workItemId, ownerId: incoming.actorId,
       reviewPolicy, attestations: [], // verifications land after completion on the legacy path
       reviewerIsVerifier: false, deliveryMode: null,
@@ -6539,6 +6650,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.jevShadow.record({ gate: "receipt", roomId, identityId: incoming.actorId ?? null,
       subject: data.workItemId, path: "work.completed",
       score: decision.quality, decision: decision.verdict,
+      // @ts-expect-error kernel-boundary (ACB typed-kernel): evaluateReceipt's inferred verdict type marks signals readonly while JevShadowJournal.record's synthesized parameter takes a mutable array; the array is only read. Cure: JSDoc @returns/@param on the two callees (server/jev-receipts.mjs, server/journal.mjs).
       escalate: decision.escalate, signals: decision.signals, at: this.now() });
   }
 
@@ -6610,6 +6722,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // counted, journaled loss (the member exists; the fabric cannot
       // address them).
       if (!identityId) {
+        // @ts-expect-error kernel-boundary (ACB typed-kernel): checkJs synthesizes the callee's destructured-options type from defaulted bindings only, so this property is missing from the synthesized type though the callee reads it at runtime. Cure: a JSDoc @param on the callee. Callee: recordWakeEvent (server/wake-metrics.mjs), prop: at.
         recordWakeEvent(this.db, { at: this.now(), roomId, store: "signals",
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;

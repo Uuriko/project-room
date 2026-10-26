@@ -1,0 +1,40 @@
+{
+  // Typed-kernel spike (agent-codebase audit, Practice 1 ADOPT-narrow):
+  // JSDoc + checkJs over the kernel modules ONLY. The "files" list is the
+  // gate's scope: scripts/check-kernel-types.mjs fails on diagnostics in
+  // exactly these paths. Imported modules enter the program for inference
+  // (the kernel cannot be typed in isolation from its imports) but their
+  // diagnostics are not gated.
+  //
+  // Strictness, honestly set to the level this code can meet today:
+  // - "strict" stays OFF. Measured at the spike base: strict:true reports
+  //   1,161 kernel errors, 850 of them implicit-any parameters — curing them
+  //   means annotating every parameter of every kernel function, which is a
+  //   tree-wide conversion, not a kernel spike. strictNullChecks alone adds
+  //   63 kernel errors whose cures are runtime narrowing edits, not
+  //   annotations. Both are recorded as the next rungs in the lane report.
+  // - The structural flags below are ON and were free or near-free:
+  //   noFallthroughCasesInSwitch, noImplicitReturns, noImplicitThis,
+  //   noUncheckedSideEffectImports.
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": false,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitReturns": true,
+    "noImplicitThis": true,
+    "noUncheckedSideEffectImports": true,
+    "types": ["node"]
+  },
+  "files": [
+    "src/events.js",
+    "server/store.mjs",
+    "server/messages-store.mjs"
+  ]
+}

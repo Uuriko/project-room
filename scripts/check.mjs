@@ -44,6 +44,13 @@ if (spawnSync(process.execPath, ["scripts/server-json-check.mjs"], { stdio: "inh
   const lint = spawnSync(process.execPath, ["scripts/lint.mjs", "--skip-if-missing"], { stdio: "inherit" });
   if (lint.status !== 0) process.exit(lint.status || 1);
 }
+// Kernel type gate (ACB typed-kernel): JSDoc + checkJs over the kernel
+// paths in tsconfig.kernel.json only; the rest of the tree is not
+// type-checked. Skipped with a notice when typescript is not installed.
+{
+  const kernelTypes = spawnSync(process.execPath, ["scripts/check-kernel-types.mjs", "--skip-if-missing"], { stdio: "inherit" });
+  if (kernelTypes.status !== 0) process.exit(kernelTypes.status || 1);
+}
 // Secret-scan gate (H005 wiring, 2026-09-16): scans the repo tree for
 // accidentally committed secrets. Fails the build on any finding.
 const secretScan = spawnSync(process.execPath, ["scripts/secret-scan-check.mjs"], { stdio: "inherit" });
