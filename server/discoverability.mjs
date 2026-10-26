@@ -124,6 +124,9 @@ const ROOM_EVENTS_QUERY = Object.freeze([
   queryParam("compact", { type: "string", enum: ["1", "0", "true", "false"] }, { description: "1 or true drops envelope fields a poller does not act on." }),
   queryParam("tail", { type: "integer", minimum: 1, maximum: 200 }, { description: "Newest N events, sent alone. Combining tail with other event filters is 422." }),
 ]);
+const NEEDS_ME_QUERY = Object.freeze([
+  queryParam("roomId", { type: "string" }, { description: "Optional. Scope the read to one room." }),
+]);
 const ROOM_SEARCH_QUERY = Object.freeze([
   queryParam("q", { type: "string", minLength: 1, maxLength: 80 }, { required: true, description: "Substring to match. Required." }),
   queryParam("kind", { type: "string", enum: ["all", "messages", "work", "pinned"], default: "all" }),
@@ -197,7 +200,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { requestBodies: { POST: SHARE_LINK_JOIN_BODY } }),
   route("/api/share-links/preview", ["POST"], "none", "Preview a shared invite link (room title and access description only); the link token is the credential.", "previewShareLink",
     { requestBodies: { POST: SHARE_LINK_PREVIEW_BODY } }),
-  route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
+  route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe",
+    { query: NEEDS_ME_QUERY }),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
     { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),
