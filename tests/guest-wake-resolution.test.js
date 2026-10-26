@@ -242,8 +242,7 @@ test("identityNamesForRoom names guest seats from guest_members (#3908 F-9)", t 
 // seats by the shared predicate: only live seats resolve, either way.
 // ---------------------------------------------------------------------------
 
-test("resolver with a credentials table: dead guest seats resolve neither way (live-seat F-2)", async t => {
-  const { DatabaseSync } = await import("node:sqlite");
+test("resolver with a credentials table: dead guest seats resolve neither way (live-seat F-2)", t => {
   const NOW_F2 = 1_800_000_000_000;
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());

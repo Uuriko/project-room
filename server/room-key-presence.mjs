@@ -25,7 +25,23 @@ export function roomKeyPresenceAuth(store, secret) {
   // resolve through the shared wake resolver, and enumerate the seats
   // through membership-resolution, which counts a guest seat as a
   // membership. Link seats resolve exactly as before.
-  const identityId = identityIdForWakeMember(store.db, auth.roomId, auth.member.id);
+  //
+  // A member WITH an identity_links row stays on the strict link leg:
+  // identityIdForMember returns an identity only for exactly one link
+  // row whose identity is not revoked, so an ambiguous member (a second
+  // identity linked to the same member) or a revoked identity resolves
+  // to null and is refused below. The wake resolver's first-row `.get()`
+  // has neither property, so it serves only the no-link leg, where the
+  // member can be a guest seat resolved through guest_members.
+  let hasLinkRow = false;
+  try {
+    hasLinkRow = !!store.db.prepare(
+      "SELECT 1 FROM identity_links WHERE room_id=? AND member_id=? LIMIT 1")
+      .get(auth.roomId, auth.member.id);
+  } catch { hasLinkRow = false; }
+  const identityId = hasLinkRow
+    ? store.identities.identityIdForMember(auth.roomId, auth.member.id)
+    : identityIdForWakeMember(store.db, auth.roomId, auth.member.id);
   if (!identityId || auth.member.identityId !== identityId) refuse("room_key_heartbeat_refused", "This room member is not a linked identity");
   const rooms = identityRoomSeats(store.db, identityId);
   if (rooms.length !== 1 || rooms[0].roomId !== auth.roomId || rooms[0].memberId !== auth.member.id) {
