@@ -764,7 +764,7 @@ const shapes = {
   [T.SESSION_STARTED]: `${work} budget environment model`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
   [T.SESSION_STOP_REQUESTED]: work,
-  [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs`,
+  [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs trippingSpendCents`,
   [T.CAPABILITIES_ADVERTISED]: "capabilities",
   "bond.propose": "to scopes note",
   "bond.accept": "bondId scopes",
@@ -820,7 +820,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "trippingSpendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -4886,7 +4886,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // a caller that smuggles them in is rejected, not silently honoured.
     const required = ["requestId", "workItemId", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "outputs"] : [])];
+    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "outputs", "attemptCount"] : [])];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, and set_status or request_stop. expectedRevision is optional");
     }
@@ -4905,6 +4905,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       fail(422, "invalid_session_rounds", "rounds must be a non-negative integer");
     if (request.toolCalls !== undefined && (!Number.isSafeInteger(request.toolCalls) || request.toolCalls < 0))
       fail(422, "invalid_session_tool_calls", "toolCalls must be a non-negative integer");
+    // #3322: a usage report may name the attempt it belongs to — the
+    // session's attempt_count at claim time, read from the session card.
+    if (request.attemptCount !== undefined && (!Number.isSafeInteger(request.attemptCount) || request.attemptCount < 0))
+      fail(422, "invalid_session_attempt", "attemptCount must be a non-negative integer");
     // W4-46 H5: the budget trip-wire fires before anything else touches the
     // session — any interaction with a runaway session stops it first. A
     // spend report on this mutation counts: the limit trips on the number
@@ -4915,11 +4919,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // Both run in their own committing transaction OUTSIDE the mutation's:
     // the forced stop/suspend must stay in the log even though the caller's
     // mutation below is rejected (a nested savepoint would roll back).
+    // The generated command itself runs isolated inside that transaction
+    // (#3323): if it is refused or faults part-way, its own writes roll
+    // back, and the outcome below reports the stop/pause as pending instead
+    // of claiming it happened.
     const tripped = this.transaction(() => {
       const roomState = this.room(roomId).state;
       const item = roomState.workItems[request.workItemId];
       if (!item) fail(404, "work_not_found", "Work item not found in this Room");
       const session = sessionRecord(item);
+      // Attempt binding (#3322, as amended by Ruling 43): a usage report
+      // binds to the attempt it names via attemptCount — the session's
+      // attempt_count at claim time. A report naming another attempt is
+      // stale and the wire never fires for it. A report naming the live
+      // attempt counts its own numbers, and — Ruling 43 — a report naming
+      // NO attempt also trips immediately on its own numbers (the
+      // pre-D-1 behaviour, RC-2026-09-19-063): attemptCount refines when
+      // present, its absence never defers enforcement.
+      const binding = request.attemptCount === undefined ? "absent"
+        : request.attemptCount === session.attempt_count ? "matched" : "stale";
+      if (binding === "stale") return null;
       const pendingRounds = request.rounds ?? session.round_count;
       const pendingToolCalls = request.toolCalls ?? session.tool_calls;
       const pendingSpend = request.spendCents ?? session.spend_cents;
@@ -4928,15 +4947,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // does not re-fire here.
       const alreadyPaused = session.status === "suspended" && session.suspended_by === "round_limit";
       if (!alreadyPaused && !isTerminalSession(session.status) && roundLimitExceeded(item, pendingRounds)) {
+        let pauseCommitted = true;
         try {
-          this.command(token, roomId, { id: `rounds-${request.requestId}`, type: T.SESSION_STATUS_CHANGED,
-            data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "suspended",
-              suspendReason: "round_limit" } }, expectedSessionBinding);
-        } catch {
-          // The 409 below still carries the reason; the worker's next
-          // heartbeat completes the pause.
-        }
-        return { kind: "rounds" };
+          this.transaction(() => {
+            this.command(token, roomId, { id: `rounds-${request.requestId}`, type: T.SESSION_STATUS_CHANGED,
+              data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "suspended",
+                suspendReason: "round_limit" } }, expectedSessionBinding);
+          }, { isolated: true });
+        } catch { pauseCommitted = false; }
+        return { kind: "rounds", committed: pauseCommitted };
       }
       const toolWire = !isTerminalSession(session.status) && session.budget?.maxToolCalls != null
         && pendingToolCalls > session.budget.maxToolCalls ? "maxToolCalls" : null;
@@ -4944,22 +4963,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         || (!isTerminalSession(session.status) && session.budget?.maxSpendCents != null && pendingSpend !== null
           && pendingSpend > session.budget.maxSpendCents ? "maxSpendCents" : null);
       if (wire) {
+        let stopCommitted = true;
         try {
-          this.command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
-            data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
-              budgetEnforced: true, reason: "budget_exceeded", limit: wire,
-              ...(request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
-              ...(request.rounds !== undefined ? { rounds: request.rounds } : {}) } }, expectedSessionBinding);
-        } catch {
-          // The 409 below still carries the reason; the worker's next
-          // heartbeat completes the stop.
-        }
-        return { kind: "budget", limit: wire };
+          this.transaction(() => {
+            this.command(token, roomId, { id: `budget-${request.requestId}`, type: T.SESSION_STOPPED,
+              data: { workItemId: request.workItemId, expectedRevision: item.revision, status: "failed",
+                budgetEnforced: true, reason: "budget_exceeded", limit: wire,
+                ...(request.toolCalls !== undefined ? { toolCalls: request.toolCalls } : {}),
+                ...(request.rounds !== undefined ? { rounds: request.rounds } : {}),
+                // #3349, as amended by Ruling 43: a spend trip records the
+                // spend figure that tripped it as NON-COUNTED record data
+                // under trippingSpendCents — never as spendCents. The
+                // tripping report was refused, so its figure is not
+                // accepted spend: the applier must not record it as the
+                // attempt's usage (a spend-tripped attempt with no accepted
+                // report stays held as unknown) and the usage fold must
+                // keep the last ACCEPTED number.
+                ...(wire === "maxSpendCents" && pendingSpend !== null ? { trippingSpendCents: pendingSpend } : {}) } }, expectedSessionBinding);
+          }, { isolated: true });
+        } catch { stopCommitted = false; }
+        return { kind: "budget", limit: wire, committed: stopCommitted };
       }
       return null;
     });
-    if (tripped?.kind === "rounds") fail(409, "round_limit_exceeded", "Session paused: the round limit was exceeded. The next mention or post resumes it");
-    if (tripped?.kind === "budget") fail(409, "budget_exceeded", `Session budget exceeded (${tripped.limit}); the session was stopped`);
+    if (tripped?.kind === "rounds" && tripped.committed) fail(409, "round_limit_exceeded", "Session paused: the round limit was exceeded. The next mention or post resumes it");
+    // #3323: the generated pause/stop did not commit — the outcome must
+    // not claim it happened. The next interaction retries the wire.
+    if (tripped?.kind === "rounds") fail(409, "round_pause_pending", "Session could not be paused: the round limit was exceeded and the pause is pending. The next mention or post retries it");
+    if (tripped?.kind === "budget" && tripped.committed) fail(409, "budget_exceeded", `Session budget exceeded (${tripped.limit}); the session was stopped`);
+    if (tripped?.kind === "budget") fail(409, "budget_stop_pending", `Session budget exceeded (${tripped.limit}); the session could not be stopped and its stop is pending`);
     return this.transaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const prior = this.db.prepare("SELECT e.sequence,e.body FROM commands c JOIN events e ON e.room_id=c.room_id AND e.sequence=c.sequence WHERE c.room_id=? AND c.actor_id=? AND c.id=?").get(roomId, auth.member.id, request.requestId);
@@ -5041,9 +5073,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (type === T.SESSION_STARTED && environment) data.environment = environment;
       if (type === T.SESSION_STARTED && model) data.model = model;
       if (type === T.SESSION_STOPPED && outputs) data.outputs = outputs;
-      if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
-      if (request.rounds !== undefined && type !== T.SESSION_STOP_REQUESTED) data.rounds = request.rounds;
-      if (request.toolCalls !== undefined && type !== T.SESSION_STOP_REQUESTED) data.toolCalls = request.toolCalls;
+      // #3322: a report naming another attempt is still recorded, so its
+      // requestId replays idempotently, but its usage numbers are not
+      // copied into the event — they must not move the live attempt's
+      // counters. The rest of the mutation applies under the usual gates.
+      const staleAttemptReport = request.attemptCount !== undefined
+        && request.attemptCount !== sessionRecord(item).attempt_count;
+      if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED && !staleAttemptReport) data.spendCents = request.spendCents;
+      if (request.rounds !== undefined && type !== T.SESSION_STOP_REQUESTED && !staleAttemptReport) data.rounds = request.rounds;
+      if (request.toolCalls !== undefined && type !== T.SESSION_STOP_REQUESTED && !staleAttemptReport) data.toolCalls = request.toolCalls;
       if (resumeApproved) data.resumeApproved = true;
       return this.command(token, roomId, { id: request.requestId, type, data }, expectedSessionBinding);
     });

@@ -4730,6 +4730,7 @@ paths:
                 requestId: { type: string, description: Idempotency key }
                 workItemId: { type: string }
                 expectedRevision: { type: integer, description: Optional compare-and-swap. Omit for last-writer-wins. A stale value is 409. }
+                attemptCount: { type: integer, description: "Optional attempt binding for usage reports: the session's attempt_count at claim time, read from the session card. A report naming another attempt is recorded but its spendCents/rounds/toolCalls do not move the live attempt and never trip its budget wire. A report omitting it trips the wire immediately on its own numbers, exactly like a report naming the live attempt (Ruling 43: attemptCount refines when present; its absence never defers enforcement)." }
                 action: { type: string, enum: [set_status, request_stop] }
                 status:
                   type: string
@@ -4744,7 +4745,7 @@ paths:
         '401': { description: unauthenticated }
         '201': { description: Committed }
         '409':
-          description: Stale revision when expectedRevision is sent, session already claimed, budget exceeded (session force-stopped), or round limit exceeded (session auto-paused; the next mention or post resumes it)
+          description: Stale revision when expectedRevision is sent, session already claimed, budget exceeded (session force-stopped), round limit exceeded (session auto-paused; the next mention or post resumes it), or budget_stop_pending / round_pause_pending when the generated stop or pause could not commit (the session is still running and the next interaction retries the enforcement)
           content:
             application/json:
               schema:
