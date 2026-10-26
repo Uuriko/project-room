@@ -12,6 +12,7 @@ import { notificationFromPush } from "../src/human-push-display.js";
 import { resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
 import { isQuietAt, normalizeQuietHours, NotifyError } from "./notify-prefs.mjs";
 import { deliverToSubscriptions, normaliseSubscription, richPushPayloadFor } from "./push-subscriptions.mjs";
+import { ServiceError } from "./service-error.mjs"; // shared class (leaf module); replaces the local shadow definition
 
 export const HUMAN_PUSH_DEFAULT = "mentions_and_dms";
 // The two event kinds the push channel actually delivers. Preferences switch
@@ -48,9 +49,6 @@ export function declarativePushEnabled(env = process.env) {
   return env?.PUSH_DECLARATIVE === "on";
 }
 
-class ServiceError extends Error {
-  constructor(status, code, message) { super(message); this.name = "ServiceError"; this.status = status; this.code = code; }
-}
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const exactKeys = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
 

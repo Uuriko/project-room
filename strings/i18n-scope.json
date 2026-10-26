@@ -8,7 +8,6 @@
   "offline.html",
   "operator.html",
   "server/email-envelope.mjs",
-  "server/notify-email.mjs",
   "src/access-presets.js",
   "src/account-client.js",
   "src/account-deletion.mjs",

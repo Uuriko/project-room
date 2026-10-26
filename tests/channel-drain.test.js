@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { telegramContractFixture } from "../scripts/telegram-contract-fixture.mjs";
 import { ChannelWebhookInbox, syncTelegramConnection, channelSyncLimits } from "../server/channel-import.mjs";
-import { channelJournalLimits } from "../server/channel-journal.mjs";
+import { channelJournalLimits } from "../server/journal.mjs";
 import { ChannelDrainer, createChannelDrainScheduler, channelDrainLimits } from "../server/channel-drain.mjs";
 
 const secret = "fixture-webhook-secret-0123456789";

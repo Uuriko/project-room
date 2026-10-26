@@ -27,15 +27,14 @@
 //
 // The module is storage-shaped like AccessRequests/ShareLinks: it takes the
 // RoomStore (db handle, transactions, room state) and exports its schema
-// for store.mjs to apply. Local ServiceError avoids the store.mjs import
-// cycle (Workers-bundle-safe).
+// for store.mjs to apply. ServiceError comes from the shared leaf module
+// (server/service-error.mjs, no imports of its own), so there is no
+// store.mjs import cycle and thrown errors satisfy callers'
+// `instanceof ServiceError` checks.
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES as T, ownMember } from "../src/events.js";
-
-class ServiceError extends Error {
-  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
-}
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 

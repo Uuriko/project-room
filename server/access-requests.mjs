@@ -33,6 +33,7 @@ import { PILOT_LIMITS } from "./store.mjs";
 import { randomUUID, createHash } from "node:crypto";
 import { MemberPermissionRequests, permissionRequestContents } from "./member-permission-requests.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { ServiceError } from "./service-error.mjs";
 // RC-2026-09-19-071 (QAJ-006): a new access request appends an
 // access.requested room event so the request is timeline-visible and drives
 // an owner notification. These imports follow the agent-invites.mjs
@@ -43,13 +44,9 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 
-// Local ServiceError (mirrors server/store.mjs). We avoid importing from
-// store.mjs here to break the circular dependency for the Workers bundle:
-// store.mjs imports this module, so this module cannot import from store.mjs
-// at the top level without esbuild failing on the cycle.
-class ServiceError extends Error {
-  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
-}
+// Shared ServiceError from the leaf module (no imports of its own, so no
+// store.mjs cycle): errors thrown here now satisfy callers'
+// `instanceof ServiceError` checks against server/service-error.mjs.
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Room permission vocabulary, mirrored from PERMISSIONS in src/events.js

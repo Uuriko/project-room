@@ -44,7 +44,6 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/email-envelope.mjs'); paths.add('server/graph-email.mjs'); paths.add('server/email-import.mjs');
   paths.add('server/graph-fixture-sync.mjs');
   paths.add('server/graph-reply-draft.mjs');
-  paths.add('server/graph-reply-journal.mjs');
   paths.add('server/graph-reply-update-review.mjs');
   paths.add('server/gmail-content.mjs'); paths.add('server/gmail-import-authority.mjs'); paths.add('server/gmail-sync.mjs'); paths.add('server/vendor/gmail-html-sanitizer.mjs'); paths.add('server/vendor/gmail-html-LICENSES.txt'); paths.add('server/gmail-mailbox.mjs'); paths.add('server/gmail-actions.mjs');
 
@@ -126,7 +125,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('scripts/release-evidence.mjs');
   paths.add('server/usage-summary.mjs');
   paths.add('server/notifications.mjs');
-  for (const path of ['server/channel-connection.mjs', 'server/channel-import.mjs', 'server/channel-adapters/index.mjs', 'server/channel-adapters/email.mjs', 'server/channel-adapters/telegram.mjs', 'server/channel-adapters/telegram-rotation.mjs', 'server/channel-adapters/gmail.mjs', 'server/channel-adapters/whatsapp.mjs', 'server/mime-message.mjs', 'server/email-routing-inbound.mjs', 'server/channel-journal.mjs', 'server/room-export-html.mjs']) paths.add(path);
+  for (const path of ['server/channel-connection.mjs', 'server/channel-import.mjs', 'server/channel-adapters/index.mjs', 'server/channel-adapters/email.mjs', 'server/channel-adapters/telegram.mjs', 'server/channel-adapters/telegram-rotation.mjs', 'server/channel-adapters/gmail.mjs', 'server/channel-adapters/whatsapp.mjs', 'server/mime-message.mjs', 'server/email-routing-inbound.mjs', 'server/room-export-html.mjs']) paths.add(path);
   paths.add('server/room-export.mjs'); paths.add('cloudflare/room-backup.mjs');
   for (const path of ['server/channel-adapters/telegram-config.mjs', 'server/channel-adapters/telegram-transport.mjs', 'scripts/telegram-set-webhook.mjs', 'scripts/telegram-rotate-webhook.mjs']) paths.add(path);
   paths.add('server/spend-allowance.mjs');
@@ -160,7 +159,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/retention-run.mjs'); // dry-run retention caller (imported by cloudflare/room.mjs)
   paths.add('server/retention.mjs'); // analytics retention planner (imported by server/retention-run.mjs)
   paths.add('server/audit-retention.mjs'); // audit retention planner (imported by server/retention-run.mjs)
-  for (const path of ['server/sla-clocks.mjs', 'server/sla-breach-journal.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24/26 (imported by server/inbox.mjs)
+  for (const path of ['server/sla-clocks.mjs', 'server/inbox-triage.mjs']) paths.add(path); // Tasks 21/24 (imported by server/inbox.mjs)
   paths.add('server/inbox-handoff.mjs'); // Task 23 (imported by server/inbox.mjs and server/store.mjs)
   for (const path of ['server/inbox-assign.mjs', 'server/inbox-internal-notes.mjs', 'server/inbox-collision.mjs', 'server/inbox-approval.mjs', 'server/inbox-agent-routing.mjs', 'server/inbox-collab-store.mjs', 'server/inbox-collab-routes.mjs']) paths.add(path); // Lane C inbox collaboration (task RC-2026-09-18-011)
   paths.add('server/content-trust.mjs'); // structured untrusted markers (imported by server/http.mjs surfaces and MCP)

@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { RoomStore, ServiceError } from "../server/store.mjs";
 import { flagMessage, quarantineThreshold } from "../server/inbox-spam.mjs";
-import { spamQuarantineStatuses, spamQuarantineLimits } from "../server/spam-quarantine-journal.mjs";
+import { spamQuarantineStatuses, spamQuarantineLimits } from "../server/journal.mjs";
 import { applicationTables } from "../server/writer-fence.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 
@@ -169,8 +169,9 @@ test("the journal table is registered, unfenced, and audited", t => {
   assert.equal(row.rows, 1, "the recovery audit sees the journal's row");
 });
 
-test("the new journal module is registered in the runtime package allowlist", async t => {
+test("the journal module is registered in the runtime package allowlist", async t => {
   const { readFileSync } = await import("node:fs");
   const allowlist = readFileSync(join(import.meta.dirname, "../scripts/runtime-package.mjs"), "utf8");
-  assert.ok(allowlist.includes('"server/spam-quarantine-journal.mjs"'), "store.mjs imports the journal, so the exact-contract runtime package must allowlist it");
+  assert.ok(allowlist.includes('"server/journal.mjs"'), "store.mjs imports the shared journal, so the exact-contract runtime package must allowlist it");
+  assert.ok(!allowlist.includes('"server/spam-quarantine-journal.mjs"'), "the deleted per-kind journal module must not stay registered");
 });

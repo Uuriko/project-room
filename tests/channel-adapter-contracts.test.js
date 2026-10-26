@@ -12,9 +12,9 @@
 // Per-adapter normalize/envelope coverage lives in the dedicated adapter
 // tests (telegram-adapter, gmail-adapter, whatsapp-adapter,
 // channel-sms-adapter, channel-messenger-adapter, email-contract,
-// email-routing-inbound). Relay adapters (slack-webhook, discord-webhook,
-// webhook-secret) and the live telegram transport are covered by
-// notify-relays.test.js and telegram-live.test.js.
+// email-routing-inbound). The live telegram transport is covered by
+// telegram-live.test.js. (The slack/discord relay adapters and their
+// shared webhook-secret helper were deleted in the T0 cut.)
 import test from "node:test";
 import assert from "node:assert/strict";
 import { ContractError, channelProviders } from "../server/channel-connection.mjs";
