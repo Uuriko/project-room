@@ -57,7 +57,8 @@ const evidenceOf = item => {
 
 // Cost on the card comes only from what the run recorded: the last finished
 // attempt's measured usage, its declared cap and its declared model. Each is
-// null when unrecorded, and the body then says so instead of a number.
+// null when unrecorded. An all-null cost adds nothing; a partial record names
+// the missing parts instead of inventing a number.
 // A Board claim's session lives on its linked work item (or the work item of
 // the same id); a claim with no recorded run gets an all-null cost.
 const UNRECORDED = Object.freeze({ spentCents: null, capCents: null, model: null });
@@ -70,7 +71,7 @@ export const receiptCostOf = workItem => {
 const dollars = cents => `$${(cents / 100).toFixed(2)}`;
 export const receiptCostLine = cost => {
   if (!cost) return "";
-  if (cost.spentCents === null && cost.capCents === null && cost.model === null) return " Cost not recorded.";
+  if (cost.spentCents === null && cost.capCents === null && cost.model === null) return "";
   const spent = Number.isSafeInteger(cost.spentCents) ? `Cost ${dollars(cost.spentCents)}` : "Cost not recorded";
   const cap = Number.isSafeInteger(cost.capCents) ? `cap ${dollars(cost.capCents)}` : "no cap recorded";
   const model = cost.model ? `model ${cost.model}` : "model not recorded";

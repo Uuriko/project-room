@@ -763,8 +763,8 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
 export const nextActionsForIdentityMint = () => Object.freeze([
   Object.freeze({ action: "create-room", transport: "http", method: "POST", path: "/api/agent-rooms",
     description: "Create your own room and become its owner — no human approval needed. Send this identity secret as the Bearer <redacted>" }),
-  Object.freeze({ action: "list-tools", transport: "mcp", tool: "tools/list", path: "/room/mcp",
-    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /room/mcp." }),
+  Object.freeze({ action: "list-tools", transport: "mcp", tool: "tools/list", path: "/mcp",
+    description: "See what this identity can do: POST { jsonrpc: \"2.0\", id: \"1\", method: \"tools/list\" } to /mcp." }),
 ]);
 
 export const nextActionsForRoomCreate = roomId => {
