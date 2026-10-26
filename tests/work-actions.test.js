@@ -268,3 +268,13 @@ test("room policy: only the room owner sets it, and the command shape is strict"
   f.setPolicy("owner", on);
   assert.deepEqual(roomPolicy(f.state()), on);
 });
+
+test("room_claim and room_handoff derive requestId and take the supplied current revision", () => {
+  const identity = { roomId: "room-a", memberId: "member-a" };
+  const take = buildWorkCommand("room_claim", { workItemId: "w1", action: "release" }, identity, { expectedRevision: 3 });
+  assert.match(take.id, /^mcp-[0-9a-f]{64}$/);
+  assert.equal(take.data.expectedRevision, 3);
+  assert.equal(take.id, buildWorkCommand("room_claim", { workItemId: "w1", action: "release" }, identity, { expectedRevision: 3 }).id);
+  const handoff = buildWorkCommand("room_handoff", { workItemId: "w1", done: "a", next: "b", reason: "c" }, identity, { expectedRevision: 2 });
+  assert.deepEqual([handoff.data.doneSummary, handoff.data.nextAction, handoff.data.limitReason, handoff.data.expectedRevision], ["a", "b", "c", 2]);
+});
