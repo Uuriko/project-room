@@ -1,5 +1,7 @@
 # Project Room docs
 
+Delivery coordination: [full implementation plan and current checkpoint](DELIVERY-SYSTEM.md) — durable scheduling, CI, merge and release work authorized 2026-10-25.
+
 Current implementation: [unified conversation](UNIFIED-CONVERSATION-20261019.md), [chat-to-result implementation and follow-through](CHAT-RESULT-IMPLEMENTATION-20261019.md), and [collaboration execution evidence](COLLABORATION-EXECUTION-20261019.md).
 
 Interaction redesign: [focused collaboration plan](FOCUSED-COLLABORATION-PLAN-20261019.md).
