@@ -346,7 +346,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   for (const name of ["room_propose_work", "wake_register", "room_put_file"]) assert.ok(!namesOf(review).includes(name));
   const work = await (await rpc(origin, "tools/list", undefined, owner.secret, "?focus=work")).json();
   assert.equal(work.result.focus, "work");
-  for (const name of ["room_begin_work", "room_record_handoff", "room_acquire_claim", "room_link_work_claim_pr"]) assert.ok(namesOf(work).includes(name));
+  for (const name of ["room_begin_work", "room_record_handoff", "room_acquire_claim", "room_link_work_claim_pr", "room_claim", "room_handoff"]) assert.ok(namesOf(work).includes(name));
   const conversation = await (await rpc(origin, "tools/list", { focus: "conversation" }, owner.secret)).json();
   assert.ok(namesOf(conversation).includes("room_read_messages"));
   assert.ok(!namesOf(conversation).includes("room_record_verification"));

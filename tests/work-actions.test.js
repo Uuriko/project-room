@@ -27,7 +27,7 @@ const receipt = command => ({ sequence: 7, duplicate: false, event: { id: "saved
   idempotencyKey: createHash("sha256").update(`${identity.memberId}:${command.id}`).digest("hex") } });
 
 test("every lifecycle descriptor maps exactly to one existing command without new authority or defaults", async () => {
-  assert.equal(workTools.length, cases.length);
+  assert.equal(workTools.length, cases.length + 2, "room_claim and room_handoff are the only non-legacy work tools");
   for (const [action, type, args] of cases) {
     const name = "room_" + action, { requestId, ...data } = args, sent = [];
     const command = buildWorkCommand(name, args);
@@ -40,6 +40,31 @@ test("every lifecycle descriptor maps exactly to one existing command without ne
   }
   assert.throws(() => buildWorkCommand("room_record_owner_decision", base), { code: "invalid_work_action" });
   assert.throws(() => buildWorkCommand("room_add_member", base), { code: "invalid_work_action" });
+});
+
+test("room_claim and room_handoff delegate to the existing commands and old names point at them", async () => {
+  const claim = cases.find(([action]) => action === "acquire_claim")[2];
+  const take = { ...claim, action: "take" };
+  const released = { ...base, action: "release" };
+  const renewed = { ...cases.find(([action]) => action === "renew_claim")[2], action: "renew" };
+  for (const [args, type] of [[take, "claim.acquired"], [renewed, "claim.renewed"], [released, "claim.released"]]) {
+    const command = buildWorkCommand("room_claim", args);
+    assert.equal(command.type, type);
+    assert.equal(command.data.action, undefined, "action is a selector, not a command field");
+    const response = await submitWorkAction({ command: async value => receipt(value) }, identity, "room_claim", args);
+    assert.equal(response.action, "room_claim");
+    assert.equal(response.deprecated, undefined);
+  }
+  const handoff = cases.find(([action]) => action === "record_handoff")[2];
+  const command = buildWorkCommand("room_handoff", handoff);
+  assert.equal(command.type, "work.handoff_recorded");
+  assert.deepEqual(command.data, buildWorkCommand("room_record_handoff", handoff).data);
+  const old = await submitWorkAction({ command: async value => receipt(value) }, identity, "room_acquire_claim", claim);
+  assert.deepEqual(old.deprecated, { successor: "room_claim", action: "take",
+    message: 'Use room_claim with action="take".' });
+  assert.equal(old.successor, "room_claim");
+  assert.equal(validWorkArguments("room_claim", { ...take, action: "release" }), false);
+  assert.equal(validWorkArguments("room_claim", { ...released, action: "take" }), false);
 });
 
 test("strict action inputs preserve null/omission, reject extras and bound command bytes", () => {

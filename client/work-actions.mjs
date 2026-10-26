@@ -75,8 +75,75 @@ const actions = new Map(definitions.map(([name, title, type, description, proper
     inputSchema: object({ ...fields, ...properties }, [...new Set([...Object.keys(fields), ...required])]),
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
 }));
-export const workTools = [...actions.values()].map(action => action.tool);
-export const isWorkTool = name => actions.has(name);
+// Consolidated front door for the four legacy claim/handoff names. `room_claim`
+// keeps the three operations exact: take delegates to acquire_claim, renew to
+// renew_claim and release to release_claim. `room_handoff` delegates to the
+// existing record_handoff command (a receipt back to the Board, never a
+// transfer of authority). The old names stay callable for one compatibility
+// window and report their successor in the response.
+const acquire = actions.get("room_acquire_claim").tool.inputSchema.properties;
+const renew = actions.get("room_renew_claim").tool.inputSchema.properties;
+const claimTool = {
+  name: "room_claim",
+  title: "Claim, renew, or release work",
+  description: "Claim work with one tool. action=take reserves a declared repository/ref/path scope for your assigned write-mode task (same rules and permissions as room_acquire_claim); action=renew extends the lease with a new explicit expiresAt (same rules as room_renew_claim); action=release gives the scope back (same rules as room_release_claim). Taking requires repository, ref, paths and expiresAt. Retry the exact same input and requestId; a saved receipt does not prove current ownership." + retry,
+  inputSchema: {
+    ...object({
+      requestId: common.requestId,
+      workItemId: id,
+      expectedRevision: common.expectedRevision,
+      action: { type: "string", enum: ["take", "renew", "release"],
+        description: "take=acquire with repository/ref/paths/expiresAt; renew=extend with expiresAt; release=give the scope back." },
+      repository: acquire.repository,
+      ref: acquire.ref,
+      paths: acquire.paths,
+      expiresAt: acquire.expiresAt,
+      pullRequests: acquire.pullRequests,
+      blocks: acquire.blocks,
+      progressMessageId: renew.progressMessageId
+    }, ["requestId", "workItemId", "expectedRevision", "action"]),
+    allOf: [
+      { if: { properties: { action: { const: "take" } }, required: ["action"] },
+        then: { required: ["repository", "ref", "paths", "expiresAt"] } },
+      { if: { properties: { action: { const: "renew" } }, required: ["action"] },
+        then: { required: ["expiresAt"] } }
+    ]
+  },
+  annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false }
+};
+const handoffTool = {
+  ...actions.get("room_record_handoff").tool,
+  name: "room_handoff",
+  title: "Hand off work",
+  description: "Hand assigned work back to the Board when you cannot finish it: state what is actually done against the definition of done, the exact next action, and why you are stopping. This records the handoff receipt and opens Board triage; it never closes, completes or reassigns the work, and review/approval gates stay with the room. Use haltAll=true only to stop all your further work mutations until a steer/decide member clears the exact halt." + retry
+};
+const canonicalActions = new Map([
+  ["room_claim", { tool: claimTool, kind: "claim" }],
+  ["room_handoff", { tool: handoffTool, to: "room_record_handoff" }]
+]);
+const claimDelegates = Object.freeze({
+  take: "room_acquire_claim",
+  renew: "room_renew_claim",
+  release: "room_release_claim"
+});
+const DEPRECATED_WORK_TOOLS = Object.freeze({
+  room_acquire_claim: { successor: "room_claim", action: "take" },
+  room_renew_claim: { successor: "room_claim", action: "renew" },
+  room_release_claim: { successor: "room_claim", action: "release" },
+  room_record_handoff: { successor: "room_handoff", action: null }
+});
+export const workTools = [...actions.values()].map(action => action.tool).concat(claimTool, handoffTool);
+export const isWorkTool = name => actions.has(name) || canonicalActions.has(name);
+
+function validCanonicalWorkArguments(name, args) {
+  const canonical = canonicalActions.get(name);
+  if (!canonical || !conforms(args, canonical.tool.inputSchema)) return false;
+  if (canonical.kind === "claim") {
+    const { action, ...rest } = args;
+    return Object.hasOwn(claimDelegates, action) && validWorkArguments(claimDelegates[action], rest);
+  }
+  return validWorkArguments(canonical.to, args);
+}
 
 // Validator for this finite descriptor vocabulary, not a general JSON Schema engine.
 export function conforms(value, shape) {
@@ -96,6 +163,7 @@ export function conforms(value, shape) {
     && value.length <= (shape.maxLength ?? Infinity) && (!shape.pattern || new RegExp(shape.pattern).test(value));
 }
 export function validWorkArguments(name, args) {
+  if (canonicalActions.has(name)) return validCanonicalWorkArguments(name, args);
   if (!actions.has(name) || !conforms(args, actions.get(name).tool.inputSchema)) return false;
   try { if (actions.get(name).type === T.WORK_COMPLETED) reportedProducer(args); } catch { return false; }
   return true;
@@ -106,9 +174,14 @@ export function buildWorkCommand(name, args) {
   // randomUUID() for a missing/invalid one minted a second command on
   // retry, the server could not deduplicate, and the action applied twice.
   // Name the missing field (as room_reply does) so the caller can repair it.
-  if (actions.has(name) && args && !validId(args.requestId))
+  if (isWorkTool(name) && args && !validId(args.requestId))
     throw Object.assign(new Error(`${name} requires requestId: supply one stable id per operation and keep it unchanged when retrying an unknown result`), { code: "missing_request_id" });
   if (!validWorkArguments(name, args)) throw Object.assign(new Error("Invalid work action input"), { code: "invalid_work_action" });
+  if (name === "room_claim") {
+    const { action, ...rest } = args;
+    return buildWorkCommand(claimDelegates[action], rest);
+  }
+  if (name === "room_handoff") return buildWorkCommand("room_record_handoff", args);
   const requestId = args.requestId;
   const { requestId: _requestId, ...data } = structuredClone(args), command = { id: requestId, type: actions.get(name).type, data };
   if (name === "room_submit_text_result") data.evidenceKind = "room_text";
@@ -138,12 +211,19 @@ export function recordedWorkAction(name, command, receipt) {
       read: { tool: "room_read_result", arguments: { workItemId: command.data.workItemId, completionEventId: receipt.event.id } } } } : {}),
     message: "This original operation was recorded. Read current work before another action; this receipt does not prove current ownership, review or human approval." };
 }
+export function withWorkDeprecation(name, recorded) {
+  const deprecated = DEPRECATED_WORK_TOOLS[name];
+  return deprecated ? { ...recorded, deprecated: { successor: deprecated.successor, action: deprecated.action,
+    message: deprecated.action
+      ? `Use ${deprecated.successor} with action="${deprecated.action}".`
+      : `Use ${deprecated.successor}.` }, successor: deprecated.successor } : recorded;
+}
 export async function submitWorkAction(client, identity, name, args, { signal } = {}) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
   const command = buildWorkCommand(name, args), receipt = await client.command(command, { signal });
   if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
     message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
-  return recordedWorkAction(name, command, receipt);
+  return withWorkDeprecation(name, recordedWorkAction(name, command, receipt));
 }
 
 const refusals = {

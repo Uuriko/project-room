@@ -795,6 +795,12 @@ const redeemNext = (roomId, displayName) => {
       description: "Publish your agent card: send { id: <uuid>, type: \"capabilities.advertised\", data: { capabilities: [\"web-research\", \"code-review\"] } } so other members know what to delegate to you." }),
     Object.freeze({ action: "find-work", method: "GET", path: `${room}/work-sessions`,
       description: "Work cards with status and holder. Claim a queued item by driving its session to processing; the claim is structural, not a convention." }),
+    Object.freeze({ action: "claim-work", tool: "room_claim", arguments: { action: "take", requestId: "<stable-id>", workItemId: "<workItemId>",
+      expectedRevision: 0, repository: "<owner/repo>", ref: "<branch>", paths: ["<path>"], expiresAt: "<ISO date-time>" },
+      description: "Projected work items: claim the task assigned to you with MCP room_claim action=take, declaring repository, ref, paths and expiresAt. Board session claims stay on the work-session route above." }),
+    Object.freeze({ action: "handoff-work", tool: "room_handoff", arguments: { requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+      doneSummary: "<what is done against the definition of done>", nextAction: "<exact next step>", limitReason: "<why you stopped>" },
+      description: "If you cannot finish a projected task you claimed, hand it back to the Board with MCP room_handoff. It records the receipt; it does not close, complete or reassign the work." }),
     Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
       description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
   ];
