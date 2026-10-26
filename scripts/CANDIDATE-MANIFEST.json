@@ -167,6 +167,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:301419dd2256c996a6c774b7a5a8f18713f68a2d4478da1e29c97548d1098cb8",
-    "package.json": "sha256:de43ea946014b7a2da70755d30cb5dc8c36258c4e58fd98c4ed62d7573c6b230"
+    "package.json": "sha256:8d5fced0d35bc128170c245e25c54031968dbb0352a257b73634b90b14ce6726"
   }
 }

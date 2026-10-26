@@ -12,6 +12,7 @@
     "pretest": "node scripts/verify-preflight.mjs && node scripts/build-agent-docs.mjs",
     "test": "node --test",
     "verify:affected": "node scripts/verify-affected.mjs",
+    "delivery:shadow": "node scripts/delivery-coordinator.mjs",
     "test:quarantined": "node scripts/run-quarantined-tests.mjs",
     "test:relay": "npm --prefix relay test",
     "test:refine": "node --test scripts/refine-draft-browser-check.mjs",
