@@ -52,6 +52,7 @@ const METRICS = [
   ["httpRecentKB", "GET recent window (KB)", r => r.httpRecentKB],
   ["httpRecentMs", "GET recent window (ms)", r => r.httpRecentMs],
   ["replayMs", "replay from log (ms)", r => r.replayMs],
+  ["replayFullMs", "replay from event 1 (ms)", r => r.replayFullMs],
 ];
 
 const git = (...a) => execFileSync("git", a, { cwd: repo, encoding: "utf8" }).trim();

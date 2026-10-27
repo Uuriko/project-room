@@ -447,6 +447,14 @@ const fail = (status, code, message) => { throw new ServiceError(status, code, m
 // Keep the application guard at 4 MiB. Bodies-at-rest supplies projection
 // headroom; a larger guard does not establish the deployed storage ceiling.
 export const PILOT_LIMITS = Object.freeze({ eventsPerRoom: 1_000_000, membersPerRoom: 100, workItemsPerRoom: 500, projectionBytes: 4 * 1024 * 1024 });
+// S-09 checkpoint-on-write cadence: an ordinary write that leaves a room's
+// retained projection checkpoint more than this many events behind the head
+// refreshes it in the same commit flush (see _maybeCheckpointOnWrite), so a
+// rebuild never folds more than ~this many events past the checkpoint.
+// Before this, only three special writers (a migration repair, event import,
+// account deletion) ever wrote projection_checkpoints, and ordinary rooms
+// folded from event 1 on every rebuild.
+export const PROJECTION_CHECKPOINT_INTERVAL = 500;
 // Inactive members retain their history, but do not occupy an admission seat.
 export const activeMemberCount = members => Object.values(members ?? {}).filter(member => member?.active !== false).length;
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -3436,6 +3444,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   _noteEventAppend(roomId) {
     if (this.db.isTransaction) { this._pendingAppends.add(roomId); return; }
     this._bumpAppendStamp(roomId);
+    // Appends that bypass store.transaction (appendSideTableEvent's own
+    // persist is the standing example) get the same cadence check here. It
+    // reads the rooms row as it stands, so the checkpoint it may write is
+    // the self-consistent (sequence, projection) pair of that row; the next
+    // transactional commit re-checks and advances it past the cadence.
+    this._maybeCheckpointOnWrite(roomId);
   }
   _bumpAppendStamp(roomId) {
     this._appendStamps.set(roomId, (this._appendStamps.get(roomId) ?? 0) + 1);
@@ -3444,10 +3458,59 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
   }
   _flushEventAppends() {
-    if (!this._pendingAppends.size) return;
+    if (!this._pendingAppends.size) return [];
     const rooms = [...this._pendingAppends];
     this._pendingAppends.clear();
     for (const roomId of rooms) this._bumpAppendStamp(roomId);
+    return rooms;
+  }
+  // Checkpoint coverage for one room: the head sequence, the retained
+  // checkpoint's sequence (null when none exists), and their difference.
+  // A room is covered when a checkpoint exists and lags the head by less
+  // than PROJECTION_CHECKPOINT_INTERVAL events.
+  checkpointCoverage(roomId) {
+    const head = this.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId);
+    if (!head) fail(404, "room_not_found", "Room not found");
+    const checkpoint = this.db.prepare("SELECT sequence FROM projection_checkpoints WHERE room_id=?").get(roomId);
+    return { sequence: head.sequence, checkpointSequence: checkpoint?.sequence ?? null,
+      lag: head.sequence - (checkpoint?.sequence ?? 0) };
+  }
+  // S-09 checkpoint-on-write. Called from transaction() after the append
+  // flush of an outermost commit, for exactly the rooms that commit
+  // appended events to: every ordinary write path (command(),
+  // appendSideTableEvent, the invitation/share-link/claim satellites) funnels
+  // through that flush, so the cadence lives in one place rather than in
+  // each writer. The checkpoint is derived from the stored rooms row — the
+  // (sequence, projection) pair is read from the same row, so the snapshot
+  // is self-consistent whatever else the committing transaction did after
+  // its event insert (redaction rewrites, resume/lapse appends, archiving)
+  // — and hydrated to the full-body form the other checkpoint writers store
+  // (checkpoints keep full bodies; replay applies edits to them).
+  // A checkpoint is an optimisation, never load-bearing (#4126): a failure
+  // here is logged and skipped, never allowed to fail a write that has
+  // already committed, and the next append past the cadence retries.
+  _maybeCheckpointOnWrite(roomId) {
+    if (this.readOnly) return false;
+    try {
+      const head = (this._checkpointHeadStmt ??= this.db.prepare("SELECT sequence FROM rooms WHERE id=?")).get(roomId);
+      if (!head || head.sequence < PROJECTION_CHECKPOINT_INTERVAL) return false;
+      const existing = (this._checkpointSeqStmt ??= this.db.prepare("SELECT sequence FROM projection_checkpoints WHERE room_id=?")).get(roomId);
+      if (existing && head.sequence - existing.sequence < PROJECTION_CHECKPOINT_INTERVAL) return false;
+      const row = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
+      if (!row) return false;
+      let parsed;
+      try { parsed = JSON.parse(row.projection); } catch { return false; } // corrupt rows are the quarantine path's problem, not a checkpoint's
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
+      const { state, missing } = hydrateProjection(this.db, roomId, parsed);
+      if (missing.length) return false; // a body the log must restore first; never checkpoint a state with holes
+      (this._checkpointSaveStmt ??= this.db.prepare(`INSERT INTO projection_checkpoints(room_id,sequence,projection) VALUES(?,?,?)
+        ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, projection=excluded.projection
+        WHERE excluded.sequence > projection_checkpoints.sequence`)).run(roomId, head.sequence, JSON.stringify(state));
+      return true;
+    } catch (error) {
+      console.error(`projection checkpoint skipped for room ${roomId} (${error.message}); the write stands and the next append past the cadence retries`);
+      return false;
+    }
   }
   // The room's append stamp: a counter that changes whenever an event has
   // committed to the room since the caller's last look. Purely in-memory.
@@ -3498,7 +3561,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // streams woken by the flush observe the post-commit projection state.
       // A rolled-back append never reaches here: the catch path clears
       // _pendingAppends at the same boundary instead.
-      this._flushEventAppends();
+      const flushedRooms = this._flushEventAppends();
+      // S-09: checkpoint-on-write cadence, outermost commits only — an
+      // isolated savepoint boundary still sits inside the outer transaction,
+      // whose own flush re-checks the same rooms at the true commit.
+      if (outermost) for (const roomId of flushedRooms) this._maybeCheckpointOnWrite(roomId);
     }
     if (before !== null && (before === undefined || this.storagePlatform.changes(this.db) !== before)) this.storageRecovered();
     return result;
@@ -3583,6 +3650,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    // S-09: callers usually wrap this in store.transaction (whose commit
+    // flush re-checks the cadence), but a direct caller persists outside
+    // one — check here too so the side-table rail keeps the same coverage.
+    this._maybeCheckpointOnWrite(roomId);
     return sequence;
   }
   // Phase 1a/1b rollback: write every room back with full bodies and full

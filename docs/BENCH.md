@@ -44,6 +44,26 @@ Everything else shows `~`. The method follows Go's benchstat: medians, non-param
 
 Compare like with like. Only a ratio from the same machine in the same invocation is meaningful; absolute milliseconds change between machines. Shared CI runners swing by tens of percent, so a 5% change is noise there. The tool checks itself: comparing a tree with itself reports `~` everywhere, and a deliberate 3x slowdown in `storedProjection` is flagged on exactly the metrics it touches.
 
+## Projection rebuild (S-09)
+
+`scripts/bench/rebuild.mjs` prices one thing `bench:room` cannot reach: rebuilding a room's projection from its event log at 1k / 4k / 16k events, with the retained checkpoint the write path now keeps (checkpoint-on-write every ~500 events; `room-scale.mjs` also reports `replay from event 1` and the checkpoint lag for its sizes) and without it — the fold from event 1 that was every ordinary room's only rebuild path before S-09, whose cost the deletion audit could not state.
+
+```sh
+node --expose-gc scripts/bench/rebuild.mjs [--sizes 1000,4000,16000] [--runs 3] [--out rebuild.json]
+```
+
+The fixture is `fixture.mjs`'s deterministic room shape and seed, seeded through `store.initialize()` (one replay of the generated log) instead of individual commands, which price the write path and take tens of minutes at 16k. Note the shape consequence: at ~870 characters a message, a 16k-event room's projection is ~16 MB — past the 4 MiB stored-projection cap a live room enforces — so read the 16k row as the fold's cost at that event count and body size, not as a room shape production admits today.
+
+Measured 2026-10-27 on the lane VM (AMD EPYC 9D25, 2 cores, Node v24.22.1, median of 3 rebuilds; local-machine figures — compare ratios on the same machine only). The base tree at the same sizes carried no checkpoint at all (lag = full head), so its rebuild is the from-event-1 column:
+
+| events | projection | checkpoint (lag) | rebuild with checkpoint | rebuild from event 1 |
+|---|---|---|---|---|
+| 1,061 | 1,009 KB | 1,061 (0) | 13 ms | 810 ms |
+| 4,061 | 4,034 KB | 4,061 (0) | 36 ms | 2,107 ms |
+| 16,061 | 16,099 KB | 16,061 (0) | 180 ms | 7,101 ms |
+
+So a from-scratch rebuild costs roughly 0.5–2 s per 4k events at this message size and grows with the log, while a rebuild from a retained checkpoint costs the checkpoint's parse plus at most ~500 events of fold — tens of milliseconds at these sizes. In live rooms the checkpoint lags the head by 0–499 events (the cadence), not 0; the tail fold adds at most ~500 events' worth (~55 ms at the 16k row's per-event rate) to the with-checkpoint figure.
+
 ## Files
 
-`scripts/bench/compare.mjs` (CLI), `fixture.mjs` (deterministic room), `room-scale.mjs` (one run), `stats.mjs` (median, interval, Mann-Whitney, Holm). Tests: `tests/bench-stats.test.js`.
+`scripts/bench/compare.mjs` (CLI), `fixture.mjs` (deterministic room), `room-scale.mjs` (one run), `rebuild.mjs` (projection-rebuild pricing at 1k/4k/16k), `stats.mjs` (median, interval, Mann-Whitney, Holm). Tests: `tests/bench-stats.test.js`, `tests/checkpoint-cadence.test.js`.
