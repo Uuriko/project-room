@@ -39,7 +39,7 @@ import { AgentRooms } from "./agent-rooms.mjs";
 import { AccessRequests } from "./access-requests.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { MCP_SUPPORTED_VERSIONS, MCP_VERSION } from "../client/mcp-stdio.mjs";
-import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./mcp-full-profile.mjs";
+import { isHostedStdioTool, isHostedStdioInboxTool, validHostedStdioArgs, callHostedStdioTool } from "./mcp-full-profile.mjs";
 import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
@@ -944,6 +944,20 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
         { store, secret, identity, mcpUrl, searchParams, agentRooms });
     }
+    // B5-4-F8: the named scope gates fire BEFORE argument validation for
+    // key-scoped denials. A scoped key lacking mcp:inbox / mcp:wake /
+    // webhooks:manage hears insufficient_scope even when its arguments
+    // are also malformed, instead of a misleading invalid_arguments that
+    // sends it to fix arguments it may have right. This also covers
+    // inbox-class hosted-stdio tools (room_read_inbox), whose branch
+    // below runs before the INBOX_TOOLS branch and whose funnel gate in
+    // callHostedStdioTool is only reached after validation. Owner
+    // identity secrets are untouched (mcpKeyGrantsScope passes them).
+    // The in-branch gates below stay as defense in depth.
+    const deniedScope = namedScopeDenial(store, secret, name);
+    if (deniedScope) {
+      return mcpCallError(requestId, { reason: "insufficient_scope", tool: name, hint: `API key lacks the ${deniedScope} scope` });
+    }
     const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
       : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
         : WAKE_TOOLS.some(entry => entry.name === name) ? validWakeArgs(name, args)
@@ -1009,6 +1023,25 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
   if (!record) return false;
   return (record.scopes ?? []).some(scope =>
     scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
+}
+
+// The named scope a tool's gate requires, when the presented API key
+// lacks it; null when the caller may proceed (owner identity secrets and
+// adequately scoped keys). Mirrors the in-branch gates in handleAuthed:
+// inbox tools and inbox-class hosted-stdio tools need mcp:inbox, wake
+// tools need mcp:wake, and webhook tools additionally need
+// webhooks:manage. Room tools are deliberately absent: their
+// rooms:read / rooms:write gate runs inside callRoomTool, after
+// validation, as its own tests pin.
+function namedScopeDenial(store, secret, name) {
+  if (isHostedStdioInboxTool(name) || INBOX_TOOLS.some(entry => entry.name === name)) {
+    return mcpKeyGrantsScope(store, secret, MCP_INBOX_SCOPE) ? null : MCP_INBOX_SCOPE;
+  }
+  if (WAKE_TOOLS.some(entry => entry.name === name)) {
+    if (!mcpKeyGrantsScope(store, secret, MCP_WAKE_SCOPE)) return MCP_WAKE_SCOPE;
+    if (name.startsWith("webhook_") && !mcpKeyGrantsScope(store, secret, MCP_WEBHOOKS_SCOPE)) return MCP_WEBHOOKS_SCOPE;
+  }
+  return null;
 }
 
 // The HTTP room routes confine api-key callers to their stored scopes (reads
