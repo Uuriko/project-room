@@ -155,10 +155,10 @@
     "strings/en.json": "sha256:2b516396771b9dbdada40b71e3757717295ce0c12904df315e56b82774bc9f89"
   },
   "deployment": {
-    ".github/workflows/deploy-prod.yml": "sha256:c46b418b45f552a3b9eb3b8df6669768301e608f512ba2465791ae6a524cce8e",
+    ".github/workflows/deploy-prod.yml": "sha256:318ec275c1e1de04ea272734746fce5a713afc25a203a114b5f426e0f424eff9",
     "cloudflare/bootstrap.mjs": "sha256:ff6095ac5ab0332de1cacc5d5250ff71831ed8c360ec108b37ecc8effe211d6d",
     "cloudflare/build-assets.mjs": "sha256:7a204a775ed8aac33ff23d1d1c210de1a29efe84a47455db7e303e6fd4aff4d4",
-    "cloudflare/package.json": "sha256:bfcac5762ca47c3f1f1bc1fecba9d2863e469cc7998cfc8c177002608caef569",
+    "cloudflare/package.json": "sha256:c8fad7631300b2bdc3af29b6966a377afac14ac59cd51218f224e552ec62ba3c",
     "cloudflare/pnpm-lock.yaml": "sha256:e85e6e33177fe8779a9baea1fe99b3575edc4a1b29da6ed7415b7d2023ca157f",
     "cloudflare/room.mjs": "sha256:8badcd7e15c1eec9cb69848f2578c0552798aa4406d9fe10428576baa2190a79",
     "cloudflare/storage.mjs": "sha256:45ee545136aab04e757950cc678381b78f90776f50a4af0ae5d2e11e4c77e165",
