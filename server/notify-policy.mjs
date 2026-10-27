@@ -17,27 +17,25 @@ export class PolicyError extends Error {
 }
 const fail = (code, message) => { throw new PolicyError(code, message); };
 
-export const STORED_LEVELS = Object.freeze(["all", "mentions", "muted"]);
-export const NEEDS_ME_LEVEL = "needs_me";
+const STORED_LEVELS = Object.freeze(["all", "mentions", "muted"]);
+const NEEDS_ME_LEVEL = "needs_me";
 export const POLICY_LEVELS = Object.freeze([NEEDS_ME_LEVEL, ...STORED_LEVELS]);
 export const POLICY_DEFAULT_LEVEL = NEEDS_ME_LEVEL;
 // NOTIFY flips this per decision. The default schedules no email.
 export const EMAIL_DELIVERY = "inert";
-export const EMAIL_MODES = Object.freeze(["inert", "off", "brief", "needs_me"]);
 
 export const BATCH_WINDOW_MS = 15 * 60 * 1000;
-export const DESKTOP_FOCUS_MS = 60 * 1000;
+const DESKTOP_FOCUS_MS = 60 * 1000;
 export const DESKTOP_RECHECK_MS = 120 * 1000;
-export const PUSH_PER_AGENT_HOUR = 3;
-export const PUSH_PER_HUMAN_DAY = 12;
+const PUSH_PER_AGENT_HOUR = 3;
+const PUSH_PER_HUMAN_DAY = 12;
 const HOUR_MS = 60 * 60 * 1000;
 const DAY_MS = 24 * HOUR_MS;
 
-export const NEEDS_ME_KINDS = Object.freeze([
+const NEEDS_ME_KINDS = Object.freeze([
   "approval_requested", "input_required", "blocked_on_me", "review_requested",
   "dm", "question_mention", "access_request"
 ]);
-export const FOLLOWING_KINDS = Object.freeze(["claim_done", "pr_merged", "reply", "member_added"]);
 const MENTION_KINDS = new Set(["mention", "dm", "question_mention"]);
 
 const done = (base, deliver) => Object.freeze({ ...base, deliver: Object.freeze(deliver.map(entry => Object.freeze(entry))) });
@@ -65,7 +63,7 @@ function localClock(at, tz) {
 
 // Next brief is the quiet-hours end (default 08:00 local). Items deferred
 // overnight wait for that instant rather than paging mid-window.
-export function nextBriefAt(quietHours, now) {
+function nextBriefAt(quietHours, now) {
   const tz = quietHours?.tz || "UTC";
   const end = quietHours?.end || "08:00";
   for (let step = 0; step <= 36 * 60; step += 1) {

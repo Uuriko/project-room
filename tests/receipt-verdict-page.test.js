@@ -1,7 +1,7 @@
 // The verdict block on the public receipt page (charter Workstream B,
 // P1/P2; server/receipts-page.mjs + server/receipt-verify.mjs through
 // server/http.mjs). Behavior protected:
-//   - the plain page shows a displayed "Not yet verified" state with the
+//   - the plain page shows a displayed "Record not rechecked" state with the
 //     verify action — unverified is a state, never a blank, and the word
 //     "verified" appears nowhere on it as a claim;
 //   - ?verify=1 renders ONE graded verdict with its scope in the same
@@ -50,10 +50,10 @@ async function serve(t, fetchPullRequest) {
   return { origin: `http://127.0.0.1:${server.address().port}`, receiptId };
 }
 
-test("the plain page shows Not yet verified with the action, and claims nothing", async t => {
+test("the plain page shows Record not rechecked with the action, and claims nothing", async t => {
   const { origin, receiptId } = await serve(t, mergedFetch);
   const html = await (await fetch(`${origin}/receipts/${receiptId}`)).text();
-  assert.match(html, /Not yet verified/);
+  assert.match(html, /Record not rechecked/);
   assert.match(html, /href="\?verify=1"/);
   assert.doesNotMatch(html, /data-verdict=/, "no verdict is rendered before one runs");
   assert.match(html, /Verification tier: bytes re-verified\. What was checked: the server verified the merge/,

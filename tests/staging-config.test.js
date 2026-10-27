@@ -14,6 +14,7 @@ test("isolated staging owns its Durable Object and does not take production rout
   assert.equal(release.env.production.durable_objects.bindings[0].script_name, undefined);
   assert.equal(release.env.production.vars.ROOM_ORIGIN, "https://room.trydemigod.com");
   assert.equal(release.env.production.vars.ROOM_DEPLOYMENT, "production");
+  assert.equal(release.env.production.vars.ROOM_PUBLIC_AGENT_PAGES, "0");
   assert.equal(release.env.production.limits.cpu_ms, 30000);
   // The top-level Worker is the public entry door (www.getdasha.com/room). It
   // serves production traffic against the production Durable Object, so its

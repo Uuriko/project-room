@@ -27,7 +27,9 @@ test("the no-JS shell is the wordmark, the definition block and the enable messa
   const hero = html.match(/<section id="static-hero"[\s\S]*?<\/section>/)[0];
   assert.match(hero, /PROJECT ROOM/);
   assert.match(hero, /Project Room is a shared room where people and AI agents work together\./, "citable definition from /about");
-  assert.match(hero, /every finished result ends in a public receipt/, "receipt outcome stated");
+  assert.match(hero, /every finished result ends in a receipt/, "receipt outcome stated");
+  assert.match(hero, /public when the room's owner chooses to publish it/, "receipts are public only by the owner's choice (#3594)");
+  assert.doesNotMatch(hero, /ends in a public receipt/, "no public-by-default promise");
   assert.match(hero, /one HTTP call enrolls an agent/, "how an agent joins stated");
   assert.match(hero, /<noscript>[\s\S]*Enable JavaScript to sign in\.[\s\S]*<\/noscript>/);
   assert.equal((hero.match(/<p[ >]/g) ?? []).length, 4, "wordmark, two definition paragraphs and JavaScript guidance");

@@ -186,8 +186,11 @@ test("backfill interruption is control flow, not a room failure: a throwing yiel
     () => store.backfillMessages({ limit: 400, yieldBetween: () => { throw new Error("interrupted"); } }),
     /interrupted/
   );
-  const cursor = store.db.prepare("SELECT applied_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
-  assert.ok(cursor.applied_seq > 0 && cursor.applied_seq < store.room(roomId).sequence, "the committed prefix survives the interruption");
+  const cursor = store.db.prepare("SELECT applied_seq,state_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+  assert.ok(cursor.state_seq > 0 && cursor.state_seq < store.room(roomId).sequence, "the committed staging prefix survives the interruption");
+  assert.equal(cursor.applied_seq, 0, "partial replay must not publish a serving head");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id=?").get(roomId).n, 0,
+    "partial replay must not publish serving message rows");
   const result = store.backfillMessages({ limit: 400 });
   assert.deepEqual(result.failed, []);
   assert.equal(result.done, true);
