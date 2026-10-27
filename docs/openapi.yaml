@@ -2893,6 +2893,85 @@ paths:
       responses:
         '200': { description: Response headers only }
         '429': { description: Response headers only }
+  /api/public/door-funnel:
+    get:
+      summary: Public door funnel aggregates
+      description: >-
+        Anonymous, counts-only weekly aggregates for the stranger door
+        (no login): joins per public-directory-listed room (from the
+        member.added and member.joined_via_invitation events), bucketed by
+        Monday 00:00 America/Los_Angeles weeks, oldest first. The public
+        response omits identity mint counts. A room owner presenting a
+        room access token or account session receives those counts and
+        Cache-Control private, no-store. Everyone else receives
+        Cache-Control public, max-age=600; the aggregate is reused for
+        ten minutes per weeks value. Example:
+        GET /api/public/door-funnel (the optional weeks query parameter
+        is clamped to 1..12, default 12). Totals only: no member ids,
+        handles, emails, identity links, or joiner data ever leave,
+        unlisted rooms never appear, and a listed room with no joins
+        renders 0. There is deliberately no fleet/outside split: no
+        fleet marker exists in the join data, so the response carries
+        classifier.available=false rather than a fabricated split.
+        Read-only; a source failure refuses the whole read with
+        door_funnel_unavailable instead of silently zeroing a leg.
+      security: []
+      parameters:
+        - name: weeks
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Weekly door funnel aggregates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema: { type: string }
+                  generatedAt: { type: string }
+                  weeks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        startsAt: { type: string }
+                        joins:
+                          type: object
+                          additionalProperties: { type: integer }
+                        mints:
+                          type: integer
+                          description: Owner-authenticated read only. Omitted from the public response.
+                  directory:
+                    type: object
+                    properties:
+                      listedRooms: { type: integer }
+                      totalMembers: { type: integer }
+                      rooms:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            roomId: { type: string }
+                            memberCount: { type: integer }
+                  classifier:
+                    type: object
+                    properties:
+                      available: { type: boolean }
+                      reason: { type: string }
+        '429':
+          description: Per-address door funnel rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: Door funnel source unavailable (error.code door_funnel_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
   /api/public/rooms/directory:
     get:
       summary: Public room directory
