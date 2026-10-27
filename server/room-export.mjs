@@ -1,17 +1,22 @@
 // Durable Object export. The on-disk server copies its sqlite file
 // (scripts/backup-room.mjs). A Durable Object cannot hand that file out, so
 // this streams the same store as NDJSON and replays it into a fresh file.
-// The secret columns named in EXPORT_SECRET_COLUMNS and raw token shapes
-// inside other cells are sha256 hex. Everything else round-trips verbatim.
+// The secret columns named in EXPORT_SECRET_COLUMNS, raw token shapes
+// inside other cells, and copies of the store's own secret values inside
+// content are replaced with salted sha256 placeholders (see
+// server/export-scrub.mjs — the one scrub every export shape shares).
+// Everything else round-trips verbatim, and every content substitution is
+// counted in the trailer's scrubbedCells so a restore reports the loss.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomStore } from "./store.mjs";
 import { auditRecovery } from "./recovery.mjs";
 import { Buffer } from "node:buffer";
+import { createExportScrubContext, defaultExportScrubContext, placeholderFor, registerSecretValues, scrubText, isScrubCountsShape } from "./export-scrub.mjs";
+import { hydrateWorkItems } from "./work-repository.mjs";
 
 const IDENT = /^[a-z_][a-z0-9_]*$/;
-const TOKEN_SOURCE = "(?:pri_|rak_|ga1\\.)[A-Za-z0-9_-]{8,}";
 const FIRST = ["accounts", "rooms", "events", "commands", "member_accounts", "account_access_events", "credentials", "account_credentials", "account_session_slots", "cursors", "projection_checkpoints"];
 
 const sha256Hex = value => createHash("sha256").update(value).digest("hex");
@@ -53,15 +58,18 @@ export function isExportSecretColumn(table, column) {
 // Watermark marker for exports written under the exact policy above.
 // Streams without it were written by the pre-#3599 name-regex exporter
 // and are "legacy" to every restore (see createSanitizedCellTracker).
-export const BACKUP_SANITIZE_POLICY = 2;
+// Policy 3 (audit conversion, export family): salted placeholders that a
+// dictionary cannot reverse, the expanded token shapes and value-shaped
+// scrub of server/export-scrub.mjs, digest-aware work-item rebinding,
+// edited-message current-ification, and scrub counts in the trailer.
+// Policy 2 streams carry no legacy-hashed columns either (the #3599 set
+// replaced the name regex), so only a MISSING marker means legacy.
+export const BACKUP_SANITIZE_POLICY = 3;
+export const isLegacySanitizeWatermark = watermark => watermark?.sanitizePolicy === undefined;
 
-function scrubTokens(value) {
-  return value.replace(new RegExp(TOKEN_SOURCE, "g"), match => sha256Hex(match));
-}
-
-export function sanitizeCell(table, column, value) {
+export function sanitizeCell(table, column, value, context = defaultExportScrubContext()) {
   if (value === null || value === undefined) return null;
-  if (isExportSecretColumn(table, column)) return sha256Hex(typeof value === "string" ? value : String(value));
+  if (isExportSecretColumn(table, column)) return placeholderFor(typeof value === "string" ? value : String(value), context);
   // REL-14: BLOB cells (room file bytes) leave as base64. JSON.stringify of a
   // Uint8Array is an object of indices that replay could not bind, so any room
   // holding a file produced an export that could not be restored.
@@ -77,12 +85,12 @@ export function sanitizeCell(table, column, value) {
     return { $base64: Buffer.from(new Uint8Array(value)).toString("base64") };
   if (ArrayBuffer.isView(value)) return { $base64: Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64") };
   if (typeof value !== "string") return value;
-  return scrubTokens(value);
+  return scrubText(value, context, table, column);
 }
 
-function sanitizeRow(table, row) {
+function sanitizeRow(table, row, context) {
   const out = {};
-  for (const [column, value] of Object.entries(row)) out[column] = sanitizeCell(table, column, value);
+  for (const [column, value] of Object.entries(row)) out[column] = sanitizeCell(table, column, value, context);
   return out;
 }
 
@@ -145,7 +153,167 @@ function* exportTableRows(db, table, columns, pageRows) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Export context pre-scans (audit conversion, export family). One pass over
+// the store's own facts, taken before the first row is yielded, so the
+// per-cell scrub below is value-shaped and digest-aware instead of a bare
+// regex over each cell in isolation:
+// - secretValues: the actual values sitting in EXPORT_SECRET_COLUMNS
+//   cells. A copy of one inside ordinary content (a credential pasted
+//   into a message) is scrubbed wherever it appears (B7-4 F3).
+// - workDigests: work_entities bodies are digest-bound — the rooms
+//   projection references each item by the sha256 of its body and
+//   hydrateWorkItems refuses a mismatch. Scrubbing a body without
+//   rebinding its digest made the export strict-unrestorable and its
+//   report-mode restore unreadable (B7-4 F1). The rebind map carries
+//   each scrubbed body and the digest OF THE SCRUBBED BODY, and the
+//   rooms-projection transform below rewrites the references to match.
+// - messageCurrents: each message's current body (null when deleted).
+//   Edited-away text otherwise survives in the event log, the stored
+//   projection and reducer extras and restores live (B7-4 F5); the
+//   transforms below current-ify those copies before scrubbing, the
+//   export-side leg of the write-time control deletes already have.
+function tableExists(db, table) {
+  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table));
+}
+
+function prepareExportContext(db) {
+  const context = createExportScrubContext();
+  for (const [table, columns] of Object.entries(EXPORT_SECRET_COLUMNS)) {
+    if (!tableExists(db, table)) continue;
+    const present = new Set(tableColumns(db, table));
+    for (const column of columns) {
+      if (!present.has(column)) continue;
+      const values = db.prepare(`SELECT ${quoteIdent(column)} AS v FROM ${quoteIdent(table)}`).all().map(row => row.v);
+      registerSecretValues(context, values);
+    }
+  }
+  const workDigests = new Map();
+  if (tableExists(db, "work_entities")) {
+    for (const row of db.prepare("SELECT room_id, work_id, body FROM work_entities").all()) {
+      if (typeof row.body !== "string") continue;
+      const scrubbed = scrubText(row.body, context, "work_entities", "body");
+      if (scrubbed !== row.body) workDigests.set(`${row.room_id}\0${row.work_id}`, { body: scrubbed, digest: sha256Hex(scrubbed) });
+    }
+  }
+  const messageCurrents = new Map();
+  if (tableExists(db, "messages")) {
+    for (const row of db.prepare("SELECT room_id, message_id, body, deleted_at FROM messages").all()) {
+      messageCurrents.set(`${row.room_id}\0${row.message_id}`, row.deleted_at ? null : (typeof row.body === "string" ? row.body : null));
+    }
+  }
+  return { context, workDigests, messageCurrents };
+}
+
+const MESSAGE_EVENT_TYPES = new Set(["message.posted", "message.edited"]);
+function eventMessageId(entry) {
+  const data = entry?.data;
+  if (!data || typeof data !== "object") return null;
+  if (typeof data.messageId === "string") return data.messageId;
+  if (entry.type === "message.posted" && typeof entry.id === "string") return entry.id;
+  return null;
+}
+
+// One parsed event object, current-ified: a posted/edited event whose
+// message has since been edited (or deleted) carries the CURRENT body,
+// never the superseded text it was appended with.
+function currentifyEvent(entry, roomId, messageCurrents) {
+  if (!entry || typeof entry !== "object" || !MESSAGE_EVENT_TYPES.has(entry.type)) return entry;
+  const messageId = eventMessageId(entry);
+  if (messageId === null || !entry.data || typeof entry.data !== "object" || !Object.hasOwn(entry.data, "body")) return entry;
+  const key = `${roomId}\0${messageId}`;
+  if (!messageCurrents.has(key)) return entry;
+  const current = messageCurrents.get(key);
+  if (entry.data.body === current) return entry;
+  return { ...entry, data: { ...entry.data, body: current } };
+}
+
+function currentifyHistory(entries, roomId, messageCurrents) {
+  if (!Array.isArray(entries)) return entries;
+  let changed = false;
+  const next = entries.map(entry => {
+    const current = currentifyEvent(entry, roomId, messageCurrents);
+    if (current !== entry) changed = true;
+    return current;
+  });
+  return changed ? next : entries;
+}
+
+// Edit-history entries carry each superseded body; current-ify every
+// entry to the message's current body so no earlier text survives.
+function currentifyEditHistory(message, roomId, messageCurrents) {
+  if (!message || typeof message !== "object" || !Array.isArray(message.editHistory)) return message;
+  const key = `${roomId}\0${message.id}`;
+  const current = messageCurrents.has(key) ? messageCurrents.get(key)
+    : (typeof message.body === "string" ? message.body : null);
+  let changed = false;
+  const editHistory = message.editHistory.map(entry => {
+    if (!entry || typeof entry !== "object" || entry.body === current) return entry;
+    changed = true;
+    return { ...entry, body: current };
+  });
+  return changed ? { ...message, editHistory } : message;
+}
+
+function transformExportRow(table, row, prepared) {
+  const { workDigests, messageCurrents } = prepared;
+  if (table === "work_entities") {
+    const rebind = workDigests.get(`${row.room_id}\0${row.work_id}`);
+    return rebind ? { ...row, body: rebind.body, digest: rebind.digest } : row;
+  }
+  if (table === "events" && typeof row.body === "string") {
+    try {
+      const entry = JSON.parse(row.body);
+      const current = currentifyEvent(entry, row.room_id, messageCurrents);
+      return current === entry ? row : { ...row, body: JSON.stringify(current) };
+    } catch { return row; }
+  }
+  if (table === "messages" && typeof row.reducer_extras_json === "string") {
+    try {
+      const extras = JSON.parse(row.reducer_extras_json);
+      if (!extras || typeof extras !== "object" || !Array.isArray(extras.editHistory)) return row;
+      const current = row.deleted_at ? null : (typeof row.body === "string" ? row.body : null);
+      let changed = false;
+      const editHistory = extras.editHistory.map(entry => {
+        if (!entry || typeof entry !== "object" || entry.body === current) return entry;
+        changed = true;
+        return { ...entry, body: current };
+      });
+      return changed ? { ...row, reducer_extras_json: JSON.stringify({ ...extras, editHistory }) } : row;
+    } catch { return row; }
+  }
+  if (table === "rooms" && typeof row.projection === "string") {
+    try {
+      const state = JSON.parse(row.projection);
+      if (!state || typeof state !== "object") return row;
+      let next = state;
+      if (Array.isArray(next.messages)) {
+        const messages = next.messages.map(message => currentifyEditHistory(message, row.id, messageCurrents));
+        if (messages.some((message, index) => message !== next.messages[index])) next = { ...next, messages };
+      }
+      if (Array.isArray(next.eventLog)) {
+        const eventLog = currentifyHistory(next.eventLog, row.id, messageCurrents);
+        if (eventLog !== next.eventLog) next = { ...next, eventLog };
+      }
+      if (next.workItems && typeof next.workItems === "object") {
+        let changed = false;
+        const workItems = {};
+        for (const [id, value] of Object.entries(next.workItems)) {
+          const rebind = value && typeof value === "object" && value._workEntity === 1
+            ? workDigests.get(`${row.id}\0${id}`) : null;
+          if (rebind && value.digest !== rebind.digest) { workItems[id] = { ...value, digest: rebind.digest }; changed = true; }
+          else workItems[id] = value;
+        }
+        if (changed) next = { ...next, workItems };
+      }
+      return next === state ? row : { ...row, projection: JSON.stringify(next) };
+    } catch { return row; }
+  }
+  return row;
+}
+
 export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
+  const prepared = prepareExportContext(db);
   const rooms = db.prepare("SELECT id, sequence FROM rooms ORDER BY id").all();
   const events = db.prepare("SELECT count(*) AS n FROM events").get().n;
   yield JSON.stringify({ kind: "watermark", version: 1, sanitizePolicy: BACKUP_SANITIZE_POLICY, backedUpAt: Date.now(), rooms, events }) + "\n";
@@ -156,12 +324,24 @@ export function* exportNdjsonLines(db, { pageRows = EXPORT_PAGE_ROWS } = {}) {
     const columns = tableColumns(db, table);
     if (!columns.length) continue;
     for (const row of exportTableRows(db, table, columns, pageRows)) {
-      const sanitized = sanitizeRow(table, row);
+      const sanitized = sanitizeRow(table, transformExportRow(table, row, prepared), prepared.context);
       digests.add(table, sanitized);
       yield JSON.stringify({ table, row: sanitized }) + "\n";
     }
   }
-  yield JSON.stringify(exportTrailer(db, digests.finish())) + "\n";
+  const trailer = exportTrailer(db, digests.finish());
+  // B2-5-F1: the trailer carries the export's content-scrub counts, so
+  // every restore path can surface the substitutions it lands instead of
+  // reporting a silently rewritten round trip as lossless.
+  const scrubbedCells = prepared.context.report();
+  if (Object.keys(scrubbedCells).length) trailer.scrubbedCells = scrubbedCells;
+  yield JSON.stringify(trailer) + "\n";
+}
+
+// The trailer's content-scrub counts, for restore results. Exports
+// written before the counts existed report an empty map, never a guess.
+export function scrubbedCellsOf(trailer) {
+  return trailer && isScrubCountsShape(trailer.scrubbedCells) ? trailer.scrubbedCells : {};
 }
 
 // End-of-stream integrity trailer. The watermark is taken before the first
@@ -299,6 +479,7 @@ export function assertTrailerShape(record) {
         || typeof entry.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(entry.sha256)) throw malformed();
     }
   }
+  if (record.scrubbedCells !== undefined && !isScrubCountsShape(record.scrubbedCells)) throw malformed();
 }
 
 export function exportNdjsonText(db) {
@@ -378,7 +559,7 @@ export function checkStoredBytes(table, row) {
 //   and the substitution is counted in report(), so the loss is explicit
 //   in the restore result and consumers fail closed visibly instead of
 //   comparing against a hash string.
-// - Legacy streams (watermark without sanitizePolicy 2, written by the
+// - Legacy streams (watermark with no sanitizePolicy marker, written by the
 //   pre-#3599 name-regex exporter) also hashed two non-secret columns.
 //   accounts.password_reset_required only ever held 0 or 1, whose
 //   placeholders are the two known digests, so the true value is
@@ -500,6 +681,31 @@ const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
 // createTableDigests above): exactly the tables no restore path loads.
 export const CONTENT_DIGEST_SKIPPED_TABLES = Object.freeze([...REPLAY_SKIPPED_TABLES, CLAIM_PERMIT_TABLE]);
 
+// Readability probe for a restored store (audit conversion, export
+// family — the headline acceptance): every restored room is read back
+// through the store's own read path. A room that throws on read (the
+// work_projection_corrupt class) must never be certified verified/full
+// by a report-mode restore: the caller downgrades the result instead.
+// Returns one {room, error} entry per unreadable room.
+export function probeRestoredReadability(store) {
+  const unreadable = [];
+  let roomIds = [];
+  try { roomIds = store.db.prepare("SELECT id FROM rooms ORDER BY id").all().map(row => row.id); }
+  catch { return unreadable; }
+  for (const roomId of roomIds) {
+    try {
+      if (typeof store.room === "function") store.room(roomId);
+      else {
+        const row = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
+        if (row) hydrateWorkItems(store.db, roomId, JSON.parse(row.projection));
+      }
+    } catch (error) {
+      unreadable.push({ room: roomId, error: String(error?.message ?? error).split("\n")[0].slice(0, 200) });
+    }
+  }
+  return unreadable;
+}
+
 // Replay into a new sqlite file, then run the same checks as backupRoom.
 // audit "strict" (default) refuses a store the recovery audit rejects.
 // audit "report" still requires the row load, foreign keys, quick_check,
@@ -528,7 +734,7 @@ export function replayNdjson(ndjson, filename, { audit = "strict", retainTables 
   try {
     // #3599: sanitized cells resolve to safe substitutes, never the
     // placeholder; legacy streams get the legacy resolutions.
-    const tracker = createSanitizedCellTracker(store.db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
+    const tracker = createSanitizedCellTracker(store.db, { legacySanitize: isLegacySanitizeWatermark(watermark) });
     // A room restore passes the tables it is willing to load. Names outside
     // that set fail the check below, including directory tables and unknown
     // tables. The default restore sees every table the fresh store created.
@@ -591,7 +797,14 @@ export function replayNdjson(ndjson, filename, { audit = "strict", retainTables 
       if (audit === "strict") throw error;
       auditResult = { ok: false, error: String(error?.message ?? error).split("\n")[0].slice(0, 200) };
     }
+    // Headline acceptance: a report-mode restore must not certify
+    // verified/"full" over a room that throws on read. The data still
+    // lands (report mode is the operator's opt-in), but the verdict is
+    // downgraded and the unreadable rooms are named.
+    const unreadable = probeRestoredReadability(store);
+    if (unreadable.length && audit === "strict") throw new Error(unreadable[0].error);
     chmodSync(filename, 0o600);
-    return { verified: true, events, trailer: trailerState, contentVerification, ...invitations, recovery, audit: auditResult, skippedTables: skipped, sanitizedCells: tracker.report() };
+    const downgraded = unreadable.length > 0;
+    return { verified: !downgraded, events, trailer: trailerState, contentVerification: downgraded ? "unreadable" : contentVerification, ...invitations, recovery, audit: auditResult, skippedTables: skipped, sanitizedCells: tracker.report(), scrubbedCells: scrubbedCellsOf(trailer), readability: { ok: !downgraded, unreadable } };
   } finally { store.close(); }
 }

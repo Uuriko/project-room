@@ -814,6 +814,7 @@ response's own `hint`/`next` when it names something more specific.
 | `nothing_to_request` | 409 | Already held: ${member.permissions.join(", ") ;; "read/chat access"} | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `number_ban` | internal | JSON numbers are forbidden in signed bodies — use decimal strings | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `oauth_busy` | 429 | Too many pending OAuth flows; try again shortly | wait | Wait for the Retry-After interval; retry the exact same request. |
+| `invalid_oauth_pending` | 422 | OAuth pending state requires a slot token and a verifier of at least 16 chars | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `offer_exists` | 409 | Offer ID already exists | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `offer_limit` | 409 | This room has reached its offer limit | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `offer_not_found` | 404 | Offer not found | re-list | Re-list the resource and use a current id. Do not guess ids. |

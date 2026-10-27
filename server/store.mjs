@@ -3885,6 +3885,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // survives Worker isolate eviction between start and callback. Short-lived.
   oauthPendingStateCreate({ provider, stateHash, slotToken, expectedRevision, verifier, expiresAt, link }) {
     if (provider !== "google" && provider !== "github") fail(422, "invalid_provider", "OAuth provider must be google or github");
+    // Writer minimums are part of the export placeholder's safety: a
+    // secret column's exported placeholder is only as strong as the
+    // weakest value a writer accepts (methods audit B7-4 F6 — this writer
+    // accepted a 6-char verifier while the webhook writer refuses <16).
+    // Both real flows mint 43-char values; 16 is the floor every secret
+    // writer in this codebase already shares.
+    if (typeof slotToken !== "string" || slotToken.length < 16 || typeof verifier !== "string" || verifier.length < 16)
+      fail(422, "invalid_oauth_pending", "OAuth pending state requires a slot token and a verifier of at least 16 chars");
     return this.transaction(() => {
       const now = this.now();
       this.db.prepare("DELETE FROM oauth_pending_states WHERE expires_at <= ?").run(now);

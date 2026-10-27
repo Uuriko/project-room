@@ -40,6 +40,7 @@ import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } f
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
+import { scrubStringsDeep } from "./export-scrub.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
@@ -4661,7 +4662,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const format = url.searchParams.get("format") ?? "jsonl";
         if (!["jsonl", "html"].includes(format) || url.searchParams.getAll("format").length > 1) reject(422, "invalid_format", "format is jsonl (default) or html");
         if (format === "html") {
-          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), store.redactionMessages(roomId));
+          // Export scrub (shared with every export shape): token-shaped
+          // content is hashed here too, not carried verbatim (B7-4 F2/F3).
+          const rows = redactEventRows([...store.exportEvents(selected.token, roomId, fence)].filter(({ event }) => roomEventVisible(event)), store.redactionMessages(roomId))
+            .map(row => ({ ...row, event: scrubStringsDeep(row.event) }));
           const bytes = Buffer.from(renderRoomExportHtml(rows, { roomId }), "utf8");
           recordRoomExport(store, selected.token, roomId, "html", fence); // PRIV-2
           res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": bytes.length,
@@ -4685,7 +4689,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         let exportSequence = 0;
         for (const line of redactEventRows(visible, store.redactionMessages(roomId))) {
           exportSequence += 1;
-          lines.push(JSON.stringify({ sequence: exportSequence, event: line.event }) + "\n");
+          lines.push(JSON.stringify({ sequence: exportSequence, event: scrubStringsDeep(line.event) }) + "\n");
         }
         const bytes = Buffer.from(lines.join(""), "utf8");
         recordRoomExport(store, selected.token, roomId, "jsonl", fence); // PRIV-2
