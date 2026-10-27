@@ -22,6 +22,7 @@ import assert from "node:assert/strict";
 import { aiCatalog } from "../server/agent-discovery.mjs";
 import { listedMcpTools, livePublicMcpTools, liveEnrolledMcpTools } from "../server/mcp-discovery.mjs";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
+import { actionMetaToolDefs } from "../server/mcp-action-search.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import { publicWorkMcpDefinitions, anonymousPublicWorkMcpTools } from "../server/mcp-public-work.mjs";
 import { identityMintMcpDefinitions } from "../server/mcp-identity-mint.mjs";
@@ -40,6 +41,7 @@ function servedProfiles() {
   return {
     public: livePublicMcpTools(),
     "core (default)": listedMcpTools("core"),
+    lean: listedMcpTools("lean"),
     full: listedMcpTools("full"),
     "focus=work": listedMcpTools("core", false, null, "work"),
     "focus=conversation": listedMcpTools("core", false, null, "conversation"),
@@ -55,6 +57,12 @@ function servedProfiles() {
 function codeToolNames() {
   return new Set([
     ...hostedMcpToolDefs.map(t => t.name),
+    // The action meta tools (room_search_actions, room_run_action) are
+    // defined in server/mcp-action-search.mjs and dispatched by the
+    // hosted handler; they were missing here while they were listed only
+    // in lean, a profile this map did not serve either. Both gaps are
+    // closed together (UT26 10-4 cure).
+    ...actionMetaToolDefs.map(t => t.name),
     ...MCP_JOIN_TOOLS.map(t => t.name),
     ...publicWorkMcpDefinitions.map(t => t.name),
     ...identityMintMcpDefinitions.map(t => t.name),
