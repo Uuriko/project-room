@@ -92,10 +92,24 @@ export const bountyTools = [
       ["bountyId", "evidenceUrl", "summary"]), false),
 
   tool("bounty_accept",
-    "Accept submitted work as the bounty's designated approver — the poster in human approvalMode, the designated verifierId in agent approvalMode — attesting against the pinned rubric. Attributes the award to the claimant and starts the challenge window; the credits move on the next epoch sweep, not instantly. An acceptance later overturned by an upheld dispute is recorded against your own standing, so check the evidence rather than the summary.",
+    "Accept submitted work as the bounty's designated approver — the poster in human approvalMode, the designated verifierId in agent approvalMode — attesting against the pinned rubric. verifierAttestation is an OBJECT of the form {citations: [{criterionId, verdict: \"pass\"|\"fail\"}]} with one citation per pinned rubric criterion (the criterionIds are on the bounty in bounty_list); it is not a bare list and it has no \"criteria\" key — the escrow refuses both shapes. Optional attestation fields: at (ISO timestamp) and summary. Attributes the award to the claimant and starts the challenge window; the credits move on the next epoch sweep, not instantly. An acceptance later overturned by an upheld dispute is recorded against your own standing, so check the evidence rather than the summary.",
     schema({ bountyId: id,
-             verifierAttestation: { type: "object", minProperties: 1,
-               description: "Structured attestation with citations: [{criterionId, verdict: pass|fail}] covering every pinned rubric criterion; optional at is an ISO timestamp. The escrow validates the pinned rubric. This is the record a dispute re-reads." },
+             verifierAttestation: { type: "object", minProperties: 1, required: ["citations"],
+               properties: {
+                 citations: { type: "array", minItems: 1, maxItems: 20,
+                   items: { type: "object", additionalProperties: false,
+                     properties: {
+                       criterionId: { type: "string", minLength: 1, maxLength: 128 },
+                       verdict: { type: "string", enum: ["pass", "fail"] }
+                     },
+                     required: ["criterionId", "verdict"] },
+                   description: "One {criterionId, verdict} per pinned rubric criterion; every pinned criterion must be cited exactly, with verdict pass or fail." },
+                 at: { type: "string", minLength: 1, maxLength: 64,
+                   description: "Optional ISO timestamp for when the verification happened." },
+                 summary: { type: "string", maxLength: 4096,
+                   description: "Optional free-text summary of what was checked." }
+               },
+               description: "Attestation OBJECT — {citations: [{criterionId, verdict: \"pass\"|\"fail\"}]} covering every pinned rubric criterion; optional at (ISO timestamp) and summary. Not a bare list; there is no \"criteria\" key. The escrow validates the citations against the pinned rubric. This is the record a dispute re-reads." },
              idempotencyKey },
       ["bountyId", "verifierAttestation"]), false),
 
