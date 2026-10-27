@@ -12,7 +12,7 @@
 // split per quarantine id (a second split is a 409); splits are never edited
 // or deleted, only read by the thread view (a read-path override that forces
 // the split source into its own thread) and listed on the review surface.
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export const quarantineSplitLimits = Object.freeze({ accountIdChars: 256, sourceIdChars: 512,

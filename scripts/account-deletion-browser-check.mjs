@@ -54,7 +54,7 @@ test("Delete account requires the email, posts with CSRF, and confirms on the la
   const { page, origin, browserKey } = await setup(t);
   await page.goto(origin + "/?account=1");
   await signInFixture(page, browserKey);
-  await page.locator("#inbox-panel").waitFor();
+  await page.locator("#account-rooms-panel").waitFor();
 
   await clickChrome(page, "#account-settings-button");
   const opener = page.locator("#account-settings-body [data-action='delete-account']");

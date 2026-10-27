@@ -1,6 +1,6 @@
 // A process-local, unforgeable capability for importing a connected owner's
 // Gmail observations. Never serialized, never accepted from HTTP, never a session.
-import { ServiceError } from './store.mjs';
+import { ServiceError } from './service-error.mjs';
 const grants = new WeakMap();
 export function gmailImportToken(store, accountId, connectionId, check) {
   const token = Object.freeze({});

@@ -16,8 +16,14 @@ test("invite mint body: collaborate is owner-shaped permissions, agent-safe plus
   assert.ok(!COLLABORATE_PERMISSIONS.includes("invite_member"));
 });
 
+test("invite mint body: owner is the owner-equivalent flag and nothing else", () => {
+  assert.deepEqual(inviteMintBody("owner"), { ownerEquivalent: true });
+  assert.deepEqual(inviteMintBody("owner", "  Ada Vale  "), { ownerEquivalent: true, displayName: "Ada Vale" });
+  assert.equal("permissions" in inviteMintBody("owner"), false);
+});
+
 test("invite mint body rejects unknown profiles and overlong names", () => {
-  assert.throws(() => inviteMintBody("admin"), /contribute, collaborate, or review/);
+  assert.throws(() => inviteMintBody("admin"), /contribute, collaborate, review, or owner/);
   assert.throws(() => inviteMintBody("contribute", "x".repeat(81)), /80 characters/);
 });
 
