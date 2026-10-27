@@ -17,16 +17,16 @@ import { messageRepository } from "./message-repository.mjs";
 //
 // The module is shaped like ShareLinks/DmConsents: it takes the RoomStore
 // (db handle, transactions, room state) and exports its schema for
-// store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
+// store.mjs to apply. ServiceError comes from the shared leaf module
+// (server/service-error.mjs, no imports of its own), so there is no
+// store.mjs import cycle and thrown errors satisfy callers'
+// `instanceof ServiceError` checks.
 
 import { randomBytes } from "node:crypto";
 import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { refreshListedRoom } from "./public-read-model.mjs";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
-
-class ServiceError extends Error {
-  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
-}
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 

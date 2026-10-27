@@ -5,10 +5,7 @@ import { randomBytes } from "node:crypto";
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { identityIdForWakeMember } from "./wake-identity-resolution.mjs";
-
-class ServiceError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
-}
+import { ServiceError } from "./service-error.mjs"; // shared class (leaf module); replaces the local shadow definition
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
