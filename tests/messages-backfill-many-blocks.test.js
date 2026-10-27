@@ -1,10 +1,8 @@
 // research r41: when many rooms stop replaying in one backfill call (the
 // class behind the Oct 11 messages_backfill wedge: a reducer change that
-// rejects an old stored event), runMessagesBackfill passes every room it
-// parked so far to nextRoom as a NOT IN list. Past 100 parked rooms in one
-// call, that list exceeds the Worker's 100-value Durable Object SQL limit and
-// the whole call throws instead of parking. Parked rooms are already excluded
-// by the messages_backfill_blocks NOT EXISTS clause, so the list is redundant.
+// rejects an old stored event), a per-room NOT IN list blew the Worker's
+// SQL bind limit past 100 rooms. Those rooms are quarantined one event at
+// a time and stay out of that list; the call finishes.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
@@ -44,11 +42,12 @@ test("the Worker bind limit is enforced in this file", (t) => {
 });
 
 for (const count of [100, 101, 130]) {
-  test(`${count} rooms that stop replaying in one call are all parked by name`, (t) => {
+  test(`${count} rooms that stop replaying in one call each quarantine the bad event`, (t) => {
     const store = poisonedRooms(t, count);
     const result = runMessagesBackfill(store, { limit: 1000 });
-    assert.equal(result.failed.length, count);
-    assert.equal(result.blocked.length, count);
+    assert.equal(result.failed.length, 0);
+    assert.equal(result.blocked.length, 0);
+    assert.equal(result.quarantined.length, count);
     assert.equal(result.done, true);
   });
 }

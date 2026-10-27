@@ -174,9 +174,10 @@ test("room actions ignore composition and held Enter without changing drafts", {
 test("room actions reach work, invitation, agent and instructions without creating anything", { timeout: 30000 }, async t => {
   const f = await setup(t), p = f.page;
   await f.open(); await f.action("results").click();
-  assert.equal(await p.locator("#settings-dialog").isVisible(), true);
-  assert.equal(await p.locator("#results-panel").evaluate(node => node.open), true);
-  await p.locator("#settings-close").click();
+  assert.equal(await p.locator("#settings-dialog").isVisible(), false);
+  assert.equal(await p.locator("#message-search").inputValue(), "has:result");
+  assert.equal(await p.locator("#results-panel").isVisible(), true);
+  await p.locator("#clear-search").click();
   for (const [action, dialog, close] of [
     ["invite", "#share-link-dialog", "#share-link-close"],
     ["agent", "#agent-connect-dialog", "#agent-connect-close"],
@@ -334,7 +335,7 @@ for (const mobile of [false, true]) test(`task finder ${mobile ? 'touch' : 'keyb
   await query.fill('> Orbit <b>agenda</b>');
   await p.locator(`[data-room-task="${pair}"]`).click();
   const card = p.locator(`[data-work-record-id="${pair}"]`), back = p.locator('#work-navigation-return');
-  await card.waitFor(); assert.equal(await card.locator('.work-details').evaluate(node => node.open), true);
+  await card.waitFor(); assert.equal(await card.locator('.work-details').evaluate(node => node.open), false);
   assert.equal(await card.evaluate(node => node === document.activeElement), true);
   assert.equal(new URL(p.url()).hash, `#pr-record/work/${encodeURIComponent(pair)}`);
   assert.equal(await p.locator('#conversation-title').textContent(), '# general');

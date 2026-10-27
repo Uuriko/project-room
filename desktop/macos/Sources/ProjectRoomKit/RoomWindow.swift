@@ -31,7 +31,13 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public let origin: URL
     private let status = NSTextField(labelWithString: "Connecting…")
     private let cancelSignInButton = NSButton(title: "Cancel sign-in", target: nil, action: nil)
+    private let signInSurface = NSStackView()
+    private let signInProgress = NSProgressIndicator()
+    private let signInHint = NSTextField(wrappingLabelWithString: "Continue in your browser")
     private var localTools: LocalToolsWindow?
+    private let acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)?
+    private let localAgentNotice = NSTextField(wrappingLabelWithString: "")
+    private let localAgentNoticeRow = NSStackView()
     private var authentication: (any RoomAuthenticationSession)?
     private let acceptanceAuthenticationFactory: RoomAuthenticationFactory?
     private var wakeObserver: NSObjectProtocol?
@@ -51,8 +57,10 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public private(set) var completedDownloadCount = 0
     public private(set) var failedDownloadCount = 0
 
-    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil) {
+    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil, acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)? = nil) {
         precondition(RoomLocation.allowed(url))
+        precondition(acceptanceLocalToolsFactory == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        self.acceptanceLocalToolsFactory = acceptanceLocalToolsFactory
         // Destination overrides are restricted to isolated loopback acceptance.
         precondition(acceptanceDownloadDestination == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
         precondition(acceptanceAuthenticationFactory == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
@@ -98,10 +106,40 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         status.textColor = .secondaryLabelColor
         status.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         bar.addArrangedSubview(status)
-        for view in [bar, webView] { view.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(view) }
+        let reviewMac = NSButton(title: "Open My Mac", target: self, action: #selector(showMyMac)); reviewMac.bezelStyle = .rounded
+        localAgentNotice.font = .systemFont(ofSize: 12)
+        localAgentNotice.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        localAgentNoticeRow.orientation = .horizontal; localAgentNoticeRow.spacing = 8
+        localAgentNoticeRow.addArrangedSubview(localAgentNotice); localAgentNoticeRow.addArrangedSubview(reviewMac)
+        localAgentNoticeRow.isHidden = true
+        let chrome = NSStackView(views: [bar, localAgentNoticeRow]); chrome.orientation = .vertical; chrome.alignment = .leading; chrome.spacing = 8
+        for view in [chrome, webView] { view.translatesAutoresizingMaskIntoConstraints = false; container.addSubview(view) }
         NSLayoutConstraint.activate([
-            bar.topAnchor.constraint(equalTo: container.topAnchor, constant: 8), bar.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12), bar.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -12),
-            webView.topAnchor.constraint(equalTo: bar.bottomAnchor, constant: 8), webView.bottomAnchor.constraint(equalTo: container.bottomAnchor), webView.leadingAnchor.constraint(equalTo: container.leadingAnchor), webView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+            chrome.topAnchor.constraint(equalTo: container.topAnchor, constant: 8), chrome.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12), chrome.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            bar.widthAnchor.constraint(equalTo: chrome.widthAnchor), localAgentNoticeRow.widthAnchor.constraint(equalTo: chrome.widthAnchor),
+            webView.topAnchor.constraint(equalTo: chrome.bottomAnchor, constant: 8), webView.bottomAnchor.constraint(equalTo: container.bottomAnchor), webView.leadingAnchor.constraint(equalTo: container.leadingAnchor), webView.trailingAnchor.constraint(equalTo: container.trailingAnchor)
+        ])
+        // Keep the account webview fenced during OAuth without a blank window.
+        // This view has no second sign-in action; Cancel remains in the toolbar.
+        let signInTitle = NSTextField(labelWithString: "PROJECT ROOM")
+        signInTitle.font = .systemFont(ofSize: 22, weight: .semibold)
+        signInHint.font = .systemFont(ofSize: 14)
+        signInHint.textColor = .secondaryLabelColor
+        signInHint.alignment = .center
+        signInProgress.style = .spinning
+        signInProgress.controlSize = .small
+        signInSurface.orientation = .vertical
+        signInSurface.alignment = .centerX
+        signInSurface.spacing = 16
+        for view in [signInTitle, signInProgress, signInHint] { signInSurface.addArrangedSubview(view) }
+        signInSurface.identifier = NSUserInterfaceItemIdentifier("native-sign-in-pending")
+        signInSurface.isHidden = true
+        signInSurface.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(signInSurface)
+        NSLayoutConstraint.activate([
+            signInSurface.centerXAnchor.constraint(equalTo: webView.centerXAnchor),
+            signInSurface.centerYAnchor.constraint(equalTo: webView.centerYAnchor),
+            signInSurface.widthAnchor.constraint(lessThanOrEqualTo: container.widthAnchor, constant: -48)
         ])
         window.center()
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { [weak self] _ in
@@ -120,6 +158,10 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             }
         }
         open(url)
+        if !isolated {
+            do { try prepareLocalStatus(); localTools?.resumeReceiving() }
+            catch { updateLocalAgentNotice("This Mac’s agent status is unavailable. Open My Mac to check its connection.") }
+        }
     }
 
     public func show() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
@@ -167,7 +209,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
                     guard self.currentAuthentication(attempt) else { return }
                     guard let tuple = slot as? String else { self.endAuthentication(attempt); return }
                     self.signInSlot = tuple
-                    self.webView.isHidden = true
+                    self.showSignInSurface(true)
                     self.beginAuthentication(attempt, provider: provider)
                 } catch {
                     guard self.currentAuthentication(attempt) else { return }
@@ -176,6 +218,14 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
                 }
             }
         }
+    }
+    private func showSignInSurface(_ visible: Bool) {
+        webView.isHidden = visible
+        signInSurface.isHidden = !visible
+        if visible {
+            signInHint.stringValue = "Continue in your browser"
+            signInProgress.startAnimation(nil)
+        } else { signInProgress.stopAnimation(nil) }
     }
     private func currentAuthentication(_ attempt: UUID) -> Bool {
         signInPending && signInAttempt == attempt
@@ -249,9 +299,10 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         signInPending = false; signInAttempt = nil; authenticationCallbackPending = false
         cancelSignInButton.isHidden = true
         cookieCommitPending = false; cookieCommitWaitExpired = false
-        signInSlot = nil; pendingDestination = nil; authentication = nil; webView.isHidden = false
+        signInSlot = nil; pendingDestination = nil; authentication = nil; showSignInSurface(false)
     }
     private func completeAuthentication(code: String, verifier: String, attempt: UUID) async {
+        signInHint.stringValue = "Finishing sign-in…"
         defer { endAuthentication(attempt) }
         var request = URLRequest(url: origin.appendingPathComponent("api/auth/desktop/session"))
         request.httpMethod = "POST"
@@ -294,7 +345,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             authenticationTimeoutTask?.cancel(); authenticationTimeoutTask = nil
             cookieCommitPending = false; cookieCommitWaitExpired = false
             status.stringValue = "Signed in"
-            webView.isHidden = false
+            showSignInSurface(false)
             // A new WK store has no browser account hint. Explicitly restore
             // the freshly installed session while retaining the original room,
             // invitation fragment and other destination parameters.
@@ -311,8 +362,25 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         }
     }
     public func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor { window }
+    public func updateLocalAgentNotice(_ text: String?) {
+        localAgentNotice.stringValue = text ?? ""
+        localAgentNoticeRow.isHidden = text == nil
+    }
+    private func prepareLocalStatus() throws {
+        if localTools == nil {
+            localTools = try acceptanceLocalToolsFactory?() ?? LocalToolsWindow()
+            localTools?.onReadinessChange = { [weak self] in self?.updateLocalAgentNotice($0) }
+            localTools?.conversationIsVisible = { [weak self] in
+                guard let self else { return false }
+                return self.window.isVisible && !self.window.isMiniaturized
+            }
+        }
+    }
     @objc public func showMyMac() {
-        do { if localTools == nil { localTools = try LocalToolsWindow() }; localTools?.show() }
+        do {
+            try prepareLocalStatus()
+            localTools?.show()
+        }
         catch let failure as LocalToolFailure {
             tell(failure.code == "mac_tools_already_running" ? "Another Project Room instance owns this Mac connection. Use its My Mac window, or quit it and try again." : "Local tools could not open. Check that Project Room can write its Application Support folder, then try again.")
         } catch { tell("Local tools could not open. Try again after restarting Project Room.") }
