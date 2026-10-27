@@ -13,7 +13,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
-import { openapiOperations, routeCandidates } from "./open-routes.mjs";
+import { openapiOperations, routeCandidates, constantRouteTemplates } from "./open-routes.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 import { HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
 
@@ -53,6 +53,8 @@ export function routeSources(root) {
     pluginRoutes: read("server/agent-plugin-routes.mjs"),
     nextActionsRoutes: read("server/next-actions-routes.mjs"),
     worker: read("cloudflare/room.mjs"),
+    googleOauth: read("server/google-oauth.mjs"),
+    githubOauth: read("server/github-oauth.mjs"),
     openapi: read("docs/openapi.yaml"),
   };
 }
@@ -113,7 +115,7 @@ export function workerRouteTemplates(source) {
 // {}-normalized template. Shared by the docs gate (routeDocsDrift) and the
 // served-spec coverage gate (tests/openapi-served-coverage.test.js) so a new
 // route source can never be visible to one gate and invisible to the other.
-export function servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, worker }) {
+export function servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, worker, googleOauth, githubOauth }) {
   const served = new Map();
   // server/http.mjs also names "/api/rooms/:roomId" as a diagnostics label; it folds into the {roomId} template.
   for (const template of routeCandidates(http)) if (!served.has(templateKey(template)) || !template.includes(":")) served.set(templateKey(template), template);
@@ -158,6 +160,21 @@ export function servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, wo
     const key = templateKey(row.path);
     if (!served.has(key)) served.set(key, row.path);
   }
+  // B5-2 F7: routes registered via a path constant (url.pathname ===
+  // GOOGLE_START_PATH) are invisible to the literal/regex extractors above.
+  // The OAuth defining modules are required sources, like the plug-in and
+  // Worker sources: an omission should be an error, not a wrong answer.
+  // constantRouteTemplates resolves the identifiers http.mjs compares
+  // pathnames against and throws on any it cannot resolve.
+  if (typeof googleOauth !== "string") throw new Error("servedRouteTemplates needs server/google-oauth.mjs; constant-routed routes are defined there");
+  if (typeof githubOauth !== "string") throw new Error("servedRouteTemplates needs server/github-oauth.mjs; constant-routed routes are defined there");
+  {
+    for (const template of constantRouteTemplates(http, [googleOauth, githubOauth])) {
+      if (!template.startsWith("/api/")) continue;
+      const key = templateKey(template);
+      if (!served.has(key)) served.set(key, template);
+    }
+  }
   // Constant-routed /api paths are invisible to the literal/regex extractors
   // above: the health aliases are path constants (server/agent-discovery.mjs)
   // served by the same http.mjs branch as /api/health. Their /api members
@@ -173,8 +190,8 @@ export function servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, wo
   return served;
 }
 
-export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, openapi }) {
-  const served = servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, worker });
+export function routeDocsDrift({ http, pluginRoutes, nextActionsRoutes, worker, googleOauth, githubOauth, openapi }) {
+  const served = servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, worker, googleOauth, githubOauth });
   const operations = openapiOperations(openapi);
   const documented = new Map();
   // API templates and every declarative route are the gate. Hosted MCP is documented

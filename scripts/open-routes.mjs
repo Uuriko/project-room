@@ -108,6 +108,38 @@ export function routeCandidates(source) {
   return [...routes].sort();
 }
 
+// Routes registered via a path constant held in a variable
+// (url.pathname === GOOGLE_START_PATH, the constant defined in another
+// module as export const GOOGLE_START_PATH = "/api/auth/google/start")
+// appear in the dispatching source as neither a string literal nor an
+// anchored regex, so routeCandidates() cannot see them (methods audit
+// B5-2 F7: the four OAuth sign-in routes were served, in the legacy
+// allowlist, and invisible to this gate). This resolver is the static
+// counterpart of routes-inventory.mjs's substitute(): it collects the
+// `const NAME = "/..."` definitions from the dispatching source and the
+// defining sources, and resolves every identifier a pathname comparison
+// uses. A CONSTANT-SHAPED identifier (ALL_CAPS) that no source defines is
+// a loud error, not a silent omission: the next constant-routed route
+// must bring its defining source with it or the gate stops.
+export function constantRouteTemplates(source, definingSources = []) {
+  const definitions = new Map();
+  for (const text of [source, ...definingSources]) {
+    for (const match of text.matchAll(/(?:^|\n)\s*(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*["'](\/[^"']*)["']/g)) {
+      if (!definitions.has(match[1])) definitions.set(match[1], match[2]);
+    }
+  }
+  const routes = new Set();
+  const unresolved = new Set();
+  const resolve = name => {
+    if (definitions.has(name)) routes.add(definitions.get(name));
+    else if (/^[A-Z][A-Z0-9_]*$/.test(name)) unresolved.add(name);
+  };
+  for (const match of source.matchAll(/(?:url\.|parsed\.)?pathname\s*(?:===|!==)\s*([A-Za-z_$][\w$]*)\b/g)) resolve(match[1]);
+  for (const match of source.matchAll(/\b([A-Za-z_$][\w$]*)\s*(?:===|!==)\s*(?:url\.|parsed\.)?pathname\b/g)) resolve(match[1]);
+  if (unresolved.size) throw new Error(`constant-routed pathname comparison cannot be resolved from the route sources: ${[...unresolved].join(", ")}`);
+  return [...routes].sort();
+}
+
 // "METHOD /path" with every {param} reduced to {} so openapi names and the
 // server's {id} placeholders compare equal.
 export const routeKey = (method, path) => `${method} ${path.replace(/\{[^}]+\}/g, "{}")}`;

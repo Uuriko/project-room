@@ -9915,6 +9915,80 @@ paths:
         '403': { description: origin_denied or access_denied (room not linked / not an agent member) }
         '422': { description: invalid_login }
         '429': { description: rate_limited }
+  /api/auth/github/callback:
+    get:
+      summary: Complete GitHub sign-in (browser OAuth callback)
+      description: >-
+        Open browser OAuth callback: consumes the single-use PKCE state
+        (bound to the account-session slot that started the flow; a
+        replayed, expired or mismatched state fails closed), exchanges the
+        code, links the verified GitHub subject into the multi-method
+        login model and upgrades the slot to a signed-in session. Browser
+        navigations get the post-login HTML page; API clients get the JSON
+        session view. Error responses never carry tokens. 503
+        github_not_configured when GitHub sign-in is not set up. 20 per
+        address per minute.
+      security: []
+      responses:
+        '200': { description: "Post-login HTML page (browser) or { status: ok, provider: github, account, sessionRevision, expiresAt, method } (API clients); the upgraded account-session cookie is set" }
+        '401': { description: github_state_invalid, github_state_expired or github_consent_denied }
+        '405': { description: method_not_allowed }
+        '422': { description: github_callback_invalid }
+        '429': { description: rate_limited }
+        '503': { description: github_not_configured or github_provider_unavailable }
+  /api/auth/github/start:
+    get:
+      summary: Start GitHub sign-in (browser OAuth)
+      description: >-
+        Browser sign-in start: binds the caller's anonymous account
+        session slot (the account_session cookie, or ?sessionToken=) into
+        a single-use PKCE state and 302s to GitHub. Open like the other
+        sign-in starts (compare POST /api/auth/password/login): the slot
+        is the freely mintable anonymous slot from GET
+        /api/account-session, and a caller with no slot at all gets 401
+        account_session_required once GitHub is configured. 503
+        github_not_configured when GitHub sign-in is not set up. 10 per
+        address per minute.
+      security: []
+      responses:
+        '302': { description: "Redirect to the GitHub authorization URL" }
+        '401': { description: account_session_required (no account-session slot) }
+        '405': { description: method_not_allowed }
+        '429': { description: rate_limited }
+        '503': { description: github_not_configured }
+  /api/auth/google/callback:
+    get:
+      summary: Complete Google sign-in (browser OAuth callback)
+      description: >-
+        Open browser OAuth callback: consumes the single-use state and
+        binds completion to the account-session slot cookie that started
+        the flow (a cross-session or cookie-less completion fails
+        closed), links or provisions the account for the verified Google
+        subject and upgrades the slot to a signed-in session. Always
+        answers the post-login HTML page; a failed completion lands on
+        /?google=error inside that page. 503 google_not_configured when
+        Google sign-in is not set up. 20 per address per minute.
+      security: []
+      responses:
+        '200': { description: "Post-login HTML page; the upgraded account-session cookie is set" }
+        '405': { description: method_not_allowed }
+        '429': { description: rate_limited }
+        '503': { description: google_not_configured }
+  /api/auth/google/start:
+    get:
+      summary: Start Google sign-in (browser OAuth)
+      description: >-
+        Open browser sign-in start: mints or reuses the caller's
+        anonymous account-session slot, binds it into a single-use OAuth
+        state and 302s to Google. When Google sign-in is not set up,
+        browser navigations 302 to /?google=unavailable and API clients
+        get 503 google_not_configured. 10 per address per minute.
+      security: []
+      responses:
+        '302': { description: "Redirect to the Google authorization URL (or to /?google=unavailable for a browser navigation when not configured)" }
+        '405': { description: method_not_allowed }
+        '429': { description: rate_limited }
+        '503': { description: google_not_configured }
   /api/auth/github/link/start:
     get:
       summary: Start GitHub OAuth to connect it to the signed-in account (slice 7)

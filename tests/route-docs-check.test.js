@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
-import { routeDocsDrift, routeSources, templateKey, workerRouteTemplates } from "../scripts/route-docs-check.mjs";
+import { routeDocsDrift, routeSources, servedRouteTemplates, templateKey, workerRouteTemplates } from "../scripts/route-docs-check.mjs";
 
 // Re-audit 2026-09-14, M4: docs/openapi.yaml describes every /api route
 // template server/http.mjs serves. The npm run check gate runs the same
@@ -12,8 +12,8 @@ import { routeDocsDrift, routeSources, templateKey, workerRouteTemplates } from 
 // agent plug-in surface (server/agent-plugin-routes.mjs) used to be fed to
 // the gate but not to these tests, failing 4/5 while the gate stayed green.
 const sources = routeSources(fileURLToPath(new URL("..", import.meta.url)));
-const { http, pluginRoutes, nextActionsRoutes, worker, openapi } = sources;
-const shared = { http, pluginRoutes, nextActionsRoutes, worker, openapi };
+const { http, pluginRoutes, nextActionsRoutes, worker, googleOauth, githubOauth, openapi } = sources;
+const shared = { http, pluginRoutes, nextActionsRoutes, worker, googleOauth, githubOauth, openapi };
 
 test("parameter spellings compare equal", () => {
   assert.equal(templateKey("/api/rooms/{roomId}/messages/{messageId}/thread"), "/api/rooms/{}/messages/{}/thread");
@@ -70,6 +70,36 @@ test("account routes must declare their scheme instead of inheriting the room de
   assert.notEqual(inherited, openapi, "fixture edit applied");
   const { failures } = routeDocsDrift({ ...shared, openapi: inherited });
   assert.deepEqual(failures, ["GET /api/account-rooms inherits the room-credential default; account routes must declare accountSession or security: []"]);
+});
+
+// B5-2 F7 (methods audit): routes registered via a path constant held in a
+// variable (url.pathname === GOOGLE_START_PATH) appear as neither a string
+// literal nor an anchored regex in server/http.mjs, so the literal/regex
+// extractors cannot see them. The gate resolves the constants from their
+// defining modules; a constant-routed route missing from the spec fails
+// like any other, and the real OAuth sign-in routes are in the served set.
+test("constant-routed routes are visible to the gate (B5-2 F7 specimen)", () => {
+  const withRoute = http + '\n      if (url.pathname === SPECIMEN_START_PATH) {}\n';
+  const withConstant = googleOauth + '\nexport const SPECIMEN_START_PATH = "/api/auth/specimen/start";\n';
+  const { failures } = routeDocsDrift({ ...shared, http: withRoute, googleOauth: withConstant });
+  assert.deepEqual(failures, ["served but not documented in docs/openapi.yaml: /api/auth/specimen/start"]);
+});
+
+test("the real OAuth sign-in routes are in the served set", () => {
+  const served = servedRouteTemplates(sources);
+  for (const path of ["/api/auth/google/start", "/api/auth/google/callback", "/api/auth/github/start", "/api/auth/github/callback"]) {
+    assert.ok(served.has(templateKey(path)), `${path} is served (constant-routed) and must be gated`);
+  }
+});
+
+test("an unresolved constant-routed comparison fails loudly, not silently", () => {
+  const withRoute = http + '\n      if (url.pathname === UNRESOLVED_START_PATH) {}\n';
+  assert.throws(() => routeDocsDrift({ ...shared, http: withRoute }), /UNRESOLVED_START_PATH/);
+});
+
+test("the gate refuses a blind inventory when an OAuth source is omitted", () => {
+  const { googleOauth: _omitted, ...withoutGoogle } = shared;
+  assert.throws(() => routeDocsDrift(withoutGoogle), /google-oauth\.mjs/);
 });
 
 // Public table routes must be documented too; metadata cannot escape the gate.
