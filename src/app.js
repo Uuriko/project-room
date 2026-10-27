@@ -848,7 +848,7 @@ const signinUI = createAuthSigninUI({
     if (invitation.secret) { $("#invitation-email").click(); signinUI.showMagic(); }
     else openEmailAuth("magic", { recordHistory: false });
     setFormStatus($("#auth-link-error"),
-      `${message} Request a new link or continue with Google.`, true);
+      `${message} Log in with your password or continue with Google.`, true);
   },
   onSignedIn: async () => {
     const restoration = accountClient.restore();

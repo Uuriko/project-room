@@ -48,6 +48,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
   // the value is kept here and restored into the fresh input — the switch
   // used to clear it silently (17 chars -> 0) while keeping the email.
   let preservedPassword = "";
+  let passwordRecovery = false;
   let magicPhase = "request", magicEmail = "", busy = false;
   let resetPhase = "request", resetEmail = "", resetCode = "";
   let magicManualCode = false, pendingLink = null, pendingTerms = null, statusText = "", statusError = false;
@@ -187,22 +188,18 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     const method = emailMethod === "magic" && magicPhase !== "sent" ? "password" : emailMethod;
     if (method === "forgot") {
       const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
-      return uiText("signin.copy.007") + (mailConfigured ? uiText("signin.magic.action") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
+      return uiText("signin.copy.007") + (mailConfigured && passwordRecovery ? uiText("signin.magic.action") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
     if (method === "reset") {
       if (resetPhase === "sent") return uiText("signin.copy.008", { fragmentA: escapeHtml(resetEmail) });
       if (resetPhase === "form") return uiText("signin.copy.009", { fragmentA: busy ? "disabled" : "" });
       const passkeySupported = Boolean(credentials?.get || (globalThis.PublicKeyCredential && globalThis.navigator?.credentials?.get));
-      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" }) + (mailConfigured ? uiText("signin.magic.instead") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
+      return uiText("signin.copy.010", { fragmentA: escapeHtml(resetEmail || passwordEmail), fragmentB: busy ? "disabled" : "" }) + (mailConfigured && passwordRecovery ? uiText("signin.magic.instead") : "") + (passkeySupported ? uiText("signin.passkey.action") : "");
     }
     if (method === "password") {
       const signup = passwordMode === "signup";
-      // The merged form: in login mode the password is optional whenever
-      // this deployment can email a sign-in link instead — the input
-      // carries `required` only for signup, or when mail is
-      // unconfigured and a password is the only way in. The hint in
-      // fragmentD teaches the blank-password path.
-      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'required minlength="10"' : (mailConfigured ? "" : "required"), fragmentD: !signup && mailConfigured ? uiText("signin.copy.035") : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
+      // Password is required until a credential rejection offers email recovery.
+      return uiText("signin.copy.011", { fragmentA: escapeHtml(passwordEmail), fragmentB: signup ? "new-password" : "current-password", fragmentC: signup ? 'required minlength="10"' : (mailConfigured && passwordRecovery ? "" : "required"), fragmentD: !signup && mailConfigured && passwordRecovery ? uiText("signin.copy.035") : "", fragmentE: busy ? "disabled" : "", fragmentF: busy ? (signup ? "Creating account…" : "Logging in…") : (signup ? "Create account" : "Log in"), fragmentG: signup ? "login" : "signup", fragmentH: signup ? "Log in" : "Create account", fragmentI: signup ? "" : uiText("signin.login-options") });
     }
     return uiText("signin.copy.012", { fragmentA: escapeHtml(magicEmail), fragmentB: magicManualCode ? uiText("signin.copy.013", { fragmentA: busy ? "disabled" : "" }) : "", fragmentC: magicManualCode ? "Hide code" : uiText("signin.copy.014") });
   }
@@ -407,16 +404,19 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     }
     if (form.dataset.signinForm === "password") {
       const fields = Object.fromEntries([...form.querySelectorAll('input[name]')].map(input => [input.name, input.value]));
-      passwordEmail = fields.email?.trim() ?? "";
+      const submittedEmail = fields.email?.trim() ?? "";
+      if (submittedEmail !== passwordEmail) passwordRecovery = false;
+      passwordEmail = submittedEmail;
       if (passwordMode === "signup" && (fields.password?.length < 10 || fields.password?.length > 256)) {
         setStatus(uiText("signin.copy.024"), true); return;
       }
-      // Merged form (#3341): in login mode with mail configured, a blank
+      // After credential rejection, with mail configured, a blank
       // password is a link request, not a sign-in attempt — like the old
       // magic-request submit it does not consult beforeSignIn (asking
       // for a link signs nothing in and clears nothing; the host's gate
       // applies when a password is presented or a code/link redeemed).
-      const linkRequest = passwordMode !== "signup" && mailConfigured && (event.submitter?.value === "email" || !fields.password);
+      const linkRequest = passwordMode !== "signup" && mailConfigured && passwordRecovery && (event.submitter?.value === "email" || !fields.password);
+      if (!linkRequest && !fields.password) { setStatus(uiText("signin.copy.037"), true); return; }
       if (!linkRequest && await beforeSignIn?.() === false) return;
       await withBusy(async () => {
         const session = await authedSession();
@@ -444,7 +444,17 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
           return;
         }
         if (linkRequest) { await requestEmailLink(session, passwordEmail); return; }
-        const view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
+        passwordRecovery = false;
+        const generation = accountClient.generation;
+        let view;
+        try {
+          view = await authApi(session, "/api/auth/password/login", { email: passwordEmail, password: fields.password, sessionRevision: session.sessionRevision });
+        } catch (error) {
+          // Unknown email and wrong password have the same uniform response.
+          passwordRecovery = error.status === 401 && error.code === "invalid_credentials"
+            && accountClient.owns(generation, session);
+          throw error;
+        }
         await finish(view);
       }); return;
     }
@@ -517,9 +527,20 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     if (linkFailure) onMagicLinkFailure?.(linkFailure);
   }
 
+  const onInput = event => {
+    if (event.target?.name === "email" && passwordRecovery
+      && event.target.value.trim() !== passwordEmail) {
+      passwordRecovery = false;
+      for (const offer of surface()?.querySelectorAll('[name="method"][value="email"], [data-email-method="magic"]') ?? []) offer.remove();
+      const password = surface()?.querySelector('[data-signin-form="password"] [name="password"]');
+      if (password) password.required = true;
+    }
+  };
+
   function bind(node) {
     node.addEventListener("click", onClick);
     node.addEventListener("submit", onSubmit);
+    node.addEventListener("input", onInput);
     // B-1 (#3771): a refused submit names its field instead of silence.
     node.addEventListener("invalid", event => {
       const field = event.target;
@@ -559,6 +580,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     },
     closeEmail() { return back(); },
     clear() {
+      passwordRecovery = false;
       resetCode = ""; resetEmail = ""; resetPhase = "request"; magicPhase = "request"; magicEmail = ""; magicManualCode = false; pendingLink = null; pendingTerms = null; statusText = ""; passwordEmail = ""; passwordMode = "login"; emailMethod = "password"; busy = false;
       onBusyChange?.(false);
       render();
@@ -566,6 +588,7 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
     unmount() {
       container?.removeEventListener("click", onClick);
       container?.removeEventListener("submit", onSubmit);
+      container?.removeEventListener("input", onInput);
       container = null;
     },
     mount(target) {
