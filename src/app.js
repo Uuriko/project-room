@@ -50,6 +50,7 @@ import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
 import { installWorkspaceNavigation } from "./workspace-navigation.js";
 import { installRoomDiscovery } from "./room-discovery.js";
+import { createHumanJoinUI } from "./human-join-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
@@ -753,7 +754,8 @@ workspaceUI = installWorkspaceNavigation({ account: accountClient, getRoom: () =
   onRooms: () => loadAccountRooms(),
   onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
-const roomDiscovery = installRoomDiscovery({ getSession: () => accountClient.session });
+const humanJoinUI = createHumanJoinUI({ accountClient, container: $("#account-human-join"), onJoined: openAccountRoom });
+const roomDiscovery = installRoomDiscovery({ getSession: () => accountClient.session, onRequestRoom: (roomId, title) => humanJoinUI.open(roomId, title) });
 $("#room-choice-create").addEventListener("click", () => {
   $("#account-room-create").open = true;
   $("#account-room-title").focus();
@@ -942,6 +944,7 @@ function filterAccountRooms() {
 $("#account-rooms-search").addEventListener("input", filterAccountRooms);
 function clearPrivateWorkspace(options) {
   roomDiscovery.reset();
+  humanJoinUI.reset();
   $("#account-rooms-search-controls").hidden = true;
   $("#account-profile-dialog").close(); profileSettingsUI.reset();
   workspaceUI?.reset(options); roomListVersion++;
@@ -1129,6 +1132,7 @@ async function loadAccountRooms(more = false) {
   try {
     const value = await accountClient.rooms(more ? roomListCursor : null);
     if (version !== roomListVersion || accountClient.session !== owned || !value) return;
+    if (!more) humanJoinUI.refresh();
     for (const room of value.rooms) {
       const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
       button.dataset.accountRoom = room.id;

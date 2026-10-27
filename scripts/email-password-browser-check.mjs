@@ -178,7 +178,7 @@ test("no-room discovery is lazy and supports empty, retry and paginated results"
     if (attempts === 1) return route.fulfill({ status: 503, json: { error: 'temporarily_unavailable' } });
     const after = new URL(route.request().url()).searchParams.get('after');
     return route.fulfill({ json: after ? {
-      rooms: [{ roomId: 'listed-b', title: 'Second listed room', purpose: 'Another public description' }], nextCursor: null
+      rooms: [{ roomId: 'listed-b', title: 'Second listed room', purpose: null }], nextCursor: null
     } : {
       rooms: [{ roomId: 'listed-a', title: '<img src=x onerror=alert(1)>', purpose: 'Public description only' }], nextCursor: 'listed-a'
     } });

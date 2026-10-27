@@ -1,3 +1,4 @@
+import { validId } from "./events.js";
 import { uiText } from "./strings.js";
 
 // Listing is visibility, not admission. Human requests use the account-bound flow.
@@ -32,12 +33,12 @@ export function installRoomDiscovery({ getSession, onRequestRoom, fetchImpl = gl
       if (!Array.isArray(page.rooms) || !(page.nextCursor === null || typeof page.nextCursor === "string")) throw new Error("directory_invalid");
       const fragment = document.createDocumentFragment(), pageIds = new Set();
       for (const room of page.rooms) {
-        if (!room || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(room.roomId) || typeof room.title !== "string" || typeof room.purpose !== "string") throw new Error("directory_invalid");
+        if (!room || (!validId(room.roomId) || room.roomId.length > 64) || typeof room.title !== "string" || (room.purpose !== null && typeof room.purpose !== "string")) throw new Error("directory_invalid");
         if (ids.has(room.roomId) || pageIds.has(room.roomId)) continue;
         pageIds.add(room.roomId);
         const row = document.createElement("article"); row.className = "room-discovery-entry";
         const title = document.createElement("h4"); title.textContent = room.title;
-        const purpose = document.createElement("p"); purpose.textContent = room.purpose;
+        const purpose = document.createElement("p"); purpose.textContent = room.purpose ?? "";
         row.append(title, purpose);
         if (onRequestRoom) {
           const request = document.createElement("button"); request.type = "button"; request.className = "text-button";
