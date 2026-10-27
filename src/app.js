@@ -13,7 +13,7 @@ import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./clie
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, memberRowName } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, reconcileLandedDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, memberRowName } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 function clipGraphemes(text, maxUnits) {
@@ -325,6 +325,10 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// Set for the duration of the composer send that owns this command, including
+// the gap before an assistant submission is recorded. Snapshot reconciliation
+// must not detach that pending while its confirmation can still arrive.
+let inFlightPlainSendId = null;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -488,6 +492,7 @@ const client = new RoomClient({
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
     retryPendingHashReveal();
+    reconcileLandedComposerDrafts();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -2826,6 +2831,42 @@ function confirmSharedSubmission({ command, fileIds }, result) {
   persistDrafts();
   if (acceptedFiles.size) void refreshRoomFiles();
 }
+function paintSavedDelivery(messageId) {
+  const delivery = $("#message-delivery");
+  const visible = state.messages.some(message => message.id === messageId);
+  delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
+  const link = document.createElement("a");
+  link.href = recordHref("message", messageId); link.textContent = uiText("composer.viewSaved");
+  delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
+  delivery.hidden = false;
+}
+// A pending plain send whose message is already in the room, and whose draft
+// the author has changed, is no longer a retry. Detach that command, drop
+// the stale retry error, and when it is the open composer show the delivery
+// line. Unchanged pendings stay so a lost response can retry the exact
+// command. Returns true when the open composer was reconciled, so this Send
+// press can be consumed instead of posting the edit.
+function reconcileLandedComposerDrafts() {
+  if (!state) return false;
+  const reconciled = reconcileLandedDrafts(drafts, state.messages, {
+    retain(command) {
+      return command.id === inFlightPlainSendId || humanExperience.hasSubmission(command);
+    }
+  });
+  if (!reconciled.length) return false;
+  const activeKey = composerKey();
+  const active = reconciled.find(entry => entry.key === activeKey);
+  if (active) {
+    const cleared = !drafts.entries.has(activeKey);
+    if (cleared && assistantDraft) assistantDraft = null;
+    restoreComposer(drafts.get(cleared ? composerKey() : activeKey));
+    if (cleared) $("#also-send-to-channel").checked = false;
+    updateReply(); syncRequestComposer(); renderComposerError();
+    paintSavedDelivery(active.message.id);
+  }
+  persistDrafts();
+  return Boolean(active);
+}
 function restoreComposer(draft) {
   assistantDraft = draft.assistantDraft ?? null;
   queueMicrotask(() => humanExperience.syncContribution());
@@ -4206,6 +4247,11 @@ $("#message-form").addEventListener("submit", e => {
     if (composerFiles.length) { setComposerError(uiText("composer.file.requestMode")); return; }
     submitRequest(e.currentTarget); return;
   }
+  // A Send press for a draft the author changed after its message already
+  // landed is a reconciliation, not a second post: detach that command and
+  // keep the edit. An unchanged press falls through and retries the original
+  // command, which the server answers with a duplicate receipt.
+  if (reconcileLandedComposerDrafts()) return;
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
   const askRoom = humanExperience.intent(content);
   if (!content.body) return;
@@ -4233,6 +4279,7 @@ $("#message-form").addEventListener("submit", e => {
     // Ownership must outlive pendingMessage: the command can commit while its immediate
     // snapshot fails, then first appear on a later refresh after the draft was cleared.
     locallyOwnedMessageIds.add(data.messageId || pendingMessage.command.id);
+    inFlightPlainSendId = sendingCommand.id;
     try {
       if (sharedRequest) {
         await humanExperience.submit(sendingCommand, askRoom, stagedFileIds);
@@ -4242,18 +4289,17 @@ $("#message-form").addEventListener("submit", e => {
       await client.send(sendingCommand);
     } catch (error) {
       if (generation !== client.generation || !state) return;
+      // A lost response still keeps the draft and the retry error. Clearing
+      // it here because a snapshot already shows the message would drop the
+      // exact command a duplicate receipt needs, and it would unlock a
+      // request that must stay read-only until that retry.
       throw mapDmConsentRefusal(sendingCommand, error) ?? error;
+    } finally {
+      if (inFlightPlainSendId === sendingCommand.id) inFlightPlainSendId = null;
     }
     if (generation !== client.generation || !state) return;
     if (!ownsSendingDraft()) return;
-    const delivery = $("#message-delivery");
-    const savedMessageId = data.messageId || sendingCommand.id;
-    const visible = state.messages.some(message => message.id === savedMessageId);
-    delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
-    const link = document.createElement("a");
-    link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
-    delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
-    delivery.hidden = false;
+    paintSavedDelivery(data.messageId || sendingCommand.id);
     await commitComposerFiles(data.messageId);
     if (!ownsSendingDraft()) return;
     if (generation !== client.generation || !state) return;
