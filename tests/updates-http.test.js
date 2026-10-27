@@ -540,3 +540,20 @@ test("event tail returns the newest events in ascending order and orient ranks a
   assert.throws(() => buildOrient(store, "commons", "owner", { maxTokens: 0 }),
     error => error.code === "invalid_orient");
 });
+
+test("permission upgrades enter the authorized attention feed and disappear after a decision", async t => {
+  const f=serve(t);await f.origin;const {AccessRequests}=await import('../server/access-requests.mjs');
+  for(const [id,permissions] of [['requester',[]],['admin',['manage_members','accept_work']],['outsider',[]]])
+    f.store.command(f.ownerKey,'commons',{id:randomUUID(),type:T.MEMBER_ADDED,data:{memberId:id,displayName:`Member ${id}`,kind:'human',permissions}});
+  const keys=Object.fromEntries(['requester','admin','outsider'].map(id=>[id,f.store.issueAccessKey('commons',id)]));
+  const access=new AccessRequests(f.store);access.requestForMember(keys.requester,'commons',{permissions:['accept_work','complete_work'],requestId:'upgrade-feed'});
+  const path='/api/rooms/commons/updates?state=actionable';
+  for(const token of [f.ownerKey,keys.admin]) {
+    const {body,status}=await f.request(path,{token});assert.equal(status,200);
+    const item=body.items.find(i=>i.sourceRef?.requestId==='upgrade-feed');assert.ok(item);assert.equal(item.title,'Member requester wants more permissions');
+  }
+  assert.equal((await f.request(path,{token:keys.outsider})).body.items.some(i=>i.kind==='access_request'),false);
+  access.decide(keys.admin,'commons','upgrade-feed',{decision:'approve',permissions:['accept_work']});
+  assert.equal(f.store.room('commons').state.members.requester.permissions.includes('complete_work'),false);
+  assert.equal((await f.request(path,{token:keys.admin})).body.items.some(i=>i.sourceRef?.requestId==='upgrade-feed'),false);
+});

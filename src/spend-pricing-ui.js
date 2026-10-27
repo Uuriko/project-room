@@ -1,28 +1,21 @@
+import { canAdministerRoom } from './room-administration.js';
+import { escapeHtml } from "./html-escape.js";
 // Spend-pricing kill-switch UI (jill-spend-pricing-killswitch, audit item 10).
 //
-// The owner-only POST /api/rooms/:id/spend-pricing route existed with no UI
-// to flip it. This module renders an owner-only emergency toggle and wires it
-// to that route. Visibility is enforced here (non-owners get no markup at all)
-// AND on the server (setSpendPricing 403s non-owners before parsing the body),
+// The administrator-only POST /api/rooms/:id/spend-pricing route existed with no UI
+// to flip it. This module renders an administrator-only emergency toggle and wires it
+// to that route. Visibility is enforced here (non-administrators get no markup at all)
+// AND on the server (setSpendPricing 403s non-administrators before parsing the body),
 // so a compromised or stale client state can never grant the control.
 //
 // The current enabled flag comes from the SSE-carried projection
 // (state.room.spendPricing, default enabled when absent) — no extra GET is
 // needed. The flip is a two-step arm/confirm so it cannot be hit by accident.
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;");
-}
-
-// Same owner rule as the spend-allowance controls in src/app.js: the room's
-// human owner, not a member holding admin permissions.
+// Retain the exported name for existing callers; authority is shared with the server.
 export function isSpendPricingOwner({ session, state } = {}) {
   const memberId = session?.member?.id;
   if (!memberId || !state?.room) return false;
-  return state.room.ownerId === memberId && state.members?.[memberId]?.kind === "human";
+  return canAdministerRoom(state, memberId);
 }
 
 // Projection read: room.spend_pricing_set events land here via SSE; absent
@@ -95,7 +88,7 @@ export function createSpendPricingKillSwitch() {
     sync(container, { session, state, client, roomId } = {}) {
       if (!container) return "none";
       if (!isSpendPricingOwner({ session, state })) {
-        // Never render the control for non-owners — not even hidden markup.
+        // Never render the control for non-administrators — not even hidden markup.
         inst.armed = false; inst.busy = false; inst.error = ""; inst.saved = false;
         container.hidden = true;
         container.innerHTML = "";

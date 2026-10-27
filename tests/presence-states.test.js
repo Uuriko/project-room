@@ -273,3 +273,11 @@ test("presence: human never shows unreachable", () => {
     if (m.kind === "human") assert.notEqual(m.state, "unreachable");
   }
 });
+
+
+test("a newer command proves activity without claiming an offline host is listening", () => {
+  assert.equal(presenceState({ kind: "agent", hostStatus: "offline",
+    hostLastSeenAt: NOW - 10 * min, lastCommandAt: NOW - 1, now: NOW }), "idle");
+  assert.equal(presenceState({ kind: "agent", hostStatus: "offline",
+    hostLastSeenAt: NOW - min, lastCommandAt: NOW - 2 * min, now: NOW }), "unreachable");
+});
