@@ -173,5 +173,12 @@ test("the journal module is registered in the runtime package allowlist", async 
   const { readFileSync } = await import("node:fs");
   const allowlist = readFileSync(join(import.meta.dirname, "../scripts/runtime-package.mjs"), "utf8");
   assert.ok(allowlist.includes('"server/journal.mjs"'), "store.mjs imports the shared journal, so the exact-contract runtime package must allowlist it");
-  assert.ok(!allowlist.includes('"server/spam-quarantine-journal.mjs"'), "the deleted per-kind journal module must not stay registered");
+  // The per-kind module is deleted from the current tree, but its registration
+  // stays as a historical entry: genuine v38 packages import it from
+  // store.mjs/inbox.mjs, so createRuntimePackage must remain able to package
+  // them (the same pattern this PR already uses for graph-reply-journal.mjs
+  // and invitation-journal.mjs). Removing the registration breaks the
+  // v27/v38 upgrade gates in tests/agent-upgrade.test.js and
+  // tests/trial-task-http.test.js.
+  assert.ok(allowlist.includes('"server/spam-quarantine-journal.mjs"'), "the deleted per-kind journal module stays registered for genuine historical packages");
 });
