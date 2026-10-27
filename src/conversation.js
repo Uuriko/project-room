@@ -495,8 +495,38 @@ function recoveredFiles(files) {
 // an authenticated room snapshot.
 // No credentials or server receipts are stored. Browser storage is untrusted.
 export class DraftRecovery {
-  constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; }
-  clear() { try { for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
+  constructor(storage, now = Date.now) { this.storage = storage; this.now = now; this.key = "project-room:drafts:v3"; this.resultsKey = "project-room:result-drafts:v1"; }
+  clear() { try { this.storage?.removeItem(this.resultsKey); for (const v of [1, 2, 3]) this.storage?.removeItem(`project-room:drafts:v${v}`); } catch {} }
+  writeResults(scope, entries) {
+    try {
+      if (!scope) { this.storage?.removeItem(this.resultsKey); return; }
+      const values = [...entries.values()].filter(e => e.body || e.command).slice(-50)
+        .map(({ workId, revision, body, command, rejected }) => ({ workId, revision, body, command, rejected: Boolean(rejected) }));
+      this.storage?.setItem(this.resultsKey, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, entries: values }));
+    } catch { /* In-memory drafts still protect navigation when storage is unavailable. */ }
+  }
+  readResults(scope, state) {
+    const entries = new Map();
+    try {
+      const raw = this.storage?.getItem(this.resultsKey); if (!raw) return entries;
+      if (!scope || raw.length > 500000) throw new Error('scope or size');
+      const saved = JSON.parse(raw);
+      if (saved.scope !== scope || !Number.isFinite(saved.expires) || saved.expires <= this.now()
+        || saved.expires > this.now() + 12 * 60 * 60 * 1000 || !Array.isArray(saved.entries) || saved.entries.length > 50) throw new Error('scope or expiry');
+      for (const e of saved.entries) {
+        if (!state.workItems[e.workId] || typeof e.body !== 'string' || e.body.length > 4000 || !Number.isSafeInteger(e.revision) || e.revision < 0) continue;
+        let command = null;
+        if (e.command) {
+          const c = e.command, d = c.data;
+          if (c.type !== 'message.posted' || ![c.id, d?.messageId, d?.packetId].every(id => typeof id === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(id))
+            || d.workItemId !== e.workId || d.basisRevision !== e.revision || d.body !== e.body) continue;
+          command = { id: c.id, type: 'message.posted', data: { messageId: d.messageId, workItemId: e.workId, packetId: d.packetId, basisRevision: e.revision, body: e.body } };
+        }
+        entries.set(e.workId, { workId: e.workId, revision: e.revision, body: e.body, command, rejected: Boolean(e.rejected) });
+      }
+    } catch { try { this.storage?.removeItem(this.resultsKey); } catch {} }
+    return entries;
+  }
   write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }

@@ -1200,7 +1200,7 @@ async function openAccountRoom(roomId) {
     return;
   }
   if (state) saveComposer();
-  if (state && (drafts.hasText() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
+  if (state && (drafts.hasText() || humanExperience?.hasDraft() || pendingAction || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending()
       || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden)
       && !window.confirm("Switch rooms and clear unsent room drafts and pending retries? Saved work stays.")) return;
   const owned = accountClient.session;
@@ -3804,7 +3804,7 @@ function restoreInvitationSignin() {
 }
 function confirmInvitationSignin() {
   if (invitationIsCommitting() || !invitation.secret) return false;
-  const hasDraft = drafts.hasText() || portableWorkUI?.hasDraft()
+  const hasDraft = drafts.hasText() || humanExperience?.hasDraft() || portableWorkUI?.hasDraft()
     || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending()
     || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction;
   return !hasDraft || window.confirm("Signing in clears unsent drafts and private setup. Continue?");
@@ -4023,7 +4023,7 @@ const replyToSharedResult = createResultFeedback({
     $("#message-input").focus();
   }
 });
-const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
+const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice, recovery, recoveryScope: () => session ? draftScope(session) : null,
   getConversation: () => ({ channelId: activeChannelId, threadId: currentThreadId, rootOf: id => conversation?.rootById.get(id) }),
   replyToResult: replyToSharedResult,
   openWork: id => revealWork(id), openMessage: id => revealMessage(id), onSubmitted: confirmSharedSubmission,
@@ -4114,8 +4114,8 @@ $("#signout-button").addEventListener("click", async () => {
   }
   if (busy || signoutLoading || !state || !session || invitationIsCommitting()) return;
   saveComposer();
-  if (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
-    if (!window.confirm((pendingAction?.uncertain || instructionsUI?.hasUnknown() || ownerOffersUI?.hasUnknown()) ? "Log out and clear drafts and the pending retry? The action may already be saved." : "Log out and clear unsent drafts and private setup on this device?")) return;
+  if (drafts.hasText() || humanExperience?.hasDraft() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction) {
+    if (!window.confirm((pendingAction?.uncertain || humanExperience?.hasUnknown() || instructionsUI?.hasUnknown() || ownerOffersUI?.hasUnknown()) ? "Log out and clear drafts and the pending retry? The action may already be saved." : "Log out and clear unsent drafts and private setup on this device?")) return;
   }
   recovery.clear();
   const operationId = ++signoutOperationId;
@@ -6593,7 +6593,7 @@ $("#action-form").addEventListener("submit", e => {
 });
 window.addEventListener("beforeunload", e => {
   if (state) saveComposer();
-  if ((state && (drafts.hasText() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
+  if ((state && (drafts.hasText() || humanExperience?.hasDraft() || portableWorkUI?.hasDraft() || resultCopyUI?.hasDraft() || remindersUI?.hasPending() || agentConnectionsUI?.hasPending() || instructionsUI?.hasPending() || ownerOffersUI?.hasPending() || !$("#new-work-form").hidden || pendingAction))
     || invitationIsCommitting() || invitation.phase === "unknown") { e.preventDefault(); e.returnValue = ""; }
 });
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "hidden" && state) saveComposer(); });

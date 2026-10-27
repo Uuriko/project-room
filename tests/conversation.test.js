@@ -409,3 +409,21 @@ test("a message overflow menu opens upward only when it does not fit below and f
   assert.equal(menuOpensUp({ ...box, triggerTop: 440, triggerBottom: 460 }), true, "newest message by the composer flips up");
   assert.equal(menuOpensUp({ ...box, triggerTop: 40, triggerBottom: 60, limitBottom: 200 }), false, "no better room above stays downward");
 });
+
+test('result recovery isolates identity, expires, clears on logout and preserves exact retry basis', () => {
+  const values = new Map(), storage = { getItem: k => values.get(k), setItem: (k,v) => values.set(k,v), removeItem: k => values.delete(k) };
+  let now = 1000; const recovery = new DraftRecovery(storage, () => now), state = { workItems: { task: { revision: 9 } } };
+  const command = { id: 'operation', type: 'message.posted', data: { messageId: 'message', workItemId: 'task', packetId: 'packet', basisRevision: 2, body: 'Unsent result' } };
+  const entries = new Map([['task', { workId: 'task', revision: 2, body: 'Unsent result', command }]]);
+  recovery.writeResults('account-room-member-session', entries);
+  assert.deepEqual(recovery.readResults('account-room-member-session', state).get('task').command, command);
+  assert.equal(recovery.readResults('another-account', state).size, 0);
+  assert.equal(values.size, 0);
+  recovery.writeResults('scope', entries); now += 12 * 60 * 60 * 1000;
+  assert.equal(recovery.readResults('scope', state).size, 0);
+  recovery.writeResults('scope', entries); recovery.clear(); assert.equal(values.size, 0);
+  recovery.writeResults('scope', entries);
+  const saved = JSON.parse(values.get(recovery.resultsKey)); saved.entries[0].command.data.body = 'Injected body';
+  values.set(recovery.resultsKey, JSON.stringify(saved)); assert.equal(recovery.readResults('scope', state).size, 0);
+  recovery.writeResults('scope', entries); assert.equal(recovery.readResults('scope', {workItems:{}}).size, 0);
+});

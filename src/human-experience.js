@@ -43,7 +43,7 @@ export function soloUnaddressed({ body, replyToId, members, messages, selfId, as
   const source = replyToId ? (messages ?? []).find(m => m.id === replyToId) : null;
   return !source || source.authorId === selfId || source.authorId === assistantId;
 }
-export function installHumanExperience({ getState, getSession, getConversation, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript, onSubmitted, replyToResult }) {
+export function installHumanExperience({ getState, getSession, getConversation, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript, onSubmitted, replyToResult, recovery, recoveryScope }) {
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
@@ -318,8 +318,19 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   face.onclick = $('#assistant-runs').onclick;
   const resultDialog = document.createElement('dialog'); resultDialog.id = 'human-share-result'; resultDialog.setAttribute('aria-labelledby', 'human-share-title');
   resultDialog.innerHTML = uiText("human.copy.017");
-  document.body.append(resultDialog); let resultEntry = null;
-  resultDialog.querySelector('[data-close-share]').onclick = () => { if (resultEntry?.rejected) resultEntry = null; resultDialog.close(); };
+  document.body.append(resultDialog); let resultEntry = null, resultEntries = new Map();
+  const persistResults = () => recovery?.writeResults(recoveryScope?.(), resultEntries);
+  const discard = document.createElement('button'); discard.type = 'button'; discard.className = 'button ghost'; discard.textContent = uiText('human.discardResultDraft');
+  resultDialog.querySelector('.form-actions').prepend(discard);
+  discard.onclick = () => {
+    if (!resultEntry || resultEntry.command && !resultEntry.rejected) return;
+    resultEntries.delete(resultEntry.workId); resultEntry = null; persistResults(); resultDialog.close();
+  };
+  resultDialog.querySelector('textarea').oninput = event => {
+    if (!resultEntry || resultEntry.command) return;
+    resultEntry.body = event.target.value; persistResults();
+  };
+  resultDialog.querySelector('[data-close-share]').onclick = () => { resultDialog.close(); };
   $('#human-share-refresh').onclick = async () => {
     const entry = resultEntry, stamp = key(); if (!entry?.rejected || entry.boundary !== stamp) return;
     const review = $('#human-share-refresh'); review.disabled = true;
@@ -327,7 +338,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       await client.refresh(); if (stamp !== key() || resultEntry !== entry) return;
       const item = getState().workItems[entry.workId];
       if (!item || item.supersededBy) { $('#human-share-error').textContent = uiText("human.copy.018"); return; }
-      entry.revision = item.revision; entry.command = null; entry.rejected = false;
+      entry.revision = item.revision; entry.command = null; entry.rejected = false; persistResults(); discard.disabled = false;
       resultDialog.querySelector('textarea').disabled = false;
       const submit = resultDialog.querySelector('[type=submit]'); submit.disabled = false; submit.textContent = 'Review result'; review.hidden = true;
       $('#human-share-error').textContent = uiText("human.copy.019", { fragmentA: item.title });
@@ -337,23 +348,25 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   };
   resultDialog.querySelector('form').onsubmit = async event => {
     event.preventDefault(); const entry = resultEntry, stamp = key(), body = resultDialog.querySelector('textarea').value;
-    if (!entry || entry.boundary !== stamp || entry.rejected) return;
+    if (!entry || entry.boundary !== stamp || entry.rejected || entry.sending) return;
     const button = resultDialog.querySelector('[type=submit]'); button.disabled = true;
     entry.command ??= { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: crypto.randomUUID(), workItemId: entry.workId,
       packetId: crypto.randomUUID(), basisRevision: entry.revision, body } };
+    entry.body = body; entry.sending = true; persistResults(); discard.disabled = true; resultDialog.querySelector('textarea').disabled = true;
     try {
-      await client.send(entry.command); if (stamp !== key() || resultEntry !== entry) return;
+      await client.send(entry.command); if (stamp !== key()) return;
+      resultEntries.delete(entry.workId); persistResults(); if (resultEntry !== entry) return;
       const messageId = entry.command.data.messageId; resultEntry = null; resultDialog.close(); selectResult(entry.workId, messageId);
     } catch (failure) {
       if (stamp !== key() || resultEntry !== entry) return;
-      entry.rejected = failure.status >= 400 && failure.status < 500;
+      entry.rejected = failure.status >= 400 && failure.status < 500; persistResults(); discard.disabled = !entry.rejected;
       $('#human-share-error').textContent = entry.rejected
         ? uiText("human.copy.020", { fragmentA: failure.message })
         : uiText("human.copy.021", { fragmentA: failure.message });
       resultDialog.querySelector('textarea').disabled = true;
       $('#human-share-refresh').hidden = !entry.rejected;
       button.textContent = entry.rejected ? 'Review result' : uiText("human.copy.022");
-    } finally { if (stamp === key() && resultEntry === entry) button.disabled = Boolean(entry.rejected); }
+    } finally { entry.sending = false; if (stamp === key() && resultEntry === entry) button.disabled = Boolean(entry.rejected); }
   };
   $('#human-existing-drafts').onclick = event => {
     const button = event.target.closest('[data-result-draft]'); if (!button || resultEntry?.boundary !== key()) return;
@@ -361,6 +374,8 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   };
   setInterval(() => { void refresh(); }, 500);
   return {
+    hasDraft: () => [...resultEntries.values()].some(e => e.body || e.command),
+    hasUnknown: () => [...resultEntries.values()].some(e => e.command && !e.rejected),
     askFailureHint,
     paint,
     assistantName(id) { return human() && !document.body.classList.contains('human-advanced') && projection?.assistant.coordinatorMemberId === id ? projection.assistant.name : null; },
@@ -372,11 +387,11 @@ export function installHumanExperience({ getState, getSession, getConversation, 
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
         $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
       }
-      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; boundary = ''; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
+      if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; boundary = ''; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; resultEntries.clear(); document.body.classList.remove('human-advanced'); return; }
       if (boundary !== key()) {
         activity.open = false; activity.hidden = true;
         for (const modal of [setup, dialog, resultDialog]) if (modal.open) modal.close();
-        resultEntry = null; resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;
+        resultEntry = null; resultEntries = recovery?.readResults(recoveryScope?.(), getState()) ?? new Map(); resultDialog.querySelector('form').reset(); setup.querySelector('form').reset(); $('#human-project-content').replaceChildren(); $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html;
         boundary = key(); projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; error = ''; lastRead = 0;
         try {
           const pending = JSON.parse(sessionStorage.getItem(pendingKey()) || 'null');
@@ -422,11 +437,17 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     },
     shareResult(item) {
       if (!human() || document.body.classList.contains('human-advanced')) return false;
-      if (!resultEntry?.command || resultEntry.workId !== item.id || resultEntry.boundary !== key()) {
-        resultEntry = { workId: item.id, revision: item.revision, boundary: key(), command: null };
-        resultDialog.querySelector('form').reset(); resultDialog.querySelector('textarea').disabled = false;
-        resultDialog.querySelector('[type=submit]').textContent = 'Review result'; resultDialog.querySelector('[type=submit]').disabled = false; $('#human-share-refresh').hidden = true; $('#human-share-error').textContent = '';
+      if (resultEntry?.workId !== item.id || resultEntry.boundary !== key()) {
+        resultEntry = resultEntries.get(item.id) ?? { workId: item.id, revision: item.revision, body: '', command: null };
+        resultEntry.boundary = key(); resultEntries.set(item.id, resultEntry);
       }
+      const textarea = resultDialog.querySelector('textarea'), submit = resultDialog.querySelector('[type=submit]');
+      textarea.value = resultEntry.body; textarea.disabled = Boolean(resultEntry.command);
+      submit.textContent = resultEntry.command && !resultEntry.rejected ? uiText('human.copy.022') : 'Review result';
+      submit.disabled = Boolean(resultEntry.rejected || resultEntry.sending);
+      discard.disabled = Boolean(resultEntry.command && !resultEntry.rejected);
+      $('#human-share-refresh').hidden = !resultEntry.rejected;
+      $('#human-share-error').textContent = resultEntry.command ? uiText(resultEntry.rejected ? 'human.resultRejectedDraft' : 'human.resultPendingDraft') : '';
       const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
       $('#human-existing-drafts').innerHTML = drafts.map(m => ["<button type=\"button\" class=\"text-button\" data-result-draft=\"", esc(m.id), "\">", esc(m.body.slice(0,100)), "</button>"].join('')).join('') || uiText("human.copy.024");
       resultDialog.showModal(); return true;
