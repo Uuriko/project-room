@@ -16,7 +16,7 @@ test("rebuilt service opens deployed schema v33 and converges it without data lo
   const projection = seed.store.room("commons").state;
   seed.store.close();
   const db = new DatabaseSync(filename);
-  for (const row of db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name GLOB 'writer_v3[5-9]_*' OR name GLOB 'writer_v4[012]_*')").all()) db.exec(`DROP TRIGGER ${row.name}`);
+  for (const row of db.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name GLOB 'writer_v3[5-9]_*' OR name GLOB 'writer_v4[0123]_*')").all()) db.exec(`DROP TRIGGER ${row.name}`);
   for (const { sql } of fenceDefinitions(33)) db.exec(sql);
   db.exec("PRAGMA user_version=33");
   db.close();
