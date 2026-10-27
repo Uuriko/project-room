@@ -1072,6 +1072,7 @@ response's own `hint`/`next` when it names something more specific.
 | `webhook_signature` | 401 | Bad webhook signature | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `webhook_unconfigured` | 503 | The PR webhook is enabled but its secret is not configured | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `webhook_url_not_public` | 500 | fail("webhook_url_not_public", message); function assertPublicHost(hostname) { const name = hostname.toLowerCase().replace(/\.$/, ""); if (!name) fail | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `wiki_not_found` | 404 | Not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `work_assignee_unknown_member` | 422 | assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `work_claim_conflict` | 409 | Work "${item.id}" is already ${item.state} | follow hint | Follow this error's hint and next steps. |
 | `work_claim_conflict` | 422 | Only an active, unsuperseded claim can receive a PR link | follow hint | Follow this error's hint and next steps. (Note: work-claim-routes map.) |

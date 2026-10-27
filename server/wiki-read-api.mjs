@@ -33,9 +33,15 @@ function clampInt(raw, fallback, min, max) {
 
 export function createWikiReadApi() {
   const byId = (rows, id) => {
-    if (!ID_PATTERN.test(id)) throw new ServiceError(404, "not_found", "Not found", null);
+    // A known wiki template with an unknown id answers wiki_not_found, not
+    // the plain not_found of an unrouted path: the unauthenticated-surface
+    // sweep (tests/invite-only-boundary.test.js) tells a served-open detail
+    // route from a fall-through 404 by its error code, the same convention
+    // as face_not_found / unknown_card on the other public templated reads.
+    // Genuinely unknown wiki subpaths keep plain not_found (below).
+    if (!ID_PATTERN.test(id)) throw new ServiceError(404, "wiki_not_found", "Not found", null);
     const row = rows.find(r => r.id === id);
-    if (!row) throw new ServiceError(404, "not_found", "Not found", null);
+    if (!row) throw new ServiceError(404, "wiki_not_found", "Not found", null);
     return row;
   };
 
