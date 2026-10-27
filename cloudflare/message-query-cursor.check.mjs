@@ -8,7 +8,7 @@ test('Worker SQLite cursor pagination has linear scan cost and preserves archive
  const mf=new Miniflare({modules:true,script:bundled.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'MessageCursorRoom',useSQLite:true}}});
  try{
   const response=await mf.dispatchFetch('http://localhost/');assert.equal(response.status,200,await response.clone().text());
-  const {result:r,expected,rowsRead,statements,measures}=await response.json();
+  const {result:r,expected,rowsRead,statements,measures,counts}=await response.json();
   assert.deepEqual(r.ascending,expected);assert.deepEqual(r.descending,[...expected].reverse());
   assert.deepEqual(r.after,expected.slice(256));assert.deepEqual(r.before,expected.slice(0,256).reverse());
   const visible=m=>!m.deletedAt&&(!m.toMemberId||m.authorId==='viewer'||m.toMemberId==='viewer');
@@ -16,7 +16,9 @@ test('Worker SQLite cursor pagination has linear scan cost and preserves archive
   const first=new Map();for(const m of expected){const time=Date.parse(m.createdAt);if(!first.has(m.authorId)||time<first.get(m.authorId))first.set(m.authorId,time);}
   assert.deepEqual(new Map(r.first),first);
   assert.deepEqual(r.recent,expected.filter(visible).slice(-100));assert.equal(r.count,expected.filter(visible).length);
-  console.log(JSON.stringify({rowsRead,statements,messages:expected.length,measures}));
-  assert.ok(rowsRead<expected.length*50,`cursor scans must remain linear: ${rowsRead} rows for ${expected.length} messages`);
+  for(const c of counts){assert.equal(c.aggregate,c.legacy,c.key);assert.equal(measures[`aggregate:${c.key}`].statements,1);assert.ok(measures[`aggregate:${c.key}`].rowsRead>0);}
+  console.log(JSON.stringify({rowsRead,statements,messages:expected.length,measures,counts}));
+  const cursorRows=Object.entries(measures).filter(([key])=>!key.includes(':')).reduce((n,[,m])=>n+m.rowsRead,0);
+  assert.ok(cursorRows<expected.length*50,`cursor scans must remain linear: ${rowsRead} rows for ${expected.length} messages`);
  }finally{await mf.dispose();}
 });

@@ -115,6 +115,22 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
       for(const m of records({descending:true})) if(visible(m)){out.push(m);if(out.length===limit)break;}
       return out.reverse();
     },
+    // The room read's window count (store.snapshot): same answer as
+    // countMetadata with messageInHistory(floor) plus the DM rule, but the
+    // archive is counted by one SQLite aggregate instead of 256-row pages
+    // decoded in JS. Every default room read pays this; it grew with history.
+    countViewerVisible(viewerId, floor = null) {
+      const visible = message => messageInHistory(message, floor)
+        && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
+      const count = live.filter(visible).length;
+      if (!marker) return count;
+      const floorSql = floor ? ` AND created_at IS NOT NULL AND (created_at > ? OR (created_at = ? AND message_id NOT IN (SELECT value FROM json_each(?))))` : '';
+      const floorParams = floor ? [floor.at, floor.at, JSON.stringify([...(floor.sameInstant ?? [])])] : [];
+      const row = store.db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE ${archived}
+        AND (to_member_id IS NULL OR to_member_id = '' OR author_id = ? OR to_member_id = ?)${floorSql}`)
+        .get(...params, viewerId, viewerId, ...floorParams);
+      return count + Number(row?.n ?? 0);
+    },
     firstPostedAtByAuthor() {
       const result=new Map();
       const add=(author,at)=>{const time=Date.parse(at);if(author && Number.isFinite(time) && (!result.has(author)||time<result.get(author)))result.set(author,time);};
