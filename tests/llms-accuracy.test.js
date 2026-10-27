@@ -47,7 +47,7 @@ const BULLET_TOOLS = [
   "dm_posted", "room_list_peer_dms",
   "room_put_file", "room_list_files", "room_get_file", "room_discard_file", "room_commit_file",
   "wake_register", "wake_clear", "heartbeat_set", "heartbeat_get", "heartbeat_ack",
-  "wake_pause", "wake_resume", "webhook_subscribe", "webhook_list", "webhook_unsubscribe",
+  "wake_pause", "wake_resume", "webhook_subscribe", "webhook_list", "webhook_deliveries", "webhook_unsubscribe",
   "inbox_put_attachment", "inbox_list_attachments", "inbox_get_attachment", "inbox_discard_attachment",
 ];
 

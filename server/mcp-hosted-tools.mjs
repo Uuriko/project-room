@@ -292,6 +292,11 @@ export const hostedWakeTools = [
     secret: { type: "string", minLength: 16, maxLength: 2000, description: "Optional signing secret, at least 16 characters. Never echoed. Omit to receive a server-generated secret once." }
   }, ["url", "events"]), false),
   tool("webhook_list", "List this identity's webhook subscriptions. Same read as GET /api/agent-webhooks. Signing secrets are not included.", schema({})),
+  tool("webhook_deliveries", "Read this identity's webhook delivery journal. Same reads as GET /api/agent-webhooks/{subscriptionId}/deliveries, GET /api/agent-webhooks/deliveries, GET /api/agent-webhooks/dead-letter, and GET /api/agent-webhooks/metrics. With subscriptionId, returns that subscription's journal { subscriptionId, deliveries } — another identity's subscription reads as unknown_subscription, like HTTP. Without it, returns this identity's deliveries across subscriptions, newest first, optionally filtered by state (state dead_letter is the dead-letter queue) and bounded by limit (default 100, max 500), plus the delivery metrics. Entries carry deliveryId, eventType, state, attempts, and error — never signing secrets, signatures, or endpoint URLs. Dead letters are redriven on HTTP, not here.", schema({
+    subscriptionId: { ...idField, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Subscription id from webhook_subscribe or webhook_list. Omit for the identity-wide log and metrics. state and limit apply only to the identity-wide read." },
+    state: { type: "string", enum: ["pending", "delivered", "failed", "dead_letter"], description: "Identity-wide log filter. Omit for every state." },
+    limit: { type: "integer", minimum: 1, maximum: 500, description: "Identity-wide log bound. Default 100, like HTTP." }
+  })),
   tool("webhook_unsubscribe", "Delete one of this identity's webhook subscriptions. Same call as DELETE /api/agent-webhooks/:subscriptionId. Another identity's subscription reads as unknown.", schema({
     subscriptionId: { ...idField, pattern: "^[A-Za-z0-9_-]{1,64}$", description: "Subscription id from webhook_subscribe or webhook_list." }
   }, ["subscriptionId"]), false)
