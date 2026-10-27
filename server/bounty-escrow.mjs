@@ -101,6 +101,31 @@ const FLAKE_BOND_MULTIPLIER = 2; // rung 2+: the claim bond doubles
 const FLAKE_COOLDOWN_RUNG = 3;
 export const FEE_NUMERATOR = 1;
 export const FEE_DENOMINATOR = 100; // 1% of the award to the room pool, on released payouts only
+
+// Fee disclosure (UT26 13-1): the breakdown every sponsor-facing surface
+// shows for an award of `amountMillis`. The arithmetic mirrors _sweep
+// exactly — fee = floor(amount * FEE_NUMERATOR / FEE_DENOMINATOR) taken
+// from the worker's approved balance at payout, on released payouts
+// only; refunds return the award in full with no fee, and the poster is
+// never charged on top of the award. The summary is conditional on a
+// full release because a dispute split releases only the vested part,
+// and the fee then falls on the amount actually released.
+export function awardFeeBreakdown(amountMillis) {
+  check(Number.isSafeInteger(amountMillis) && amountMillis >= 0, "invalid_amount",
+    "awardFeeBreakdown amountMillis must be a non-negative integer");
+  const feeMillis = Math.floor(amountMillis * FEE_NUMERATOR / FEE_DENOMINATOR);
+  const netMillis = amountMillis - feeMillis;
+  const grossCredits = toCredits(amountMillis), feeCredits = toCredits(feeMillis), netCredits = toCredits(netMillis);
+  return Object.freeze({
+    ratePercent: FEE_NUMERATOR * 100 / FEE_DENOMINATOR,
+    basis: "released payout",
+    grossMillis: amountMillis, feeMillis, netMillis,
+    grossCredits, feeCredits, netCredits,
+    summary: `If this award is released in full, the worker receives ${netCredits} of the ${grossCredits} credits: `
+      + `${feeCredits} credits (1% of the award) is deducted from the award and paid to the room pool as a fee. `
+      + `The poster is not charged on top of the award, and a refunded award is returned in full with no fee.`,
+  });
+}
 export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the bounty (<=25% total dispute cost, per v2)
 const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
@@ -1301,6 +1326,7 @@ export class BountyEscrow {
     return Object.freeze({
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
+      feeDisclosure: awardFeeBreakdown(row.amount_millis),
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
       disputeDecider: row.dispute_decider ?? null,
       approvalMode: row.approval_mode ?? "legacy",
@@ -2168,9 +2194,11 @@ export class BountyEscrow {
       this._transition(bounty, "accepted");
       bounty.challengeEndsMs = this.nowMs() + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
       this._saveBounty(bounty);
+      const fee = awardFeeBreakdown(bounty.amountMillis);
       return { bounty: this._getBounty(roomId, bountyId),
         approval,
-        attribution: { attributionId: lotId, bountyId, claimant: bounty.claimant, amount: toCredits(bounty.amountMillis), at },
+        attribution: { attributionId: lotId, bountyId, claimant: bounty.claimant, amount: toCredits(bounty.amountMillis),
+          grossCredits: fee.grossCredits, feeCredits: fee.feeCredits, netCredits: fee.netCredits, feeDisclosure: fee, at },
         receipt: { kind: "attribute", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
     });
