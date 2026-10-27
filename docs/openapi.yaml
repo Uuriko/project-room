@@ -8283,6 +8283,35 @@ paths:
         '404': { description: unknown_bounty }
         '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/bounties/{bountyId}/dispute:
+    get:
+      summary: Read the dispute case file for a bounty
+      description: |
+        The dispute case file (UT2 candidate 2): the challenger's stated
+        `grounds`, the parties (poster, worker, challenger, seated
+        decider), the bond, the evidence entries, and — once ruled — the
+        outcome, the decider's `reasonCodes` and the full bond
+        consequences (`bondConsequences`: what happened to the dispute
+        bond and to the worker's claim bond, with amounts and parties).
+        Readable only by a party to the dispute (poster, worker,
+        challenger or seated decider); any other room member is refused
+        403 `not_authorized`. A bounty with no dispute returns 404.
+        API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      responses:
+        '200':
+          description: The dispute case file
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  dispute: { type: object }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: not_found, unknown_bounty }
     post:
       summary: Dispute an accepted bounty
       description: |
@@ -8338,8 +8367,11 @@ paths:
         rejected challenge releases the award (the bond compensates the
         worker for delay, no fee); an upheld challenge cancels and refunds
         the poster in full with no fee while the claimant's bond is slashed
-        to the pool. The settlement is attributed to the decider. API keys
-        need `rooms:write`.
+        to the pool. The settlement is attributed to the decider. The
+        resolution records the decider's `reasonCodes` and the full bond
+        consequences (`bondConsequences` for both the dispute bond and the
+        claim bond; `bondForfeited` reports whether any bond was forfeited
+        by the settlement). API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - $ref: '#/components/parameters/BountyId'
