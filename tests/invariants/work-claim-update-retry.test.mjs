@@ -252,7 +252,7 @@ invariantSuite([
       ctx.dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "a4-updateretry-"));
       ctx.db = new DatabaseSync(join(ctx.dir, "claims.db"));
       ctx.db.exec(workClaimSchema);
-      ctx.registry = createDurableWorkClaimRegistry(ctx.db, {});
+      ctx.registry = createDurableWorkClaimRegistry(ctx.db, { transaction: fn => fn() });
       await seedClaim(ctx.registry);
       ctx.before = ctx.registry.get("room1", "task").history.length;
       return ctx;
@@ -260,7 +260,7 @@ invariantSuite([
     .when(async (f, ctx) => {
       ctx.first = await call(ctx.registry, "worker", "update", "task", { note: "progress", requestId: "req-1" });
       // Rebuild the registry on the same database, as after a restart.
-      const rebuilt = createDurableWorkClaimRegistry(ctx.db, {});
+      const rebuilt = createDurableWorkClaimRegistry(ctx.db, { transaction: fn => fn() });
       ctx.retry = await call(rebuilt, "worker", "update", "task", { note: "progress", requestId: "req-1" });
       ctx.rebuilt = rebuilt;
     })
@@ -285,7 +285,7 @@ invariantSuite([
       ctx.dir = mkdtempSync(join(process.env.TMPDIR ?? tmpdir(), "a4-updatebind-"));
       ctx.db = new DatabaseSync(join(ctx.dir, "claims.db"));
       ctx.db.exec(workClaimSchema);
-      ctx.registry = createDurableWorkClaimRegistry(ctx.db, {});
+      ctx.registry = createDurableWorkClaimRegistry(ctx.db, { transaction: fn => fn() });
       await seedClaim(ctx.registry);
       ctx.before = ctx.registry.get("room1", "task").history.length;
       return ctx;
@@ -293,7 +293,7 @@ invariantSuite([
     .when(async (f, ctx) => {
       ctx.first = await call(ctx.registry, "worker", "update", "task", { note: "progress", requestId: "req-1" });
       // Rebuild the registry on the same database, as after a restart.
-      const rebuilt = createDurableWorkClaimRegistry(ctx.db, {});
+      const rebuilt = createDurableWorkClaimRegistry(ctx.db, { transaction: fn => fn() });
       ctx.rebuilt = rebuilt;
       await call(rebuilt, "worker", "update", "task", { note: "different", requestId: "req-1" });
     })

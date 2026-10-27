@@ -115,7 +115,7 @@ test("work-claim registry: legacy row loads with unknown fields dropped and miss
   const db = workClaimDb(t);
   db.prepare("INSERT INTO work_claims (room_id, claim_id, item_json, updated_at) VALUES (?,?,?,?)")
     .run("room1", "old-1", legacyItem, 1);
-  const registry = createDurableWorkClaimRegistry(db);
+  const registry = createDurableWorkClaimRegistry(db, { transaction: fn => fn() });
   const item = registry.get("room1", "old-1");
   assert.equal(item.id, "old-1");
   assert.equal(item.title, "Old work");
@@ -128,7 +128,7 @@ test("work-claim registry: legacy row loads with unknown fields dropped and miss
 
 test("work-claim registry: new writes carry the version envelope and round-trip", t => {
   const db = workClaimDb(t);
-  const registry = createDurableWorkClaimRegistry(db);
+  const registry = createDurableWorkClaimRegistry(db, { transaction: fn => fn() });
   registry.set("room1", { id: "new-1", title: "New", state: "unclaimed", owner: null });
   const raw = JSON.parse(db.prepare("SELECT item_json FROM work_claims WHERE claim_id=?").get("new-1").item_json);
   assert.equal(raw.v, ROW_FORMAT_V);

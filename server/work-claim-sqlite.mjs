@@ -71,8 +71,16 @@ const parse = text => {
   return value;
 };
 
-export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction = fn => fn(), onChange = null } = {}) {
+export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), transaction, onChange = null } = {}) {
   if (!db || typeof db.prepare !== "function") throw new TypeError("a SQLite database handle is required");
+  // S-03: the transaction runner is required, with no default. The old
+  // silent no-op default (fn => fn()) let a caller that forgot the option
+  // build a "durable" registry that was not atomic — a representable
+  // illegal state. Callers must choose a runner explicitly (production
+  // passes the store's transaction; isolated fixtures may pass an explicit
+  // pass-through), and a missing or non-function runner fails here, at
+  // construction, instead of silently at the first contested write.
+  if (typeof transaction !== "function") throw new TypeError("a transaction runner is required");
   // Prepare lazily: RoomStore constructs services before its atomic schema migration.
   const statement = sql => ({
     get: (...args) => db.prepare(sql).get(...args),
