@@ -82,9 +82,11 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   assert.equal(state().workItems[workId].receipt.evidenceVersion, textVersion(artifact));
   assert.equal(state().workItems[workId].verification, null); assert.equal(state().workItems[workId].decision, null);
   await page.locator('[data-read-result="' + workId + '"]').click();
-  await page.waitForFunction(body => document.querySelector("#result-body").textContent === body, artifact);
-  await capture("result"); await page.locator("#result-original").click();
-  await page.locator("#result-dialog").waitFor({ state: "hidden" });
+  await page.waitForFunction(id => document.activeElement?.dataset.messageRecordId === id, refined.id);
+  assert.equal(await page.locator("#result-dialog").isVisible(), false, "short result stays in the conversation");
+  assert.equal(await page.locator(`[data-message-record-id="${refined.id}"] .message-body`).textContent(), artifact);
+  await capture("result");
+  await page.locator('[data-message-record-id="source-a"] .message-time').click();
   await page.locator('[data-portable-original="source-a"]').waitFor();
   assert.ok((await page.locator("#message-list").textContent()).includes(original));
   await ordinary(); assert.equal(await page.locator("#portable-result").inputValue(), "Keep my unrelated work draft."); await close();

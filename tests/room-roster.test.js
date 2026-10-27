@@ -201,10 +201,10 @@ test("Add agent markup lists the four roster names", () => {
   }
   assert.match(html, /Muse app or WhatsApp/);
   assert.match(html, /id="agent-access-hint"/);
-  assert.match(html, /id="inbox-heading"/);
+  assert.doesNotMatch(html, /id="inbox-heading"/);
   assert.doesNotMatch(html, /id="people-hint"/);
   assert.doesNotMatch(html, /id="people-wake-hint"/);
-  assert.match(html, /id="room-tools"/);
+  assert.doesNotMatch(html, /id="room-tools"/);
   assert.match(html, /id="invite-agents-button"/);
   assert.match(html, /id="create-room-details"/);
   assert.match(html, /id="agent-invite-dialog"/);
@@ -236,7 +236,7 @@ test("Add agent markup lists the four roster names", () => {
   const app = readFileSync(join(checkout, "src/app.js"), "utf8");
   assert.match(app, /How to invite someone/);
   assert.match(app, /How to add an agent/);
-  assert.match(app, /How to open Inbox/);
+  assert.doesNotMatch(app, /How to open Inbox/);
   assert.match(app, /#auth-title.*PROJECT ROOM/);
   assert.match(app, /Open room/);
   assert.match(app, /data-empty-write/);
@@ -294,7 +294,6 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(source, /setupChecklist/);
   assert.match(source, /reconnectCopy/);
   assert.match(source, /Copy plug-in steps/);
-  assert.match(app, /aria-label.*Open /);
   const css = readFileSync(join(checkout, "src/styles.css"), "utf8");
   assert.match(css, /--room-paper/);
   assert.match(css, /--room-ink/);
