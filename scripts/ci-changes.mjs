@@ -56,6 +56,10 @@ const BROWSER_EXACT = new Set([
   "scripts/browser-ci-durations.json",
   "scripts/test-env.sh",
   "scripts/report-test-failures.mjs",
+  // The workflow file schedules the browser rollup and its six shards, so a
+  // change to it (the timeout cure in PR #5013) must be classified browser=true:
+  // the browser matrix must actually execute, not record an intentional skip.
+  ".github/workflows/test.yml",
 ]);
 
 function globToRegExp(pattern) {
