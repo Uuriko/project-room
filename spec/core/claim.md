@@ -72,7 +72,7 @@ A merged or closed linked pull request is applied by poll (`server/claim-pr-sync
 
 ## Room today
 
-There is no claim state named `input_required`. Waiting is `blocked`. `server/notify-policy.mjs` lists `input_required` as a needs-me notification kind. That kind does not move a claim.
+There is no claim state named `input_required`. Waiting is `blocked`. A needs-me notification kind named `input_required` does not move a claim.
 
 `server/work-handoff.mjs` validates a status report and a typed delegation envelope. It does not change a board claim. `work.handoff_recorded` in `src/events.js` is a work-item event, not a board reassign.
 

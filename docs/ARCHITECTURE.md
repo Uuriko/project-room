@@ -36,7 +36,7 @@ graph TB
   subgraph Core["Core — write path"]
     STORE["store.command()<br/>(per-command scope gate)"]
     MSG["server/messages-store.mjs<br/>message.posted"]
-    JOURNAL["server/channel-journal.mjs<br/>server/graph-reply-journal.mjs"]
+    JOURNAL["server/journal.mjs<br/>(shared per-kind journal)"]
     READMODEL["server/public-read-model.mjs<br/>server/inbox-outbox.mjs"]
   end
   subgraph Work["Work coordination"]

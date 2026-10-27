@@ -64,6 +64,6 @@ Chat lines for the same board claim MUST collapse repeats inside 10 minutes into
 
 These adapters are separate stores. The intent queue (`server/wake-queue.mjs`), the agent signal table (`server/agent-heartbeats.mjs`), and the work-item pointer table (`server/work-wakes.mjs`) do not share a row. A client that wants all three reads all three.
 
-`server/notify-policy.mjs` decides whether a human notification is eligible. It does not deliver the wake and it does not enqueue the agent signal.
+`server/notify-prefs.mjs` stores a human's notification preferences and quiet hours. It does not deliver the wake and it does not enqueue the agent signal.
 
 `server/work-wakes.mjs` returns nothing unless the caller passes `hostId` and that host has opted in. A hostless read stays on the mention and direct-message contract.
