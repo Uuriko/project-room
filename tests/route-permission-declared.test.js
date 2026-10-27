@@ -45,22 +45,23 @@ const baseline = JSON.parse(readFileSync(join(root, "tests/fixtures/route-permis
 test("new mutating operations declare x-room-permission", () => {
   const { undeclared } = auditSpec(spec);
   const { added } = compareToBaseline(undeclared, baseline.undeclared);
-  assert.deepEqual(added, [], `Add x-room-permission (for example "owner", "member", "accept_work", "public") to: ${added.join(", ")}`);
+  assert.deepEqual(added, [], `New mutating operations without x-room-permission:\n${added.map((k) => `  ${k}`).join("\n")}\nCure: in docs/openapi.yaml add a line to each operation above, e.g. \`x-room-permission: owner\` (a lowercase token or |-joined tokens: owner, member, accept_work, public). Do NOT add entries to tests/fixtures/route-permission-baseline.json — the baseline may only shrink, and there is no regen script for it.`);
 });
 
 test("baseline only shrinks: remove entries that now declare or no longer exist", () => {
   const { undeclared } = auditSpec(spec);
   const { stale } = compareToBaseline(undeclared, baseline.undeclared);
-  assert.deepEqual(stale, [], `Remove from tests/fixtures/route-permission-baseline.json: ${stale.join(", ")}`);
+  assert.deepEqual(stale, [], `Baseline entries that now declare x-room-permission or no longer exist:\n${stale.map((k) => `  ${k}`).join("\n")}\nCure: delete exactly those lines from the "undeclared" array in tests/fixtures/route-permission-baseline.json (keep the array sorted, no duplicates), then re-run this check. No script regenerates the baseline — this edit is the regeneration.`);
 });
 
 test("declared permissions are well formed", () => {
-  assert.deepEqual(auditSpec(spec).malformed, []);
+  const { malformed } = auditSpec(spec);
+  assert.deepEqual(malformed, [], `Operations with a malformed x-room-permission value:\n${malformed.map((k) => `  ${k}`).join("\n")}\nCure: in docs/openapi.yaml set each value to a lowercase token or |-joined tokens matching ${PERMISSION_RE} (for example owner, member, accept_work, public, owner|manage_claims).`);
 });
 
 test("baseline is sorted and unique", () => {
   const sorted = [...new Set(baseline.undeclared)].sort();
-  assert.deepEqual(baseline.undeclared, sorted);
+  assert.deepEqual(baseline.undeclared, sorted, `Cure: sort the "undeclared" array in tests/fixtures/route-permission-baseline.json alphabetically and remove duplicate entries, then re-run this check.`);
 });
 
 test("audit catches an undeclared new route and accepts a declared one", () => {

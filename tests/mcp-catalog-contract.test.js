@@ -6,12 +6,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { SNAPSHOT_PATH, buildSnapshot, canonicalJson, diffSnapshots } from "../scripts/mcp-catalog-snapshot.mjs";
+import { SNAPSHOT_PATH, buildSnapshot, canonicalJson, diffSnapshots, formatSnapshotDiff } from "../scripts/mcp-catalog-snapshot.mjs";
 
 test("the served MCP catalog matches the reviewed snapshot", () => {
   const expected = JSON.parse(readFileSync(SNAPSHOT_PATH, "utf8"));
-  const changes = diffSnapshots(expected, buildSnapshot());
-  assert.deepEqual(changes, [], `MCP catalog changed. Review, then run: node scripts/mcp-catalog-snapshot.mjs --write\n${changes.join("\n")}`);
+  const actual = buildSnapshot();
+  const changes = diffSnapshots(expected, actual);
+  assert.deepEqual(changes, [], `MCP catalog changed:\n${formatSnapshotDiff(expected, actual)}`);
+});
+
+test("formatSnapshotDiff prints the real hashes and the cure, including the count-pin follow-on", () => {
+  const base = { core: { room_a: { inputSchema: "aaaa", annotations: {} } } };
+  const next = { core: { room_a: { inputSchema: "bbbb", annotations: {} }, room_c: { inputSchema: "cccc", annotations: {} } } };
+  const report = formatSnapshotDiff(base, next);
+  assert.match(report, /core: ~ room_a inputSchema hash committed aaaa -> served bbbb/);
+  assert.match(report, /core: \+ room_c/);
+  assert.match(report, /node scripts\/mcp-catalog-snapshot\.mjs --write/);
+  assert.match(report, /tests\/mcp-search-actions\.test\.js/);
+  assert.match(report, /tests\/mcp-untrusted-content\.test\.js/);
+  assert.equal(formatSnapshotDiff(base, base), "");
 });
 
 test("canonicalJson ignores key order", () => {

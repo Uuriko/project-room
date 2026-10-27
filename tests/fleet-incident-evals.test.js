@@ -58,7 +58,7 @@ import { deliveryDigest } from "../server/work-claims.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { allowed } from "../scripts/runtime-package.mjs";
 import { renderReceiptDetailHtml } from "../server/receipts-page.mjs";
-import { SNAPSHOT_PATH, buildSnapshot, diffSnapshots } from "../scripts/mcp-catalog-snapshot.mjs";
+import { SNAPSHOT_PATH, buildSnapshot, diffSnapshots, formatSnapshotDiff } from "../scripts/mcp-catalog-snapshot.mjs";
 import { applyOutcomes } from "../cloudflare/job-heartbeat.mjs";
 
 // ---------------------------------------------------------------- E1 ----
@@ -169,8 +169,9 @@ test("E4 baselines: i18n baseline and MCP catalog snapshot match the composed tr
     { cwd: root, encoding: "utf8", env: { ...process.env } });
   assert.equal(i18n.status, 0, `i18n baseline desync (regenerate on the composed tree):\n${i18n.stdout}\n${i18n.stderr}`);
   const expected = JSON.parse(readFileSync(SNAPSHOT_PATH, "utf8"));
-  const changes = diffSnapshots(expected, buildSnapshot());
-  assert.deepEqual(changes, [], `MCP catalog snapshot desync (regenerate on the composed tree):\n${changes.join("\n")}`);
+  const actual = buildSnapshot();
+  const changes = diffSnapshots(expected, actual);
+  assert.deepEqual(changes, [], `MCP catalog snapshot desync (regenerate on the composed tree):\n${formatSnapshotDiff(expected, actual)}`);
 });
 
 // ---------------------------------------------------------------- E5 ----
