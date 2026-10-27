@@ -55,11 +55,17 @@ export async function backupRoom(source, destinationDirectory) {
     const events = restored.db.prepare("SELECT count(*) AS n FROM events").get().n;
     const digests = backupDigests(restored.db);
     if (digests.attachments.mismatched) throw new Error(`Backup holds ${digests.attachments.mismatched} attachment(s) whose bytes do not match their sha256`);
-    const watermark = { version: 1, backedUpAt: Date.now(), rooms, events, digests };
+    // This shape is a RAW byte copy (node:sqlite backup()), not the
+    // sanitized NDJSON export: secret columns and content sit in it in
+    // original form, by design, for disaster fidelity (methods audit
+    // B7-4 F9). The watermark names that plainly so the file is never
+    // mistaken for a scrubbed export; its protection is the 0600 file
+    // inside the 0700 directory, and nothing else.
+    const watermark = { version: 1, backedUpAt: Date.now(), rooms, events, digests, sanitization: "none-raw-copy" };
     const sidecar = join(destination, "room-backup.json");
     writeFileSync(sidecar, JSON.stringify(watermark, null, 2));
     chmodSync(sidecar, 0o600);
-    return { filename, watermark: sidecar, verified: true, ...audit, recovery };
+    return { filename, watermark: sidecar, verified: true, sanitized: false, ...audit, recovery };
   } finally { restored?.close(); }
 }
 

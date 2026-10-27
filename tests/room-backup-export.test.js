@@ -74,7 +74,11 @@ test("an export hashes secrets and replays the room into a fresh store", t => {
   for (const secret of [VERIFIER, SLOT, HOOK, SEED, CIPHER, PUSH_AUTH, P256, PRI, RAK, key]) {
     assert.equal(ndjson.includes(secret), false, secret);
   }
-  for (const secret of [VERIFIER, SLOT, HOOK, SEED, CIPHER, PUSH_AUTH, P256, PRI, RAK]) assert.equal(ndjson.includes(sha(secret)), true, secret);
+  // Placeholders are salted sha256 under a per-export salt that is never
+  // exported (export family cure, B7-4 F6): the plain unsalted sha256 of
+  // a secret must NOT appear — it is dictionary-reversible — while a
+  // 64-hex placeholder stands where the secret stood.
+  for (const secret of [VERIFIER, SLOT, HOOK, SEED, CIPHER, PUSH_AUTH, P256, PRI, RAK]) assert.equal(ndjson.includes(sha(secret)), false, secret);
   assert.equal(ndjson.includes(PUBLIC_KEY), true);
   assert.equal(ndjson.includes(KEPT_HASH), true);
   assert.equal(ndjson.includes("Export me plainly"), true);
@@ -133,7 +137,7 @@ test("the operator export route stays closed until the backup token is set", asy
   assert.match(ok.headers.get("content-type"), /application\/x-ndjson/);
   const body = await ok.text();
   assert.equal(body.includes(VERIFIER), false);
-  assert.equal(body.includes(sha(VERIFIER)), true);
+  assert.equal(body.includes(sha(VERIFIER)), false, "the placeholder is salted, never the plain sha256 of the secret");
   assert.equal(operatorExportResponse(new Request("https://room.example/api/health"), OPERATOR, store.db), null);
 });
 
@@ -160,7 +164,7 @@ test("the daily backup writes one object when R2 is bound and skips otherwise", 
   assert.equal(seen[0].key, "room-backups/2026-10-02.ndjson");
   assert.equal(seen[0].type, "application/x-ndjson");
   assert.equal(seen[0].text.includes(HOOK), false);
-  assert.equal(seen[0].text.includes(sha(HOOK)), true);
+  assert.equal(seen[0].text.includes(sha(HOOK)), false, "the placeholder is salted, never the plain sha256 of the secret");
   assert.equal(seen[0].customMetadata.sha256, sha(seen[0].text));
   assert.equal(seen[0].customMetadata.backupVersion, "2");
 });

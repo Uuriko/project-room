@@ -24,7 +24,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 import { auditRecovery } from "./recovery.mjs";
-import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, BACKUP_SANITIZE_POLICY } from "./room-export.mjs";
+import { cellOf, checkStoredBytes, verifyTrailer, assertTrailerShape, createTableDigests, contentVerificationLevel, REPLAY_SKIPPED_TABLES, createSanitizedCellTracker, isLegacySanitizeWatermark, probeRestoredReadability, scrubbedCellsOf } from "./room-export.mjs";
 import { verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { BACKUP_MANIFEST_VERSION, backupObjectKey, backupPartKey } from "../cloudflare/room-backup.mjs";
 
@@ -186,7 +186,7 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
   // #3599: sanitized cells resolve to safe substitutes, never the
   // placeholder; legacy streams (no sanitizePolicy marker) get the
   // legacy resolutions for the two columns the old exporter over-hashed.
-  const tracker = createSanitizedCellTracker(db, { legacySanitize: watermark.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
+  const tracker = createSanitizedCellTracker(db, { legacySanitize: isLegacySanitizeWatermark(watermark) });
   // A migrated-but-empty store still holds migration-seeded singleton rows.
   // Clear each replayed table first, exactly like the file-based replay;
   // foreign keys go off for the walk and the foreign_key_check below proves
@@ -259,7 +259,13 @@ export function replayNdjsonInto(ndjson, store, { audit = "strict" } = {}) {
         if (audit !== "report") throw error;
         auditResult = auditFailure(error);
       }
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: tracker.report(), ...invitations, recovery, audit: auditResult };
+      // Headline acceptance: report mode must not certify verified/"full"
+      // over a room that throws on read — the data lands, the verdict is
+      // downgraded, and the unreadable rooms are named.
+      const unreadable = probeRestoredReadability(store);
+      if (unreadable.length && audit !== "report") throw new Error(unreadable[0].error);
+      const downgraded = unreadable.length > 0;
+      return { verified: !downgraded, trailer: trailer ? "verified" : "absent", contentVerification: downgraded ? "unreadable" : contentVerification, events, tables: order.length, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: tracker.report(), scrubbedCells: scrubbedCellsOf(trailer), readability: { ok: !downgraded, unreadable }, ...invitations, recovery, audit: auditResult };
     });
   } finally {
     db.exec("PRAGMA foreign_keys=ON");
@@ -422,7 +428,7 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
     if (record?.kind === "watermark") {
       if (watermark) throw new Error("Export has more than one watermark");
       watermark = record;
-      tracker = createSanitizedCellTracker(db, { legacySanitize: record.sanitizePolicy !== BACKUP_SANITIZE_POLICY });
+      tracker = createSanitizedCellTracker(db, { legacySanitize: isLegacySanitizeWatermark(record) });
       return;
     }
     if (record?.kind === "trailer") {
@@ -549,9 +555,14 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
         if (audit !== "report") throw error;
         auditResult = auditFailure(error);
       }
+      // Headline acceptance, as in replayNdjsonInto: an unreadable
+      // restored room downgrades the verdict instead of certifying it.
+      const unreadable = probeRestoredReadability(store);
+      if (unreadable.length && audit !== "report") throw new Error(unreadable[0].error);
+      const downgraded = unreadable.length > 0;
       settled = true;
       db.exec("PRAGMA foreign_keys=ON");
-      return { verified: true, trailer: trailer ? "verified" : "absent", contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), ...invitations, recovery, audit: auditResult };
+      return { verified: !downgraded, trailer: trailer ? "verified" : "absent", contentVerification: downgraded ? "unreadable" : contentVerification, events, tables: counts.size, backedUpAt: watermark.backedUpAt ?? null, skippedTables, sanitizedCells: cellTracker().report(), scrubbedCells: scrubbedCellsOf(trailer), readability: { ok: !downgraded, unreadable }, ...invitations, recovery, audit: auditResult };
     } catch (error) {
       abort();
       throw error;
@@ -681,11 +692,13 @@ export async function operatorRestoreResponse(request, token, store) {
     tables: result.tables,
     backedUpAt: result.backedUpAt ? new Date(result.backedUpAt).toISOString() : null,
     sanitizedCells: result.sanitizedCells,
-    note: "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.",
+    scrubbedCells: result.scrubbedCells,
+    readability: result.readability,
+    note: "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells, and token-shaped or secret-value content the exporter scrubbed is counted in scrubbedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.",
   });
 }
 
-const RESTORE_NOTE = "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.";
+const RESTORE_NOTE = "Secrets in the export are hashes, not working credentials: sanitized cells were substituted (never loaded as live values) and are counted in sanitizedCells, and token-shaped or secret-value content the exporter scrubbed is counted in scrubbedCells — re-issue every agent key, token and secret after a restore, and re-apply any revocations made after the backup.";
 const BACKUP_KEY_PATTERN = /^room-backups\/\d{4}-\d{2}-\d{2}\.ndjson$/;
 
 function kvBytes(value) {
@@ -790,6 +803,8 @@ export async function operatorRestoreFromBackupResponse(request, token, store, k
       bytes: total,
       skippedTables: result.skippedTables,
       sanitizedCells: result.sanitizedCells,
+      scrubbedCells: result.scrubbedCells,
+      readability: result.readability,
       note: RESTORE_NOTE,
     });
   } catch (error) {

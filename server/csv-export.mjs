@@ -1,7 +1,11 @@
 // Analytics export (G011). A pure CSV exporter: take rows (objects) and
 // column definitions, emit RFC 4180 CSV text with proper quoting. The
-// module is pure and dependency-free. Malformed inputs throw ExportError.
-// HTTP download wiring is a later slice.
+// module is pure; its only import is the shared export scrub
+// (server/export-scrub.mjs), so this shape sanitizes token-shaped and
+// secret-value content exactly like every other export shape instead of
+// applying no scrubbing at all (methods audit B7-4 F4). Malformed inputs
+// throw ExportError. HTTP download wiring is a later slice.
+import { scrubText } from "./export-scrub.mjs";
 class ExportError extends Error { constructor(code, message) { super(message); this.name = "ExportError"; this.code = code; } }
 const fail = (code, message) => { throw new ExportError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_export", message); };
@@ -18,9 +22,11 @@ const checkColumns = columns => {
 // quote, which forces spreadsheet apps to treat the cell as text. Genuine
 // numbers are not strings and keep their bare numeric form.
 const FORMULA_LEADING = /^[\s]*[=+\-@]/;
-// Escape a single CSV field per RFC 4180, after formula neutralization.
+// Escape a single CSV field per RFC 4180, after the shared export scrub
+// and formula neutralization.
 export function escapeField(value) {
   let text = value === null || value === undefined ? "" : String(value);
+  if (typeof value === "string") text = scrubText(text);
   if (typeof value === "string" && FORMULA_LEADING.test(text)) text = `'${text}`;
   if (text.includes('"') || text.includes(",") || text.includes("\n") || text.includes("\r")) {
     return `"${text.replace(/"/g, '""')}"`;
@@ -49,7 +55,10 @@ export function toJsonExport({ name, generatedAt, columns, rows }) {
   const safeRows = rows.map(row => {
     check(row !== null && typeof row === "object", "every row must be an object");
     const projected = {};
-    for (const c of columns) projected[c.key] = row[c.key] ?? null;
+    for (const c of columns) {
+      const value = row[c.key] ?? null;
+      projected[c.key] = typeof value === "string" ? scrubText(value) : value;
+    }
     return projected;
   });
   return JSON.stringify({

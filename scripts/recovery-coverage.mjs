@@ -121,7 +121,7 @@ export async function seedRecoveryCoverage(f) {
   // evicted between the provider redirect and the callback). It is short-lived
   // and it is not room data, but the audit's claim is that it covers every
   // table, so a table with no fixture row is a hole in the claim.
-  f.store.oauthPendingStateCreate({ provider: "google", stateHash: "1".repeat(64), slotToken: "recovery-slot",
+  f.store.oauthPendingStateCreate({ provider: "google", stateHash: "1".repeat(64), slotToken: "recovery-slot-token",
     expectedRevision: 0, verifier: "recovery-pkce-verifier", expiresAt: f.now() + 600000, link: false });
   // Seed one read marker so the capture comparison covers private_inbox_reads.
   f.store.inbox.apply(f.owner.token, { action: "source.read", requestId: "recovery-inbox-read", sourceId: "recovery-source", expectedRevision: 1 }, f.owner.session.sessionBinding);
