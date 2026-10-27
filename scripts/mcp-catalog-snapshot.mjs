@@ -33,6 +33,7 @@ const hash = value => createHash("sha256").update(canonicalJson(value)).digest("
 export function servedProfiles() {
   return {
     public: livePublicMcpTools(),
+    lean: listedMcpTools("lean"),
     core: listedMcpTools("core"),
     full: listedMcpTools("full"),
     "focus=work": listedMcpTools("core", false, null, "work"),

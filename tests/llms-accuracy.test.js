@@ -32,14 +32,18 @@ import { createRoomServer } from "../server/http.mjs";
 // The four anonymous join readers, in packet order.
 const JOIN_READERS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
-// The 18 essential tools the packet names for the member core profile.
-const CORE_18 = [
-  "room_needs_me", "room_read_messages", "room_post_message", "room_reply",
-  "room_list_requests", "room_read_request", "room_respond_to_request",
-  "dm_posted", "room_check_access", "room_create", "room_join",
-  "room_put_file", "room_commit_file", "add_land_item", "list_land_queue",
-  "wake_pause", "wake_resume", "bond_propose",
+// The 17 tools the packet names for the member lean default: the 10-tool
+// front door plus the 7 public-work tools (flip decided 2026-10-27).
+const LEAN_17 = [
+  "room_needs_me", "room_read_messages", "room_post_message",
+  "room_read_request", "room_respond_to_request", "room_check_access",
+  "room_join", "wake_pause", "room_search_actions", "room_run_action",
+  "public_work_recommend", "public_work_read_task", "public_work_claim",
+  "public_work_renew", "public_work_release", "public_work_finish",
+  "public_work_my_review",
 ];
+// The discovery pair an outside identity's default adds to the lobby list.
+const DISCOVERY_PAIR = ["room_search_actions", "room_run_action"];
 
 // Every snake_case tool the hosted-mcp bullet promises on the bearer URL.
 const BULLET_TOOLS = [
@@ -126,19 +130,22 @@ test("anonymous catalog is exactly the packet's seven tools", async () => {
     "packet must name room_mcp_snippet among the four join tools");
 });
 
-test("outside identity gets the packet's seven public-work tools plus four join readers", async () => {
+test("outside identity gets the packet's seven public-work tools plus four join readers and the discovery pair", async () => {
   const names = await toolsList(undefined, outsiderSecret);
   // Packet: "Outside identities get seven public-work tools plus four
-  // documents by default."
-  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
+  // documents and the two discovery tools (room_search_actions,
+  // room_run_action) by default."
+  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL, ...DISCOVERY_PAIR]);
 });
 
-test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {
+test("member default is the packet's lean set: 10 front-door tools, the 4 join readers, then the public-work set", async () => {
   const names = await toolsList(undefined, memberSecret);
-  // Packet: "18 essential tools ... plus the 4 public join readers, so about 22 total".
-  assert.equal(names.length, 22, `core profile must be 22 tools, got ${names.length}`);
-  assert.deepEqual(names.slice(0, 18), CORE_18);
-  assert.deepEqual(names.slice(18), JOIN_READERS);
+  // Packet: "10 front-door tools plus the 7 public-work tools and the 4
+  // public join readers, so 21 total".
+  assert.equal(names.length, 21, `lean default must be 21 tools, got ${names.length}`);
+  assert.deepEqual(names.slice(0, 10), LEAN_17.slice(0, 10));
+  assert.deepEqual(names.slice(10, 14), JOIN_READERS);
+  assert.deepEqual(names.slice(14), LEAN_17.slice(10));
 });
 
 test("full profile contains every tool the hosted-mcp bullet names", async () => {
@@ -162,13 +169,13 @@ test("canonical MCP URL is one URL across packet, card, and skill", () => {
     "packet keeps the www door as a documented alias");
 });
 
-test("Routes compact core set names the same tools as the 18-tool paragraph", () => {
+test("Routes compact lean set names the same tools as the 17-tool paragraph", () => {
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
-    const match = packet.match(/Their compact core set: ([^.]+)\./);
-    assert.ok(match, `${label} must have a compact core set list`);
+    const match = packet.match(/Their compact lean set: ([^.]+?)(?: — plus|\.)/);
+    assert.ok(match, `${label} must have a compact lean set list`);
     const listed = match[1].split(/,\s*/).map(s => s.trim());
-    const missing = CORE_18.filter(n => !listed.includes(n));
+    const missing = LEAN_17.filter(n => !listed.includes(n));
     assert.deepEqual(missing, [],
-      `${label} compact core set is missing tools the 18-tool paragraph promises: ${missing.join(",")}`);
+      `${label} compact lean set is missing tools the 17-tool paragraph promises: ${missing.join(",")}`);
   }
 });

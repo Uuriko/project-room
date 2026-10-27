@@ -79,12 +79,17 @@ test("anonymous stranger mints a secret over MCP and authenticates with it", asy
   assert.match(created.identityId, /^ai_/);
   assert.equal(typeof created.privateKey, "string");
   // The minted secret authenticates on the same MCP door: an unenrolled
-  // identity gets the enrolled public-work catalog (7 tools + 4 join readers),
-  // which the anonymous door never lists — proof the secret was accepted.
+  // identity gets the enrolled public-work catalog (7 public-work tools +
+  // 4 join readers + room_search_actions and room_run_action — the
+  // flip-to-lean decided 2026-10-27 adds the meta pair to the identity-stage
+  // default so room_create is reachable pre-membership), which the anonymous
+  // door never lists — proof the secret was accepted.
   const listed = await rpc(origin, "tools/list", undefined, created.secret);
   assert.equal(listed.status, 200);
   const enrolledNames = listed.json.result.tools.map(tool => tool.name);
-  assert.equal(enrolledNames.length, 11, `enrolled public-work catalog must be 11 tools, got ${enrolledNames.length}`);
+  assert.equal(enrolledNames.length, 13, `enrolled public-work catalog must be 13 tools, got ${enrolledNames.length}`);
+  assert.ok(enrolledNames.includes("room_search_actions") && enrolledNames.includes("room_run_action"),
+    "identity-stage default must list the search/run meta pair (flip-to-lean, decided 2026-10-27)");
   assert.ok(enrolledNames.includes("public_work_claim"),
     "enrolled catalog must include identity-gated public_work_claim");
   const check = await call(origin, "room_check_access", {}, created.secret);
@@ -197,7 +202,7 @@ test("mint text block withholds the secret and privateKey; enrollment runs on st
   // from structuredContent authenticates and unlocks the enrolled catalog.
   const listed = await rpc(origin, "tools/list", undefined, created.secret);
   assert.equal(listed.status, 200);
-  assert.equal(listed.json.result.tools.length, 11, "enrolled catalog must list from the structuredContent secret alone");
+  assert.equal(listed.json.result.tools.length, 13, "enrolled catalog must list 13 from the structuredContent secret alone (7 public-work + 4 join + search/run meta pair, flip-to-lean decided 2026-10-27)");
   const check = await call(origin, "room_check_access", {}, created.secret);
   assert.equal(unwrapCall(check, "room_check_access").structuredContent.status, "credential_accepted");
 });

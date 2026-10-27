@@ -45,7 +45,12 @@ test("full: every contracted tool states access, cost and REST twin", () => {
 });
 
 test("full: every front-door tool on core and lean has a contract", () => {
-  const front = new Set([...listedMcpTools("core"), ...listedMcpTools("lean")].map(tool => tool.name));
+  // The lean default also lists the public-work set; those definitions are
+  // a separate catalog with their own authorization meta, not AUX-08
+  // front-door tools (they sit in KNOWN_UNCOVERED by design), so the
+  // contract rule covers the hosted front door only.
+  const front = new Set([...listedMcpTools("core"), ...listedMcpTools("lean")]
+    .map(tool => tool.name).filter(name => !name.startsWith("public_work_")));
   assert.deepEqual([...front].filter(name => !MCP_TOOL_CONTRACTS[name]), []);
 });
 

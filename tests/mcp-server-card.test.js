@@ -10,7 +10,8 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { roomEntry } from "../server/room-entry.mjs";
 import { MCP_VERSION } from "../client/mcp-stdio.mjs";
-import { CORE_MCP_TOOLS, ROOM_MCP_SERVER_VERSION } from "../src/room-mcp-join.js";
+import { PUBLIC_WORK_MCP_TOOLS, ROOM_MCP_SERVER_VERSION } from "../src/room-mcp-join.js";
+import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 import { MCP_JOIN_TOOLS } from "../server/mcp-http.mjs";
 import {
@@ -99,13 +100,14 @@ test("server card and /.well-known/mcp.json are one document from the live tool 
   assert.equal(enrolled.status, 200);
   const bearerTools = (await enrolled.json()).result.tools;
   // The minted identity holds no room membership, so the door serves it the
-  // non-member (public-work) catalog. That is a different subject from the
-  // card's enrolled tier, which advertises the member catalog: the default
-  // core list a member bearer gets, derived from the serving registry (#3769).
-  assert.deepEqual(bearerTools, listedMcpTools("core", false, null, "public_work"));
-  assert.deepEqual(card.tools.enrolled, listedMcpTools("core", false, null));
-  assert.equal(card.tools.enrolled.length, CORE_MCP_TOOLS.length + MCP_JOIN_TOOLS.length,
-    "enrolled count derives from the registry: core profile plus the join tools");
+  // non-member catalog: the public-work set plus the discovery pair. That is
+  // a different subject from the card's enrolled tier, which advertises the
+  // member catalog: the default lean list a member bearer gets, derived
+  // from the serving registry (#3769).
+  assert.deepEqual(bearerTools, listedMcpTools("lean", false, { memberships: [] }));
+  assert.deepEqual(card.tools.enrolled, listedMcpTools("lean", false, null));
+  assert.equal(card.tools.enrolled.length, LEAN_MCP_TOOLS.length + MCP_JOIN_TOOLS.length + PUBLIC_WORK_MCP_TOOLS.length,
+    "enrolled count derives from the registry: lean profile plus the join tools and the public-work set");
   assert.ok(card.tools.enrolled.some(tool => tool.name === "room_post_message"),
     "enrolled tier lists hosted room tools");
   assert.notDeepEqual(card.tools.enrolled, bearerTools,

@@ -183,7 +183,15 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
     grantedBy: created.ownerMemberId ?? owner.identityId, capCents: "100000", perTxCapCents: "10000", nowMs: Date.now(),
   });
   const names = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
-  assert.equal(names.includes("room_commit_file"), true);
+  // Flip-to-lean (decided 2026-10-27): room_commit_file is a long-tail verb —
+  // not in the lean front-door listing; the listed room_search_actions /
+  // room_run_action pair must find it by name (it stays installed and
+  // directly callable, as the calls below prove).
+  assert.ok(names.includes("room_search_actions") && names.includes("room_run_action"),
+    "default catalog must list the search/run meta pair");
+  const foundCommit = await call(origin, "room_search_actions", { query: "room_commit_file" }, owner.secret);
+  assert.ok(foundCommit.value.matches.some(match => match.name === "room_commit_file"),
+    "search must find room_commit_file");
   const posted = await call(origin, "room_post_message", {
     roomId: created.roomId, id: "chat-1", messageId: "msg-1", body: "file lands here"
   }, owner.secret);

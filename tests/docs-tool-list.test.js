@@ -19,7 +19,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 import { roomTools, attentionTools } from "../client/mcp-stdio.mjs";
-import { CORE_MCP_TOOLS } from "../src/room-mcp-join.js";
+import { PUBLIC_WORK_MCP_TOOLS } from "../src/room-mcp-join.js";
+import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 import { llmsTxt } from "../server/agent-discovery.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,7 +33,10 @@ const served = new Set([
   ...roomTools.map(t => t.name),
   ...attentionTools.map(t => t.name),
 ]);
-const core = new Set(CORE_MCP_TOOLS);
+// The member default catalog since the 2026-10-27 flip: the lean front
+// door plus the public-work set (join tools ride as a "plus" suffix in the
+// doc enumerations, as the core set's did).
+const leanDefault = new Set([...LEAN_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
 
 // Tool-name tokens: snake_case names with a known tool prefix. Dotted aliases
 // (wake.pause) collapse to their canonical snake_case name, which is what
@@ -51,21 +55,21 @@ function assertSetEqual(actual, expected, label) {
   assert.deepEqual({ missing, extra }, { missing: [], extra: [] }, label);
 }
 
-test("llms.txt core-set enumerations match the live core profile", () => {
+test("llms.txt lean-set enumerations match the live lean default", () => {
   const text = llmsTxt();
   const lists = [];
-  for (const m of text.matchAll(/(?:essential tools|compact core set)[ —:\-]+(.+?)(?: — plus|\.\s)/gs)) {
+  for (const m of text.matchAll(/(?:essential tools|compact lean set)[ —:\-]+(.+?)(?: — plus|\.\s)/gs)) {
     lists.push(toolTokens(m[1]));
   }
-  assert.ok(lists.length > 0, "llms.txt enumerates the core set at least once");
-  for (const list of lists) assertSetEqual(list, core, "llms.txt core set == live CORE_MCP_TOOLS");
+  assert.ok(lists.length > 0, "llms.txt enumerates the lean set at least once");
+  for (const list of lists) assertSetEqual(list, leanDefault, "llms.txt lean set == live lean default (LEAN_MCP_TOOLS + public-work set)");
 });
 
-test("tools.md core-set sentence matches the live core profile", () => {
+test("tools.md lean-set sentence matches the live lean default", () => {
   const text = read("skills/project-room/references/tools.md");
-  const m = text.match(/Default `tools\/list` is the core set[^:]*:([^\n.]+)\./);
-  assert.ok(m, "tools.md states the default tools/list core set");
-  assertSetEqual(toolTokens(m[1]), core, "tools.md core set == live CORE_MCP_TOOLS");
+  const m = text.match(/Default `tools\/list` is the lean set[^:]*:([^\n.]+)\./);
+  assert.ok(m, "tools.md states the default tools/list lean set");
+  assertSetEqual(toolTokens(m[1]), leanDefault, "tools.md lean set == live lean default");
 });
 
 test("SWARM-PLUG-IN read/write tool bullets all resolve in the served catalog", () => {
@@ -145,9 +149,9 @@ test("skill files' no-credential catalog sentence matches the live anonymous cat
   }
 });
 
-test("ProjectRoom/SKILL.md core-profile sentence matches the live core profile", () => {
+test("ProjectRoom/SKILL.md lean-profile sentence matches the live lean default", () => {
   const text = read("skills/ProjectRoom/SKILL.md");
-  const m = text.match(/default `tools\/list` is the core profile[^:]*:([^\n.]+)\./);
-  assert.ok(m, "ProjectRoom/SKILL.md states the default tools/list core profile");
-  assertSetEqual(toolTokens(m[1]), core, "ProjectRoom/SKILL.md core profile == live CORE_MCP_TOOLS");
+  const m = text.match(/default `tools\/list` is the lean profile[^:]*:([^\n.]+)\./);
+  assert.ok(m, "ProjectRoom/SKILL.md states the default tools/list lean profile");
+  assertSetEqual(toolTokens(m[1]), leanDefault, "ProjectRoom/SKILL.md lean profile == live lean default");
 });
