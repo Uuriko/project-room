@@ -9,7 +9,11 @@ honestly cannot survive yet.
   whole-store NDJSON export per day to Workers KV (binding `ROOM_BACKUPS_KV`,
   namespace `project-room-backups`): parts of at most 16 MiB, each with its
   sha256, plus a manifest carrying the whole file's size and sha256, written
-  last. Every key expires after 35 days. `GET /api/health/jobs` reported
+  last. Every key carries the TTL of its backup's retention class —
+  7 days for a daily copy, 4 weeks for a Sunday (weekly) copy, and until
+  the 1st three calendar months later for a 1st-of-month (monthly) copy —
+  so the retained set covers the last 7 days, the last 4 Sundays, and the
+  last 3 month-firsts. `GET /api/health/jobs` reported
   `room-backup: ok`, last success 2026-10-14T06:30Z. Mechanics:
   [BACKUPS.md](BACKUPS.md).
 - **It is a single copy.** R2 is not enabled on the Cloudflare account, so

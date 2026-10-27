@@ -8,6 +8,9 @@
 // of at most BACKUP_KV_PART_BYTES and writes the manifest last, under the
 // same key the R2 object would use. A day with no manifest has no complete
 // backup; parts without a manifest are an aborted run and expire on their own.
+// Every key of one backup (parts and manifest alike) carries that backup's
+// retention-class TTL (see backupRetentionClass), so a copy expires whole:
+// no part can outlive its manifest or the other way round.
 //
 // The R2 target stores one object per day, verified before it is written
 // (see writeR2Backup): the export's sha256 is recorded in the object's
@@ -19,8 +22,63 @@ export const BACKUP_BINDING = "ROOM_BACKUPS";
 export const BACKUP_KV_BINDING = "ROOM_BACKUPS_KV";
 export const BACKUP_PREFIX = "room-backups/";
 export const BACKUP_KV_PART_BYTES = 16 * 1024 * 1024;
-// 35 days: a month of nightly copies, and storage stays bounded without a sweep.
-export const BACKUP_KV_TTL_SECONDS = 35 * 24 * 60 * 60;
+// Tiered retention (grandfather-father-son), replacing the flat 35-day TTL
+// that kept 35 full copies. The backup's own UTC date designates its class:
+// the 1st of a month is a monthly copy, a Sunday is a weekly copy, and any
+// other day is a daily copy (monthly wins when the 1st is a Sunday). Each
+// copy is kept for its class's span — 7 days daily, 4 weeks weekly, and
+// monthly until the 1st three calendar months later — so at any moment the
+// retained set covers the last 7 days, a Sunday from each of the last 4
+// weeks, and the 1st of each of the last 3 months, with no sweep job: the
+// per-key TTL set at write time is the whole mechanism. A designated day's
+// copy also serves as that day's daily copy, so distinct retained copies
+// number at most 14 (the 7 + 4 + 3 class slots, less overlaps). Retention
+// changes only how long a copy lives, never what a copy holds: the export
+// bytes, part hashes, manifest and trailer verification are untouched, and
+// a restore from any retained class verifies exactly as before.
+const DAY_SECONDS = 24 * 60 * 60;
+export const BACKUP_DAILY_TTL_SECONDS = 7 * DAY_SECONDS;
+export const BACKUP_WEEKLY_TTL_SECONDS = 4 * 7 * DAY_SECONDS;
+
+export function backupRetentionClass(date) {
+  const day = date instanceof Date ? date : new Date(date);
+  if (day.getUTCDate() === 1) return "monthly";
+  if (day.getUTCDay() === 0) return "weekly";
+  return "daily";
+}
+
+export function backupTtlSeconds(date) {
+  const day = date instanceof Date ? date : new Date(date);
+  const retentionClass = backupRetentionClass(day);
+  if (retentionClass === "daily") return BACKUP_DAILY_TTL_SECONDS;
+  if (retentionClass === "weekly") return BACKUP_WEEKLY_TTL_SECONDS;
+  // Monthly: a fixed second count cannot say "3 months" — the months span
+  // 89–92 days — so the span is the exact day count from this month's 1st
+  // to the 1st three calendar months later. The copy then expires as its
+  // third successor arrives, never before and never a month late.
+  const year = day.getUTCFullYear();
+  const month = day.getUTCMonth();
+  const first = Date.UTC(year, month, 1);
+  const thirdSuccessor = Date.UTC(year, month + 3, 1);
+  return (thirdSuccessor - first) / 1000;
+}
+
+export function backupRetention(date) {
+  return { retentionClass: backupRetentionClass(date), ttlSeconds: backupTtlSeconds(date) };
+}
+
+// The backup date a KV key names, or null when the key is not a daily
+// backup key. Retention is a function of the backup's date, and the key is
+// where that date is recorded, so the writer derives the class from the
+// key rather than from the wall clock at write time.
+const BACKUP_KEY_DATE = /^room-backups\/(\d{4})-(\d{2})-(\d{2})\.ndjson$/;
+function backupDateFromKey(key) {
+  const match = BACKUP_KEY_DATE.exec(typeof key === "string" ? key : "");
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (date.getUTCFullYear() !== Number(match[1]) || date.getUTCMonth() !== Number(match[2]) - 1 || date.getUTCDate() !== Number(match[3])) return null;
+  return date;
+}
 // Version 2: BLOB cells (room file bytes) are base64 on the Durable Object
 // too. A version 1 manifest for today was written by the export that dropped
 // them, so the next tick rewrites that day instead of skipping it.
@@ -199,7 +257,12 @@ function trailerHashTracker() {
 }
 
 // Streams the export into parts so at most one part sits in memory.
-export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_BYTES, ttlSeconds = BACKUP_KV_TTL_SECONDS, now = Date.now() } = {}) {
+// Without an explicit ttlSeconds override, every key written here (parts
+// and the manifest, written last) gets the TTL of the retention class the
+// backup's date designates (backupRetention). An explicit override is a
+// caller/test escape hatch and bypasses tiering for that one backup.
+export async function writeKvBackup(kv, key, body, { partBytes = BACKUP_KV_PART_BYTES, ttlSeconds, now = Date.now() } = {}) {
+  if (ttlSeconds === undefined) ttlSeconds = backupTtlSeconds(backupDateFromKey(key) ?? new Date(now));
   const whole = createHash("sha256");
   const parts = [];
   let pending = [];
