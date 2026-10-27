@@ -40,7 +40,7 @@ The weekly fresh-agent onboarding probe is [ONBOARDING-PROBE.md](ONBOARDING-PROB
 
 The identity lifecycle (mint → link → rotate → revoke, with the honest gaps) is [IDENTITY-LIFECYCLE.md](IDENTITY-LIFECYCLE.md). Invite-code failures and lost secrets are covered in [FAQ.md](FAQ.md#troubleshooting).
 
-Native execution: [Codex Room host](CODEX-ROOM-HOST.md) and [execution portability and qualification](EXECUTION-PORTABILITY-PLAN-20261018.md).
+Native execution: [Codex Room host](CODEX-ROOM-HOST.md), [local host continuity inspection](HOST-CONTINUITY-INSPECTION.md), and [execution portability and qualification](EXECUTION-PORTABILITY-PLAN-20261018.md).
 
 ## Coordinate
 
