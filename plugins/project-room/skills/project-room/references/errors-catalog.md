@@ -461,6 +461,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_credential` | 422 | Invalid account credential | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credentials` | 401 | Invalid email or password | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_cursor` | 422 | Use the nextCursor returned by the previous page | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_day` | 422 | day must be YYYY-MM-DD | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_deletion` | 422 | A deletion confirmation token from GET /api/account/deletion/plan is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract` | 422 | Invalid action | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_demigod_contract_status` | 409 | Contract is terminal and cannot move | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |

@@ -456,6 +456,14 @@ const ROWS = [
     }
   },
   {
+    "table": "mcp_tool_calls",
+    "key": "day",
+    "action": "retain",
+    "optional": true,
+    "match": {},
+    "reason": "Global per-tool daily counters (deep-pass usage clock) carry no room, identity, or account key; retained across purges as usage evidence, exactly like a security audit row."
+  },
+  {
     "table": "bounty_disputes",
     "key": "room_id",
     "action": "delete",

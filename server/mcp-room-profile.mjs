@@ -44,6 +44,7 @@ import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
 import { withSpendCharge } from "./spend-grants.mjs";
+import { recordMcpToolCall } from "./mcp-tool-calls.mjs";
 import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
@@ -465,11 +466,35 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
+// Per-tool usage counter (deep-pass T0 usage-reads, Read 2): one counter
+// write per dispatch at this dispatch point, recorded after the dispatch
+// settles so the error flag is the dispatch's real outcome. The counter
+// write rides its own store transaction (recordMcpToolCall's upsert) and
+// never throws into the tool call.
+function countMcpToolCall(store, name, isError) {
+  try {
+    recordMcpToolCall(store.db, name, { isError, at: typeof store.now === "function" ? store.now() : Date.now() });
+  } catch { /* counting never breaks a tool call */ }
+}
+
 function callRoomTool(store, secret, identity, name, args, agentRooms) {
-  enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
-  enforceMcpCallVisibility(store, identity, name);
-  return withSpendCharge(store, secret, name, args,
-    () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms));
+  let result;
+  try {
+    enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
+    enforceMcpCallVisibility(store, identity, name);
+    result = withSpendCharge(store, secret, name, args,
+      () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms));
+  } catch (error) {
+    countMcpToolCall(store, name, true);
+    throw error;
+  }
+  if (result && typeof result.then === "function") {
+    return result.then(
+      (value) => { countMcpToolCall(store, name, false); return value; },
+      (error) => { countMcpToolCall(store, name, true); throw error; });
+  }
+  countMcpToolCall(store, name, false);
+  return result;
 }
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
@@ -923,7 +948,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
     if (typeof name !== "string" || !SUGGESTABLE_TOOLS.includes(name)) {
       return mcpCallError(requestId, { reason: "unknown_tool", tool: called, suggestion: closestToolName(called, SUGGESTABLE_TOOLS) });
     }
-    if (MCP_JOIN_TOOLS.some(entry => entry.name === name)) return handleMcpJoinRpc(message, { mcpUrl });
+    if (MCP_JOIN_TOOLS.some(entry => entry.name === name)) return handleMcpJoinRpc(message, { mcpUrl, onToolCall: (tool, isError) => countMcpToolCall(store, tool, isError) });
     let args = message.params?.arguments ?? {};
     const selected = HOSTED_TOOLS.find(entry => entry.name === name);
     args = withDefaultRoomId(store, secret, name, args, selected?.inputSchema);
@@ -941,8 +966,14 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       if (!isRunnableAction(inner)) {
         return mcpCallError(requestId, { reason: "unknown_tool", tool: args.name, suggestion: closestToolName(args.name, HOSTED_ROOM_MCP_TOOLS) });
       }
-      return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
+      const reply = await handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
         { store, secret, identity, mcpUrl, searchParams, agentRooms });
+      // The outer room_run_action dispatch counts exactly once, as its own
+      // tool row; the inner dispatch counted itself at callRoomTool. One
+      // logical call through room_run_action therefore moves exactly two
+      // rows by one each — the inner tool is never double-counted.
+      countMcpToolCall(store, RUN_ACTION_TOOL, Boolean(reply?.error) || reply?.result?.isError === true);
+      return reply;
     }
     const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
       : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)

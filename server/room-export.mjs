@@ -491,7 +491,11 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
+  // mcp_tool_calls (MCP per-tool counter, server/mcp-tool-calls.mjs):
+  // lazily created usage-clock telemetry, same shape as the wake-accounting
+  // tables — a restored store restarts its per-tool counting window.
+  "mcp_tool_calls"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";
