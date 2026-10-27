@@ -28,6 +28,8 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
 @MainActor public final class RoomWindow: NSObject, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, ASWebAuthenticationPresentationContextProviding {
     public let window: NSWindow
     public let webView: WKWebView
+    public var showSharedMac: (() -> Void)?
+    private let profile: RoomProfile?
     public let origin: URL
     private let status = NSTextField(labelWithString: "Connecting…")
     private let cancelSignInButton = NSButton(title: "Cancel sign-in", target: nil, action: nil)
@@ -57,9 +59,11 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
     public private(set) var completedDownloadCount = 0
     public private(set) var failedDownloadCount = 0
 
-    public init(url: URL, isolated: Bool = false, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil, acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)? = nil) {
+    public init(url: URL, isolated: Bool = false, profile: RoomProfile? = nil, acceptanceDownloadDestination: ((String) -> URL?)? = nil, acceptanceAuthenticationFactory: RoomAuthenticationFactory? = nil, acceptanceAuthenticationTimeoutNanoseconds: UInt64? = nil, acceptanceCookieInstaller: RoomCookieInstaller? = nil, acceptanceCookieCommitTimeoutNanoseconds: UInt64? = nil, acceptanceLocalToolsFactory: (() throws -> LocalToolsWindow)? = nil) {
         precondition(RoomLocation.allowed(url))
         precondition(acceptanceLocalToolsFactory == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
+        precondition(!isolated || profile == nil)
+        self.profile = profile
         self.acceptanceLocalToolsFactory = acceptanceLocalToolsFactory
         // Destination overrides are restricted to isolated loopback acceptance.
         precondition(acceptanceDownloadDestination == nil || (isolated && url.scheme == "http" && ["localhost", "127.0.0.1"].contains(url.host ?? "")))
@@ -74,13 +78,13 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         self.acceptanceDownloadDestination = acceptanceDownloadDestination
         self.origin = URL(string: "\(url.scheme!)://\(url.host!)\(url.port.map { ":\($0)" } ?? "")")!
         let config = WKWebViewConfiguration()
-        config.websiteDataStore = isolated ? .nonPersistent() : .default()
+        config.websiteDataStore = isolated ? .nonPersistent() : (profile?.websiteDataStore() ?? .default())
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
         config.applicationNameForUserAgent = "ProjectRoomMac/0.1"
         webView = WKWebView(frame: .zero, configuration: config)
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1200, height: 820), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         super.init()
-        window.title = "Project Room"
+        window.title = "Project Room — " + (profile?.name ?? "Default")
         window.minSize = NSSize(width: 480, height: 480)
         window.isReleasedWhenClosed = false
         window.delegate = self
@@ -158,7 +162,7 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
             }
         }
         open(url)
-        if !isolated {
+        if !isolated && profile == nil {
             do { try prepareLocalStatus(); localTools?.resumeReceiving() }
             catch { updateLocalAgentNotice("This Mac’s agent status is unavailable. Open My Mac to check its connection.") }
         }
@@ -273,6 +277,10 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         }
         let session = acceptanceAuthenticationFactory?(components.url!, "projectroom", completion)
             ?? ASWebAuthenticationSession(url: components.url!, callbackURLScheme: "projectroom", completionHandler: completion)
+        // Ask for account selection without borrowing the normal browser session.
+        if profile != nil, let browserSession = session as? ASWebAuthenticationSession {
+            browserSession.prefersEphemeralWebBrowserSession = true
+        }
         session.presentationContextProvider = self
         authentication = session
         authenticationCallbackPending = true
@@ -377,6 +385,11 @@ public typealias RoomCookieInstaller = @MainActor (HTTPCookie, WKHTTPCookieStore
         }
     }
     @objc public func showMyMac() {
+        if profile != nil {
+            if let showSharedMac { showSharedMac() }
+            else { tell("Open My Mac from the Default profile to manage this Mac’s shared connection.") }
+            return
+        }
         do {
             try prepareLocalStatus()
             localTools?.show()
