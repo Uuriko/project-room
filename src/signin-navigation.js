@@ -26,15 +26,13 @@ export function createSigninNavigation({ getUI, active }) {
     $("#email-auth-step").hidden = !auxiliary;
     $("#signin-methods").hidden = auxiliary;
     $("#signin-entry-routes").hidden = auxiliary;
-    // GitHub (and, if a deploy omits it, Google) is stripped from the served
-    // HTML when that provider is not configured. Assigning `.hidden` on a
-    // missing anchor throws and the entry catch shows "The room could not load".
-    const googleSignin = $("#google-signin");
-    const githubSignin = $("#github-signin");
-    if (googleSignin) googleSignin.hidden = view === "welcome";
-    if (githubSignin) $("#github-signin").hidden = view === "welcome";
-    if (unavailableProviders.has("google") && googleSignin) googleSignin.hidden = true;
-    if (unavailableProviders.has("github") && githubSignin) githubSignin.hidden = true;
+    // #github-signin is omitted when GitHub is unconfigured. A missing anchor must not throw.
+    const paintAnchor = name => {
+      const anchor = $(`#${name}-signin`);
+      if (anchor) anchor.hidden = view === "welcome" || unavailableProviders.has(name);
+    };
+    paintAnchor("google");
+    paintAnchor("github");
     $("#terms-notice").hidden = view === "welcome";
   }
   function withReplay(value, action) {
