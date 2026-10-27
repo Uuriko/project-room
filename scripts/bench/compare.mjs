@@ -20,6 +20,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compare, holm, median, medianInterval, verdict } from "./stats.mjs";
 import { qualifiedSamples } from "./validity.mjs";
+import { summarizeRefusals } from "./refusals.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -157,6 +158,15 @@ try {
   }
   const failures = sizes.flatMap(size => Object.values(samples[size]).flat().map(r => r.writeFailures)).reduce((a, b) => a + b, 0);
   if (failures) lines.push(`Note: ${failures} benchmark writes were refused; affected write comparisons are n/a. Raw successful-write timings are retained.`);
+  report.writeRefusals = {};
+  for (const size of sizes) {
+    report.writeRefusals[size] = {};
+    for (const tree of trees) {
+      const counts = summarizeRefusals(samples[size][tree.label]);
+      report.writeRefusals[size][tree.label] = counts;
+      if (counts.length) lines.push(`Refusals · ${size} messages · ${tree.label}: ${counts.map(row => `${row.code} (status ${row.status ?? "unknown"}): ${row.count}`).join("; ")}`);
+    }
+  }
   lines.push(`Verdicts need a Holm-adjusted p < 0.05 across this size's metrics and a move of ${Math.round(floor * 100)}% or more. Under 6 runs, intervals span the full range.`);
   process.stdout.write(lines.join("\n") + "\n");
   if (out) writeFileSync(resolve(out), JSON.stringify({ ...report, raw: samples }, null, 1));
