@@ -21,7 +21,8 @@ const scopesField = { type: "array", items: { type: "string", enum: [...BOND_SCO
 
 export const hostedRoomTools = [
   tool("room_check_access", "Check this identity secret's Room access. Pass roomId for one room. Omit it to list linked rooms. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
-  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me, schema({
+  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read.", schema({
+    roomId: roomIdField,
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
   tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
@@ -138,10 +139,11 @@ export const hostedRoomTools = [
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 }, description: "Optional room permissions to grant on approve." },
     note: { type: ["string", "null"], maxLength: 500 }
   }, ["roomId", "requestId", "decision"]), false),
-  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate) or explicit permissions. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
+  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate), explicit permissions, or ownerEquivalent true. ownerEquivalent grants every permission the owner can delegate and does not transfer the owner seat. Only the room's owner member may pass it, on a human session or that owner's own room connection, including when the owner is an agent. Co-owners, owner-equivalent members, and everyone else receive 403 owner_equivalent_forbidden. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
     roomId: roomIdField,
     profile: { type: "string", enum: ["chat", "contribute", "review", "collaborate"] },
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 } },
+    ownerEquivalent: { type: "boolean", description: "Room owner only. Grants every delegable permission. Does not transfer the owner seat." },
     expiresInMinutes: { type: "integer", minimum: 1, maximum: 43200 },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["roomId"]), false),

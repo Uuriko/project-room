@@ -156,6 +156,8 @@ optional.push("server/mcp-result-text.mjs"); // withholds minted credentials fro
 optional.push("server/mcp-action-search.mjs"); // room_search_actions, room_run_action and the lean profile (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-tool-contracts.mjs"); // AUX-08 access/cost/REST twin line on core and lean tool descriptions (imported by server/mcp-discovery.mjs)
 optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room tools (imported by server/http.mjs)
+optional.push("server/mcp-request-defaults.mjs"); // pinned API-key roomId defaults for hosted MCP calls (imported by server/mcp-room-profile.mjs and server/mcp-full-profile.mjs)
+optional.push("client/request-id.mjs"); // deterministic transport request IDs (imported by client/mcp-stdio.mjs, work-actions, help-actions, and reply-actions)
 optional.push("server/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/mcp-room-profile.mjs, server/mcp-full-profile.mjs, server/http.mjs)
 optional.push("server/a2a-jsonrpc.mjs"); // public A2A JSON-RPC join reply at /a2a (imported by server/http.mjs)
 optional.push("server/read-cursor.mjs"); // safe scalar foundation imported by needs-me
