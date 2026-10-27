@@ -101,3 +101,11 @@ test('disabled observer fast path preserves rowsRead without accessing rowsWritt
   db.storage.sql.exec=()=>({rowsRead:3,get rowsWritten(){writeCounterReads++;throw new Error('must not access writes when disabled')},toArray:()=>[1],*[Symbol.iterator](){yield 1;}});
   assert.equal(db.prepare('x').get(),1);assert.deepEqual([...db.prepare('x').iterate()],[1]);assert.equal(db.rowsRead,6);assert.equal(writeCounterReads,0);
 });
+
+test('SQL diagnostic configuration is explicit and reversible only on the production Durable Object', async () => {
+  const {readFile}=await import('node:fs/promises');
+  const config=JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc',import.meta.url),'utf8'));
+  assert.ok(['0','1'].includes(config.env.production.vars.ROOM_SQL_COST_LOG));
+  assert.notEqual(config.vars.ROOM_SQL_COST_LOG,'1');
+  assert.notEqual(config.env.staging.vars.ROOM_SQL_COST_LOG,'1');
+});
