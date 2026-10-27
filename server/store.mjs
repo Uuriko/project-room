@@ -5462,26 +5462,40 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // Compact catch-up. sinceVersion equal to context_version returns
   // { not_modified: true } and no roster, work, or refs. Message and file
   // bodies are never part of either shape.
-  roomContext(token, roomId, { sinceVersion = null, expectedSessionBinding = null } = {}) {
+  roomContext(token, roomId, { sinceVersion = null, checkpoint = null, expectedSessionBinding = null } = {}) {
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (sinceVersion !== null && (typeof sinceVersion !== "string" || !/^[a-f0-9]{64}$/.test(sinceVersion))) {
         fail(422, "invalid_context_version", "since_version must be the previous context_version (64 lowercase hex characters), or omit it");
       }
       const room = this.room(roomId);
+      const anchor = sequence => this.db.prepare("SELECT id FROM events WHERE room_id=? AND sequence=?").get(roomId, sequence)?.id ?? null;
+      const history = { createdEventId: anchor(1), sequence: room.sequence, eventId: anchor(room.sequence) };
+      if (checkpoint !== null) {
+        if (!checkpoint || typeof checkpoint !== "object" || Array.isArray(checkpoint)
+          || Object.keys(checkpoint).sort().join(" ") !== "createdEventId eventId sequence"
+          || !validId(checkpoint.createdEventId) || !validId(checkpoint.eventId)
+          || !Number.isSafeInteger(checkpoint.sequence) || checkpoint.sequence < 1)
+          fail(422, "invalid_context_checkpoint", "Use the complete history checkpoint from the prior context read");
+        if (checkpoint.createdEventId !== history.createdEventId || checkpoint.sequence > room.sequence
+          || anchor(checkpoint.sequence) !== checkpoint.eventId)
+          fail(409, "context_history_changed", "Room history changed; reconcile the saved session and pending operations");
+      }
       const caughtUp = this.db.prepare("SELECT sequence FROM cursors WHERE room_id=? AND member_id=?").get(roomId, auth.member.id)?.sequence ?? 0;
       const built = buildRoomContext({
         state: room.state, sequence: room.sequence, viewerId: auth.member.id, caughtUp, now: this.now()
       });
       const identity = {
-        viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
+        viewerId: auth.member.id, viewerKind: auth.member.kind, viewerActive: auth.member.active === true,
+        viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null
       };
       if (sinceVersion === built.context_version) {
         return { not_modified: true, context_version: built.context_version, roomId,
-          evaluatedThrough: built.evaluatedThrough, evaluatedAt: built.evaluatedAt, cursors: built.cursors, ...identity };
+          workActionContractRevision: built.workActionContractRevision,
+          evaluatedThrough: built.evaluatedThrough, evaluatedAt: built.evaluatedAt, cursors: built.cursors, history, ...identity };
       }
-      return { ...built, ...identity };
+      return { ...built, history, ...identity };
     });
   }
   // C-06 room digest: one bounded read composed from the context, needs-me,

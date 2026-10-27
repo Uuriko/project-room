@@ -1,3 +1,4 @@
+import { agentPhaseMetrics } from "./agent-phase-metrics.mjs";
 import { hostReplyBody } from "./host-result.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
@@ -26,7 +27,20 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId }) {
+export async function runRequestOnce(options) {
+  const metrics = agentPhaseMetrics();
+  const connection = { ...options.connection, fetchImpl: metrics.fetch(options.connection.fetchImpl ?? globalThis.fetch) };
+  try {
+    const result = await runMeasuredRequest({ ...options, connection, metrics });
+    return { ...result, metrics: metrics.finish({ status: "delivered", duplicate: result.receipt?.duplicate === true }) };
+  } catch (error) {
+    // Observability cannot change delivery or hide the original failure.
+    try { options.onMetrics?.(metrics.finish({ status: "interrupted" })); } catch { /* diagnostic observer only */ }
+    throw error;
+  }
+}
+
+async function runMeasuredRequest({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId, metrics }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
   if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
   if (selectRequest !== undefined && typeof selectRequest !== "function") throw new Error("Execution selection must be a function");
@@ -46,6 +60,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   const report = (attemptId, action, basis = {}, reportSignal = signal) => client.requestRuns({ requestMessageId, attemptId, action,
     ...basis }, { signal: reportSignal });
   const deliver = async record => {
+    metrics.transition("publication");
     const input = JSON.parse(record.response);
     let receipt;
     try { receipt = await client.replyAction("room_respond_to_request", input, { signal }); }
@@ -55,6 +70,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       throw error;
     }
     if (receipt.status !== "recorded") throw new Error("Reply delivery is unconfirmed; retain the journal and retry unchanged");
+    metrics.transition("acknowledgement");
     db.prepare("UPDATE request_runs SET delivered=1 WHERE id=?").run(id);
     if (record.attempt_id) await report(record.attempt_id, "delivered").catch(() => {});
     return { status: "delivered", requestId: id, receipt, hostExecuted: false };
@@ -94,10 +110,13 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     context = { ...context, preparation: { ...context.preparation, work: selected.work, workBrief: await createWorkBrief(selected),
       workBriefBoundary: "Separately observed linked work context. This conversation does not authorize work transitions; revalidate work before acting." } };
   }
-  if (Buffer.byteLength(JSON.stringify({ messages, preparation: context.preparation })) > 262144)
+  const preparedBytes = Buffer.byteLength(JSON.stringify({ messages, preparation: context.preparation }));
+  metrics.prepared(preparedBytes);
+  if (preparedBytes > 262144)
     throw new Error("Request exceeds the automatic preparation limit; inspect it directly");
   // Recovery above needs only the saved answer. Check execution dependencies
   // before recording a new intent, so unavailable tools cannot strand a request.
+  metrics.transition("preparation");
   await preflight?.();
   signal?.throwIfAborted();
   if (selectRequest && selectRequest(context.request) !== true)
@@ -108,6 +127,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   signal?.throwIfAborted();
   if (selectRequest && selectRequest(context.request) !== true)
     throw Object.assign(new Error("Request is not selected for execution"), { code: "request_not_selected" });
+  metrics.transition("authorization");
   const attemptId = randomUUID();
   const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id) VALUES (?,?)").run(id, attemptId).changes;
   if (!claimed) throw new Error("Another runner owns this attempt; reconcile before proceeding");
@@ -142,12 +162,14 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   }, 30000);
   try {
     controller.signal.throwIfAborted();
+    metrics.transition("model"); metrics.modelStarted();
     const result = await execute({ requestId: id, request: structuredClone(context.request), messages,
       preparation: context.preparation, signal: controller.signal }, { binding: Object.freeze({
         origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId,
         requestMessageId, requestId: id, attemptId, roomCreatedEventId: context.roomCreatedEventId,
         openingEventId: context.request.openingEventId, ...basis }) });
     controller.signal.throwIfAborted();
+    metrics.transition("publication");
     const body = hostReplyBody(result);
     const response = { requestId: id, responseToRequestId: requestMessageId,
       ...context.current.answerBasis, responseOutcome: "answered", toMemberId: context.request.requesterId,
@@ -190,7 +212,7 @@ export function isRequestEligible(request, { owned, runState, hasPendingDelivery
   return runState !== "needs_attention" && hasPendingDelivery;
 }
 
-export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, selectRequest, onPoll = () => {} }) {
+export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, selectRequest, onPoll = () => {}, onMetrics = () => {} }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
   let delay = intervalMs, connectionUnavailable = false, pendingStatement, recoveryRow = 0;
@@ -220,7 +242,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
           // Preserve explicit attention fences for requests still being worked.
           if (runs[requestMessageId]?.state === "needs_attention") continue;
           emit(await runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal,
-            allowRequest, selectRequest, savedRequestId: record.id }));
+            allowRequest, selectRequest, savedRequestId: record.id, onMetrics }));
         } catch (error) {
           emit({ status: "needs_attention", ...(requestMessageId ? { requestMessageId } : {}) });
           if ([401, 429].includes(error?.status) || error?.status >= 500
@@ -239,7 +261,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
         // A saved response may be retried only by its original local journal.
         // Another host's ownership is never a lease that can be stolen.
         if (owned(request) && !pending(request)) continue;
-        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest, selectRequest })); }
+        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest, selectRequest, onMetrics })); }
         catch (error) {
           if (error?.code === "host_isolation_unavailable") throw error;
           emit({ status: "needs_attention", requestMessageId: request.id });

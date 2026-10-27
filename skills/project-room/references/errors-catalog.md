@@ -456,7 +456,9 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_command` | 422 | Unknown bond command | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_confirmation` | 401 | That deletion confirmation is not valid; request a fresh plan | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_connection` | 422 | Invalid connection request | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
-| `invalid_context_version` | 422 | since_version is the only context query parameter | follow hint | Follow this error's hint and next steps. |
+| `invalid_context_version` | 422 | Use since_version and the complete checkpoint from the prior context read | fix+resend | Correct the context version; preserve saved session and uncertain operations. |
+| `invalid_context_checkpoint` | 422 | Use the complete history checkpoint from the prior context read | fix+resend | Send the saved history checkpoint intact; do not replace unresolved operations. |
+| `context_history_changed` | 409 | Room history changed; reconcile the saved session and pending operations | reconcile | Preserve the saved checkpoint and journals; inspect the history change before resuming. Do not silently reset or rerun work. |
 | `invalid_conversation_selection` | 422 | Choose a bounded conversation page or one message | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credential` | 422 | Invalid account credential | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_credentials` | 401 | Invalid email or password | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |

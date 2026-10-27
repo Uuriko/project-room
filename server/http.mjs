@@ -5271,11 +5271,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "context" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["since_version", "auth"].includes(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_context_version", "since_version is the only context query parameter");
+        if ([...params.keys()].some(key => !["since_version", "checkpoint", "auth"].includes(key) || params.getAll(key).length !== 1)) {
+          reject(422, "invalid_context_version", "Use since_version and the complete checkpoint from the prior context read");
+        }
+        let checkpoint = null;
+        if (params.has("checkpoint")) {
+          try {
+            const raw = params.get("checkpoint");
+            if (raw.length > 512) throw new Error();
+            checkpoint = JSON.parse(raw);
+            if (checkpoint === null) throw new Error();
+          } catch { reject(422, "invalid_context_checkpoint", "Use the complete history checkpoint from the prior context read"); }
         }
         const context = store.roomContext(selected.token, roomId, {
-          sinceVersion: params.has("since_version") ? params.get("since_version") : null, expectedSessionBinding: fence
+          sinceVersion: params.has("since_version") ? params.get("since_version") : null, checkpoint, expectedSessionBinding: fence
         });
         if (context.not_modified) return json(res, 200, context);
         return json(res, 200, { ...context, orient: buildOrient(store, roomId, viewerId, { text: false, token: selected.token, binding: fence, boardList: memoizeBoardList(store) }) });

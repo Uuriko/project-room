@@ -3,7 +3,9 @@
 // to resume. Message bodies, file bytes, and result prose stay out: those
 // have their own reads. context_version hashes this projection so an unchanged
 // room answers { not_modified: true } instead of another copy.
+import { WORK_ACTION_CONTRACT_REVISION } from "../client/work-actions.mjs";
 import { createHash } from "node:crypto";
+import { charterContext } from "../src/room-charter.js";
 import { roomPolicy } from "../src/events.js";
 import { activeClaim, nextWorkStep } from "../src/workflow.js";
 import { isRunningSession, sessionRecord } from "../src/work-item-session.js";
@@ -131,6 +133,8 @@ export function buildRoomContext({ state, sequence, viewerId, caughtUp, now }) {
   fileRefs.sort((a, b) => refKey(a) < refKey(b) ? -1 : refKey(a) > refKey(b) ? 1 : 0);
   const stable = {
     roomId: state.room.id, viewerId,
+    workActionContractRevision: WORK_ACTION_CONTRACT_REVISION,
+    instructions: (({ revision, eventId }) => ({ revision, eventId }))(charterContext(state.room)),
     roster, policy: {
       requireIndependentReview: roomPolicy(state).requireIndependentReview,
       requireOwnerDecision: roomPolicy(state).requireOwnerDecision,

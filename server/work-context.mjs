@@ -1,3 +1,4 @@
+import { workActionRecipe, WORK_ACTION_CONTRACT_REVISION } from "../client/work-actions.mjs";
 import { nextWorkStep, workActions, workCollaboration, workResume } from "../src/workflow.js";
 import { charterContext } from "../src/room-charter.js";
 import { validateHelp, workHelpContext } from "../src/work-help.js";
@@ -105,6 +106,20 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   for (const entry of offers?.offers ?? []) participantIds.add(entry.offer.offererId);
   const participants = [...participantIds].map(id => state.members[id]
     ? pick(state.members[id], "id displayName kind active revision permissions") : { id, unavailable: true });
+  const suggestedActions = workActions(item, member, now).map(([action, label]) => ({ action, label }));
+  const actionRecipes = [];
+  if (!state.agentHalts?.[viewerId]) {
+    for (const { action } of suggestedActions) {
+      const operation = action === "claim" ? "take" : action === "renew" ? "renew" : action === "release" ? "release" : null;
+      if (operation) actionRecipes.push(workActionRecipe("room_claim", { workItemId, expectedRevision: item.revision, action: operation }, state.room.id));
+    }
+  }
+  // Handoff is allowed while halted: it records context for triage, never starts
+  // or transfers work. These are the reducer's assignment/state/permission gates.
+  if (member.active !== false && item.accountableMemberId === viewerId && member.permissions.includes("accept_work")
+    && ["accepted", "working", "blocked"].includes(item.state) && !item.supersededBy) {
+    actionRecipes.push(workActionRecipe("room_handoff", { workItemId, expectedRevision: item.revision }, state.room.id));
+  }
   const value = {
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
@@ -117,7 +132,9 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
       automatic: false,
       guidance: "Optional discovery preference. Hosted MCP tools/list accepts params.focus; omit focus from both params and URL and set profile=full for the full catalog. This does not select a mode, change permissions or authorize execution."
     },
-    suggestedActions: workActions(item, member, now).map(([action, label]) => ({ action, label })),
+    suggestedActions,
+    actionRecipes,
+    workActionContractRevision: WORK_ACTION_CONTRACT_REVISION,
     collaboration: workCollaboration(item, member, participants),
     helpContextVersion: 1, help: workHelpContext(state, workItemId, viewerId, new Date(now).toISOString()),
     ...(includeOffers ? { offerContextVersion: 1, offers } : {}),

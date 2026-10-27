@@ -872,6 +872,15 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
       ]
     };
   }
+  if (["invalid_context_checkpoint", "context_history_changed"].includes(reasonCode)) {
+    return {
+      status: "action_required", reason: reasonCode,
+      hint: reasonCode === "context_history_changed"
+        ? "Preserve the saved session and pending operation journals; reconcile the changed history before resuming."
+        : "Send the complete saved history checkpoint unchanged; preserve pending operation journals.",
+      next: [command("Inspect the saved checkpoint and the current room history. Do not reset or rerun uncertain work automatically.")]
+    };
+  }
   if (reasonCode === "invalid_context_version") {
     return {
       status: "action_required", reason: "invalid_context_version",

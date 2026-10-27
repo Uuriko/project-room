@@ -51,7 +51,8 @@ function withRoomId(entry) {
       additionalProperties: false,
       ...(entry.inputSchema.allOf ? { allOf: entry.inputSchema.allOf } : {})
     },
-    annotations: entry.annotations
+    annotations: entry.annotations,
+    ...(entry._meta ? { _meta: entry._meta } : {})
   };
 }
 
