@@ -30,6 +30,8 @@ export const ABUSE_RATE_FAMILIES = Object.freeze(new Set([
   "link-join",
   "agent-webhook-subscribe",
   "guest-post",
+  "public-ask",
+  "public-agent",
   "write"
 ]));
 

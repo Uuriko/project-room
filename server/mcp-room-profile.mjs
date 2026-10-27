@@ -44,6 +44,7 @@ import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
 import { withSpendCharge } from "./spend-grants.mjs";
+import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
@@ -56,6 +57,7 @@ import { stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext,
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
+import { runRoomMap } from "./project-map-store.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -143,6 +145,15 @@ function validRoomArgs(name, args) {
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
+  if (name === "room_map") {
+    const repoOk = args.repo === undefined || typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200;
+    if (!repoOk || !["query", "path", "hotspots", "explain"].includes(args.op)) return false;
+    if (args.op === "hotspots") return args.q === undefined && args.from === undefined && args.to === undefined;
+    if (args.op === "path") {
+      return typeof args.from === "string" && typeof args.to === "string" && args.from.length >= 1 && args.to.length <= 300 && args.from.length <= 300 && args.to.length >= 1 && args.q === undefined;
+    }
+    return typeof args.q === "string" && args.q.length >= 1 && args.q.length <= 300 && args.from === undefined && args.to === undefined;
+  }
   if (name === "squads_get") return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
   if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
   if (name === "squads_update_members" || name === "squads_disband") {
@@ -216,12 +227,13 @@ function validRoomArgs(name, args) {
       && ["approve", "deny"].includes(args.decision) && permsOk && noteOk;
   }
   if (name === "room_create_agent_invite") {
-    const hasScope = args.profile !== undefined || args.permissions !== undefined;
+    const ownerOk = args.ownerEquivalent === undefined || args.ownerEquivalent === true || args.ownerEquivalent === false;
+    const hasScope = args.profile !== undefined || args.permissions !== undefined || args.ownerEquivalent !== undefined;
     const profileOk = args.profile === undefined || typeof args.profile === "string" && args.profile.length <= 32;
     const permsOk = args.permissions === undefined || validPermissionList(args.permissions);
     const ttlOk = args.expiresInMinutes === undefined || Number.isSafeInteger(args.expiresInMinutes) && args.expiresInMinutes >= 1;
     const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.length > 0 && args.displayName.length <= 80;
-    return hasScope && profileOk && permsOk && ttlOk && nameOk;
+    return hasScope && ownerOk && profileOk && permsOk && ttlOk && nameOk;
   }
   if (name === "room_list_agent_invites") return true;
   if (name === "room_revoke_agent_invite") return typeof args.inviteId === "string" && args.inviteId.length > 0 && args.inviteId.length <= 64;
@@ -471,7 +483,7 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
 }
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
-  if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
+  if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId });
   if (name === "room_create") {
     const request = {};
     for (const key of ["title", "purpose", "roomId", "kind", "displayName", "requestId"]) {
@@ -520,6 +532,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     return doc;
   }
   if (name === "squads_list") return listSquads(store, secret, roomId);
+  if (name === "room_map") return runRoomMap(store, secret, args);
   if (name === "squads_get") return getSquad(store, secret, roomId, args.squadId);
   if (name === "squads_create") {
     const data = { name: args.name };
@@ -599,7 +612,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_create_agent_invite") {
     const request = {};
-    for (const key of ["profile", "permissions", "expiresInMinutes", "displayName"]) {
+    for (const key of ["profile", "permissions", "ownerEquivalent", "expiresInMinutes", "displayName"]) {
       if (args[key] !== undefined) request[key] = args[key];
     }
     return store.invites.create(secret, roomId, request);
@@ -735,11 +748,12 @@ async function callWakeTool(store, secret, identity, name, args) {
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
     const mode = name === "wake_register" ? "wakeable" : name === "wake_clear" ? "pull-only" : args.mode;
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
-    // Cadence is sticky: wake_register/heartbeat_set pass the caller's
-    // value through untouched (omitted = preserve the stored declaration,
-    // a number = replace, explicit null = clear). wake_clear has no
+    // The cadence hint is sticky: wake_register/heartbeat_set pass the
+    // caller's value through untouched (omitted = preserve the stored
+    // hint, a number = replace, explicit null = clear); the store
+    // assigns the governing cadence from it. wake_clear has no
     // cadenceSeconds field by design, so it sends an explicit null —
-    // clearing the declaration is part of what "clear" means for this
+    // clearing the hint is part of what "clear" means for this
     // tool, now expressed as the documented clear instead of as the
     // side effect of an omitted field.
     const cadenceSeconds = name === "wake_clear" ? null : args.cadenceSeconds;
@@ -814,6 +828,14 @@ function argumentFailure(requestId, name, args, schema) {
     }
     if (name === "report_tip" && args.sourceRevision === undefined && args.buildId === undefined && !report.missing.length) {
       report.invalid.sourceRevision = "sourceRevision or buildId is required";
+    }
+    if (name === "room_record_handoff") {
+      for (const [alias, canonical] of [["done", "doneSummary"], ["next", "nextAction"], ["reason", "limitReason"]]) {
+        if (args[alias] !== undefined && args[canonical] !== undefined)
+          report.invalid[alias] = `${alias} and ${canonical} cannot both be supplied`;
+        else if (args[alias] === undefined && args[canonical] === undefined && !report.missing.includes(canonical))
+          report.missing.push(canonical);
+      }
     }
   }
   if (!report.missing.length && !report.unexpected.length && !Object.keys(report.invalid).length) {
@@ -913,7 +935,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       return mcpCallError(requestId, { reason: "unknown_tool", tool: called, suggestion: closestToolName(called, SUGGESTABLE_TOOLS) });
     }
     if (MCP_JOIN_TOOLS.some(entry => entry.name === name)) return handleMcpJoinRpc(message, { mcpUrl });
-    const args = message.params?.arguments ?? {};
+    let args = message.params?.arguments ?? {};
+    const selected = HOSTED_TOOLS.find(entry => entry.name === name);
+    args = withDefaultRoomId(store, secret, name, args, selected?.inputSchema);
     if (name === SEARCH_ACTIONS_TOOL) {
       const schema = actionMetaToolDefs.find(entry => entry.name === name).inputSchema;
       if (!validSearchActionsArgs(args)) return argumentFailure(requestId, name, args, schema);
@@ -931,7 +955,6 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
         { store, secret, identity, mcpUrl, searchParams, agentRooms });
     }
-    const selected = HOSTED_TOOLS.find(entry => entry.name === name);
     const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
       : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
         : WAKE_TOOLS.some(entry => entry.name === name) ? validWakeArgs(name, args)
@@ -969,7 +992,12 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       // handler with the inner tool name, so it is covered here too.
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
     } catch (error) {
-      const value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
+      let value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
+      if (error?.status === 409 && /stale/i.test(String(error?.message ?? "")) && typeof args?.roomId === "string") {
+        value = { ...value, reason: "stale_revision", next: [{ tool: "room_read_work", arguments: {
+          roomId: args.roomId, ...(typeof args.workItemId === "string" ? { workItemId: args.workItemId } : {})
+        } }] };
+      }
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
     }
   }

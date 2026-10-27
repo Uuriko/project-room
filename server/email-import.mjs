@@ -5,7 +5,7 @@ import { emailConnection, emailDigest, emailInput, emailOpaqueId, emailText, exa
 import { channelProfile, connectionState, isEmailProfile, profileExternalId, toChannelProfile } from "./channel-connection.mjs";
 import { adapterForChannel, readChannelEnvelope } from "./channel-adapters/index.mjs";
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { webhookRotationDefaults } from "./channel-adapters/telegram-rotation.mjs";
 
 const fail = (code, message, status = 409) => { throw new ServiceError(status, code, message); };
