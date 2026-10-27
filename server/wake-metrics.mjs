@@ -44,6 +44,8 @@
 // Both tables are lazy/additive (created on first record, like the
 // listener-lease tables) and registered in writer-fence lazyAdditiveTables.
 
+import { runWakeTransaction } from "./wake-transaction.mjs";
+
 export const WAKE_STORES = Object.freeze(["signals", "work", "queue"]);
 export const WAKE_EVENTS = Object.freeze([
   "emitted", "coalesced", "suppressed_no_host", "suppressed_no_identity",
@@ -121,8 +123,12 @@ function noteRecordFailure(store, event, error) {
 // failure returns false AND is counted + logged centrally (see
 // noteRecordFailure above), so no caller has to inspect the return for
 // the failure to be visible. The counter row and its failure-journal
-// row write inside one savepoint: a partial failure (counter advanced,
-// journal row lost — audit D3-5 P1) rolls both back.
+// row write inside one isolated transaction (runWakeTransaction — the
+// runner RoomStore registers for its db, server/wake-transaction.mjs):
+// a partial failure (counter advanced, journal row lost — audit D3-5
+// P1) rolls both back, without disturbing any transaction the caller
+// already holds. A db with no registered runner throws before any
+// write (fail closed), so a partial record is impossible there too.
 export function recordWakeEvent(db, { at, roomId = null, store, event, door = "", kind = "", n = 1, subjectId = null, reason = null } = {}) {
   try {
     if (!WAKE_STORES.includes(store) || !WAKE_EVENTS.includes(event)) return false;
@@ -130,8 +136,7 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
     if (!Number.isSafeInteger(n) || n <= 0) return false;
     ensureWakeMetricsSchema(db);
     const stamp = Number.isSafeInteger(at) ? at : 0;
-    db.exec("SAVEPOINT wake_record_event");
-    try {
+    runWakeTransaction(db, () => {
       db.prepare(`INSERT INTO agent_wake_counters (room_id, store, event, door, kind, n, first_at, last_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(room_id, store, event, door, kind) DO UPDATE SET
@@ -143,14 +148,7 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
         db.prepare(`DELETE FROM agent_wake_failures WHERE id <=
           (SELECT MAX(id) FROM agent_wake_failures) - ?`).run(FAILURE_JOURNAL_CAP);
       }
-      db.exec("RELEASE SAVEPOINT wake_record_event");
-    } catch (error) {
-      try {
-        db.exec("ROLLBACK TO SAVEPOINT wake_record_event");
-        db.exec("RELEASE SAVEPOINT wake_record_event");
-      } catch { /* the outer catch reports the original failure */ }
-      throw error;
-    }
+    });
     return true;
   } catch (error) {
     noteRecordFailure(store, event, error);

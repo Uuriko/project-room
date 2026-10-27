@@ -21,6 +21,7 @@ import { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { recordWakeEvent, wakeAccounting, wakeRecordFailures, resetWakeRecordFailuresForTests } from "../server/wake-metrics.mjs";
 import { createOperatorRoutes } from "../server/operator-routes.mjs";
+import { registerBareIsolatedTransactions } from "./helpers/bare-db-isolated-transactions.mjs";
 
 const TOKEN = "wake-accounting-operator-token-0123456789";
 const HASH = createHash("sha256").update(TOKEN).digest("hex");
@@ -56,7 +57,7 @@ function operatorFixture(t, db) {
 }
 
 test("operator route renders the wake accounting view in production shape", async t => {
-  const db = new DatabaseSync(":memory:");
+  const db = registerBareIsolatedTransactions(new DatabaseSync(":memory:"));
   t.after(() => db.close());
   assert.equal(recordWakeEvent(db, { at: 100, roomId: "commons", store: "signals", event: "emitted", kind: "mention" }), true);
   assert.equal(recordWakeEvent(db, { at: 101, roomId: "commons", store: "signals", event: "failed", kind: "mention", reason: "enqueue_error", subjectId: "ai_x" }), true);
@@ -105,7 +106,7 @@ test("a broken counter store returns false but is counted and logged centrally",
 test("a partial failure rolls the counter back: no counter without its journal row", t => {
   resetWakeRecordFailuresForTests();
   t.after(() => resetWakeRecordFailuresForTests());
-  const db = new DatabaseSync(":memory:");
+  const db = registerBareIsolatedTransactions(new DatabaseSync(":memory:"));
   t.after(() => db.close());
   assert.equal(recordWakeEvent(db, { at: 1, store: "signals", event: "emitted" }), true);
   db.exec("DROP TABLE agent_wake_failures");
