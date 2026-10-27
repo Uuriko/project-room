@@ -62,45 +62,82 @@ const tooBig = error => isTooBig(error)
   : error;
 
 export class DurableDatabase {
-  constructor(storage) { this.storage = storage; this.isTransaction = false; this.rowsRead = 0; }
-  #count(cursor) {
-    const n = Number(cursor?.rowsRead ?? 0);
-    if (n) this.rowsRead += n;
+  constructor(storage, { observeStatement } = {}) {
+    this.storage = storage; this.isTransaction = false; this.rowsRead = 0;
+    this.observeStatement = observeStatement;
+  }
+  // Observers receive only counters, never SQL, bindings or errors. Capture
+  // ownership at execution, not prepare(): statements are reused across requests.
+  #countRead(cursor) {
+    try { const n = Number(cursor?.rowsRead ?? 0); if (n) this.rowsRead += n; }
+    catch { /* unavailable diagnostic counters must not change SQL results */ }
+  }
+  #observation() {
+    let finish;
+    try { finish = this.observeStatement?.(); } catch { /* diagnostics cannot break SQL */ }
+    return (cursor, failed) => {
+      let rowsRead = null, rowsWritten = null;
+      try {
+        if (Number.isSafeInteger(cursor?.rowsRead) && cursor.rowsRead >= 0) rowsRead = cursor.rowsRead;
+        if (Number.isSafeInteger(cursor?.rowsWritten) && cursor.rowsWritten >= 0) rowsWritten = cursor.rowsWritten;
+      } catch { /* unavailable counters remain unknown */ }
+      this.#countRead(cursor);
+      try { finish?.({ rowsRead, rowsWritten, failed }); } catch { /* diagnostics cannot break SQL */ }
+    };
+  }
+  #all(sql, args) {
+    const finish = this.observeStatement ? this.#observation() : null;
+    let cursor, failed = false;
+    try { cursor = this.storage.sql.exec(sql, ...args); return cursor.toArray(); }
+    catch (error) { failed = true; throw tooBig(error); }
+    finally { if (finish) finish(cursor, failed); else this.#countRead(cursor); }
   }
   exec(sql) {
-    return durableStorage.transaction(this, () => {
-      let cursor;
-      try { cursor = this.storage.sql.exec(sql); } catch (error) { throw tooBig(error); }
-      const rows = cursor.toArray();
-      this.#count(cursor);
-      return rows;
-    });
+    return durableStorage.transaction(this, () => this.#all(sql, []));
   }
   prepare(sql) {
     const db = this;
     function* iterate(...args) {
-      let cursor;
+      // Generator body starts on first next(), including observation capture.
+      if (!db.observeStatement) {
+        let cursor;
+        try { cursor = db.storage.sql.exec(sql, ...args); yield* cursor; }
+        catch (error) { throw tooBig(error); }
+        finally { db.#countRead(cursor); }
+        return;
+      }
+      const finish = db.#observation();
+      let cursor, failed = false;
       try {
-        cursor = db.storage.sql.exec(sql, ...args);
-        yield* cursor;
+        let iterator;
+        try { cursor = db.storage.sql.exec(sql, ...args); iterator = cursor[Symbol.iterator](); }
+        catch (error) { failed = true; throw error; }
+        const observed = {
+          [Symbol.iterator]() { return this; },
+          next(...values) {
+            try { return iterator.next(...values); }
+            catch (error) { failed = true; throw error; }
+          }
+        };
+        if (iterator.return) observed.return = (...values) => {
+          try { return iterator.return(...values); }
+          catch (error) { failed = true; throw error; }
+        };
+        // Consumer-injected throw/cancellation is not a proven SQL error.
+        if (iterator.throw) observed.throw = (...values) => iterator.throw(...values);
+        yield* observed;
       } catch (error) { throw tooBig(error); }
-      finally { db.#count(cursor); }
+      finally { finish(cursor, failed); }
     }
-    const all = (...args) => {
-      let cursor;
-      try { cursor = this.storage.sql.exec(sql, ...args); } catch (error) { throw tooBig(error); }
-      const rows = cursor.toArray();
-      this.#count(cursor);
-      return rows;
-    };
+    const all = (...args) => this.#all(sql, args);
     return {
       all,
       iterate,
       get: (...args) => all(...args)[0],
       run: (...args) => durableStorage.transaction(this, () => {
         all(...args);
-        // rowsWritten includes trigger/index work; changes() matches Node's
-        // affected-row semantics used by invitation compare-and-swap checks.
+        // These raw calls and writer-permit maintenance are deliberately outside
+        // the initial adapter-observed diagnostic, not claimed as total SQL cost.
         return { changes: this.storage.sql.exec('SELECT changes() AS n').one().n };
       })
     };

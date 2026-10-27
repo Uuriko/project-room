@@ -12,6 +12,8 @@ import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
+import { drainProjectMapQueue, projectMapPending } from "./project-map-store.mjs";
+import { projectMapEnabled } from "./project-map.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
 import { ChannelDrainer, channelDrainLimits } from "./channel-drain.mjs";
@@ -641,6 +643,17 @@ export const JOBS = Object.freeze([
     async run(_store, ctx) {
       if (typeof ctx.growthTick !== "function") return { skipped: 1 };
       return ctx.growthTick();
+    }
+  }),
+  defineJob({
+    name: "project-map",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled: (env, store) => projectMapEnabled(env) && projectMapPending(store),
+    disabledReason: () => "No map rebuild is waiting",
+    nextDueAt: (store, now) => (projectMapPending(store) ? now : null),
+    async run(store, ctx) {
+      return drainProjectMapQueue(store, ctx?.env);
     }
   }),
   defineJob({
