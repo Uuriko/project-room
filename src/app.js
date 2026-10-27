@@ -7023,7 +7023,7 @@ async function refreshPresenceStates() {
   const request = { seq: ++presenceSeq, generation: client.generation, room: state };
   presenceRequest = request;
   try {
-    const result = await client.request(client.path("/presence"));
+    const result = await client.request(client.path("/presence"), { fresh: true }); // a refresh is a new read
     if (!ownsPresenceRequest(request)) return;
     const next = new Map();
     for (const entry of result?.members ?? []) {

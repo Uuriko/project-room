@@ -210,7 +210,8 @@ export class RoomClient {
     }
     try {
       const restored = await this.request(accountMode ? `/api/session?room=${encodeURIComponent(roomId)}` : "/api/session",
-        accountMode ? { authMode: "account", authSession: accountSession } : {});
+        // Each restore revalidates the session; it never joins an earlier check.
+        accountMode ? { authMode: "account", authSession: accountSession, fresh: true } : { fresh: true });
       if (generation !== this.generation) return null;
       if (accountMode && (accountClient !== this.accountClient || accountGeneration !== accountClient.generation || accountSession !== accountClient.session
         || restored?.authMode !== "account" || restored.roomId !== roomId || !sameAccountSession(restored, accountSession))) return null;
