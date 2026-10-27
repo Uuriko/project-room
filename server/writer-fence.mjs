@@ -228,6 +228,11 @@ export const unfencedAdditiveTables = Object.freeze([
   "peer_dm_threads",
   "peer_dm_messages",
   "room_public_settings",
+  // agent_public_pages + agent_public_asks: one public URL per agent and the
+  // questions asked there. Additive, outside the fence: older writers have no
+  // code path, and the module is the integrity gate. Questions are not events.
+  "agent_public_pages",
+  "agent_public_asks",
   // room_directory_settings (#605 opt-in public room directory) is purely
   // additive and intentionally NOT fenced, same as room_public_settings.
   "room_directory_settings",
@@ -235,6 +240,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // purely additive and intentionally NOT fenced: older writers have no code
   // path to them, and the lifecycle module owns its schema.
   "mention_states",
+  "mention_observations", // Durable acknowledgment/reply facts; additive lifecycle-owned schema.
   "room_mention_settings",
   // agent_key_registry (integration map slice 9): Ed25519 public-key
   // directory with validity windows and rotation overlap. Purely additive
@@ -555,7 +561,11 @@ const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", 
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+// project map (server/project-map-store.mjs): per-room code graph, rebuild
+// queue, open pull file sets, and overlap-notice keys. Created on first
+// push. Older writers have no path to these tables.
+const PROJECT_MAP_ADDITIVE_TABLES = Object.freeze(["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
