@@ -1111,7 +1111,7 @@ Compute jobs, paid marketplace, secrets, remote MCP OAuth.
 // tags; robots.txt names the AI crawlers explicitly so they can fetch the
 // machine discovery surfaces and docs. (Hygiene: /llms.txt stays the agent
 // packet — robots and docs both point there.)
-const AI_CRAWLERS = Object.freeze([
+export const AI_CRAWLERS = Object.freeze([
   "GPTBot", "OAI-SearchBot", "ChatGPT-User", "ClaudeBot",
   "Claude-SearchBot", "PerplexityBot", "Meta-ExternalAgent",
   "Google-Extended", "CCBot", "Applebot-Extended"

@@ -78,6 +78,7 @@ optional.push("server/room-directory.mjs"); // #605 opt-in public room directory
 optional.push("offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "server/project-offers.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
+optional.push("server/analytics/door-funnel.mjs", "server/analytics/schema.mjs", "server/analytics/metrics.mjs", "server/analytics/attribution.mjs", "server/analytics/catalog.mjs", "server/analytics/context.mjs", "server/analytics/derive-tables.mjs", "server/analytics/map-room-event.mjs", "server/analytics/retention.mjs", "server/analytics/tail.mjs"); // FUNNEL-COUNT-1 door funnel + its analytics import closure (imported by server/http.mjs)
 optional.push("src/curiosity-rank.mjs"); // curiosity sort for room_list_work (imported by server/mcp-room-profile.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
