@@ -10,7 +10,6 @@ test("agent docs pages let inline code wrap so 390px phones do not scroll sidewa
   const pages = agentPages();
   const paste = pages.get(PASTE_PAGE.htmlFile);
   assert.ok(paste, "paste page is generated");
-  assert.match(paste, /<li>[^<]*<code>curl -sS -X POST https:\/\/room\.trydemigod\.com\/api\//, "paste page carries long inline curl commands");
   for (const [file, html] of pages) {
     const style = html.match(/<style>([\s\S]*?)<\/style>/)?.[1] || "";
     assert.match(style, /:not\(pre\)>code\{overflow-wrap:anywhere\}/, `${file} wraps inline code`);

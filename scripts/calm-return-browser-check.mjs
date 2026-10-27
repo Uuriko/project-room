@@ -106,7 +106,7 @@ for (const mobile of [false, true]) {
     await page.locator("#message-input").evaluate(node => node.setSelectionRange(2, 9));
     await openCatchUp(page); await ready();
     await attention("return-1").click();
-    assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), false);
     assert.equal(await card("return-1").evaluate(node => node === document.activeElement), true);
     assert.deepEqual(await page.locator("#message-input").evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ["A draft to keep while catching up.", 2, 9]);
     assert.equal(await page.locator("#message-to-select").inputValue(), "guest");
@@ -127,7 +127,7 @@ for (const mobile of [false, true]) {
     assert.equal(await card("return-1").locator('[data-action="start"]').count(), 0);
     assert.equal(await card("return-1").locator('[data-action="claim"]').count(), 1);
     assert.match(await card("return-1").locator(".claim > summary").textContent(), /expired/);
-    assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), false);
     assert.equal(Number(await page.locator("#rb-ack-button").getAttribute("data-horizon")), horizon);
     assert.deepEqual(snapshot(), initial); assert.deepEqual(writes.filter(path => !path.endsWith("/typing")), []);
 

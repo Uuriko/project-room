@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openCatchUp } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 // Real browser commands against disposable loopback rooms only. No external agent runs.
 import test from "node:test";
@@ -72,7 +72,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await isOpen("#rb-history-section"), false);
     assert.equal(await isOpen("#rb-involving-section"), false);
     await page.locator("#message-input").fill("Keep my draft while I move around the room.");
-    await page.locator("#topbar-catchup").click();
+    await openCatchUp(page);
     assert.equal(await isOpen("#catchup-dialog"), true);
     assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft while I move around the room.");
     await page.locator("#return-brief-panel > summary").click();
@@ -185,7 +185,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#message-input").fill("Keep this private unsent draft while I review changes.");
     await Promise.all([
       page.waitForResponse(response => new URL(response.url()).pathname === "/api/rooms/commons/return-brief"),
-      page.locator("#topbar-catchup").click()
+      openCatchUp(page)
     ]);
     await page.waitForFunction(() => document.querySelector("#summary-grid").textContent && !document.querySelector("#rb-refresh-button").disabled);
     assert.equal(await isOpen("#return-brief-panel"), true);
