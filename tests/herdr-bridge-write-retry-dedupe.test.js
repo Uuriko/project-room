@@ -94,7 +94,7 @@ function startFakeHerdr(socketPath) {
 }
 
 before(async () => {
-  dir = mkdtempSync(join(tmpdir(), 'herdr-bridge-2868-'));
+  dir = mkdtempSync(join(tmpdir(), 'hbd-'));
   mkdirSync(join(dir, 'sockets'), { recursive: true });
   const socketPath = join(dir, 'sockets', 'a.sock');
   const tenantsFile = join(dir, 'tenants.json');

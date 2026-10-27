@@ -31,9 +31,13 @@ function freezeGuard(guard) {
 }
 
 const ROWS = [
+  ...["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
+  { table: "mention_observations", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   { table: "share_link_join_redemptions", key: "account_id", action: "retain", reason: "Immutable link-redemption journal prevents cross-account replay; retained alongside share_link_joins", match: { account: ["account_id"] } },
 
   ...["room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: {room:["room_id"]} })),
+  { table: "message_replay_snapshots", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "work_entities", key: "room_id", action: "delete", match: { room: ["room_id"] } },
   { table: "projection_bodies", key: "room_id", action: "delete", match: { room: ["room_id"] } },
   ...["room_assistant_config", "room_assistant_runs", "room_assistant_ops"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   // Retired schemas remain in upgraded databases but are never created on a
@@ -1104,6 +1108,26 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_public_pages",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "agent_public_asks",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "messages_backfill_cursor",
     "key": "room_id",
     "action": "delete",
@@ -1509,6 +1533,16 @@ const ROWS = [
   },
   {
     "table": "public_work_reviews",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "public_work_review_versions",
     "key": "room_id",
     "action": "delete",
     "match": {
@@ -1948,6 +1982,16 @@ const ROWS = [
   },
   {
     "table": "work_claims",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
+    "table": "work_claim_history",
     "key": "room_id",
     "action": "delete",
     "match": {
