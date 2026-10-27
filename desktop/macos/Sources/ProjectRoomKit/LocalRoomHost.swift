@@ -55,6 +55,7 @@ public final class LocalRoomHost {
     private var session: String?
     private var macTools: [String: String] = ["mode": "unknown"]
     private var lastExit = "none"
+    private var lastFailureCode: String?
     public private(set) var journalURL: URL?
     public init(directory: URL? = nil) throws {
         self.directory = directory ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("Project Room/Room Host")
@@ -113,7 +114,7 @@ public final class LocalRoomHost {
         try JSONEncoder().encode(selected).write(to: saved, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: saved.path)
         manifest = selected; scope = identity
-        lastExit = "none"
+        lastExit = "none"; lastFailureCode = nil
         macTools = LocalHostReadiness.toolConfiguration(URL(fileURLWithPath: selected.runtimeConfig))
         journalURL = directory.appendingPathComponent("room-\(key).sqlite")
         lastMessage = "Ready to start · \(identity["roomId"]!)"
@@ -197,7 +198,7 @@ public final class LocalRoomHost {
             close(fd); throw error
         }
         ownerFD = fd; stopping = false; session = nil; launchTime = Date(); lastMessage = "Starting agent…"
-        lastExit = "none"
+        lastExit = "none"; lastFailureCode = nil
         let child = pid; finished.enter()
         work.async { [self] in supervise(child, manifest: manifest, journal: journalURL); finished.leave() }
     }
@@ -235,7 +236,8 @@ public final class LocalRoomHost {
         reapGroup(child)
         lock.lock()
         pid = 0; stopping = false
-        lastExit = confirmed ? "confirmed_stop" : "unconfirmed"
+        lastFailureCode = LocalHostReadiness.failureNotice(code: receipt?["failureCode"] as? String) != nil ? receipt?["failureCode"] as? String : nil
+        lastExit = lastFailureCode != nil ? "failed" : confirmed ? "confirmed_stop" : "unconfirmed"
         lastMessage = confirmed ? "Agent stopped" : requested ? "Host ended · execution needs reconciliation" : "Agent ended · check connection setup"
         if ownerFD >= 0 { close(ownerFD); ownerFD = -1 }
         lock.unlock()
@@ -278,7 +280,7 @@ public final class LocalRoomHost {
         return value
     }
     public func snapshot() -> [String: Any] {
-        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope, selectedTools = macTools, exitState = lastExit, receiving = receivingEnabled, directed = manifest?.allowedRequesterIds != nil; lock.unlock()
+        lock.lock(); let child = pid, message = lastMessage, configured = manifest != nil, isStopping = stopping, selectedScope = scope, selectedTools = macTools, exitState = lastExit, receiving = receivingEnabled, failureCode = lastFailureCode, directed = manifest?.allowedRequesterIds != nil; lock.unlock()
         var text = message
         var evidence: [String: Any] = ["statusFresh": false, "phase": "unknown", "protocol": "unverified", "credentials": "unknown"]
         if child != 0 && !isStopping {
@@ -299,6 +301,10 @@ public final class LocalRoomHost {
                     }
                 }
             } else { text = "Connecting · current status unavailable" }
+        }
+        if let failureCode {
+            evidence["failureCode"] = failureCode
+            text = LocalHostReadiness.failureNotice(code: failureCode) ?? text
         }
         if directed { text += " · Directed requests" }
         return evidence.merging(["hostMode": directed ? "directed_requests" : "shared_asks", "receivingEnabled": receiving, "configured": configured, "running": child != 0, "stopping": isStopping, "message": text,

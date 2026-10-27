@@ -338,3 +338,18 @@ automatic rebasing.
 Qualification: send one bounded formal request from an enabled member, verify its
 linked response, then test Stop and restart with synthetic data. Protocol or login
 readiness alone is not evidence of a completed model turn or cross-device failover.
+
+
+### Native startup failure diagnosis
+
+The private status record can carry a bounded `failureCode`: profile ownership,
+protocol qualification, dedicated-account sign-in, or an unspecified host failure.
+Provider stderr, error messages, credentials and arbitrary codes are never copied
+into this field. The native app retains the matching child session’s diagnosis
+when that child exits. A new explicit start clears the old diagnosis.
+
+When receiving remains enabled but the child has exited, My Mac offers **Retry
+agent** alongside **Disconnect agent**. Retry uses the existing ownership checks;
+it never clears a profile lock or discards unresolved execution. Disconnect still
+turns off receiving across app restarts. A reported failure is not confirmation
+that an external effect did not occur: inspect unfinished work before retrying.

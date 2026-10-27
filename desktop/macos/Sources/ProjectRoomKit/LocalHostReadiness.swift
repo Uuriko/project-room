@@ -15,11 +15,22 @@ public enum LocalHostReadiness {
         return ["mode": tools["inputApproval"] as? String == "approve" ? "control" : "approval_required", "connection": connection]
     }
 
+    public static func failureNotice(code: String?) -> String? {
+        switch code {
+        case "runtime_profile_locked": return "Another agent may still own this profile. Check its process and unfinished work before retrying. Do not remove its lock to force a restart."
+        case "runtime_protocol_unavailable": return "The Codex runtime could not pass its connection check. Review the configured executable in agent setup, then retry."
+        case "login_required": return "Sign in to the dedicated Codex account through Set up agent, then retry."
+        case "host_failed": return "The agent ended unexpectedly. Review agent setup and unfinished work before retrying."
+        default: return nil
+        }
+    }
+
     /// Conversation does not require local computer permissions. Keep its
     /// readiness independent from optional tools and never imply model success.
     public static func conversationNotice(host: [String: Any]) -> String? {
         guard host["configured"] as? Bool == true else { return "Set up this Mac’s agent to work from Conversation." }
         if host["stopping"] as? Bool == true { return "This Mac’s agent is stopping. Wait before starting it again." }
+        if let failure = failureNotice(code: host["failureCode"] as? String) { return failure }
         guard host["running"] as? Bool == true else {
             return host["lastExit"] as? String == "unconfirmed"
                 ? "This Mac’s agent ended without a confirmed stop. Review its status in My Mac before restarting."

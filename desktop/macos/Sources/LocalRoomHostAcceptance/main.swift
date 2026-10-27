@@ -22,10 +22,12 @@ if CommandLine.arguments.count > 3, CommandLine.arguments[2].hasPrefix("--") {
     try fm.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
     let started = stamp(), session = UUID().uuidString.lowercased()
     func status(_ phase: String) throws {
-        try write(["schemaVersion":1,"pid": mode == "wrongpid" ? Int(getpid()) + 1 : Int(getpid()), "sessionId":session,
+        var record: [String: Any] = ["schemaVersion":1,"pid": mode == "wrongpid" ? Int(getpid()) + 1 : Int(getpid()), "sessionId":session,
             "startedAt":started,"updatedAt":mode == "stale" ? "2000-01-01T00:00:00.000Z" : stamp(),
             "origin":"https://fixture.invalid", "roomId":"fixture", "memberId":"agent", "phase":phase,
-            "protocol": mode == "unverified" ? "unverified" : "qualified", "credentials":"not_required", "modelExecution":"not_tested"], directory + "/status.json")
+            "protocol": mode == "unverified" ? "unverified" : "qualified", "credentials":"not_required", "modelExecution":"not_tested"]
+        if mode == "profile-locked" { record["failureCode"] = "runtime_profile_locked" }
+        try write(record, directory + "/status.json")
     }
     if mode == "resistant" {
         signal(SIGTERM, SIG_IGN)
@@ -39,6 +41,7 @@ if CommandLine.arguments.count > 3, CommandLine.arguments[2].hasPrefix("--") {
         try String(child).write(toFile: journal + ".child", atomically: true, encoding: .utf8)
     }
     try status("watching_room")
+    if mode == "profile-locked" { try status("stopped"); exit(1) }
     if mode == "exit" { exit(3) }
     while true {
         if mode != "resistant" && fm.fileExists(atPath: journal + ".stop") { try status("stopped"); exit(0) }
@@ -277,6 +280,17 @@ for mode in ["wrongpid","stale","unverified","exit"] {
     }
     check(other.stopAndWait(), "\(mode) cleanup bounded")
 }
+let (locked, lockedDir) = try fixture("profile-locked")
+try locked.start()
+check(until { locked.snapshot()["running"] as? Bool == false }, "failed child exits")
+check(locked.snapshot()["failureCode"] as? String == "runtime_profile_locked", "bounded failure survives child exit")
+check(locked.snapshot()["lastExit"] as? String == "failed", "failure is not reported as clean stop")
+check(LocalHostReadiness.conversationNotice(host: locked.snapshot())?.contains("unfinished work") == true, "native notice gives recovery guidance")
+check(LocalHostReadiness.failureNotice(code: "PRIVATE-STDERR") == nil, "unknown diagnostic text is not displayed")
+try "healthy".write(to: lockedDir.appendingPathComponent("runtime.json"), atomically: true, encoding: .utf8)
+try locked.start()
+check(locked.snapshot()["failureCode"] == nil, "explicit retry clears old failure")
+check(locked.stopAndWait(), "retry shutdown succeeds")
 let (resistant,_) = try fixture("resistant"); try resistant.start()
 let childPath = resistant.journalURL!.path + ".child"
 check(until { fm.fileExists(atPath:childPath) }, "resistant descendant started")

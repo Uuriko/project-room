@@ -102,6 +102,10 @@ Normal invocation executes one already-created public Room assistant run assigne
         emit: event => console.log(JSON.stringify(event)) });
       console.log(JSON.stringify({ status: result.result.status, runId, resultMessageId: result.result.resultMessageId ?? null }));
     }
+  } catch (error) {
+    // Only bounded codes cross into native status; never persist provider stderr.
+    try { statusWriter?.event({ type: "host_failure", code: error.code }); } catch { /* preserve original failure */ }
+    throw error;
   } finally {
     statusWriter?.close();
     try { await rpc?.close(); } finally { db?.close(); process.removeListener("SIGINT", stop); process.removeListener("SIGTERM", stop); }

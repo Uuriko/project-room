@@ -3,6 +3,7 @@ import { isAbsolute, join } from "node:path";
 import { WatchJournal } from "./watch-journal.mjs";
 
 const phases = new Set(["watching_room", "assistant_not_selected", "protocol_qualified", "running", "settled", "recovery_pending", "retrying_room", "stopped"]);
+const failureCodes = new Set(["runtime_profile_locked", "runtime_protocol_unavailable", "login_required", "host_failed"]);
 const credentials = new Set(["unknown", "present", "login_required", "not_required"]);
 const privatePath = (path, directory = false) => {
   const stat = lstatSync(path);
@@ -24,6 +25,7 @@ function readRecord(path) {
     phase: value.phase, protocol: value.protocol, credentials: value.credentials, modelExecution: "not_tested" };
   for (const key of ["origin", "roomId", "memberId", "runId"])
     if (typeof value[key] === "string" && value[key].length <= 256) result[key] = value[key];
+  if (failureCodes.has(value.failureCode)) result.failureCode = value.failureCode;
   return result;
 }
 
@@ -57,7 +59,7 @@ export function createCodexStatusWriter(directory, connection, { onError = () =>
   return {
     event(event) {
       if (failure) throw failure;
-      if (!["host_status", "host_readiness"].includes(event.type)) return;
+      if (!["host_status", "host_readiness", "host_failure"].includes(event.type)) return;
       if (event.type === "host_status" && phases.has(event.status)) {
         record.phase = event.status;
         if (event.status === "protocol_qualified") record.protocol = "qualified";
@@ -68,6 +70,7 @@ export function createCodexStatusWriter(directory, connection, { onError = () =>
       if (event.type === "host_readiness" && credentials.has(event.credentials)) {
         record.credentials = event.credentials; record.protocol = "qualified";
       }
+      if (event.type === "host_failure") record.failureCode = failureCodes.has(event.code) ? event.code : "host_failed";
       write();
     },
     close() { clearInterval(timer); stopped = true; }
