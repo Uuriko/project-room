@@ -315,7 +315,7 @@ test("L6: the agent-invite audit and revoke handle never carry a stored code has
   const legacyId = sha256(legacy).slice(0, 8);
   const revoked = await request("/api/rooms/commons/agent-invites", { method: "DELETE", token: ownerKey, data: { inviteId: legacyId } });
   assert.equal(revoked.status, 200);
-  assert.deepEqual(await revoked.json(), { inviteId: legacyId, revoked: true });
+  assert.deepEqual(await revoked.json(), { inviteId: legacyId, revoked: true, status: "revoked" });
   assert.equal(store.db.prepare("SELECT revoked_at FROM agent_invite_codes WHERE code_hash=?").get(sha256(legacy)).revoked_at > 0, true);
   assert.equal(store.db.prepare("SELECT revoked_at FROM agent_invite_codes WHERE code_hash<>?").get(sha256(legacy)).revoked_at, null);
   const byHash = await request("/api/rooms/commons/agent-invites", { method: "DELETE", token: ownerKey, data: { inviteId: sha256(legacy) } });

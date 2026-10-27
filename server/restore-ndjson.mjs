@@ -562,8 +562,10 @@ export function createBackupReplaySession(store, { audit = "strict" } = {}) {
 }
 
 // Operator gate, mirroring server/room-export.mjs's operatorExportResponse:
-// the same ROOM_BACKUP_TOKEN guards export and restore, and an unconfigured
-// token answers 404 so the endpoint does not advertise itself.
+// TM-2 split the shared backup credential, so the Durable Object passes
+// this door ROOM_RESTORE_TOKEN only (the export door gets
+// ROOM_EXPORT_TOKEN); an unconfigured token answers 404 so the endpoint
+// does not advertise itself.
 const sha256Hex = value => createHash("sha256").update(value).digest("hex");
 
 function authorizeOperatorRestore(authorization, expected) {
