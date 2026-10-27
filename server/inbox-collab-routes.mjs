@@ -18,7 +18,7 @@
 // pure modules see them. Approval verdicts additionally require a human
 // caller — an agent can never clear its own draft, enforced both here (403)
 // and by the queue itself (approval_not_human).
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { recordWakeEvent } from "./wake-metrics.mjs";
 
@@ -71,7 +71,11 @@ const callerOf = auth => ({
 export async function handleInboxCollab(options) {
   const { req, res, store, helpers, reauthorize } = options;
   if (["GET", "HEAD"].includes(req.method)) return handleInboxCollabCore(options);
-  const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
+  // The sweep takes no fields. A blank body runs it. Any key is named in the 422.
+  const sweep = options.collabRoute === "envelope-sweep" && req.method === "POST";
+  const requestData = req.method === "POST"
+    ? await helpers.body(req, sweep ? { allowEmpty: true, fields: [], unknownCode: "invalid_input" } : {})
+    : undefined;
   const result = store.transaction(() => handleInboxCollabCore({ ...options,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },

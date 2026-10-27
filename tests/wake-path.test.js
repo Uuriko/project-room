@@ -76,7 +76,9 @@ test("heartbeat validates cadenceSeconds", t => {
   const { host } = hb.heartbeat({ ...wakeable(), cadenceSeconds: 300 });
   assert.equal(host.cadenceSeconds, 300);
   const bare = hb.heartbeat({ ...wakeable("host-2") });
-  assert.equal(bare.host.cadenceSeconds, null, "a host that never declared a cadence reads null");
+  // BUILD-HEARTBEAT-CADENCE: no declaration means no hint — the server
+  // assigns its default (120s, whose window is the old 180s default).
+  assert.equal(bare.host.cadenceSeconds, 120, "a host that never declared a cadence is assigned the server default");
 });
 
 test("cadence is sticky: omit preserves, a value replaces, explicit null clears", t => {
@@ -101,17 +103,18 @@ test("cadence is sticky: omit preserves, a value replaces, explicit null clears"
   const replaced = hb.heartbeat({ ...wakeable(), cadenceSeconds: 60 });
   assert.equal(replaced.host.cadenceSeconds, 60);
   assert.equal(storedCadence(), 60);
-  // An explicit null is the clear: back to no declaration and the
-  // 180s default window.
+  // An explicit null is the clear: the hint is gone, so the server
+  // assigns its default — whose window is the same 180s the cleared
+  // declaration used to read.
   const cleared = hb.heartbeat({ ...wakeable(), cadenceSeconds: null });
-  assert.equal(cleared.host.cadenceSeconds, null, "explicit null clears the declaration");
-  assert.equal(storedCadence(), null, "the stored row is cleared");
+  assert.equal(cleared.host.cadenceSeconds, 120, "explicit null clears the hint; the server assigns its default");
+  assert.equal(storedCadence(), 120, "the stored row carries the default assignment");
   assert.equal(cleared.reachability.reachableUntil - cleared.host.lastSeenAt, 180_000,
     "a cleared cadence reads the 180s default window");
   // Omission after a clear keeps it cleared — preserve means preserve
   // the current state, not resurrect an earlier declaration.
   const after = hb.heartbeat({ ...wakeable() });
-  assert.equal(after.host.cadenceSeconds, null);
+  assert.equal(after.host.cadenceSeconds, 120);
 });
 
 test("heartbeat validates pushNotification shape", t => {

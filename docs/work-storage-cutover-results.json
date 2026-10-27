@@ -1,0 +1,207 @@
+{
+  "baseline": "ee32e58f",
+  "sourceHashes": {
+    "server/work-repository.mjs": "76c9780b03578a69b81573afae0f28bd025ea20555647a6fcd60d0b2e9a4bb90",
+    "server/store.mjs": "568449f9725e45a4ae9e843a66090a15ed2e320dbc39aa8356397dc360c23451",
+    "server/work-item-board.mjs": "47fcd4f3c5b513487c6cf9bf73afa0b75ffc01aaa899ac2b54932d6031450d26",
+    "scripts/benchmark-work-boundaries.mjs": "bfc5c7b743be87ec706abe72695fe62b138ca55b09495c2db76fe2afb031e8e6"
+  },
+  "limitations": [
+    "Synthetic local SQLite; sequential storage modes, not a randomized production comparison.",
+    "12 samples after two warmups; fixed-head rollback excluded.",
+    "No whole-product productivity or physical WAL-write claim.",
+    "Hydration, hashing and board synchronization still scale with total work items."
+  ],
+  "inline": {
+    "runtime": "v24.19.0",
+    "workStorage": "inline",
+    "platform": "darwin",
+    "workload": "one work.blocked command, fixed head; alternating indexed/all-event facts; 2 warmups, 12 samples; rollback excluded; synthetic local SQLite",
+    "results": [
+      {
+        "dimension": "messages",
+        "size": 100,
+        "projectionBytes": 44013,
+        "samples": 12,
+        "modes": {
+          "allEvents": {
+            "medianMs": 2.500624999999985,
+            "p95Ms": 2.776207999999997,
+            "maxQueries": 22,
+            "maxBoundBytes": 96510,
+            "maxFactRows": 106
+          },
+          "indexed": {
+            "medianMs": 2.386291,
+            "p95Ms": 3.713041000000004,
+            "maxQueries": 22,
+            "maxBoundBytes": 96510,
+            "maxFactRows": 4
+          }
+        }
+      },
+      {
+        "dimension": "messages",
+        "size": 400,
+        "projectionBytes": 172713,
+        "samples": 12,
+        "modes": {
+          "allEvents": {
+            "medianMs": 5.187667000000033,
+            "p95Ms": 6.144958000000031,
+            "maxQueries": 22,
+            "maxBoundBytes": 369510,
+            "maxFactRows": 406
+          },
+          "indexed": {
+            "medianMs": 4.342000000000041,
+            "p95Ms": 4.78408300000001,
+            "maxQueries": 22,
+            "maxBoundBytes": 369510,
+            "maxFactRows": 4
+          }
+        }
+      },
+      {
+        "dimension": "workItems",
+        "size": 100,
+        "projectionBytes": 63104,
+        "samples": 12,
+        "modes": {
+          "allEvents": {
+            "medianMs": 3.923750000000041,
+            "p95Ms": 4.583792000000017,
+            "maxQueries": 22,
+            "maxBoundBytes": 144292,
+            "maxFactRows": 106
+          },
+          "indexed": {
+            "medianMs": 3.9832079999999905,
+            "p95Ms": 4.430166999999983,
+            "maxQueries": 22,
+            "maxBoundBytes": 144292,
+            "maxFactRows": 104
+          }
+        }
+      },
+      {
+        "dimension": "workItems",
+        "size": 400,
+        "projectionBytes": 249404,
+        "samples": 12,
+        "modes": {
+          "allEvents": {
+            "medianMs": 10.876041999999984,
+            "p95Ms": 14.522707999999966,
+            "maxQueries": 22,
+            "maxBoundBytes": 561292,
+            "maxFactRows": 406
+          },
+          "indexed": {
+            "medianMs": 11.470874999999978,
+            "p95Ms": 12.896250000000009,
+            "maxQueries": 22,
+            "maxBoundBytes": 561292,
+            "maxFactRows": 404
+          }
+        }
+      }
+    ]
+  },
+  "entities": {
+    "runtime": "v24.19.0",
+    "workStorage": "entities",
+    "platform": "darwin",
+    "workload": "one work.blocked command, fixed head; alternating indexed/all-event facts; 2 warmups, 12 samples; rollback excluded; synthetic local SQLite",
+    "results": [
+      {
+        "dimension": "messages",
+        "size": 100,
+        "projectionBytes": 43527,
+        "samples": 12,
+        "modes": {
+          "allEvents": {
+            "medianMs": 3.0982500000000073,
+            "p95Ms": 3.839833999999996,
+            "maxQueries": 25,
+            "maxBoundBytes": 96089,
+            "maxFactRows": 106
+          },
+          "indexed": {
+            "medianMs": 2.8780419999999935,
+            "p95Ms": 3.5804579999999646,
+            "maxQueries": 25,
+            "maxBoundBytes": 96089,
+            "maxFactRows": 4
+          }
+        }
+      },
+      {
+        "dimension": "messages",
+        "size": 400,
+        "projectionBytes": 172227,
+        "samples": 12,
+        "modes": {
+          "allEvents": {
+            "medianMs": 5.541500000000042,
+            "p95Ms": 6.626708000000008,
+            "maxQueries": 25,
+            "maxBoundBytes": 369089,
+            "maxFactRows": 406
+          },
+          "indexed": {
+            "medianMs": 4.802541000000019,
+            "p95Ms": 5.371582999999987,
+            "maxQueries": 25,
+            "maxBoundBytes": 369089,
+            "maxFactRows": 4
+          }
+        }
+      },
+      {
+        "dimension": "workItems",
+        "size": 100,
+        "projectionBytes": 13428,
+        "samples": 12,
+        "modes": {
+          "allEvents": {
+            "medianMs": 4.814457999999945,
+            "p95Ms": 6.850333999999975,
+            "maxQueries": 25,
+            "maxBoundBytes": 33491,
+            "maxFactRows": 106
+          },
+          "indexed": {
+            "medianMs": 4.820749999999975,
+            "p95Ms": 5.472499999999968,
+            "maxQueries": 25,
+            "maxBoundBytes": 33491,
+            "maxFactRows": 104
+          }
+        }
+      },
+      {
+        "dimension": "workItems",
+        "size": 400,
+        "projectionBytes": 51828,
+        "samples": 12,
+        "modes": {
+          "allEvents": {
+            "medianMs": 9.024708000000146,
+            "p95Ms": 10.543374999999969,
+            "maxQueries": 25,
+            "maxBoundBytes": 118691,
+            "maxFactRows": 406
+          },
+          "indexed": {
+            "medianMs": 9.783999999999878,
+            "p95Ms": 12.462332999999944,
+            "maxQueries": 25,
+            "maxBoundBytes": 118691,
+            "maxFactRows": 404
+          }
+        }
+      }
+    ]
+  }
+}
