@@ -58,6 +58,7 @@ import { isRoomMcpPath, writeRoomMcpNode } from "./mcp-http.mjs";
 import { isA2aPath, writeA2aNode } from "./a2a-jsonrpc.mjs";
 import { mcpAttachmentBodyBytes } from "./room-attachment-bytes.mjs";
 import { createHostedRoomMcp } from "./mcp-room-profile.mjs";
+import { recordMcpToolCall } from "./mcp-tool-calls.mjs";
 import { diagnoseArguments } from "./mcp-arg-errors.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
@@ -684,6 +685,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // the service instance.
   const agentRooms = new AgentRooms(store);
   const hostedRoomMcp = createHostedRoomMcp(store, { agentRooms });
+  // Anonymous MCP join-tool calls reach handleMcpJoinRpc through
+  // dispatchRoomMcp, outside the hosted profile: this recorder is the
+  // store-bound half of that dispatch point's per-tool counter
+  // (server/mcp-tool-calls.mjs). Hosted calls count inside the profile.
+  const mcpToolCallRecorder = (tool, isError) => recordMcpToolCall(store.db, tool, { isError, at: store.now() });
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
   // keys, public agent directory, derived plug-in manifest, per-agent webhook
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
@@ -1231,9 +1237,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             // accepted), matching bearer()/carriesBearer() above.
             && /^bearer (?:pri_|rak_)/i.test(req.headers.authorization);
           const text = await readText(req, fileBody ? mcpAttachmentBodyBytes : JSON_BODY_BYTES, () => new ServiceError(413, "too_large", "Request is too large"));
-          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress });
+          return writeRoomMcpNode(req, res, url, { bodyText: text, roomMcp: hostedRoomMcp, remoteAddress, onToolCall: mcpToolCallRecorder });
         }
-        return writeRoomMcpNode(req, res, url);
+        return writeRoomMcpNode(req, res, url, { onToolCall: mcpToolCallRecorder });
       }
       if (isA2aPath(inboundPath)) {
         rate(`a2a:${remoteAddress}`, 60);

@@ -8,6 +8,7 @@ import { operatorStatus, operatorDrift } from "./operator-status.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 import { operatorArchive } from "./operator-archive.mjs";
 import { planProjectionRepair, executeProjectionRepair } from "./operator-projection-repair.mjs";
+import { listMcpToolCalls } from "./mcp-tool-calls.mjs";
 
 const POST = "POST";
 const GET = "GET";
@@ -19,6 +20,7 @@ const ROUTES = Object.freeze({
   "/api/operator/projection/plan": POST,
   "/api/operator/projection/execute": POST,
   "/api/operator/actions": GET,
+  "/api/operator/mcp-tool-calls": GET,
   "/api/operator/status": GET,
   "/api/operator/drift": GET
 });
@@ -66,6 +68,16 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
       const limit = raw == null ? 50 : Number(raw);
       if (!Number.isInteger(limit) || limit < 1 || limit > 200) reject(422, "invalid_limit", "limit must be an integer from 1 to 200");
       json(res, 200, { actions: listOperatorActions(store, limit) });
+      return true;
+    }
+    if (path === "/api/operator/mcp-tool-calls") {
+      // Per-tool MCP call counter (deep-pass T0 usage-reads, Read 2): the
+      // production read surface for the 30-day per-tool clock, so the
+      // figures are readable without a store file. ?day=YYYY-MM-DD narrows
+      // to one day; without it every day on file is returned.
+      const day = url.searchParams.get("day");
+      if (day !== null && !/^\d{4}-\d{2}-\d{2}$/.test(day)) reject(422, "invalid_day", "day must be YYYY-MM-DD");
+      json(res, 200, { day: day ?? null, toolCalls: listMcpToolCalls(store.db, { day }) });
       return true;
     }
     if (path === "/api/operator/status") {

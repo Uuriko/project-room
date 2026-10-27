@@ -51,7 +51,16 @@ function toolResult(value) {
   return { content: [{ type: "text", text }], structuredContent: typeof value === "string" ? { text: value } : value };
 }
 
-export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
+// Per-tool usage counter hook (deep-pass T0 usage-reads, Read 2): callers
+// that own a store pass onToolCall(tool, isError); the counter module
+// (server/mcp-tool-calls.mjs) does the recording. A counting failure must
+// never fail a tool call, so the hook is invoked defensively.
+function noteToolCall(onToolCall, name, isError) {
+  if (typeof onToolCall !== "function" || typeof name !== "string") return;
+  try { onToolCall(name, isError); } catch { /* counting never breaks a call */ }
+}
+
+export function handleMcpJoinRpc(message, { mcpUrl, onToolCall } = {}) {
   const url = mcpUrl || roomMcpUrlForHost(ROOM_MCP_PUBLIC_URL);
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
@@ -102,15 +111,20 @@ export function handleMcpJoinRpc(message, { mcpUrl } = {}) {
       // tool names are not its catalog to give. When the closest match is a
       // hosted tool, return no suggestion at all rather than falling back to a
       // reduced list (decision posted to the room at seq 3218).
+      // Not counted: an unknown or hosted name never dispatches here.
       const suggestion = closestToolName(name, known);
       return mcpCallError(requestId, { reason: "unknown_tool", tool: name, suggestion: isHostedMcpToolName(suggestion) ? null : suggestion });
     }
     const problems = diagnoseArguments(selected.inputSchema, args);
-    if (problems) return mcpCallError(requestId, { reason: "invalid_arguments", tool: name, ...problems });
+    if (problems) {
+      noteToolCall(onToolCall, name, true);
+      return mcpCallError(requestId, { reason: "invalid_arguments", tool: name, ...problems });
+    }
     const value = selected.name === "room_join_packet" ? llmsTxt()
       : selected.name === "room_join_kits" ? kitsTxt()
         : selected.name === "room_join_prompt" ? joinPrompt()
           : roomMcpSnippets(url);
+    noteToolCall(onToolCall, name, false);
     return { jsonrpc: "2.0", id: requestId, result: toolResult(value) };
   }
   if (message.method === "server/discover") {
@@ -126,7 +140,7 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
+export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress, onToolCall } = {}) {
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);
@@ -141,7 +155,7 @@ export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp,
       if (typeof roomMcp === "function") return roomMcp(message, { mcpUrl, searchParams, userAgent, remoteAddress });
       return mcpTransportError(-32603, "Identity mint requires the live Room service", { reason: "service_unavailable", category: "unavailable", status: "failed", hint: "Use the live Project Room MCP endpoint.", next: [{ command: "Read /llms.txt for the live MCP endpoint" }] });
     }
-    return handleMcpJoinRpc(message, { mcpUrl });
+    return handleMcpJoinRpc(message, { mcpUrl, onToolCall });
   }
   if (typeof roomMcp !== "function") {
     const requestId = message?.id;
@@ -242,6 +256,7 @@ export async function roomMcpFetchPost(request, options = {}) {
       mcpUrl: roomMcpUrlForHost(url),
       authorization: request.headers.get("authorization"),
       roomMcp: options.roomMcp,
+      onToolCall: options.onToolCall,
       searchParams: url.searchParams,
       userAgent: request.headers.get("user-agent")
     });
@@ -258,7 +273,7 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
-export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress } = {}) {
+export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress, onToolCall } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
   if (method === "OPTIONS") {
@@ -303,6 +318,7 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
       mcpUrl: roomMcpUrlForHost(url),
       authorization: req.headers.authorization,
       roomMcp,
+      onToolCall,
       searchParams: url.searchParams,
       userAgent: req.headers["user-agent"],
       remoteAddress

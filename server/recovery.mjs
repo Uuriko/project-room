@@ -8,6 +8,7 @@ import { auditCharters } from "../src/room-charter.js";
 import { auditReplyRequests } from "./reply-requests.mjs";
 import { auditWorkHelp } from "./work-help.mjs";
 import { compactReplayLikeArchive, archivedMessageIds } from "./messages-store.mjs";
+import { verifyMcpToolCallsSchema } from "./mcp-tool-calls.mjs";
 
 const canonical = value => Array.isArray(value) ? `[${value.map(canonical).join(",")}]`
   : value && typeof value === "object" ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}` : JSON.stringify(value);
@@ -178,6 +179,7 @@ export function auditRecovery(store) {
     const invitations = store.verifyInvitationAudit();
     store.shareLinks.verify(); store.reminders.verifySchema(); store.agentConnections.verify();
     store.requestRuns.verifySchema({ allowAbsent: true });
+    verifyMcpToolCallsSchema(store.db, { allowAbsent: true }); // lazy per-tool MCP counter: present = shape-verified, absent = tolerated
     store.inbox.verify();
     store.email.verify();
     store.delegationJournal.verify();
