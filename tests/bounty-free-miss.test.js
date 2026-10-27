@@ -1,4 +1,4 @@
-// Unit + HTTP tests for free-miss settlement (docs/FREE-MISS-SETTLEMENT.md):
+// Unit + HTTP tests for free-miss settlement (archive/docs/history/FREE-MISS-SETTLEMENT.md):
 // failed or unverified work settles at zero; agents earn only on verified
 // completion. Settlement points live in server/bounty-escrow.mjs
 // (BountyEscrow): rejectWork (new), _settleUnverified (new keeper path),

@@ -11,7 +11,7 @@
 //   passkey           — one method row per WebAuthn credential; key material in account_passkey_credentials
 //   recovery-code-set — one active set per account; codes in account_recovery_codes
 //
-// Security rules (per docs/SECRETS-ROTATION.md and docs/TOTP-2FA.md):
+// Security rules (per docs/SECRETS-ROTATION.md and archive/docs/history/TOTP-2FA.md):
 // - No secret value is ever logged or returned by list methods.
 // - Magic-link codes and recovery codes are hashed at rest (sha256 with a
 //   per-row salt for recovery codes); codes are single-use and burned.

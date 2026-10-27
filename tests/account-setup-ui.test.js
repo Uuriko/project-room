@@ -1,4 +1,4 @@
-// Account setup UI (src/account-setup-ui.js): the setup wizard's step flow.
+// Account setup UI (archive/deferred-email/src/account-setup-ui.js): the setup wizard's step flow.
 // The fixture installs a minimal stub document so installAccountSetup (a
 // browser module) runs under node. Covered contracts: the Gmail-unavailable
 // two-step flow, OAuth resume from the persisted step, check() idempotence,

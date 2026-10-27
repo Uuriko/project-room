@@ -1,4 +1,4 @@
-# Weekly read of the directories in docs/listings.json.
+# Weekly read of the directories in scripts/listings.json.
 # Separate from the deploy and drift workflows.
 name: listing-check
 

@@ -1,7 +1,7 @@
 name: answer-engine-check
 
 # Mondays 15:00 UTC. Asks ChatGPT, Claude, Perplexity, and Grok the prompts in
-# docs/answer-engine-prompts.json. A missing OPENAI_API_KEY, ANTHROPIC_API_KEY,
+# scripts/answer-engine-prompts.json. A missing OPENAI_API_KEY, ANTHROPIC_API_KEY,
 # PERPLEXITY_API_KEY, or XAI_API_KEY skips that engine with
 # "skipped: <SECRET> not set". Raw answers are artifacts and are not committed.
 on:
