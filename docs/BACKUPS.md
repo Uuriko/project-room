@@ -6,14 +6,20 @@ The on-disk server still uses [scripts/backup-room.mjs](../scripts/backup-room.m
 
 `GET /api/operator/export` streams NDJSON. The first line is a watermark (`version`, `backedUpAt`, room id and sequence, event count). Every later line is one row: `{ "table", "row" }`. The stream includes the event log and the other application tables.
 
-Secret and token columns are sha256 hex. That covers columns named like `secret`, `token`, `password`, `verifier`, `private_seed`, `encrypted`, `refresh`, or `p256dh`, and the web-push column `auth`. Columns that are already hashes (`hash`, or a name ending in `_hash`) are kept. `auth_epoch` is a counter and stays a number. A whole cell, or a token inside a cell, that looks like `pri_…`, `rak_…`, or `ga1.…` is hashed too. Public keys and message text that do not contain those shapes are kept.
+The secret columns named exactly in `EXPORT_SECRET_COLUMNS` (`server/room-export.mjs`) — webhook secrets, push key material and tokens, join tokens, PKCE verifiers, the referral private seed, encrypted Gmail payloads — are sha256 hex in the export. The set is an exact per-table list, not a name pattern; everything else, including columns that merely look secret-named (the `accounts.password_reset_required` flag, `bounty_records.verifier`), round-trips verbatim. Columns that are already hashes (`hash`, or a name ending in `_hash`) are kept. `auth_epoch` is a counter and stays a number. A token inside any other cell that looks like `pri_…`, `rak_…`, or `ga1.…` is hashed too. Public keys and message text that do not contain those shapes are kept.
 
-The route is not a room login. It answers only when the Worker that owns the Durable Object has `ROOM_BACKUP_TOKEN` set to at least 16 characters. Send `Authorization: Bearer <token>`. A missing or short token is 404. A wrong token is 401. The token is checked inside the Durable Object, so it has to be set on the owning script (`project-room`, `wrangler secret put ROOM_BACKUP_TOKEN --env production`), not only on the entry Worker.
+On restore, a placeholder is never loaded as a live value: each sanitized cell lands as NULL (or an empty string where the column is NOT NULL) and is counted per table and column in the restore result's `sanitizedCells`, so the operator sees exactly which secrets must be re-issued. Backups written before this policy (their watermark has no `sanitizePolicy: 2`) also hashed the two non-secret columns above: restores recover the flag's true 0/1 value exactly, load the bounty verifier as NULL (counted in `sanitizedCells`; re-appoint a verifier after restoring an old backup), and refuse rather than guess if the flag's placeholder is unrecognized.
+
+The route is not a room login. It answers only when the Worker that owns the Durable Object has `ROOM_EXPORT_TOKEN` set to at least 16 characters. Send `Authorization: Bearer <token>`. A missing or short token is 404. A wrong token is 401. The token is checked inside the Durable Object, so it has to be set on the owning script (`project-room`, `wrangler secret put ROOM_EXPORT_TOKEN --env production`), not only on the entry Worker.
 
 ```bash
-curl -fsS -H "Authorization: Bearer $ROOM_BACKUP_TOKEN" \
+curl -fsS -H "Authorization: Bearer $ROOM_EXPORT_TOKEN" \
   https://room.trydemigod.com/api/operator/export -o room-export.ndjson
 ```
+
+## Split backup credentials (TM-2)
+
+Export and restore no longer share one credential. `ROOM_EXPORT_TOKEN` opens this export door only — it cannot restore — so it may stay armed standing for the nightly second-home pull. The restore doors (`POST /api/operator/restore`, `POST /api/operator/restore-from-backup`) answer only to `ROOM_RESTORE_TOKEN`, which stays unset outside a restore incident: unconfigured, they answer 404. The old `ROOM_BACKUP_TOKEN` opens nothing; on the first deploy with the split, replace it (`wrangler secret put ROOM_EXPORT_TOKEN --env production`, then `wrangler secret delete ROOM_BACKUP_TOKEN --env production`). If both new secrets are ever set to the same value, the split is void and both doors fail closed (404) until the values differ.
 
 Maintenance mode answers before this route. The export is unavailable while the room is paused.
 
@@ -72,7 +78,7 @@ Putting a restore back into the production Durable Object is a separate, deliber
 
 ### Drill without waiting for the nightly copy
 
-The nightly job is due 24 hours after its last run, so there is no way to force a KV copy early. For an on-demand drill, pull the same NDJSON from `GET /api/operator/export`: set a random `ROOM_BACKUP_TOKEN` (16+ characters) on `project-room` with `wrangler secret put ROOM_BACKUP_TOKEN --env production`, keep it in a 0600 file, send it as `authorization: Bearer ...` (curl `-H @file`, so it never lands in shell history or output), then `wrangler secret delete ROOM_BACKUP_TOKEN --env production` and confirm the route answers 404 again. Both secret commands publish a new Worker version with the same code; smoke `/api/version` afterwards. Restore with `--from`, then check:
+The nightly job is due 24 hours after its last run, so there is no way to force a KV copy early. For an on-demand drill, pull the same NDJSON from `GET /api/operator/export`: set a random `ROOM_EXPORT_TOKEN` (16+ characters) on `project-room` with `wrangler secret put ROOM_EXPORT_TOKEN --env production`, keep it in a 0600 file, send it as `authorization: Bearer ...` (curl `-H @file`, so it never lands in shell history or output), then `wrangler secret delete ROOM_EXPORT_TOKEN --env production` and confirm the route answers 404 again. Both secret commands publish a new Worker version with the same code; smoke `/api/version` afterwards. Restore with `--from`, then check:
 
 1. the restore exits 0 with `verified: true` and the backup's total event count;
 2. `--room <id>` message count and `messagesSha256` equal the live digest from `GET /api/rooms/<id>/events` up to the room's `lastSequence`;

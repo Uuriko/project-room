@@ -1,5 +1,6 @@
 // isUnpublished is the operator's takedown check on public read paths. When the lookup fails
-// it must report the content as unpublished, so a database error cannot re-expose it.
+// — or cannot even be performed — it must report the content as unpublished, so a database
+// error, a missing database, or an invalid target cannot re-expose it (fail closed).
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { isUnpublished } from "../server/legal-store.mjs";
@@ -22,8 +23,21 @@ describe("isUnpublished", () => {
     assert.equal(isUnpublished(broken, "room", "lobby"), true);
   });
 
-  it("does not look anything up without a database or a target", () => {
-    assert.equal(isUnpublished(null, "room", "lobby"), false);
-    assert.equal(isUnpublished(dbReturning({ 1: 1 }), "room", ""), false);
+  it("fails closed without a database", () => {
+    assert.equal(isUnpublished(null, "room", "lobby"), true);
+    assert.equal(isUnpublished(undefined, "room", "lobby"), true);
+    assert.equal(isUnpublished(false, "room", "lobby"), true);
+  });
+
+  it("fails closed with an invalid target", () => {
+    const db = dbReturning(undefined);
+    assert.equal(isUnpublished(db, "room", ""), true);
+    assert.equal(isUnpublished(db, "room", null), true);
+    assert.equal(isUnpublished(db, "room", undefined), true);
+    assert.equal(isUnpublished(db, "room", 42), true);
+    assert.equal(isUnpublished(db, "room", {}), true);
+    // Even a db that would report a takedown — or none — must not rescue an invalid target.
+    assert.equal(isUnpublished(dbReturning({ 1: 1 }), "room", ""), true);
+    assert.equal(isUnpublished(null, "room", ""), true);
   });
 });

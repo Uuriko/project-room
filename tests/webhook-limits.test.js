@@ -33,7 +33,7 @@ function fixture(t) {
     f.apply({ action: "connection.webhook", requestId: randomUUID(), connectionId: profile.id, expectedRevision: 1, secretHash: ChannelWebhookInbox.hash(secrets[index]) });
   }
   f.serve = async (options = {}) => {
-    const server = createRoomServer({ store: f.store, channelWebhooks: f.webhooks, ...options });
+    const server = createRoomServer({ enableDeferredInbox: true, store: f.store, channelWebhooks: f.webhooks, ...options });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
     const origin = "http://127.0.0.1:" + server.address().port;

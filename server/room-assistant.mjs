@@ -1,6 +1,7 @@
+import { canAdministerRoom } from '../src/room-administration.js';
 import { enforceAutonomyTierForAction, getTier } from './autonomy-tiers.mjs';
 import { validId, messageChannelId, MAX_MESSAGE_BODY_CHARS } from '../src/events.js';
-import { conversationIndex } from '../src/conversation.js';
+import { messageRepository, messageThreadRoot } from './message-repository.mjs';
 import { isGuestAgentMemberId } from './guest-agent-links.mjs';
 import { historyFloor, messageInHistory, messageVisibleToViewer } from './history-visibility.mjs';
 import { createHash } from 'node:crypto';
@@ -51,7 +52,7 @@ const derivedRunStatus = (run, now) => {
 };
 const controlsDeletedSource = (run, opening, actor, state, floor) => Boolean(
   opening?.deletedAt && opening.body == null && !opening.toMemberId && messageInHistory(opening, floor)
-  && (actor.kind === 'human' && (actor.id === run.initiatorId || actor.id === state.room.ownerId)
+  && (canAdministerRoom(state, actor.id) || actor.kind === 'human' && actor.id === run.initiatorId
     || actor.kind === 'agent' && actor.id === run.coordinatorMemberId && run.attemptId && actor.permissions.includes('accept_work')));
 const deletedControl = run => Object.fromEntries([
   ...['id', 'sourceMessageId', 'initiatorId', 'coordinatorMemberId', 'status', 'revision', 'attemptId', 'createdAt', 'updatedAt', 'hostReportedAt', 'stopOutcome'].map(key => [key, run[key]]),
@@ -59,8 +60,8 @@ const deletedControl = run => Object.fromEntries([
 ]);
 // Reads and receipt replays share current visibility. A committed operation
 // remains idempotent, but its old receipt is not a grant to hidden history.
-const visibleRun = (run, state, actor, floor) => {
-  const opening = state.messages.find(message => message.id === run.sourceMessageId);
+const visibleRun = (run, state, actor, floor, records) => {
+  const opening = records.get(run.sourceMessageId);
   if (messageVisibleToViewer(opening, actor.id, floor)) return run;
   return controlsDeletedSource(run, opening, actor, state, floor) ? deletedControl(run) : null;
 };
@@ -98,12 +99,13 @@ export class RoomAssistant {
       if (!this.store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get())
         return { contractVersion: 1, roomId, assistant: { name: 'Room', coordinatorMemberId: null, revision: 0, availability: 'not_connected' }, runs: [] };
       const state = this.store.room(roomId).state;
+      const records = messageRepository(this.store, roomId, state);
       const config = this.config(roomId), coordinator = state.members[config.coordinatorMemberId];
       const floor = historyFloor(this.store.db, state, roomId, auth.member.id);
       // Keep unfinished requests discoverable by their host and controllers;
       // newer terminal history must not push pending work out of this window.
       const runs = this.store.db.prepare("SELECT value FROM room_assistant_runs WHERE room_id=? ORDER BY json_extract(value,'$.status') IN ('done','cancelled','failed'), rowid DESC LIMIT 100").all(roomId)
-        .map(row => visibleRun(JSON.parse(row.value), state, auth.member, floor)).filter(Boolean)
+        .map(row => visibleRun(JSON.parse(row.value), state, auth.member, floor, records)).filter(Boolean)
         .map(run => ({ ...run, status: run.status === 'working' && (!Number.isFinite(run.hostReportedAt) || this.store.now() - run.hostReportedAt > hostStaleAfterMs) ? 'unknown' : run.status,
           displayStatus: derivedRunStatus(run, this.store.now()) }));
       const recent = runs.some(run => run.coordinatorMemberId === config.coordinatorMemberId && run.attemptId && Number.isFinite(run.hostReportedAt) && this.store.now() - run.hostReportedAt <= 120000 && !terminal.has(run.status));
@@ -126,12 +128,13 @@ export class RoomAssistant {
       fail('invalid_assistant_action', 'Invalid expectedAttemptId', 422);
     return this.store.transaction(() => {
       const auth = authorize(), state = this.store.room(roomId).state, actor = auth.member;
+      const records = messageRepository(this.store, roomId, state);
       if (isGuestAgentMemberId(actor.id) || actor.permissions?.some(p => p.startsWith('guest:')))
         fail('assistant_denied', 'Guests cannot coordinate shared work', 403);
       if (state.room.archivedAt) fail('assistant_archived', 'This room is archived');
       this.init();
       const config = this.config(roomId);
-      const isOwner = state.room.ownerId === actor.id;
+      const isAdmin = canAdministerRoom(state, actor.id) && actor.permissions.includes('manage_members');
       const isHuman = actor.kind === 'human';
       const floor = historyFloor(this.store.db, state, roomId, actor.id);
       const canonical = JSON.stringify(Object.fromEntries(Object.entries(input).sort(([a], [b]) => a.localeCompare(b))));
@@ -140,18 +143,19 @@ export class RoomAssistant {
         if (old.input !== canonical) fail('assistant_retry_conflict', 'Retry ID already records different input');
         const response = JSON.parse(old.result);
         if (input.action === 'configure') return response;
-        const result = visibleRun(response.result, state, actor, floor);
+        const result = visibleRun(response.result, state, actor, floor, records);
         if (!result) fail('assistant_run_missing', 'Request not found', 404);
         return { ...response, result };
       }
       const source = id => {
-        const message = state.messages.find(m => m.id === id);
+        const message = records.get(id);
         if (!message || message.toMemberId || !messageVisibleToViewer(message, actor.id, floor) || message.authorId !== actor.id)
           fail('assistant_source_denied', 'Choose your own visible shared message', 403);
         return message;
       };
       const conversationSource = (id, opening) => {
-        const message = source(id), { rootById } = conversationIndex(state.messages);
+        const message = source(id);
+        const rootById = { get: messageId => messageThreadRoot(records, messageId) };
         // A channel prompt may receive a channel reply or a thread rooted in
         // that prompt. A prompt already inside a thread stays in that thread.
         const sameThread = opening.replyToId
@@ -163,7 +167,7 @@ export class RoomAssistant {
       };
       let result, receipt;
       if (input.action === 'submit') {
-        if (!isHuman || input.intent?.action === 'invoke' && !actor.permissions.includes('steer')) fail('assistant_denied', 'Shared requests require permission to steer work', 403);
+        if (!isHuman || input.intent?.action === 'invoke' && !isAdmin && !actor.permissions.includes('steer')) fail('assistant_denied', 'Shared requests require permission to steer work', 403);
         if (!postToken || input.command?.type !== 'message.posted' || !validId(input.command?.data?.messageId)
           || !['invoke', 'contribute', 'resolve'].includes(input.intent?.action)
           || !Array.isArray(input.fileIds) || input.fileIds.length > 20 || input.fileIds.some(id => !validId(id)))
@@ -179,7 +183,8 @@ export class RoomAssistant {
           ...(input.intent.action === 'invoke' ? { runId: `run-${sourceMessageId}` } : {}), sourceMessageId
         }, authorize, postToken).result;
       } else if (input.action === 'configure') {
-        if (!isOwner) fail('assistant_denied', 'Only the room owner configures its assistant', 403);
+        if (!isAdmin) fail('assistant_denied', 'A room administrator configures its assistant', 403);
+        enforceAutonomyTierForAction({ db: this.store.db, roomId, state, actor, action: 'configure the shared assistant' });
         if (input.expectedRevision !== config.revision) fail('assistant_revision_conflict', 'Assistant settings changed; read them before retrying');
         if (typeof input.name !== 'string' || !input.name.trim() || input.name.length > 64
           || input.coordinatorMemberId !== null && (!validId(input.coordinatorMemberId) || state.members[input.coordinatorMemberId]?.kind !== 'agent' || !state.members[input.coordinatorMemberId]?.active || !state.members[input.coordinatorMemberId]?.permissions.includes('accept_work')))
@@ -205,7 +210,7 @@ export class RoomAssistant {
           if (!isHuman) fail('assistant_denied', 'A human explicitly asks the shared assistant', 403);
           // Asking dispatches work to the room's agent, so it takes the same
           // steer permission as proposing work. Posting a message stays open.
-          if (!actor.permissions?.includes('steer')) fail('assistant_denied', 'Asking the room assistant needs the steer permission. Ask the room owner for access.', 403);
+          if (!isAdmin && !actor.permissions?.includes('steer')) fail('assistant_denied', 'Asking the room assistant needs the steer permission. Ask the room owner for access.', 403);
           source(input.sourceMessageId);
           const coordinator = state.members[config.coordinatorMemberId];
           if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
@@ -215,7 +220,7 @@ export class RoomAssistant {
             createdAt: this.store.now(), updatedAt: this.store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: input.sourceMessageId, status: 'pending' }], activity: [] };
         } else {
           if (!run) fail('assistant_run_missing', 'Request not found', 404);
-          const opening = state.messages.find(m => m.id === run.sourceMessageId);
+          const opening = records.get(run.sourceMessageId);
           if (!messageVisibleToViewer(opening, actor.id, floor)
             && !(controlsDeletedSource(run, opening, actor, state, floor)
               && (isHuman && ['pause', 'cancel'].includes(input.action)
@@ -233,7 +238,7 @@ export class RoomAssistant {
             if (!isHuman) fail('assistant_denied', 'Shared inputs preserve human authorship', 403);
             conversationSource(input.sourceMessageId, opening);
             if (input.conflict !== undefined && typeof input.conflict !== 'boolean') fail('invalid_assistant_action', 'Conflict must be a boolean', 422);
-            if (input.action === 'resolve' && !isOwner && actor.id !== run.initiatorId)
+            if (input.action === 'resolve' && !isAdmin && actor.id !== run.initiatorId)
               fail('assistant_denied', 'The requester or room owner resolves conflicting scope', 403);
             if (input.action === 'resolve' && run.status !== 'needs_input') fail('assistant_no_conflict', 'There is no pending scope decision');
             if (run.inputs.length >= 100) fail('assistant_input_limit', 'Start a new request after 100 contributions', 422);
@@ -241,7 +246,7 @@ export class RoomAssistant {
             if (input.conflict) run.status = 'needs_input';
             else if (input.action === 'resolve') run.status = run.attemptId ? 'pause_requested' : 'queued';
           } else if (input.action === 'resume') {
-            if (!isHuman || (!isOwner && actor.id !== run.initiatorId)) fail('assistant_denied', 'The requester or owner resumes this request', 403);
+            if (!isAdmin && (!isHuman || actor.id !== run.initiatorId)) fail('assistant_denied', 'The requester or a room administrator resumes this request', 403);
             if (run.status !== 'paused') fail('assistant_not_paused', 'Wait for the host to confirm pausing before resuming');
             const coordinator = state.members[config.coordinatorMemberId];
             if (!coordinator?.active || !coordinator.permissions.includes('accept_work') || run.coordinatorMemberId !== config.coordinatorMemberId
@@ -249,7 +254,7 @@ export class RoomAssistant {
               fail('assistant_not_connected', 'Reconnect the original authorized assistant before resuming');
             run.status = run.attemptId ? 'resume_requested' : 'queued';
           } else if (['pause', 'cancel'].includes(input.action)) {
-            if (!isHuman || (!isOwner && actor.id !== run.initiatorId)) fail('assistant_denied', 'The requester or owner controls this request', 403);
+            if (!isAdmin && (!isHuman || actor.id !== run.initiatorId)) fail('assistant_denied', 'The requester or a room administrator controls this request', 403);
             if (input.action === 'pause' && run.status === 'cancel_requested')
               fail('assistant_stop_pending', 'Wait for the host to confirm stopping');
             if (input.action === 'cancel' && run.attemptId
@@ -369,7 +374,7 @@ export class RoomAssistant {
         if (input.action !== 'draft' && (run.status !== 'working' || ['contribute', 'resolve'].includes(input.action))) delete run.answerDraft;
         run.updatedAt = this.store.now();
         this.store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO UPDATE SET value=excluded.value').run(roomId, run.id, JSON.stringify(run));
-        result = state.messages.find(m => m.id === run.sourceMessageId)?.deletedAt ? deletedControl(run) : run;
+        result = records.get(run.sourceMessageId)?.deletedAt ? deletedControl(run) : run;
       }
       const response = { contractVersion: 1, roomId, action: input.action, result, ...(receipt ? { receipt } : {}) };
       if (input.action !== 'draft') this.store.db.prepare('INSERT INTO room_assistant_ops VALUES(?,?,?,?,?)').run(roomId, actor.id, input.requestId, canonical, JSON.stringify(response));
