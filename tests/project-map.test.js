@@ -275,3 +275,69 @@ test("request-scoped overlap reuse preserves results and new requests observe ch
   assert.deepEqual(fresh.symbols, ["beta"]);
   assert.equal(assessOverlap({ subject: { ...claims[0], files: [] }, others: claims, graph, overlapContext }), null);
 });
+
+test("retained Graphify callable aliases preserve canonical names and callers", () => {
+  const graph = graphFromGraphify({ nodes: [
+    { id: 1, file: "a.js", label: ".helper()", _callable: true },
+    { id: 2, file: "b.js", label: "b.js", kind: "file" }
+  ], edges: [{ source: 2, target: 1, relation: "calls" }] });
+  assert.equal(graph.files["a.js"].symbols[0].kind, "function");
+  const exact = mapQuery(graph, ".helper");
+  const alias = mapQuery(graph, "helper");
+  assert.equal(alias.found, true);
+  assert.equal(alias.symbol, ".helper");
+  assert.equal(alias.matchedBy, "callable-alias");
+  assert.equal(alias.ambiguous, false);
+  assert.deepEqual(alias.definitions, exact.definitions);
+  assert.deepEqual(alias.callers, exact.callers);
+  assert.equal(mapPath(graph, "b.js", "helper").found, true);
+  assert.equal(mapPath(graph, "b.js", "a.js#helper").found, true);
+});
+
+test("exact names win over callable aliases and noncallables gain no alias", () => {
+  const graph = graphFromGraphify({ nodes: [
+    { id: 1, file: "a.js", label: ".helper()", _callable: true },
+    { id: 2, file: "b.js", label: "helper", kind: "symbol" },
+    { id: 3, file: "c.js", label: ".value", kind: "symbol" }
+  ], edges: [] });
+  const exact = mapQuery(graph, "helper");
+  assert.equal(exact.symbol, "helper");
+  assert.deepEqual(exact.definitions.map(x => x.file), ["b.js"]);
+  assert.equal(exact.matchedBy, undefined);
+  assert.equal(mapQuery(graph, "value").found, false);
+  assert.equal(mapQuery(graph, ".value").found, true);
+});
+
+test("ambiguous callable aliases return definitions but require file qualification for paths", () => {
+  const graph = graphFromGraphify({ nodes: [
+    { id: 1, file: "a.js", label: ".helper()", _callable: true },
+    { id: 2, file: "b.js", label: ".helper()", _callable: true }
+  ], edges: [] });
+  const alias = mapQuery(graph, "helper");
+  assert.equal(alias.found, true);
+  assert.equal(alias.ambiguous, true);
+  assert.deepEqual(alias.definitions.map(x => x.file), ["a.js", "b.js"]);
+  const path = mapPath(graph, "a.js", "helper");
+  assert.equal(path.found, false);
+  assert.equal(path.ambiguous, true);
+  assert.equal(path.reason, "ambiguous_symbol");
+  assert.equal(mapPath(graph, "a.js", "a.js#helper").found, true);
+  // Preserve existing exact-name path selection semantics.
+  assert.equal(mapPath(graph, "a.js", ".helper").found, true);
+});
+
+test("truncated misses explain missing coverage without changing stored graph limits", () => {
+  const graph = graphFromGraphify({ nodes: Array.from({ length: 201 }, (_, i) =>
+    ({ id: i, file: "large.js", label: `.f${i}()`, _callable: true })), edges: [] });
+  const before = JSON.stringify(graph);
+  assert.equal(graph.files["large.js"].symbols.length, 200);
+  assert.equal(mapQuery(graph, "f199").found, true);
+  for (const result of [mapQuery(graph, "f200"), mapExplain(graph, "f200"), mapPath(graph, "large.js", "f200")]) {
+    assert.equal(result.found, false);
+    assert.equal(result.coverageIncomplete, true);
+    assert.match(result.coverageNote, /narrower source scope/);
+  }
+  assert.equal(JSON.stringify(graph), before);
+  const complete = graphFromGraphify({ nodes: [], edges: [] });
+  assert.equal(mapQuery(complete, "missing").coverageIncomplete, undefined);
+});
