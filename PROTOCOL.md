@@ -1,6 +1,6 @@
 # Project Room ↔ machine protocol — canonical contract
 
-**Status:** canonical as of 2026-10-13 (simplification program, decision 18 / issue #3217). This document is the single contract the machine + relay extraction will version against when `machine/` and `relay/` leave this repo. It describes the protocol **as implemented today**; where an older document disagrees with this one, this one wins, and where this document and the code disagree, the code wins and this document is the bug.
+**Status:** canonical as of 2026-10-19 (simplification program, decision 18 / issue #3217). This document is the single contract the machine + relay extraction will version against when `machine/` and `relay/` leave this repo. It describes the protocol **as implemented today**; where an older document disagrees with this one, this one wins, and where this document and the code disagree, the code wins and this document is the bug.
 
 It replaces, as the canonical statement, the overlapping descriptions previously spread across `machine/PROTOCOL.md` (daemon wire contract), `relay/PROTOCOL.md` (relay operator notes), `machine/lib/protocol.mjs`, and `relay/src/protocol.mjs`. Those files remain as implementation-local notes until extraction; their protocol constants are pinned by §6.
 
@@ -29,7 +29,7 @@ The daemon authenticates with its identity secret (`Authorization: Bearer <secre
 | Heartbeat (host registration) | `POST /api/agent-heartbeats` (hostId `room-machine`) | `lib/room.mjs`, `bot/room-api.mjs` |
 | Wake long-poll | `GET /api/agent-wakes/poll?hostId=room-machine&waitMs=<ms>` | `bot/room-api.mjs` |
 | Wake ack | `POST /api/agent-heartbeats/ack` | `bot/room-api.mjs` |
-| Orientation | `GET /api/rooms/:roomId/orient` | `bot/room-api.mjs` |
+| Orientation | `GET /api/rooms/:roomId/activation-pack` (the payload is the pack's `orient` embed) | `bot/room-api.mjs` |
 | Room updates feed | `GET /api/rooms/:roomId/updates?…`; `POST /api/rooms/:roomId/updates/:itemId/:action` | `bot/room-api.mjs` |
 | Conversation read | `GET /api/rooms/:roomId/conversation?…` | `bot/room-api.mjs` |
 | Post message / commands | `POST /api/rooms/:roomId/commands` | `lib/room.mjs`, `bot/room-api.mjs` |
@@ -41,6 +41,8 @@ The daemon authenticates with its identity secret (`Authorization: Bearer <secre
 A **desk lease is an ordinary work claim** whose `files` entry is `resource/<machineId>/desk`; a scratch lease uses `resource/<machineId>/scratch`. There is no `kind: "lease"` claim. `machine.release` (§3) closes the claim through this surface; if the machine identity does not own the claim, Room returns `403` and the release reports `closed: false`.
 
 **Approvals ride this surface too:** for gated tool classes (§3), the daemon posts `approve <code>` as a room message and accepts one exact reply `approve <code>` from `ownerMemberId` within 10 minutes, once, polling the events feed above.
+
+**Revision note (2026-10-19, PR #4161; per §7):** the standalone `GET /api/rooms/:roomId/orient` endpoint is deleted (simplification register D1). Orientation is now read from the activation pack's `orient` embed — the same `buildOrient` payload — and `bot/room-api.mjs` was repointed in the same change. Relatedly, for the work-claims surface above: the claim lifecycle's states are the kernel's seven — `unclaimed`, `claimed`, `in_progress`, `blocked`, `delivered`, `done`, `closed` — as enumerated in `server/work-claims.mjs`, which is the source of truth; the older five-state description in `spec/core/claim.md` is superseded by that enumeration.
 
 ## 3. Relay link (daemon ↔ relay, WebSocket)
 

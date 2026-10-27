@@ -116,3 +116,17 @@ test("follow-up drafts bind the delivered answer and recipient without mixing no
   s.messages.at(-1).body = null; assert.ok(validReplyDraft(next.mode, s)); // Keep exact pending retries even if the parent is withdrawn.
   s.replyRequests.question.status = "open"; assert.equal(replyFollowUp(s, "question", "owner"), null);
 });
+
+
+test("attachment-only drafts retain bounded metadata and original commit target, never bytes", () => {
+  const memory = new Map();
+  const recovery = new DraftRecovery({ getItem: key => memory.get(key), setItem: (key, value) => memory.set(key, value), removeItem: key => memory.delete(key) }, () => 1000);
+  const drafts = new ConversationDrafts();
+  const file = { id: "file-1", filename: "note.txt", mediaType: "text/plain", status: "uploading", commitMessageId: "posted-message", source: { bytes: "PRIVATE BYTES" } };
+  drafts.save(null, { body: "", toMemberId: "", replyToId: null, files: [file, { ...file, id: "invalid/id" }] });
+  assert.equal(recovery.write("scope", drafts, null), true);
+  assert.ok(!memory.get(recovery.key).includes("PRIVATE BYTES"));
+  const restored = recovery.read("scope", state()).drafts.get(null).files;
+  assert.deepEqual(restored, [{ id: "file-1", filename: "note.txt", mediaType: "text/plain", status: "error", commitMessageId: "posted-message" }]);
+  assert.equal(recovery.read("other-scope", state()), null);
+});

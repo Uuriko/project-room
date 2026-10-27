@@ -105,7 +105,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       await mutate("producer", T.WORK_COMPLETED, { summary: "The source supports this small finding.", evidenceUrl: "https://example.invalid/finding", evidenceVersion: "v1", producerId: "producer", nextAction: "Use the finding or review it as requested." });
       const card = page.locator(`[data-work-record-id="${id}"]`);
       const status = async (step, text, tone) => {
-        await card.locator(`[data-next-step="${step}"]`).waitFor();
+        await card.locator(`[data-next-step="${step}"]`).waitFor({ state: "attached" });
+        if (["complete", "in_progress"].includes(step)) await card.locator(".work-accountable").waitFor();
+        else await card.locator(`[data-next-step="${step}"]`).waitFor();
         assert.equal(await card.locator(".state").textContent(), text);
         assert.equal(await card.locator(".state").getAttribute("class"), `state state-${tone}`);
         assert.equal((await agent("owner").orient()).work.find(work => work.id === id).next.action, step);

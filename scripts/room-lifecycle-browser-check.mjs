@@ -35,7 +35,7 @@ async function setup(t, viewport) {
   const login = async accountId => {
     await page.goto(origin + "/?account=1");
     await signInFixture(page, f.store.issueAccountAccessKey(accountId));
-    await page.locator("#inbox-panel").waitFor();
+    await page.locator("#account-rooms-panel").waitFor();
   };
   const roomCount = () => f.store.db.prepare("SELECT count(*) AS n FROM rooms").get().n;
   return { ...f, page, origin, login, roomCount };
