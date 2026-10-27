@@ -1586,7 +1586,8 @@ export function archiveRoomMessages(store, roomId, { keepNewest = 2000, dryRun =
       .get(roomId, marker.throughSeq, marker.retainedJson, JSON.stringify(next.messages.map(message => message.id)));
     if (overlaps || next.messages.some(message => movingIds.has(message.id))) return { ok: false, reason: "marker_overlaps_projection" };
     next.messagesArchive = { throughSeq, count: marker.count + moving.length, retainedIds };
-    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest, messageEntities: store.messageEntityProjection }), roomId);
+    const slim = db.prepare("SELECT storage_mode FROM rooms WHERE id=?").get(roomId)?.storage_mode === "slim";
+    db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(storedProjection(db, roomId, next, { enabled: store.bodiesAtRest && !slim, messageEntities: store.messageEntityProjection || slim }), roomId);
     return result;
   });
 }
