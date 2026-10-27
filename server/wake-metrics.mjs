@@ -83,10 +83,46 @@ export function ensureWakeMetricsSchema(db) {
 
 const isMissingTable = error => /no such (table|column)/i.test(String(error?.message ?? ""));
 
+// Recorder-failure observability (audit D3-5 P1): recordWakeEvent's
+// false return was inspected at none of its production call sites, so a
+// broken counter store failed silently — the detection layer's own
+// failure was undetectable. The inspection is centralised here instead
+// of at the 18 call sites: every write failure is counted in memory,
+// logged (first failure and every 100th, so a dead store cannot flood
+// the log), and the running total is rendered on the operator wake-
+// accounting surface (GET /api/operator/wake-accounting), so the count
+// itself has a production reader. Validation refusals above the write
+// (unknown store/event/reason, bad n) are caller-contract refusals, not
+// write failures, and are not counted here.
+const recordFailureState = { total: 0, last: null };
+export function wakeRecordFailures() {
+  return Object.freeze({ total: recordFailureState.total,
+    last: recordFailureState.last ? Object.freeze({ ...recordFailureState.last }) : null });
+}
+export function resetWakeRecordFailuresForTests() {
+  recordFailureState.total = 0;
+  recordFailureState.last = null;
+}
+function noteRecordFailure(store, event, error) {
+  try {
+    recordFailureState.total += 1;
+    recordFailureState.last = { store: store ?? null, event: event ?? null,
+      error: String(error?.message ?? error).replace(/[\r\n]+/g, " ").slice(0, 200) };
+    if (recordFailureState.total === 1 || recordFailureState.total % 100 === 0) {
+      console.error(`wake accounting record failed (store=${store}, event=${event}, failures=${recordFailureState.total}): ${recordFailureState.last.error}`);
+    }
+  } catch { /* observability must never break the wake path either */ }
+}
+
 // Record one audited wake outcome. Never throws: accounting rides the
 // wake path and must not be able to fail a message post, a heartbeat or
 // an ack. (Tests pin that counters DO move on every real path, so a
-// silent no-op here cannot hide.) Returns true when recorded.
+// silent no-op here cannot hide.) Returns true when recorded; a write
+// failure returns false AND is counted + logged centrally (see
+// noteRecordFailure above), so no caller has to inspect the return for
+// the failure to be visible. The counter row and its failure-journal
+// row write inside one savepoint: a partial failure (counter advanced,
+// journal row lost — audit D3-5 P1) rolls both back.
 export function recordWakeEvent(db, { at, roomId = null, store, event, door = "", kind = "", n = 1, subjectId = null, reason = null } = {}) {
   try {
     if (!WAKE_STORES.includes(store) || !WAKE_EVENTS.includes(event)) return false;
@@ -94,19 +130,30 @@ export function recordWakeEvent(db, { at, roomId = null, store, event, door = ""
     if (!Number.isSafeInteger(n) || n <= 0) return false;
     ensureWakeMetricsSchema(db);
     const stamp = Number.isSafeInteger(at) ? at : 0;
-    db.prepare(`INSERT INTO agent_wake_counters (room_id, store, event, door, kind, n, first_at, last_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(room_id, store, event, door, kind) DO UPDATE SET
-        n = n + excluded.n, last_at = excluded.last_at`)
-      .run(roomId ?? "", store, event, door ?? "", kind ?? "", n, stamp, stamp);
-    if (reason !== null) {
-      db.prepare("INSERT INTO agent_wake_failures (at, room_id, store, kind, subject_id, reason) VALUES (?, ?, ?, ?, ?, ?)")
-        .run(stamp, roomId ?? null, store, kind ?? "", subjectId ?? null, reason);
-      db.prepare(`DELETE FROM agent_wake_failures WHERE id <=
-        (SELECT MAX(id) FROM agent_wake_failures) - ?`).run(FAILURE_JOURNAL_CAP);
+    db.exec("SAVEPOINT wake_record_event");
+    try {
+      db.prepare(`INSERT INTO agent_wake_counters (room_id, store, event, door, kind, n, first_at, last_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(room_id, store, event, door, kind) DO UPDATE SET
+          n = n + excluded.n, last_at = excluded.last_at`)
+        .run(roomId ?? "", store, event, door ?? "", kind ?? "", n, stamp, stamp);
+      if (reason !== null) {
+        db.prepare("INSERT INTO agent_wake_failures (at, room_id, store, kind, subject_id, reason) VALUES (?, ?, ?, ?, ?, ?)")
+          .run(stamp, roomId ?? null, store, kind ?? "", subjectId ?? null, reason);
+        db.prepare(`DELETE FROM agent_wake_failures WHERE id <=
+          (SELECT MAX(id) FROM agent_wake_failures) - ?`).run(FAILURE_JOURNAL_CAP);
+      }
+      db.exec("RELEASE SAVEPOINT wake_record_event");
+    } catch (error) {
+      try {
+        db.exec("ROLLBACK TO SAVEPOINT wake_record_event");
+        db.exec("RELEASE SAVEPOINT wake_record_event");
+      } catch { /* the outer catch reports the original failure */ }
+      throw error;
     }
     return true;
-  } catch {
+  } catch (error) {
+    noteRecordFailure(store, event, error);
     return false;
   }
 }
@@ -118,8 +165,12 @@ const emptyCounters = () => ({ emitted: 0, coalesced: 0, suppressed_no_host: 0,
 
 // Aggregate the counters + the stores' own stock into the accounting
 // view. One bounded read per table; safe on pre-metrics databases (every
-// section degrades to zeros/nulls, never an error), so the cockpit
-// exceptions feed and operator surfaces can render it unconditionally.
+// section degrades to zeros/nulls, never an error), so surfaces can
+// render it unconditionally. Production reader: the operator route
+// GET /api/operator/wake-accounting (server/operator-routes.mjs), the
+// same operator counter surface the MCP per-tool counter table (#4984)
+// reads through — before that route existed this view was reached only
+// from tests, via AgentHeartbeats.accounting().
 export function wakeAccounting(db, { now = 0, roomId = null } = {}) {
   const byStore = { signals: emptyCounters(), work: emptyCounters(), queue: emptyCounters() };
   const failures = { total: 0, byReason: {}, recent: [] };
