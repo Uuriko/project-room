@@ -33,10 +33,10 @@ export default {
   "human.copy.014": "Assistant service unavailable",
   "human.copy.015": "That request is closed. Your message is still in the conversation.",
   "human.copy.016": "Review the current activity, then choose Retry request to confirm applying your already-posted message.",
-  "human.copy.017": "<form><div class=\"dialog-head\"><h2 id=\"human-share-title\">Share result</h2></div><p>Write the result here, then review it before saving. It will be shared with this room.</p><label>Result<textarea name=\"body\" rows=\"5\" maxlength=\"4000\" required></textarea></label><p id=\"human-share-error\" role=\"alert\"></p><button type=\"button\" id=\"human-share-refresh\" class=\"button ghost\" hidden>Review updated task</button><div class=\"form-actions\"><button type=\"button\" data-close-share class=\"button ghost\">Cancel</button><button type=\"submit\" class=\"button primary\">Review result</button></div><details><summary>Use an existing draft</summary><div id=\"human-existing-drafts\"></div></details></form>",
+  "human.copy.017": "<form><div class=\"dialog-head\"><h2 id=\"human-share-title\">Share result</h2></div><p>Write the result here, then review it before saving. It will be shared with this room.</p><label>Result<textarea name=\"body\" rows=\"5\" maxlength=\"4000\" required></textarea></label><p id=\"human-share-error\" role=\"alert\"></p><button type=\"button\" id=\"human-share-refresh\" class=\"button ghost\" hidden>Review updated task</button><div class=\"form-actions\"><button type=\"button\" data-close-share class=\"button ghost\">Close</button><button type=\"submit\" class=\"button primary\">Review result</button></div><details><summary>Use an existing draft</summary><div id=\"human-existing-drafts\"></div></details></form>",
   "human.copy.018": "This task is no longer available. Your draft is kept here; cancel to discard it.",
   "human.copy.019": "Updated task: {fragmentA}. Review your draft, then choose Review result to post it against the current task.",
-  "human.copy.020": "Draft was not saved: {fragmentA}. Review the updated task before posting again, or cancel to discard this draft.",
+  "human.copy.020": "Draft was not saved: {fragmentA}. Review the updated task before posting again, or choose Discard draft.",
   "human.copy.021": "Draft not confirmed: {fragmentA}. Retry preserves the original draft.",
   "human.copy.022": "Retry original draft",
   "human.copy.023": "An earlier assistant request needs confirmation. Retry preserves the original request.",
@@ -543,5 +543,8 @@ export default {
   "cockpit.jobTimes": "last run {run} · last success {success}",
   "cockpit.jobNever": "never",
   "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
-  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>",
+  "human.discardResultDraft": "Discard draft",
+  "human.resultRejectedDraft": "This draft was not saved. Review the updated task before posting again, or choose Discard draft.",
+  "human.resultPendingDraft": "This draft has not been confirmed. Retry preserves the original draft."
 };

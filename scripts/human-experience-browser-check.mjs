@@ -363,6 +363,7 @@ test('a closed result editor cannot mutate its replacement after a delayed respo
       if (crossesBoundary) {
         // Restore the same human, optionally in another room, without reloading:
         // the old callback must survive to exercise the actual boundary guard.
+        page.once('dialog', dialog => { assert.match(dialog.message(), /pending retry/); void dialog.accept(); });
         await clickChrome(page,'#signout-button');
         await page.locator('#auth-panel').waitFor({state:'visible'});
         const restored = await context.request.post(`${origin}/api/session`,{headers:{Origin:origin},data:{accessKey:roomKeys[currentRoom]},maxRedirects:0});
@@ -388,7 +389,7 @@ test('a closed result editor cannot mutate its replacement after a delayed respo
       await old.deliver();
       assert.equal(await page.locator('#human-share-result').isVisible(),true);
       assert.equal(await page.locator('#human-share-result textarea').inputValue(),currentBody);
-      assert.equal(await page.locator('#human-share-result textarea').isEnabled(),true,'an obsolete failure must not lock the current draft');
+      assert.equal(await page.locator('#human-share-result textarea').isEnabled(),!current,'only the current pending send may lock the draft');
       assert.equal(await page.locator('#human-share-error').textContent(),'','an obsolete failure must not replace the current error');
       assert.equal(await page.locator('#human-share-refresh').isVisible(),false);
       assert.equal(await page.locator('#human-share-result button[type=submit]').textContent(),'Review result');
@@ -1094,4 +1095,44 @@ test('human room admin connects assistant without owner identity or redundant st
   const runs=f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=?').all('commons');
   assert.equal(runs.length,1);
   assert.equal(JSON.parse(runs[0].value).initiatorId,'guest');
+});
+
+test('unsent human result survives Escape and reload, then clears on discard, save and logout', { timeout:60000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({store:f.store,streamInterval:40});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const browser = await browserType.launch({headless:true});
+  t.after(async()=>{ await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve=>server.close(resolve)); f.store.close(); rmSync(f.directory,{recursive:true,force:true}); });
+  for (const [type,data] of [
+    ['work.proposed',{workItemId:'draft-preserve',title:'Keep result draft',definitionOfDone:'Useful text',accountableMemberId:'owner',mode:'read',independentVerificationRequired:false,ownerDecisionRequired:false}],
+    ['work.accepted',{workItemId:'draft-preserve',expectedRevision:0}],['work.started',{workItemId:'draft-preserve',expectedRevision:1}]
+  ]) f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type,data});
+  const page = await browser.newPage(); page.setDefaultTimeout(8000);
+  await page.goto(`http://127.0.0.1:${server.address().port}`); await signInFixture(page,f.keys.owner);
+  await page.locator('#main').waitFor({state:'visible'}); await openHumanResult(page,'draft-preserve');
+  const text = 'The result I have not shared yet.';
+  await page.locator('#human-share-result textarea').fill(text);
+  await page.keyboard.press('Escape'); await openHumanResult(page,'draft-preserve');
+  assert.equal(await page.locator('#human-share-result textarea').inputValue(),text);
+  assert.equal(await page.evaluate(()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented;}),true);
+  page.on('dialog', dialog=>dialog.accept());
+  await page.reload(); await page.locator('#main').waitFor({state:'visible'}); await openHumanResult(page,'draft-preserve');
+  assert.equal(await page.locator('#human-share-result textarea').inputValue(),text);
+  await page.getByRole('button', { name: 'Discard draft', exact: true }).click();
+  await openHumanResult(page, 'draft-preserve');
+  assert.equal(await page.locator('#human-share-result textarea').inputValue(), '');
+  await page.locator('#human-share-result textarea').fill('A result ready to review');
+  await page.locator('#human-share-result [type=submit]').click();
+  await page.locator('#human-share-result').waitFor({state:'hidden'});
+  assert.equal(await page.evaluate(() => JSON.parse(sessionStorage.getItem('project-room:result-drafts:v1')).entries.length), 0);
+
+  await page.keyboard.press('Escape');
+  await openHumanResult(page, 'draft-preserve');
+  await page.locator('#human-share-result textarea').fill('Private draft to clear on logout');
+  await page.setViewportSize({ width: 390, height: 844 });
+  assert.equal(await page.locator('#human-share-result').evaluate(el => el.getBoundingClientRect().right <= innerWidth), true);
+  await page.keyboard.press('Escape');
+  if (await page.locator('#session-menu-button').isVisible()) await page.locator('#session-menu-button').click();
+  await clickChrome(page, '#signout-button');
+  await page.waitForFunction(() => sessionStorage.getItem('project-room:result-drafts:v1') === null);
+
 });
