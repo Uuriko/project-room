@@ -4,4 +4,5 @@ node_modules/
 test-results/
 .operator/
 public/
+client-dist/
 dist/

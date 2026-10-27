@@ -29,9 +29,9 @@ test('asset build produces and refreshes exactly the allowlisted application fil
   const output = await fixture(t);
   const packaged = [...assetPaths, ...templateAssetPaths];
   const produced = packaged.filter(file => !absentGenerated(file));
-  assert.equal(await buildAssets(output), produced.length);
+  assert.equal(await buildAssets(output, await fixture(t)), produced.length);
   await writeFile(new URL('src/app.js', output), 'stale generated asset');
-  await buildAssets(output);
+  await buildAssets(output, await fixture(t));
   // Derived from the allowlist rather than written down: 'connectors' was
   // added to publicAssets and this line still said ['index.html', 'src'].
   const topLevel = [...new Set(produced.map(path => path.includes('/') ? path.slice(0, path.indexOf('/')) : path))].sort();
@@ -39,7 +39,7 @@ test('asset build produces and refreshes exactly the allowlisted application fil
   assert.deepEqual((await readdir(new URL('src/', output))).sort(), produced.filter(p => p.startsWith('src/')).map(p => p.slice(4)).sort());
   for (const file of produced) assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)));
   const config = JSON.parse(await readFile(new URL('../cloudflare/wrangler.jsonc', import.meta.url), 'utf8'));
-  assert.equal(config.build.command, 'node ../scripts/build-agent-docs.mjs && node ../scripts/stamp-version.mjs && node ../scripts/build-capabilities.mjs && node ../scripts/sign-agent-card.mjs && node build-assets.mjs', 'deploy builds the generated agent pages first, then stamps the committed revision before building exact assets');
+  assert.equal(config.build.command, 'node ../scripts/build-agent-docs.mjs && node ../scripts/stamp-version.mjs && node ../scripts/build-capabilities.mjs && node ../scripts/sign-agent-card.mjs && node build-client.mjs && node build-assets.mjs', 'deploy builds the generated agent pages first, then stamps the committed revision, builds the client bundles, then packages exact assets');
 });
 test('the deployment allowlist and the runtime package agree on the public assets', async () => {
   // Three lists name the browser assets: cloudflare/build-assets.mjs (what is
@@ -92,14 +92,14 @@ test('asset build rejects unknown files without uploading or deleting them', asy
   const output = await fixture(t);
   await mkdir(new URL('.operator/', output));
   await writeFile(new URL('.operator/example.txt', output), 'synthetic private file');
-  await assert.rejects(buildAssets(output), /Unexpected asset output/);
+  await assert.rejects(buildAssets(output, await fixture(t)), /Unexpected asset output/);
   assert.equal(await readFile(new URL('.operator/example.txt', output), 'utf8'), 'synthetic private file');
 });
 test('asset build rejects symbolic-link destinations without following them', async t => {
   const output = await fixture(t), target = new URL('outside.txt', await fixture(t));
   await writeFile(target, 'unchanged');
   await symlink(fileURLToPath(target), new URL('index.html', output));
-  await assert.rejects(buildAssets(output), /Unexpected asset output/);
+  await assert.rejects(buildAssets(output, await fixture(t)), /Unexpected asset output/);
   assert.equal(await readFile(target, 'utf8'), 'unchanged');
 });
 test('hosted check help and invalid flags stop before browser or credential access', () => {
@@ -115,6 +115,82 @@ test('hosted check help and invalid flags stop before browser or credential acce
 test('asset build rejects a directory symlink even when its URL has a trailing slash', async t => {
   const parent = await fixture(t), target = await fixture(t), output = new URL('output/', parent);
   await symlink(fileURLToPath(target), new URL('output', parent), 'dir');
-  await assert.rejects(buildAssets(output), /real directory/);
+  await assert.rejects(buildAssets(output, await fixture(t)), /real directory/);
   assert.deepEqual(await readdir(target), [], 'the linked directory remains untouched');
+});
+
+// Client bundles (tranche-2 item 1): with a bundle manifest present, the
+// packaged contract for bundle files is bundle-manifest-exact, packaged
+// HTML points at the entry bundle, and every unbundled source stays
+// packaged source-exact beside them (equal or greater strength).
+import { createHash } from 'node:crypto';
+
+const BUNDLE_ENTRY = 'src/entry-AAAABBBB.js';
+const BUNDLE_CHUNK = 'src/chunk-CCCCDDDD.js';
+async function bundleFixture(t, { tamper = false, extraPath = null } = {}) {
+  const dist = await fixture(t);
+  const entryBytes = Buffer.from('export const entry = true;\n');
+  const chunkBytes = Buffer.from('export const chunk = true;\n');
+  await mkdir(new URL('src/', dist));
+  await writeFile(new URL(BUNDLE_ENTRY, dist), entryBytes);
+  await writeFile(new URL(BUNDLE_CHUNK, dist), chunkBytes);
+  const pin = bytes => createHash('sha256').update(bytes).digest('hex');
+  const files = [
+    { path: BUNDLE_ENTRY, bytes: entryBytes.length, sha256: pin(entryBytes) },
+    { path: BUNDLE_CHUNK, bytes: chunkBytes.length, sha256: tamper ? pin(Buffer.from('other')) : pin(chunkBytes) },
+  ];
+  if (extraPath) files.push({ path: extraPath, bytes: 0, sha256: pin(Buffer.alloc(0)) });
+  const entries = { 'src/entry.js': BUNDLE_ENTRY, 'src/signin-entry.js': BUNDLE_CHUNK, 'src/app.js': BUNDLE_CHUNK };
+  await writeFile(new URL('manifest.json', dist), JSON.stringify({ version: 1, entries, files }, null, 2) + '\n');
+  return dist;
+}
+
+test('asset build packages client bundles manifest-exactly and rewrites entry references', async t => {
+  const output = await fixture(t);
+  const dist = await bundleFixture(t);
+  const packaged = [...assetPaths, ...templateAssetPaths].filter(file => !absentGenerated(file));
+  assert.equal(await buildAssets(output, dist), packaged.length + 2);
+  assert.deepEqual(await readFile(new URL(BUNDLE_ENTRY, output)), Buffer.from('export const entry = true;\n'));
+  assert.deepEqual(await readFile(new URL(BUNDLE_CHUNK, output)), Buffer.from('export const chunk = true;\n'));
+  const index = (await readFile(new URL('index.html', output))).toString('utf8');
+  assert.ok(index.includes(`"./${BUNDLE_ENTRY}"`), 'packaged index.html names the entry bundle');
+  assert.ok(!index.includes('"./src/entry.js"'), 'packaged index.html no longer names the entry source');
+  // The sources stay packaged, source-exact: the Node server and pre-bundle
+  // cached HTML (which names /src/app.js and relies on its self-start
+  // guard) keep working unbundled.
+  for (const file of packaged) {
+    if (file.endsWith('.html')) continue;
+    assert.deepEqual(await readFile(new URL(file, output)), await readFile(new URL('../' + file, import.meta.url)), file);
+  }
+});
+
+test('asset build fails closed when bundle bytes drift from the manifest', async t => {
+  const output = await fixture(t);
+  const dist = await bundleFixture(t, { tamper: true });
+  await assert.rejects(buildAssets(output, dist), /drifted from the bundle manifest/);
+});
+
+test('asset build fails closed when the manifest names a non-bundle path', async t => {
+  const output = await fixture(t);
+  const dist = await bundleFixture(t, { extraPath: 'src/evil.js' });
+  await assert.rejects(buildAssets(output, dist), /invalid bundle file/);
+});
+
+test('the HTTP server serves bundle-pattern assets immutably and 404s absent ones', async t => {
+  const root = await fixture(t);
+  await mkdir(new URL('cloudflare/client-dist/src/', root), { recursive: true });
+  const bundleBytes = Buffer.from('export const served = true;\n');
+  await writeFile(new URL('cloudflare/client-dist/src/entry-AAAABBBB.js', root), bundleBytes);
+  const store = new RoomStore(':memory:'), server = createRoomServer({ store, assetRoot: root });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const present = await fetch(origin + '/src/entry-AAAABBBB.js');
+  assert.equal(present.status, 200);
+  assert.equal(present.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+  assert.deepEqual(Buffer.from(await present.arrayBuffer()), bundleBytes);
+  const absent = await fetch(origin + '/src/chunk-ZZZZZZZZ.js');
+  assert.equal(absent.status, 404, 'a bundle name with no generated output is a 404, never a 500');
+  const unhashed = await fetch(origin + '/src/entry-AAAABBBB.css');
+  assert.equal(unhashed.status, 404, 'the bundle pattern is JavaScript-only');
 });

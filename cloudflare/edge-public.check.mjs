@@ -61,7 +61,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
         const path = new URL(request.url).pathname;
         if (path === '/og/fonts/Inter-Regular.ttf') return new Response(wordmarkFont);
         if (path === '/og/fonts/OFL.txt') return new Response(fontLicense);
-        const bodies = { '/index.html': '<div id="message-input">', '/about.html': 'about-page', '/src/app.js': 'app-js', '/manifest.webmanifest': '{"name":"Room"}' };
+        const bodies = { '/index.html': '<div id="message-input">', '/about.html': 'about-page', '/src/app.js': 'app-js', '/src/entry-AAAABBBB.js': 'entry-bundle-js', '/src/chunk-CCCCDDDD.js': 'chunk-bundle-js', '/manifest.webmanifest': '{"name":"Room"}' };
         if (!bodies[path]) return new Response(null, { status: 404 });
         return new Response(bodies[path]);
       }
@@ -138,6 +138,19 @@ test('static assets and discovery documents do not enter the Durable Object', as
     // Scripts revalidate against a content ETag instead of re-downloading;
     // fonts get a day of cache; the HTML shell stays no-store.
     assert.equal(script.headers.get('cache-control'), 'no-cache');
+    // Hashed bundle names classify by pattern, cache immutably, and are
+    // answered from ASSETS without entering the Durable Object —
+    // including under the /room/ marketing prefix.
+    const bundle = await call('/src/entry-AAAABBBB.js');
+    assert.equal(bundle.status, 200);
+    assert.equal(bundle.headers.get('x-test-do-fetches'), '0');
+    assert.equal(bundle.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.equal(await bundle.text(), 'entry-bundle-js');
+    const roomBundle = await call('/room/src/chunk-CCCCDDDD.js');
+    assert.equal(roomBundle.status, 200);
+    assert.equal(roomBundle.headers.get('x-test-do-fetches'), '0');
+    assert.equal(roomBundle.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    assert.equal(await roomBundle.text(), 'chunk-bundle-js');
     const etag = script.headers.get('etag');
     assert.match(etag, /^"[0-9a-f]{32}"$/);
     assert.equal(scriptAgain.headers.get('etag'), etag, 'the ETag is stable for unchanged bytes');

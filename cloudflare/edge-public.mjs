@@ -3,7 +3,7 @@
 // single-threaded, and a cold wake or a synchronous stretch closes its input
 // gate for every route that shares it. Asset bytes are cached for the life
 // of this isolate; a deploy starts a new one.
-import { publicAssetPaths } from '../server/public-assets.mjs';
+import { publicAssetPaths, isClientBundlePath } from '../server/public-assets.mjs';
 import { frontDoorHtml, githubConfig } from '../server/github-oauth.mjs';
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, PUBLIC_NOT_FOUND_HTML, reviewedPublicSearchPaths } from '../server/public-search.mjs';
 import { discoveryDoc, EDGE_DOOR_HOSTS, ROOM_ORIGIN, SKILLS_CATALOG_PATH } from '../server/agent-discovery.mjs';
@@ -107,7 +107,7 @@ function roomMarketingPath(pathname) {
   const rest = pathname.slice('/room'.length);
   // /room/ is the public door, not the app shell.
   if (rest === '/' || rest === '') return null;
-  return assets.has(rest) ? rest : null;
+  return assets.has(rest) || isClientBundlePath(rest.slice(1)) ? rest : null;
 }
 
 let securityContactWarned = false;
@@ -147,7 +147,7 @@ export function classifyEdgePath(pathname) {
   if (pathname === '/openapi.json' || pathname === '/room/openapi.json') return 'openapi';
   const doc = discoveryDoc(pathname);
   if (doc && doc !== skillsDoc) return 'discovery';
-  if (assets.has(pathname) || roomMarketingPath(pathname)) return 'asset';
+  if (assets.has(pathname) || isClientBundlePath(pathname.slice(1)) || roomMarketingPath(pathname)) return 'asset';
   return null;
 }
 
@@ -268,7 +268,9 @@ async function assetResponse(request, env, url) {
     return new Response(null, { status: 301, headers });
   }
   if (canonical && !url.search && reviewedPublicSearchPaths.includes(canonical)) headers.set('X-Robots-Tag', 'all');
-  const [file, type] = assets.get(servedPath);
+  // A bundle path classified by pattern has no map entry: its file is the
+  // path itself and its type is always JavaScript.
+  const [file, type] = assets.get(servedPath) ?? [servedPath.slice(1), 'text/javascript'];
   const bytes = await loadCachedAsset(env, file);
   const githubConfigured = file === 'index.html' && githubSignInConfigured(env, url.origin);
   if (!bytes) {
@@ -297,7 +299,11 @@ async function assetResponse(request, env, url) {
   // same one-day cache the Node server gives them. Scripts, styles and SVG
   // keep unhashed names, so they revalidate on every load (no-cache) against a
   // content ETag and an unchanged file costs a 304. HTML stays no-store.
-  const policy = assetCachePolicy(type);
+  // Content-hashed bundle names are their own version: cache them
+  // immutably. Every other script or style keeps the
+  // revalidate-on-every-load policy above, and HTML stays no-store
+  // (baseHeaders) — only hashed names qualify.
+  const policy = isClientBundlePath(file) ? 'public, max-age=31536000, immutable' : assetCachePolicy(type);
   if (policy) {
     headers.set('Cache-Control', policy);
     const etag = await assetEtag(bodyBytes);
