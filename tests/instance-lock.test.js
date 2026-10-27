@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { acquireInstanceLock, INSTANCE_LOCK_ERRORS } from "../server/instance-lock.mjs";
+import { acquireInstanceLock, pidAlive, procState, INSTANCE_LOCK_ERRORS } from "../server/instance-lock.mjs";
+import { spawnSync } from "node:child_process";
 
 function lockDir(t) {
   const dir = mkdtempSync(join(tmpdir(), "project-room-instance-lock-"));
@@ -93,4 +94,40 @@ test("acquiring in a missing directory surfaces a coded io error", t => {
     assert.equal(error.code, "instance_lock_io");
     return true;
   });
+});
+
+test("pidAlive answers for a live pid and a bogus pid", t => {
+  assert.equal(pidAlive(process.pid), true, "the running test process is alive");
+  assert.equal(pidAlive(2147483646), false, "an implausible pid is not alive");
+});
+
+// Regression: pidAlive used process.kill(pid, 0) only. A zombie (an exited
+// process never reaped by its parent) answers signal 0, so after a SIGKILLed
+// server left an unreaped zombie behind, every later boot on the same
+// database directory was refused forever instead of reclaiming the lock.
+// A zombie is created deterministically with a tiny python3 helper: fork a
+// child that exits immediately, then do not wait() on it for a few seconds.
+test("a zombie pid reads as dead and its lock is reclaimed", t => {
+  const probe = spawnSync("python3", [
+    "-c",
+    "import os,sys,time\np=os.fork()\nif p==0: os._exit(0)\nprint(p,flush=True)\ntime.sleep(6)",
+  ], { encoding: "utf8", timeout: 10_000 });
+  if (probe.status !== 0 || !probe.stdout?.trim()) {
+    t.skip(`no python3 fork available on this host (status ${probe.status})`);
+    return;
+  }
+  const zombie = Number(probe.stdout.trim());
+  if (!Number.isSafeInteger(zombie) || zombie <= 0) {
+    t.skip("python3 did not report a usable pid");
+    return;
+  }
+  const state = procState(zombie);
+  assert.equal(state, "Z", "the unreaped child is a zombie in /proc");
+  assert.equal(pidAlive(zombie), false, "a zombie is not an alive lock holder");
+  const dir = lockDir(t);
+  const lockPath = join(dir, ".project-room.lock");
+  writeFileSync(lockPath, JSON.stringify({ pid: zombie, startedAt: "2020-01-01T00:00:00.000Z" }), { mode: 0o600 });
+  const lock = acquireInstanceLock(lockPath);
+  t.after(() => lock.release());
+  assert.equal(lock.pid, process.pid, "the zombie-held lock is reclaimed");
 });
