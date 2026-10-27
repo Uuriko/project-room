@@ -173,7 +173,12 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);
     assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`);
   }
-  const existingTools = fullTools.filter(tool => !releaseTools.has(tool.name));
+  // UT26 lane 10 F4 cure: the action meta tools (room_search_actions,
+  // room_run_action) are now also listed in full — full must be a superset
+  // of lean — so they are accounted explicitly here, like the release tools
+  // above, and do not consume the existing-catalog budget.
+  const metaTools = new Set(["room_search_actions", "room_run_action"]);
+  const existingTools = fullTools.filter(tool => !releaseTools.has(tool.name) && !metaTools.has(tool.name));
   assert.ok(existingTools.length <= 115,
     `existing full catalog has ${existingTools.length} tools (${fullTokens} total tokens); its budget remains 115 tools`);
   for (const name of ["room_read_messages", "room_read_request", "room_needs_me"]) {

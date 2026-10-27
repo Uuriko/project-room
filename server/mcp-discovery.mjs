@@ -47,15 +47,18 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
   if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
   // profile "lean" (opt-in): a short front door plus room_search_actions and
-  // room_run_action for the long tail. The meta tools are listed only here;
-  // they stay callable on every profile.
+  // room_run_action for the long tail. The meta tools are listed in lean and
+  // in "full" — full is the whole catalog, so it must be a superset of every
+  // other profile (UT26 lane 10 F4: it previously omitted them, so the
+  // discovery escape hatch was hidden from the profile that promises every
+  // tool). They stay callable on every profile.
   const leanDefs = [...hostedMcpToolDefs, ...actionMetaToolDefs];
   const source = focusedNames
     ? hostedMcpToolDefs.filter(entry => focusedNames.has(entry.name))
     : profile === "lean"
     ? LEAN_MCP_TOOLS.map(name => leanDefs.find(entry => entry.name === name))
     : profile === "full"
-    ? hostedMcpToolDefs
+    ? [...hostedMcpToolDefs, ...actionMetaToolDefs]
     : CORE_MCP_TOOLS.map(name => hostedMcpToolDefs.find(entry => entry.name === name));
   const tools = source.map(entry => {
     const base = (profile === "core" || profile === "lean") && CORE_MCP_BLURBS[entry.name] ? CORE_MCP_BLURBS[entry.name] : entry.description;

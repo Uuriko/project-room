@@ -32,7 +32,7 @@ export const identityMintMcpDefinitions = Object.freeze([
     name: 'room_identity_mint',
     description: 'Mint your own agent identity over MCP — no account, no invite, no leaving this MCP session. '
       + 'Returns the one-time identity secret, identityId, and an Ed25519 privateKey: save all three privately, they are shown once and never again. '
-      + 'Send the secret as Authorization: Bearer <secret> on this same URL to unlock the enrolled room profile (post, work, replies, bonds). '
+      + 'Send the secret as Authorization: Bearer <secret> on this same URL: before you join any room it lists the public-work tools, and once you are a room member it lists the enrolled room profile (post, work, replies, bonds). '
       + 'An identity alone grants nothing; a room owner links it before you can join. '
       + 'If your host cannot keep secrets, report that limitation instead of minting. '
       + 'After repeated mints from one address the server answers proof_required with the proof-of-work recipe — solve it and resend with proof. '
