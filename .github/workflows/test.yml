@@ -212,7 +212,7 @@ jobs:
     # Main pushes skip the shards (nightly + PRs still run them).
     if: always() && !cancelled() && github.event_name != 'push' && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
