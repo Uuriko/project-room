@@ -23,14 +23,11 @@ import { randomUUID } from "node:crypto";
 import { event, EVENT_TYPES as T, isRoomArchived } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { ensureActivationColumn, ensurePayoutColumns, inviteMessage, memberReward, settleActivations, stampIssuer } from "./growth-loop.mjs";
+import { ServiceError } from "./service-error.mjs";
 
-// Local ServiceError (mirrors server/store.mjs). We avoid importing from
-// store.mjs here to break the circular dependency for the Workers bundle:
-// store.mjs imports this module, so this module cannot import from store.mjs
-// at the top level without esbuild failing on the cycle.
-class ServiceError extends Error {
-  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
-}
+// Shared ServiceError from the leaf module (no imports of its own, so no
+// store.mjs cycle): errors thrown here now satisfy callers'
+// `instanceof ServiceError` checks against server/service-error.mjs.
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Mirrors the projection compaction in store.mjs: strip replay-only caches.
 const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });

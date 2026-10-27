@@ -9,17 +9,16 @@
 // Named owner-attention to avoid the unrelated W4-46 quiet-hours/digest
 // "attention" module (server/attention.mjs).
 //
-// Local ServiceError (mirrors server/access-requests.mjs): store.mjs imports
-// are avoided here to keep the Workers bundle cycle-free; http.mjs injects
-// its store and AccessRequests instances. The work-claims kernel is a pure
-// module (no store import), so its close/review predicates are safe to use.
+// ServiceError comes from the shared leaf module (server/service-error.mjs,
+// no imports of its own): store.mjs imports are avoided here to keep the
+// Workers bundle cycle-free; http.mjs injects its store and AccessRequests
+// instances. The work-claims kernel is a pure module (no store import), so
+// its close/review predicates are safe to use.
 import { createHash } from "node:crypto";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 import { canCloseWork, hasCurrentReview, resolveNamedReviewers } from "./work-claims.mjs";
+import { ServiceError } from "./service-error.mjs";
 
-class ServiceError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
-}
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
 // A claim lease inside this horizon is worth the owner's attention.

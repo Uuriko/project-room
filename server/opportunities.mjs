@@ -1,6 +1,7 @@
 import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
+import { ServiceError } from "./service-error.mjs"; // shared class (leaf module); replaces the local shadow definition
 
 // Public opportunity feed (v2).
 //
@@ -50,10 +51,6 @@ import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a
 //      counts, or public leaderboards — in this feed or around it. Sort is
 //      recency-only, never popularity/engagement; comparison stays private
 //      (percentiles, never public ranks).
-
-class ServiceError extends Error {
-  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
-}
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 

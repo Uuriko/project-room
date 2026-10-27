@@ -4,10 +4,7 @@
 // clears both paths. Agent delegates cannot confer manage_members.
 
 import { randomUUID } from "node:crypto";
-
-class ServiceError extends Error {
-  constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
-}
+import { ServiceError } from "./service-error.mjs"; // shared class (leaf module); replaces the local shadow definition
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Mirrors memberCan() from src/events.js (Workers-bundle reason as above).

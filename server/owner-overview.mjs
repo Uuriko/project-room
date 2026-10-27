@@ -19,18 +19,16 @@
 // - No new tables, no new write path: access-request approve/deny reuses
 //   the existing decide endpoint via the #662 actions verbatim.
 //
-// Local ServiceError mirrors server/owner-attention.mjs (store.mjs imports
-// are avoided to keep the Workers bundle cycle-free; http.mjs injects its
-// store, AccessRequests and job-health reader).
+// ServiceError comes from the shared leaf module (server/service-error.mjs,
+// no imports of its own), so there is no store.mjs import cycle (http.mjs
+// injects its store, AccessRequests and job-health reader).
 import { attentionReport, accessRequestAttentionItem } from "./owner-attention.mjs";
 import { REQUEST_TTL_MS } from "./access-requests.mjs";
 import { DISPUTE_TIMEOUT_MS } from "./bounty-escrow.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
+import { ServiceError } from "./service-error.mjs";
 
-class ServiceError extends Error {
-  constructor(status, code, message) { super(message); this.status = status; this.code = code; }
-}
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
 export const OVERVIEW_WINDOWS = Object.freeze({ "24h": 24 * 3600 * 1000, "7d": 7 * 24 * 3600 * 1000, "30d": 30 * 24 * 3600 * 1000 });
