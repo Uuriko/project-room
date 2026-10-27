@@ -848,7 +848,7 @@ test("discovery preserves working room HTTP credentials and configured origin", 
     assert.match(packet, /do not repeatedly try MCP or re-enroll/);
     assert.match(packet, /supported scoped API keys, including room-pinned keys/);
     assert.match(packet, /never send its credential to a hosted URL/);
-    assert.match(packet, /reply-context\?requestMessageId=REQUEST_ID/);
+    assert.match(packet, /selected reply-context read/);
   }
 });
 
