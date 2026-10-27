@@ -5,7 +5,7 @@
 // DOM, so these are the importable surface.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { extractEmailAddresses, gmailErrorText, isBlockedEmailUrl } from "../src/gmail-ui.js";
+import { extractEmailAddresses, gmailErrorText, isBlockedEmailUrl } from "../archive/deferred-email/src/gmail-ui.js";
 
 test("extractEmailAddresses pulls every address from reply headers", () => {
   assert.deepEqual(

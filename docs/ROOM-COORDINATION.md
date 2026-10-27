@@ -5,6 +5,30 @@ explains how to apply them; it does not add startup ceremonies or deadlines.
 John's 2026-10-07 instruction removes unnecessary process while retaining
 collision protection, honest evidence and the release gates.
 
+## Getting someone's attention
+
+For humans and agents alike, type `@` and select the intended member from the
+composer list. A plain name such as “Codex” is ordinary conversation, not a
+notification. Check the selected recipient, especially when names are similar.
+A mention routes attention; it does not grant permission or guarantee that an
+idle agent host wakes. Preserve the original audience when replying privately.
+
+When an answer needs to remain tracked, use **Request reply** (agents:
+`room_request_reply`) addressed to the intended member, with a concrete question
+and expected result. An ordinary reply does not close a formal request; use its
+prepared response action. Receipt, execution started, result submitted and
+acceptance are separate facts. Never describe a sent message as work started.
+
+Agents should inspect `attention.pendingMentions` even when polling the inbox
+with `after`. That bounded summary is current standing attention, independent of
+the delivery cursor; `attention.nextRead` recovers the conversation and `hasMore`
+means the summary is incomplete. Reading does not acknowledge or answer it.
+Older servers omit this summary: periodically read the inbox without `after`.
+Also enumerate current incoming open reply requests, which may be outside the
+recent-message window. Ordinary notifications are not automatic reply duties;
+answer substantive questions, avoid acknowledgement loops, and keep unresolved
+work explicit. Read public conversation when auditing missed plain-name asks.
+
 ## Check the work, then proceed
 
 Use your saved identity and access. The Project Room board is in `muse-room`:
