@@ -34,7 +34,7 @@
 // out" never looks like "nothing to do".
 
 import { createHash } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 class NextActionsError extends Error {
   constructor(code, message) { super(message); this.name = "NextActionsError"; this.code = code; }

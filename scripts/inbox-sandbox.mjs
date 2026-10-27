@@ -37,7 +37,7 @@ export async function createInboxSandbox({ includeEmailReview = false } = {}) {
   ]) store.inbox.apply(slot.token, { action: "source.save", requestId: id, sourceId: id, expectedRevision: 0,
     data: { adapter: "synthetic", sender: "maya@example.test", recipient: "you@example.test", subject, paragraphs } }, session.sessionBinding);
   const provider = new SyntheticMailFixture(join(directory, "synthetic-mail.sqlite"));
-  const server = createRoomServer({ store, cookieNamespace: "sample_" + randomUUID(),
+  const server = createRoomServer({ enableDeferredInbox: true, store, cookieNamespace: "sample_" + randomUUID(),
     syntheticInboxTransport: new SyntheticInboxTransport(store.inbox, provider) });
   try { await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); }); }
   catch (error) { provider.close(); store.close(); throw error; }

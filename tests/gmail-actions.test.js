@@ -61,7 +61,7 @@ test('mailbox search, archive/read/star/trash reflect Gmail and session changes 
   await assert.rejects(f.run(compose), { code: 'gmail_session_changed' }); assert.equal(f.calls.filter(c => c.url.endsWith('/messages/send')).length, 0);
 });
 test('mailbox HTTP rejects missing CSRF before provider access and projects owner', async t => {
-  const f = await setup(t), server = createRoomServer({ store: f.store, gmailAuth: f.config });
+  const f = await setup(t), server = createRoomServer({ enableDeferredInbox: true, store: f.store, gmailAuth: f.config });
   await new Promise(r => server.listen(0, '127.0.0.1', r)); t.after(async () => { server.closeAllConnections(); await new Promise(r => server.close(r)); });
   const origin = 'http://127.0.0.1:' + server.address().port, count = f.calls.length;
   const headers = { Cookie: 'account_session=' + f.slot.token, Origin: origin, 'X-Session-Binding': f.session.sessionBinding, 'Content-Type': 'application/json' };
