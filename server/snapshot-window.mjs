@@ -86,7 +86,10 @@ export function fitWindowedSnapshot(snapshot, { maxBytes = SNAPSHOT_WINDOW_BYTES
 
 function fitEvents(base, events, maxBytes) {
   const baseBytes = Buffer.byteLength(JSON.stringify(base));
-  if (baseBytes >= maxBytes || events.length === 0) return base;
+  if (events.length === 0) return base;
+  // The newest event always rides along: readers anchor on the audit tail's
+  // last event, so an over-budget window still carries that one event.
+  if (baseBytes >= maxBytes) return { ...base, state: { ...base.state, eventLog: events.slice(-1) } };
   const sizes = events.map(event => Buffer.byteLength(JSON.stringify(event)) + 1);
   let total = baseBytes;
   let start = events.length;
@@ -99,7 +102,7 @@ function fitEvents(base, events, maxBytes) {
   }
   let chosen = events.slice(start);
   let fitted = { ...base, state: { ...base.state, eventLog: chosen } };
-  while (chosen.length > 0 && Buffer.byteLength(JSON.stringify(fitted)) > maxBytes) {
+  while (chosen.length > 1 && Buffer.byteLength(JSON.stringify(fitted)) > maxBytes) {
     chosen = chosen.slice(1);
     fitted = { ...base, state: { ...base.state, eventLog: chosen } };
   }
