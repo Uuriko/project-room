@@ -14,7 +14,7 @@
 // writer has no code path to this table and the recovery audit's exact table
 // list is the integrity gate. All writes go through the store transaction.
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // payloadBytes matches the webhook route's body cap (channelSyncLimits.webhookBodyBytes):

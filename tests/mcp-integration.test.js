@@ -22,7 +22,8 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   t.after(async () => { if (mcp) await mcp.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   mcp = await openMcpTestClient(directory);
   const tools = (await mcp.request("tools/list")).result.tools;
-  assert.equal(tools.length, 44);
+  assert.equal(tools.length, 47);
+  assert.ok(tools.some(tool => tool.name === "room_map"));
   assert.deepEqual(tools.filter(tool => tool.name.startsWith("room_assistant_")).map(tool => tool.name), ["room_assistant_context", "room_assistant_action"]);
   const assistant = (await mcp.call("room_assistant_context", {})).result.structuredContent;
   assert.equal(assistant.roomId, "commons");
@@ -50,6 +51,7 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   assert.match(compact.brief, /Suggested tool focus: work/);
   assert.equal(compact.brief.includes("Please prepare an agenda"), false);
   assert.ok(JSON.stringify(compact).length < JSON.stringify(selected).length);
+  assert.match(compact.briefVersion, /^[a-f0-9]{64}$/);
   const batch = (await mcp.call("room_read_work", { workItemIds: batchIds })).result.structuredContent;
   const withoutReadTime = item => ({ ...item, brief: item.brief.replace(/Evaluated: [^\n]+/, "Evaluated: <fresh read>") });
   assert.deepEqual(batch.items.map(item => item.workItemId), batchIds);

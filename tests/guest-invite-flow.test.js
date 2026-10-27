@@ -105,6 +105,19 @@ test("owner mint issues a public-safe GX code; strangers and non-owners are refu
   assert.equal(anon.status, 401);
 });
 
+test("a non-owner peer with an empty body is refused before field validation", async t => {
+  const { store, request, ownerKey } = await serve(t);
+  store.command(ownerKey, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "peer", displayName: "Peer", kind: "human", permissions: [] } });
+  const peerKey = store.issueAccessKey("commons", "peer");
+  const denied = await request("/api/rooms/commons/guest-invites", { method: "POST", token: peerKey, data: {} });
+  assert.equal(denied.status, 403, JSON.stringify(await denied.clone().json()));
+  assert.equal((await denied.json()).error.code, "owner_required");
+  const ownerEmpty = await request("/api/rooms/commons/guest-invites", { method: "POST", token: ownerKey, data: {} });
+  assert.equal(ownerEmpty.status, 422);
+  assert.equal((await ownerEmpty.json()).error.code, "invalid_guest_invite");
+});
+
 test("agent owner mint is refused with owner-addressed remedies; the named Add-agent remedy converges (#3432)", async t => {
   const { store, request } = await serve(t);
   // An agent-owned room: the owner is an agent identity with no account

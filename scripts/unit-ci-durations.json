@@ -553,6 +553,7 @@
   "tests/instance-lock.test.js": 4828,
   "tests/integrity-deleted-invitee.test.js": 1318,
   "tests/integrity-incremental.test.js": 27612,
+  "tests/integrity-naming.test.js": 5565,
   "tests/invariants-ci-parser.test.js": 1000,
   "tests/invariants/board-mutations-emit-events.test.mjs": 1353,
   "tests/invariants/claim-reopen.test.mjs": 1000,
