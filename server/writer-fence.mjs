@@ -410,6 +410,11 @@ export const unfencedAdditiveTables = Object.freeze([
   // deferred integrity step the cron runs next. Neither is room content.
   "room_schema_stamp",
   "integrity_job_cursor",
+  // storage_failure_streak (B3-2 F2): the durable mirror of the store's
+  // consecutive-storage-failure counter, so eviction cannot reset the
+  // readiness streak. Operational state, never room content; older
+  // writers have no code path to it.
+  "storage_failure_streak",
   // Public page read model. Written when an owner opts in, and removed when
   // they opt out. Older writers have no path to these tables. Public pages
   // read only these rows. The constructor creates the empty tables; the

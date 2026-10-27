@@ -1900,7 +1900,12 @@ const ROWS = [
   { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
-  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // B3-2 F2: the storage-failure streak is a global singleton with no
+  // room, identity, or account key — no purge kind scopes it, so the
+  // empty match retains it under every purge (the row is operational
+  // readiness state for the whole store, not any target's data).
+  { table: "storage_failure_streak", key: "singleton", action: "retain", reason: "Global storage-failure streak (readiness state) is not scoped to any room, identity, or account; it clears only on a committed write.", match: {} }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({

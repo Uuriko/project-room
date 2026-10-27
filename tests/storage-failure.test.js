@@ -185,6 +185,41 @@ test("a storage error raised outside a store transaction takes the typed 503 and
   assert.equal(store.storageStatus().failures, 3);
 });
 
+test("the failure streak survives a store reopen until a committed write clears it (B3-2 F2)", async t => {
+  // Eviction shape at the store layer: a reopen constructs a successor
+  // instance over the same durable database. Before the cure the streak
+  // was a plain instance field, so the successor read failures: 0 and
+  // readiness silently cleared without any committed write.
+  const directory = mkdtempSync(join(tmpdir(), "project-room-storage-streak-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = join(directory, "room.sqlite");
+  const driverError = () => Object.assign(new Error("disk I/O error"), { code: "ERR_SQLITE_ERROR", errcode: 10, errstr: "disk I/O error" });
+  const first = new RoomStore(filename, { storageFailureThreshold: 2 });
+  first.initialize(initialRoom());
+  first.storageFailure(driverError());
+  first.storageFailure(driverError());
+  assert.deepEqual(first.storageStatus(), { failures: 2, threshold: 2, unavailable: true });
+  const lastAt = first.storageFailureLastAt;
+  assert.equal(typeof lastAt, "number");
+  first.close();
+
+  const second = new RoomStore(filename, { storageFailureThreshold: 2 });
+  assert.deepEqual(second.storageStatus(), { failures: 2, threshold: 2, unavailable: true }, "the successor inherits the degraded streak");
+  assert.equal(second.storageFailureLastAt, lastAt, "the last-failure timestamp is rehydrated too");
+  // A committed write that changes rows is the only recovery: it clears
+  // the streak in memory and in the durable mirror.
+  second.bindHumanAccount("commons", "owner", "account-owner");
+  const owner = second.issueAccessKey("commons", "owner");
+  second.command(owner, "commons", post("recovered after reopen"));
+  assert.deepEqual(second.storageStatus(), { failures: 0, threshold: 2, unavailable: false });
+  assert.equal(second.storageFailureLastAt, null);
+  second.close();
+
+  const third = new RoomStore(filename, { storageFailureThreshold: 2 });
+  assert.deepEqual(third.storageStatus(), { failures: 0, threshold: 2, unavailable: false }, "the cleared streak stays cleared on the next successor");
+  third.close();
+});
+
 test("nested and read-only transactions count one refusal each and the store stays usable", async t => {
   const { store, owner, fill, free } = await fixture(t, { storageFailureThreshold: 3 });
   fill();

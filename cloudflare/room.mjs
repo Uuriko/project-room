@@ -17,7 +17,7 @@ import { ChannelWebhookInbox } from '../server/channel-import.mjs';
 import { createMagicLinkMailer } from '../server/magic-links.mjs';
 import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
-import { channelDrainTickShape, CHANNEL_DRAIN_INFLIGHT_KEY } from './channel-drain-tick.mjs';
+import { channelDrainTickShape, persistChannelDrainOutcome, CHANNEL_DRAIN_INFLIGHT_KEY, CHANNEL_DRAIN_OUTCOME_KEY } from './channel-drain-tick.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
@@ -308,6 +308,12 @@ export class ProjectRoom extends DurableObject {
           this.channelDrainOutcome = this.channelDrainOutcomeHeld ?? null;
           this.channelDrainOutcomeHeld = null;
         }
+        // B3-2 F1: the heartbeat record is durable, so the durable
+        // outcome mirror now reflects the post-consumption stash (the
+        // promoted held outcome, or nothing — which deletes the key).
+        // On the put-failure path above this is deliberately skipped:
+        // the mirror keeps the unrecorded outcome for the next tick.
+        await persistChannelDrainOutcome(this.ctx.storage, this.channelDrainOutcome, this.channelDrainOutcomeHeld);
       }
       this.jobHealthSnapshot = jobHealthView(next, Date.now(), this.env, this.store).jobs;
       return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
@@ -348,6 +354,22 @@ export class ProjectRoom extends DurableObject {
     const drainer = this.channelDrainer ??= new ChannelDrainer({ store: this.store, webhooks: this.channelWebhooks });
     const gate = drainer.configured();
     if (!gate.configured) return { skipped: 1, configured: false, connections: 0 };
+    // B3-2 F1: a successor instance's stash fields are cold. Peek the
+    // durable outcome mirror before concluding there is no completed
+    // drain to report — without it the successor reported `unobserved`
+    // for a drain that had in fact completed before the eviction. An
+    // outcome that was peeked (reported) but not yet recorded when the
+    // previous instance died is simply reported again, the same
+    // at-least-once shape as the heartbeat put-failure path above.
+    if (this.channelDrainOutcome == null && this.channelDrainOutcomeHeld == null) {
+      try {
+        const stored = await this.ctx.storage.get(CHANNEL_DRAIN_OUTCOME_KEY);
+        if (stored && typeof stored === 'object') {
+          if (stored.outcome != null) this.channelDrainOutcome = stored.outcome;
+          if (stored.held != null) this.channelDrainOutcomeHeld = stored.held;
+        }
+      } catch (error) { console.error(`[channel-drain] outcome restore failed: ${error?.message ?? error}`); }
+    }
     const completed = this.channelDrainOutcome ?? null;
     if (completed !== null) this.channelDrainOutcomeReported = completed;
     // #3927 R3: the inflight fields are instance memory. An instance
@@ -421,6 +443,12 @@ export class ProjectRoom extends DurableObject {
     } else {
       this.channelDrainOutcome = summary;
     }
+    // B3-2 F1: mirror the stash durably at stash time (same write shape
+    // as the inflight start stamp). Fire-and-forget with a log line: a
+    // failed mirror degrades to the pre-cure behaviour, never to a
+    // failed drain.
+    persistChannelDrainOutcome(this.ctx.storage, this.channelDrainOutcome, this.channelDrainOutcomeHeld).catch(error =>
+      console.error(`[channel-drain] outcome persist failed: ${error?.message ?? error}`));
   }
   // Changed rooms update the checksum. One room per tick is reread so a
   // projection that changes without a new event is still caught. A mismatch

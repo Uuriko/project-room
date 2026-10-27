@@ -19,6 +19,15 @@ export const CHANNEL_DRAIN_STUCK_MS = 120000;
 // CHANNEL_DRAIN_STUCK_MS: room.mjs cannot carry test-only exports.
 export const CHANNEL_DRAIN_INFLIGHT_KEY = 'cron:channel-drain-inflight:v1';
 
+// B3-2 F1: the durable mirror of a completed drain's outcome, written to
+// DO storage when the outcome is stashed and deleted when recordCronTick
+// consumes it. The outcome itself is instance memory, so without this
+// record an eviction between completion and the heartbeat record lost
+// it permanently — the successor reported the drain `unobserved`. The
+// record holds { outcome, held } in the stash's shape (the head outcome
+// plus one queued behind it while the head awaits its record).
+export const CHANNEL_DRAIN_OUTCOME_KEY = 'cron:channel-drain-outcome:v1';
+
 // The fields of a completed drain tick that may cross the RPC to the
 // heartbeat: the numeric digest plus the failure strings summaryFailure
 // reads. The full summary (per-connection results, account and connection
@@ -51,6 +60,29 @@ function drainOutcomeFields(summary) {
 // durable start stamp survives): the drain will never complete, so past
 // the stuck bound the tick reports the wedge AND starts a replacement —
 // a live drain past the bound is merely wedged and must not be doubled.
+// B3-2 F1: write the durable outcome mirror — the post-consumption
+// rewrite recordCronTick performs once the heartbeat record is durable,
+// and the stash-time mirror #drainChannelsInBackground's stash performs.
+// This lives here, not as a ProjectRoom method, for two reasons: a
+// private method's brand check rejects the plain-object receivers the
+// heartbeat glue is exercised against in tests (room.mjs's prototype
+// methods run against DO-shaped stubs there), and room.mjs cannot carry
+// extra exports without widening the runtime's RPC surface. The mirror
+// holds a JSON copy of the stash; the in-memory fields keep the original
+// objects, so recordCronTick's identity comparisons are unaffected on
+// the instance that stashed them. An empty stash deletes the record, so
+// a successor instance's peek finds no outcome to report.
+export async function persistChannelDrainOutcome(storage, outcome, held) {
+  const current = outcome ?? null;
+  const queued = held ?? null;
+  if (current === null && queued === null) {
+    await storage.delete(CHANNEL_DRAIN_OUTCOME_KEY);
+    return;
+  }
+  const copy = value => value === null ? null : JSON.parse(JSON.stringify(value));
+  await storage.put(CHANNEL_DRAIN_OUTCOME_KEY, { outcome: copy(current), held: copy(queued) });
+}
+
 export function channelDrainTickShape({ connections, inflight, inflightSince, now, completed, orphaned = false }) {
   const report = drainOutcomeFields(completed);
   const unobserved = completed == null ? { unobserved: 1 } : {};
