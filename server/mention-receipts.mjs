@@ -19,6 +19,7 @@ export function listMentionReceipts(store, token, roomId, expectedSessionBinding
     const rows = store.db.prepare(
       `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
               m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt,
+              json_extract(e.body, '$.data.messageId') AS messageId,
               o.acknowledged, o.acknowledged_at AS acknowledgedAt, o.responded_at AS respondedAt
        FROM mention_states m
        LEFT JOIN mention_observations o ON o.room_id=m.room_id
@@ -33,6 +34,7 @@ export function listMentionReceipts(store, token, roomId, expectedSessionBinding
       roomId,
       senderId: auth.member.id,
       receipts: rows.map(row => ({
+        messageId: row.messageId ?? row.messageEventId,
         messageEventId: row.messageEventId,
         memberId: row.memberId,
         displayName: members[row.memberId]?.displayName ?? row.memberId,

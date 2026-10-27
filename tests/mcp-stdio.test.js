@@ -277,6 +277,13 @@ test("MCP claim PR links validate URL-only arguments and forward the complete cl
   const { signal, ...sent } = seen[0].options;
   assert.ok(signal instanceof AbortSignal);
   assert.deepEqual({ claimId: seen[0].id, ...sent }, args);
+  const fenced = { ...args, expectedClaimGeneration: 4 };
+  const fencedResult = (await h.rpc("tools/call", { name: definition.name, arguments: fenced })).result;
+  assert.equal(fencedResult.isError, undefined);
+  const { signal: fencedSignal, ...fencedSent } = seen[1].options;
+  assert.ok(fencedSignal instanceof AbortSignal);
+  assert.deepEqual({ claimId: seen[1].id, ...fencedSent }, fenced);
+  assert.equal((await h.rpc("tools/call", { name: definition.name, arguments: { ...args, expectedClaimGeneration: -1 } })).error.code, -32602);
 });
 
 test("MCP claim PR refusals preserve specific codes and reconcile unknown writes without leaking diagnostics", async t => {

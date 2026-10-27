@@ -62,7 +62,7 @@ import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
 import { PublicAgentPages, agentPublicPageSchema } from "./public-agent-page.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
-import { conflictingClaim } from "./claim-scopes.mjs";
+import { conflictingClaim, claimLeaseRefusal, claimMaxLeaseMs, wholeRepoClaimRefusal } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
 import { Notifications } from "./notifications.mjs";
 import { Moderation, moderationSchema, mutedEvent } from "./moderation.mjs";
@@ -96,7 +96,7 @@ import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attach
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
-import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
+import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, boardRowForItem, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -642,13 +642,38 @@ const invitationSchema = `
   CREATE TRIGGER IF NOT EXISTS membership_invitation_events_append_only_delete BEFORE DELETE ON membership_invitation_events BEGIN SELECT RAISE(ABORT,'invitation audit is append-only'); END;
 `;
 const compact = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
+// #3697: the recorded budget is the validated declaration from the original
+// start; a retry matches only when its budget normalizes to the same
+// declaration (key order is not content — the command fingerprint
+// canonicalizes it away too). An unvalidatable retry budget is different
+// content, never a duplicate.
+const sessionBudgetMatchesRequest = (recorded, requested) => {
+  if (recorded == null || requested == null) return (recorded ?? null) === (requested ?? null);
+  let normalized;
+  try { normalized = validateSessionBudget(requested); } catch { return false; }
+  if (!normalized) return false;
+  const keys = Object.keys(normalized);
+  return keys.length === Object.keys(recorded).length && keys.every(key => recorded[key] === normalized[key]);
+};
+// The session door's idempotency fingerprint: every caller-supplied content
+// field of the request must equal what the recorded event carries, or the
+// retry is a conflict, not a duplicate (#3697 — the usage figures below are
+// the session's cumulative spend/rounds/tool calls, the numbers the budget
+// trip-wires enforce). Deliberately excluded: expectedRevision, a
+// compare-and-swap token rather than content (a genuine retry may refresh
+// it after re-reading the item), and the system-set fields
+// (resumeApproved / suspendReason), which callers may not supply at all.
 const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId === request.workItemId
   && (request.action === "request_stop" ? event.type === T.SESSION_STOP_REQUESTED
     : event.type === T.SESSION_STARTED ? request.status === "processing"
       : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status)
   && (event?.data?.environment ?? null) === (request.environment ?? null)
   && (event?.data?.model ?? null) === (request.model ?? null)
-  && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null);
+  && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null)
+  && (event?.data?.spendCents ?? null) === (request.spendCents ?? null)
+  && (event?.data?.rounds ?? null) === (request.rounds ?? null)
+  && (event?.data?.toolCalls ?? null) === (request.toolCalls ?? null)
+  && sessionBudgetMatchesRequest(event?.data?.budget ?? null, request.budget ?? null);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
 const nodeReadTransactions = new WeakSet();
@@ -4794,7 +4819,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
-          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item)])),
+          workItems: Object.fromEntries(Object.entries(room.state.workItems).map(([id, item]) => [id, currentWorkRecord(item, boardRowForItem(this, roomId, id))])),
           // The board projection needs halts. The HTTP work view strips this
           // before it is sent; it is not part of that response's state keys.
           agentHalts: room.state.agentHalts || {} },
@@ -5583,6 +5608,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = this.room(roomId), now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: messageRepository(this, roomId, room.state),
+        boardRow: boardRowForItem(this, roomId, workItemId),
         floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
@@ -6202,6 +6228,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
           : command.data
       });
+      // Live admission only. Replay of an older claim keeps the expiry and
+      // paths it was accepted with. CLAIM_MAX_LEASE_MS tunes the cap.
+      // ** reserves every path, so it needs decide.
+      const leaseRefusal = claimLeaseRefusal(incoming, claimMaxLeaseMs());
+      if (leaseRefusal) fail(422, "command_rejected", leaseRefusal);
+      const wholeRepoRefusal = wholeRepoClaimRefusal(incoming, memberCan(room.state, auth.member.id, "decide"));
+      if (wholeRepoRefusal) fail(422, "command_rejected", wholeRepoRefusal);
       // A display name is checked before the reducer stores it. Exact
       // duplicates stay allowed: identity link already accepts two members
       // with the same spelling. Reserved labels, confusable spellings, and
@@ -6841,7 +6874,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.flipExpiredMentions(roomId);
       const rows = this.db.prepare(
         `SELECT m.message_event_id AS messageEventId, m.mentioned_member_id AS memberId, m.state,
-                m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt
+                m.created_at AS createdAt, m.timeout_at AS timeoutAt, m.decided_at AS decidedAt,
+                json_extract(e.body,'$.data.messageId') AS messageId
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
          WHERE m.room_id=? AND m.mentioned_member_id=?
            AND (? IS NULL OR m.state=?) AND (? IS NULL OR m.created_at>=?)
@@ -6855,6 +6889,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return {
         roomId, memberId: target,
         mentions: rows.map(r => ({
+          // SCALE-HANDOFF F-1: messageId is the id needs-me/wake key a
+          // mention by (data.messageId, falling back to the event id —
+          // the same fallback needs-me uses), so a woken consumer can
+          // join this row to the signal that woke it.
+          messageId: r.messageId ?? r.messageEventId,
           messageEventId: r.messageEventId, memberId: r.memberId, state: r.state,
           displayName: members[r.memberId]?.displayName ?? r.memberId,
           createdAt: new Date(r.createdAt).toISOString(),
@@ -6872,9 +6911,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
        FROM mention_states WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?`
     ).get(roomId, messageEventId, memberId);
     if (!row) return null;
+    const eventRow = this.db.prepare(
+      "SELECT json_extract(body,'$.data.messageId') AS messageId FROM events WHERE room_id=? AND id=?"
+    ).get(roomId, messageEventId);
     const members = this.room(roomId).state.members ?? {};
     return {
-      roomId, messageEventId, memberId, state: row.state,
+      roomId, messageId: eventRow?.messageId ?? messageEventId, messageEventId, memberId, state: row.state,
       displayName: members[memberId]?.displayName ?? memberId,
       createdAt: new Date(row.createdAt).toISOString(),
       timeoutAt: new Date(row.timeoutAt).toISOString(),

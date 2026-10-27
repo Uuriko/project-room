@@ -40,7 +40,10 @@ const itemOf = (id, owner, history, state = "claimed") =>
 // extended with review/done stamps at controlled times.
 const claimedItem = (id, memberId, claimAtMs) => {
   const created = createWork({ id }, { now: claimAtMs - H });
-  return claimWork(created, memberId, { now: claimAtMs });
+  // No lease: these scenarios fabricate history at controlled times days
+  // past the claim, and the state machine (#3545) refuses state moves on a
+  // lapsed lease — lease liveness is not what this file measures.
+  return claimWork(created, memberId, { now: claimAtMs, leaseHours: null });
 };
 const withStamps = (item, ...stamps) => ({
   ...item,

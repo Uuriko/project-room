@@ -151,6 +151,10 @@ const LIVENESS_GET_ONLY_PATHS = new Set(["/api/health", "/api/health/", "/api/ve
 // server/wiki-read-api.mjs (reads are lazy per request; import is side-effect-free).
 const wikiReadApi = createWikiReadApi();
 const reject = (status, code, message, headers) => { throw new ServiceError(status, code, message, headers ?? null); };
+// #3650: an invalid_public_work refusal names the fields it refused, in the
+// message and in error.detail.fields ({ missing, unexpected, invalid }) like
+// the domain refusals in server/public-work-claims.mjs.
+const rejectFields = (message, fields) => { const error = new ServiceError(422, "invalid_public_work", message); error.detail = { fields }; throw error; };
 
 // RFC 9116. Contact comes from ROOM_SECURITY_CONTACT. A bare address becomes
 // a mailto URI. Anything else must already be mailto: or https:, with no
@@ -800,8 +804,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const stride = Math.max(1, Math.floor(maximum / 4));
       if (entry.n >= maximum || entry.n % stride === 0) saveAbuseRateBucket(store.db, id, entry);
     }
-    if (entry.n > maximum) throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
-      { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000), "X-RateLimit-Bucket": family });
+    if (entry.n > maximum) {
+      // SCALE-HANDOFF F-2 (UT-BIGROOM): the refusal must name its scope and
+      // retry terms in the BODY, not only in headers — a burst client that
+      // logs bodies (the UT driver did) otherwise learns nothing about
+      // which bucket refused it or when to retry. Scope is the bucket
+      // family (for room writes, "write": 60 mutations/minute per
+      // credential); retry terms are computed from the live window, so
+      // every field is truthful at emit time.
+      // CURE-4396: the Retry-After HEADER is deliberately not set here.
+      // The catch-all below assigns the flat 60 that has always been the
+      // rate_limited header contract ("retry after a minute"); a computed
+      // per-window header value broke that contract for aged windows
+      // (access-review allowance pin). The precise computed terms live in
+      // the body detail, which is what F-2 chartered.
+      const retryAfterSeconds = Math.max(1, Math.ceil((entry.until - now) / 1000));
+      const error = new ServiceError(429, "rate_limited", "Too many requests; retry after a minute",
+        { "X-RateLimit-Limit": maximum, "X-RateLimit-Remaining": 0, "X-RateLimit-Reset": Math.ceil(entry.until / 1000), "X-RateLimit-Bucket": family });
+      error.detail = { rateLimit: { scope: family, limit: maximum, windowSeconds: 60, remaining: 0, retryAfterSeconds, resetAt: new Date(entry.until).toISOString() } };
+      throw error;
+    }
   }
   function cookie(req, name) {
     const scoped = scopedCookieName(name);
@@ -2000,7 +2022,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/api/public/rooms/directory") reject(405, "method_not_allowed", "Method not allowed");
       if (url.pathname === "/api/public-work/match") {
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-        if ([...url.searchParams].length) reject(422, "invalid_public_work", "No matching query parameters accepted");
+        if ([...url.searchParams].length) { const refused = [...new Set(url.searchParams.keys())]; rejectFields(`No matching query parameters accepted (refused: ${refused.join(", ")})`, { missing: [], unexpected: refused, invalid: [] }); }
         rate(`public-work-match:${remoteAddress}`, 60);
         const secret = bearer(req);
         const input = await body(req);
@@ -2016,8 +2038,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const publicWorkTaskMatch = /^\/api\/public-work\/tasks\/([^/]{1,128})(?:\/(claim|renew|release|finish))?$/.exec(url.pathname);
       const publicWorkReceiptMatch = /^\/api\/public-work\/receipts\/([^/]{1,128})(?:\/(artifact))?$/.exec(url.pathname);
       if (url.pathname === "/api/public-work/tasks" || publicWorkTaskMatch || publicWorkReceiptMatch) {
-        if ([...url.searchParams.keys()].some(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_public_work", "Unsupported query parameters");
-        if (url.pathname === "/api/public-work/tasks" && url.searchParams.has("claimable") && !["1", "true"].includes(url.searchParams.get("claimable"))) reject(422, "invalid_public_work", "Unsupported query parameters");
+        const refusedParams = [...new Set([...url.searchParams.keys()].filter(key => url.pathname !== "/api/public-work/tasks" || !["limit", "after", "claimable"].includes(key) || url.searchParams.getAll(key).length !== 1))];
+        if (refusedParams.length) rejectFields(`Unsupported query parameters: ${refusedParams.join(", ")}`, { missing: [], unexpected: refusedParams, invalid: [] });
+        if (url.pathname === "/api/public-work/tasks" && url.searchParams.has("claimable") && !["1", "true"].includes(url.searchParams.get("claimable"))) rejectFields("Unsupported query parameters: claimable (must be 1 or true)", { missing: [], unexpected: [], invalid: ["claimable"] });
         const action = publicWorkTaskMatch?.[2];
         if (action) {
           if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });

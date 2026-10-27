@@ -26,33 +26,76 @@ CREATE TABLE IF NOT EXISTS public_work_receipts (
   receipt_json TEXT NOT NULL, created_at INTEGER NOT NULL
 );`;
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
-const check = (condition, message) => { if (!condition) fail(422, 'invalid_public_work', message); };
+// #3650: an invalid_public_work refusal must name the fields it refused —
+// its own AX hint tells the caller to fix "the refused fields named in this
+// error's message". The names ride the message text (the one channel every
+// door serves, the MCP door included) and, on the HTTP envelope,
+// error.detail.fields as { missing, unexpected, invalid } name lists,
+// mirroring the MCP argument-diagnosis shape in mcp-arg-errors.mjs.
+const failFields = (message, { missing = [], unexpected = [], invalid = [] } = {}) => {
+  const error = new ServiceError(422, 'invalid_public_work', message);
+  error.detail = { fields: { missing, unexpected, invalid } };
+  throw error;
+};
+const check = (condition, message, fields) => { if (!condition) { if (fields) failFields(message, fields); fail(422, 'invalid_public_work', message); } };
 const identifier = value => validId(value);
 const hash = text => createHash('sha256').update(text).digest('hex');
+// #3606: a claimable-first browse walk carries a versioned cursor,
+// `w1:<version>:<lastTaskId>`, where <version> fingerprints the visible
+// board — every task's id and claimability, in offer_id order — as the
+// walk began. A later page resumes only when the fingerprint still
+// matches, which proves the claimable-first ordering is identical to the
+// walk's own; otherwise the walk restarts explicitly (see list()). A task
+// id that literally matches this shape is read as a walk cursor, never as
+// a bare resume position.
+const WALK_CURSOR = /^w1:([0-9a-f]{32}):(.+)$/;
+const parseWalkCursor = value => {
+  if (typeof value !== 'string') return null;
+  const match = WALK_CURSOR.exec(value);
+  return match && identifier(match[2]) ? { version: match[1], lastTaskId: match[2] } : null;
+};
+const walkVersionOf = tasks => hash(tasks.map(task => `${task.taskId}:${task.claimable ? 1 : 0}`).join('\n')).slice(0, 32);
 const normalize = sql => sql?.trim().replace(/;$/, '').replace(/IF NOT EXISTS /g, '').replace(/\s+/g, ' ');
 const shape = (input, required, optional = []) => {
-  check(input && typeof input === 'object' && !Array.isArray(input)
-    && required.every(key => Object.hasOwn(input, key)) && Object.keys(input).every(key => required.includes(key) || optional.includes(key)), 'Unexpected or missing fields');
+  if (!input || typeof input !== 'object' || Array.isArray(input))
+    failFields(`Unexpected or missing fields (missing: ${required.join(', ')})`, { missing: [...required] });
+  const missing = required.filter(key => !Object.hasOwn(input, key));
+  const unexpected = Object.keys(input).filter(key => !required.includes(key) && !optional.includes(key));
+  if (missing.length || unexpected.length) {
+    const parts = [];
+    if (missing.length) parts.push(`missing: ${missing.join(', ')}`);
+    if (unexpected.length) parts.push(`unexpected: ${unexpected.join(', ')}`);
+    failFields(`Unexpected or missing fields (${parts.join('; ')})`, { missing, unexpected });
+  }
 };
 const lease = value => {
   const hours = value === undefined ? 1 : value;
   // Name the real fault: a string like "6h" is a type error, not a range one (#1553).
-  check(typeof hours === 'number' && Number.isFinite(hours), `leaseHours must be a JSON number of hours, like 6, not ${JSON.stringify(hours)}`);
-  check(hours > 0 && hours <= 24, 'leaseHours must be greater than zero and at most 24');
+  check(typeof hours === 'number' && Number.isFinite(hours), `leaseHours must be a JSON number of hours, like 6, not ${JSON.stringify(hours)}`, { invalid: ['leaseHours'] });
+  check(hours > 0 && hours <= 24, 'leaseHours must be greater than zero and at most 24', { invalid: ['leaseHours'] });
   return hours;
 };
 const filesOf = input => {
-  check(Array.isArray(input) && input.length > 0 && input.length <= 64, 'Declare 1..64 repository paths');
+  check(Array.isArray(input) && input.length > 0 && input.length <= 64, 'files must declare 1..64 repository paths', { invalid: ['files'] });
   const files = input.map(raw => {
-    check(typeof raw === 'string', 'Invalid repository path');
+    check(typeof raw === 'string', 'files entries must be repository path strings', { invalid: ['files'] });
     const path = raw.trim().replace(/\/+/g, '/').replace(/^(\.\/)+/, '').replace(/\/$/, '');
     check(path && path.length <= 512 && !path.startsWith('/') && !path.split('/').some(segment => !segment || segment === '..' || segment === '.')
-      && !/[\\*\x00-\x1f\x7f]/.test(path), 'Paths must be normalized repository-relative paths');
+      && !/[\\*\x00-\x1f\x7f]/.test(path), 'files paths must be normalized repository-relative paths', { invalid: ['files'] });
     return path;
   });
   return [...new Set(files)].sort();
 };
 const overlaps = (left, right) => left === right || left.startsWith(right + '/') || right.startsWith(left + '/');
+// The claim path's fencing rule (#3649), shared by apply(), the board
+// packets and match() so no surface can advertise what a claim would
+// refuse: a task is path-fenced when another live claim in its namespace
+// holds any file overlapping any of the task's declared files. Callers
+// pass the namespace's items with lapsed leases already released
+// (releaseExpired), matching the sweep apply() performs before checking.
+const pathFencedByLiveClaim = (files, namespaceItems, ownId) =>
+  namespaceItems.some(other => other.id !== ownId && other.owner
+    && other.files.some(path => files.some(file => overlaps(path, file))));
 
 // #3530: the standard public-work starter set — the newcomer tasks an
 // operator first seeded on the public board (the pw-garden round of
@@ -193,7 +236,7 @@ export class PublicWorkClaims {
   }
   available() { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_work_tasks'").get()); }
   task(offerId) {
-    check(identifier(offerId), 'Invalid task ID');
+    check(identifier(offerId), 'Invalid taskId: expected a valid task identifier', { invalid: ['taskId'] });
     const row = this.available() && this.db.prepare('SELECT * FROM public_work_tasks WHERE offer_id=?').get(offerId);
     if (!row) fail(404, 'public_work_not_found', 'Public task not found');
     return row;
@@ -209,7 +252,7 @@ export class PublicWorkClaims {
   }
   settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
   request(row, actorId, action, input, operation) {
-    check(identifier(input.requestId), 'Invalid request ID');
+    check(identifier(input.requestId), 'Invalid requestId: expected a valid request identifier', { invalid: ['requestId'] });
     const encoded = canonicalJson({ action, ...input });
     const previous = this.db.prepare('SELECT * FROM public_work_requests WHERE offer_id=? AND actor_id=? AND request_id=?').get(row.offer_id, actorId, input.requestId);
     if (previous) {
@@ -220,7 +263,7 @@ export class PublicWorkClaims {
     this.db.prepare('INSERT INTO public_work_requests VALUES (?,?,?,?,?)').run(row.offer_id, actorId, input.requestId, encoded, JSON.stringify(outcome));
     return outcome;
   }
-  packet(row, item, offer) {
+  packet(row, item, offer, pathFenced = false) {
     const live = releaseExpired([item], this.store.now())[0];
     const receipt = this.db.prepare('SELECT receipt_id,identity_id,receipt_json FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
     // #3546: submitted is the delivered state, not the end of the story —
@@ -233,17 +276,31 @@ export class PublicWorkClaims {
     // not claimable, whatever its claim state — the board must not offer
     // work whose submission window is already closed.
     const deadlinePassed = offer.deadline != null && Number.isFinite(Date.parse(offer.deadline)) && Date.parse(offer.deadline) <= this.store.now();
+    // #3649: an unclaimed task whose paths a live claim fences is NOT
+    // claimable, and the packet says why (claim.pathFenced) instead of
+    // letting the claim attempt discover it with a 409.
+    const fenced = state === 'unclaimed' && pathFenced;
     const settlement = this.settlementService().viewForOffer(row.offer_id);
     return { schema: 'public-work-task/1', taskId: row.offer_id, termsVersion: row.terms_version,
       namespaceId: row.namespace_key, repositoryUrl: row.repository_url, repositoryRef: row.repository_ref,
-      title: offer.title, acceptanceCriteria: offer.acceptanceCriteria, files: JSON.parse(row.files_json),
+      title: offer.title, acceptanceCriteria: offer.acceptanceCriteria,
+      acceptanceCriteriaWithIds: offer.acceptanceCriteriaWithIds ?? [], criteriaHash: offer.criteriaHash ?? null, files: JSON.parse(row.files_json),
       reward: offer.reward, ...(settlement ? { settlement } : {}),
-      claimable: state === 'unclaimed' && !deadlinePassed,
+      claimable: state === 'unclaimed' && !deadlinePassed && !fenced,
       claim: { state, generation: row.generation,
         identityId: receipt?.identity_id ?? live.owner, leaseExpiresAt: receipt ? null : live.leaseExpiresAt, submittedReceiptId: receipt?.receipt_id ?? null,
         verification: receipt ? (receiptBody?.verification ?? 'hash_only') : null,
         deliveryDigest: receiptBody?.deliveryDigest ?? null,
-        criteriaAttestation: receiptBody?.criteriaAttestation ?? null } };
+        criteriaAttestation: receiptBody?.criteriaAttestation ?? null,
+        ...(fenced ? { pathFenced: true } : {}) } };
+  }
+  // Whether a live claim in the task's namespace fences the task's paths,
+  // judged on the same in-memory swept view match() used: lapsed leases
+  // are released before owners are read, so an expired fence never hides
+  // a task (the claim path's persisted sweep reaches the same verdict).
+  pathFenced(row, namespaceItems) {
+    const items = namespaceItems ?? releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now());
+    return pathFencedByLiveClaim(JSON.parse(row.files_json), items, row.offer_id);
   }
   read(offerId) {
     return this.store.readTransaction(() => {
@@ -251,16 +308,27 @@ export class PublicWorkClaims {
       // Operator unpublish hides the task (and its submittedReceiptId) here too.
       if (isUnpublished(this.db, 'room', row.room_id)) fail(404, 'public_work_not_found', 'Public task not found');
       const offer = this.offer(row);
-      return this.packet(row, this.store.workClaims.get(row.namespace_key, offerId), offer);
+      return this.packet(row, this.store.workClaims.get(row.namespace_key, offerId), offer, this.pathFenced(row));
     });
   }
   // claimableFirst defaults to claimable-first for browse callers (#2988).
+  // Browse walks paginate with the versioned walk cursor (#3606, below).
   // match() opts out: its `after` cursor is an offer_id-order scan position
   // with its own documented continuation semantics, so it passes
   // claimableFirst: false and keeps scanning in offer_id order.
   list({ limit = 20, after = '', claimable = false, claimableFirst = true } = {}) {
-    check(Number.isInteger(limit) && limit > 0 && limit <= 100 && (after === '' || identifier(after)), 'Invalid page');
-    check(typeof claimable === 'boolean' && typeof claimableFirst === 'boolean', 'Invalid page');
+    const walk = parseWalkCursor(after);
+    // A walk cursor names its last returned task in every mode; only the
+    // claimable-first browse walk also verifies the cursor's version.
+    // #3650 names the refused page fields; a versioned walk cursor is a
+    // valid `after` (#3606).
+    const invalidPage = [...(Number.isInteger(limit) && limit > 0 && limit <= 100 ? [] : ['limit']),
+      ...(after === '' || identifier(after) || walk ? [] : ['after'])];
+    check(!invalidPage.length, `Invalid page fields: ${invalidPage.join(', ')} (limit must be an integer 1..100; after must be a task id, a walk cursor, or empty)`, { invalid: invalidPage });
+    const invalidFlags = [...(typeof claimable === 'boolean' ? [] : ['claimable']),
+      ...(typeof claimableFirst === 'boolean' ? [] : ['claimableFirst'])];
+    check(!invalidFlags.length, `Invalid page fields: ${invalidFlags.join(', ')} (claimable and claimableFirst must be booleans)`, { invalid: invalidFlags });
+    const resumeAfter = walk ? walk.lastTaskId : after;
     return this.store.readTransaction(() => {
       if (!this.available()) return { tasks: [], claimableCount: 0, nextCursor: null };
       const rows = this.db.prepare(`SELECT t.* FROM public_work_tasks t JOIN project_offers o ON o.offer_id=t.offer_id
@@ -270,25 +338,64 @@ export class PublicWorkClaims {
       // column SQL can order by, so packets are materialized before ordering.
       // Operator-unpublished rooms are dropped before materializing: their
       // packets (including submittedReceiptId) must never be built or served.
+      // Fences are judged per namespace on one swept item list per
+      // namespace (#3649), so claimable/claimableCount tell the truth the
+      // claim path will enforce.
+      const liveByNamespace = new Map();
+      const fencedOf = row => {
+        if (!liveByNamespace.has(row.namespace_key))
+          liveByNamespace.set(row.namespace_key, releaseExpired(this.store.workClaims.list(row.namespace_key), this.store.now()));
+        return this.pathFenced(row, liveByNamespace.get(row.namespace_key));
+      };
       let tasks = rows.filter(row => !isUnpublished(this.db, 'room', row.room_id))
-        .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row)));
+        .map(row => this.packet(row, this.store.workClaims.get(row.namespace_key, row.offer_id), this.offer(row), fencedOf(row)));
       const claimableCount = tasks.filter(task => task.claimable).length;
       if (claimable) tasks = tasks.filter(task => task.claimable);
+      if (claimableFirst && !claimable) {
+        // Versioned browse walk (#3606). The claimable-first ordering is a
+        // function of the board's claim states, which are exactly what
+        // changes between pages on a live board — resuming a bare offer_id
+        // in the recomputed ordering repeats tasks and can end the walk
+        // while claimable tasks were never returned. So the walk's cursor
+        // carries the board fingerprint from walk start: a page resumes
+        // only when the fingerprint still matches (the ordering is then
+        // identical to the walk's own, and the resume is exactly-once);
+        // on any mismatch — or a foreign/bare cursor, which carries no
+        // fingerprint — the walk restarts from the first page with
+        // `restarted: true`, so the caller discards its earlier pages
+        // instead of silently skipping or repeating work. A task that
+        // stayed visible for a whole (re)started walk is returned exactly
+        // once; claimableCount is always the live count.
+        const version = walkVersionOf(tasks);
+        const ordered = [...tasks.filter(task => task.claimable), ...tasks.filter(task => !task.claimable)];
+        let start = 0, restarted = false;
+        if (after !== '') {
+          const index = walk && walk.version === version
+            ? ordered.findIndex(task => task.taskId === walk.lastTaskId) : -1;
+          if (index >= 0) start = index + 1;
+          else restarted = true;
+        }
+        const page = ordered.slice(start, start + limit);
+        return { tasks: page, claimableCount, ...(restarted ? { restarted: true } : {}),
+          nextCursor: start + limit < ordered.length ? `w1:${version}:${page.at(-1).taskId}` : null };
+      }
       if (claimableFirst) {
         // Stable claimable-first order; rows arrive in offer_id order, which
         // is the deterministic tiebreak inside each claimability group.
         tasks = [...tasks.filter(task => task.claimable), ...tasks.filter(task => !task.claimable)];
       }
-      // The cursor is the last returned task's offer_id; resuming finds that
-      // id in the (recomputed) ordering, so a page walk over a stable set
-      // visits each task exactly once, claimable tasks first. An unknown
-      // cursor falls back to the old offer_id boundary.
+      // The remaining modes order by offer_id alone (the claimable filter's
+      // single group, or match()'s scan), which claim flips cannot reorder:
+      // the cursor is the last returned task's offer_id, resuming finds that
+      // id in the ordering, and an unknown cursor falls back to the old
+      // offer_id boundary — a page walk visits each task that stays in the
+      // set exactly once.
       let start = 0;
-      if (after !== '') {
-        const index = tasks.findIndex(task => task.taskId === after);
+      if (resumeAfter !== '') {
+        const index = tasks.findIndex(task => task.taskId === resumeAfter);
         if (index >= 0) start = index + 1;
         else {
-          const fallback = tasks.findIndex(task => task.taskId > after);
+          const fallback = tasks.findIndex(task => task.taskId > resumeAfter);
           start = fallback < 0 ? tasks.length : fallback;
         }
       }
@@ -383,10 +490,12 @@ export class PublicWorkClaims {
   }
   enable(roomId, actorId, offerId, input) {
     shape(input, ['requestId', 'expectedRevision', 'expectedTermsVersion', 'repositoryRef', 'files']);
-    check(identifier(offerId) && Number.isSafeInteger(input.expectedRevision) && input.expectedRevision > 0
-      && Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0, 'Expected offer revision and terms version required');
+    const invalidEnable = [...(identifier(offerId) ? [] : ['offerId']),
+      ...(Number.isSafeInteger(input.expectedRevision) && input.expectedRevision > 0 ? [] : ['expectedRevision']),
+      ...(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0 ? [] : ['expectedTermsVersion'])];
+    check(!invalidEnable.length, `Invalid fields: ${invalidEnable.join(', ')} (offerId must be a valid task identifier; expectedRevision and expectedTermsVersion must be positive integers)`, { invalid: invalidEnable });
     check(typeof input.repositoryRef === 'string' && /^[A-Za-z0-9][A-Za-z0-9._/-]{0,127}$/.test(input.repositoryRef)
-      && !input.repositoryRef.split('/').some(part => !part || part === '..' || part === '.'), 'Explicit repository ref required');
+      && !input.repositoryRef.split('/').some(part => !part || part === '..' || part === '.'), 'repositoryRef must be an explicit repository ref (letters, digits, dot, dash, underscore or slash; no empty, . or .. segments)', { invalid: ['repositoryRef'] });
     const files = filesOf(input.files);
     return withPublicWorkClaimWriter(this.store, () => {
       this.store.projectOffers.requireOwner(roomId, actorId);
@@ -410,7 +519,8 @@ export class PublicWorkClaims {
         // Kernel done means submitted delivery here, never independent acceptance.
         const item = createWork({ id: offerId, title: offer.title, files, reviewPolicy: 'self_attested' }, { now: this.store.now() });
         this.store.workClaims.set(namespace, item);
-        return this.packet(this.task(offerId), item, offer);
+        const enabledRow = this.task(offerId);
+        return this.packet(enabledRow, item, offer, this.pathFenced(enabledRow));
       });
     });
   }
@@ -418,10 +528,11 @@ export class PublicWorkClaims {
     const required = ['requestId', 'expectedTermsVersion'];
     if (action !== 'claim') required.push('generation');
     if (action === 'finish') required.push('artifactText', 'checksReported');
-    check(['claim', 'renew', 'release', 'finish'].includes(action), 'Unknown action');
+    check(['claim', 'renew', 'release', 'finish'].includes(action), 'action must be one of: claim, renew, release, finish', { invalid: ['action'] });
     shape(input, required, ['claim', 'renew'].includes(action) ? ['leaseHours'] : action === 'finish' ? ['criteriaAttestation'] : []);
-    check(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0
-      && (action === 'claim' || Number.isSafeInteger(input.generation) && input.generation > 0), 'Expected terms version and claim generation required');
+    const invalidAct = [...(Number.isSafeInteger(input.expectedTermsVersion) && input.expectedTermsVersion > 0 ? [] : ['expectedTermsVersion']),
+      ...(action === 'claim' || (Number.isSafeInteger(input.generation) && input.generation > 0) ? [] : ['generation'])];
+    check(!invalidAct.length, `Invalid fields: ${invalidAct.join(', ')} (expectedTermsVersion must be a positive integer${action === 'claim' ? '' : '; generation must be a positive integer'})`, { invalid: invalidAct });
     if (['claim', 'renew'].includes(action)) lease(input.leaseHours);
     return withPublicWorkClaimWriter(this.store, () => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
@@ -451,10 +562,8 @@ export class PublicWorkClaims {
             fail(409, 'public_work_claim_conflict', `Task already claimed by ${holder} (lease expires ${item.leaseExpiresAt ?? 'unknown'})`);
           }
           const files = JSON.parse(row.files_json);
-          for (const other of this.store.workClaims.list(row.namespace_key)) {
-            if (other.id !== offerId && other.owner && other.files.some(path => files.some(file => overlaps(path, file))))
-              fail(409, 'public_work_path_conflict', 'Another live claim holds these repository paths');
-          }
+          if (pathFencedByLiveClaim(files, this.store.workClaims.list(row.namespace_key), offerId))
+            fail(409, 'public_work_path_conflict', 'Another live claim holds these repository paths');
           // #3707: the per-identity live-claim ceiling. Counted here, inside
           // the writer fence on the shared claim path, so every door —
           // direct act() and match() auto-claim alike — is bound by it, and
@@ -493,7 +602,7 @@ export class PublicWorkClaims {
           }
         }
         this.store.workClaims.set(row.namespace_key, item);
-        const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer) };
+        const outcome = { action: { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' }[action], task: this.packet(row, item, offer, this.pathFenced(row)) };
         if (action === 'finish') {
           // #3707: a submission after the offer's deadline is refused, even
           // for a claim whose lease predates deadline clamping — the lease
@@ -503,8 +612,8 @@ export class PublicWorkClaims {
           if (offer.deadline != null && Number.isFinite(Date.parse(offer.deadline)) && this.store.now() >= Date.parse(offer.deadline))
             fail(409, 'public_work_deadline_passed', `This task's submission deadline (${offer.deadline}) has passed`);
           check(typeof input.artifactText === 'string' && Buffer.byteLength(input.artifactText, 'utf8') <= 65536
-            && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'Artifact must be valid UTF-8 text no larger than 64 KiB');
-          check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'Invalid caller-reported checks');
+            && Buffer.from(input.artifactText, 'utf8').toString('utf8') === input.artifactText, 'artifactText must be valid UTF-8 text no larger than 64 KiB', { invalid: ['artifactText'] });
+          check(Array.isArray(input.checksReported) && input.checksReported.length <= 20 && input.checksReported.every(text => typeof text === 'string' && text.length > 0 && text.length <= 1000), 'checksReported must be an array of up to 20 non-empty strings, each at most 1000 characters', { invalid: ['checksReported'] });
           // #3547: the delivery bundle's criteria leg. artifactText +
           // checksReported stay the bundle's v1 serialization; when the
           // deliverer adds a per-criterion attestation, the platform
@@ -518,15 +627,32 @@ export class PublicWorkClaims {
           if (input.criteriaAttestation !== undefined) {
             check(Array.isArray(input.criteriaAttestation) && input.criteriaAttestation.length <= 64
               && input.criteriaAttestation.every(entry => entry && typeof entry === 'object' && !Array.isArray(entry)
-                && typeof entry.criterion === 'string' && entry.criterion.length > 0 && entry.criterion.length <= 500
+                && ((typeof entry.criterion === 'string' && entry.criterion.length > 0 && entry.criterion.length <= 500)
+                  || (typeof entry.criterionId === 'string' && entry.criterionId.length > 0 && entry.criterionId.length <= 64))
                 && ['met', 'not_met', 'na'].includes(entry.status)
                 && (entry.evidenceRef === undefined || entry.evidenceRef === null
                   || (typeof entry.evidenceRef === 'string' && entry.evidenceRef.length > 0 && entry.evidenceRef.length <= 512))),
               'Invalid criteria attestation');
-            check(new Set(input.criteriaAttestation.map(entry => entry.criterion)).size === input.criteriaAttestation.length,
+            // #3613 B1: an attestation entry may cite a criterion by its
+            // pinned criterionId instead of its full text; the id resolves
+            // against the offer's pinned criteria set (unknown id refused,
+            // a text that disagrees with its id refused) and the stored
+            // attestation keeps the legacy text-keyed shape.
+            const pinnedTextById = new Map((Array.isArray(offer.acceptanceCriteriaWithIds) ? offer.acceptanceCriteriaWithIds : [])
+              .map(entry => [entry.criterionId, entry.text]));
+            criteriaAttestation = input.criteriaAttestation.map(entry => {
+              let criterion = entry.criterion;
+              if (entry.criterionId !== undefined && entry.criterionId !== null) {
+                const resolved = pinnedTextById.get(entry.criterionId);
+                check(resolved !== undefined, `criteriaAttestation cites unknown criterionId "${entry.criterionId}"`);
+                check(criterion === undefined || criterion === resolved, 'criteriaAttestation criterion text does not match its criterionId');
+                criterion = resolved;
+              }
+              return { criterion, status: entry.status,
+                ...(entry.evidenceRef != null ? { evidenceRef: entry.evidenceRef } : {}) };
+            });
+            check(new Set(criteriaAttestation.map(entry => entry.criterion)).size === criteriaAttestation.length,
               'criteriaAttestation maps a criterion more than once');
-            criteriaAttestation = input.criteriaAttestation.map(entry => ({ criterion: entry.criterion, status: entry.status,
-              ...(entry.evidenceRef != null ? { evidenceRef: entry.evidenceRef } : {}) }));
             if (offerCriteria.length > 0) {
               const mapped = new Set(criteriaAttestation.map(entry => entry.criterion));
               const missing = offerCriteria.find(criterion => !mapped.has(criterion));
@@ -560,13 +686,24 @@ export class PublicWorkClaims {
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
           const deliveryDigest = hash(canonicalJson({ artifactSha256: sha256, checksReported: input.checksReported, criteriaAttestation }));
           const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
+          const submittedAt = new Date(this.store.now()).toISOString();
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
             namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
             artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
+            // #3613 B1: the receipt binds the pinned criteria set (ids +
+            // hash) its finish attested against, so a reviewer's
+            // per-criterion outcomes cite this exact set.
+            ...(Array.isArray(offer.acceptanceCriteriaWithIds) && offer.acceptanceCriteriaWithIds.length
+              ? { acceptanceCriteriaWithIds: offer.acceptanceCriteriaWithIds, criteriaHash: offer.criteriaHash } : {}),
+            // #3613 B4: the work period — claimedAt from the claim item
+            // already in hand, submittedAt is this receipt's createdAt.
+            // Receipts minted before this field carry no period and no
+            // start is ever fabricated for them.
+            ...(typeof item.claimedAt === 'string' && item.claimedAt ? { period: { claimedAt: item.claimedAt, submittedAt } } : {}),
             // #3683: the system_checked label is earned by a check that
             // PASSED — a recorded failure is honest evidence on the
             // receipt, never a label upgrade.
-            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: new Date(this.store.now()).toISOString() };
+            verification: executedChecks.some(entry => entry.result === 'pass') ? 'system_checked' : 'hash_only', createdAt: submittedAt };
           // Paid tasks attach the submission to the funded escrow bounty
           // before the receipt lands, so a receipt never exists without its
           // settlement vehicle in 'submitted' state (no-op when unpaid).
@@ -579,7 +716,7 @@ export class PublicWorkClaims {
           item = updateWork({ ...item, files: [] }, identity.identityId, { state: 'done', deliveryMode: 'result', blobs: ['sha256:' + sha256], now: this.store.now() });
           this.store.workClaims.set(row.namespace_key, item);
           outcome.receipt = receipt;
-          outcome.task = this.packet(row, item, offer);
+          outcome.task = this.packet(row, item, offer, this.pathFenced(row));
         }
         return outcome;
       };
@@ -587,16 +724,18 @@ export class PublicWorkClaims {
   }
   match(secret, input) {
     shape(input, [], ['requestId', 'skills', 'interests', 'reward', 'autoClaim', 'limit', 'leaseHours', 'after']);
-    if (input.requestId !== undefined) check(identifier(input.requestId), 'Invalid request ID');
+    if (input.requestId !== undefined) check(identifier(input.requestId), 'Invalid requestId: expected a valid request identifier', { invalid: ['requestId'] });
     const limit = input.limit ?? 3, reward = input.reward ?? 'volunteer';
-    check(Number.isInteger(limit) && limit >= 1 && limit <= 5 && ['volunteer', 'work_trade', 'cash'].includes(reward), 'Invalid matching preferences');
-    check(input.autoClaim === undefined || typeof input.autoClaim === 'boolean', 'autoClaim must be explicit boolean');
+    const invalidPrefs = [...(Number.isInteger(limit) && limit >= 1 && limit <= 5 ? [] : ['limit']),
+      ...(['volunteer', 'work_trade', 'cash'].includes(reward) ? [] : ['reward'])];
+    check(!invalidPrefs.length, `Invalid matching preferences (fields: ${invalidPrefs.join(', ')}; limit must be an integer 1..5; reward must be volunteer, work_trade or cash)`, { invalid: invalidPrefs });
+    check(input.autoClaim === undefined || typeof input.autoClaim === 'boolean', 'autoClaim must be explicit boolean', { invalid: ['autoClaim'] });
     const preferences = ['skills', 'interests'].flatMap(key => {
       const values = input[key] ?? [];
-      check(Array.isArray(values) && values.length <= 20 && values.every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 100 && !/[\x00-\x1f\x7f]/.test(value)), 'Invalid matching preferences');
+      check(Array.isArray(values) && values.length <= 20 && values.every(value => typeof value === 'string' && value.trim().length > 0 && value.length <= 100 && !/[\x00-\x1f\x7f]/.test(value)), `${key} must be an array of up to 20 non-empty strings of at most 100 characters, without control characters`, { invalid: [key] });
       return values.map(value => value.trim().toLowerCase());
     });
-    check(input.after === undefined || identifier(input.after), 'Invalid matching cursor');
+    check(input.after === undefined || identifier(input.after), 'after must be a valid matching cursor (a task id)', { invalid: ['after'] });
     lease(input.leaseHours);
     const run = operation => input.autoClaim === true ? withPublicWorkClaimWriter(this.store, operation) : this.store.readTransaction(operation);
     return run(() => {
@@ -667,7 +806,7 @@ export class PublicWorkClaims {
   // still serves them to its members; everyone else gets 403. Rows without
   // a task link (legacy) stay public, preserving current behavior.
   _receiptRow(receiptId) {
-    check(identifier(receiptId), 'Invalid receipt ID');
+    check(identifier(receiptId), 'Invalid receiptId: expected a valid receipt identifier', { invalid: ['receiptId'] });
     const row = this.available() && this.db.prepare(
       `SELECT r.receipt_json AS receiptJson, t.room_id AS roomId
        FROM public_work_receipts r LEFT JOIN public_work_tasks t ON t.offer_id = r.offer_id

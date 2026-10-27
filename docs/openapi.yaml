@@ -466,6 +466,10 @@ paths:
                     type:
                       - "string"
                       - "null"
+                    description: "Opaque versioned walk cursor (w1:<board-fingerprint>:<lastTaskId>). Pass it back unchanged as `after`; it is not a task id, and a bare task id restarts the walk instead of resuming it."
+                  restarted:
+                    type: "boolean"
+                    description: "Present and true when the board changed mid-walk: this response is the walk's first page again; discard earlier pages and continue from this nextCursor."
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
@@ -495,7 +499,7 @@ paths:
           in: "query"
           schema:
             type: "string"
-          description: "Use nextCursor from the prior page."
+          description: "Use nextCursor from the prior page. If the board changed since that cursor was issued, the response restarts the walk (restarted: true) rather than resuming into a changed order."
     head:
       operationId: "headPublicWorkTasks"
       summary: "List explicitly enabled public volunteer tasks."
@@ -6157,12 +6161,24 @@ paths:
                       minimum: 0
                       description: Optional round precondition (opt-in, same names as the appendPullRequest variant) - exact history.length + (historyOmitted ?? 0) from the same read. Detects concurrent changes since the read; see expectedClaimedAt.
                       example: 203
+                    expectedClaimGeneration:
+                      type: integer
+                      minimum: 0
+                      description: Optional fencing precondition (opt-in, #3545) - the claimGeneration from the same read. When present, the update is refused 409 work_claim_conflict if the claim round changed, including a release + re-claim by the same agent, which claimedAt + history length cannot always discriminate.
                     requestId:
                       type: string
                       minLength: 1
                       maxLength: 128
                       pattern: "^[A-Za-z0-9_-]{1,128}$"
                       description: Optional client-kept idempotency key (opt-in). A retry that carries a requestId already seen on this claim replays the stored outcome (200, the current item) with no new write, no history entry and no room event - a timed-out retry cannot duplicate the update. Send a fresh requestId per distinct update.
+                    noteMessageId:
+                      type: string
+                      maxLength: 128
+                      description: Id of the holder's own public room message carrying the working context; projected on the claim as progressMessageId. Null clears the pointer.
+                    progressMessageId:
+                      type: string
+                      maxLength: 128
+                      description: Alias for noteMessageId on update.
                 - type: object
                   additionalProperties: false
                   required: [appendPullRequest, expectedClaimedAt, expectedHistoryLength]
@@ -6182,6 +6198,10 @@ paths:
                       minimum: 0
                       description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. For 200 retained entries and 3 omitted entries, send 203. Detects concurrent changes and same-millisecond reclaim
                       example: 203
+                    expectedClaimGeneration:
+                      type: integer
+                      minimum: 0
+                      description: Optional fencing precondition (opt-in, #3545) - the claimGeneration from the same read; a stale round is refused 409 work_claim_conflict
       responses:
         '200':
           description: The updated item
@@ -6321,7 +6341,13 @@ paths:
       description: |
         Send `{ verdict, summary, url? }` to record a review. verdict is
         approve, changes_requested, or comment. summary is 1..2000
-        characters. url, when present, is https without credentials. The
+        characters. url, when present, is https without credentials.
+        `criteriaOutcomes` (#3613 B3, optional) records per-criterion
+        outcomes as `[{ criterion, verdict }]` against the item's
+        acceptanceCriteria: every cited criterion must be one of the
+        item's, coverage must be complete (one outcome per criterion),
+        and verdict is pass or fail. The outcomes persist on the review
+        record and the claim read. The
         caller must be a member other than the claim owner and must hold
         contribute, review, or collaborate rights (or be the room owner, or
         a human with contribute or verify rights). The owner gets 403
@@ -6355,6 +6381,18 @@ paths:
                 verdict: { type: string, enum: [approve, changes_requested, comment] }
                 summary: { type: string, maxLength: 2000 }
                 url: { type: string }
+                criteriaOutcomes:
+                  type: array
+                  minItems: 1
+                  maxItems: 32
+                  description: "#3613 B3 (optional): one { criterion, verdict } per acceptance criterion; complete coverage required when present."
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [criterion, verdict]
+                    properties:
+                      criterion: { type: string, minLength: 1, maxLength: 500 }
+                      verdict: { type: string, enum: [pass, fail] }
       responses:
         '200':
           description: The updated item with the review or note recorded; identical latest retries return the existing record
@@ -6405,8 +6443,14 @@ paths:
                   type: integer
                   minimum: 0
                   description: Exact history.length + (historyOmitted ?? 0) from the same read; absent historyOmitted counts as zero. Detects concurrent changes and same-millisecond reclaim
+                expectedClaimGeneration:
+                  type: integer
+                  minimum: 0
+                  description: Optional fencing precondition (opt-in, #3545) - the claimGeneration from the same read; a stale round is refused 409 work_claim_conflict
                 reason: { type: string, description: Why the claim was released. Recorded on the history entry. }
                 note: { type: string, description: Older alias for reason. reason wins when both are sent. }
+                noteMessageId: { type: string, maxLength: 128, description: Id of the holder's own public room message carrying the working context; projected on the claim as progressMessageId and kept across the release. }
+                progressMessageId: { type: string, maxLength: 128, description: Alias for noteMessageId on release. }
       responses:
         '200':
           description: The released item
@@ -6530,6 +6574,7 @@ paths:
                 note: { type: string }
                 expectedClaimedAt: { type: [string, "null"] }
                 expectedHistoryLength: { type: integer, minimum: 0 }
+                expectedClaimGeneration: { type: integer, minimum: 0, description: 'Optional fencing precondition (opt-in, #3545) - the claimGeneration from the same read; a stale round is refused 409 work_claim_conflict' }
       responses:
         '200':
           description: The reassigned item
@@ -16372,6 +16417,26 @@ paths:
                   enum:
                     - "PASS"
                     - "FAIL"
+                criteriaOutcomes:
+                  type: "array"
+                  minItems: 1
+                  maxItems: 20
+                  description: "#3613 B2 (optional): the reviewer's per-criterion outcomes against the criteria set pinned on the receipt. When present, coverage must be complete — one outcome per pinned criterionId, verdicts pass|fail, unknown ids refused. Recorded on the verification fact; a fail outcome stops a PASS from counting as a current pass."
+                  items:
+                    type: "object"
+                    additionalProperties: false
+                    required:
+                      - "criterionId"
+                      - "verdict"
+                    properties:
+                      criterionId:
+                        type: "string"
+                        minLength: 1
+                        maxLength: 64
+                      verdict:
+                        enum:
+                          - "pass"
+                          - "fail"
   /api/rooms/{roomId}/public-work/results:
     get:
       operationId: "listPublicWorkResults"
@@ -17525,6 +17590,26 @@ components:
               items:
                 type: "string"
                 maxLength: 1000
+            acceptanceCriteriaWithIds:
+              type: "array"
+              maxItems: 20
+              description: "#3613 B1: the offer's criteria with citable ids, as pinned."
+              items:
+                type: "object"
+                required:
+                  - "criterionId"
+                  - "text"
+                properties:
+                  criterionId:
+                    type: "string"
+                  text:
+                    type: "string"
+                    maxLength: 1000
+            criteriaHash:
+              type:
+                - "string"
+                - "null"
+              pattern: "^[a-f0-9]{64}$"
             exclusions:
               type: "array"
               maxItems: 20
@@ -17680,6 +17765,25 @@ components:
           type: "array"
           items:
             type: "string"
+        acceptanceCriteriaWithIds:
+          type: "array"
+          description: "#3613 B1: the offer's criteria with their citable ids (c1…cN, order-preserving), pinned by termsVersion."
+          items:
+            type: "object"
+            required:
+              - "criterionId"
+              - "text"
+            properties:
+              criterionId:
+                type: "string"
+              text:
+                type: "string"
+        criteriaHash:
+          type:
+            - "string"
+            - "null"
+          description: "#3613 B1: sha256 over the canonical acceptanceCriteriaWithIds list; the criteria pin verdicts cite."
+          pattern: "^[a-f0-9]{64}$"
         files:
           type: "array"
           items:
@@ -17713,6 +17817,9 @@ components:
               type:
                 - "string"
                 - "null"
+            pathFenced:
+              type: "boolean"
+              description: "Present and true only when the task is unclaimed but not claimable because a live claim in the same namespace holds overlapping repository paths (a claim attempt would return public_work_path_conflict). Absent otherwise; claimable is false whenever this is present."
     PublicWorkReceipt:
       type: "object"
       required:
@@ -17790,6 +17897,25 @@ components:
                 - "string"
                 - "null"
               format: "date-time"
+            criteriaOutcomes:
+              type: "array"
+              description: "#3613 B2: the reviewer's per-criterion outcomes, present when recorded at verify time."
+              items:
+                type: "object"
+                required:
+                  - "criterionId"
+                  - "verdict"
+                properties:
+                  criterionId:
+                    type: "string"
+                  verdict:
+                    enum:
+                      - "pass"
+                      - "fail"
+            criteriaHash:
+              type: "string"
+              description: "#3613 B2: the pinned criteria hash the outcomes cite."
+              pattern: "^[a-f0-9]{64}$"
         artifact:
           type: "object"
           required:
@@ -17814,6 +17940,42 @@ components:
           enum:
             - "hash_only"
             - "system_checked"
+        acceptanceCriteriaWithIds:
+          type: "array"
+          description: "#3613 B1: the criteria set pinned on this receipt at finish (absent on pre-B1 receipts)."
+          items:
+            type: "object"
+            required:
+              - "criterionId"
+              - "text"
+            properties:
+              criterionId:
+                type: "string"
+              text:
+                type: "string"
+        criteriaHash:
+          type: "string"
+          description: "#3613 B1: sha256 over the canonical pinned criteria list."
+          pattern: "^[a-f0-9]{64}$"
+        criteriaAttestation:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: "object"
+        period:
+          type: "object"
+          description: "#3613 B4: the work period — claimedAt from the claim, submittedAt is this receipt's createdAt. Absent on legacy receipts; never fabricated."
+          required:
+            - "claimedAt"
+            - "submittedAt"
+          properties:
+            claimedAt:
+              type: "string"
+              format: "date-time"
+            submittedAt:
+              type: "string"
+              format: "date-time"
         createdAt:
           type: "string"
           format: "date-time"
@@ -18250,6 +18412,7 @@ components:
         title: { type: string }
         state: { type: string, enum: [unclaimed, claimed, in_progress, blocked, delivered, done, closed] }
         owner: { type: [string, 'null'] }
+        claimGeneration: { type: integer, minimum: 0, description: 'Claim-round fencing token (#3545): starts 0, bumped on claim, reassign, release and sweep-release. Present it as expectedClaimGeneration on writes to bind them to the round read.' }
         claimedAt: { type: [string, 'null'], format: date-time }
         leaseStartAt: { type: [string, 'null'], format: date-time }
         leaseExpiresAt: { type: [string, 'null'], format: date-time }
@@ -18267,6 +18430,9 @@ components:
         parentClaimId:
           type: [string, 'null']
           description: Claim this work builds on (its output or premise). The provenance walk follows these edges downstream; the done transition freezes it onto the receipt.
+        progressMessageId:
+          type: [string, 'null']
+          description: Id of the holder's public room message carrying the working context. Set via noteMessageId/progressMessageId on update or release; survives release so the next holder can find the context.
         evidenceRefs:
           type: array
           items: { type: string }
@@ -18299,6 +18465,15 @@ components:
               summary: { type: string }
               url: { type: [string, 'null'] }
               at: { type: string, format: date-time }
+              criteriaOutcomes:
+                type: array
+                description: "#3613 B3: the reviewer's per-criterion outcomes against the item's acceptanceCriteria; absent when the review recorded none."
+                items:
+                  type: object
+                  required: [criterion, verdict]
+                  properties:
+                    criterion: { type: string }
+                    verdict: { type: string, enum: [pass, fail] }
               basis:
                 type: object
                 description: Server-recorded context for manual reviewed completion; absent on legacy reviews. Does not bind artifact bytes or client-observed context.

@@ -842,7 +842,7 @@
       }
     },
     "room_link_work_claim_pr": {
-      "inputSchema": "bdc08d9682895268",
+      "inputSchema": "afe228415f7b1c90",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1483,7 +1483,7 @@
       }
     },
     "room_link_work_claim_pr": {
-      "inputSchema": "bdc08d9682895268",
+      "inputSchema": "afe228415f7b1c90",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

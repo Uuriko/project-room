@@ -27,22 +27,20 @@
 // board claim here — one definition, no dual-source divergence.
 // Titles are member-authored: every item is marked untrusted.
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
+import { claimableBoardRows } from "./claim-coordination.mjs";
 
 export const AVAILABLE_WORK_SOURCES = ["board", "publicTask"];
 
-const usableClaim = item => Boolean(item) && !item.premiseFlag && !item.supersededBy;
-
-// The board-availability predicate, exported so needs-me can consume the
-// exact same test instead of its private copy (E1 PR-2). Returns the
-// claim rows from `board` (a store.workClaims.list() result) that are
-// claimable right now, in board order.
+// The board-availability predicate is claimableBoardRows in
+// claim-coordination.mjs — the ONE eligibility test, shared with the
+// board list's ready queue (readyClaims) so the two "what can I take?"
+// surfaces cannot disagree (#3713); needs-me consumes it through here
+// instead of a private copy (E1 PR-2). Returns the claim rows from
+// `board` (a store.workClaims.list() result) that are claimable right
+// now, in board order.
 export function availableBoardRows(board) {
   const list = Array.isArray(board) ? board : [];
-  const done = new Set(list.filter(item => usableClaim(item) && item.state === "done").map(item => item.id));
-  return list.filter(item => usableClaim(item)
-    && item.state === "unclaimed"
-    && (item.kind ?? "work") === "work"
-    && (item.dependsOn ?? []).every(dep => done.has(dep)));
+  return claimableBoardRows(list);
 }
 
 const boardItem = (roomId, item) => ({
@@ -145,12 +143,21 @@ export function availableWorkInRoom(store, roomId, { viewerId = null, limit = 50
 // buildOrient and buildActivationPack both consume this — one definition,
 // so the two surfaces cannot diverge again.
 export function availableClaimsInRoom(store, roomId, { viewerId = null, limit = 50, boardList = null } = {}) {
+  return availableClaimsPageInRoom(store, roomId, { viewerId, limit, boardList }).items;
+}
+
+// SCALE-HANDOFF F-3: the sliced page plus its truthful total, so a caller
+// rendering the slice (the activation pack) can say it was sliced instead
+// of presenting a subset as the whole set.
+export function availableClaimsPageInRoom(store, roomId, { viewerId = null, limit = 50, boardList = null } = {}) {
   let board = [];
   if (boardList) board = boardList(roomId);
-  else try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return []; }
+  else try { board = store.workClaims?.list?.(roomId) ?? []; } catch { return { items: [], total: 0, truncated: false }; }
   let state = null;
   try { state = store.room(roomId)?.state ?? null; } catch { state = null; }
-  return availableClaimsFromBoard(board, roomId, { viewerId, state }).slice(0, limit);
+  const all = availableClaimsFromBoard(board, roomId, { viewerId, state });
+  const items = all.slice(0, limit);
+  return { items, total: all.length, truncated: items.length < all.length };
 }
 
 // Cross-room public pool: published public-work tasks the facade itself
@@ -165,7 +172,12 @@ export function availablePublicTasks(store, { limit = 50 } = {}) {
   let total = 0;
   let after = "";
   for (;;) {
-    const page = facade.list({ limit: 100, after });
+    // claimableFirst: false — this scan filters to unclaimed packets
+    // itself, so its item order is the same offer_id order the
+    // claimable-first walk yields, while offer_id pagination stays
+    // exactly-once when claims land mid-scan (#3606); the browse walk's
+    // versioned cursor would restart the scan on every claim flip.
+    const page = facade.list({ limit: 100, after, claimableFirst: false });
     const tasks = page?.tasks ?? [];
     for (const packet of tasks) {
       if (packet?.claimable !== true) continue;

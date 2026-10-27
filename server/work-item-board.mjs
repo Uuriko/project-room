@@ -28,8 +28,8 @@ import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
 
-const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
-const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
+export const WORK_ITEM_BOARD_BACKFILL_VERSION = 2;
+export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
 // Lazily created by this module on first use (the run-once/request_replays
 // pattern); registered in server/writer-fence.mjs lazyAdditiveTables.
 const WORK_ITEM_BOARD_BACKFILL_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_BACKFILL_TABLE} (room_id TEXT PRIMARY KEY, version INTEGER NOT NULL, at TEXT NOT NULL)`;
@@ -101,6 +101,29 @@ export function boardClaimId(workItemId) {
   const candidate = `_e${encoded}`;
   if (BOARD_SAFE_ID.test(candidate)) return candidate;
   return `_h${createHash("sha256").update(raw).digest("hex").slice(0, 40)}`;
+}
+
+// Slice 3b: board-first brief resolution for reader surfaces. A reader
+// that projects a work item's brief resolves definitionOfDone + mode
+// from the item's board row when a row exists, and falls back to the
+// item when there is no row. A row wins per field only when it actually
+// carries that field as a string; a null board field never erases an
+// item brief.
+export function boardRowForItem(store, roomId, workItemId) {
+  const registry = store?.workClaims;
+  if (!registry || typeof registry.get !== "function") return null;
+  if (typeof roomId !== "string" || roomId.length === 0) return null;
+  if (typeof workItemId !== "string" || workItemId.length === 0) return null;
+  try { return registry.get(roomId, boardClaimId(workItemId)); } catch { return null; }
+}
+export function briefForWorkItem(item, boardRow = null) {
+  return {
+    definitionOfDone: boardRow && typeof boardRow.definitionOfDone === "string" ? boardRow.definitionOfDone : (item?.definitionOfDone ?? null),
+    mode: boardRow && typeof boardRow.mode === "string" ? boardRow.mode : (item?.mode ?? null),
+  };
+}
+export function boardBriefForItem(store, roomId, item) {
+  return briefForWorkItem(item, boardRowForItem(store, roomId, item?.id));
 }
 
 const iso = ms => new Date(ms).toISOString();
@@ -453,16 +476,25 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     // Working/blocked without a live lease: the accountable member is
     // doing (or stuck on) the work. Read-mode items never hold claims;
     // their owner + start time come from the item and its start event.
+    // #3711: this branch is only reached when the item's claim is NOT
+    // live at nowMs, so its lease timing must not be copied onto the
+    // row. A copied expiry that is already past makes the board's own
+    // lease sweep release a row the item door still shows as held; the
+    // next sync then re-projects it held, and the row oscillates
+    // in_progress <-> unclaimed — one lease_expired event + wake per
+    // cycle, plus an unclaimed window in which a second member can
+    // claim the card natively and diverge the row for good. The kernel's
+    // own lease-free shape is leaseStartAt/leaseExpiresAt both null
+    // (claimWork/renewWork), and a lease-free row is never swept, so the
+    // projection carries the claim's identity (owner, claimedAt) with
+    // no lease at all.
     owner = item.claim?.holderId ?? item.accountableMemberId ?? null;
     if (item.claim) {
       claimedAt = isoOrNull(item.claim.acquiredAt);
-      leaseStartAt = isoOrNull(item.claim.renewedAt ?? item.claim.acquiredAt);
-      leaseExpiresAt = isoOrNull(item.claim.expiresAt);
     } else {
       const started = (facts?.events ?? []).findLast(event => event.type === "work.started");
       claimedAt = isoOrNull(started?.at) ?? isoOrNull(item.updatedAt);
     }
-    if (state === "in_progress" && !item.claim) { leaseStartAt = null; leaseExpiresAt = null; }
   } else if (state === "done") {
     owner = item.claim?.holderId ?? item.accountableMemberId ?? null;
     if (item.claim) {
@@ -536,9 +568,22 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     claimedAt,
     leaseStartAt,
     leaseExpiresAt,
+    // The work-item claim stores this as expiresAt. Repeat it on the list
+    // when a lease exists, so the expiry is not a missing or null field.
+    ...(typeof leaseExpiresAt === "string" ? { expiresAt: leaseExpiresAt } : {}),
     deliveryMode: existing?.deliveryMode ?? null,
     reviewPolicy: item.independentVerificationRequired === true ? "independent_principal"
       : (typeof item.verifierMemberId === "string" && item.verifierMemberId.length > 0 ? "distinct_member" : null),
+    // B-4' Phase 0 slice 2 (Appendix D §D.1 §4.2): decision-gate fields,
+    // carried verbatim from the item's STORED values (the reducer already
+    // computed them from room policy at propose time; never recompute here).
+    // Same names/semantics as the item fields so the #3342 decisions inbox
+    // (PR #3572 decisionFacts) can re-point at the board 1:1.
+    accountableMemberId: typeof item.accountableMemberId === "string" && item.accountableMemberId.length > 0 ? item.accountableMemberId : null,
+    definitionOfDone: typeof item.definitionOfDone === "string" && item.definitionOfDone.length > 0 ? item.definitionOfDone : null,
+    mode: item.mode === "read" || item.mode === "write" ? item.mode : null,
+    ownerDecisionRequired: item.ownerDecisionRequired === true,
+    humanDecisionMakerId: typeof item.humanDecisionMakerId === "string" && item.humanDecisionMakerId.length > 0 ? item.humanDecisionMakerId : null,
     reviewedBy: reviewsMerged.length > 0 ? reviewsMerged[reviewsMerged.length - 1].memberId : null,
     attestations: attestationsMerged,
     tags: [...tags].slice(0, 32),
@@ -552,6 +597,10 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     parentClaimId: existing?.parentClaimId ?? null,
     evidenceRefs,
     premiseFlag: null,
+    // The progress pointer is set through the claims API; a work item
+    // cannot express it, so an existing row's pointer survives the
+    // mapping (CURE-4396: workOf emits the field on every claim).
+    progressMessageId: existing?.progressMessageId ?? null,
     pullRequest: existing?.pullRequest ?? null,
     // Existing links and their polling outcomes belong to the board. Rebuilding
     // them from acquisition events erased board-added links and completed polls.
@@ -587,6 +636,12 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     verification: existing?.verification ?? null,
     claimRound: Number.isSafeInteger(existing?.claimRound) && existing.claimRound > 0 ? existing.claimRound : 0,
     deliveryGeneration: Number.isSafeInteger(existing?.deliveryGeneration) && existing.deliveryGeneration > 0 ? existing.deliveryGeneration : 0,
+    // #3545 claimGeneration is the same shape again (the claim round's
+    // fencing token; the codec defaults it to 0): the work item cannot
+    // express it, so an existing row's token is preserved verbatim —
+    // resetting it here would both unbind the round's fencing and keep
+    // the board diff from ever converging.
+    claimGeneration: Number.isSafeInteger(existing?.claimGeneration) && existing.claimGeneration > 0 ? existing.claimGeneration : 0,
   };
   if (historyOmitted > 0) row.historyOmitted = historyOmitted;
   if (existing?.deploy !== undefined && existing?.deploy !== null) row.deploy = existing.deploy;
@@ -622,6 +677,9 @@ function mergeReviews(mapped, existing) {
       continue;
     }
     seen.add(key(review));
+    // #3613 B3: a kernel review's per-criterion outcomes survive the
+    // board re-map verbatim, like the rest of the record (main's spread
+    // carries criteriaOutcomes through unchanged).
     merged.push({ ...review, url: review.url ?? null });
   }
   merged.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0));
@@ -663,6 +721,11 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     leaseExpiresAt: null,
     deliveryMode: null,
     reviewPolicy: null,
+    ownerDecisionRequired: false,
+    humanDecisionMakerId: null,
+    accountableMemberId: null,
+    definitionOfDone: null,
+    mode: null,
     reviewedBy: null,
     attestations: [],
     tags: [],
@@ -673,6 +736,7 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     parentClaimId: null,
     evidenceRefs: [],
     premiseFlag: null,
+    progressMessageId: null,
     pullRequest: null,
     pullRequests: [],
     updatedAt: isoOrNull(at) ?? iso(Date.now()),
@@ -691,6 +755,7 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     delivery: null,
     verification: null,
     deliveryGeneration: 0,
+    claimGeneration: 0,
   };
 }
 

@@ -121,11 +121,18 @@ test("step0 fates: a maximally populated item's board row drops the named fields
   assert.equal(row.attestations[0].memberId, "worker");
   assert.ok(boardJson.includes("HANDOFF-NEXT-SENTINEL")); // handoff nextAction survives as the chain note
   // Dropped — no board field exists for any of these (Step 0 record §3):
-  for (const sentinel of ["DOD-SENTINEL", "RECEIPT-NEXT-SENTINEL", "HANDOFF-DONE-SENTINEL", "HANDOFF-LIMIT-SENTINEL"]) {
+  for (const sentinel of ["RECEIPT-NEXT-SENTINEL", "HANDOFF-DONE-SENTINEL", "HANDOFF-LIMIT-SENTINEL"]) {
     assert.equal(boardJson.includes(sentinel), false, `${sentinel} must not reach the board at Step 0`);
   }
   assert.equal(boardJson.includes(receipt.signedEvidence.signature), false, "the signed evidence object itself has no board home");
-  for (const key of ["definitionOfDone", "humanDecisionMakerId", "ownerDecisionRequired", "mode", "verifierMemberId", "accountableMemberId", "receipt", "handoff", "helpWanted", "publicTask"]) {
+  // B-4' Phase 0 carries the brief, the accountable member, and the
+  // decision gate on the board row. verifierMemberId stays a policy kind.
+  assert.equal(row.definitionOfDone, "DOD-SENTINEL");
+  assert.equal(row.mode, "write");
+  assert.equal(row.accountableMemberId, "worker");
+  assert.equal(row.ownerDecisionRequired, true);
+  assert.equal(row.humanDecisionMakerId, "owner");
+  for (const key of ["verifierMemberId", "receipt", "handoff", "helpWanted", "publicTask"]) {
     assert.equal(Object.hasOwn(row, key), false, `board row must not carry ${key} at Step 0`);
   }
   // #3547 kernel fact vs item vocabulary: the claim row now always carries

@@ -957,7 +957,7 @@ export class RoomAgentClient {
         ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
         ...(pullRequest === undefined ? {} : { pullRequest }) }, signal);
   }
-  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, signal } = {}) {
+  updateWorkItem(id, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, expectedClaimGeneration, noteMessageId, progressMessageId, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
       { ...(state === undefined ? {} : { state }), ...(note === undefined ? {} : { note }),
         ...(deliveryMode === undefined ? {} : { deliveryMode }),
@@ -965,17 +965,22 @@ export class RoomAgentClient {
         ...(tags === undefined ? {} : { tags }), ...(blobs === undefined ? {} : { blobs }),
         ...(parentClaimId === undefined ? {} : { parentClaimId }),
         ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
-        ...(delivery === undefined ? {} : { delivery }) }, signal);
+        ...(delivery === undefined ? {} : { delivery }),
+        ...(expectedClaimGeneration === undefined ? {} : { expectedClaimGeneration }),
+        ...(noteMessageId === undefined ? {} : { noteMessageId }),
+        ...(progressMessageId === undefined ? {} : { progressMessageId }) }, signal);
   }
-  linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
+  linkWorkItemPullRequest(id, { pullRequest, expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/update`,
-      { appendPullRequest: pullRequest, expectedClaimedAt, expectedHistoryLength }, signal);
+      { appendPullRequest: pullRequest, expectedClaimedAt, expectedHistoryLength,
+        ...(expectedClaimGeneration === undefined ? {} : { expectedClaimGeneration }) }, signal);
   }
-  reviewWorkItem(id, { note, verdict, summary, url, expectedBasis, signal } = {}) {
+  reviewWorkItem(id, { note, verdict, summary, url, expectedBasis, criteriaOutcomes, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/review`,
       { ...(note === undefined ? {} : { note }), ...(verdict === undefined ? {} : { verdict }),
         ...(summary === undefined ? {} : { summary }), ...(url === undefined ? {} : { url }),
-        ...(expectedBasis === undefined ? {} : { expectedBasis }) }, signal);
+        ...(expectedBasis === undefined ? {} : { expectedBasis }),
+        ...(criteriaOutcomes === undefined ? {} : { criteriaOutcomes }) }, signal);
   }
   renewWorkItem(id, { progressMessageId, note, leaseHours, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/renew`,
@@ -987,15 +992,19 @@ export class RoomAgentClient {
     return this.#request("/work-claims/config", { ...(maxMemberOpenClaims === undefined ? {} : { maxMemberOpenClaims }),
       ...(maxOpenClaims === undefined ? {} : { maxOpenClaims }) }, signal);
   }
-  releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
+  releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, noteMessageId, progressMessageId, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/release`,
       { ...(note === undefined ? {} : { note }), ...(reason === undefined ? {} : { reason }),
-        expectedClaimedAt, expectedHistoryLength }, signal);
+        expectedClaimedAt, expectedHistoryLength,
+        ...(expectedClaimGeneration === undefined ? {} : { expectedClaimGeneration }),
+        ...(noteMessageId === undefined ? {} : { noteMessageId }),
+        ...(progressMessageId === undefined ? {} : { progressMessageId }) }, signal);
   }
-  reassignWorkItem(id, { newOwner, note, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
+  reassignWorkItem(id, { newOwner, note, expectedClaimedAt, expectedHistoryLength, expectedClaimGeneration, signal } = {}) {
     if (typeof newOwner !== "string" || !newOwner) throw new Error("Choose the new owner");
     return this.#request(`/work-claims/${encodeURIComponent(id)}/reassign`,
-      { newOwner, ...(note === undefined ? {} : { note }), expectedClaimedAt, expectedHistoryLength }, signal);
+      { newOwner, ...(note === undefined ? {} : { note }), expectedClaimedAt, expectedHistoryLength,
+        ...(expectedClaimGeneration === undefined ? {} : { expectedClaimGeneration }) }, signal);
   }
   sweepWorkClaims({ signal } = {}) { return this.#request("/work-claims/sweep", {}, signal); }
   // Convenience: claim, creating the item first when it does not exist yet.

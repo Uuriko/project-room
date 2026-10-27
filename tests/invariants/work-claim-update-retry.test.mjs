@@ -14,12 +14,21 @@
 // state/note/delivery fields). Reusing a requestId with a DIFFERENT payload
 // is not a retry — it is refused with 409 work_claim_conflict and applies
 // nothing, instead of silently swallowing the second update with a 200.
+//
+// CURE-4396-2: the digest itself is a cross-build contract. Builds from
+// before the progress-pointer field digest a no-pointer update with no
+// progressMessageId key; the pointer build must produce the identical
+// digest for that shape, or an update recorded on one side of a deploy
+// conflicts (409) when its retry lands on the other side instead of
+// replaying. The pointer joins the digest only when one is given (an id,
+// or an explicit null clearing one) — the same condition under which the
+// update applies it — so absent, null and an id stay pairwise distinct.
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { createWork, claimWork, updateWork } from "../../server/work-claims.mjs";
+import { createWork, claimWork, updateWork, updateRequestDigest, requestReplayVerdict } from "../../server/work-claims.mjs";
 import { createWorkClaimRegistry, handleWorkClaims } from "../../server/work-claim-routes.mjs";
 import { createDurableWorkClaimRegistry, workClaimSchema } from "../../server/work-claim-sqlite.mjs";
 import { invariant } from "./dsl.mjs";
@@ -56,6 +65,14 @@ const seedClaim = async registry => {
   await call(registry, "worker", "claim", "task", {});
   return registry.get("room1", "task").history.length;
 };
+
+// Digests produced by the pre-pointer build's own updateRequestDigest
+// (main 62ac6f1c448d08cd700277f02119463367438029, whose payload has no
+// progressMessageId key), computed by importing that tree's function —
+// these constants are the cross-build anchor: if the no-pointer digest
+// ever drifts from them, a retry straddling the deploy conflicts.
+const PRE_POINTER_DIGEST_NOTE = "2ca7c897a5a31cca39f61de79bb09714bb01859e9eb1add4aed1490d67038ee1";
+const PRE_POINTER_DIGEST_STATE_NOTE = "91ffcc81be76bef4e3737d49e6dc622ef2825a9f790d0a7c245b06b5d678ea7a";
 
 invariantSuite([
   invariant("update-retry-same-requestid-appends-nothing",
@@ -309,6 +326,86 @@ invariantSuite([
         ctx.db.close();
         rmSync(ctx.dir, { recursive: true, force: true });
       }
+    })
+    .build(),
+
+  invariant("update-digest-nopointer-matches-pre-pointer-build",
+    "a no-pointer update digests exactly as the pre-pointer build digests it, so its record replays across the deploy boundary in both directions")
+    .given((f, ctx) => {
+      ctx.item = claimWork(createWork({ id: "task", title: "task" }, { now: 1000 }), "worker", { now: 1001 });
+      // The same claim as the pre-pointer build would have left it after
+      // recording the note update under req-compat: the outcome record
+      // carries that build's digest (no round stamp — the verdict's
+      // digest comparison governs records without one).
+      ctx.recorded = { ...ctx.item, requestOutcomes: {
+        "req-compat": { at: "2026-10-20T00:00:00.000Z", digest: PRE_POINTER_DIGEST_NOTE } } };
+      return ctx;
+    })
+    .when((f, ctx) => {
+      // Direction 1: the retry of the pre-pointer record lands here.
+      ctx.retry = updateWork(ctx.recorded, "worker", { note: "progress", requestId: "req-compat", now: 2000 });
+      // Direction 2: the same update recorded by THIS build.
+      ctx.first = updateWork(ctx.item, "worker", { note: "progress", requestId: "req-compat", now: 2000 });
+    })
+    .then((f, ctx) => {
+      assert.equal(ctx.error, undefined, "the cross-build retry must replay, not conflict");
+      assert.equal(ctx.retry.history.length, ctx.item.history.length,
+        "the pre-pointer record replays: the retry appends nothing");
+      assert.equal(ctx.first.requestOutcomes["req-compat"].digest, PRE_POINTER_DIGEST_NOTE,
+        "this build records the pre-pointer digest for a no-pointer update, so the reverse retry replays too");
+      assert.equal(requestReplayVerdict(ctx.first.requestOutcomes, "req-compat",
+        PRE_POINTER_DIGEST_NOTE, ctx.first.claimRound), "replay");
+      assert.equal(updateRequestDigest({ note: "progress" }), PRE_POINTER_DIGEST_NOTE);
+      assert.equal(updateRequestDigest({ state: "blocked", note: "progress" }), PRE_POINTER_DIGEST_STATE_NOTE);
+      const absent = updateRequestDigest({ note: "progress" });
+      const cleared = updateRequestDigest({ note: "progress", progressMessageId: null });
+      const pointed = updateRequestDigest({ note: "progress", progressMessageId: "msg-1" });
+      assert.notEqual(cleared, absent, "an explicit clear digests distinctly from no pointer given");
+      assert.notEqual(pointed, absent, "a with-pointer update digests distinctly from a no-pointer one");
+      assert.notEqual(pointed, cleared, "an id and a clear digest distinctly — no collision arm opens");
+    })
+    .build(),
+
+  invariant("update-digest-pointer-stays-in-payload",
+    "a with-pointer update keeps the pointer in its digest: the identical retry replays, a no-pointer reuse of the requestId conflicts")
+    .given((f, ctx) => {
+      ctx.item = claimWork(createWork({ id: "task", title: "task" }, { now: 1000 }), "worker", { now: 1001 });
+      return ctx;
+    })
+    .when((f, ctx) => {
+      ctx.first = updateWork(ctx.item, "worker",
+        { note: "progress", progressMessageId: "msg-1", requestId: "req-ptr", now: 2000 });
+      ctx.replay = updateWork(ctx.first, "worker",
+        { note: "progress", progressMessageId: "msg-1", requestId: "req-ptr", now: 3000 });
+      // Same requestId, the pointer dropped: a different payload.
+      updateWork(ctx.first, "worker", { note: "progress", requestId: "req-ptr", now: 4000 });
+    })
+    .then((f, ctx) => {
+      assert.equal(ctx.first.progressMessageId, "msg-1", "the pointer applied");
+      assert.deepEqual(ctx.replay.history, ctx.first.history, "the identical with-pointer retry replays");
+      assert.equal(ctx.replay.progressMessageId, "msg-1");
+      assert.equal(ctx.error?.code, "work_claim_conflict",
+        "dropping the pointer under a seen requestId is a different update — refused, not replayed");
+    })
+    .build(),
+
+  invariant("update-digest-different-pointer-conflicts",
+    "reusing a requestId with a different progress pointer is refused 409 and applies nothing")
+    .given((f, ctx) => {
+      ctx.item = claimWork(createWork({ id: "task", title: "task" }, { now: 1000 }), "worker", { now: 1001 });
+      return ctx;
+    })
+    .when((f, ctx) => {
+      ctx.first = updateWork(ctx.item, "worker",
+        { note: "progress", progressMessageId: "msg-1", requestId: "req-ptr2", now: 2000 });
+      updateWork(ctx.first, "worker",
+        { note: "progress", progressMessageId: "msg-2", requestId: "req-ptr2", now: 3000 });
+    })
+    .then((f, ctx) => {
+      assert.equal(ctx.error?.code, "work_claim_conflict");
+      assert.equal(ctx.first.progressMessageId, "msg-1", "the first pointer stands; the second applied nothing");
+      assert.equal(ctx.first.history.length, ctx.item.history.length + 1,
+        "only the first update appended");
     })
     .build(),
 ]);
