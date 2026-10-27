@@ -820,13 +820,14 @@ test("route table: the three spend-grant routes are registered with room auth", 
 });
 
 test("spend authorization issues no raw transaction SQL: it runs through the store's transaction", async () => {
-  const { registerTransactionRunner, reapExpiredSpendAuthorizations } = await import("../server/spend-grants.mjs");
+  const { reapExpiredSpendAuthorizations } = await import("../server/spend-grants.mjs");
+  const { registerStoreTransactionRunner } = await import("../server/store-transaction.mjs");
   const calls = [];
   const db = { isTransaction: false, prepare() { throw new Error("not reached: validation refuses first"); }, exec(sql) { calls.push(sql); } };
   // Unregistered database: refuse loudly instead of issuing raw BEGIN.
   assert.throws(() => reapExpiredSpendAuthorizations(db, { roomId: "r", nowMs: 1 }), /no store transaction is registered/);
   let ran = 0;
-  registerTransactionRunner(db, fn => { ran += 1; db.isTransaction = true; try { return fn(); } finally { db.isTransaction = false; } });
+  registerStoreTransactionRunner(db, fn => { ran += 1; db.isTransaction = true; try { return fn(); } finally { db.isTransaction = false; } });
   assert.throws(() => reapExpiredSpendAuthorizations(db, { roomId: "r", nowMs: 1 }), /not reached/);
   assert.equal(ran, 1, "the registered store transaction wrapped the call");
   assert.deepEqual(calls, [], "no BEGIN/COMMIT/ROLLBACK was executed on the database");

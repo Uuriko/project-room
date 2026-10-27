@@ -45,7 +45,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
-import { registerBareTransactions } from "./helpers/bare-db-transactions.mjs";
+import { RoomStore } from "../server/store.mjs";
 import fc from "fast-check";
 import {
   ensureSpendGrantsSchema,
@@ -83,7 +83,10 @@ let roomSeq = 0;
 const freshRoom = () => `prop-room-${roomSeq++}`;
 
 function database(t) {
-  const db = registerBareTransactions(new DatabaseSync(":memory:"));
+  // Bind the store's transaction runner by constructing a RoomStore over
+  // the bare db (S-02: no test-local transaction re-implementation).
+  const db = new DatabaseSync(":memory:");
+  new RoomStore(null, { database: db });
   ensureGrantsSchema(db);
   ensureAutonomyTiersSchema(db);
   ensureSpendGrantsSchema(db);
