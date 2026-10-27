@@ -9,6 +9,7 @@ import { messageRepository } from "./message-repository.mjs";
 // rows whose token is recomputed from the room's referral signing seed.
 
 import { createHash, createHmac } from "node:crypto";
+import { tableExists } from "./db-util.mjs";
 
 // Same sentence as inviteMessage in src/share-links.js. The server copy stays
 // here so the runtime package does not pull the browser module into its closure.
@@ -97,10 +98,6 @@ export function partyAddress(address) {
 export function partySession(session) {
   if (typeof session !== "string" || !session || session.length > 512) return null;
   return partyDigest("session", session);
-}
-
-function tableExists(db, name) {
-  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 }
 
 function columnExists(db, table, column) {

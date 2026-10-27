@@ -92,6 +92,12 @@ try {
   assert.equal(calls.filter(m => m === 'turn/start').length, starts, 'restart retry must not execute a second model turn');
   assert.equal(f.store.room('commons').state.messages.filter(m => m.id === resultId).length, 1);
   report.hostRestartRetry = true; report.modelStarts = starts;
+  const observed = db.prepare('SELECT input_digest,input_bytes FROM codex_runtime_contexts').all();
+  assert.equal(observed.length, 1);
+  assert.match(observed[0].input_digest, /^[a-f0-9]{64}$/);
+  assert.ok(observed[0].input_bytes > 0);
+  report.runtimeInputObservationSurvivedRestart = true;
+  report.runtimeInputBytes = observed[0].input_bytes;
   report.status = 'passed';
   }
 } catch (error) {

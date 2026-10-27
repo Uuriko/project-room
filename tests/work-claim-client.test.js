@@ -253,6 +253,9 @@ test('SDK state filters retrieve older done claims through explicit and automati
 
 // The published OpenAPI example is client input, not an expected value derived
 // from the implementation. Exercise it against a real capped stored history.
+// A plain read reunites the spilled prefix (W3 claim-history spill), so the
+// SDK sees the full documented history; mutation responses still return the
+// stored 200-stamp window plus the omission counter.
 test('the documented capped-history PR basis succeeds through the SDK', async t => {
   const api = parse(readFileSync(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'));
   const schemas = api.paths['/api/rooms/{roomId}/work-claims/{claimId}/update'].post
@@ -267,8 +270,8 @@ test('the documented capped-history PR basis succeeds through the SDK', async t 
   for (let index = 0; index < additions; index++) item = updateWork(item, 'owner', { note: `Progress ${index}` });
   store.workClaims.set('commons', item);
   const read = await owner.workClaimGet(item.id);
-  assert.equal(read.history.length, 200);
-  assert.equal(read.historyOmitted, 3);
+  assert.equal(read.history.length, 203);
+  assert.equal(read.historyOmitted, undefined);
   const input = { pullRequest: 'https://github.com/Uuriko/project-room/pull/18', expectedClaimedAt: read.claimedAt };
   await assert.rejects(owner.linkWorkItemPullRequest(item.id, { ...input, expectedHistoryLength: 200 }),
     error => error.status === 409 && error.code === 'work_claim_conflict');
@@ -407,4 +410,37 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   await disconnected;
   release();
   assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
+});
+
+
+test('SDK repository and branch reach creation, claiming, and convenience reclaim over HTTP', async t => {
+  const { owner } = await fixture(t);
+  const created = await owner.workClaimCreate({ id: 'repo-direct', repo: 'acme/widgets', branch: 'codex/create' });
+  assert.equal(created.repo, 'acme/widgets'); assert.equal(created.branch, 'codex/create');
+  const claimed = await owner.claimWorkItem('repo-direct', { repo: 'acme/other', branch: 'codex/claim' });
+  assert.equal(claimed.repo, 'acme/other'); assert.equal(claimed.branch, 'codex/claim');
+  const convenient = await owner.workClaim('repo-convenience', { repo: 'acme/widgets', branch: 'codex/new' });
+  assert.equal(convenient.repo, 'acme/widgets'); assert.equal(convenient.branch, 'codex/new');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const reclaimed = await owner.workClaim('repo-convenience', { repo: 'acme/changed', branch: 'codex/reclaim' });
+  assert.equal(reclaimed.repo, 'acme/changed'); assert.equal(reclaimed.branch, 'codex/reclaim');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const retained = await owner.workClaim('repo-convenience');
+  assert.equal(retained.repo, 'acme/changed'); assert.equal(retained.branch, 'codex/reclaim');
+  assert.equal((await owner.workClaimGet('repo-convenience')).repo, 'acme/changed');
+});
+
+test('SDK invalid repository and branch declarations reach server validation', async t => {
+  const { owner } = await fixture(t);
+  for (const fields of [{ repo: 'invalid repo' }, { branch: 'invalid branch' }]) {
+    await assert.rejects(owner.workClaimCreate({ id: 'bad-repo-create', ...fields }), invalid);
+    await assert.rejects(owner.workClaim('bad-repo-convenience', fields), invalid);
+    await assert.rejects(owner.workClaimGet('bad-repo-create'), error => error.status === 404);
+    await assert.rejects(owner.workClaimGet('bad-repo-convenience'), error => error.status === 404);
+  }
+  await owner.workClaimCreate({ id: 'bad-repo-existing', repo: 'acme/widgets', branch: 'main' });
+  await assert.rejects(owner.claimWorkItem('bad-repo-existing', { repo: 'invalid repo' }), invalid);
+  await assert.rejects(owner.workClaim('bad-repo-existing', { branch: 'invalid branch' }), invalid);
+  const unchanged = await owner.workClaimGet('bad-repo-existing');
+  assert.equal(unchanged.state, 'unclaimed'); assert.equal(unchanged.repo, 'acme/widgets'); assert.equal(unchanged.branch, 'main');
 });

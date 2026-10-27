@@ -31,3 +31,12 @@ test("a push shows a count, never the message", () => {
   assert.equal(JSON.stringify(empty).includes(secret), false);
   assert.equal(empty.data.roomId, null);
 });
+
+
+test("push paths reject URL-normalization escapes and retain safe item links", () => {
+  for (const url of ["/\\other.example/path", "/\n/other.example", "//other.example", "https://other.example"]) {
+    assert.equal(notificationFromPush({ roomId: "commons", data: { url } }).data.url, "/?room=commons");
+  }
+  const url = "/?room=commons&item=release#result";
+  assert.equal(notificationFromPush({ data: { url } }).data.url, url);
+});

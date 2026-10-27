@@ -17,9 +17,10 @@
 //     non-bounty lots (transfers) still 404;
 //   - the room's public-receipts directory toggle and operator
 //     unpublish hide a lot receipt like any other shape;
-//   - the room's recorded public-receipts setting governs lots too:
-//     recording it off hides a lot receipt, recording it on serves
-//     it, and never recording it leaves the settled lot served;
+//   - the room's recorded public-receipts setting governs lots too
+//     (#3594): only recording it on serves a lot receipt — never
+//     recording it, and recording it off, both keep the settled lot
+//     private, while the member-gated credits history is unaffected;
 //   - other receipt shapes gain no lot field and stay unchanged.
 //
 // Seams: the real BountyEscrow state machine drives a real ledger
@@ -107,9 +108,18 @@ const lotOfKind = (db, bountyId, kind) => db.prepare(
   "SELECT lot_id FROM bounty_journal WHERE room_id=? AND bounty_id=? AND kind=? ORDER BY seq LIMIT 1")
   .get(ROOM, bountyId, kind)?.lot_id;
 
+// #3594: a settled lot is public only with the owner's recorded opt-in.
+// recordOptIn writes the mirror row syncRoomPublication writes when the
+// owner records room.public_receipts_set with enabled: true; tests whose
+// subject is lot composition record it explicitly, the gate tests below
+// exercise all three recorded states.
+const recordOptIn = db => db.prepare(
+  "INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 1)").run(ROOM);
+
 test("a settled payout lot composes a public receipt with the ledger's real fields", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToPaid(escrow);
+  recordOptIn(db);
   assert.equal(bounty.state, "paid");
   const lotId = lotOfKind(db, bounty.bountyId, "payout");
   assert.match(lotId, /^lot_[a-f0-9]{16}$/);
@@ -211,6 +221,7 @@ function runToPaidCrossReferenced(escrow, db) {
 test("a settled work receipt names its payout lot, and the lot names the receipt back", () => {
   const { escrow, db, store } = makeEscrow();
   const { lotId } = runToPaidCrossReferenced(escrow, db);
+  recordOptIn(db);
 
   const receipt = publicReceiptById(store, PWR_ID);
   assert.ok(receipt, "the stored work receipt must resolve");
@@ -246,6 +257,7 @@ test("a work receipt with no journal lot row gains no lot fields", () => {
 test("a lot whose entries carry no work receipt id reports workReceiptId null", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToPaid(escrow);
+  recordOptIn(db);
   const lotId = lotOfKind(db, bounty.bountyId, "payout");
   const lot = publicReceiptById(store, lotId);
   assert.ok(lot);
@@ -318,6 +330,7 @@ function runToSplit(escrow, { fromAccepted }) {
 test("split from a pre-gate submitted dispute: the page shows both halves, not the full award to the worker", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToSplit(escrow, { fromAccepted: false });
+  recordOptIn(db);
   // The decide lot carries attribute (full award) + approve (worker half)
   // + refund (poster half) under one lot id.
   const lotId = lotOfKind(db, bounty.bountyId, "approve");
@@ -349,6 +362,7 @@ test("split from a pre-gate submitted dispute: the page shows both halves, not t
 test("split from accepted: the page shows the poster refund the headline omits", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToSplit(escrow, { fromAccepted: true });
+  recordOptIn(db);
   const lotId = lotOfKind(db, bounty.bountyId, "approve");
   const receipt = publicReceiptById(store, lotId);
   assert.ok(receipt, "the split decide lot must resolve");
@@ -373,6 +387,7 @@ test("split from accepted: the page shows the poster refund the headline omits",
 test("payout lot: the page shows the pool fee leg; single-movement lots gain no movements list", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToPaid(escrow);
+  recordOptIn(db);
   const lotId = lotOfKind(db, bounty.bountyId, "payout");
   const receipt = publicReceiptById(store, lotId);
   assert.ok(receipt);
@@ -394,6 +409,7 @@ test("payout lot: the page shows the pool fee leg; single-movement lots gain no 
 test("every lot of a settled bounty resolves, each showing its own movement", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToPaid(escrow);
+  recordOptIn(db);
   const fundLot = lotOfKind(db, bounty.bountyId, "escrow-lock");
   const receipt = publicReceiptById(store, fundLot);
   assert.ok(receipt, "the funding lot of a settled bounty resolves");
@@ -427,8 +443,9 @@ test("unknown, malformed, unsettled, and non-bounty lots stay 404", () => {
 test("the directory toggle and operator unpublish hide a lot receipt", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToPaid(escrow);
+  recordOptIn(db);
   const lotId = lotOfKind(db, bounty.bountyId, "payout");
-  assert.ok(publicReceiptById(store, lotId));
+  assert.ok(publicReceiptById(store, lotId), "recorded opt-in: the lot is served");
 
   db.prepare("INSERT INTO room_directory_settings (room_id, discoverable, public_receipts) VALUES (?, 0, 0)")
     .run(ROOM);
@@ -442,18 +459,28 @@ test("the directory toggle and operator unpublish hide a lot receipt", () => {
   assert.ok(publicReceiptById(store, lotId));
 });
 
-test("the room's recorded public-receipts setting hides a lot receipt", () => {
+test("the room's recorded public-receipts setting gates a lot receipt (#3594)", () => {
   const { escrow, db, store } = makeEscrow();
   const bounty = runToPaid(escrow);
   const lotId = lotOfKind(db, bounty.bountyId, "payout");
-  assert.ok(publicReceiptById(store, lotId), "never recorded: the settled lot is served");
+  assert.equal(publicReceiptById(store, lotId), null,
+    "never recorded: the settled lot stays private — no record is not an opt-in");
+  // The member view never moves with the public gate: the worker's own
+  // credits history still carries the lot while the public read is null.
+  assert.ok(escrow.history(ROOM, GROK).some(entry => entry.receiptId === lotId),
+    "member-gated credits history still serves the lot");
 
   // The mirror row syncRoomPublication writes when the owner records
-  // room.public_receipts_set. Only a RECORDED off hides the lot; the
+  // room.public_receipts_set. Only a RECORDED on serves the lot; the
   // end-to-end recording path is covered by the HTTP test below.
-  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 0)")
+  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 1)")
     .run(ROOM);
-  assert.equal(publicReceiptById(store, lotId), null, "owner recorded public receipts off");
+  assert.ok(publicReceiptById(store, lotId), "owner recorded public receipts on: served");
+  db.prepare("UPDATE room_public_receipts_setting SET enabled=0 WHERE room_id=?").run(ROOM);
+  assert.equal(publicReceiptById(store, lotId), null,
+    "recorded back off (the opt-in revoked): private again on the next read");
+  assert.ok(escrow.history(ROOM, GROK).some(entry => entry.receiptId === lotId),
+    "member-gated credits history still serves the lot after the revoke");
   db.prepare("UPDATE room_public_receipts_setting SET enabled=1 WHERE room_id=?").run(ROOM);
   assert.ok(publicReceiptById(store, lotId), "recording it back on restores the receipt");
 });
@@ -497,8 +524,11 @@ async function serveSettledRoom(t) {
 }
 
 test("GET /receipts/<lotId> serves the settled lot page and JSON; unknown lots 404", async t => {
-  const { origin, lotId } = await serveSettledRoom(t);
+  const { origin, lotId, store, ownerKey } = await serveSettledRoom(t);
   assert.match(lotId, /^lot_[a-f0-9]{16}$/);
+  // #3594: the page serves because the owner recorded the opt-in.
+  store.command(ownerKey, "commons",
+    { id: "pub-on", type: "room.public_receipts_set", data: { enabled: true } });
 
   const page = await fetch(`${origin}/receipts/${lotId}`);
   assert.equal(page.status, 200);
@@ -538,13 +568,28 @@ test("GET /receipts/<lotId> serves the settled lot page and JSON; unknown lots 4
   assert.doesNotMatch(await list.text(), /Fix the flaky export/);
 });
 
-test("recording the room's public-receipts setting off hides the lot page", async t => {
+test("the room's recorded public-receipts setting gates the lot page (#3594)", async t => {
   const { origin, lotId, store, ownerKey } = await serveSettledRoom(t);
   const record = (id, enabled) => store.command(ownerKey, "commons",
     { id, type: "room.public_receipts_set", data: { enabled } });
 
-  // The room never recorded the setting: the settled lot stays served.
-  assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 200);
+  // The room never recorded the setting: the settled lot is private on
+  // every public surface — detail page, JSON twin, alias, share card —
+  // and never leaks into the receipts gallery.
+  assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 404,
+    "never recorded: the lot page is a 404, not a public receipt");
+  assert.equal((await fetch(`${origin}/receipts/${lotId}.json`)).status, 404,
+    "never recorded: the JSON twin is a 404 too");
+  assert.equal((await fetch(`${origin}/room/receipts/${lotId}`)).status, 404,
+    "never recorded: the alias is a 404 too");
+  assert.equal((await fetch(`${origin}/receipts/${lotId}/og.png`)).status, 404,
+    "never recorded: the share card is a 404 too");
+  assert.equal((await fetch(`${origin}/receipts/${lotId}/badge.svg`)).status, 404,
+    "never recorded: the badge is a 404 too");
+  const list = await fetch(`${origin}/receipts`);
+  assert.equal(list.status, 200);
+  assert.doesNotMatch(await list.text(), /Fix the flaky export/,
+    "never recorded: the gallery does not list the lot");
   record("pub-on", true);
   assert.equal((await fetch(`${origin}/receipts/${lotId}`)).status, 200,
     "recorded on: still served");

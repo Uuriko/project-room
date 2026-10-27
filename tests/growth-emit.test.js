@@ -23,13 +23,12 @@ const roomEvent = (id, type, actorId, data, n = 0) =>
 
 const lastEnvelope = collector => collector.query({ limit: 1 })[0];
 
-test("C3 ROOM_TO_GROWTH covers the nine mapped room event types and is frozen", () => {
+test("C3 ROOM_TO_GROWTH covers the eight mapped room event types and is frozen", () => {
   assert.deepEqual({ ...ROOM_TO_GROWTH }, {
     "room.created": "room.created",
     "member.added": "member.joined",
     "member.joined_via_invitation": "member.joined",
     "message.posted": "message.sent",
-    "message.reaction_set": "reaction.added",
     "message.pinned": "message.pinned",
     "work.proposed": "work.proposed",
     "work.completed": "work.completed",
@@ -118,15 +117,15 @@ test("C4 mention matching is exact and case-sensitive (C3 integration)", () => {
   assert.deepEqual(collector.query({}).map(e => e.type), ["message.sent"]);
 });
 
-test("C3 historical reaction.added and message.pinned project message identifiers", () => {
+test("C3 old reaction_set events emit nothing; message.pinned projects the message id", () => {
   const { state, collector } = fresh();
   let res = applyEventWithGrowth(state,
     roomEvent("ev-post", EVENT_TYPES.MESSAGE_POSTED, "maya", { messageId: "m-r", body: "react to me" }, 5), collector);
+  const before = collector.query({}).length;
   res = applyEventWithGrowth(res.state,
     roomEvent("ev-react", "message.reaction_set", "codex",
       { messageId: "m-r", reaction: "like", active: true }, 6), collector);
-  assert.equal(res.growthOk, true);
-  assert.deepEqual(lastEnvelope(collector).fields, { roomId: ROOM, messageId: "m-r", reaction: "like" });
+  assert.equal(collector.query({}).length, before);
   res = applyEventWithGrowth(res.state,
     roomEvent("ev-pin", EVENT_TYPES.MESSAGE_PINNED, "potter", { messageId: "m-r" }, 7), collector);
   assert.equal(res.growthOk, true);
@@ -246,27 +245,4 @@ test("C3 duplicate room events are not re-recorded, re-notified, or re-projected
   } finally {
     getGrowthFanout().unsubscribe(subId);
   }
-});
-
-test("C3 reaction removals (active:false) do not emit reaction.added", () => {
-  const { state, collector } = fresh();
-  let res = applyEventWithGrowth(state,
-    roomEvent("ev-post-rem", EVENT_TYPES.MESSAGE_POSTED, "maya", { messageId: "m-rem", body: "react then unreact" }, 19), collector);
-  res = applyEventWithGrowth(res.state,
-    roomEvent("ev-add-rem", "message.reaction_set", "codex",
-      { messageId: "m-rem", reaction: "like", active: true }, 20), collector);
-  assert.equal(res.growthOk, true);
-  assert.equal(collector.query({}).filter(e => e.type === "reaction.added").length, 1);
-
-  // active:false removes the member's reaction in the room core; it is not
-  // an addition and must neither build nor record a reaction.added envelope.
-  const removal = roomEvent("ev-del-rem", "message.reaction_set", "codex",
-    { messageId: "m-rem", reaction: "like", active: false }, 21);
-  assert.equal(buildGrowthEvent(removal, res.state), null);
-  res = applyEventWithGrowth(res.state, removal, collector);
-  assert.equal(res.growthOk, false);
-  assert.equal(collector.query({}).filter(e => e.type === "reaction.added").length, 1);
-  // The room state did apply the removal.
-  const message = res.state.messages.find(m => m.id === "m-rem");
-  assert.equal(Object.values(message.reactions ?? {}).flat().includes("codex"), false);
 });
