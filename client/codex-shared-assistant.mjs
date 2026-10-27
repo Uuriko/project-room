@@ -259,6 +259,12 @@ export async function runCodexSharedAssistant({ connection, db, rpc, cwd, policy
     if (current && ["working", "unknown"].includes(current.status) && settled?.status === "failed")
       return act({ action: "report", requestId: `codex-failed-${key}-${record.continuation ?? 0}`, expectedRevision: current.revision,
         state: "failed", summary: "The agent could not finish. Check the agent host for the error, then retry." });
+    // A host shutdown can interrupt the provider without a Room pause request.
+    // On restart, expose that confirmed terminal state so Resume can continue
+    // the original thread. Unknown outcomes still remain fenced for inspection.
+    if (current && ["working", "unknown"].includes(current.status) && settled?.status === "interrupted")
+      return act({ action: "report", requestId: `codex-interrupted-${key}-${record.continuation ?? 0}`, expectedRevision: current.revision,
+        state: "paused", summary: "The agent was interrupted. Resume this request to continue from its saved conversation; earlier actions will be reconciled before further work." });
     throw error;
   } finally { clearInterval(timer); await polling; await draft.close(); signal?.removeEventListener("abort", abort); }
   const current = await read();

@@ -13,18 +13,21 @@ import { runCodexSharedAssistant } from '../client/codex-shared-assistant.mjs';
 
 const [configPath, reportPath, mode] = process.argv.slice(2);
 const disconnectAfterStart = mode === "--disconnect-after-start";
-if ((process.argv.length !== 4 && !(process.argv.length === 5 && disconnectAfterStart)) || !isAbsolute(configPath ?? '') || !isAbsolute(reportPath ?? ''))
+const resumeAfterInterrupt = mode === "--resume-after-interrupt";
+if ((process.argv.length !== 4 && !(process.argv.length === 5 && (disconnectAfterStart || resumeAfterInterrupt))) || !isAbsolute(configPath ?? '') || !isAbsolute(reportPath ?? ''))
   throw new Error('Explicit absolute runtime config and report paths required');
 const f = createAcceptanceFixture({ dmConsent: true });
 const workspace = join(realpathSync(f.directory), 'provider-workspace');
 mkdirSync(workspace, { mode: 0o700 });
-writeFileSync(join(workspace, 'AGENTS.md'), 'Disposable protocol qualification. No tools, network, file changes or delegation are needed. Answer the synthetic request only.\n');
+writeFileSync(join(workspace, 'AGENTS.md'), 'Disposable qualification workspace. Read inventory.json if requested; do not change files, use external services, or delegate. Report the fixture facts only.\n');
+writeFileSync(join(workspace, 'inventory.json'), JSON.stringify({ pending: 17, completed: 19, blocked: 6 }) + '\n');
 const config = validateCodexRuntimeConfig({ ...JSON.parse(readFileSync(configPath, 'utf8')),
   cwd: workspace, policy: { approvalPolicy: 'never', sandbox: 'read-only' } });
 const journal = join(f.directory, 'host-journal.sqlite');
 const server = createRoomServer({ store: f.store });
-let db, rpc;
+let db, rpc, interruptTimer;
 const calls = [];
+let interrupted = false;
 const open = () => {
   db = openRequestJournal(journal);
   const threads = db.prepare("SELECT 1 FROM sqlite_master WHERE name='codex_runtime_attempts'").get()
@@ -33,6 +36,13 @@ const open = () => {
   return { ...rpc, async request(method, ...args) {
     calls.push(method);
     const value = await rpc.request(method, ...args);
+    if (resumeAfterInterrupt && !interrupted && method === 'turn/start') {
+      interrupted = true;
+      const transport = rpc;
+      interruptTimer = setTimeout(() => transport.request('turn/interrupt', { threadId: args[0].threadId, turnId: value.turn.id })
+        .then(() => { report.interruptAcknowledged = true; })
+        .catch(error => { report.interruptErrorCode = error.code ?? 'transport_error'; }), 500);
+    }
     if (disconnectAfterStart && method === 'turn/start') await rpc.close();
     return value;
   } };
@@ -48,13 +58,36 @@ try {
   await owner.act({ action: 'configure', requestId: 'qualification-config', expectedRevision: 0,
     name: 'Room', coordinatorMemberId: 'producer' });
   f.store.command(f.keys.owner, 'commons', { id: 'qualification-question', type: 'message.posted',
-    data: { messageId: 'qualification-question', body: 'Synthetic transport check. Return only ROOM-QUALIFIED-42. Do not use tools.' } });
+    data: { messageId: 'qualification-question', body: `${resumeAfterInterrupt ? 'For this interruption test, first run /bin/sleep 5 before reading the file. ' : ''}Read inventory.json in the qualification workspace. Return a concise inventory report with the pending, completed and blocked counts, the total, and the fraction blocked. Include ROOM-QUALIFIED-42 only if the total is 42. Do not modify files or contact external services.` } });
   await owner.act({ action: 'invoke', requestId: 'qualification-invoke', runId: 'qualification', sourceMessageId: 'qualification-question' });
   let measuredRpc = open();
   await checkCodexProtocol(measuredRpc, config); report.protocolReady = true;
   const run = () => runCodexSharedAssistant({ connection, db, rpc: measuredRpc, cwd: config.cwd,
     policy: config.policy, runId: 'qualification', timeoutMs: disconnectAfterStart ? 3000 : config.turnTimeoutMs });
-  if (disconnectAfterStart) {
+  if (resumeAfterInterrupt) {
+    const first = await run();
+    assert.equal(first.result.status, 'paused', 'confirmed interruption must expose Resume');
+    await rpc.close(); rpc = null; db.close(); db = null;
+    measuredRpc = open();
+    const paused = (await owner.assistant()).runs.find(row => row.id === 'qualification');
+    await owner.act({ action: 'resume', requestId: 'qualification-resume', runId: paused.id, expectedRevision: paused.revision });
+    const completed = await run();
+    assert.equal(completed.result.status, 'done');
+    const resultId = completed.result.resultMessageId;
+    const message = await owner.message(resultId);
+    assert.match(message?.body ?? '', /ROOM-QUALIFIED-42/);
+    assert.match(message.body, /17/); assert.match(message.body, /19/); assert.match(message.body, /6/);
+    const attempts = db.prepare('SELECT thread_id,state FROM codex_runtime_attempts').all();
+    assert.equal(attempts.length, 2); assert.equal(new Set(attempts.map(row => row.thread_id)).size, 1);
+    assert.deepEqual(attempts.map(row => row.state), ['interrupted', 'completed']);
+    await rpc.close(); rpc = null; db.close(); db = null; measuredRpc = open();
+    const replay = await run(); assert.equal(replay.result.resultMessageId, resultId);
+    assert.equal(calls.filter(method => method === 'turn/start').length, 2, 'only the explicitly resumed continuation may start');
+    assert.equal(f.store.room('commons').state.messages.filter(row => row.id === resultId).length, 1);
+    Object.assign(report, { modelTurnExecuted: true, publication: true, hostRestartRetry: true,
+      interruptedThenResumed: true, sameThread: true, modelStarts: 2, resultMessageId: resultId,
+      resultBody: message.body, status: 'passed' });
+  } else if (disconnectAfterStart) {
     // Drop the real process after start acknowledgement, before publication.
     // The durable turn identifier must be reconciled, never blindly restarted.
     await assert.rejects(run());
@@ -106,6 +139,7 @@ try {
   report.failureClass = error.name;
   process.exitCode = 1;
 } finally {
+  clearTimeout(interruptTimer);
   await rpc?.close(); db?.close();
   server.closeStreams(); server.closeAllConnections();
   if (server.listening) await new Promise(resolve => server.close(resolve));

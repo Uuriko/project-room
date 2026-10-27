@@ -135,3 +135,24 @@ for (const mismatch of ["origin", "roomId", "memberId", "malformed", "incomplete
     assert.equal((result.stdout + result.stderr).includes(connection.token), false);
   });
 }
+
+test("status retains bounded result evidence and a concrete recovery action without claiming idle readiness", t => {
+  const f = setup(t), owner = new WatchJournal(`${f.journal}.watch`);
+  const writer = createCodexStatusWriter(`${f.journal}.watch`, { origin: "https://room.example", roomId: "room", memberId: "agent" });
+  t.after(() => { writer.close(); owner.close(); });
+  writer.event({ type: "host_readiness", credentials: "present" });
+  writer.event({ type: "host_status", status: "settled", runStatus: "paused", resultMessageId: "not-a-result" });
+  assert.equal(readCodexHostStatus(f.journal).modelExecution, "not_tested");
+  writer.event({ type: "host_status", status: "settled", runStatus: "done", resultMessageId: "result-1" });
+  let state = readCodexHostStatus(f.journal);
+  assert.equal(state.modelExecution, "completed"); assert.equal(state.resultMessageId, "result-1");
+  writer.event({ type: "host_status", status: "recovery_pending", runId: "next-run", code: "PRIVATE-ERROR" });
+  state = readCodexHostStatus(f.journal);
+  assert.equal(state.recoveryAction, "inspect_original_attempt"); assert.equal(state.protocol, "unverified");
+  writer.event({ type: "host_status", status: "stopped_auth", code: "PRIVATE-ERROR", action: "reconnect_agent" });
+  writer.event({ type: "host_status", status: "stopped" });
+  state = readCodexHostStatus(f.journal);
+  assert.equal(state.recoveryAction, "reconnect_agent");
+  assert.equal(state.modelExecution, "completed", "historical result evidence is separate from current readiness");
+  assert.doesNotMatch(readFileSync(`${f.journal}.watch/status.json`, "utf8"), /PRIVATE-ERROR/);
+});
