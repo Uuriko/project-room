@@ -80,3 +80,24 @@ test('indexed seek preserves page boundaries across retained and archived record
  f.s.db.prepare("UPDATE messages SET record_json='invalid' WHERE message_id='seek-1'").run();
  assert.deepEqual([...f.repo().records({afterId:'seek-137'})].map(m=>m.id),['seek-138','seek-139']);
 });
+
+test('partial message backfill after prefix archive preserves snapshots and seek',t=>{
+ const f=setup(t);
+ for(let i=0;i<12;i++)f.post(`partial-${i}`,`Record ${i}`);
+ f.certify();
+ assert.equal(f.s.archiveMessages('commons',{keepNewest:4,dryRun:false}).ok,true);
+ const expected=[...f.repo().records()].map(m=>m.id);
+ // Legacy posts used their event ID when no explicit message ID was supplied.
+ const legacy=f.s.db.prepare("SELECT id,body FROM events WHERE json_extract(body,'$.data.messageId')=?").get('partial-10');
+ const event=JSON.parse(legacy.body);delete event.data.messageId;event.id='partial-10';
+ f.s.db.prepare('UPDATE events SET body=? WHERE id=?').run(JSON.stringify(event),legacy.id);
+ // A certified prefix can coexist with a working set not yet backfilled.
+ f.s.db.prepare("DELETE FROM messages WHERE room_id=? AND message_id IN (?,?)").run('commons','partial-8','partial-10');
+ assert.deepEqual([...f.repo().records()].map(m=>m.id),expected);
+ assert.deepEqual(f.repo().recent(3).map(m=>m.id),expected.slice(-3));
+ assert.deepEqual([...f.repo().records({afterId:'partial-8'})].map(m=>m.id),expected.slice(9));
+ assert.deepEqual([...f.repo().records({afterId:'partial-10',descending:true})].map(m=>m.id),expected.slice(0,10).reverse());
+ assert.deepEqual(f.s.snapshot(f.token,'commons').state.messages.map(m=>m.id),expected);
+ assert.deepEqual(f.s.snapshot(f.token,'commons',null,'full',false,false,'full',3).state.messages.map(m=>m.id),expected.slice(-3));
+ assert.equal(f.s.db.prepare('SELECT count(*) n FROM messages WHERE message_id=?').get('partial-8').n,0,'read does not mutate or certify the partial table');
+});
