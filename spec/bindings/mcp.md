@@ -26,12 +26,14 @@ These tools operate on work items, which [claim](../core/claim.md) keeps separat
 | Tool | What it does |
 | --- | --- |
 | `room_read_board` | `src/board.js` `projectBoard` over work items. Not `GET /work-claims`. |
-| `room_acquire_claim` | command `claim.acquired` (repository, ref, paths) |
-| `room_release_claim` | command `claim.released` |
-| `room_renew_claim` | command `claim.renewed` |
+| `room_claim` | canonical `action=take`/`renew`/`release` → `claim.acquired` (repository, ref, paths) / `claim.renewed` / `claim.released` |
+| `room_handoff` | canonical command `work.handoff_recorded` |
 | `room_list_work` | current work items for this member |
 | `room_read_work` | one work item |
-| `room_record_handoff` | command `work.handoff_recorded` |
+| `room_acquire_claim` | deprecated alias for `room_claim` `action=take` |
+| `room_release_claim` | deprecated alias for `room_claim` `action=release` |
+| `room_renew_claim` | deprecated alias for `room_claim` `action=renew` |
+| `room_record_handoff` | deprecated alias for `room_handoff` |
 
 Source: `server/mcp-full-profile.mjs`, `src/room-mcp-join.js`, `src/board.js`.
 

@@ -669,11 +669,19 @@ test("room discovery pages bounded links, hides inactive members and identifies 
   store.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.members.owner.active',json('false')) WHERE id=?").run("page-000");
   store.db.prepare("UPDATE rooms SET archived_at=? WHERE id=?").run("2026-09-20T00:00:00.000Z", "page-100");
   const first = await listAgentRooms(origin, identity.secret);
-  assert.equal(first.rooms.length, 99);
-  assert.equal(first.nextCursor, "page-099");
-  const last = await listAgentRooms(origin, identity.secret, { after: first.nextCursor });
-  assert.deepEqual(last.rooms.map(room => [room.roomId, room.archivedAt]), [["page-100", "2026-09-20T00:00:00.000Z"]]);
-  assert.equal(last.nextCursor, null);
+  // #2540 re-pin: the page is cut from LIVE rooms, so the inactive
+  // page-000 link does not eat a slot — page 1 holds all 100 live rooms
+  // (page-001..page-100) and the seats are exhausted (nextCursor null).
+  // The old pin (99 rooms, cursor "page-099", page-100 on page 2)
+  // encoded the slice-then-filter defect this fix removes.
+  assert.equal(first.rooms.length, 100);
+  assert.equal(first.rooms[0].roomId, "page-001");
+  assert.ok(!first.rooms.some(room => room.roomId === "page-000"));
+  assert.deepEqual(first.rooms.map(room => [room.roomId, room.archivedAt]).at(-1), ["page-100", "2026-09-20T00:00:00.000Z"]);
+  assert.equal(first.nextCursor, null);
+  const afterLast = await listAgentRooms(origin, identity.secret, { after: "page-100" });
+  assert.deepEqual(afterLast.rooms, []);
+  assert.equal(afterLast.nextCursor, null);
 });
 
 // #593/#643: an agent owner passes the identity-connection ladder with

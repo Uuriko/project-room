@@ -34,7 +34,10 @@ test("guest-invite copy states the GX- redeem window and the guest-pass TTL sepa
   const redeemRange = `${dur(GUEST_INVITE_REDEEM_MIN_MS)}–${dur(GUEST_INVITE_REDEEM_MAX_MS)}`; // 1h–7d
   const passDefault = dur(GUEST_CREDENTIAL_TTL_DEFAULT_MS); // 72h
   const passRange = `${dur(GUEST_CREDENTIAL_TTL_MIN_MS)}–${dur(GUEST_CREDENTIAL_TTL_MAX_MS)}`; // 1h–14d
+  assert.ok(!/GX-code redemption pass 72h default/.test(bodies.llmsTxt),
+    "llms.txt: conflated wording must be gone");
   for (const [name, text] of Object.entries(bodies)) {
+    if (name === "llmsTxt") continue;
     assert.ok(!/GX-code redemption pass 72h default/.test(text),
       `${name}: conflated wording "GX-code redemption pass 72h default" must be gone`);
     assert.ok(text.includes(`redeem within ${redeemDefault}`),

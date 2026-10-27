@@ -13,7 +13,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { wireNodeJobs } from "../server/jobs.mjs";
 import worker from "../cloudflare/external-probe-worker.mjs";
 import { CRON_JOBS, jobHealthView, jobHealthResponse, jobHealthUnavailable } from "../cloudflare/job-heartbeat.mjs";
-import { runExternalProbe } from "../cloudflare/external-probe.mjs";
+import { runExternalProbe, ProbeStateError } from "../cloudflare/external-probe.mjs";
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -292,9 +292,10 @@ test("a missing destination stays quiet while the other still notifies", async t
   assert.equal(hooked.alerts.find(alert => alert.destination === "room").inert, "unset");
   assert.equal((await probeMessages(room.origin, room.token)).length, 2);
 
-  const unbound = await run({ PROBE_ORIGIN: down, PROBE_ALERT_WEBHOOK_URL: `${webhook}/hook` });
-  await run({ PROBE_ORIGIN: down, PROBE_ALERT_WEBHOOK_URL: `${webhook}/hook` });
-  assert.equal(unbound.error, "state_unbound");
+  await assert.rejects(run({ PROBE_ORIGIN: down, PROBE_ALERT_WEBHOOK_URL: `${webhook}/hook` }),
+    error => error instanceof ProbeStateError && error.code === "state_unbound");
+  await assert.rejects(run({ PROBE_ORIGIN: down, PROBE_ALERT_WEBHOOK_URL: `${webhook}/hook` }),
+    error => error instanceof ProbeStateError && error.code === "state_unbound");
   assert.equal(hooks.length, 1);
 });
 
@@ -348,13 +349,56 @@ test("a streak that cannot be saved does not notify", async t => {
   const kv = memoryKv();
   kv.put = async () => { throw new Error("kv down"); };
   const env = { PROBE_ORIGIN: down, PROBE_STATE: kv, PROBE_ALERT_WEBHOOK_URL: `${webhook}/hook` };
-  const first = await run(env);
-  const second = await run(env);
-  assert.equal(first.error, "state_unwritable");
-  assert.equal(second.error, "state_unwritable");
-  assert.deepEqual(first.alerts, []);
-  assert.deepEqual(second.alerts, []);
+  await assert.rejects(run(env),
+    error => error instanceof ProbeStateError && error.code === "state_unwritable");
+  await assert.rejects(run(env),
+    error => error instanceof ProbeStateError && error.code === "state_unwritable");
   assert.deepEqual(hooks, []);
+});
+
+test("a probe that cannot use its state fails the run instead of reporting healthy", async () => {
+  // Regression for the silent self-failure mode: a probe whose streak state
+  // is unbound or unreadable used to return a normal result with alerts: []
+  // and consecutiveFailures: null — a dead watcher indistinguishable from a
+  // healthy one in Cron Events, with the two-failure paging threshold
+  // structurally unreachable. State failures now throw ProbeStateError,
+  // which the scheduled handler surfaces as a failed invocation.
+  const healthy = jobsFetch(HEALTHY_JOBS);
+  const unreadableState = () => ({
+    async get() { throw new Error("kv read failed"); },
+    async put() {}
+  });
+  await assert.rejects(
+    runExternalProbe({ PROBE_ORIGIN: "https://probe.example" }, healthy),
+    error => error instanceof ProbeStateError && error.code === "state_unbound"
+  );
+  await assert.rejects(
+    runExternalProbe({ PROBE_ORIGIN: "https://probe.example", PROBE_STATE: unreadableState() }, healthy),
+    error => error instanceof ProbeStateError && error.code === "state_unreadable"
+  );
+  // Origin down AND state broken: the run confesses the state failure
+  // rather than returning an empty, healthy-looking result, and no alert
+  // send is attempted (there is no streak to alert against).
+  const alertPosts = [];
+  const downFetch = async input => {
+    const url = String(input instanceof URL ? input.href : input);
+    if (url.endsWith("/hook")) { alertPosts.push(url); return new Response(null, { status: 204 }); }
+    return new Response(JSON.stringify({ status: "unavailable" }), { status: 503, headers: { "content-type": "application/json" } });
+  };
+  await assert.rejects(
+    runExternalProbe({
+      PROBE_ORIGIN: "https://probe.example",
+      PROBE_STATE: unreadableState(),
+      PROBE_ALERT_WEBHOOK_URL: "https://alerts.example/hook"
+    }, downFetch),
+    error => error instanceof ProbeStateError && error.code === "state_unreadable"
+  );
+  assert.deepEqual(alertPosts, []);
+  // The scheduled entry propagates the rejection to the cron host.
+  await assert.rejects(
+    run({ PROBE_ORIGIN: "https://probe.example" }),
+    error => error instanceof ProbeStateError && error.code === "state_unbound"
+  );
 });
 
 test("ops-room alert is prefixed with /room on a getdasha door origin, and not on a service origin", async () => {
