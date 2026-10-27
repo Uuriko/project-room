@@ -15,6 +15,7 @@ import { exportNdjsonText, replayNdjson, tableDigestsOf } from "../server/room-e
 import { replayNdjsonInto, createBackupReplaySession } from "../server/restore-ndjson.mjs";
 import { recordDirectSend, exportDirectSends } from "../server/inbox-outbox.mjs";
 import { backupRoom } from "../server/backup.mjs";
+import { createExportScrubContext, placeholderFor, registerSecretValues, scrubText } from "../server/export-scrub.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -183,6 +184,27 @@ test("file replay path: a cured export restores verified/full and readable", t =
   assert.equal(result.contentVerification, "full");
   assert.equal(result.readability.ok, true);
   assert.ok(result.scrubbedCells.messages.body >= 1);
+});
+
+test("export-scrub: shapes, salted placeholders, value-shaped twins, and base64 boundaries", () => {
+  const context = createExportScrubContext();
+  const scrubbed = scrubText(`a ${PRI} b ${GX} c ${SHARE} d ga1.${"e".repeat(20)}`, context, "messages", "body");
+  for (const leaked of [PRI, GX, SHARE]) assert.equal(scrubbed.includes(leaked), false, leaked);
+  assert.equal(context.report().messages.body, 4, "every substitution is counted on its surface");
+  // Salted: not the dictionary-testable plain sha256, stable within one
+  // export, different across exports.
+  assert.notEqual(placeholderFor(LOW, context), sha(LOW));
+  assert.equal(placeholderFor(PRI, context), placeholderFor(PRI, context));
+  assert.notEqual(placeholderFor(PRI, context), placeholderFor(PRI, createExportScrubContext()));
+  // Value-shaped: a registered secret value is scrubbed out of content.
+  registerSecretValues(context, [HOOK]);
+  assert.equal(scrubText(`the secret is ${HOOK} ok`, context).includes(HOOK), false);
+  // Boundaries: padded base64 (a stored public key's shape) is not a
+  // share token, and ordinary prose is untouched.
+  const publicKey = Buffer.alloc(32, 7).toString("base64");
+  assert.equal(publicKey.length, 44);
+  assert.equal(scrubText(`key ${publicKey} end`, createExportScrubContext()).includes(publicKey), true);
+  assert.equal(scrubText("plain release notes, nothing to hide", createExportScrubContext()), "plain release notes, nothing to hide");
 });
 
 test("room JSONL and HTML exports scrub token-shaped content like every other shape", async t => {
