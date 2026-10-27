@@ -1,4 +1,5 @@
 import test from "node:test";
+import { STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { createServer, request } from "node:http";
@@ -232,6 +233,7 @@ test("uncommitted candidate packages cold in an isolated synthetic commit, inclu
   t.after(() => rmSync(directory, { recursive: true, force: true }));
   const candidate = candidateRuntimeFixture(repository, directory), destination = join(directory, "runtime");
   const receipt = createRuntimePackage({ repository: candidate.repository, commit: candidate.commit, destination });
+  assert.equal(receipt.schemaVersion, STORE_SCHEMA_VERSION, "current store schema must be accepted by cold runtime packaging");
   // The allowlist (scripts/runtime-package.mjs) is the single source of truth.
   // The expected file count derives from the fixture's packaged paths
   // intersected with the allowlist, so registering a new module never requires
