@@ -140,8 +140,10 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
       // on. list() enforces membership administration itself (including
       // owner-delegation grants); a refusal means no items, not an error.
       let requests;
-      try { requests = accessRequests.list(token, roomId, { status: "pending" }, binding); }
+      try { requests = [...accessRequests.list(token, roomId, { status: "pending" }, binding)]; }
       catch (error) { if (error.status === 403) { roomsIncluded++; return; } throw error; }
+      try { requests.push(...(store.accountJoinRequests?.list(token, roomId, binding).requests ?? [])); }
+      catch (error) { if (error.status !== 403) throw error; }
       for (const request of requests) {
         const createdAtMs = ms(request.createdAt);
         decisions.push(enrichDecision(accessRequestAttentionItem(roomId, request), base, {
@@ -164,7 +166,7 @@ export function ownerOverview(deps, token, binding, nowMs = Date.now(), { window
       cursor = report.nextCursor;
     }
     const requestsById = new Map();
-    for (const request of accessRequests.list(token, roomId, { status: "pending" }, binding)) {
+    for (const request of [...accessRequests.list(token, roomId, { status: "pending" }, binding), ...(store.accountJoinRequests?.list(token, roomId, binding).requests ?? [])]) {
       requestsById.set(request.requestId, request);
     }
     const workItems = state.workItems ?? {};

@@ -117,7 +117,8 @@
              carries the one request-access door (human-map §8.1, #3293
              step 2). The acquisition-intent consumer in src/app.js sends
              "request" intents there. -->
-        <details id="account-room-create" class="account-room-create">
+        <section id="account-human-join" hidden aria-label="Room join request"></section>
+          <details id="account-room-create" class="account-room-create">
           <summary>New room</summary>
           <form id="account-room-form" class="account-room-form" autocomplete="off">
             <label for="account-room-template">Start from a template</label>
@@ -126,6 +127,8 @@
             <input id="account-room-title" name="title" type="text" maxlength="120" required>
             <label for="account-room-purpose">Purpose</label>
             <textarea id="account-room-purpose" name="purpose" rows="2" maxlength="1000" required></textarea>
+            <label for="account-room-visibility">Visibility</label>
+            <select id="account-room-visibility" name="visibility"><option value="private">Private · invitation only</option><option value="public">Public · listed, approval required</option></select>
             <label for="account-room-kind">Kind</label>
             <select id="account-room-kind" name="kind"><option value="personal">Personal</option><option value="organization">Organization</option></select>
             <label for="account-room-name">Your name in this room</label>
@@ -397,6 +400,7 @@
           <details id="advanced-room-tools"><summary>Advanced</summary>
             <p><a href="/demo">Demo conversation</a> · <button id="connect-guide-open" type="button" class="text-button">Connect your AI</button></p>
           </details>
+          <section id="room-discovery-settings" hidden><label for="room-discovery-select">Visibility</label><select id="room-discovery-select"><option value="private">Private · invitation only</option><option value="public">Public · listed, approval required</option></select><p class="form-hint">Listing shares the room’s name and purpose. Messages stay private.</p><p id="room-discovery-settings-status" role="status"></p></section>
           <details id="room-about" class="room-about" open>
             <summary>About</summary>
             <p class="room-purpose"></p>

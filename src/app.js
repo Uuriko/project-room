@@ -1,3 +1,4 @@
+import { createRoomJoinSettings } from "./room-join-settings.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
@@ -561,6 +562,7 @@ const client = new RoomClient({
     // JDOT-MEMBER-PERMS-UI begin
     memberPermissionsUI?.reset();
     ownerAttentionCard.hide();
+    roomJoinSettings.reset();
     // JDOT-MEMBER-PERMS-UI end
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
@@ -722,6 +724,7 @@ agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
+const roomJoinSettings = createRoomJoinSettings({ client, getState: () => state, section: $("#room-discovery-settings") });
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention"), getState: () => state });
 // #3342: Owner Cockpit shell on the account home — cross-room Decisions +
 // Exceptions from /api/owner/overview. Decide actions execute against the
@@ -1292,6 +1295,7 @@ $("#account-room-form").addEventListener("submit", async event => {
   if (!owned?.authenticated || form.dataset.busy === "true" || invitationIsCommitting() || signoutLoading) return;
   const title = $("#account-room-title").value.trim(), purpose = $("#account-room-purpose").value.trim(), displayName = $("#account-room-name").value.trim();
   const kind = $("#account-room-kind").value;
+  const discoverable = $("#account-room-visibility").value === "public";
   if (!title || !purpose || !displayName) { setFormStatus(status, "Room name, purpose and your name are required.", true); return; }
   // One id per attempt: a retry after a lost response finds the same room instead of creating a twin.
   const roomId = form.dataset.roomId || (form.dataset.roomId = "room-" + crypto.randomUUID().replaceAll("-", "").slice(0, 12));
@@ -1303,8 +1307,8 @@ $("#account-room-form").addEventListener("submit", async event => {
   try {
     const session = accountClient.currentSession("creating a room", { authenticated: true });
     const result = template
-      ? await accountClient.request("/api/account-rooms/from-template", { method: "POST", data: { roomId, template, title, purpose, kind, displayName, ...(ref ? { ref } : {}) }, session })
-      : await accountClient.request("/api/account-rooms", { method: "POST", data: { roomId, title, purpose, kind, displayName }, session });
+      ? await accountClient.request("/api/account-rooms/from-template", { method: "POST", data: { roomId, template, title, purpose, kind, displayName, discoverable, ...(ref ? { ref } : {}) }, session })
+      : await accountClient.request("/api/account-rooms", { method: "POST", data: { roomId, title, purpose, kind, displayName, discoverable }, session });
     if (accountClient.session !== owned) return;
     delete form.dataset.roomId; form.reset(); setFormStatus(status, ""); $("#account-room-create").open = false;
     await openAccountRoom(result.room.id);
@@ -6199,6 +6203,7 @@ function openSettings(panelId) {
   if (!dialog) return;
   if (panelId === "results-panel") { selectWorkView("results"); return; }
   $("#settings-title").textContent = "Settings";
+  roomJoinSettings.refresh();
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);
