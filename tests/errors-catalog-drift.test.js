@@ -9,53 +9,38 @@
 //   3. a pinned doc statement no longer matches live behavior.
 //
 // Regenerate the catalog after server error changes:
-//   node ~/workspace/project-room-qa/product200-docs/skill/A6/gen-docs.mjs
-// (sources: resolve-final.mjs extraction + catalog.tsv evidence).
+//   node scripts/gen-error-catalog.mjs
+// The guard and the generator share one extractor
+// (scripts/error-catalog-extraction.mjs) so they can never again disagree
+// about which codes the server emits: the pre-cure extractor matched only
+// literal codes handed directly to fail()/reject()/ServiceError/
+// AgentPluginError, so whole emit shapes (local code-forwarding helpers,
+// coded error classes, super(status, "code"), *_CODE constants, ternary
+// code arguments, divergent { error: "code" } envelopes, fallback codes)
+// were invisible to it — the guard was green on main while 63 verified
+// wire codes (clean-slate lane 24) plus a further 50 (job3 cure lane)
+// were missing from the catalog.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { agentErrorAx, ERROR_REGISTRY, errorRegistryAx } from "../src/agent-error.mjs";
+import { extractLiveCodes, NOT_WIRE_CODES } from "../scripts/error-catalog-extraction.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SERVER = join(ROOT, "server");
 const CATALOG = join(ROOT, "skills/project-room/references/errors-catalog.md");
 
-function* walk(dir) {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    const p = join(dir, e.name);
-    if (e.isDirectory()) yield* walk(p);
-    else if (e.name.endsWith(".mjs")) yield p;
-  }
+// Every code the shared extractor can see in server/. Codes verified NOT
+// to reach the wire (NOT_WIRE_CODES, each with its evidence) are excluded
+// from the catalog requirement below; everything else must be rowed.
+function liveCodes() {
+  return extractLiveCodes(ROOT);
 }
 
-// Compact mirror of the extraction in resolve-final.mjs: every literal code
-// handed to fail()/reject()/ServiceError/AgentPluginError, plus typed-error
-// fail("code") sites. Variable-passed codes are resolved separately below.
-function liveCodes() {
-  const codes = new Set();
-  const callRe = /(?:fail|reject)\(\s*(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)'|(\d{3}))\s*(?:,\s*(?:"([a-z][a-z0-9_]*)"|'([a-z][a-z0-9_]*)'|(\d{3})))?/g;
-  // Match `new ServiceError(...)` in ANY context, not only `throw new ...`:
-  // sites that construct the error in a variable first (then attach detail
-  // and throw it later), pass it to a reject callback, or return it are live
-  // emit sites too — a throw-only pattern made them invisible to this guard
-  // (#2897: transfer_ownership_required, github_rate_limited, aborted).
-  const svcRe = /new ServiceError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
-  const apRe = /new AgentPluginError\(\s*(\d{3})\s*,\s*["']([a-z][a-z0-9_]*)["']/g;
-  const adhocRe = /error:\s*\{\s*code:\s*"([a-z][a-z0-9_]*)"/g;
-  for (const f of walk(SERVER)) {
-    const t = readFileSync(f, "utf8");
-    const addGroups = (re, idxs) => {
-      let m; re.lastIndex = 0;
-      while ((m = re.exec(t))) for (const i of idxs) if (m[i]) codes.add(m[i]);
-    };
-    addGroups(callRe, [1, 2, 4, 5]);
-    addGroups(svcRe, [2]);
-    addGroups(apRe, [2]);
-    addGroups(adhocRe, [1]);
-  }
-  return codes;
+function wireCodes() {
+  return new Set([...liveCodes()].filter(c => !NOT_WIRE_CODES.has(c)));
 }
 
 // Codes passed via variables (not greppable as literals) — resolved by hand
@@ -109,10 +94,52 @@ test("catalog exists and is linked from the skill", () => {
 });
 
 test("every server-emitted code is in the catalog", () => {
-  const live = liveCodes();
+  const live = wireCodes();
   const rows = catalogRows();
   const missing = [...live].filter(c => !rows.has(c));
   assert.deepEqual(missing, [], `codes emitted by the server but missing from the catalog: ${missing.join(", ")}`);
+});
+
+test("extractor sees the previously blind emit shapes (job3 cure)", () => {
+  // One pin per shape the pre-cure extractor could not see. If a pin fails,
+  // the extractor has gone blind again for that shape — widening the
+  // extraction is the cure, never deleting the pin.
+  const live = liveCodes();
+  const pins = [
+    "push_subscription_invalid", // local refuse(code,msg) helper (push-subscriptions.mjs)
+    "invalid_listener_lease", // local check(cond,status,code,msg) helper, code in slot 2
+    "courier_cannot_decide", // local check(cond,msg,code) helper, code in slot 2 (agent-lanes.mjs)
+    "invalid_handoff_envelope", // *_CODE constant passed as a helper's code argument
+    "wake_signal_fenced", // *_CODE constant passed to fail()
+    "channel_archived", // CHANNEL_ARCHIVED_CODE: constant defined in src/events.js, emitted by server/store.mjs
+    "storage_unavailable", // super(503, "code") in a ServiceError subclass
+    "invalid_claim_scope", // fixed this.code = "…" literal in a coded class
+    "github_pending_invalid", // new CodedClass("code") at the constructor's code position
+    "gmail_not_found", // ternary of code literals in a fail() code slot
+    "invalid_attention_query", // divergent envelope: json(res, 422, { error: "code" })
+    "unsupported_grant_type", // divergent OAuth2 envelope: json(res, 400, { error: "code" })
+    "invalid_proof_query", // error: { status, code: "…" } — keys before code
+    "terms_changed", // { ok: false, status, code: "…" } result object
+    "next_actions_error", // fallback: reject(status, error.code ?? "code")
+    "settlement_failed", // fallback: const code = … ? error.code : "code"
+    "viewer_not_found", // class-method helper _requireActiveMember(state, id, code)
+  ];
+  for (const code of pins) assert.ok(live.has(code), `blind-shape pin '${code}' was not extracted from server/`);
+});
+
+test("not-wire dispositions are live, evidenced, and unrowed", () => {
+  // A disposition in NOT_WIRE_CODES is a claim that a code never reaches
+  // clients as a response error.code. It rots in two directions, both
+  // guarded here: the code stops being extracted (the evidence is stale
+  // — delete or re-verify the disposition), or the code gains a catalog
+  // row (it is wire after all — delete the disposition).
+  const live = liveCodes();
+  const rows = catalogRows();
+  for (const [code, reason] of NOT_WIRE_CODES) {
+    assert.ok(typeof reason === "string" && reason.length > 10, `not-wire disposition '${code}' must carry its evidence`);
+    assert.ok(live.has(code), `not-wire disposition '${code}' is stale: the code is no longer extracted`);
+    assert.ok(!rows.has(code), `not-wire disposition '${code}' is catalogued: delete the disposition, the code is wire`);
+  }
 });
 
 test("ServiceError codes constructed before throwing are extracted (#2897)", () => {
