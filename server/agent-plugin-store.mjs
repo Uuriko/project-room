@@ -1379,7 +1379,7 @@ export class AgentPluginStore {
       // member id in this room through the shared guest-aware resolver.
       // An identity seated in neither identity_links nor guest_members
       // for this room is not a member and hears nothing.
-      const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId);
+      const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId, this.store.now());
       if (!memberId) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
@@ -1573,7 +1573,7 @@ export class AgentPluginStore {
     // (identity_links first, guest_members fallback) — the same one the
     // fan-out uses (#3777) — so a trial seat's queued delivery is not
     // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
-    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id)) return skip();
+    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now)) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
     // payload?.data: a stored payload that parses to a non-object (or an
@@ -1737,7 +1737,9 @@ export class AgentPluginStore {
     // backlog occupies every LIMIT-sized batch and live deliveries wait behind
     // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
     // subscription was removed (s is NULL) are still selected so they
-    // dead-letter as before.
+    // dead-letter as before. A guest seat counts as seated here only
+    // while it holds a live access credential (the resolver's liveness
+    // gate, mirrored in SQL), so a disconnected guest's rows stay out.
     const due = this.db.prepare(
       `SELECT d.* FROM agent_webhook_deliveries d
        LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
@@ -1745,9 +1747,11 @@ export class AgentPluginStore {
        ${agentId ? "AND d.agent_id = ?" : ""}
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
          OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id)
-         OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id))))
+         OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id
+           AND EXISTS (SELECT 1 FROM credentials c WHERE c.room_id = g.room_id AND c.member_id = g.member_id
+             AND c.kind = 'access' AND c.revoked = 0 AND c.expires_at > ?)))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
-      .all(...(agentId ? [now, agentId, limit] : [now, limit]));
+      .all(...(agentId ? [now, agentId, now, limit] : [now, now, limit]));
     const isolated = [];
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {
