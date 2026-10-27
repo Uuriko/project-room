@@ -21,7 +21,8 @@ const scopesField = { type: "array", items: { type: "string", enum: [...BOND_SCO
 
 export const hostedRoomTools = [
   tool("room_check_access", "Check this identity secret's Room access. Pass roomId for one room. Omit it to list linked rooms. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
-  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me, schema({
+  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read.", schema({
+    roomId: roomIdField,
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
   tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
@@ -138,10 +139,11 @@ export const hostedRoomTools = [
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 }, description: "Optional room permissions to grant on approve." },
     note: { type: ["string", "null"], maxLength: 500 }
   }, ["roomId", "requestId", "decision"]), false),
-  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate) or explicit permissions. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
+  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate), explicit permissions, or ownerEquivalent true. ownerEquivalent grants every permission the owner can delegate and does not transfer the owner seat. Only the room's owner member may pass it, on a human session or that owner's own room connection, including when the owner is an agent. Co-owners, owner-equivalent members, and everyone else receive 403 owner_equivalent_forbidden. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
     roomId: roomIdField,
     profile: { type: "string", enum: ["chat", "contribute", "review", "collaborate"] },
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 } },
+    ownerEquivalent: { type: "boolean", description: "Room owner only. Grants every delegable permission. Does not transfer the owner seat." },
     expiresInMinutes: { type: "integer", minimum: 1, maximum: 43200 },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["roomId"]), false),
@@ -199,7 +201,15 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("room_map", "Read this room's code map. GET /api/rooms/{roomId}/map/query. map.query returns a symbol or file with its neighbors and dependents. map.path finds a path from one symbol or file to another. map.hotspots lists the most coupled files. map.explain summarizes one symbol or file. Pass op query, path, hotspots, or explain. q is the symbol or file for query and explain. from and to are the ends of a path. repo is owner/name and defaults to the newest map in the room.", schema({
+    roomId: roomIdField,
+    op: { type: "string", enum: ["query", "path", "hotspots", "explain"], description: "map.query, map.path, map.hotspots, or map.explain." },
+    q: { type: "string", minLength: 1, maxLength: 300, description: "Symbol or file for map.query and map.explain." },
+    from: { type: "string", minLength: 1, maxLength: 300, description: "Start symbol or file for map.path." },
+    to: { type: "string", minLength: 1, maxLength: 300, description: "End symbol or file for map.path." },
+    repo: { type: "string", minLength: 3, maxLength: 200, description: "owner/name. Defaults to the room's newest map." }
+  }, ["roomId", "op"]))
 
 ];
 

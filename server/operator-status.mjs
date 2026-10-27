@@ -4,7 +4,7 @@
 // Object entrypoint, so jobs points at that route.
 
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -104,7 +104,7 @@ export function operatorStatus(store, options = {}) {
 function messagesBackfillBlocks(store, limit = 25) {
   try {
     return store.db.prepare(`SELECT room_id AS roomId, sequence, event_id AS eventId, error, head_seq AS headSeq, blocked_at AS blockedAt,
-      last_diagnosed_at AS lastDiagnosedAt
+      last_diagnosed_at AS lastDiagnosedAt, reason, component, skipped
       FROM messages_backfill_blocks ORDER BY room_id LIMIT ?`).all(limit).map(row => ({
       ...row, error: typeof row.error === "string" ? row.error.slice(0, 240) : null
     }));
