@@ -16,7 +16,7 @@
 // (POST /api/agent-rooms — no human owner needed). Existing rooms use
 // invitation links; agents follow the packet with their saved identity.
 import { uiText } from "./strings.js";
-import { escapeHtml } from "./account-settings-ui.js";
+import { escapeHtml } from "./html-escape.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 import { submitIdentityMint } from "./account-client.js";
 
@@ -54,7 +54,7 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
 
   function shellHtml() {
     return `<div class="auth-divider"><span>Agent sign-in</span></div>
-      <p class="form-hint">For AI agents that already have a saved identity. People use Log in.</p>
+      <p class="form-hint">${uiText(phase === "create" ? "entry.agent.create" : "entry.agent.saved")}</p>
       ${showPasteHint() ? `<p class="form-hint" data-agent-paste-hint>Connecting your ChatGPT, Claude or Cursor? <a href="/docs/agents/paste">Paste one block instead</a>. The agent sets itself up and never shows you its key.</p>` : ""}
       <div data-agent-panel>${panelHtml()}</div>
       <p class="status form-status" role="alert" data-agent-status>${escapeHtml(error)}</p>`;

@@ -2,8 +2,8 @@
 // observable selection rule it guards; the fixture repo is in memory.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -38,6 +38,23 @@ const files = Object.keys(repo);
 const read = (f) => repo[f];
 const tests = files.filter((f) => f.startsWith("tests/"));
 const reverse = buildReverseGraph(files, read);
+
+test("failed or terminated preflight prevents test discovery and preserves failure", t => {
+  const directory = mkdtempSync(join(tmpdir(), "affected-preflight-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "scripts"));
+  cpSync(new URL("../scripts/verify-affected.mjs", import.meta.url), join(directory, "scripts/verify-affected.mjs"));
+  // There is deliberately no Git repository or test-discovery module. Reaching
+  // either would produce a different error rather than the preflight outcome.
+  for (const [source, expected] of [["console.log('preflight refusal'); process.exit(17);", 17],
+    ["console.log('preflight refusal'); process.kill(process.pid, 'SIGTERM');", 1]]) {
+    writeFileSync(join(directory, "scripts/verify-preflight.mjs"), source);
+    const result = spawnSync(process.execPath, ["scripts/verify-affected.mjs"], { cwd: directory, encoding: "utf8" });
+    assert.equal(result.status, expected, result.stderr);
+    assert.match(result.stdout, /preflight refusal/);
+    assert.equal(result.stderr, "");
+  }
+});
 
 test("parseImports reads static, re-export, dynamic, require and new URL specifiers", () => {
   const src = [

@@ -76,7 +76,9 @@ async function setup(t, { humanWork = false, mobile = false } = {}) {
   const card = page.locator(`[data-work-record-id="${workId}"]`), input = page.locator("#portable-result"), submit = page.locator("#portable-submit"), dialog = page.locator("#portable-dialog");
   const open = async () => {
     if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
-    await card.getByRole("button", { name: "Paste AI draft", exact: true }).click(); await dialog.waitFor({ state: "visible" });
+    await card.getByRole("button", { name: "Use my AI", exact: true }).click();
+    await dialog.waitFor({ state: "visible" });
+    await page.locator("#portable-add-result").click();
   };
   const answer = (body = "Synthetic agenda: choose priorities and review blockers.") => `ROOM-RETURN ${JSON.stringify({ version: 1, roomId: "commons", workItemId: workId, packetId: "manual-packet", basisRevision: 0 })}\n\n${body}`;
   const unknown = async () => { await page.getByText("Save not confirmed. Retry the same draft.", { exact: true }).waitFor(); assert.equal(await input.getAttribute("readonly"), ""); };
@@ -265,7 +267,7 @@ for (const mobile of [false, true]) test(`work destination ${mobile ? 'mobile' :
   await page.evaluate(() => { location.hash = '#pr-record/work/test-handoff'; });
   await f.card.waitFor({ state: 'visible' });
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === 'test-handoff');
-  assert.equal(await f.card.locator('.work-details').evaluate(node => node.open), true);
+  assert.equal(await f.card.locator('.work-details').evaluate(node => node.open), false);
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep my room draft');
   await welcome.locator('[data-message-action="thread"]').click();
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep my thread draft');
@@ -291,7 +293,7 @@ for (const mobile of [false, true]) test(`draft choices ${mobile ? 'mobile' : 'd
     await page.locator(`[data-message-record-id="${id}"]`).waitFor({ state: 'visible' });
   }
   await page.locator('#message-input').fill('Keep my unsent note');
-  await page.locator('#topbar-catchup').click();
+  await clickChrome(page, '#topbar-catchup');
   await page.locator('#rb-attention-list [data-view-drafts][data-open-work="human-handoff"]').click();
   await page.locator('#catchup-dialog').waitFor({ state: 'hidden' });
   const choices = f.card.locator('.work-drafts');

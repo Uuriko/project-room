@@ -23,7 +23,7 @@ export const durableFenceDefinitions = version => fenceDefinitions(version).map(
   sql: sql.replace(`project_room_writer_v${version}()`, version < 8 ? `(SELECT version FROM ${marker} WHERE singleton=1)`
     : `(CASE WHEN (SELECT version FROM ${marker} WHERE singleton=1) IS ${version} AND (SELECT version FROM ${permit} WHERE singleton=1) IS ${version} THEN ${version} ELSE NULL END)`) }));
 const fences = durableFenceDefinitions(STORE_SCHEMA_VERSION);
-const reconciliation = () => { throw new Error('Database writer fence requires operator reconciliation'); };
+const reconciliation = (why = '') => { throw new Error('Database writer fence requires operator reconciliation' + (why ? ` [diag: ${why}]` : '')); };
 const hasPermit = db => {
   const hit = cacheOf(db);
   if (hit.permitExists === true) return true;
@@ -36,8 +36,12 @@ const permitSchema = version => `CREATE TABLE ${permit} (singleton INTEGER PRIMA
 const verifyPermit = (db, version, value) => {
   const hit = cacheOf(db);
   if (hit.permitOk && hit.permitVersion === version && hit.permitValue === value) return;
-  if (db.prepare("SELECT sql FROM sqlite_master WHERE name=? AND type='table'").get(permit)?.sql !== permitSchema(version)
-    || db.prepare(`SELECT count(*) n FROM ${permit}`).get().n !== 1 || permitValue(db) !== value) reconciliation();
+  const psql = db.prepare("SELECT sql FROM sqlite_master WHERE name=? AND type='table'").get(permit)?.sql;
+  if (psql !== permitSchema(version)) reconciliation(`permit schema want v${version} got ${String(psql).slice(0, 160)}`);
+  const pn = db.prepare(`SELECT count(*) n FROM ${permit}`).get().n;
+  if (pn !== 1) reconciliation(`permit rows ${pn}`);
+  const pv = permitValue(db);
+  if (pv !== value) reconciliation(`permit value ${pv} want ${value} v${version}`);
   hit.permitOk = true;
   hit.permitVersion = version;
   hit.permitValue = value;
@@ -58,35 +62,82 @@ const tooBig = error => isTooBig(error)
   : error;
 
 export class DurableDatabase {
-  constructor(storage) { this.storage = storage; this.isTransaction = false; this.rowsRead = 0; }
-  #count(cursor) {
-    const n = Number(cursor?.rowsRead ?? 0);
-    if (n) this.rowsRead += n;
+  constructor(storage, { observeStatement } = {}) {
+    this.storage = storage; this.isTransaction = false; this.rowsRead = 0;
+    this.observeStatement = observeStatement;
+  }
+  // Observers receive only counters, never SQL, bindings or errors. Capture
+  // ownership at execution, not prepare(): statements are reused across requests.
+  #countRead(cursor) {
+    try { const n = Number(cursor?.rowsRead ?? 0); if (n) this.rowsRead += n; }
+    catch { /* unavailable diagnostic counters must not change SQL results */ }
+  }
+  #observation() {
+    let finish;
+    try { finish = this.observeStatement?.(); } catch { /* diagnostics cannot break SQL */ }
+    return (cursor, failed) => {
+      let rowsRead = null, rowsWritten = null;
+      try {
+        if (Number.isSafeInteger(cursor?.rowsRead) && cursor.rowsRead >= 0) rowsRead = cursor.rowsRead;
+        if (Number.isSafeInteger(cursor?.rowsWritten) && cursor.rowsWritten >= 0) rowsWritten = cursor.rowsWritten;
+      } catch { /* unavailable counters remain unknown */ }
+      this.#countRead(cursor);
+      try { finish?.({ rowsRead, rowsWritten, failed }); } catch { /* diagnostics cannot break SQL */ }
+    };
+  }
+  #all(sql, args) {
+    const finish = this.observeStatement ? this.#observation() : null;
+    let cursor, failed = false;
+    try { cursor = this.storage.sql.exec(sql, ...args); return cursor.toArray(); }
+    catch (error) { failed = true; throw tooBig(error); }
+    finally { if (finish) finish(cursor, failed); else this.#countRead(cursor); }
   }
   exec(sql) {
-    return durableStorage.transaction(this, () => {
-      let cursor;
-      try { cursor = this.storage.sql.exec(sql); } catch (error) { throw tooBig(error); }
-      const rows = cursor.toArray();
-      this.#count(cursor);
-      return rows;
-    });
+    return durableStorage.transaction(this, () => this.#all(sql, []));
   }
   prepare(sql) {
-    const all = (...args) => {
-      let cursor;
-      try { cursor = this.storage.sql.exec(sql, ...args); } catch (error) { throw tooBig(error); }
-      const rows = cursor.toArray();
-      this.#count(cursor);
-      return rows;
-    };
+    const db = this;
+    function* iterate(...args) {
+      // Generator body starts on first next(), including observation capture.
+      if (!db.observeStatement) {
+        let cursor;
+        try { cursor = db.storage.sql.exec(sql, ...args); yield* cursor; }
+        catch (error) { throw tooBig(error); }
+        finally { db.#countRead(cursor); }
+        return;
+      }
+      const finish = db.#observation();
+      let cursor, failed = false;
+      try {
+        let iterator;
+        try { cursor = db.storage.sql.exec(sql, ...args); iterator = cursor[Symbol.iterator](); }
+        catch (error) { failed = true; throw error; }
+        const observed = {
+          [Symbol.iterator]() { return this; },
+          next(...values) {
+            try { return iterator.next(...values); }
+            catch (error) { failed = true; throw error; }
+          }
+        };
+        if (iterator.return) observed.return = (...values) => {
+          try { return iterator.return(...values); }
+          catch (error) { failed = true; throw error; }
+        };
+        // Consumer-injected throw/cancellation is not a proven SQL error.
+        if (iterator.throw) observed.throw = (...values) => iterator.throw(...values);
+        yield* observed;
+      } catch (error) { throw tooBig(error); }
+      finally { finish(cursor, failed); }
+    }
+    const all = (...args) => this.#all(sql, args);
     return {
       all,
+      iterate,
       get: (...args) => all(...args)[0],
       run: (...args) => durableStorage.transaction(this, () => {
         all(...args);
-        // rowsWritten includes trigger/index work; changes() matches Node's
-        // affected-row semantics used by invitation compare-and-swap checks.
+        // These raw calls and writer-permit maintenance are deliberately outside
+        // the initial adapter-observed diagnostic, not claimed as total SQL cost.
         return { changes: this.storage.sql.exec('SELECT changes() AS n').one().n };
       })
     };
@@ -156,12 +207,12 @@ export const durableStorage = {
   verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
     const expected = new Map(writerVersions.filter(v => version < 8 ? v <= version : v === version).flatMap(durableFenceDefinitions).map(def => [def.name, def.sql]));
     for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
-      if (expected.get(row.name) !== row.sql) reconciliation();
+      if (expected.get(row.name) !== row.sql) reconciliation(`trigger ${row.name} ${expected.has(row.name) ? 'drifted' : 'unknown'}`);
     }
     if (version >= 8) verifyPermit(db, version, db.isTransaction && !db.readOnlyTransaction ? version : 0);
     for (const { name, sql } of durableFenceDefinitions(version)) {
       if (db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name)?.sql !== sql) {
-        throw new Error('Database writer fence requires operator reconciliation');
+        reconciliation(`trigger ${name} missing or drifted`);
       }
     }
   },
@@ -183,7 +234,17 @@ export const durableStorage = {
     }
     return db.storage.transactionSync(() => {
       const version = this.version(db);
-      if (version !== STORE_SCHEMA_VERSION && version !== db.migrationSource) reconciliation();
+      if (version !== STORE_SCHEMA_VERSION && version !== db.migrationSource) reconciliation(`version ${version} want ${STORE_SCHEMA_VERSION} src ${db.migrationSource}`);
+      // A committed permit left at the writer version means an earlier write
+      // transaction's closing flip was lost. The Durable Object is single
+      // threaded, so no write is in flight at an outermost transaction start:
+      // restore the invariant (permit 0) once, loudly, instead of refusing
+      // every request until an operator edits the row.
+      if (version >= 8 && hasPermit(db) && permitValue(db) === version) {
+        console.error(JSON.stringify({ event: 'room.writer_permit_stale_reset', version }));
+        db.storage.sql.exec(`UPDATE ${permit} SET version=0 WHERE singleton=1`);
+        forgetRuntime(db);
+      }
       if (version >= 8) verifyPermit(db, version, 0);
       db.isTransaction = true;
       db.readOnlyTransaction = readOnly;

@@ -86,6 +86,14 @@ function mergeRecentMessages(held, read) {
 // reads the newest window first and fills the rest in the background; `partial`
 // marks held history that is only that window.
 const FILL_DELAY_MS = 250;
+// Lazy history (opt-in, `lazyHistory: true`): the first windowed read is not
+// followed by the background fill. Older history loads when the reader asks
+// for it (loadHistory(): scrolling up, "Show earlier messages", search, a
+// deep link to an older message). Until then every covered event re-reads the
+// cheap window instead of applying a delta, so after this many windowed reads
+// on a partial window the fill runs anyway: past it, holding full history
+// (and applying deltas) costs less than re-reading windows.
+const LAZY_FILL_AFTER_READS = 24;
 // Session liveness under delta sync: a covered event applies locally with no
 // read, so the snapshot read's second job — noticing a dead room credential
 // (401/403) — needs its own cadence while connected. The probe in
@@ -102,7 +110,7 @@ function firstWindow(read) {
 // Single source for the connected status line; app.js matches this exact text.
 const CONNECTED_STATUS = "Connected to room service · no peer read or processing receipt";
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {} } = {}) {
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {} } = {}) {
     if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
     this.auditView = auditView;
     Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange });
@@ -118,6 +126,9 @@ export class RoomClient {
     this.rawTail = [];
     this.windowOmitted = null;
     this.backfilling = false;
+    this.lazyHistory = Boolean(lazyHistory);
+    this.historyWanted = false;
+    this.partialReads = 0;
     this.deltaStats = { applied: 0, fallback: 0, reasons: {} };
     // Liveness: when the last snapshot-path read proved the credential, and
     // the pending probe timer (see scheduleLiveness). The interval is an
@@ -291,7 +302,11 @@ export class RoomClient {
     // re-read only the newest ones. Anything else needs a full read at or past
     // its own sequence, even when a newer windowed read already landed.
     // A background fill is always a full read; a fresh client's first read is windowed.
-    const windowed = fill ? false : sequence === null ? (revalidate || !this.heldMessages()) : RECENT_REFRESH_EVENTS.has(receipt.event.type);
+    // Lazy history: while only a window is held, any covered change re-reads
+    // the window (it serves current records); older messages are not held, so
+    // nothing older needs correcting until the fill reads them fresh.
+    const windowed = fill ? false : sequence === null ? (revalidate || !this.heldMessages())
+      : RECENT_REFRESH_EVENTS.has(receipt.event.type) || (this.lazyHistory && Boolean(this.heldMessages()?.partial));
     const held = this.heldMessages(), fullSequence = held?.fullSequence ?? this.sequence;
     if (sequence !== null && sequence <= (windowed ? this.sequence : fullSequence)) return Promise.resolve();
     const generation = this.generation;
@@ -335,6 +350,7 @@ export class RoomClient {
           } else snapshot = mergeRecentMessages(holding.messages, read);
           if (!snapshot) { flight.fullNow = true; continue; }
           if (complete) covered = Math.max(covered, read.sequence);
+          if (partial && holding?.partial) this.partialReads++;
           if (snapshot.sequence >= this.sequence) {
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
@@ -345,7 +361,7 @@ export class RoomClient {
             this.onSnapshot(snapshot, this.session);
           }
         } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
-        if (this.heldMessages()?.owesFull) this.scheduleFill();
+        if (this.heldMessages()?.owesFull && this.fillWanted()) this.scheduleFill();
       } catch (error) {
         if (generation !== this.generation) return;
         // A failed read may have owed a full one; the stream will not replay
@@ -358,6 +374,27 @@ export class RoomClient {
       }
     })().finally(() => { if (this.flight === flight) this.flight = null; });
     return flight.promise;
+  }
+  // Whether the owed fill should run now. Eager clients always fill; a lazy
+  // client fills a partial window only once the reader asked for history or
+  // re-reading windows has cost more than the fill would. Owed history over
+  // a full held one (a failed read) always fills: deltas wait on it.
+  fillWanted() {
+    const held = this.heldMessages();
+    return !this.lazyHistory || !held?.partial || this.historyWanted || this.partialReads >= LAZY_FILL_AFTER_READS;
+  }
+  // True while a lazy client holds only the newest window of the room.
+  get owesHistory() {
+    const held = this.heldMessages();
+    return Boolean(held?.partial && held.owesFull);
+  }
+  // Ask for older history now (a reader gesture). Returns whether a fill was
+  // owed; repeated calls while one runs are no-ops.
+  loadHistory() {
+    if (!this.owesHistory) return false;
+    this.historyWanted = true;
+    if (!this.flight) this.scheduleFill(0);
+    return true;
   }
   setAuditView(view) {
     if (!["full", "activity"].includes(view)) throw new RangeError(uiText("record.invalidView"));
@@ -1026,6 +1063,7 @@ export class RoomClient {
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
     clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
     clearTimeout(this.fillTimer); this.fillTimer = null; this.fillDelay = 1000;
+    this.historyWanted = false; this.partialReads = 0;
     clearTimeout(this.livenessTimer); this.livenessTimer = null;
     this.refreshInterrupted = false;
     this.stream?.close(); this.stream = null;

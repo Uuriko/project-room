@@ -1,9 +1,11 @@
 // Allocation for the sharded unit suite (CI-speed lane).
 //
-// The `unit` merge-gate job ran `npm test` (Node default discovery) in one
-// job: ~625s on hosted CI, the long pole of every PR head. This module splits
-// the suite into SHARD_COUNT file shards with balanced estimated duration, so
-// the `unit-shards` matrix finishes in roughly 1/SHARD_COUNT of the time.
+// The hosted `unit` job runs every discovered file in one process
+// (`node scripts/unit-ci.mjs --all`). A single `npm test` was ~625s when this
+// splitter was added; hosted shards on 2026-10-24 were 4–6 minutes each,
+// including setup, so one job is inside a 25-minute cap and frees two runner
+// slots. This module still splits the suite into SHARD_COUNT file shards for
+// the receipt gate and duration balance. CI does not start those shards.
 //
 // Allocation follows Node24 default test discovery; timing data never selects
 // membership: every Node-discovered test file is in exactly one shard.
