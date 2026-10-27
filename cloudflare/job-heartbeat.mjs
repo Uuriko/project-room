@@ -289,7 +289,15 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
   const requiredDisabled = jobs.some(job => job.status === 'disabled' && job.required);
   const status = active.some(job => job.stale) ? 'stale' : requiredDisabled || active.some(job => job.status === 'failing') ? 'failing'
     : active.some(job => job.status === 'degraded') ? 'degraded' : 'ok';
-  return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, jobs };
+  // UT wave-2 L10: the top-level status alone does not say WHICH required
+  // job is stale — an operator reading the 503 had to scan the whole jobs
+  // array to find the one stale row whose required flag makes it a safety
+  // signal. Name those jobs at the top level, in the per-job rows' own
+  // shape (name, last-run instants, required/stale flags, status). This is
+  // a projection of the rows above; it changes no status semantics.
+  const staleRequiredJobs = jobs.filter(job => job.required && job.stale)
+    .map(job => ({ name: job.name, lastRunAt: job.lastRunAt, lastSuccessAt: job.lastSuccessAt, required: true, stale: true, status: job.status }));
+  return { schema: 'room.job-health/1', status, generatedAt: iso(now), staleAfterPeriods: STALE_PERIODS, staleRequiredJobs, jobs };
 }
 
 export function jobHealthResponse(view, { head = false } = {}) {
@@ -298,5 +306,5 @@ export function jobHealthResponse(view, { head = false } = {}) {
 }
 
 export function jobHealthUnavailable({ head = false } = {}) {
-  return jobHealthResponse({ schema: 'room.job-health/1', status: 'unavailable', generatedAt: iso(Date.now()), jobs: [] }, { head });
+  return jobHealthResponse({ schema: 'room.job-health/1', status: 'unavailable', generatedAt: iso(Date.now()), staleRequiredJobs: [], jobs: [] }, { head });
 }
