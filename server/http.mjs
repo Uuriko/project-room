@@ -22,12 +22,12 @@ import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js"
 import { SyntheticInboxTransport, FixtureChannelSender } from "./inbox-transport.mjs";
 import { createSendBudgetRegistry } from "./channel-send-budgets.mjs";
 import { handleInboxCollab } from "./inbox-collab-routes.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
-import { buildActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
-import { buildOrient } from "./orient.mjs"; // Orient endpoint (jill lane, RC-2026-09-28 — the URL outside agents guess; ryska's 404).
+import { buildActivationPack, briefActivationPack } from "./room-activation-pack.mjs"; // Room activation pack (quill lane, RC-2026-09-18-040).
+import { buildOrient } from "./orient.mjs"; // Orient builder (jill lane, RC-2026-09-28). The standalone /orient endpoint was deleted (register D1); the builder survives inside the activation pack, the context response, and the MCP room profile.
 import { memoizeBoardList } from "./available-work.mjs"; // PERF-10X L4: per-request board-list memo for the composite reads.
 import { listRoomUpdates, listIdentityUpdates, listAccountUpdates, markUpdate, readEventTail } from "./updates.mjs"; // Updates projection (U batch).
 import { handleWorkClaims } from "./work-claim-routes.mjs"; // Work-claim leases/delivery/review (task RC-2026-09-18-041).
-import { handleAgentConnect } from "./routes/agent-connect.mjs";
+import { handleAgentConnect, joinPageForAgentCode, joinPathAgentCode, agentInvitePreview, withAgentInviteLink } from "./routes/agent-connect.mjs";
 import { listMentionReceipts } from "./mention-receipts.mjs";
 import { handleMatchmaking } from "./matchmaking-routes.mjs"; // Arrival surface: declare, offer, match, and human decisions as work.
 import { handleFeedback } from "./feedback-routes.mjs"; // Agent /feedback endpoint (structured bug/feature reports).
@@ -41,7 +41,8 @@ import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
 import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
-import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN } from "./agent-discovery.mjs";
+import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
+import { validateCriticalConfig } from "./boot-config.mjs";
 import { noteIdentityMint } from "./growth-loop.mjs";
 import { createWikiReadApi } from "./wiki-read-api.mjs"; // W009: read-only wiki API for agents (prefix-delegated, no route literals here)
 import { buildOpenApiJson, discoverabilityErrorOverride, nextActionsForAccessRequest, nextActionsForAccessRequestStatus, nextActionsForInviteRedeem } from "./discoverability.mjs";
@@ -63,8 +64,8 @@ import { isIdentitySecret } from "./agent-identities.mjs";
 import { isPublicRoomDoorPath, wantsPublicDoorHtml, publicRoomAppUrl } from "./room-entry.mjs";
 import { GUEST_AGENT_TOKEN_PREFIX, isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isWebFetchGuest, WebFetchError } from "./web-fetch.mjs";
-// Board v2 is retired. Its routes answer 410 board_v2_retired. The
-// board_vtwo_* tables stay in place; nothing here drops them.
+// Board v2 is retired. Any /board/v2 path answers 410 board_v2_retired.
+// The board_vtwo_* tables stay in place; nothing here drops them.
 import { validateClaimText, CLAIM_TEXT_MAX_LENGTH } from "./claim-validate.mjs"; // Synchronous pre-post claim-block validation (RC-2026-09-24-204): pure, no store.
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 import { guestInviteContract } from "./guest-invites.mjs";
@@ -76,7 +77,7 @@ import { attentionReport } from "./owner-attention.mjs";
 import { ownerOverview } from "./owner-overview.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
 import { evaluateAdmission, jevVelocityWindowMs } from "./jev-admission.mjs";
-import { jevShadowReport } from "./jev-shadow-journal.mjs";
+import { jevShadowReport } from "./journal.mjs";
 import { AgentRooms, ROOM_TOKEN_NOT_IDENTITY } from "./agent-rooms.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { createAgentPluginRoutes } from "./agent-plugin-routes.mjs";
@@ -94,7 +95,7 @@ import { queryPublicReceipts, publicReceiptById, listPublicReceiptSitemap, PUBLI
 import { githubTokenFromEnv } from "./claim-pr-sync.mjs";
 // --- GR2 public acquisition pages (templates, opt-in room pages, agent directory). ---
 import { applyRoomTemplate } from "./templates.mjs";
-import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP } from "./public-rooms.mjs";
+import { templatesIndex, templatePage, publicRoomView, agentDirectoryView, publicSitemapEntries, PUBLIC_PAGE_CSP, PUBLIC_ROOM_SETUP_CSP } from "./public-rooms.mjs";
 import { roomProofView } from "./proof-page.mjs";
 // --- end GR2 ---
 // --- LEGAL public pages, terms acceptance, abuse reports, operator unpublish (G-SEC-11, G-SEC-14). ---
@@ -116,7 +117,7 @@ import { createDeletionSecret, executeAccountDeletion, issueDeletionToken, planA
 import { createOperatorRoutes } from "./operator-routes.mjs"; // CP-ADMIN-0: operator purge, status, and audit. Paths stay in that module.
 import { hashPassword, checkPasswordPolicy } from "../src/password-auth.mjs";
 import { buildGitHubAuthUrl, codeChallengeFor, createPendingStore, exchangeCodeForToken, fetchGitHubUser,
-  GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
+  frontDoorHtml, GitHubOAuthError, GITHUB_START_PATH, GITHUB_CALLBACK_PATH, githubPostLoginPage, githubUnavailablePage } from "./github-oauth.mjs";
 import { createOAuthProvider, OAUTH_SCOPES } from "./oauth-provider.mjs";
 import { dispatchRoute } from "./routes/dispatch.mjs";
 import { withSpendCharge } from "./spend-grants.mjs"; // #3269: priced REST twins charge through the shared path.
@@ -172,6 +173,14 @@ function warnEmailGatesRelaxed() {
   if (emailGatesRelaxedWarned) return;
   emailGatesRelaxedWarned = true;
   console.warn("No magic-link mailer is configured: email-verification gates are relaxed (agent-invite escape hatch); /api/health reports emailVerification: relaxed-no-mailer");
+}
+const bootConfigWarningsShown = new Set();
+function warnBootConfigOnce(warning) {
+  if (bootConfigWarningsShown.has(warning)) return;
+  bootConfigWarningsShown.add(warning);
+  // Same channel and prefix server.mjs used when the gate lived there, so
+  // boot logs keep one shape after the move (BG-1).
+  console.error(`[boot-config] ${warning}`);
 }
 function warnMissingSecurityContact() {
   if (securityContactWarned) return;
@@ -272,6 +281,40 @@ const sessionView = auth => ({
   expiresAt: auth.expiresAt
 });
 const exact = (value, fields) => Object.keys(value).length === fields.length && fields.every(field => Object.hasOwn(value, field));
+// Strict JSON bodies refuse nesting past this. A 3,000-deep payload is not a
+// document the routes accept; the walk stops at the limit instead of
+// recursing the whole value.
+const JSON_STRICT_DEPTH = 32;
+function jsonNestingExceeds(value, max, depth = 1) {
+  if (depth > max) return true;
+  if (!value || typeof value !== "object") return false;
+  for (const child of Object.values(value)) {
+    if (jsonNestingExceeds(child, max, depth + 1)) return true;
+  }
+  return false;
+}
+// Events since/until. RFC 3339 with Z or a numeric offset. A zone-less
+// timestamp and a bare date do not match. Returns epoch millis, or null.
+const EVENT_TIMESTAMP_EXAMPLE = "2026-10-24T20:30:00Z";
+const RFC3339_TIMESTAMP = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(Z|[+-](\d{2}):(\d{2}))$/;
+function eventTimestampMillis(value) {
+  if (typeof value !== "string") return null;
+  const match = RFC3339_TIMESTAMP.exec(value);
+  if (!match) return null;
+  const year = Number(match[1]), month = Number(match[2]), day = Number(match[3]);
+  const hour = Number(match[4]), minute = Number(match[5]), second = Number(match[6]);
+  const zone = match[8];
+  const offHour = zone === "Z" ? 0 : Number(match[9]);
+  const offMinute = zone === "Z" ? 0 : Number(match[10]);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 60 || offHour > 23 || offMinute > 59) return null;
+  const probe = new Date(Date.UTC(year, month - 1, day));
+  if (probe.getUTCFullYear() !== year || probe.getUTCMonth() !== month - 1 || probe.getUTCDate() !== day) return null;
+  const ms = Date.parse(value);
+  return Number.isNaN(ms) ? null : ms;
+}
+function eventTimestampMessage(name) {
+  return `${name} must be an RFC 3339 timestamp with Z or an offset, for example ${EVENT_TIMESTAMP_EXAMPLE}`;
+}
 // Providers the browser may reply through from the Inbox. Email stays out until
 // an outbound email slice exists; its sources report send: false.
 const channelSendProviders = Object.freeze(["telegram-bot"]);
@@ -325,16 +368,30 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   loadAsset = defaultAssetLoader(assetRoot), resolveClientAddress = req => clientAddress(req, trustedLocalProxy),
   resolveRequestSignal = () => null, syntheticInboxTransport = null, channelWebhooks = null, cookieNamespace = "",
   telegram = telegramConfig(), telegramStatus = store?.telegramLiveStatus ?? new TelegramLiveStatus(), channelTransports = null,
-  googleAuth = null, gmailAuth = null, directSendFetch = null,
+  googleAuth = null, gmailAuth = null, directSendFetch = null, enableDeferredInbox = false,
   sendBudgetRegistry = null, sendBudgetEnv = null, // per-connection send budgets (task #41); null = build from env
+  jobHealth = nodeJobHealth, // job records for the owner overview; the Worker passes its heartbeat view
   passkeyService = null, // test injection for the passkey routes; production uses createPasskeyAuth({ store })
   magicLinkMailer = null,
   githubAuth = null,
   fetchPullRequest = null,
   githubToken = undefined,
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
-  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, growth = null, push = undefined,
-  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "" }) {
+  serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
+  operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
+  publicAgentPages = false }) {
+  // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
+  // (server/boot-config.mjs) runs here, in the shared boot path every entry
+  // converges on — the node entry (server.mjs), the Worker entry
+  // (cloudflare/room.mjs) and every fixture boot — instead of only in
+  // server.mjs, whose fixture boots never saw it. Production entries pass
+  // `production: true` and throw on broken critical config before any side
+  // effect; other boots surface the gate's warnings once per process (the
+  // mailer warning below follows the same once-per-process rule). The
+  // Worker entry's card is additionally covered at build time by
+  // scripts/sign-agent-card.mjs, which fails closed without the key.
+  const { warnings: bootConfigWarnings } = validateCriticalConfig({ production, cardSignature: agentCardSignatureState() });
+  for (const warning of bootConfigWarnings) warnBootConfigOnce(warning);
   // Human browser push stays off until VAPID keys are present. Node reads
   // process.env; the Worker passes its bindings as `push` so a secret never
   // has to live in the source tree.
@@ -360,7 +417,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // The sign-in helper is created lazily so its PKCE/state table lives as long
   // as this server instance (one per Durable Object in production).
   let googleSignIn = null;
-  const gmail = gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
+  const gmail = enableDeferredInbox && gmailAuth ? new GmailMailbox(store, gmailAuth) : null;
   // Magic-link mailer (slice 3). Unconfigured by default: the routes say so
   // honestly (mail_not_configured) and never pretend a code was sent.
   const magicMailer = magicLinkMailer ?? createMagicLinkMailer();
@@ -882,13 +939,30 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Every JSON route takes the default limit; a caller passes `limit` only where
   // the provider's payload is known to be larger (the Telegram webhook embeds
   // the replied-to message).
-  async function body(req, { limit = JSON_BODY_BYTES } = {}) {
-    if (!/^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "")) reject(415, "json_required", "Use application/json");
+  // Shared JSON object reader. `allowEmpty` treats a blank body as {}.
+  // `fields` names the only accepted keys: any other key is 422 and the
+  // message lists it. Nesting past JSON_STRICT_DEPTH is malformed.
+  async function body(req, { limit = JSON_BODY_BYTES, allowEmpty = false, fields = null, unknownCode = "invalid_body" } = {}) {
+    const jsonType = /^application\/json(?:\s*;|$)/i.test(req.headers["content-type"] || "");
+    if (!jsonType && !allowEmpty) reject(415, "json_required", "Use application/json");
     // G7 (#940): the body-cap rejection names the limit and the actual size.
     // Code stays too_large; the AX layer adds the next step.
     const text = await readText(req, limit, actualBytes => new ServiceError(413, "too_large", `Request body is ${actualBytes} bytes; the limit is ${limit} bytes`));
-    try { const value = JSON.parse(text); if (!value || Array.isArray(value) || typeof value !== "object") throw new Error(); return value; }
+    if (text.trim() === "") {
+      if (allowEmpty) return {};
+      reject(400, "invalid_json", "Expected a JSON object");
+    }
+    if (!jsonType) reject(415, "json_required", "Use application/json");
+    let value;
+    try { value = JSON.parse(text); }
     catch { reject(400, "invalid_json", "Expected a JSON object"); }
+    if (!value || Array.isArray(value) || typeof value !== "object") reject(400, "invalid_json", "Expected a JSON object");
+    if (fields && jsonNestingExceeds(value, JSON_STRICT_DEPTH)) reject(400, "invalid_json", "Expected a JSON object");
+    if (fields) {
+      const unknown = Object.keys(value).filter(key => !fields.includes(key));
+      if (unknown.length) reject(422, unknownCode, `unknown fields: ${unknown.join(", ")}`);
+    }
+    return value;
   }
   function stream(req, res, token, roomId, after, auth, operationId) {
     const binding = auth.sessionBinding;
@@ -1215,6 +1289,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // 405 Allow on a known path. The inbox mount and the auth group keep
       // their own session and method checks. Anything else falls through
       // to the legacy chain below until that chain is empty.
+      // The private email workspace is excluded from v1. Preserve stored data
+      // and isolated compatibility fixtures without exposing import/send flows.
+      if (!enableDeferredInbox && (url.pathname === "/api/inbox" || url.pathname.startsWith("/api/inbox/")
+        || url.pathname.startsWith("/api/auth/gmail/"))) reject(404, "not_found", "Not found");
       if (await dispatchRoute({
         req, res, url, store, remoteAddress, loopback, operationId,
         // JDOT-MEMBER-PERMS begin: share quotas across request aliases.
@@ -1231,6 +1309,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         gmail, channelWebhooks, telegram, telegramStatus,
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
+        publicAgentPages,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
@@ -2199,7 +2278,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.writeHead(200, { "Content-Type": "application/xml; charset=utf-8" });
         return res.end(req.method === "HEAD" ? undefined : xml);
       }
-      // --- GR2 public acquisition pages. Script-free. Indexable when the URL has no query. ---
+      // --- GR2 public acquisition pages. Hash-authorized copy helper; indexable without a query. ---
       const templateDetail = /^\/templates\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const roomPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})(\.json)?$/.exec(url.pathname);
       const proofPage = /^\/r\/([a-z0-9][a-z0-9-]{0,63})\/proof(\.json)?$/.exec(url.pathname);
@@ -2209,7 +2288,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (acquisition && ["GET", "HEAD"].includes(req.method)) {
         rate(`acquisition:${remoteAddress}`, 120);
         const ref = url.searchParams.get("ref") ?? "";
-        const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60") => {
+        const sendPage = (status, html, jsonBody, canonical, cacheControl = "public, max-age=60", policy = PUBLIC_PAGE_CSP) => {
           if (!url.search) res.setHeader("X-Robots-Tag", "all");
           res.setHeader("Cache-Control", cacheControl);
           res.setHeader("Link", publicPageLinks(url, canonical));
@@ -2219,7 +2298,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return res.end(req.method === "HEAD" ? undefined : body);
           }
           // JDOT-PUBLIC-CSP-RUM begin: public-page policy
-          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), PUBLIC_PAGE_CSP));
+          res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), policy));
           // JDOT-PUBLIC-CSP-RUM end
           const body = Buffer.from(html);
           res.writeHead(status, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
@@ -2231,6 +2310,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (templateDetail) {
           const page = templatePage(templateDetail[1], { ref });
+          // Same posture as an unknown room page: a slug that matches the
+          // template route but is not a template gets the styled public 404
+          // for browsers. /templates/<slug>.json and non-HTML clients keep JSON.
+          if (!page && !templateDetail[2] && acceptPrefersHtml(req.headers.accept)) {
+            const body = Buffer.from(PUBLIC_NOT_FOUND_HTML);
+            res.setHeader("X-Robots-Tag", "noindex");
+            res.writeHead(404, { "Content-Type": "text/html; charset=utf-8", "Content-Length": body.length });
+            return res.end(req.method === "HEAD" ? undefined : body);
+          }
           if (!page) reject(404, "not_found", "Not found");
           return sendPage(200, page.html, templateDetail[2] ? page.document : null, `/templates/${templateDetail[1]}`);
         }
@@ -2278,7 +2366,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // (the owner flipping public receipts off must bite immediately).
           return sendPage(200, proof.html, proofPage[2] ? proof.document : null, `/r/${proofPage[1]}/proof`, "no-store");
         }
-        const page = publicRoomView(store, roomPage[1], { ref });
+        const page = publicRoomView(store, roomPage[1], { ref, origin: expectedOrigin() });
         // A browser opening /r/<slug> for a room that is unknown or not
         // published gets the same styled 404 as any other public path, not
         // the JSON API envelope; /r/<slug>.json and non-HTML clients keep JSON.
@@ -2293,7 +2381,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // titles, so like the receipts routes it must never sit in a shared
         // cache — a response cached while public would keep disclosing a
         // room's receipts after the owner switches privacy off.
-        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`, "no-store");
+        return sendPage(200, page.html, roomPage[2] ? page.document : null, `/r/${roomPage[1]}`, "no-store", PUBLIC_ROOM_SETUP_CSP);
       }
       if (acquisition) reject(405, "method_not_allowed", "Method not allowed");
       // --- end GR2 ---
@@ -2329,8 +2417,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        // The front door keeps the GitHub anchor in source. Omit it from the
+        // served bytes unless this server was given a GitHub auth config.
+        const payload = path === "index.html"
+          ? Buffer.from(frontDoorHtml(data, { githubConfigured: Boolean(githubAuth) }))
+          : data;
         res.writeHead(200, { "Content-Type": binary ? type : `${type}; charset=utf-8` });
-        return res.end(req.method === "HEAD" ? undefined : data);
+        return res.end(req.method === "HEAD" ? undefined : payload);
         }
       }
       if (url.pathname === "/api/account-rooms" && req.method === "GET") {
@@ -2346,7 +2439,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const token = cookie(req, accountCookieName), binding = accountBinding(req);
         if (url.searchParams.getAll("after").length > 1) reject(422, "invalid_room", "Invalid room continuation");
         if (url.searchParams.getAll("window").length > 1) reject(422, "invalid_overview_query", "window must be a single value");
-        return json(res, 200, ownerOverview({ store, accessRequests, jobHealth: nodeJobHealth }, token, binding, Date.now(),
+        return json(res, 200, ownerOverview({ store, accessRequests, jobHealth }, token, binding, Date.now(),
           { window: url.searchParams.get("window") ?? "7d", after: url.searchParams.get("after") }));
       }
       if (url.pathname === "/api/account-rooms" && req.method === "POST") {
@@ -3066,8 +3159,22 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const joinPageMatch = /^\/(?:room\/)?join(?:\/([^/]{1,128}))?\/?$/.exec(url.pathname);
       if (joinPageMatch) {
         if (req.method !== "GET") reject(405, "method_not_allowed", "Method not allowed");
+        // An agent invite code asked for without HTML gets the /a/ steps.
+        // The lookup is a scrypt hash (agent-invites codeHash), so it shares
+        // /a/<code>'s per-address limit, and the preview it reads is handed
+        // to the /a/ handler so one GET hashes the code once.
+        const agentCode = joinPathAgentCode(url.pathname);
+        if (agentCode) rate(`agent-connect:${remoteAddress}`, 30);
+        const livePreview = agentCode ? agentInvitePreview(store, agentCode) : null;
+        const liveCode = livePreview ? agentCode : null;
+        if (liveCode && !acceptPrefersHtml(req.headers.accept)) {
+          const agentUrl = new URL(url);
+          agentUrl.pathname = `/a/${encodeURIComponent(liveCode)}`;
+          if (handleAgentConnect(req, agentUrl, { res, store, remoteAddress, rate: () => {}, reject, origin: expectedOrigin(), preview: livePreview })) return;
+        }
         const assetBase = url.pathname.startsWith("/room/") ? "/room" : "";
-        const page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        let page = (await loadAsset("join.html")).toString("utf8").replaceAll("{{ASSET_BASE}}", assetBase);
+        if (liveCode) page = joinPageForAgentCode(page, liveCode);
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": Buffer.byteLength(page), "Cache-Control": "no-store" });
         return res.end(page);
       }
@@ -3483,7 +3590,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           try { since = JSON.parse(sinceParam); }
           catch { reject(422, "invalid_cursor", "since must be a sequence number or a cursor object"); }
         }
-        return json(res, 200, collectNeedsMe(store, secret, { since }), req.method === "HEAD");
+        const roomId = url.searchParams.has("roomId") ? url.searchParams.get("roomId") : undefined;
+        return json(res, 200, collectNeedsMe(store, secret, { since, roomId }), req.method === "HEAD");
       }
       if (url.pathname === "/api/needs-me") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
@@ -3721,7 +3829,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const projectOfferWithdrawMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/withdraw$/.exec(url.pathname);
       const projectOfferClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/project-offers\/([^/]{1,128})\/claims$/.exec(url.pathname);
       const projectOfferActionMatch = projectOfferPublishMatch ?? projectOfferWithdrawMatch ?? projectOfferClaimsMatch;
-      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|orient|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
+      const match = /^\/api\/rooms\/([^/]{1,384})(?:\/(commands|events|context|conversation|stream|cursor|project-offers|return-brief|work-changes|work-context|work-discussion|work-result|work-sessions|presence|capabilities|export|import|charter|outside-agents|request-runs|reply-requests|reply-context|reply-history|invitations|share-links|share-links-cancel|reminders|reports|agent-connections|guest-invites|guest-invites-list|guest-invites-revoke|guest-invites-disconnect|guest-invites-revoke-all|guest-invites-upgrade|diagnostics|diagnostics-export|search|pins|provider-heartbeats|identity-links|agent-invites|agent-pause|access-review|access-requests|usage|notifications|spend-allowance|agent-inbox|activation-pack|verification-policy|dm-consents|bonds|peer-dms|directory|opportunities|public-face|needs-attention|jev-shadow|mentions|open-questions|human-push|thread-mutes|referrals|referral-invites|activity|activity-read|activity-read-all|activity-unread-count|read-horizon|saved))?$/.exec(url.pathname);
       // Round-2 #112: threaded replies share the room funnel below (id decoding,
       // credential selection, read rate limit) with every other room route.
       const threadMatch = /^\/api\/rooms\/([^/]{1,384})\/messages\/([^/]{1,384})\/thread$/.exec(url.pathname);
@@ -3897,27 +4005,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const creditsTransferMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/transfer$/.exec(url.pathname);
       const creditsEpochMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/epoch\/close$/.exec(url.pathname);
       const creditsMatch = creditsBalancesMatch ?? creditsHistoryMatch ?? creditsTransferMatch ?? creditsEpochMatch;
-      // Board v2 (RC-2026-09-27-2720): the durable claims board mounted under
-      // the room funnel. One anchored regex per concrete route — the
-      // route-docs gate (scripts/open-routes.mjs) expands only ([^/]{1,N})
-      // groups, so a subtree regex would fail the check. The board itself is
-      // deployment-wide (one per room database); :roomId selects the auth
-      // context. Literal segments (heartbeat/release/receipts) sit on their
-      // own templates so they are never mistaken for a task id.
-      const boardV2ClaimsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims$/.exec(url.pathname);
-      const boardV2HeartbeatMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/heartbeat$/.exec(url.pathname);
-      const boardV2ReleaseMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/release$/.exec(url.pathname);
-      const boardV2ReceiptsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/claims\/([^/]{1,128})\/receipts$/.exec(url.pathname);
-      const boardV2NotesMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/notes$/.exec(url.pathname);
-      const boardV2FindingsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/findings$/.exec(url.pathname);
-      const boardV2DecisionsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/decisions$/.exec(url.pathname);
-      const boardV2BoardMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/board$/.exec(url.pathname);
-      const boardV2EventsMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/events$/.exec(url.pathname);
-      const boardV2MirrorMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/mirror-map$/.exec(url.pathname);
-      const boardV2HealthMatch = /^\/api\/rooms\/([^/]{1,384})\/board\/v2\/health$/.exec(url.pathname);
-      const boardV2Match = boardV2ClaimsMatch ?? boardV2HeartbeatMatch ?? boardV2ReleaseMatch ?? boardV2ReceiptsMatch
-        ?? boardV2NotesMatch ?? boardV2FindingsMatch ?? boardV2DecisionsMatch ?? boardV2BoardMatch
-        ?? boardV2EventsMatch ?? boardV2MirrorMatch ?? boardV2HealthMatch;
+      // Board v2 is retired. One prefix answers every path under /board/v2
+      // with 410. A regex literal would have to be one fully expanded
+      // template per route (scripts/open-routes.mjs), so this pattern is a
+      // RegExp and the route gates keep the retired templates themselves.
+      // :roomId still selects the auth context. /board/v2extra does not match.
+      const boardV2Match = new RegExp("^/api/rooms/([^/]{1,384})/board/v2(?:/|$)").exec(url.pathname);
       // Consent-bound DMs (decide/revoke/unblock) and public-face rotate ride
       // the same funnel: their literal segments must never be mistaken for ids.
       if (!publicWorkRoomReviewMatch && !projectOfferActionMatch && !match && !revokeMatch && !threadMatch && !accessDecideMatch && !delegationGrantMatch && !delegationRevokeMatch && !delegationListMatch && !ownerDelegateGrantMatch && !ownerDelegateRevokeMatch && !ownerDelegateListMatch && !ownershipTransferMatch && !collabMatch && !workClaimMatch
@@ -4311,6 +4404,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
+        if (snapshotView === "work") delete snapshot.state.agentHalts;
         if (snapshotView === "full") {
           // RC-2026-09-19-070: strip targeted DMs from both carriers in the
           // full snapshot — the audit tail (state.eventLog, the named P0) and
@@ -4407,25 +4501,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // cursor). Rides the standard room credential funnel above; unknown
       // rooms answer 404 room_not_found from the store.
       if (route === "activation-pack" && req.method === "GET") {
-        return json(res, 200, buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) }));
-      }
-      // ORIENT — jill lane RC-2026-09-28 (ryska's 404): the URL outside
-      // agents guess by analogy with /activation-pack. Read-only,
-      // member-scoped orientation: contract version, authenticated member
-      // and scope, room summary, evaluated-through sequence, and a bounded
-      // list of open work records with their next steps. Rides the standard
-      // room credential funnel above; unknown rooms answer 404
-      // room_not_found from the store.
-      if (route === "orient" && req.method === "GET") {
-        const params = url.searchParams;
-        const allowed = new Set(["focus", "q", "maxTokens", "auth", "binding"]);
-        if ([...params.keys()].some(key => !allowed.has(key) || params.getAll(key).length !== 1)) {
-          reject(422, "invalid_orient", "focus, q, and maxTokens are the orient query parameters");
-        }
-        return json(res, 200, buildOrient(store, roomId, viewerId, {
-          focus: params.get("focus"), q: params.get("q"), maxTokens: params.get("maxTokens"),
-          token: selected.token, binding: fence, boardList: memoizeBoardList(store)
-        }));
+        const view = url.searchParams.get("view");
+        if (view !== null && view !== "brief") reject(422, "invalid_view", "view=brief is the only accepted view; omit it for the full pack");
+        const pack = buildActivationPack(store, roomId, viewerId, { boardList: memoizeBoardList(store) });
+        if (view !== "brief") return json(res, 200, pack);
+        const watchers = [...streams].filter(entry => entry.roomId === roomId).map(entry => entry.memberId);
+        const { members } = store.presence(selected.token, roomId, watchers, fence);
+        return json(res, 200, briefActivationPack(pack, members, store.now(), viewerId));
       }
       if (route === "verification-policy" && req.method === "GET") {
         // RC-2026-09-18-049: read the room's verified-agents gate policy.
@@ -4450,13 +4532,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "search" && req.method === "GET") {
         // Round-2 #113: full-text search over messages and work items.
-        const q = url.searchParams.get("q");
-        const kind = url.searchParams.get("kind") ?? "all";
-        const limitRaw = url.searchParams.get("limit");
+        // `auth` is the credential selector roomCredentials already read, not
+        // a search filter. `cursor` is an alias of `before`.
+        const params = url.searchParams;
+        const allowed = new Set(["q", "kind", "limit", "before", "cursor", "auth"]);
+        const bad = [...new Set(params.keys())].filter(key => !allowed.has(key) || params.getAll(key).length !== 1);
+        if (bad.length) reject(422, "invalid_search", `unknown or repeated search parameters: ${bad.join(", ")}`);
+        if (params.has("before") && params.has("cursor")) reject(422, "invalid_search", "send before or cursor, not both");
+        const q = params.get("q");
+        const kind = params.get("kind") ?? "all";
+        const limitRaw = params.get("limit");
         if (limitRaw !== null && (!/^[1-9]\d*$/.test(limitRaw) || Number(limitRaw) > 200)) {
           reject(422, "invalid_search", "limit is 1 to 200");
         }
-        const before = url.searchParams.get("before");
+        const before = params.get("before") ?? params.get("cursor");
         const result = store.search(selected.token, roomId, q, kind, fence, { limit: limitRaw === null ? 50 : Number(limitRaw), before });
         // RC-2026-09-19-070: search hits carry bodies but not toMemberId, so
         // re-resolve each hit against the projection and drop targeted DMs
@@ -4468,6 +4557,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             return message ? dmMessageVisible(message) : false;
           });
         }
+        if (typeof result.nextCursor === "string" && result.nextCursor) result.next = { before: result.nextCursor };
         return json(res, 200, result);
       }
       if (route === "usage" && req.method === "GET") {
@@ -4529,15 +4619,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "GET") return json(res, 200, { roomId, invites: store.invites.list(selected.token, roomId, fence) });
         if (req.method === "POST") {
           const keys = Object.keys(data);
-          if ((!keys.includes("permissions") && !keys.includes("profile"))
-            || keys.some(k => !["permissions", "profile", "expiresInMinutes", "displayName"].includes(k)))
-            reject(422, "invalid_invite", "permissions or profile is required; optional: expiresInMinutes, displayName");
-          return json(res, 201, store.invites.create(selected.token, roomId, data, fence,
+          const scopes = ["permissions", "profile", "ownerEquivalent"].filter(key => Object.hasOwn(data, key));
+          if (scopes.length < 1 || keys.some(key => !["permissions", "profile", "ownerEquivalent", "expiresInMinutes", "displayName"].includes(key)))
+            reject(422, "invalid_invite", "exactly one of permissions, profile, or ownerEquivalent is required; optional: expiresInMinutes, displayName");
+          return json(res, 201, withAgentInviteLink(store.invites.create(selected.token, roomId, data, fence,
             // Funnel: on a deployment without a configured mailer no account can
             // ever complete email verification, so the email_unverified gate
             // would deadlock invite mint permanently instead of nudging the
             // owner to verify. Where mail is configured the gate still applies.
-            { emailVerificationUnachievable: !magicMailer.isConfigured() }));
+            { emailVerificationUnachievable: !magicMailer.isConfigured() }), expectedOrigin()));
         }
         if (req.method === "DELETE") {
           if (!exact(data, ["inviteId"]) || typeof data.inviteId !== "string") reject(422, "invalid_invite", "inviteId is required");
@@ -4843,7 +4933,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // plan-dir-card: owner-only seeding of placeholder directory cards
         // for agent members that have none. Seeded cards are visibility
         // "room", provenance "seeded", unsigned; the agent replaces its seed
-        // by publishing a signed card.
+        // by publishing a signed card. The route takes no fields.
+        await body(req, { allowEmpty: true, fields: [], unknownCode: "invalid_body" });
         return json(res, 200, store.agentPlugin.seedRoomDirectoryCards({ roomId, ownerMemberId: auth.member.id }));
       }
       if (route === "member-deactivate" && req.method === "DELETE") {
@@ -5222,9 +5313,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_event_cursor", "compact must be 1 or 0");
         }
         const typeParam = params.get("type");
+        const limitRaw = params.get("limit");
+        if (limitRaw !== null && (!/^[1-9]\d*$/.test(limitRaw) || Number(limitRaw) > 100)) {
+          reject(422, "invalid_event_cursor", "limit must be an integer from 1 to 100");
+        }
+        const afterRaw = params.get("after");
+        if (afterRaw !== null && (!/^(0|[1-9]\d*)$/.test(afterRaw) || !Number.isSafeInteger(Number(afterRaw)))) {
+          reject(422, "invalid_event_cursor", "after must be an integer of 0 or more");
+        }
+        const sinceRaw = params.get("since");
+        const untilRaw = params.get("until");
+        const sinceMs = sinceRaw === null ? null : eventTimestampMillis(sinceRaw);
+        const untilMs = untilRaw === null ? null : eventTimestampMillis(untilRaw);
+        if (sinceRaw !== null && sinceMs === null) reject(422, "invalid_event_cursor", eventTimestampMessage("since"));
+        if (untilRaw !== null && untilMs === null) reject(422, "invalid_event_cursor", eventTimestampMessage("until"));
+        if (sinceMs !== null && untilMs !== null && sinceMs > untilMs) reject(422, "invalid_event_cursor", "since is after until");
         return json(res, 200, redactEventPage(store.eventsAfter(selected.token, roomId,
-          Number(params.get("after") || 0), Number(params.get("limit") || 100),
-          { actor: params.get("actor"), since: params.get("since"), until: params.get("until"),
+          afterRaw === null ? 0 : Number(afterRaw), limitRaw === null ? 100 : Number(limitRaw),
+          { actor: params.get("actor"),
+            since: sinceMs === null ? null : new Date(sinceMs).toISOString(),
+            until: untilMs === null ? null : new Date(untilMs).toISOString(),
             types: typeParam === null ? null : typeParam.split(",").map(part => part.trim()).filter(part => part.length > 0),
             mentions: params.get("mentions"),
             compact: compactParam === "1" || compactParam === "true",

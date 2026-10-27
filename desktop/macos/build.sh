@@ -14,6 +14,12 @@ iconutil -c icns build/ProjectRoom.iconset -o "$app/Contents/Resources/ProjectRo
 cp .build/release/ProjectRoom "$app/Contents/MacOS/ProjectRoom"
 cp .build/release/ProjectRoomTools "$app/Contents/MacOS/ProjectRoomTools"
 codesign --force --sign - "$app/Contents/MacOS/ProjectRoomTools"
+# Package only the parsed host/setup import closure, never a developer checkout.
+runtime_stage="$(mktemp -d "$PWD/build/runtime-stage.XXXXXX")"
+trap 'rm -rf "$runtime_stage"' EXIT
+node ../../scripts/package-mac-runtime.mjs "$runtime_stage/room-runtime"
+rm -rf "$app/Contents/Resources/room-runtime"
+mv "$runtime_stage/room-runtime" "$app/Contents/Resources/room-runtime"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

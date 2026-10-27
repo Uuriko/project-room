@@ -3,9 +3,9 @@
 //
 // Usage: node scripts/refresh-unit-ci-durations.mjs RECEIPTS_DIR [OUT_PATH]
 //
-// RECEIPTS_DIR is a directory of unit-shard-*.json receipts in the layout
-// the `unit` aggregator job downloads (see .github/workflows/test.yml):
-// one JSON file per shard, each optionally carrying `fileDurationsMs`
+// RECEIPTS_DIR is a directory of unit-shard-*.json or unit-all-*.json
+// receipts (see .github/workflows/test.yml). CI runs the suite as one job
+// and writes unit-all-*.json. Each receipt optionally carries `fileDurationsMs`
 // (per-file measured ms from that actual hosted run, written by
 // scripts/unit-ci.mjs). OUT_PATH defaults to scripts/unit-ci-durations.json.
 //
@@ -53,7 +53,7 @@ export function validateReceipt(receipt, name = "receipt") {
 
 export function loadReceipts(receiptsDir) {
   const names = readdirSync(receiptsDir)
-    .filter((name) => /^unit-shard-.*\.json$/.test(name))
+    .filter((name) => /^unit-(?:shard|all)-.*\.json$/.test(name))
     .sort();
   return names.map((name) => {
     let parsed;

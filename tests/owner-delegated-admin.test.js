@@ -93,16 +93,21 @@ test("delegated agent cannot grant admin bits to another agent", t => {
   })), /delegat/i);
 });
 
-test("delegated agent cannot grant admin bits to a human either", t => {
+test("delegated agent grants held admin bits to an existing human", t => {
   const { store, owner, agent } = fixture(t);
   store.command(owner, "commons", command(T.MEMBER_ACCESS_CHANGED, {
     memberId: "agent", expectedMemberRevision: revisionOf(store, "agent"),
     permissions: ["accept_work", "manage_members"], active: true
   }));
-  assert.throws(() => store.command(agent, "commons", command(T.MEMBER_ACCESS_CHANGED, {
+  store.command(agent, "commons", command(T.MEMBER_ACCESS_CHANGED, {
     memberId: "human", expectedMemberRevision: revisionOf(store, "human"),
     permissions: ["accept_work", "manage_members"], active: true
-  })), /delegat/i);
+  }));
+  assert.ok(store.room("commons").state.members.human.permissions.includes("manage_members"));
+  assert.throws(() => store.command(agent, "commons", command(T.MEMBER_ACCESS_CHANGED, {
+    memberId: "human", expectedMemberRevision: revisionOf(store, "human"),
+    permissions: ["accept_work", "manage_members", "decide"], active: true
+  })), /authority they do not hold/);
 });
 
 test("owner revoking admin bits clears delegatedAdmin instantly", t => {

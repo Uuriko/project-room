@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 // Public receipts: a private room stays off the page until its owner opts in,
 // a non-owner cannot opt in, and an already-public work receipt does not
 // wait for that switch. Served by the real HTTP server and RoomStore.
@@ -97,7 +98,10 @@ test("a private room's claim stays hidden until the owner publishes, and a non-o
   store.command(ownerKey, "commons", { id: "publish-room-page", type: "room.public_page_set", data: { enabled: true } });
   const roomPage = await raw(origin, "/r/commons");
   assert.equal(roomPage.status, 200);
-  assert.equal(roomPage.headers.get("content-security-policy"), publicPolicy);
+  const copyScript = /<script>([\s\S]*?)<\/script>/.exec(roomPage.text)?.[1];
+  assert.ok(copyScript);
+  const copyHash = createHash("sha256").update(copyScript).digest("base64");
+  assert.equal(roomPage.headers.get("content-security-policy"), publicPolicy.replace("script-src ", `script-src 'sha256-${copyHash}' `));
   const named = await raw(origin, `/receipts/${id}`);
   assert.match(named.text, /Project Room Commons/);
   const off = await raw(origin, "/api/rooms/commons/commands", {
@@ -128,7 +132,8 @@ test("share surfaces: JSON-LD and a per-receipt OG card ride the same owner togg
   // The share block shows the exact pre-filled text and one-tap targets,
   // and the badge serves the graded verdict as an embeddable SVG.
   assert.match(pwrPage.text, /Share this receipt/);
-  assert.match(pwrPage.text, /Work, verified: Public task — Artifact hash recorded/);
+  assert.match(pwrPage.text, /Public task — Artifact hash recorded/);
+  assert.ok(!pwrPage.text.includes("Work, verified:"), "share text must not headline an unverified receipt as verified");
   assert.match(pwrPage.text, /twitter\.com\/intent\/tweet/);
   assert.match(pwrPage.text, new RegExp(`/receipts/${PWR}/badge\\.svg`));
   const badge = await fetch(`${origin}/receipts/${PWR}/badge.svg`);

@@ -26,21 +26,39 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // second run writes nothing.
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
 
-export const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
-export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
+const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
+const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
 // Lazily created by this module on first use (the run-once/request_replays
 // pattern); registered in server/writer-fence.mjs lazyAdditiveTables.
-export const WORK_ITEM_BOARD_BACKFILL_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_BACKFILL_TABLE} (room_id TEXT PRIMARY KEY, version INTEGER NOT NULL, at TEXT NOT NULL)`;
-export const WORK_ITEM_BOARD_DIVERGENCE_TABLE = "work_item_board_divergence";
+const WORK_ITEM_BOARD_BACKFILL_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_BACKFILL_TABLE} (room_id TEXT PRIMARY KEY, version INTEGER NOT NULL, at TEXT NOT NULL)`;
+const WORK_ITEM_BOARD_DIVERGENCE_TABLE = "work_item_board_divergence";
 // Per-room divergence snapshot (Appendix D §D.2.3 monitor): persisted
 // whenever a backfill run or a sync plan computes diverged rows.
 // Zero is the only healthy value; any non-zero reading re-opens #3607.
-export const WORK_ITEM_BOARD_DIVERGENCE_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_DIVERGENCE_TABLE} (room_id TEXT PRIMARY KEY, diverged INTEGER NOT NULL, rework INTEGER NOT NULL, board_native INTEGER NOT NULL, at TEXT NOT NULL)`;
+const WORK_ITEM_BOARD_DIVERGENCE_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_DIVERGENCE_TABLE} (room_id TEXT PRIMARY KEY, diverged INTEGER NOT NULL, rework INTEGER NOT NULL, board_native INTEGER NOT NULL, at TEXT NOT NULL)`;
 export const DIVERGENCE_REPAIR_NOTE = "divergence repair: board reopened to match the work item; was done";
 
 const MAX_CLAIM_HISTORY = 200; // mirrors withHistory in server/work-claims.mjs
+const isDivergenceRepairStamp = stamp => typeof stamp?.note === "string" && stamp.note.startsWith("divergence repair:");
+// Apply the MAX_CLAIM_HISTORY cap to a board row's history. Event-derived
+// stamps drop oldest-first and are counted in `dropped`; divergence-repair
+// stamps are exempt — they are board-native (no journal event re-derives
+// them), so dropping one would destroy the only record of a repair and
+// fold the loss silently into the generic historyOmitted counter.
+function capBoardHistory(history) {
+  if (history.length <= MAX_CLAIM_HISTORY) return { history, dropped: 0 };
+  const kept = [...history];
+  let dropped = 0;
+  while (kept.length > MAX_CLAIM_HISTORY) {
+    const index = kept.findIndex(stamp => !isDivergenceRepairStamp(stamp));
+    if (index === -1) break; // only repair stamps remain: they stay, over cap
+    kept.splice(index, 1);
+    dropped += 1;
+  }
+  return { history: kept, dropped };
+}
 const MAX_CHAIN = 20;
 const MAX_REVIEWS = 50;
 const MAX_EVIDENCE_REFS = 16;
@@ -280,7 +298,7 @@ function historyForWorkItem(item, facts) {
 // order. Board verdicts are approve / changes_requested / comment; a
 // verification pass and an owner approval are approvals, everything else
 // sent the item back, which is a changes_requested.
-function reviewsForWorkItem(item, facts) {
+function reviewsForWorkItem(item, facts, basis = null) {
   const sequenceOf = eventId => {
     const events = facts?.events ?? [];
     const index = events.findIndex(event => event.id === eventId);
@@ -296,6 +314,13 @@ function reviewsForWorkItem(item, facts) {
       summary: cleanText(verification.summary, 2000) ?? "verification",
       url: null,
       at: eventAt(facts, verification.eventId, item.updatedAt),
+      // #3712: a verification-derived review carries the claim basis it
+      // stands against (the projected row's own basis facts, computed by
+      // boardClaimForWorkItem), or the kernel's reviewed-completion gate
+      // (canCloseWork) can never see it as current through the board door.
+      // Owner-decision reviews carry none: they are not verification
+      // reviews and no basis is invented for them.
+      ...(basis ? { basis } : {}),
       order: sequenceOf(verification.eventId),
     });
   }
@@ -315,9 +340,15 @@ function reviewsForWorkItem(item, facts) {
   return reviews.slice(-MAX_REVIEWS).map(({ order, ...review }) => review);
 }
 
-// Attestations: one per completion (receipt history + current receipt).
+// Attestations: one per completion (receipt history + current receipt),
+// plus the verifier's attestation for each passed verification (#3712).
 // The producer attests the delivery; the completion event supplies the
-// time (receipts carry no timestamp of their own).
+// time (receipts carry no timestamp of their own). The verifier's
+// attestation mirrors the review route's shape: recordReview binds an
+// attestation to an approve verdict only, timestamped at the review and
+// noted with its summary — the completion gate matches it to the derived
+// review by member and exact time, so it is projected from the same
+// verification event the review is derived from.
 function attestationsForWorkItem(item, facts) {
   const receipts = [...(item.receiptHistory ?? []), ...(item.receipt ? [item.receipt] : [])];
   const attestations = [];
@@ -328,6 +359,15 @@ function attestationsForWorkItem(item, facts) {
       memberId,
       at: eventAt(facts, receipt.eventId, item.updatedAt),
       note: cleanText(receipt.summary, 512),
+    });
+  }
+  const verifications = [...(item.verificationHistory ?? []), ...(item.verification ? [item.verification] : [])];
+  for (const verification of verifications) {
+    if (!verification?.verifierId || verification.result !== "pass") continue;
+    attestations.push({
+      memberId: verification.verifierId,
+      at: eventAt(facts, verification.eventId, item.updatedAt),
+      note: (cleanText(verification.summary, 2000) ?? "verification").slice(0, 512),
     });
   }
   return attestations;
@@ -438,14 +478,32 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
   // order) so a repaired row is a fixed point of re-mapping — without
   // this, the next sync/backfill would silently drop the reopen record.
   for (const stamp of existing?.history ?? []) {
-    if (typeof stamp?.note !== "string" || !stamp.note.startsWith("divergence repair:")) continue;
+    if (!isDivergenceRepairStamp(stamp)) continue;
     if (history.some(entry => entry.at === stamp.at && entry.agentId === stamp.agentId && entry.action === stamp.action && entry.note === stamp.note)) continue;
     const at = isoOrNull(stamp.at) ?? iso(nowMs);
     const index = history.findIndex(entry => entry.at > at);
     history.splice(index === -1 ? history.length : index, 0, { at, agentId: typeof stamp.agentId === "string" && stamp.agentId ? stamp.agentId : "system", action: stamp.action, note: stamp.note });
   }
-  if (history.length > MAX_CLAIM_HISTORY) { const dropped = history.length - MAX_CLAIM_HISTORY; history = history.slice(dropped); historyOmitted += dropped; }
-  const reviews = reviewsForWorkItem(item, facts);
+  const cappedHistory = capBoardHistory(history);
+  history = cappedHistory.history; historyOmitted += cappedHistory.dropped;
+  // #3712: the basis a verification-derived review stands against,
+  // derived only from the projected row's own basis facts — the same
+  // fields reviewBasisFor reads back off the row at the completion gate
+  // (owner and claimedAt from the item's claim, revision / CI head /
+  // delivery preserved from the existing board row, exactly as the row
+  // below carries them). No field is invented: with no accountable
+  // owner there is no basis to bind, and none is attached.
+  const projectedBasis = typeof owner === "string" && owner.length > 0 ? Object.freeze({
+    version: 1,
+    owner,
+    claimedAt: claimedAt ?? null,
+    revision: typeof existing?.revision === "string" ? existing.revision : null,
+    headSha: typeof existing?.ci?.headSha === "string" ? existing.ci.headSha : null,
+    deliveryDigest: typeof existing?.delivery?.digest === "string" ? existing.delivery.digest : null,
+    deliveryGeneration: Number.isSafeInteger(existing?.deliveryGeneration) && existing.deliveryGeneration > 0
+      ? existing.deliveryGeneration : 0,
+  }) : null;
+  const reviews = reviewsForWorkItem(item, facts, projectedBasis);
   const attestations = attestationsForWorkItem(item, facts);
   const evidence = evidenceForWorkItem(item);
 
@@ -502,7 +560,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
       ...(existing?.pullRequests ?? []),
     ].map(pull => [pull.url, pull])).values()].slice(0, MAX_PULLS),
     updatedAt: isoOrNull(item.updatedAt) ?? isoOrNull(item.createdAt) ?? iso(nowMs),
-    repo: claimForScope ? (claimForScope.repository ?? null) : null,
+    repo: claimForScope ? (normalizeClaimRepository(claimForScope.repository) ?? null) : null,
     branch: claimForScope ? (claimForScope.ref ?? null) : null,
     chain: chain.slice(-MAX_CHAIN),
     supersededBy: item.state === "superseded" && typeof item.supersededBy === "string" ? boardClaimId(item.supersededBy) : null,
@@ -650,7 +708,7 @@ function provablyCompleted(item, facts) {
   return (facts?.events ?? []).some(event => event.type === "work.completed")
     || Boolean(item?.receipt) || (Array.isArray(item?.receiptHistory) && item.receiptHistory.length > 0);
 }
-export function classifyWorkItemBoardDivergence(current, mapped, item, facts) {
+function classifyWorkItemBoardDivergence(current, mapped, item, facts) {
   // A board delivery is an independent execution record. Work receipts cannot
   // prove that its verification or send-back should be rewritten.
   if (current?.delivery) return "board_native";
@@ -672,10 +730,9 @@ function reworkRepairRow(mapped, item, facts, nowMs) {
     action: `state:${mapped.state}`, note: DIVERGENCE_REPAIR_NOTE,
   };
   if (mapped.history.some(entry => entry.at === stamp.at && entry.agentId === stamp.agentId && entry.action === stamp.action && entry.note === stamp.note)) return mapped;
-  const history = [...mapped.history, stamp];
-  const dropped = Math.max(0, history.length - MAX_CLAIM_HISTORY);
-  const row = { ...mapped, history: history.slice(dropped) };
-  const omitted = (mapped.historyOmitted ?? 0) + dropped;
+  const capped = capBoardHistory([...mapped.history, stamp]);
+  const row = { ...mapped, history: capped.history };
+  const omitted = (mapped.historyOmitted ?? 0) + capped.dropped;
   if (omitted > 0) row.historyOmitted = omitted; else delete row.historyOmitted;
   return row;
 }
@@ -782,7 +839,7 @@ function isDiverged(current, mapped, item) {
 // Canonical comparison for the unchanged check: both sides are board rows
 // (existing rows arrive decoded from the registry; mapped rows are built
 // above), so a sorted-key JSON form is stable across runs.
-export function canonicalClaimRow(row) {
+function canonicalClaimRow(row) {
   if (row === null || typeof row !== "object") return row;
   if (Array.isArray(row)) return row.map(canonicalClaimRow);
   const out = {};
@@ -1027,6 +1084,21 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
     if (successorRow && SYNC_ACTIVE.has(successorRow.state) && !(successorRow.dependsOn ?? []).includes(claimId)) {
       refuse(409, "work_claim_conflict", `Board card ${targetId} is already claimed. It is not a successor of ${claimId}.`);
     }
+  }
+
+  // Holder refusal (DCP-1 / D-1): the registry row is the holder
+  // authority — a claim-taking event by a member who is not the primary
+  // row's active holder would mint a second hold in the projection
+  // while the board keeps the first, and the divergence skip below
+  // would let it pass silently (the diverged board_native row is
+  // exactly the board-first claim). Refuse inside the transaction so
+  // the command rolls back with nothing written. The skip stays for
+  // every non-claim-taking type: a release by the projection holder
+  // still leaves a foreign board hold untouched, and the diverged row
+  // itself is never rewritten here.
+  const claimTaking = incoming.type === "claim.acquired" || incoming.type === "claim.renewed";
+  if (claimTaking && current && SYNC_ACTIVE.has(current.state) && current.owner && current.owner !== actorId) {
+    refuse(409, "work_claim_conflict", `Work "${claimId}" is held by ${current.owner} — ask them to reassign or release it`);
   }
 
   const events = roomEvents(store, roomId);
