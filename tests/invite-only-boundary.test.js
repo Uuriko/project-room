@@ -16,7 +16,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { openRoutes, openapiOperations, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
+import { openRoutes, openapiOperations, routeCandidates, constantRouteTemplates, routeKey } from "../scripts/open-routes.mjs";
 import { pluginRouteTemplates, nextActionsRouteTemplates } from "../scripts/route-docs-check.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 import { HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
@@ -44,6 +44,11 @@ const SERVED_CANDIDATES = [
   // served by the same http.mjs branch as /api/health but invisible to the
   // literal/regex extractors above. Only the /api members join this sweep.
   ...new Set(HEALTH_ALIAS_PATHS.filter(path => path.startsWith("/api/")).map(path => path.replace(/\/+$/, ""))),
+  // Constant-routed routes (B5-2 F7): the OAuth sign-in routes are
+  // registered via path constants (url.pathname === GOOGLE_START_PATH)
+  // and are invisible to the literal/regex extractors above; resolve them
+  // from their defining modules, as the route-docs gate now does.
+  ...constantRouteTemplates(read("../server/http.mjs"), [read("../server/google-oauth.mjs"), read("../server/github-oauth.mjs")]),
 ];
 assert.ok(DECLARED_OPEN.length >= 10, "openapi open-route parse sanity");
 assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/health") && SERVED_CANDIDATES.includes("/api/rooms/{id}/commands"),
@@ -60,6 +65,15 @@ const PROBES = {
   // Native login starts/callbacks require PKCE query shape. The exchange is
   // publicly reachable but an invented one-time code cannot establish a session.
   "GET /api/auth/desktop/start": [undefined, 422],
+  // OAuth sign-in routes (B5-2 F7): publicly reachable by design. The
+  // test server configures neither provider, so an anonymous caller gets
+  // the honest 503; configured, the starts 302 to the provider (github
+  // start first requires the anonymous slot: 401 without one) and the
+  // callbacks complete or fail closed on their single-use state.
+  "GET /api/auth/google/start": [undefined, 503],
+  "GET /api/auth/google/callback": [undefined, 503],
+  "GET /api/auth/github/start": [undefined, 503],
+  "GET /api/auth/github/callback": [undefined, 503],
   "GET /api/auth/desktop/callback": [undefined, 422],
   "POST /api/auth/desktop/session": [{ code: `oac_${"A".repeat(32)}`, verifier: "A".repeat(43) }, 401],
   "HEAD /api/health": [undefined, 200],

@@ -123,6 +123,10 @@ server request timeout.
 | `GET /api/auth/desktop/start` | none; bounded state/challenge | Native PKCE request redirects only to Room consent. |
 | `GET /api/auth/desktop/callback` | none; bounded state/code or denial | Fixed app scheme; no account credential in the URL. |
 | `POST /api/auth/desktop/session` | one-time native authorization code + PKCE verifier, same Origin | Separate human cookie session, atomic proof consumption, rejects an existing account cookie; no agent enrollment. |
+| `GET /api/auth/google/start` | none | Browser Google sign-in start: mints/reuses the anonymous account-session slot, 302 to Google; 503 `google_not_configured` when not set up. |
+| `GET /api/auth/google/callback` | none; single-use OAuth state bound to the initiating slot cookie | Completes Google sign-in and upgrades the slot; failed completions land on `/?google=error`; 503 when not set up. |
+| `GET /api/auth/github/start` | none (anonymous account-session slot required; 401 `account_session_required` without one) | Browser GitHub sign-in start: binds the slot into a single-use PKCE state, 302 to GitHub; 503 `github_not_configured` when not set up. |
+| `GET /api/auth/github/callback` | none; single-use PKCE state bound to the initiating slot | Completes GitHub sign-in and upgrades the slot; error responses never carry tokens; 503 when not set up. |
 
 ## Read routes
 

@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { openapiOperations, openRoutes, pathParameterSamples, routeCandidates, routeKey, documents, docsDrift, checklistSection1 } from "../scripts/open-routes.mjs";
+import { openapiOperations, openRoutes, pathParameterSamples, routeCandidates, constantRouteTemplates, routeKey, documents, docsDrift, checklistSection1 } from "../scripts/open-routes.mjs";
 
 const spec = `openapi: 3.1.0
 info:
@@ -85,6 +85,29 @@ test("routeCandidates expands string literals and anchored path regexes", () => 
   ]);
   assert.throws(() => routeCandidates("/^\\/api\\/x\\/(a|b)$/"), /not expanded/);
   assert.equal(routeKey("POST", "/api/inbox/webhooks/{connectionId}"), routeKey("POST", "/api/inbox/webhooks/{id}"));
+});
+
+// B5-2 F7: a route registered via a path constant is invisible to
+// routeCandidates (no literal, no regex). The resolver takes the audit's
+// specimen shape: the comparison lives in the dispatch source, the
+// definition in another module's source.
+test("constantRouteTemplates resolves constant-routed paths from their defining sources", () => {
+  const http = `
+    if (url.pathname === GOOGLE_START_PATH) {}
+    if (url.pathname === GOOGLE_CALLBACK_PATH) {}
+    if (parsed.pathname !== GITHUB_CALLBACK_PATH) {}
+    if (url.pathname === "/api/health") {}
+  `;
+  const google = `export const GOOGLE_START_PATH = '/api/auth/google/start';\nexport const GOOGLE_CALLBACK_PATH = '/api/auth/google/callback';\n`;
+  const github = `export const GITHUB_CALLBACK_PATH = "/api/auth/github/callback";\nexport const UNREFERENCED_PATH = "/api/auth/github/unreferenced";\n`;
+  assert.deepEqual(constantRouteTemplates(http, [google, github]), [
+    "/api/auth/github/callback", "/api/auth/google/callback", "/api/auth/google/start",
+  ]);
+  // A constant-shaped comparison no source defines is a loud error: the
+  // gate must stop, not silently return to the literal-routed subset.
+  assert.throws(() => constantRouteTemplates(http, [google]), /GITHUB_CALLBACK_PATH/);
+  // Lowercase/variable comparisons are not route constants and are ignored.
+  assert.deepEqual(constantRouteTemplates(`if (url.pathname === someVariable) {}`, []), []);
 });
 
 test("documents matches :param spellings and whole paths only", () => {
