@@ -4,7 +4,7 @@ import { resumeAgent } from '../client/agent-resume.mjs';
 
 export async function main(args = process.argv.slice(2), { env = process.env, write = console.log, fetchImpl = fetch } = {}) {
   if (args.length === 1 && args[0] === '--help') {
-    write('Usage: node scripts/agent-resume.mjs [--focus replies] [--since-version HEX] [--attention-cursor JSON]\nReads current obligations and claim references, or current reply requests with --focus replies. No acknowledgement or execution. Uses the existing private Room connection.');
+    write('Usage: node scripts/agent-resume.mjs [--focus replies] [--since-version HEX] [--attention-cursor JSON]\nReads current work, claims, outstanding replies and recovery references together. Use --focus replies to omit work and claims. No acknowledgement or execution. Uses the existing private Room connection.');
     return 0;
   }
   try {
