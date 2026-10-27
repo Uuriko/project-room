@@ -1,12 +1,11 @@
-// Board UI pure helpers: escapeHtml, columnOf, claimUpdateText,
+// Board UI pure helpers: columnOf, claimUpdateText,
 // collapseClaimUpdates, boardToolNames, canWriteClaims.
-// The browser checks own the rendered board and its controls; these tests
-// guard the classification, copy, and permission contracts the renderer
-// consumes, independent of any DOM.
+// HTML escaping lives in src/html-escape.js. The browser checks own the
+// rendered board and its controls; these tests guard the classification,
+// copy, and permission contracts the renderer consumes, independent of any DOM.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  escapeHtml,
   columnOf,
   placeClaims,
   claimUpdateText,
@@ -14,21 +13,6 @@ import {
   boardToolNames,
   canWriteClaims,
 } from "../src/board-ui.js";
-
-// --- escapeHtml: the XSS boundary every board string crosses ---
-
-test("escapeHtml escapes the five HTML metacharacters", () => {
-  assert.equal(escapeHtml(`<script>alert("x&y")</script>`), "&lt;script&gt;alert(&quot;x&amp;y&quot;)&lt;/script&gt;");
-  assert.equal(escapeHtml("it's"), "it&#39;s");
-  assert.equal(escapeHtml("a>b"), "a&gt;b");
-});
-
-test("escapeHtml tolerates nullish and non-string input", () => {
-  assert.equal(escapeHtml(null), "");
-  assert.equal(escapeHtml(undefined), "");
-  assert.equal(escapeHtml(42), "42");
-  assert.equal(escapeHtml("plain"), "plain");
-});
 
 // --- columnOf: board placement is a pure function of claim state ---
 

@@ -177,6 +177,12 @@ export async function resolveConfig(env, { fetchImpl = globalThis.fetch, listRoo
 export async function main(env = process.env, argv = process.argv) {
   const mode = argv[2];
   if (!["in", "out"].includes(mode)) throw new Error("usage: github-door.mjs in|out");
+  // Room-visible conversation is not necessarily authorized for public GitHub.
+  // Publishing requires a separate owner opt-in, even when inbound is enabled.
+  if (mode === "out" && env.ROOM_DOOR_PUBLISH !== "true") {
+    console.log(JSON.stringify({ ok: true, skipped: "outbound publication disabled; set ROOM_DOOR_PUBLISH=true only for a room approved for public mirroring" }));
+    return;
+  }
   const config = await resolveConfig(env);
   if (config.skipped) {
     console.log(JSON.stringify({ ok: false, skipped: config.skipped }));
