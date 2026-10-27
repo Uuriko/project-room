@@ -54,7 +54,7 @@ function fixture(t) {
     return f.inbox({ action: "send.reserve", requestId: "send-" + sourceId, sourceId, sourceRevision: 1, draftRevision: 1, previewVersion: preview.previewVersion }).receipt.send;
   };
   f.server = async (options = {}) => {
-    const server = createRoomServer({ store: f.store, resolveClientAddress: () => "203.0.113.5", ...options });
+    const server = createRoomServer({ enableDeferredInbox: true, store: f.store, resolveClientAddress: () => "203.0.113.5", ...options });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
     const origin = "http://127.0.0.1:" + server.address().port;
@@ -234,5 +234,5 @@ test("channel sends: a Telegram reply dispatches through the fixture sender when
   const receipt = await rejecting.submit({ operationId: "op-1", envelope: { previewVersion: "v1" } });
   assert.deepEqual(receipt, { operationId: "op-1", previewVersion: "v1", outcome: "rejected", providerId: null, code: "fixture_rejected" });
   await assert.rejects(rejecting.submit({ operationId: "op-1", envelope: { previewVersion: "v2" } }), { code: "conflicting_inbox_observation" });
-  assert.throws(() => createRoomServer({ store: f.store, channelTransports: "telegram" }), /resolver/);
+  assert.throws(() => createRoomServer({ enableDeferredInbox: true, store: f.store, channelTransports: "telegram" }), /resolver/);
 });

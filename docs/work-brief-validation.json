@@ -1,0 +1,386 @@
+{
+  "version": 1,
+  "runtime": "v24.19.0",
+  "platform": "darwin-arm64",
+  "fullSuite": {
+    "tests": 11206,
+    "passed": 11174,
+    "failed": 24,
+    "skipped": 8,
+    "durationMs": 490233.773291,
+    "failuresMatchRecordedBaseline": true,
+    "baseline": "release-qualification.json",
+    "failures": [
+      {
+        "file": "tests/host-context-policy.test.js",
+        "test": "host policy has one explicit no-network, no-secret, no-external-effects profile"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "automatic host cannot read parent secrets or reach the network"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "sandbox refuses executables outside the checkout and system paths"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "configured environment is refused before a host starts"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "default host has isolated HOME so a room path cannot expand to operator HOME"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host process receives JSON and literal arguments without ambient environment"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host malformed output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host nonzero output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host oversized output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host empty output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "timeout and cancellation stop host processes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "different host processes cannot write the same checkout concurrently"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "process adapter accepts optional coding evidence without replacing its bytes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "adapter gets a typed data envelope rather than top-level room instructions"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "adapter runs configured checks and binds observations to exact local patch"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "failed configured check remains a failed observed exit, despite model success claim"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "mismatched patch, untracked files, and wrong repository never start checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "check that edits tracked files cannot produce a current verification receipt"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "committed artifact verification requires exact clean head and valid ancestor"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "checkout stays reserved through verification and cancellation releases it"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "model stdout cannot inject an adapter observation"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "observed result is journaled and redelivered after restart without repeating execution or checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "bounded verification times out without an observation and releases checkout ownership"
+      },
+      {
+        "file": "tests/reply-agent.test.js",
+        "test": "one command drives a separate host process and repeat invocation reuses its result"
+      }
+    ]
+  },
+  "focused": {
+    "tests": 51,
+    "passed": 51
+  },
+  "browserJourneys": {
+    "tests": 9,
+    "passed": 9
+  },
+  "storageBoundaryRepair": {
+    "tests": 3,
+    "passed": 3,
+    "candidateHead": "b9c4afed326219194f0b0ad6ac6df6b221bf3b1d"
+  },
+  "lint": "passed",
+  "ciModeCheck": "passed",
+  "untestedModuleGate": "passed",
+  "syntheticContext": "work-brief-qualification.json",
+  "nativeRestart": "work-brief-native-host.json",
+  "roomBenchmark": "work-brief-room-bench.json",
+  "initialRun": {
+    "runtime": "v26.8.2",
+    "failures": 31,
+    "disposition": "24 recorded host baseline failures; five cold-package failures repaired by runtime allowlist; compact-response duplication removed; PNG fixed-byte check passes on supported Node24. Final full suite supersedes initial run."
+  },
+  "releaseReady": false,
+  "openGates": [
+    "Integrated Linux CI",
+    "Shared RELEASE-PAUSE and coordinated release",
+    "Physical Mac sleep/wake",
+    "Human productivity comparison"
+  ],
+  "previousFullSuite": {
+    "tests": 11158,
+    "passed": 11126,
+    "failed": 24,
+    "skipped": 8,
+    "durationMs": 383159.618583,
+    "failuresMatchRecordedBaseline": true,
+    "baseline": "release-qualification.json",
+    "failures": [
+      {
+        "file": "tests/host-context-policy.test.js",
+        "test": "host policy has one explicit no-network, no-secret, no-external-effects profile"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "automatic host cannot read parent secrets or reach the network"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "sandbox refuses executables outside the checkout and system paths"
+      },
+      {
+        "file": "tests/host-policy-boundary.test.js",
+        "test": "configured environment is refused before a host starts"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "default host has isolated HOME so a room path cannot expand to operator HOME"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host process receives JSON and literal arguments without ambient environment"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host malformed output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host nonzero output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host oversized output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "host empty output fails without exposing diagnostics"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "timeout and cancellation stop host processes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "different host processes cannot write the same checkout concurrently"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "process adapter accepts optional coding evidence without replacing its bytes"
+      },
+      {
+        "file": "tests/host-process.test.js",
+        "test": "adapter gets a typed data envelope rather than top-level room instructions"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "adapter runs configured checks and binds observations to exact local patch"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "failed configured check remains a failed observed exit, despite model success claim"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "mismatched patch, untracked files, and wrong repository never start checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "check that edits tracked files cannot produce a current verification receipt"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "committed artifact verification requires exact clean head and valid ancestor"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "checkout stays reserved through verification and cancellation releases it"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "model stdout cannot inject an adapter observation"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "observed result is journaled and redelivered after restart without repeating execution or checks"
+      },
+      {
+        "file": "tests/host-verification.test.js",
+        "test": "bounded verification times out without an observation and releases checkout ownership"
+      },
+      {
+        "file": "tests/reply-agent.test.js",
+        "test": "one command drives a separate host process and repeat invocation reuses its result"
+      }
+    ]
+  },
+  "integration": {
+    "architectureBase": "aa69cf95fccc70674b878a415ede331ffe7f0b74",
+    "sourceHead": "ca6f4927bf1ce076e7d9b57ec2f0a65c22ebc325",
+    "fullSuiteSource": "00feaf48 plus test-only bounded-wait repair separately verified",
+    "preflightMs": 765,
+    "affected": {
+      "base": "aa69cf95",
+      "files": 158,
+      "tests": 1246,
+      "passed": 1236,
+      "failed": 10,
+      "baselineFailures": 9,
+      "newFailure": "fixed1300ms relay-suspension wait; repaired using bounded observable-state wait",
+      "repairTestsPassed": 17
+    },
+    "focused": {
+      "passed": 51,
+      "failed": 0
+    },
+    "lint": {
+      "errors": 0,
+      "warnings": 291,
+      "changedTestAlsoLinted": true
+    },
+    "qualifiedSourceFiles": {
+      "package.json": "9a4899d8007e1f74328cb859072dc63439d36b7e0277d526ca089450a3854216",
+      "scripts/CANDIDATE-MANIFEST.json": "a5d12cad8a2706d76ac09bf9812575bb7a302dbee61422038fd5129cb7ba1c50",
+      "scripts/runtime-package.mjs": "69a3049f8acaaf34823447856ac2fba9d439c2f403da548ee330a6c6594edffa",
+      "scripts/verify-affected.mjs": "d8d7adce90be5e8e41db465d9a93ead442f44207f00dd5a307630cb3fd0f5788",
+      "scripts/verify-preflight.mjs": "56434d0a34fdeaf2b9ee7fe219b9485c1436b941c48aec59bd3d7eb7819d536b",
+      "strings/i18n-baseline.json": "4f6981583e03df7b952a078f265762e5d95d3b11338132708e9eca8d1b8ec300",
+      "tests/runtime-package.test.js": "88a5d48374ee246585d42280a2eeb5a8280da49e5cb170af3f707edad848bb46",
+      "tests/verify-affected.test.js": "3ae1d728f62c6d498466f5ea2f0e79e6d8a4cdc220c5b778a814dce3744ffbad",
+      "machine/test/machine.test.mjs": "0e993db869a2c48b549135b495a77fea2b6e63d09a32240f9613b073f5bff396"
+    },
+    "serverPerformanceProvenance": {
+      "sourceIdenticalTo": "aa69cf95",
+      "paths": [
+        "server",
+        "src",
+        "cloudflare",
+        "scripts/bench"
+      ],
+      "benchmark": "architecture-integration-bench.json",
+      "note": "No server runtime change relative to qualified base; reused its same-source evidence, no new speed claim."
+    },
+    "syntheticContext": {
+      "version": 1,
+      "runtime": "v24.19.0",
+      "synthetic": true,
+      "scope": "Payload and freshness contracts only; broad fixture contains only synthetic public messages.",
+      "payloadBytes": {
+        "minimal": 123,
+        "selectedBrief": 4027,
+        "broadContext": 65850
+      },
+      "historyGrowthPreservesBrief": true,
+      "changes": [
+        {
+          "scenario": "requirements",
+          "status": "changed",
+          "changedSections": [
+            "objective"
+          ],
+          "requiresFreshRead": true,
+          "authorityGranted": false
+        },
+        {
+          "scenario": "access",
+          "status": "changed",
+          "changedSections": [
+            "authority"
+          ],
+          "requiresFreshRead": true,
+          "authorityGranted": false
+        },
+        {
+          "scenario": "handoff",
+          "status": "changed",
+          "changedSections": [
+            "progress"
+          ],
+          "requiresFreshRead": true,
+          "authorityGranted": false
+        },
+        {
+          "scenario": "result",
+          "status": "changed",
+          "changedSections": [
+            "evidence"
+          ],
+          "requiresFreshRead": true,
+          "authorityGranted": false
+        }
+      ],
+      "limitations": [
+        "No model execution comparison",
+        "No human productivity measurement",
+        "Brief omits discussion and external evidence; unchanged version does not validate omitted content"
+      ]
+    },
+    "laterMainNotIntegrated": "f18cd508",
+    "qualificationLimit": "Exact-head hosted checks and coordinated release remain open. Full run plus final machine test repair; no physical sleep/wake or productivity claim."
+  },
+  "previousIntegration": {
+    "baselineRepair": "93727acbb67ac15edd6f4cbcb8287d1bea9adca2",
+    "runtimeUnchangedFrom": "1b6fbe8cb3e95082c2fa49f7e9394af044fbbf94",
+    "preflightMs": 261,
+    "affected": {
+      "files": 28,
+      "passed": 335,
+      "failed": 1,
+      "disposition": "Only stale package.json manifest hash failed; regenerated exact hash. 16 focused manifest/selection tests and final full suite pass that check."
+    },
+    "focusedRepair": {
+      "tests": 16,
+      "passed": 16
+    },
+    "preflightChecks": [
+      "installed dependencies",
+      "existing server module coverage gate",
+      "shared runtime import verifier",
+      "candidate manifest drift"
+    ],
+    "qualificationLimit": "Local working-tree qualification. Exact published/merged CI and release are separate gates.",
+    "qualifiedSourceFiles": {
+      "package.json": "7fdecefa48580bc13dfe410942dde283adf1ce43dbecc511e0ae53870c330967",
+      "scripts/CANDIDATE-MANIFEST.json": "acecd17dfd5009aea8900edf1e267f4089fd9451ef516b99cb9afe1edc459747",
+      "scripts/runtime-package.mjs": "31a57ae1d3586d6a4e728658d9f079a782bbf034afd7401d49e9dff5e2af4156",
+      "scripts/verify-affected.mjs": "d8d7adce90be5e8e41db465d9a93ead442f44207f00dd5a307630cb3fd0f5788",
+      "scripts/verify-preflight.mjs": "56434d0a34fdeaf2b9ee7fe219b9485c1436b941c48aec59bd3d7eb7819d536b",
+      "strings/i18n-baseline.json": "4f6981583e03df7b952a078f265762e5d95d3b11338132708e9eca8d1b8ec300",
+      "tests/runtime-package.test.js": "88a5d48374ee246585d42280a2eeb5a8280da49e5cb170af3f707edad848bb46",
+      "tests/verify-affected.test.js": "3ae1d728f62c6d498466f5ea2f0e79e6d8a4cdc220c5b778a814dce3744ffbad"
+    }
+  }
+}

@@ -72,31 +72,31 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(DISCOVERY_PATHS.includes("/room/mcp"), false);
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(text.includes("lobby.getdasha.com"), false); // dead door, never advertised
-  assert.match(text, /Humans: open this invite link/);
-  assert.match(text, /https:\/\/www\.getdasha\.com\/room\/#join\//);
-  assert.match(text, /#room\/\{roomId\} is not an invite/);
-  assert.match(text, /Agent invite code \/ redeem-invite is labeled below/);
-  assert.match(text, /packet \(live, no account\)/);
-  assert.match(text, /paste-prompt \(live, no account\)/);
-  assert.match(text, /GET \/join\.txt/);
-  assert.match(text, /guest-agent-link \(live, owner-issued\)/);
-  assert.match(text, /agent-room-create \(live, no account\)/);
-  assert.match(text, /bootstrap-agent-room/);
-  assert.match(text, /cli, not a live HTTP POST/);
-  assert.match(text, /no POST \/api\/bootstrap-agent-room/);
-  assert.match(text, /\/room\/api\/agent-identities/);
-  assert.match(text, /\/room\/api\/agent-rooms/);
-  assert.match(text, /\/room\/api\/agent-invites\/redeem/);
-  assert.match(text, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
-  assert.match(text, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
+  assert.match(full, /Humans: open this invite link/);
+  assert.match(full, /https:\/\/room\.trydemigod\.com\/#join\//);
+  assert.match(full, /#room\/\{roomId\} is not an invite/);
+  assert.match(full, /Agent invite code \/ redeem-invite is labeled below/);
+  assert.match(full, /packet \(live, no account\)/);
+  assert.match(full, /paste-prompt \(live, no account\)/);
+  assert.match(full, /GET \/join\.txt/);
+  assert.match(full, /guest-agent-link \(live, owner-issued\)/);
+  assert.match(full, /agent-room-create \(live, no account\)/);
+  assert.match(full, /bootstrap-agent-room/);
+  assert.match(full, /cli, not a live HTTP POST/);
+  assert.match(full, /no POST \/api\/bootstrap-agent-room/);
+  assert.match(full, /\/room\/api\/agent-identities/);
+  assert.match(full, /\/room\/api\/agent-rooms/);
+  assert.match(full, /\/room\/api\/agent-invites\/redeem/);
+  assert.match(full, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
+  assert.match(full, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
   assert.equal(card.endpoints.invite_mint, `${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`);
-  assert.match(text, /hosted-mcp \(live, no account\)/);
+  assert.match(full, /hosted-mcp \(live, no account\)/);
   assert.match(text, /https:\/\/room\.trydemigod\.com\/mcp/);
-  assert.doesNotMatch(text, /human-join-code \(live\)/);
-  assert.match(text, /www.getdasha.com \(no \/room path\)/);
+  assert.doesNotMatch(full, /human-join-code \(live\)/);
+  assert.match(full, /www.getdasha.com \(no \/room path\)/);
   assert.match(text, /room_check_access/);
   assert.match(text, /orient/);
-  assert.match(text, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(full, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(full, /queued \/ processing \/ active/);
   assert.match(full, /Compute is a separate/);
   assert.match(text, /\/kits\.txt/);
@@ -125,17 +125,17 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.match(AFTER_PASTE_SECTION, /POST \/api\/share-links\/join-agent/);
   assert.match(AFTER_PASTE_SECTION, /GET \/api\/rooms\/ROOM_ID\/activation-pack/);
   assert.doesNotMatch(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth|Waiting for Paste AI draft/);
-  for (const packet of [text, full]) {
-    const joinAt = packet.indexOf("## Join\n");
-    const afterAt = packet.indexOf(AFTER_PASTE_SECTION);
-    const routesAt = packet.indexOf("## Routes\n");
-    assert.ok(joinAt >= 0, "Join present");
-    assert.ok(afterAt > joinAt, "After paste follows Join");
-    assert.ok(routesAt > afterAt, "Routes follow After paste");
-    assert.equal(packet.includes(AFTER_PASTE_SECTION), true);
-    assert.match(packet, /Humans: open this invite link \(https:\/\/www\.getdasha\.com\/room\/#join\/…\)/);
-    assert.match(packet, /#room\/\{roomId\} is not an invite/);
-  }
+  const joinAt = full.indexOf("## Join\n");
+  const afterAt = full.indexOf(AFTER_PASTE_SECTION);
+  const routesAt = full.indexOf("## Routes\n");
+  assert.ok(joinAt >= 0, "Join present");
+  assert.ok(afterAt > joinAt, "After paste follows Join");
+  assert.ok(routesAt > afterAt, "Routes follow After paste");
+  assert.equal(full.includes(AFTER_PASTE_SECTION), true);
+  assert.match(full, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
+  assert.match(full, /#room\/\{roomId\} is not an invite/);
+  assert.match(text, /\[Full agent packet\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
+  assert.equal(text.includes(AFTER_PASTE_SECTION), false, "the short index points at the full packet instead of embedding After paste");
   assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
   assert.equal(kitsTxt().includes("## After paste"), false);
   const packetSkill = agentCard().skills.find(row => row.id === "packet");
@@ -150,7 +150,7 @@ test("both packets disclose the trial-seat mint requirement where they teach gue
   // the packet into a 403 whose advice looped back at them. The disclosure
   // rides the same sentence that presents the door, in both packets, and
   // in the JOIN_TIERS summary agents read first.
-  for (const packet of [llmsTxt(), llmsFullTxt()]) {
+  for (const packet of [llmsFullTxt()]) {
     const line = packet.split("\n").find(l => l.startsWith("- guest-agent-link"));
     assert.ok(line, "guest-agent-link join line present");
     assert.match(line, /signed-in account session/);
@@ -684,10 +684,10 @@ test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D
   assert.match(text, /One canonical MCP URL: paste https:\/\/room\.trydemigod\.com\/mcp/);
 });
 
-test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
-  const text = llmsTxt();
-  // The short packet must name the board endpoints so an agent can
-  // coordinate machine work without reading the full packet or openapi.
+test("llms-full.txt documents the work-claims REST contract (issue #1529)", () => {
+  const text = llmsFullTxt();
+  // The full packet names the board endpoints so an agent can
+  // coordinate machine work without reading openapi. The short index points there.
   assert.match(text, /^## Work-claim board$/m);
   const section = text.slice(text.indexOf("## Work-claim board"));
   assert.match(section, /GET \/api\/rooms\/{roomId}\/work-claims/);
@@ -722,8 +722,8 @@ test("every packet wake-poll mention teaches heartbeat-first with hostId (#3022)
       assert.ok(line.includes("agent_not_registered"), `${name}: Board-wakes line names the 404 before any heartbeat`);
     }
   }
-  const wakesLines = llmsTxt().split("\n").filter(l => l.includes("Board wakes"));
-  assert.equal(wakesLines.length, 2, "llms.txt keeps exactly its two Board-wakes paragraphs");
+  const wakesLines = llmsFullTxt().split("\n").filter(l => l.includes("Board wakes"));
+  assert.equal(wakesLines.length, 2, "llms-full.txt keeps exactly its two Board-wakes paragraphs");
 });
 
 // The packet golden path (PUBLIC_WORK_SECTION, shared by llms.txt and
@@ -737,10 +737,11 @@ test("packet golden path carries no stale termsVersion/generation literals", () 
     assert.ok(!text.includes("\"termsVersion\":3"), `${name}: no termsVersion 3 literal`);
     assert.ok(!text.includes("\"expectedTermsVersion\":3"), `${name}: finish example sends no literal expectedTermsVersion`);
     assert.ok(!text.includes("\"generation\":8"), `${name}: no generation 8 literal`);
-    assert.ok(text.includes("\"expectedTermsVersion\":TERMS_VERSION"), `${name}: finish example uses the TERMS_VERSION placeholder`);
-    assert.ok(text.includes("\"generation\":GENERATION"), `${name}: finish example uses the GENERATION placeholder`);
-    assert.match(text, /copy both, never invent them/, `${name}: finish example says to copy both values from the claim response`);
   }
+  const full = llmsFullTxt();
+  assert.ok(full.includes("\"expectedTermsVersion\":TERMS_VERSION"), "llms-full.txt finish example uses the TERMS_VERSION placeholder");
+  assert.ok(full.includes("\"generation\":GENERATION"), "llms-full.txt finish example uses the GENERATION placeholder");
+  assert.match(full, /copy both, never invent them/, "llms-full.txt finish example says to copy both values from the claim response");
 });
 
 // Canonical MCP origin (John's decision, 2026-10-13): room.trydemigod.com/mcp.
@@ -795,9 +796,42 @@ test("discovery surfaces name only one 'one' guide", () => {
 });
 
 test("llms packets describe /openapi.json as the curated machine surface, not every route", () => {
-  for (const [name, text] of [["llms.txt", llmsTxt()], ["skill.md", skillMd()]]) {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["skill.md", skillMd()]]) {
     assert.ok(!text.includes("Every route is in"), `${name}: no 'Every route is in' overclaim`);
     assert.ok(!text.includes("(every route)"), `${name}: no '(every route)' overclaim`);
     assert.match(text, /curated machine[ -]surface/, `${name}: states the actual coverage rule`);
+  }
+});
+
+// AEO Lane 3 (2026-10-17): the money truth after the settlement rail landed.
+// The packets and card once said volunteer/reputation-only; funded work now
+// settles in ledger credits through escrow. Pin the new truth and the
+// llms-full superset so the stale lines cannot return silently.
+test("packets and card state the funded-work truth, never the stale volunteer-only line", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!text.includes("Only volunteer work is executable here"), `${name}: stale volunteer-only line`);
+    assert.ok(text.includes("locked in escrow"), `${name}: escrow funding stated`);
+    assert.ok(text.includes("not cash"), `${name}: credits-not-cash stated`);
+  }
+  const card = agentCard();
+  assert.ok(!card.description.includes("reputation receipts only"), "card: stale reputation-only line");
+  assert.ok(card.description.includes("ledger credits"), "card: ledger credits stated");
+  assert.ok(card.description.includes("not cash"), "card: credits-not-cash stated");
+});
+
+test("llms-full.txt is a section superset of llms.txt and no smaller", () => {
+  const text = llmsTxt(), full = llmsFullTxt();
+  const headings = packet => [...packet.matchAll(/^## .+$/gm)].map(match => match[0]);
+  for (const heading of headings(text)) {
+    assert.ok(headings(full).includes(heading), `llms-full.txt missing section: ${heading}`);
+  }
+  assert.ok(full.length >= text.length, `llms-full.txt (${full.length}) must not be smaller than llms.txt (${text.length})`);
+});
+
+test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extended", async t => {
+  const origin = await serve(t);
+  const robots = await (await fetch(`${origin}/robots.txt`)).text();
+  for (const bot of ["Google-Extended", "CCBot", "Applebot-Extended"]) {
+    assert.ok(robots.includes(`User-agent: ${bot}\nAllow: /`), `robots.txt must explicitly allow ${bot}`);
   }
 });

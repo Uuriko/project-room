@@ -561,13 +561,19 @@ test("land queue rows copy into land claims once and the list stays the same sha
 
 test("board v2 routes answer 410 and point at work claims", async t => {
   const { origin, ownerKey } = await fixture(t);
-  const response = await fetch(`${origin}/api/rooms/commons/board/v2/claims`, {
+  for (const path of ["/board/v2/claims", "/board/v2/health", "/board/v2/claims/task-1/not-a-route"]) {
+    const response = await fetch(`${origin}/api/rooms/commons${path}`, {
+      headers: { authorization: `Bearer ${ownerKey}` }
+    });
+    const body = await response.json();
+    assert.equal(response.status, 410, path);
+    assert.equal(body.error.code, "board_v2_retired");
+    assert.equal(body.next[0].href, "/api/rooms/commons/work-claims");
+  }
+  const near = await fetch(`${origin}/api/rooms/commons/board/v2extra`, {
     headers: { authorization: `Bearer ${ownerKey}` }
   });
-  const body = await response.json();
-  assert.equal(response.status, 410);
-  assert.equal(body.error.code, "board_v2_retired");
-  assert.equal(body.next[0].href, "/api/rooms/commons/work-claims");
+  assert.equal(near.status, 404);
   const tables = ["board_vtwo_claims", "board_vtwo_events", "board_vtwo_mirror", "board_vtwo_idempotency"];
   const { store } = await fixture(t);
   for (const name of tables) {

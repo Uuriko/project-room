@@ -28,10 +28,18 @@ async function fixture(t) {
   t.after(async () => { await stop(); rmSync(f.directory, { recursive: true, force: true }); });
   const directory = join(f.directory, 'connection');
   saveAgentConnection(directory, { version: 1, origin: `http://127.0.0.1:${port}`, roomId: 'commons', memberId: 'producer', token: f.keys.producer });
-  const connect = () => {
+  const connect = ({ loseCommandResponse = false } = {}) => {
     const connection = readAgentConnection(directory);
     const client = new RoomAgentClient({ ...connection,
-      fetchImpl: (url, options) => fetch(url, { ...options, headers: { ...options.headers, Connection: 'close' } }) });
+      fetchImpl: async (url, options) => {
+        const response = await fetch(url, { ...options, headers: { ...options.headers, Connection: 'close' } });
+        if (loseCommandResponse && options.method === 'POST' && new URL(url).pathname.endsWith('/commands')) {
+          assert.equal(response.status, 201, 'lose only an actually committed command response');
+          await response.arrayBuffer();
+          throw new TypeError('Simulated response lost after commit');
+        }
+        return response;
+      } });
     return { client, read: () => readResumablePreparation(client, workItemId, { directory, connection }),
       act: (name, args) => submitWorkAction(client, connection, name, args) };
   };
@@ -116,4 +124,29 @@ test('a resumed preparation does not rebase a stale action after another client 
   assert.equal(f.work().revision, current.work.revision + 1);
   assert.ok(f.sequence() >= started.sequence);
   assert.ok(started.sequence > sequence);
+});
+
+
+test('lost command response reconciles after restart without duplicating or rebasing the operation', async t => {
+  const f = await fixture(t);
+  const initial = await f.connect().read();
+  const input = Object.freeze({ requestId: randomUUID(), workItemId, expectedRevision: initial.work.revision });
+  const before = f.sequence();
+  await assert.rejects(f.connect({ loseCommandResponse: true }).act('room_accept_work', input), /Simulated response lost after commit/);
+  assert.equal(f.work().revision, initial.work.revision + 1, 'server committed despite a lost response');
+  assert.ok(f.sequence() > before);
+  await f.restart();
+  const returning = f.connect();
+  const accepted = await returning.read();
+  await returning.act('room_start_work', { requestId: randomUUID(), workItemId, expectedRevision: accepted.work.revision });
+  const latest = f.work(), sequence = f.sequence();
+  const receipt = await returning.act('room_accept_work', input);
+  assert.equal(receipt.status, 'recorded');
+  assert.equal(receipt.duplicate, true);
+  assert.equal(receipt.appliedRevision, initial.work.revision + 1);
+  assert.equal(receipt.currentStateVerified, false, 'original receipt does not claim current ownership/state');
+  assert.equal(f.sequence(), sequence, 'retry records no duplicate event');
+  assert.deepEqual(f.work(), latest, 'old retry cannot rewind the newer work');
+  await assert.rejects(returning.act('room_accept_work', { ...input, expectedRevision: latest.revision }), error => error.code === 'idempotency_conflict');
+  assert.equal(f.sequence(), sequence);
 });
