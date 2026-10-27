@@ -341,6 +341,11 @@ export class RoomClient {
         let covered = held?.fullSequence ?? 0;
         do {
           const session = this.session, holding = this.heldMessages();
+          // Sequence and snapshot the held state was taken at, for the
+          // carried-event accounting below (this.sequence / this.live move
+          // with the assignment at the end of the iteration).
+          const heldSequence = this.sequence;
+          const heldSnapshot = this.live && this.live.generation === generation && this.live.session === session ? this.live.snapshot : null;
           // With nothing held, read the newest window first (the background fill brings the rest).
           const full = flight.again || flight.fullNow || flight.fullSequence > covered;
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
@@ -367,16 +372,51 @@ export class RoomClient {
           if (complete) covered = Math.max(covered, read.sequence);
           if (partial && holding?.partial) this.partialReads++;
           if (snapshot.sequence >= this.sequence) {
+            // Carried-event accounting for a windowed read: the fill is owed
+            // only for an event this read PASSED — one inside the sequence
+            // advance since the held snapshot that the read did not carry.
+            // A windowed read carries (a) every message in its window that
+            // was not held before (a new arrival serves its own record), and
+            // (b) every change to the state it serves in full (work items,
+            // pins): only the messages are windowed, the rest of the state
+            // is current as of the read's sequence. An edit or delete of a
+            // message before the window changes neither, so it is not
+            // counted: advance > carried means a passed event exists. A
+            // single carried arrival (advance 1, carried 1) therefore owes
+            // no fill — owing one would schedule a background full refresh
+            // whose extra snapshot repaints whatever the reader is doing —
+            // while an advance beyond the carried events (a 9→11 jump with
+            // one carried message: 9 + 1 = 10 < 11) still owes the fill that
+            // heals the passed record. An already-owed fill persists above
+            // through holding.owesFull until a complete read clears it, so
+            // per-read accounting cannot lose a passed event from an
+            // earlier windowed read.
+            let passedEvent = false;
+            if (!complete && holding && !holding.partial) {
+              const advance = snapshot.sequence - heldSequence;
+              if (advance > 0) {
+                const heldIds = new Set(holding.messages.map(message => message?.id));
+                let carried = Array.isArray(read.state?.messages)
+                  ? read.state.messages.filter(message => message && !heldIds.has(message.id)).length : 0;
+                const heldWork = heldSnapshot?.state?.workItems, readWork = read.state?.workItems;
+                if (heldWork && readWork && typeof heldWork === "object" && typeof readWork === "object") {
+                  for (const id of new Set([...Object.keys(heldWork), ...Object.keys(readWork)]))
+                    if (JSON.stringify(heldWork[id]) !== JSON.stringify(readWork[id])) carried++;
+                }
+                if (JSON.stringify(heldSnapshot?.state?.pins ?? null) !== JSON.stringify(read.state?.pins ?? null)) carried++;
+                passedEvent = advance > carried;
+              }
+            }
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
-              // A windowed read that advances the sequence past the last full
-              // read may have passed an event it did not carry (an edit or
-              // delete of a message before the window, e.g. behind a delivery
-              // gap): the merged window cannot correct that record, so the
-              // held snapshot owes a full fill — the same heal a reconnect's
-              // replay from fullSequence provides, without the reconnect.
-              partial, owesFull: !complete && (partial || Boolean(holding?.owesFull) || snapshot.sequence > (holding?.fullSequence ?? 0)) };
+              // A windowed read that passed an event it did not carry (an
+              // edit or delete of a message before the window, e.g. behind
+              // a delivery gap) leaves that record stale in the merged
+              // window, so the held snapshot owes a full fill — the same
+              // heal a reconnect's replay from fullSequence provides,
+              // without the reconnect.
+              partial, owesFull: !complete && (partial || Boolean(holding?.owesFull) || passedEvent) };
             this.live = { generation, session, snapshot };
             this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
             this.onSnapshot(snapshot, this.session);
