@@ -58,12 +58,13 @@ test("an identity creates a room self-serve and becomes its owner", async t => {
   assert.equal(created.duplicate, false);
   // RC-2026-09-18-030: the create response names the first-owner moves.
   assert.deepEqual(created.next.map(n => n.action),
-    ["start-work", "post-message", "finish-work", "create-task", "invite-members", "publish-card", "read-quickstart"]);
-  assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.doc)),
-    "every next step names a path or doc plus what to do");
+    ["start-work", "post-message", "finish-work", "claim-work", "handoff-work", "create-task", "invite-members", "publish-card", "read-quickstart"]);
+  assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.tool || n.doc)),
+    "every next step names a path, tool or doc plus what to do");
   assert.equal(created.next[0].path, "/api/rooms/agent-den/work-claims/starter/update",
     "room-scoped next steps are templated with the new roomId");
   assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/work-claims/starter/update");
+  assert.equal(created.next.find(n => n.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   assert.equal(created.starter.claimId, "starter");
   assert.equal(created.starter.state, "claimed");
   // The projection names the agent member as owner with the full set...
@@ -575,6 +576,8 @@ test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + he
   assert.equal(boot.json.invite.profile, "collaborate");
   assert.deepEqual(boot.json.invite.permissions, [...AGENT_AUTONOMY_PERMISSIONS]);
   assert.match(boot.json.invite.code, /^RM-/);
+  assert.equal(Date.parse(boot.json.invite.expiresAtIso), boot.json.invite.expiresAt);
+  assert.equal(boot.json.warnings.includes("Live www /room/api/* is 404 until Instinct publishes the Worker rewrite. Source path is ready."), false);
   assert.equal(boot.json.hello.posted, true);
   assert.ok(boot.json.ownerPermissions.includes("invite_member"));
   assert.ok(boot.json.ownerPermissions.includes("manage_members"));

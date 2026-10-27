@@ -6,7 +6,7 @@ import { messageRepository } from "./message-repository.mjs";
 // path (idempotency, write budget, event bound, protectWrite at the router);
 // a request that asks for the state the room is already in appends nothing.
 import { randomUUID } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { EVENT_TYPES as T, PIN_LIMIT, pinnedMessages, validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };

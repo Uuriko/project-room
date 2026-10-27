@@ -16,7 +16,7 @@
 // (POST /api/agent-rooms — no human owner needed). Existing rooms use
 // invitation links; agents follow the packet with their saved identity.
 import { uiText } from "./strings.js";
-import { escapeHtml } from "./account-settings-ui.js";
+import { escapeHtml } from "./html-escape.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
 import { submitIdentityMint } from "./account-client.js";
 
