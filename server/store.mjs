@@ -105,7 +105,7 @@ import { WebFetch, webFetchSchema, migrateWebFetchLogColumns } from "./web-fetch
 import { WebResearch, webResearchSchema } from "./web-research.mjs"; // RC-2026-09-24-310: knowledge router (additive)
 import { AgentIdentities, agentIdentitySchema, ensureIdentitySecretSchema, ensureIdentityCapacitySchema, ensureIdentityLinkCodeSchema, identityLinkCodeSchema, isIdentitySecret } from "./agent-identities.mjs";
 import { identityRoomSeats } from "./membership-resolution.mjs";
-import { identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member->identity for the wake legs (#3764, #3777).
+import { activeMemberIdForWakeIdentity, identityIdForWakeMember } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware member<->identity for the wake legs (#3764, #3777). Delivery requires an active seat.
 import { AgentKeyRegistry, agentKeyRegistrySchema } from "./agent-key-registry.mjs"; // Integration map slice 9: agent public-key registry.
 // Board v2 is retired. These tables stay so existing databases and the
 // recovery audit still see them. Nothing drops board_vtwo_*.
@@ -6340,10 +6340,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           messageId: command.data.messageId || incoming.id, sequence, eventId: incoming.id
         });
       }
-      if (command.type === T.DM_POSTED && incoming.data?.toIdentityId) {
+      if (command.type === T.DM_POSTED && incoming.data?.toIdentityId
+        && activeMemberIdForWakeIdentity(this, roomId, incoming.data.toIdentityId)) {
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
+        // A removed member keeps the identity link; the active-seat check
+        // above is what stops the wake.
         const { woken, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
@@ -6621,6 +6624,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
+      // Removal keeps the link row. Do not wake an identity that is no
+      // longer an active member of this room (guest seats: live pass too).
+      if (activeMemberIdForWakeIdentity(this, roomId, identityId) !== memberId) continue;
       const { woken, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {

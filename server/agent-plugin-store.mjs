@@ -31,7 +31,7 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
-import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
+import { activeMemberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777). Active seats only: removal keeps the link row.
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
@@ -1281,11 +1281,11 @@ export class AgentPluginStore {
       // room's message bodies to the URL it chose, even if the row stayed
       // enabled from an older build.
       if (this.identityRevoked(row.agentId)) continue;
-      // Room-membership scope: resolve the subscription's agent_id to its
-      // member id in this room through the shared guest-aware resolver.
-      // An identity seated in neither identity_links nor guest_members
-      // for this room is not a member and hears nothing.
-      const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId, this.store.now());
+      // Room-membership scope: an active member only. The shared resolver
+      // still seats identity_links and guest_members, then requires
+      // members[id].active !== false (and a live guest pass for a guest
+      // seat). Removal keeps the link row, so the link alone hears nothing.
+      const memberId = activeMemberIdForWakeIdentity(this.store, roomId, row.agentId);
       if (!memberId) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
@@ -1463,23 +1463,29 @@ export class AgentPluginStore {
     // that kept their old next_attempt_at would fill every batch forever and
     // starve all newer deliveries: live 2026-09-24 every cron tick reported
     // processed 25 / skipped 25 and nothing was ever delivered or retried.
-    const skip = () => {
-      this.mutate(() => this.db.prepare(
-        `UPDATE agent_webhook_deliveries SET next_attempt_at=?, claim_expires_at=NULL
-         WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
-        .run(now + SKIPPED_RECHECK_MS, row.delivery_id, claimExpiresAt));
+    const skip = (reason = null) => {
+      this.mutate(() => {
+        if (reason) {
+          this.db.prepare(
+            `UPDATE agent_webhook_deliveries SET next_attempt_at=?, last_error=?, claim_expires_at=NULL
+             WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+            .run(now + SKIPPED_RECHECK_MS, String(reason).slice(0, 500), row.delivery_id, claimExpiresAt);
+        } else {
+          this.db.prepare(
+            `UPDATE agent_webhook_deliveries SET next_attempt_at=?, claim_expires_at=NULL
+             WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+            .run(now + SKIPPED_RECHECK_MS, row.delivery_id, claimExpiresAt);
+        }
+      });
       return "skipped";
     };
     if (!sub.enabled) return skip();
-    // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
-    // identity lost its room seat between fan-out and dispatch is skipped,
-    // not sent. Fail closed at the last moment too. The delivery stays
-    // pending, so a re-seated identity still receives it on a later drain.
-    // The seat lookup goes through the shared guest-aware resolver
-    // (identity_links first, guest_members fallback) — the same one the
-    // fan-out uses (#3777) — so a trial seat's queued delivery is not
-    // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
-    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now)) return skip();
+    // Dispatch-time re-check: a delivery whose identity is no longer an
+    // active member (removed, or a guest pass that lapsed) is skipped and
+    // journaled, not sent. The row stays pending, so a re-added member
+    // still receives it on a later drain. Same active-seat resolver as
+    // fan-out, including the guest_members fallback (#3777, #3881).
+    if (row.room_id && !activeMemberIdForWakeIdentity(this.store, row.room_id, row.agent_id)) return skip("skipped_not_member");
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
     // payload?.data: a stored payload that parses to a non-object (or an

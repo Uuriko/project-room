@@ -90,3 +90,50 @@ export function memberIdForWakeIdentity(db, roomId, identityId, now = Date.now()
   if (!guest?.memberId) return null;
   return guestSeatLive(db, roomId, guest.memberId, now) ? guest.memberId : null;
 }
+
+function missingSchema(error) {
+  return /no such (table|column)/i.test(String(error?.message ?? ""));
+}
+
+// A guest seat resolved only through guest_members also needs a live,
+// unrevoked access credential when that table can answer. A database
+// without the credentials table has no pass state to consult. Any other
+// read error fails closed.
+function liveGuestPass(store, roomId, memberId) {
+  let row;
+  try {
+    row = store.db.prepare(
+      `SELECT MAX(expires_at) AS expiresAt FROM credentials
+       WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0`
+    ).get(roomId, memberId);
+  } catch (error) {
+    if (missingSchema(error)) return true;
+    return false;
+  }
+  if (!row || row.expiresAt == null) return false;
+  const now = typeof store.now === "function" ? Number(store.now()) : Date.now();
+  return Number.isFinite(now) && Number(row.expiresAt) > now;
+}
+
+// Same resolution as memberIdForWakeIdentity, then the room roster.
+// Removal keeps the identity_links (or guest_members) row and sets
+// members[id].active to false, so a link row alone is not a seat.
+// Returns the member id only while that member exists and active !== false.
+// Guest seats (no identity_links row) also need a live guest pass when
+// that state is available. Errors return null.
+export function activeMemberIdForWakeIdentity(store, roomId, identityId) {
+  try {
+    if (!store || typeof store.roomAuthority !== "function" || !store.db) return null;
+    const memberId = memberIdForWakeIdentity(store.db, roomId, identityId);
+    if (!memberId) return null;
+    const member = store.roomAuthority(roomId).members?.[memberId];
+    if (!member || member.active === false) return null;
+    const link = getRow(store.db,
+      "SELECT member_id AS memberId FROM identity_links WHERE room_id=? AND identity_id=?",
+      roomId, identityId);
+    if (!link?.memberId && !liveGuestPass(store, roomId, memberId)) return null;
+    return memberId;
+  } catch {
+    return null;
+  }
+}

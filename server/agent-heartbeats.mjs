@@ -23,6 +23,7 @@ import { randomBytes } from "node:crypto";
 import { validateWebhookUrl, assertWebhookHostDnsPublic, WAKE_ACK_HINT } from "./outbound-webhooks.mjs";
 import { postDelivery } from "./webhook-dispatch.mjs";
 import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
+import { activeMemberIdForWakeIdentity, memberIdForWakeIdentity } from "./wake-identity-resolution.mjs";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
@@ -1074,13 +1075,52 @@ export class AgentHeartbeats {
     }
     const probe = limit + 1;
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
-    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
+    const hiddenSeat = new Map();
+    // Hide a room only when this identity's seat is known and inactive
+    // (or a guest pass has lapsed). A signal with no seat — a unit queue,
+    // a room this store cannot read — stays on the page.
+    const hideRoom = signalRoomId => {
+      if (!signalRoomId) return false;
+      if (hiddenSeat.has(signalRoomId)) return hiddenSeat.get(signalRoomId);
+      let hide = false;
+      try {
+        const memberId = memberIdForWakeIdentity(this.store.db, signalRoomId, agentId);
+        if (memberId) {
+          const member = this.store.roomAuthority(signalRoomId).members?.[memberId];
+          if (member && activeMemberIdForWakeIdentity(this.store, signalRoomId, agentId) !== memberId) hide = true;
+        }
+      } catch { hide = false; }
+      hiddenSeat.set(signalRoomId, hide);
+      return hide;
+    };
+    const loadSignals = () => this.db.prepare(`SELECT * FROM agent_wake_signals
       WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
       AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
       AND (room_id IS NULL OR room_id NOT IN (SELECT value FROM json_each(?)))
       ORDER BY created_at,signal_id LIMIT ?`)
       .all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0,
         after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe).map(signalView);
+    // A removed member keeps queued signals. Skip rooms they are no longer
+    // an active member of, and keep scanning so those rows do not fill the
+    // page ahead of a room they still belong to.
+    const messages = [];
+    const seenSignals = new Set();
+    for (let pass = 0; pass < 8 && messages.length < probe; pass++) {
+      const batch = loadSignals();
+      let hidden = 0;
+      for (const signal of batch) {
+        if (seenSignals.has(signal.signalId)) continue;
+        seenSignals.add(signal.signalId);
+        if (hideRoom(signal.roomId)) {
+          if (signal.roomId) held.add(signal.roomId);
+          hidden++;
+          continue;
+        }
+        messages.push(signal);
+        if (messages.length >= probe) break;
+      }
+      if (hidden === 0 || batch.length < probe) break;
+    }
     const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after }) ?? [];
     const combined = [...messages, ...work].filter(s => !held.has(s.roomId))
       .sort((a, b) => a.createdAt - b.createdAt || (a.signalId < b.signalId ? -1 : a.signalId > b.signalId ? 1 : 0));
