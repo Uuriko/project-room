@@ -26,7 +26,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // second run writes nothing.
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
 
 export const WORK_ITEM_BOARD_BACKFILL_VERSION = 2;
 export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -544,6 +544,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     // computed them from room policy at propose time; never recompute here).
     // Same names/semantics as the item fields so the #3342 decisions inbox
     // (PR #3572 decisionFacts) can re-point at the board 1:1.
+    accountableMemberId: typeof item.accountableMemberId === "string" && item.accountableMemberId.length > 0 ? item.accountableMemberId : null,
     ownerDecisionRequired: item.ownerDecisionRequired === true,
     humanDecisionMakerId: typeof item.humanDecisionMakerId === "string" && item.humanDecisionMakerId.length > 0 ? item.humanDecisionMakerId : null,
     reviewedBy: reviewsMerged.length > 0 ? reviewsMerged[reviewsMerged.length - 1].memberId : null,
@@ -567,7 +568,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
       ...(existing?.pullRequests ?? []),
     ].map(pull => [pull.url, pull])).values()].slice(0, MAX_PULLS),
     updatedAt: isoOrNull(item.updatedAt) ?? isoOrNull(item.createdAt) ?? iso(nowMs),
-    repo: claimForScope ? (claimForScope.repository ?? null) : null,
+    repo: claimForScope ? (normalizeClaimRepository(claimForScope.repository) ?? null) : null,
     branch: claimForScope ? (claimForScope.ref ?? null) : null,
     chain: chain.slice(-MAX_CHAIN),
     supersededBy: item.state === "superseded" && typeof item.supersededBy === "string" ? boardClaimId(item.supersededBy) : null,
@@ -672,6 +673,7 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     reviewPolicy: null,
     ownerDecisionRequired: false,
     humanDecisionMakerId: null,
+    accountableMemberId: null,
     reviewedBy: null,
     attestations: [],
     tags: [],

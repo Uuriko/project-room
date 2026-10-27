@@ -146,11 +146,21 @@ const repoOf = value => {
   check(typeof value === "string" && NAME_PATTERN.test(value), "repo must be 1..200 characters of letters, numbers, or . _ / -");
   return value;
 };
+// Canonical work keeps the caller's repository spelling for replay. The Board
+// and live conflict checks share this identity conversion for public GitHub URLs.
+export function normalizeClaimRepository(value) {
+  if (typeof value !== "string") return value;
+  const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(value);
+  return match ? `${match[1]}/${match[2]}` : value;
+}
+export { repoOf as claimRepositoryOf };
+
 const branchOf = value => {
   if (value === undefined || value === null || value === "") return null;
   check(typeof value === "string" && NAME_PATTERN.test(value), "branch must be 1..200 characters of letters, numbers, or . _ / -");
   return value;
 };
+export { branchOf as claimBranchOf };
 const MAX_PULLS = 16;
 const MAX_CHAIN = 20;
 const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -900,6 +910,7 @@ export const workOf = value => {
   const revision = revisionOf(value.revision);
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
   const decisionGate = decisionGateOf(value);
+  const accountableMemberId = memberRefOf(value.accountableMemberId, "accountableMemberId");
   const historyOmitted = historyOmittedOf(value.historyOmitted);
   const readingAcks = readingAcksOf(value.readingAcks);
   const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
@@ -911,6 +922,7 @@ export const workOf = value => {
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     ...decisionGate,
+    accountableMemberId,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
