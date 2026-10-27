@@ -141,7 +141,7 @@ test("uncorrelated adapter evidence never marks an unknown attempt accepted", as
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
 test("HTTP callers may review, reserve and cancel but cannot forge dispatch or delivery", async t => {
-  const f = setup(t), server = createRoomServer({ store: f.store });
+  const f = setup(t), server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
@@ -216,8 +216,8 @@ test("late account revocation retains unknown status and a new authorized sessio
 });
 test("optional loopback simulation endpoint uses the existing intent and never accepts claimed outcomes", async t => {
   const f = setup(t), driver = f.driver();
-  assert.throws(() => createRoomServer({ store: f.store, origin: "https://example.test", trustedLocalProxy: true, syntheticInboxTransport: driver }), /loopback/);
-  const server = createRoomServer({ store: f.store, syntheticInboxTransport: driver });
+  assert.throws(() => createRoomServer({ enableDeferredInbox: true, store: f.store, origin: "https://example.test", trustedLocalProxy: true, syntheticInboxTransport: driver }), /loopback/);
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store, syntheticInboxTransport: driver });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
