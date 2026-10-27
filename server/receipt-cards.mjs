@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // ACT-1a: append a room event without a member credential, and post the in-room
 // receipt card for a done board claim. Public receipts stay the opt-in PRM/GR1
 // path. This module does not import the work-claim or guide modules.
@@ -8,6 +9,7 @@
 import { createHash } from "node:crypto";
 import { applyEvent, event, isRoomArchived } from "../src/events.js";
 import { syncMessageRows } from "./messages-store.mjs";
+import { attemptReceipts } from "../src/work-item-session.js";
 
 export const ROOM_GUIDE_ID = "room-guide";
 
@@ -53,6 +55,29 @@ const evidenceOf = item => {
   return note || "Closed.";
 };
 
+// Cost on the card comes only from what the run recorded: the last finished
+// attempt's measured usage, its declared cap and its declared model. Each is
+// null when unrecorded. An all-null cost adds nothing; a partial record names
+// the missing parts instead of inventing a number.
+// A Board claim's session lives on its linked work item (or the work item of
+// the same id); a claim with no recorded run gets an all-null cost.
+const UNRECORDED = Object.freeze({ spentCents: null, capCents: null, model: null });
+export const receiptCostOf = workItem => {
+  const attempts = workItem && typeof workItem === "object" ? [...attemptReceipts(workItem)].reverse() : [];
+  const last = attempts.find(a => a.outcome === "done") ?? attempts.find(a => a.outcome !== null) ?? null;
+  if (!last) return { ...UNRECORDED };
+  return { spentCents: last.usageCents ?? null, capCents: last.estimateCents ?? null, model: last.model ?? null };
+};
+const dollars = cents => `$${(cents / 100).toFixed(2)}`;
+export const receiptCostLine = cost => {
+  if (!cost) return "";
+  if (cost.spentCents === null && cost.capCents === null && cost.model === null) return "";
+  const spent = Number.isSafeInteger(cost.spentCents) ? `Cost ${dollars(cost.spentCents)}` : "Cost not recorded";
+  const cap = Number.isSafeInteger(cost.capCents) ? `cap ${dollars(cost.capCents)}` : "no cap recorded";
+  const model = cost.model ? `model ${cost.model}` : "model not recorded";
+  return ` ${spent} (${cap}, ${model}).`;
+};
+
 // One card per claim. A second done notification for the same id is a no-op.
 export function postReceiptCard(store, roomId, item, atMs) {
   if (!item || item.state !== "done") return null;
@@ -68,7 +93,9 @@ export function postReceiptCard(store, roomId, item, atMs) {
   const closedBy = (closer?.displayName || closer?.id || author.displayName || author.id);
   const pull = item.pullRequest?.url;
   const messageId = stableEventId("rc", `${roomId}\0${claimId}`);
-  if (room.state.messages?.some(message => message.id === messageId)) return null;
+  if (messageRepository(store, roomId, room.state).get(messageId)) return null;
+  const workItems = room.state.workItems ?? {};
+  const cost = receiptCostOf(workItems[item.workItemId] ?? workItems[item.id] ?? null);
   return appendRoomEvent(store, roomId, {
     id: messageId,
     type: "message.posted",
@@ -76,14 +103,15 @@ export function postReceiptCard(store, roomId, item, atMs) {
     atMs,
     data: {
       messageId,
-      body: `${title} closed as ${item.deliveryMode}.`,
+      body: `${title} closed as ${item.deliveryMode}.${receiptCostLine(cost)}`,
       kind: "receipt_card",
       claimId,
       title,
       closedBy,
       deliveryMode: item.deliveryMode,
       evidence: evidenceOf(item),
-      ...(typeof pull === "string" && pull.trim() ? { pullRequestUrl: pull } : {})
+      ...(typeof pull === "string" && pull.trim() ? { pullRequestUrl: pull } : {}),
+      ...(cost ? { cost } : {})
     }
   });
 }

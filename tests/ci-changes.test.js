@@ -78,8 +78,19 @@ test("browser runs when a shared browser-check helper changes", () => {
   assert.equal(classifyChanges(["scripts/auth-signin.mjs"]).browser, true);
   assert.equal(classifyChanges(["scripts/room-chrome.mjs"]).browser, true);
   assert.equal(classifyChanges(["scripts/helpers/google-oauth-fixture.mjs"]).browser, true);
+  assert.equal(classifyChanges(["scripts/browser-suites.mjs"]).browser, true);
   // server/ modules the checks import (transitively, via the server).
   assert.equal(classifyChanges(["server/room-entry.mjs"]).browser, true);
+});
+
+test("docs-only diffs are markdown or docs/, and any other file is not", () => {
+  assert.equal(classifyChanges(["docs/INDEX.md"]).docsOnly, true);
+  assert.equal(classifyChanges(["README.md"]).docsOnly, true);
+  assert.equal(classifyChanges(["docs/openapi.yaml"]).docsOnly, true);
+  assert.equal(classifyChanges(["docs/INDEX.md", "README.md"]).docsOnly, true);
+  assert.equal(classifyChanges(["docs/INDEX.md", "server/store.mjs"]).docsOnly, false);
+  assert.equal(classifyChanges([".github/workflows/test.yml"]).docsOnly, false);
+  assert.equal(classifyChanges([]).docsOnly, false);
 });
 
 test("browser still skips when the diff cannot affect the checks", () => {

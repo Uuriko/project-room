@@ -236,6 +236,7 @@ describe("operator purge and status", { concurrency: false }, () => {
     const eventsB = store.db.prepare("SELECT count(*) AS n FROM events WHERE room_id=?").get(roomB).n;
     assert.equal((await call(`/api/rooms/${roomA}`, { authorization: `Bearer ${ownerA}` })).status, 200);
     const { plan, executed } = await planAndExecute(call, [{ kind: "room", id: roomA }]);
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM work_entities WHERE room_id=?").get(roomA).n, 0);
     assert.ok(plan.body.totalRows > 0);
     assert.equal(executed.status, 200, JSON.stringify(executed.body));
     assert.equal(executed.body.result, "executed");
@@ -284,6 +285,7 @@ describe("operator purge and status", { concurrency: false }, () => {
     store.db.prepare(`INSERT INTO public_receipts (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, hashes_json, at, start_href)
       VALUES ('pwr_0123456789abcdef', 'Fixture receipt', 'work-claim', ?, ?, 'qa2 receipts setting', '[]', '[]', '[]', '2026-10-16T00:00:00.000Z', '/?start=room')`).run(roomA, roomA);
     const { plan, executed } = await planAndExecute(call, [{ kind: "room", id: roomA }]);
+    assert.equal(store.db.prepare("SELECT count(*) AS n FROM work_entities WHERE room_id=?").get(roomA).n, 0);
     assert.equal(plan.body.counts.find(row => row.table === "room_public_receipts_setting")?.rows, 1);
     assert.equal(executed.status, 200, JSON.stringify(executed.body));
     assert.equal(executed.body.result, "executed");
