@@ -176,7 +176,7 @@ const ALLOW = {
   },
   webhook_deliveries: {
     routeSelector: {
-      subscriptionId: "'Omit for the identity-wide log and metrics' \u2014 omitted reads the identity-wide log and metrics (GET /api/agent-webhooks/deliveries, /dead-letter, /metrics, which declare no subscriptionId), set reads one subscription's journal (GET /api/agent-webhooks/{subscriptionId}/deliveries, where it is a required path parameter).",
+      subscriptionId: "'Omit for the identity-wide log and metrics' — omitted reads the identity-wide log and metrics (GET /api/agent-webhooks/deliveries, /dead-letter, /metrics, which declare no subscriptionId), set reads one subscription's journal (GET /api/agent-webhooks/{subscriptionId}/deliveries, where it is a required path parameter).",
     },
   },
   wake_register: {
