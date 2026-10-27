@@ -196,7 +196,13 @@ test("the handler rate-limits by remote address, then serves the funnel read", (
   assert.deepEqual(out.body.directory, { listedRooms: 2, totalMembers: 117, rooms: LISTED });
 });
 
-test("a room owner receives mint counts on a private response; another member does not", () => {
+test("a room owner receives mint counts on a private response; another member does not", (t) => {
+  // handleDoorFunnel never passes `now`, so readDoorFunnel falls back to the
+  // wall clock — the seeded fixtures live in the week of NOW (Wed 2026-10-21),
+  // and the [0, 1, 2] mint buckets below are only the right expectation while
+  // the run date sits in that same week. Pin the clock to NOW for this test
+  // so the week buckets are the seeded ones on any run date.
+  t.mock.timers.enable({ apis: ["Date"], now: NOW });
   const store = storeOf(seededDb(), LISTED);
   store.roomAuthority = () => ({ ownerId: "owner-1" });
   store.authenticate = token => {
