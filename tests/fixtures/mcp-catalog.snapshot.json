@@ -1165,6 +1165,24 @@
         "openWorldHint": false
       }
     },
+    "room_run_action": {
+      "inputSchema": "81ad2ade46cb75b2",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": false,
+        "openWorldHint": true
+      }
+    },
+    "room_search_actions": {
+      "inputSchema": "db4687fb9b7e04ca",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_select_help_offer": {
       "inputSchema": "cf804d7e056cf301",
       "annotations": {

@@ -45,11 +45,15 @@ async function member(t) {
 const stable = body => JSON.parse(JSON.stringify(body, (key, value) => key === "operationId" ? undefined : value));
 const size = tools => JSON.stringify(tools).length;
 
-test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
+test("lean is opt-in: default core is unchanged, full is a superset, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
   assert.equal(core.length, 22, "default core is unchanged until the flip is agreed");
-  assert.equal(full.length, 119, "full adds room_claim and room_handoff");
+  // 119 + the two action meta tools: "full" is the whole catalog, so it now
+  // also lists room_search_actions / room_run_action (UT26 lane 10 F4 —
+  // they were previously lean-only, so full was not a superset).
+  assert.equal(full.length, 121, "full adds room_claim and room_handoff plus the action meta tools");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
+  assert.ok(full.some(tool => tool.name === "room_search_actions"), "meta tools are listed in full");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
   assert.ok(lean.every(Boolean) && names.every(name => typeof name === "string"));
