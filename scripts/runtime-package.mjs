@@ -57,7 +57,7 @@ const required = [...v8Assets, "server.mjs", "package.json", "package-lock.json"
 // Historical v8 packages predate these files. Literal-import closure below makes
 // them mandatory when the selected source imports them, without rewriting history.
 const optional = ["server/diagnostics.mjs", "server/maintenance.mjs", "server/recovery.mjs", "client/agent-connection.mjs", "server/agent-connections.mjs", "src/agent-connections.js", "src/agent-error.mjs", "client/mcp-stdio.mjs", "client/work-preparation.mjs", "scripts/agent-mcp.mjs", "client/work-actions.mjs", "server/work-discussion.mjs", "server/text-results.mjs", "client/attention-inbox.mjs"];
-optional.push("src/workspace-navigation.js");
+optional.push("src/workspace-navigation.js", "src/room-discovery.js", "src/human-join-ui.js", "src/room-join-settings.js");
 // Historical release packaging still verifies these files when the selected
 // old source advertises them. They are absent from v1's public asset list.
 optional.push("src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui.js",

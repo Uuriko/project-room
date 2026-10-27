@@ -95,7 +95,7 @@
     "src/html-escape.js": "sha256:c11803b39ce9bb53a49d7bad6e7f520b556d8a1b2247c24060392dc6e4dd90ca",
     "src/human-experience.css": "sha256:c4eb8870bedbafda4bc85f1a85788070d94815e60a0eff5a3f1902a4f9804aa3",
     "src/human-experience.js": "sha256:f23aa2f637a817dedb8ad41b125f06dc0c9c56843f4ae5cc101f9d1a68048c77",
-    "src/human-join-ui.js": "sha256:77913b277cb92a0962ac40f20bddf89b8cc494431ec7e2e4db1a7ff9ab4dcbbd",
+    "src/human-join-ui.js": "sha256:d63e2dbf2dcd5e0838999075a1941b5de6e094ba0000204e4deb3c8272cea31e",
     "src/human-push-display.js": "sha256:e5ae3ec560fe7334442557e286e5d297f8b579a215f41c2702890ba49d8050f6",
     "src/human-push.js": "sha256:d1c35ff1ea9b2cdfd352282db6a7fb1cbcd814e503b53e03a45884adfa041ae3",
     "src/invite-context.js": "sha256:17328cc6619c64592b75995baa441d45e136da37c80f2079bbdb6c7fc3c44bea",
@@ -104,7 +104,7 @@
     "src/login-polish.css": "sha256:0d4ece96f4d26140e7f99bf34f5e63d73e0143c63e50f7ca61d7dacebd685b3c",
     "src/member-display-names.js": "sha256:7679f106d20b4a8947555173895784952ce9aef858dfc2c2bab041ed4eaa794b",
     "src/message-reducers.js": "sha256:4df23621c020fa8f84d7e9986d07bc579b6d18298d6cce39c7df7439cb7cc475",
-    "src/needs-attention.js": "sha256:733c364cfb4bf8d1c5613a9cae73811438847f26489f27843831742389b3d232",
+    "src/needs-attention.js": "sha256:71b22b693af4b343c5fdf493d0d42d085c83d19e73fb24e2716f265a8f386779",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",
     "src/operator.css": "sha256:cd016a6147ff49f1bc0463e438353d24004199ddd98981ec433ef92fbc4b2568",
     "src/owner-cockpit.js": "sha256:61bb8df98ae9aadf4745921456f17861d813559578680354258a1e0847ce40b1",
@@ -130,7 +130,7 @@
     "src/room-deep-link.js": "sha256:fc111ee798a43ee05991c147fa1b4cf0b743c5cc5530a8357ff8770146ea98c3",
     "src/room-discovery.js": "sha256:9eca97e0a125dab5775b37b9508cad222baeb3d68f931d87962caa77b7338f1e",
     "src/room-instructions.js": "sha256:f44a40e9edcf346e1804bdbd87dd7529d51b16e212a74f1d74d7aa79ea91901c",
-    "src/room-join-settings.js": "sha256:84716db3539bb5dbe4d50584d2501242432bdd5f4fa2b45ab593aa42256d2373",
+    "src/room-join-settings.js": "sha256:7ecd330602a197c44ec70fd897c4b7c0c85f32e628e6ac47d16d78cc0631cb1e",
     "src/room-layout.js": "sha256:dfa9a49f34650ced88c9df63633d9ebf82ff7d25a1c535f983b675bba544ced3",
     "src/room-roster.js": "sha256:938feb4cf75c13f4ffbda8e59b6354b00c3a6512fc05de1fc902dbbd82f2a5e1",
     "src/room-setup-prompt.js": "sha256:f770646b20288b3064b232f2fb60428179cc50e729e1889cea3a9f26100c8789",
@@ -154,8 +154,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:23a81d688f81c9edb37b701f2b412aa9437de12503165ae99a92b5eabb6aff0f",
-    "strings/en.json": "sha256:a197abcd5dc0ddbeb697ea6b781a6076953da74e30b42923e1ae097bdd347f27"
+    "strings/en.js": "sha256:206cddbf724186d743d7fd017d66ed17ef6b60adc6e4ec4e18e53c8aa29e8eae",
+    "strings/en.json": "sha256:8f35055d15e54ad24b88751a01ce8f1bfe98fefb3a150a1658cba8ea17cfbc46"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:c46b418b45f552a3b9eb3b8df6669768301e608f512ba2465791ae6a524cce8e",
@@ -170,6 +170,6 @@
   },
   "packages": {
     "package-lock.json": "sha256:301419dd2256c996a6c774b7a5a8f18713f68a2d4478da1e29c97548d1098cb8",
-    "package.json": "sha256:f724668b98a082b2f9e46927c3df24eaeef4184ed078521754667f7244f695d3"
+    "package.json": "sha256:34950f56c3757e32c04d436f5e751ed7a3a9fa03c54f4be72d6a701b41e48cd7"
   }
 }

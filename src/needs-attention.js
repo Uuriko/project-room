@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { ACCESS_PRESETS, permissionLabel } from "./access-presets.js";
 // #662 owner attention rollup, plus MEMBER-PERMS reviewed access requests.
 // Admins see only the existing access-request queue their authority permits;
@@ -32,7 +33,7 @@ export function createNeedsAttentionCard(options) {
   const next = section.querySelector("#attention-next");
   const moreJoins = section.ownerDocument?.createElement("button");
   let joinCursor = null;
-  if (moreJoins) { moreJoins.type = "button"; moreJoins.className = "button ghost"; moreJoins.textContent = "More join requests"; moreJoins.hidden = true; section.append(moreJoins); }
+  if (moreJoins) { moreJoins.type = "button"; moreJoins.className = "button ghost"; moreJoins.textContent = uiText("rooms.join.more"); moreJoins.hidden = true; section.append(moreJoins); }
   let currentReport = null, epoch = 0, busy = false, partial = null, observed = null, activeScope = null, authority = null, resync = false;
   function viewer() {
     const state = typeof getState === "function" ? getState() : null, session = client.session;
@@ -289,11 +290,11 @@ export function createNeedsAttentionCard(options) {
       const page = await client.request(client.path(`/join-requests?after=${encodeURIComponent(joinCursor)}`));
       if (!owns(ticket, session, generation)) return;
       if (page.roomId !== session.roomId || !Array.isArray(page.requests)) throw new Error("The request queue could not be confirmed");
-      const items = [...new Map([...currentReport.items, ...page.requests.map(requestItem)].map(item => [item.id, item])).values()];
+      const items = [...new Map([...currentReport.items, ...page.requests.map(requestItem)].map(item => [`${item.kind}:${item.id}`, item])).values()];
       joinCursor = page.nextCursor; moreJoins.hidden = !joinCursor;
       render({ ...currentReport, items, itemCount: Math.max(currentReport.itemCount, items.length) });
       setStatus("");
-    } catch { if (owns(ticket, session, generation)) setStatus("Couldn’t load more requests. Try again."); }
+    } catch { if (owns(ticket, session, generation)) setStatus(uiText("rooms.join.moreError")); }
     finally { if (owns(ticket, session, generation)) { setBusy(false); if (resync) { resync = false; observed = null; sync(); } } }
   });
   refreshButton.addEventListener("click", () => refresh());

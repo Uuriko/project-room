@@ -27,3 +27,13 @@ Schema43 adds `account_join_requests` and its indexes. The migration installs th
 Before release, qualify a43-aware fallback based on the prior production behavior. It must include the additive table/index definition,43 fence and request deletion compatibility, while retaining prior UI and route behavior. Persist pending, approved and denied requests and approved human memberships; run candidate → fallback → candidate restart tests and verify those records and existing room behavior. A fallback must not approve, cancel or discard requests automatically. Ordinary rollback must not restore an older snapshot or lose data.
 
 Current implementation is under qualification. The requester view is bounded to the most recent100 requests; the administrator queue exposes keyset pagination. Release qualification must include composed first-login/discovery UI, real Worker SQLite migration and fallback restart, authority/race tests, affected checks, lint, full suite and the required1000-message benchmark. These are requirements for this change, not claims that those checks have already passed.
+
+Run the explicit Worker recovery qualification with independently pinned source trees:
+
+```sh
+ROOM_JOIN_OLD_ROOT=/path/to/schema42-source \
+ROOM_JOIN_FALLBACK_ROOT=/path/to/schema43-aware-fallback \
+npm run test:human-join-upgrade
+```
+
+This test requires real source roots and refuses missing or wrong-version inputs. It uses persisted Worker SQLite across restarts, verifies old-writer refusal, compares pending/approved/denied rows and membership bindings through fallback, permits an ordinary fallback write, then resumes the pending request after returning to the feature runtime. It runs separately from the default Cloudflare suite because that suite does not provision the two independent source trees.

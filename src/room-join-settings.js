@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 export function createRoomJoinSettings({client, getState, section}) {
   const select=section.querySelector("select"),status=section.querySelector('[role="status"]');
   let epoch=0,scope=null,current=null,busy=false;
@@ -6,17 +7,17 @@ export function createRoomJoinSettings({client, getState, section}) {
   function reset() { epoch++;scope=null;current=null;busy=false;section.hidden=true; }
   async function refresh() {
     if(!owner()){reset();return;}
-    const session=client.session,ticket=++epoch;scope=session;section.hidden=false;select.disabled=true;status.textContent="Checking visibility…";
+    const session=client.session,ticket=++epoch;scope=session;section.hidden=false;select.disabled=true;status.textContent=uiText("rooms.join.visibilityChecking");
     try { const result=await client.request(client.path("/join-settings"));if(!valid(ticket,session))return;
       current=result.discoverable;select.value=current?"public":"private";status.textContent="";select.disabled=false;
-    }catch{if(valid(ticket,session))status.textContent="Couldn’t check visibility. Reopen settings to retry.";}
+    }catch{if(valid(ticket,session))status.textContent=uiText("rooms.join.visibilityReadError");}
   }
   select.addEventListener("change",async()=>{
     if(busy||!owner()||scope!==client.session||typeof current!=="boolean")return;
-    const session=client.session,ticket=epoch;busy=true;select.disabled=true;status.textContent="Saving…";
+    const session=client.session,ticket=epoch;busy=true;select.disabled=true;status.textContent=uiText("rooms.join.saving");
     try {const result=await client.request(client.path("/join-settings"),{method:"POST",data:{discoverable:select.value==="public",expectedDiscoverable:current}});
-      if(!valid(ticket,session))return;current=result.discoverable;status.textContent="Saved";
-    }catch{if(valid(ticket,session)){select.value=current?"public":"private";status.textContent="Couldn’t save. Reopen settings to check the current value.";}}
+      if(!valid(ticket,session))return;current=result.discoverable;status.textContent=uiText("rooms.join.saved");
+    }catch{if(valid(ticket,session)){select.value=current?"public":"private";status.textContent=uiText("rooms.join.visibilityWriteError");}}
     finally{if(valid(ticket,session)){busy=false;select.disabled=false;}}
   });
   return {refresh,reset};

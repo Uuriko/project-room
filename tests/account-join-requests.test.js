@@ -1,4 +1,7 @@
 import test from "node:test";
+import {AccountJoinRequests} from "../server/account-join-requests.mjs";
+import {accountJoinRequestsSchema} from "../server/account-join-schema.mjs";
+import {ACCOUNT_JOIN_REQUEST_ROUTES} from "../server/routes/account-join-requests.mjs";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
@@ -10,7 +13,7 @@ function setup(t) {
  return {s,owner,token:slot.token,binding:session.sessionBinding,input:{roomId:"commons",requestId:"humanjoin-ask-1",displayName:"New Human",note:"Hello"}};
 }
 test("human request approval binds real account atomically and retries do not duplicate",t=>{
- const {s,owner,token,binding,input}=setup(t);const q=s.accountJoinRequests;
+ const {s,owner,token,binding,input}=setup(t);const q=new AccountJoinRequests(s);
  const pending=q.request(token,binding,input);assert.equal(pending.status,"pending");assert.deepEqual(q.request(token,binding,input),pending);
  assert.throws(()=>q.request(token,binding,{...input,note:"changed"}),{code:"idempotency_conflict"});
  const done=q.decide(owner,"commons",null,input.requestId,{decision:"approve",expectedRevision:0});
@@ -38,10 +41,11 @@ test("real HTTP requires account CSRF and approval makes account room visible",a
  await new Promise(r=>server.listen(0,"127.0.0.1",r));
  t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));});
  const origin=`http://127.0.0.1:${server.address().port}`;
+ const path=ACCOUNT_JOIN_REQUEST_ROUTES.find(row=>row.id==="human-join-request").path;
  const auth=s.authenticateAccountSession(token,null,binding);
  const headers={Cookie:`account_session=${token}`,"X-Session-Binding":binding,"Content-Type":"application/json",Origin:origin};
- let r=await fetch(origin+"/api/account-join-requests",{method:"POST",headers,body:JSON.stringify(input)});assert.equal(r.status,403);
- r=await fetch(origin+"/api/account-join-requests",{method:"POST",headers:{...headers,"X-CSRF-Token":auth.csrf},body:JSON.stringify(input)});assert.equal(r.status,201,await r.clone().text());
+ let r=await fetch(origin+path,{method:"POST",headers,body:JSON.stringify(input)});assert.equal(r.status,403);
+ r=await fetch(origin+path,{method:"POST",headers:{...headers,"X-CSRF-Token":auth.csrf},body:JSON.stringify(input)});assert.equal(r.status,201,await r.clone().text());
  const request=await r.json();assert.equal(request.status,"pending");
  r=await fetch(origin+"/api/rooms/commons/join-requests",{headers:{Authorization:`Bearer ${owner}`}});assert.equal(r.status,200,await r.clone().text());assert.equal((await r.json()).requests.length,1);
  r=await fetch(origin+`/api/rooms/commons/join-requests/${input.requestId}/decide`,{method:"POST",headers:{Authorization:`Bearer ${owner}`,"Content-Type":"application/json"},body:JSON.stringify({decision:"approve",expectedRevision:0})});assert.equal(r.status,200,await r.clone().text());
@@ -177,4 +181,23 @@ test("unavailable requests can be declined and keyset pagination reaches request
  s.roomDirectory.set("commons","owner",false);assert.equal(q.listOwn(token,binding).requests[0].status,"unavailable");
  assert.equal(q.decide(owner,"commons",null,input.requestId,{decision:"deny",expectedRevision:0}).status,"denied");
  assert.throws(()=>q.list(owner,"commons",null,{after:"not-valid"}),{code:"invalid_join_cursor"});
+});
+
+
+test("admission schema enforces request identity and account/room foreign keys",async()=>{
+ const {DatabaseSync}=await import("node:sqlite");const db=new DatabaseSync(":memory:");
+ try {db.exec("PRAGMA foreign_keys=ON; CREATE TABLE accounts(id TEXT PRIMARY KEY);CREATE TABLE rooms(id TEXT PRIMARY KEY);INSERT INTO accounts VALUES('a');INSERT INTO rooms VALUES('r');");db.exec(accountJoinRequestsSchema);
+ const insert=db.prepare("INSERT INTO account_join_requests(request_id,room_id,account_id,fingerprint,display_name,note,status,created_at,expires_at) VALUES(?,?,?,'fp','name','','pending',1,2)");
+ insert.run("one","r","a");assert.throws(()=>insert.run("one","r","a"),/UNIQUE/);assert.throws(()=>insert.run("two","missing","a"),/FOREIGN KEY/);assert.throws(()=>insert.run("three","r","missing"),/FOREIGN KEY/);
+ const plan=db.prepare("EXPLAIN QUERY PLAN SELECT * FROM account_join_requests WHERE room_id=? AND status='pending' ORDER BY created_at,request_id LIMIT 101").all("r");assert.ok(plan.some(row=>row.detail.includes("account_join_requests_room")));
+ }finally{db.close();}
+});
+
+test("confirmed room purge removes human request records without orphaned accounts",async t=>{
+ const {s,token,binding,input}=setup(t);s.accountJoinRequests.request(token,binding,input);
+ const {createOperatorPurge}=await import("../server/operator-purge.mjs");const purge=createOperatorPurge(s);
+ const plan=purge.plan({targets:[{kind:"room",id:"commons"}],reason:"Synthetic admission cleanup",allowActiveMembers:true},"join-purge-plan");
+ purge.execute({planId:plan.planId,confirmToken:plan.confirmToken},"join-purge-execute");
+ assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM account_join_requests").get().n,0);
+ assert.equal(s.account("requester").active,true);
 });

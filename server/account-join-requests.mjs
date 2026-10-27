@@ -13,9 +13,9 @@ export const JOIN_REQUEST_TTL_MS = 7 * 86400000;
 // request ID; approval binds a human member without minting an agent identity.
 export class AccountJoinRequests {
   constructor(store) { this.store = store; this.db = store.db; }
-  view(row) {
+  view(row, available = undefined) {
     return { requestId: row.request_id, roomId: row.room_id, displayName: row.display_name,
-      note: row.note, status: row.status === "pending" ? (row.expires_at <= this.store.now() ? "expired" : this.isAvailable(row.room_id) ? "pending" : "unavailable") : row.status,
+      note: row.note, status: row.status === "pending" ? (row.expires_at <= this.store.now() ? "expired" : (available ?? this.isAvailable(row.room_id)) ? "pending" : "unavailable") : row.status,
       revision: row.revision, createdAt: row.created_at, expiresAt: row.expires_at,
       decidedAt: row.decided_at, memberId: row.member_id, kind: "human_join", requestedPermissions: [] };
   }
@@ -84,7 +84,8 @@ export class AccountJoinRequests {
     }
     const rows = this.db.prepare("SELECT * FROM account_join_requests WHERE room_id=? AND status='pending' AND expires_at>?" + (cursor ? " AND (created_at>? OR (created_at=? AND request_id>?))" : "") + " ORDER BY created_at,request_id LIMIT 101").all(roomId, this.store.now(), ...(cursor ? [cursor[0], cursor[0], cursor[1]] : []));
     const page = rows.slice(0, 100), last = page.at(-1);
-    return { roomId, requests: page.map(row => this.view(row)), nextCursor: rows.length > 100 ? Buffer.from(JSON.stringify([last.created_at, last.request_id])).toString("base64url") : null };
+    const available = this.isAvailable(roomId);
+    return { roomId, requests: page.map(row => this.view(row, available)), nextCursor: rows.length > 100 ? Buffer.from(JSON.stringify([last.created_at, last.request_id])).toString("base64url") : null };
   }
   cancel(token, binding, requestId, expectedRevision) {
     return this.store.transaction(() => {

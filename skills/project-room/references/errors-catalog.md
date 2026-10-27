@@ -1089,3 +1089,14 @@ response's own `hint`/`next` when it names something more specific.
 | `work_resolved` | 409 | This work is resolved; no reminder was scheduled. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `work_review_rejected` | 403 | Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work | follow hint | Follow this error's hint and next steps. |
 | `wrong_link_kind` | 422 | Human invitation links are not agent credentials. | follow hint | Follow this error's hint and next steps. |
+| `invalid_join_cursor` | 422 | The request cursor is invalid. | follow hint | Restart the request list and use its returned nextCursor. |
+| `invalid_join_decision` | 422 | Decision and current request revision are required. | follow hint | Send approve or deny with the current expectedRevision. |
+| `invalid_join_request` | 422 | The account join request is invalid. | follow hint | Correct the request fields; preserve the request ID if reconciling an uncertain send. |
+| `invalid_visibility` | 422 | Visibility and its current value are required. | follow hint | Read join-settings and send discoverable and expectedDiscoverable booleans. |
+| `join_pending` | 409 | A request for this room is already pending. | follow hint | Read your account join requests and follow the existing request. |
+| `join_request_changed` | 409 | The request is no longer at the supplied pending revision. | follow hint | Read its current status and revision before taking another action. |
+| `join_request_not_found` | 404 | The scoped request was not found. | follow hint | Read the current authorized request list; do not guess another account or room. |
+| `join_unavailable` | 404 | This room is not accepting public requests. | follow hint | Use a valid invitation; do not retry public admission unchanged. |
+| `membership_exists` | 409 | This account already has a room membership. | follow hint | Use the existing membership or request a new invitation; do not recreate removed access. |
+| `requester_unavailable` | 409 | The requester account is no longer active. | follow hint | Decline the request or wait for the account to be restored; do not grant access by another identity. |
+| `visibility_changed` | 409 | Directory visibility changed. | follow hint | Read join-settings again before deciding whether to save. |

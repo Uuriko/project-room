@@ -15,6 +15,7 @@
     "test:quarantined": "node scripts/run-quarantined-tests.mjs",
     "test:relay": "npm --prefix relay test",
     "test:refine": "node --test scripts/refine-draft-browser-check.mjs",
+    "test:human-join-upgrade": "node --test cloudflare/human-join-schema43.check.mjs",
     "test:browser": "node scripts/browser-suites.mjs --run",
     "test:browser:ci": "node scripts/browser-ci.mjs",
     "check": "node scripts/check.mjs",

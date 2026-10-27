@@ -257,6 +257,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   // Account-session inventory + targeted revocation (CX4). Native desktop
   // sessions live here, not in the OAuth family: the desktop exchange
   // retires its OAuth grant and keeps only the account-session slot.
+  route("/api/account-join-requests", ["GET", "POST"], "account-session", "Inspect own human join requests or request admission to a listed room. Browser account binding and CSRF required for writes.", "humanJoinRequests", { operationIds: { GET: "humanJoinRequestsList", POST: "humanJoinRequestCreate" } }),
+  route("/api/account-join-requests/{requestId}/cancel", ["POST"], "account-session", "Cancel the signed-in account own pending request with expectedRevision.", "humanJoinRequestCancel"),
   route("/api/account/sessions", ["GET"], "account-session", "List the signed-in account's live account sessions (browser and native/desktop slots): public id, login method, created-at, authenticated-until, expiry, and whether each is the caller's current session.", "accountSessionsList"),
   route("/api/account/sessions/{id}", ["DELETE"], "account-session", "Revoke one account session (browser or native slot) owned by the signed-in account. Only that session dies; the account's other sessions and every OAuth session are untouched. Unknown ids and other accounts' sessions both answer 404.", "accountSessionRevoke"),
   // Agent claim-block pre-validation (QA2 2026-10-04: served spec omitted it).

@@ -1184,7 +1184,8 @@
   "tests/writer-fence-unfenced.test.js": 58675,
   "tests/writer-fence.test.js": 77595,
   "tests/analytics-loop-funnel.test.js": 3200,
-  "tests/receipts-cursor-hidden.test.js": 4000
+  "tests/receipts-cursor-hidden.test.js": 4000,
+  "tests/account-join-requests.test.js": 881.208
  },
  "_note": "Per-file wall-clock ms of `node --test <file>` measured 2026-10-06 on a 2-CPU host with 16-way parallelism (values are contention-inflated; used only as relative weights for shard balancing, never for membership). Files hitting the 300s measurement timeout are capped at 300000.",
  "releaseRecordMeasurement": "Eight record-rail files measured on macOS Node26, four concurrent real Node processes, 2026-10-06; all eight passed. Timing allocates files only.",
@@ -1251,5 +1252,12 @@
   ],
   "filesMeasured": 1,
   "purpose": "Measured allocation only; test discovery remains authoritative. Timing allocates files only, not membership."
+ },
+ "accountJoinMeasurement": {
+  "date": "2026-10-27",
+  "runtime": "Node24.22.1 local macOS",
+  "revision": "24a88f31 plus documentation and current-schema assertion updates",
+  "filesMeasured": 1,
+  "method": "Single local node --test tests/account-join-requests.test.js; 13 passed. Timing allocation only."
  }
 }
