@@ -207,6 +207,21 @@ test("authorized coordinator proposes and supersedes work without transferring a
   assert.deepEqual(againWork, originalReplacement);
 });
 
+test("canonical room_claim drives take, renew and release while legacy names report their successor", { timeout: 30000 }, async t => {
+  const f = await fixture(t), a = await f.open(f.participants[0].configDirectory), workItemId = "work-agent-a";
+  await recorded(a, "room_accept_work", { requestId: "canonical-accept", workItemId, expectedRevision: 0 });
+  const expiresAt = new Date(Date.now() + 7200000).toISOString();
+  await recorded(a, "room_claim", { requestId: "canonical-take", workItemId, expectedRevision: 1, action: "take", ...f.manifest.scope });
+  assert.equal((await read(a, workItemId)).work.claim.holderId, "agent-a");
+  await recorded(a, "room_claim", { requestId: "canonical-renew", workItemId, expectedRevision: 2, action: "renew", expiresAt });
+  assert.equal((await read(a, workItemId)).work.claim.expiresAt, expiresAt);
+  await recorded(a, "room_claim", { requestId: "canonical-release", workItemId, expectedRevision: 3, action: "release" });
+  assert.equal((await read(a, workItemId)).work.claim.status, "released");
+  const legacy = await recorded(a, "room_acquire_claim", { requestId: "legacy-re-take", workItemId, expectedRevision: 4, ...f.manifest.scope });
+  assert.equal(legacy.successor, "room_claim");
+  assert.deepEqual(legacy.deprecated, { successor: "room_claim", action: "take", message: 'Use room_claim with action="take".' });
+});
+
 test("expired claim rejects new work while its original successful acquisition remains retryable without renewal", { timeout: 30000 }, async t => {
   const f = await fixture(t), a = await f.open(f.participants[0].configDirectory), workItemId = "work-agent-a";
   await recorded(a, "room_accept_work", { requestId: "accept-expiring", workItemId, expectedRevision: 0 });

@@ -68,6 +68,15 @@ export const LEAN_MCP_TOOLS = Object.freeze([
 
 const words = text => String(text ?? "").toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 1);
 const REST_ROUTE = /\b(GET|POST|PUT|PATCH|DELETE) (\/api\/[A-Za-z0-9_:{}\/.-]+)/;
+// Common ways agents ask for the consolidated claim/handoff actions. The
+// synopsis words are added to the query terms so "I'm stuck" finds handoff
+// and "take this task" finds room_claim without teaching every description
+// to stuff keywords.
+const INTENT_SYNONYMS = Object.freeze([
+  { phrases: ["claim work", "claim this", "take work", "take task", "take this", "grab work", "grab task", "acquire work"], terms: ["claim", "take"] },
+  { phrases: ["hand off", "handoff", "stuck", "blocked", "cannot finish", "can't finish", "give back work"], terms: ["handoff", "hand", "off"] }
+]);
+const CANONICAL_WRITE_TOOLS = new Set(["room_claim", "room_handoff"]);
 
 export function restRouteOf(tool) {
   const match = REST_ROUTE.exec(tool.description ?? "");
@@ -94,21 +103,30 @@ export function validRunActionArgs(args) {
   return args.arguments === undefined || args.arguments !== null && typeof args.arguments === "object" && !Array.isArray(args.arguments);
 }
 
-// Name words count three times as much as description words; ties keep
-// catalog order, so the result is deterministic.
+// Name words count three times as much as description words. The canonical
+// claim/handoff front doors get a small bonus so a work-named long-tail tool
+// (for example room_work_claim_provenance) cannot outrank the one an agent
+// should call. Ties keep catalog order, so the result is deterministic.
 export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, tools = hostedMcpToolDefs } = {}) {
+  const normalized = String(query ?? "").toLowerCase();
   const terms = [...new Set(words(query))];
+  for (const intent of INTENT_SYNONYMS) {
+    if (intent.phrases.some(phrase => normalized.includes(phrase))) {
+      for (const term of intent.terms) if (!terms.includes(term)) terms.push(term);
+    }
+  }
   const visible = agent ? tools.filter(tool => capabilityVisibleTo(agent, tool)) : tools;
   const scored = [];
   visible.forEach((tool, index) => {
     const nameWords = new Set(words(tool.name));
     const descriptionWords = new Set(words(tool.description));
-    let score = 0;
+    let score = 0, nameHit = false;
     for (const term of terms) {
-      if (nameWords.has(term)) score += 3;
+      if (nameWords.has(term)) { score += 3; nameHit = true; }
       else if ([...nameWords].some(word => word.startsWith(term) || term.startsWith(word) && word.length > 3)) score += 2;
       if (descriptionWords.has(term)) score += 1;
     }
+    if (nameHit && CANONICAL_WRITE_TOOLS.has(tool.name)) score += 4;
     if (score > 0) scored.push({ score, index, tool });
   });
   scored.sort((a, b) => b.score - a.score || a.index - b.index);

@@ -18,7 +18,7 @@
 // connection ids recur across accounts. Rows written before the columns
 // existed keep NULL in both and still read/verify — see
 // migrateSpamQuarantineColumns.
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // reasonBytes caps the stored signal list (a flagMessage() result carries at

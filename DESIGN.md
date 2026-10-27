@@ -52,6 +52,10 @@ human-facing change against that.
 
 - **Chat is home.** Updates, Work, People, and Connections support the chat.
   They don't replace it, and they don't add a second home.
+- **One attention entry.** Updates contains catch-up history and owner decisions.
+  Do not add a parallel Activity destination or label read updates as Saved;
+  bookmarks remain their own explicit message action. Peripheral agent/API
+  features do not automatically earn a human panel.
 - **One assistant voice.** The humans see one Room assistant. Worker agents
   sit behind it, visible on demand. Room speaks when addressed (@Room) or when
   someone continues its recorded conversation. John removed the separate Ask

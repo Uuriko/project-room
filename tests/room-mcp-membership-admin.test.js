@@ -69,9 +69,10 @@ test("owner mints, lists, and revokes agent invites over MCP", async t => {
   assert.ok((await restListed.json()).invites.some(invite => invite.inviteId === minted.value.inviteId), "REST sees the MCP invite");
 
   const revoked = await call(origin, "room_revoke_agent_invite", { roomId: room.roomId, inviteId: minted.value.inviteId }, owner.secret);
-  assert.deepEqual(revoked.value, { inviteId: minted.value.inviteId, revoked: true });
+  assert.deepEqual(revoked.value, { inviteId: minted.value.inviteId, revoked: true, status: "revoked" });
   const again = await call(origin, "room_revoke_agent_invite", { roomId: room.roomId, inviteId: minted.value.inviteId }, owner.secret);
-  assert.ok(again.body.error || again.isError, "second revoke is refused");
+  assert.equal(again.isError, false, JSON.stringify(again.body));
+  assert.deepEqual(again.value, { inviteId: minted.value.inviteId, revoked: true, status: "revoked" });
 
   const redeemed = store.invites.redeem;
   assert.equal(typeof redeemed, "function");

@@ -159,6 +159,16 @@ export function memberStatus(member, context) {
   return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
 }
 
+// One accessible name per member row: who, agent or human, and how available.
+// Screen readers and browser drivers address the row by this name instead of
+// its initials and status chips.
+export function memberRowName(member, status) {
+  const name = String(member?.displayName ?? "").trim();
+  const kind = member?.kind === "agent" ? "agent" : "human";
+  const state = String(status ?? "").trim();
+  return [name, kind, state].filter(Boolean).join(", ");
+}
+
 // Compact Done receipt for an agent who posted completion. Not chat spam.
 export function memberDoneChip(member, { workItems } = {}) {
   if (!member || member.kind !== "agent" || member.active === false) return null;
@@ -581,6 +591,18 @@ export class DraftRecovery {
       }
       let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)
         : drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      // Keep empty-thread navigation separate from recoverable draft text.
+      // Never turn a rejected private draft into a fresh public reply.
+      if (activeKey === null && typeof saved.threadId === "string"
+        && saved.activeKey === saved.threadId && !saved.entries.some(([id]) => id === saved.threadId)) {
+        const root = index.byId.get(saved.threadId), channelId = root?.channelId ?? "general";
+        if (root && !root.deletedAt && !root.toMemberId && index.threads.has(root.id)
+          && (channelId === "general" || state.channels?.[channelId])
+          && !state.channels?.[channelId]?.archivedAt) {
+          drafts.save(root.id, { body: "", toMemberId: "", replyToId: root.id, channelId, pending: null });
+          activeKey = root.id;
+        }
+      }
       const active = drafts.entries.get(activeKey);
       if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
       const selected = drafts.entries.get(activeKey);
