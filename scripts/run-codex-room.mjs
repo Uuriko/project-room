@@ -13,6 +13,27 @@ import { superviseCodexRoom, scopedCodexThreads } from "../client/codex-supervis
 import { runCodexSharedAssistant } from "../client/codex-shared-assistant.mjs";
 import { superviseCodexRequests } from "../client/codex-request-supervisor.mjs";
 
+export function bindRuntimeRoomTools(settings, connection, environment = process.env) {
+  // Native setup pins the visible room identity. Validate the connection that
+  // this child actually loaded, closing the file-replacement race at launch.
+  if (connection && environment.ROOM_HOST_SCOPE !== undefined) {
+    let expected;
+    try { expected = JSON.parse(environment.ROOM_HOST_SCOPE); } catch { /* refuse below */ }
+    const fields = ["origin", "roomId", "memberId"];
+    if (!expected || typeof expected !== "object" || Array.isArray(expected)
+      || Object.keys(expected).length !== fields.length
+      || fields.some(field => typeof expected[field] !== "string" || !expected[field] || expected[field] !== connection[field]))
+      throw new Error("Room connection changed; reconnect the agent in My Mac");
+  }
+  if (connection) {
+    const scope = { origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId };
+    if (settings.roomTools && Object.keys(scope).some(key => settings.roomTools.scope[key] !== scope[key]))
+      throw new Error("Runtime Room tools target another identity");
+    if (environment.ROOM_AGENT_CONFIG) settings.roomTools = { directory: realpathSync(environment.ROOM_AGENT_CONFIG), scope };
+  }
+  return validateCodexRuntimeConfig(settings);
+}
+
 export async function main(argv = process.argv.slice(2)) {
   if (argv[0] === "--help") {
     console.log(`Usage:
@@ -50,8 +71,10 @@ Normal invocation executes one already-created public Room assistant run assigne
     if (argv.length !== 5 || !isAbsolute(argv[1]) || !isAbsolute(argv[2]) || !validId(argv[3]) || !validId(argv[4]))
       throw new Error("Choose the exact journal, runtime config, cancelled request and original attempt");
     try {
-      console.log(JSON.stringify(await reconcileCancelledCodexRequest({ connection: agentConnectionFromEnvironment(),
-        journal: argv[1], config: JSON.parse(readFileSync(argv[2], "utf8")), requestMessageId: argv[3], attemptId: argv[4] })));
+      const connection = agentConnectionFromEnvironment();
+      const config = bindRuntimeRoomTools(validateCodexRuntimeConfig(JSON.parse(readFileSync(argv[2], "utf8"))), connection);
+      console.log(JSON.stringify(await reconcileCancelledCodexRequest({ connection,
+        journal: argv[1], config, requestMessageId: argv[3], attemptId: argv[4] })));
     } catch (error) {
       const allowed = ["reconciliation_proof_unavailable", "reconciliation_binding_mismatch", "reconciliation_outcome_present",
         "reconciliation_dispatch_unknown", "reconciliation_cancellation_required", "reconciliation_private_path_required",
@@ -76,17 +99,7 @@ Normal invocation executes one already-created public Room assistant run assigne
     || !allowedRequestIds.every(validId))) throw new Error("Choose 1 to 20 distinct valid request IDs");
   const settings = validateCodexRuntimeConfig(JSON.parse(readFileSync(configPath, "utf8")));
   const connection = check ? null : agentConnectionFromEnvironment();
-  // Native setup pins the visible room identity. Validate the connection that
-  // this child actually loaded, closing the file-replacement race at launch.
-  if (connection && process.env.ROOM_HOST_SCOPE !== undefined) {
-    let expected;
-    try { expected = JSON.parse(process.env.ROOM_HOST_SCOPE); } catch { /* refuse below */ }
-    const fields = ["origin", "roomId", "memberId"];
-    if (!expected || typeof expected !== "object" || Array.isArray(expected)
-      || Object.keys(expected).length !== fields.length
-      || fields.some(field => typeof expected[field] !== "string" || !expected[field] || expected[field] !== connection[field]))
-      throw new Error("Room connection changed; reconnect the agent in My Mac");
-  }
+  bindRuntimeRoomTools(settings, connection);
   const db = check ? null : openRequestJournal(journal);
   const threads = db ? scopedCodexThreads(db, connection) : [];
   let rpc, statusWriter;

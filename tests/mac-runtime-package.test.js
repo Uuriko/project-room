@@ -13,6 +13,7 @@ test("Mac runtime runs outside checkout with verified closure and no installed p
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const result = packageMacRuntime(fileURLToPath(new URL("../", import.meta.url)), output);
   assert.ok(result.files > 1);
+  assert.match(readFileSync(join(output, "AGENT-RUNTIME.md"), "utf8"), /Bundled Room tools/);
   const manifest = JSON.parse(readFileSync(join(output, "runtime-manifest.json")));
   for (const file of manifest.files) assert.equal(createHash("sha256").update(readFileSync(join(output, file.path))).digest("hex"), file.sha256);
   assert.equal(existsSync(join(output, "server/agent-discovery.mjs")), false, "agent runtime must not package server discovery to route client URLs");

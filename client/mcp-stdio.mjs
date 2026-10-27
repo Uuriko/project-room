@@ -214,13 +214,17 @@ async function callTool(client, identity, name, args, signal) {
 // Pinned stdio transport; ordinary callers remain tools-only. An explicit Claude
 // channel caller may publish bounded notifications. No sampling,
 // host installation, credential enrollment, background runner or provider calls.
-export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutMs = 30000, attention, channel }) {
+export function serveRoomMcp({ client, roomId, memberId, input, output, timeoutMs = 30000, attention, channel, enabledTools }) {
   if (!validId(roomId) || !validId(memberId) || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000) throw new Error("Invalid adapter configuration");
   if (attention !== undefined && (typeof attention?.directory !== "string" || !attention.directory.trim()
       || typeof attention.origin !== "string" || new URL(attention.origin).origin !== attention.origin
       || (attention.version !== undefined && ![2, 3].includes(attention.version)))) throw new Error("Invalid attention configuration");
   if (channel !== undefined && typeof channel?.acknowledge !== "function") throw new Error("Invalid channel configuration");
-  const tools = [...roomTools, ...(attention ? attentionTools : []), ...(channel ? [wakeAckTool] : [])];
+  const available = [...roomTools, ...(attention ? attentionTools : []), ...(channel ? [wakeAckTool] : [])];
+  if (enabledTools !== undefined && (!Array.isArray(enabledTools) || !enabledTools.length
+    || new Set(enabledTools).size !== enabledTools.length
+    || enabledTools.some(name => !available.some(tool => tool.name === name)))) throw new Error("Invalid tool selection");
+  const tools = enabledTools ? available.filter(tool => enabledTools.includes(tool.name)) : available;
   const flights = new Map(), maxLine = 65536, maxOutput = 2 * 1024 * 1024;
   let phase = "new", buffer = Buffer.alloc(0), closed = false;
   let finish, finishReady;

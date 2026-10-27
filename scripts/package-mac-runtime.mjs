@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, realpathSync, writeFileSync, existsSync, rmSyn
 import { dirname, join, relative, resolve, isAbsolute } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const entries = ["scripts/run-codex-room.mjs", "scripts/native-agent-setup.mjs"];
+const entries = ["scripts/run-codex-room.mjs", "scripts/native-agent-setup.mjs", "scripts/runtime-room-mcp.mjs"];
 export function packageMacRuntime(source, destination) {
   const root = realpathSync(source), output = resolve(destination), files = new Map();
   if (existsSync(output)) throw new Error("Runtime destination must be new");

@@ -1,3 +1,5 @@
+import { fileURLToPath } from "node:url";
+import { readRuntimeRoomConnection, runtimeRoomToolNames } from "./runtime-room-tools.mjs";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, rmdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
@@ -7,7 +9,7 @@ const METHODS = new Set(["initialize", "account/read", "thread/start", "thread/r
 const inside = (root, path) => path === root || (!relative(root, path).startsWith(`..${sep}`) && relative(root, path) !== ".." && !isAbsolute(relative(root, path)));
 
 export function validateCodexRuntimeConfig(config) {
-  if (!config || Object.keys(config).some(key => !["command", "cwd", "codexHome", "policy", "requestTimeoutMs", "turnTimeoutMs", "model", "macTools"].includes(key)))
+  if (!config || Object.keys(config).some(key => !["command", "cwd", "codexHome", "policy", "requestTimeoutMs", "turnTimeoutMs", "model", "macTools", "roomTools"].includes(key)))
     throw new Error("Unknown runtime config field");
   for (const key of ["command", "cwd", "codexHome"]) if (!isAbsolute(config[key] ?? "")) throw new Error(`Runtime ${key} must be absolute`);
   if (!statSync(config.command).isFile() || !statSync(config.cwd).isDirectory()) throw new Error("Runtime executable/workspace unavailable");
@@ -31,6 +33,7 @@ export function validateCodexRuntimeConfig(config) {
     if (!Number.isInteger(value) || value < 100 || value > maximum) throw new Error(`Invalid ${key}`);
   }
   if (config.model !== undefined && (typeof config.model !== "string" || !config.model.trim() || config.model.length > 128)) throw new Error("Invalid model");
+  if (config.roomTools !== undefined) readRuntimeRoomConnection(config.roomTools, cwd);
   if (config.macTools !== undefined) {
     const local = config.macTools;
     if (process.platform !== "darwin" || !local || Object.keys(local).some(key => !["command", "connection", "inputApproval"].includes(key))
@@ -73,6 +76,13 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   const args = ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="file"',
     "-c", 'shell_environment_policy.inherit="none"', "-c", `approval_policy=${JSON.stringify(settings.policy.approvalPolicy)}`,
     "-c", `sandbox_mode=${JSON.stringify(settings.policy.sandbox)}`,
+    ...(settings.roomTools && !authenticationOnly ? [
+      "-c", `mcp_servers.project_room.command=${JSON.stringify(process.execPath)}`,
+      "-c", `mcp_servers.project_room.args=${JSON.stringify([fileURLToPath(new URL("../scripts/runtime-room-mcp.mjs", import.meta.url)), settings.roomTools.directory, JSON.stringify(settings.roomTools.scope)])}`,
+      "-c", `mcp_servers.project_room.enabled_tools=${JSON.stringify(runtimeRoomToolNames)}`,
+      "-c", "mcp_servers.project_room.required=true",
+      "-c", 'mcp_servers.project_room.default_tools_approval_mode="approve"'
+    ] : []),
     ...(settings.model ? ["-c", `model=${JSON.stringify(settings.model)}`] : []),
     ...(settings.macTools ? [
       "-c", `mcp_servers.project_room_mac.command=${JSON.stringify(settings.macTools.command)}`,

@@ -1,3 +1,4 @@
+import { runtimeRoomToolNames } from "./runtime-room-tools.mjs";
 import { createHash, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { lstatSync, realpathSync } from "node:fs";
@@ -33,7 +34,9 @@ function initialize(db) {
 export function codexRuntimeFingerprint(settings) {
   return hash(["codex-native-before-dispatch-v1", settings.command, settings.cwd, settings.codexHome,
     settings.policy.approvalPolicy, settings.policy.sandbox, settings.model ?? null,
-    settings.macTools?.command ?? null, settings.macTools?.connection ?? null, settings.macTools?.inputApproval ?? null]);
+    settings.macTools?.command ?? null, settings.macTools?.connection ?? null, settings.macTools?.inputApproval ?? null,
+    ...(settings.roomTools ? ["room-tools-v1", settings.roomTools.directory,
+      settings.roomTools.scope.origin, settings.roomTools.scope.roomId, settings.roomTools.scope.memberId, runtimeRoomToolNames] : [])]);
 }
 function requestId(binding) {
   return "host-" + hash([binding.origin, binding.roomId, binding.memberId, binding.requestMessageId, binding.roomCreatedEventId, binding.openingEventId]);

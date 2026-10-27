@@ -1,4 +1,6 @@
 import test from "node:test";
+import { bindRuntimeRoomTools } from "../scripts/run-codex-room.mjs";
+import { codexRuntimeFingerprint } from "../client/request-reconciliation.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, chmodSync, mkdirSync, rmSync, symlinkSync, realpathSync, existsSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
@@ -159,4 +161,68 @@ test("unexpected process exit invalidates a completed handshake", async t => {
   await rpc.request("initialize", {});
   await assert.rejects(rpc.request("thread/start", {}), /disconnected/);
   await assert.rejects(rpc.request("initialize", {}), /disconnected/);
+});
+
+test("scoped Room MCP is available to the dedicated host without credential argv or ambient inheritance", async t => {
+  const { config, root } = setup(t);
+  const connection = { version: 1, origin: "http://127.0.0.1:1234", roomId: "commons", memberId: "producer", token: "T".repeat(43) };
+  const directory = join(root, "room-connection");
+  saveAgentConnection(directory, connection);
+  const scope = { origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId };
+  const rpc = openCodexStdio({ ...config, roomTools: { directory, scope } });
+  t.after(() => rpc.close());
+  const result = await rpc.request("initialize", {});
+  assert.ok(result.argv.some(arg => arg.startsWith("mcp_servers.project_room.command=")), "normal host must receive its Room tools");
+  assert.ok(result.argv.some(arg => arg === "mcp_servers.project_room.required=true"));
+  assert.equal(JSON.stringify(result).includes(connection.token), false);
+  assert.equal(result.secret, null);
+  await rpc.close();
+  const authentication = openCodexStdio({ ...config, roomTools: { directory, scope } }, { authenticationOnly: true });
+  t.after(() => authentication.close());
+  const authReady = await authentication.request("initialize", {});
+  assert.equal(authReady.argv.some(arg => arg.startsWith("mcp_servers.project_room.")), false,
+    "authentication-only setup must not start collaboration tools");
+});
+
+test("Room tool configuration rejects cross-identity and workspace credentials before launch", t => {
+  const { config, root } = setup(t);
+  const connection = { version: 1, origin: "http://127.0.0.1:1234", roomId: "commons", memberId: "producer", token: "T".repeat(43) };
+  const directory = join(root, "bound-room"), inside = join(config.cwd, "connection");
+  saveAgentConnection(directory, connection); saveAgentConnection(inside, connection);
+  const scope = { origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId };
+  for (const changed of [{ ...scope, memberId: "other" }, { ...scope, roomId: "other" }, { ...scope, origin: "https://example.invalid" }])
+    assert.throws(() => openCodexStdio({ ...config, roomTools: { directory, scope: changed } }), /identity changed/);
+  assert.throws(() => openCodexStdio({ ...config, roomTools: { directory: inside, scope } }), /outside/);
+  chmodSync(join(directory, "connection.json"), 0o644);
+  assert.throws(() => openCodexStdio({ ...config, roomTools: { directory, scope } }), /config_not_private/);
+  assert.equal(existsSync(join(config.codexHome, ".room-runtime.lock")), false);
+});
+
+test("execution and reconciliation bind the same private Room tool configuration", t => {
+  const { config, root } = setup(t);
+  const directory = join(root, "connection");
+  const connection = { version: 1, origin: "http://127.0.0.1:8765", roomId: "commons", memberId: "producer", token: "T".repeat(43) };
+  saveAgentConnection(directory, connection);
+  const environment = { ROOM_AGENT_CONFIG: directory, ROOM_HOST_SCOPE: JSON.stringify({ origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId }) };
+  const execution = bindRuntimeRoomTools(validateCodexRuntimeConfig(config), connection, environment);
+  const reconciliation = bindRuntimeRoomTools(validateCodexRuntimeConfig(config), connection, environment);
+  assert.equal(codexRuntimeFingerprint(execution), codexRuntimeFingerprint(reconciliation));
+  assert.notEqual(codexRuntimeFingerprint(config), codexRuntimeFingerprint(reconciliation));
+  assert.throws(() => bindRuntimeRoomTools(validateCodexRuntimeConfig(config), { ...connection, memberId: "reviewer" }, environment), /connection changed/);
+  assert.throws(() => bindRuntimeRoomTools(validateCodexRuntimeConfig(config), { ...connection, memberId: "reviewer" }, { ROOM_AGENT_CONFIG: directory }), /identity|scope/i);
+});
+
+for (const field of ["origin", "roomId", "memberId", "missing-member"]) test(`environment-backed supervisor refuses mismatched Room tools: ${field}`, t => {
+  const { config, root } = setup(t);
+  const directory = join(root, "connection");
+  const connection = { version: 1, origin: "http://127.0.0.1:8765", roomId: "commons", memberId: "producer", token: "T".repeat(43) };
+  saveAgentConnection(directory, connection);
+  const scope = { origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId };
+  const settings = validateCodexRuntimeConfig({ ...config, roomTools: { directory, scope } });
+  const supervisor = { ...connection };
+  if (field === "missing-member") delete supervisor.memberId;
+  else supervisor[field] = field === "origin" ? "http://127.0.0.1:8766" : "another";
+  assert.throws(() => bindRuntimeRoomTools(settings, supervisor, {}), /another identity/);
+  assert.equal(existsSync(join(config.codexHome, ".room-runtime.lock")), false);
+  assert.deepEqual(bindRuntimeRoomTools(settings, connection, {}).roomTools, settings.roomTools);
 });
