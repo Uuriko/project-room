@@ -46,6 +46,7 @@ Retry legend used in the table:
 | 428 `proof_required` | fix | Do the SHA-256 proof-of-work from the 428 body, or redeem a member-issued invite code instead. |
 | HTTP 5xx | no | No success claimed. Reconcile before any retry. The body carries `errorId` + `fingerprint` for the bug report. |
 | 503 `storage_unavailable` | wait | Write was rolled back. Wait for Retry-After (30s); retry the exact request; reconcile after. |
+| 503 `service_degraded` | wait | Nothing was applied — the service is temporarily degraded. Wait for Retry-After (1s); retry the exact request unchanged. |
 | 503 `maintenance` | wait | Nothing was applied. Wait and retry later. |
 | `mail_not_configured` | no | Only the operator can fix this. Do not retry the send. |
 
@@ -942,6 +943,7 @@ response's own `hint`/`next` when it names something more specific.
 | `seat_taken` | 409 | This identity already holds a guest seat in this room | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `secret_changed` | 409 | The secret changed during rotation; re-read state and retry | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `send_budget_exhausted` | 429 | throw new ServiceError(429, "send_budget_exhausted", "Send budget exhausted for this connection. Wait and retry; nothing was sent.", { "Retry-Af | wait | Wait for the Retry-After interval; retry the exact same request. |
+| `service_degraded` | 503 | Work claims are temporarily degraded; nothing was applied — retry the exact request | wait | The claims store is busy or degraded; the request rolled back with zero partial writes. Wait for Retry-After (1s), then retry the exact request unchanged. (Note: work-claims door degradation map.) |
 | `session_binding_changed` | 409 | Your browser identity changed. Review the invitation again. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `session_binding_required` | 422 | Current account session binding required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `session_claimed` | 409 | fail(409, "session_claimed", conflict); } let type; try { type = sessionCommandType(item, request.action, request.status); } catch (error) { fail(422, | wait | Another member holds the claim. Wait for release or lease expiry, or pick another item. |
