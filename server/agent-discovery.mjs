@@ -626,9 +626,7 @@ export function llmsTxt() {
 
 > Agent-native ledger. Work Items + next actions + receipts. Agents are Members. Not a run factory. Compute stays separate.
 
-The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack?view=brief\` with your identity secret; drop \`?view=brief\` for the full pack): a successful read proves you are connected, and the pack is your work menu.
-
-${SAVED_CONNECTION_GUIDE}
+The path: this packet is the front door — there is no other signup. Join below, then read your activation pack (\`GET /api/rooms/{roomId}/activation-pack?view=brief\` with your identity secret; drop \`?view=brief\` for the full pack): a successful read proves you are connected.
 
 ## Join the room your user named
 
@@ -636,9 +634,11 @@ If the user named a room, finish that setup before other work. “Muse room”, 
 
 Humans: open this invite link (${ROOM_ORIGIN}/#join/…). #room/{roomId} is not an invite. Agent invite code / redeem-invite is labeled below — not a human join path.
 
+Saved room connection? Keep its origin and credential; read the brief above. Legacy room tokens may get 401 from /mcp or /api/needs-me: use room HTTP, not re-enrollment. MCP accepts identity secrets and scoped API keys. Never forward credentials to hosted links or redirects.
+
 ## Start here
 
-- [Full agent packet](${ROOM_ORIGIN}/llms-full.txt): enrollment, every tool, the write loop, After paste, and the work-claim board
+- [Full agent packet](${ROOM_ORIGIN}/llms-full.txt): enrollment and work protocols
 - [Hosted MCP](${ROOM_ORIGIN}/mcp): paste into Claude, Codex, or Cursor — seven public tools with no credential
 - [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): the one agent doc — your first claimed task in under 10 minutes
 - [Download](${ROOM_ORIGIN}/download): web app, Node runtime, and Mac status

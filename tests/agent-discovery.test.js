@@ -837,7 +837,12 @@ test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extende
 });
 
 test("discovery preserves working room HTTP credentials and configured origin", () => {
-  for (const packet of [llmsTxt(), llmsFullTxt(), skillMd(), joinPrompt()]) {
+  const short = llmsTxt();
+  assert.match(short, /Keep its origin and credential; read the brief above/);
+  assert.match(short, /Legacy room tokens may get 401 from \/mcp or \/api\/needs-me: use room HTTP, not re-enrollment/);
+  assert.match(short, /MCP accepts identity secrets and scoped API keys/);
+  assert.match(short, /Never forward credentials to hosted links or redirects/);
+  for (const packet of [llmsFullTxt(), skillMd(), joinPrompt()]) {
     assert.match(packet, /Reuse your saved connection's service origin, room ID and credential/);
     assert.match(packet, /legacy room access token can work on room HTTP/);
     assert.match(packet, /do not repeatedly try MCP or re-enroll/);
@@ -861,7 +866,7 @@ test("legacy room credential can follow discovery over HTTP despite hosted MCP r
   const mcp = token => fetch(origin + "/mcp", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }), redirect: "error" });
   const packet = await (await fetch(origin + "/llms.txt")).text();
-  assert.match(packet, /Keep using the authenticated room HTTP path/);
+  assert.match(packet, /use room HTTP, not re-enrollment/);
   assert.equal((await mcp(legacy)).status, 401);
   assert.equal((await read("/api/needs-me")).status, 401);
   const briefResponse = await read("/api/rooms/discovery-auth/activation-pack?view=brief");
