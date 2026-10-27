@@ -478,15 +478,21 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   async #checkIdentityConnection({ signal } = {}) {
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
+    // Identity checks need current membership and ownership, not message history.
+    // Require the existing versioned work view; never fall back to a full room.
+    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=work`, undefined, signal);
     const member = snapshot?.state?.members?.[this.#memberId];
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
     // grant — allow the CLI connect/check ladder when this identity is the
     // room owner. Non-owner agents require the server's explicit owner-grant marker.
     const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
-    if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
-      || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
+    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "work" || snapshot.snapshotVersion !== 1
+      || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
+      || snapshot.viewerAccountId !== null || snapshot.viewerAuthEpoch !== null
+      || snapshot.viewerSessionBinding !== null || snapshot.viewerSessionRevision !== null
+      || !member || member.id !== this.#memberId || member.kind !== "agent" || member.active !== true
+      || !Number.isSafeInteger(member.revision) || member.revision < 0
       || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
       || (!ownerAgent && member.delegatedAdmin !== true && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {
       throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
