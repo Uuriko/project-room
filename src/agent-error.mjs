@@ -136,6 +136,27 @@ export const ERROR_REGISTRY = {
       "recovery": "Read the detail. Retry catch-up when progress is retained; repair a blocked backfill or parity failure before obtaining a fresh dry run."
     }
   },
+  // Trial-task verdict surface (server/trial-task-store.mjs, action
+  // "verdict"): the buyer sign-off gate runs before any write, so a refused
+  // verdict saved nothing. The recovery is the sign-off loop itself — the
+  // buyer (or owner) opens a loop for the submitted trial, the candidate
+  // submits in it, and the recorded buyer reviews with decision "accept";
+  // only then can a verdict be recorded.
+  buyer_signoff_required: {
+    status: "action_required",
+    hint: "The buyer has not accepted this trial's delivery in a sign-off loop yet, so the verdict cannot be recorded. Nothing was saved.",
+    next: [path("/api/rooms/{roomId}/signoff-loops"), command("Open a sign-off loop for the trial (POST /api/rooms/{roomId}/signoff-loops), have the candidate submit in it (POST /api/rooms/{roomId}/signoff-loops/{loopId}/submit), and have the recorded buyer review it with decision accept (POST /api/rooms/{roomId}/signoff-loops/{loopId}/review). Then resend the verdict with a new requestId.")],
+    catalog: { http: 409, retry: "no", recovery: "Do not resend the verdict yet — nothing was saved. The buyer must accept the delivery in a sign-off loop for this trial first (POST /api/rooms/{roomId}/signoff-loops, candidate submit, buyer review with decision accept), then resend the verdict with a new requestId." },
+  },
+  // Trial-task verdict surface: vetting receipts are single-use. The replay
+  // check runs inside the verdict transaction before the receipt row is
+  // written, so a replayed receipt records nothing new.
+  receipt_replayed: {
+    status: "action_required",
+    hint: "This vetting receipt was already recorded — receipts are single-use and cannot be replayed. Nothing new was saved.",
+    next: [path("/api/rooms/{roomId}/trial-tasks/{taskId}/receipt"), command("Do not resend this receipt. Read the trial's recorded receipt (GET /api/rooms/{roomId}/trial-tasks/{taskId}/receipt) to reconcile; any further verdict needs a fresh, unused signed receipt.")],
+    catalog: { http: 409, retry: "no", recovery: "Do not resend this receipt — vetting receipts are single-use and this one is already recorded; nothing new was saved. Read the trial's recorded receipt (GET /api/rooms/{roomId}/trial-tasks/{taskId}/receipt) to reconcile; a further verdict needs a fresh, unused signed receipt." },
+  },
   // Wake surface (server/agent-plugin-routes.mjs pollWakes). Verbatim move
   // of the dedicated branch #3026 landed for #3021.
   agent_not_registered: {
