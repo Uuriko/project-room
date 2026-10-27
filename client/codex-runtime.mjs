@@ -1,3 +1,4 @@
+import { recordCodexRequestEntry, fenceCodexRequestDispatch } from "./request-reconciliation.mjs";
 import { createHash } from "node:crypto";
 import { createHostEnvelope } from "./host-context-policy.mjs";
 import { RoomAgentClient } from "./room-agent.mjs";
@@ -43,7 +44,7 @@ const keyFor = binding => createHash("sha256").update(JSON.stringify([binding.ki
 // subscribe(listener) -> unsubscribe. It must reject requests on disconnect;
 // transport retries are forbidden for turn/start and turn/steer.
 // `authorize` revalidates Room ownership and exact attempt before each control.
-export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy, emit = () => {}, timeoutMs = 300000 }) {
+export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy, emit = () => {}, timeoutMs = 300000, runtimeFingerprint }) {
   if (!db || !rpc?.request || !rpc?.notify || !rpc?.subscribe || typeof authorize !== "function"
     || typeof cwd !== "string" || !cwd.startsWith("/") || !Number.isInteger(timeoutMs) || timeoutMs < 10)
     throw new Error("Explicit journal, scoped transport, authorization and workspace are required");
@@ -171,6 +172,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     return { status: "received" }; // Never infer that the model applied it.
   };
   const execute = async (input, { binding, previousBinding, onModelStart } = {}) => {
+    const proof = recordCodexRequestEntry(db, binding, runtimeFingerprint);
     const id = await checked(binding, "start");
     if (get(id)) throw new Error("Runtime attempt already exists; reconcile instead of rerunning");
     let previous;
@@ -192,6 +194,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     const prompt = JSON.stringify(envelope);
     const workBriefVersion = envelope.context.preparation?.workBrief?.version ?? null;
     if (workBriefVersion !== null && !/^[a-f0-9]{64}$/.test(workBriefVersion)) throw new Error("Invalid work brief version");
+    fenceCodexRequestDispatch(db, proof);
     await ready(); input.signal?.throwIfAborted();
     db.exec("BEGIN IMMEDIATE");
     try {

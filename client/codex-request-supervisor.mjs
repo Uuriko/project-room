@@ -1,3 +1,4 @@
+import { hasUnresolvedRequestIntents } from "./request-reconciliation.mjs";
 import { validId } from "../src/events.js";
 import { WatchJournal } from "./watch-journal.mjs";
 import { runRequestQueue } from "./request-runner.mjs";
@@ -9,7 +10,7 @@ import { scopedCodexThreads } from "./codex-supervisor.mjs";
 // Room delivery is HTTPS; this supervisor needs no inbound port or VPN.
 export async function superviseCodexRequests({ connection, db, directory, connect, cwd, policy,
   allowedRequesterIds, allowedRequestIds, signal, emit = () => {}, pollMs = 2000, timeoutMs = 300000,
-  connectOnStart = false }) {
+  connectOnStart = false, runtimeFingerprint }) {
   if (!Array.isArray(allowedRequesterIds) || !allowedRequesterIds.length || allowedRequesterIds.length > 20
     || new Set(allowedRequesterIds).size !== allowedRequesterIds.length
     || !allowedRequesterIds.every(id => typeof id === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(id)))
@@ -33,7 +34,7 @@ export async function superviseCodexRequests({ connection, db, directory, connec
   // An ambiguous prior invocation owns this workspace until reconciled. Do not
   // confuse server queue eligibility with permission to start a successor.
   const unresolved = () => {
-    if (db.prepare("SELECT 1 FROM request_runs WHERE response IS NULL LIMIT 1").get()) return true;
+    if (hasUnresolvedRequestIntents(db, connection, runtimeFingerprint)) return true;
     // Switching from shared asks must not abandon that mode's owned outcome.
     if (!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_shared_runs'").get()) return false;
     const shared = db.prepare("SELECT attempt_id FROM codex_shared_runs WHERE publish IS NULL").all();
@@ -53,7 +54,7 @@ export async function superviseCodexRequests({ connection, db, directory, connec
     if (host) return;
     rpc = await connect(scopedCodexThreads(db, connection));
     controller.signal.throwIfAborted();
-    host = roomCodexHost({ connection, db, rpc, cwd, policy, timeoutMs, emit, allowRequest: executionAllowed });
+    host = roomCodexHost({ connection, db, rpc, cwd, policy, timeoutMs, emit, runtimeFingerprint, allowRequest: executionAllowed });
     state("protocol_qualified", { providerAuthentication: "unverified" });
   };
   const execute = Object.assign(async (input, options) => {

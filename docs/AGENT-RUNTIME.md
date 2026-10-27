@@ -40,3 +40,38 @@ Use `node scripts/run-codex-room.mjs --help` for status and stop commands. Keep 
 Directed request results include a content-free `metrics` object. Native failures emit `status: request_metrics` with the same bounded measurements. They cover one selected invocation: discovery/context reads, local preparation, reservation authorization, model execution, publication, and acknowledgement bookkeeping. `httpCalls` includes that invocation's Room reads/writes and progress reports, not the queue's idle stream/poll traffic. `requestBodyBytes` measures outgoing JSON bodies; `preparedContextBytes` measures serialized prepared messages/context. Neither is a token estimate.
 
 `modelStarts` distinguishes new execution from saved-delivery recovery. `duplicateReceipt` means the service recognized the saved operation; it does not prove the latest work state. Response byte counts and model tokens remain `null` until actually measured. Timings are local wall-clock durations, not server or provider CPU time. No credentials, URLs, message bodies, or provider errors are emitted. Preserve the result/diagnostic log when comparing cold work and recovery; do not infer end-to-end throughput from this alone.
+
+
+## Reconcile a cancelled request before runtime dispatch
+
+For a newly instrumented native Codex request that failed before dispatch, the
+owning laptop can deliberately record its cancellation without deleting the
+original intent. First stop receiving and cancel the obsolete formal request as
+its requester. Cancellation alone does not settle an execution attempt.
+
+```sh
+ROOM_AGENT_CONFIG="/private/room-connection" node scripts/run-codex-room.mjs --reconcile-cancelled-request /private/journal.sqlite /private/runtime.json REQUEST_MESSAGE_ID ORIGINAL_ATTEMPT_ID
+```
+
+This action performs authenticated Room reads and local audit writes only. It
+never starts a runtime, cancels a request, changes the server reservation, edits
+the original intent, supplies an answer, or enables receiving. It requires the
+original private journal outside the model workspace, exact runtime settings,
+exclusive watcher/profile ownership and an exclusive journal transaction.
+
+Only the native adapter can create the entry evidence, before authorization.
+It durably records a dispatch fence before its first execution RPC. A resolution
+requires matching room creation, request opening, identity, original attempt,
+runtime fingerprint and journal nonce; fresh authenticated cancellation; and no
+dispatch fence or runtime attempt. Both entry and resolution records are
+append-only. The returned `originalRetryAuthorized:false` remains binding:
+only a separately authorized, distinct selected request may be started later.
+
+`reconciliation_proof_unavailable` means there is no qualifying provenance.
+Legacy intents and generic executors are deliberately unsupported, even when
+runtime tables are empty or a model-start metric is zero. Do not change journal
+paths, delete rows or fabricate a response to evade that refusal. A dispatch
+fence, uncertain start, history/config mismatch, active lock, failed read or
+read-only journal also refuses resolution. Preserve those originals for their
+own supported reconciliation. Retrying this action repeats the authenticated
+read and returns the same audited resolution when it still matches.
