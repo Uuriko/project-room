@@ -417,6 +417,9 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       serviceOrigin: serviceOrigin(req),
       query: url.searchParams.get("q") ?? "",
       capability: url.searchParams.get("capability"),
+      // #650 item 3: registry query by advertised skill, e.g.
+      // GET /api/agent-directory/cards?skill=verification&capability=webhooks
+      skill: url.searchParams.get("skill"),
     };
     const doc = member
       ? store.agentPlugin.memberDirectoryDocument({ viewerIdentityId: member.identityId, ...args })
@@ -1068,6 +1071,10 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     const keyActionMatch = method === "POST" ? KEY_ACTION_ROUTE.exec(pathname) : null;
     if (keyActionMatch) { await keyAction(req, res, { remoteAddress, keyId: keyActionMatch[1], action: keyActionMatch[2] }); return true; }
     if (pathname === "/api/agent-directory/cards" && method === "POST") { await publishCard(req, res, { remoteAddress }); return true; }
+    // #650 item 3: the filed registry-query path. GET on the collection is
+    // the same read-only directory document as GET /api/agent-directory,
+    // with ?q= / ?capability= / ?skill= filters. Querying mints no trust.
+    if (pathname === "/api/agent-directory/cards" && method === "GET") { await directoryDocument(req, res, { url }); return true; }
     if (pathname === "/api/agent-skills" && method === "POST") { await publishSkills(req, res, { remoteAddress }); return true; }
     const skillCardMatch = (method === "GET" || method === "HEAD") ? SKILL_CARD_ROUTE.exec(pathname) : null;
     if (skillCardMatch) { await skillCardDocument(req, res, { remoteAddress, identityId: skillCardMatch[1] }); return true; }

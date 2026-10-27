@@ -26,6 +26,8 @@
 
 import { isUnpublished } from "./legal-store.mjs";
 import { refreshListedRoom } from "./public-read-model.mjs";
+import { deployFields } from "./version.mjs";
+import { ownMember } from "../src/events.js";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -209,6 +211,70 @@ export class RoomDirectory {
     return {
       rooms,
       nextCursor: rows.length > pageSize ? page[page.length - 1].roomId : null,
+    };
+  }
+
+  // ---- per-room agent card (#650 item 2) -----------------------------------
+  // GET /api/rooms/{id}/agent-card. Visibility discipline is the contract:
+  // the card is readable exactly when the requester can already see the
+  // room — an active member (viewerMemberId, resolved by the HTTP layer),
+  // or anyone when the owner has opted the room into the public directory
+  // (discoverable, non-archived, not unpublished). Every other case —
+  // private room, archived, unpublished, or no such room at all — throws
+  // the SAME 404 room_not_found, so the endpoint is never an existence or
+  // metadata oracle. Strict field rebuild like _publicEntry: no member ids,
+  // handles, emails, identity links, or permissions leave. The card
+  // describes join mechanisms; it grants, joins, and authenticates nothing.
+  agentCard(roomId, viewerMemberId = null) {
+    let state;
+    try {
+      state = this._roomState(roomId);
+    } catch {
+      fail(404, "room_not_found", "Room not found");
+    }
+    let discoverable = false;
+    try {
+      const row = this.db.prepare(`
+          SELECT s.discoverable AS discoverable
+          FROM room_directory_settings s
+          JOIN rooms r ON r.id = s.room_id
+          WHERE s.room_id = ? AND r.archived_at IS NULL`).get(roomId);
+      discoverable = row?.discoverable === 1;
+    } catch { discoverable = false; }
+    if (discoverable && isUnpublished(this.db, "room", roomId)) discoverable = false;
+    const members = state?.members && typeof state.members === "object" ? state.members : {};
+    // ownMember: a caller-supplied id like "toString" must not pose as a
+    // member through the prototype chain (room/no-raw-members-index).
+    const viewer = viewerMemberId ? ownMember(members, viewerMemberId) : null;
+    const isMember = !!viewer && viewer.active !== false;
+    if (!discoverable && !isMember) fail(404, "room_not_found", "Room not found");
+    const title = cleanText(state?.room?.title, MAX_TITLE_CHARS);
+    if (!title) fail(404, "room_not_found", "Room not found");
+    const memberCount = Object.values(members).filter(m => m && m.active !== false).length;
+    return {
+      schema: "project-room-room-agent-card/1",
+      roomId,
+      name: title,
+      purpose: cleanText(state?.room?.purpose, MAX_PURPOSE_CHARS),
+      kind: cleanText(state?.room?.kind, 64),
+      memberCount,
+      visibility: discoverable ? "discoverable" : "members-only",
+      // Open-join policy as it actually stands: a discoverable room can be
+      // found and access requested by anyone; an unlisted room is joinable
+      // only through an invite or share link a member issues. Joining still
+      // requires the owner/member action each mechanism names — the card
+      // itself admits no one.
+      openJoin: {
+        discoverable,
+        policy: discoverable ? "request-access" : "invite-only",
+        mechanisms: discoverable
+          ? ["access-request", "invite", "share-link"]
+          : ["invite", "share-link"],
+      },
+      requiredAuth: ["bearerAuth", "guestLinkAuth"],
+      cardUrl: `/api/rooms/${encodeURIComponent(roomId)}/agent-card`,
+      // #650 item 4: live deploy-aware fields (server/version.mjs).
+      ...deployFields(),
     };
   }
 

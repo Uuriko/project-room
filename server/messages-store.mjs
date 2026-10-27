@@ -343,6 +343,24 @@ export function archiveMarker(db, roomId) {
   return { throughSeq, count: throughSeq && Number.isInteger(row.count) && row.count > 0 ? row.count : 0, retainedIds: retained, retainedJson: JSON.stringify(retained) };
 }
 
+// PERF-BUILDS P0-2: the same marker, read from a room state the caller
+// already holds (the command path has the projection in hand) instead of
+// probing the stored projection text. Normalization matches
+// archiveMarker exactly: a non-positive or non-integer throughSeq means
+// "nothing archived", and retainedIds keeps only string ids.
+export function archiveMarkerFromState(state) {
+  const marker = state?.messagesArchive;
+  const throughSeq = Number.isInteger(marker?.throughSeq) && marker.throughSeq > 0 ? marker.throughSeq : 0;
+  if (!throughSeq) return { throughSeq: 0, count: 0, retainedIds: [], retainedJson: "[]" };
+  const retained = Array.isArray(marker.retainedIds) ? marker.retainedIds.filter(id => typeof id === "string") : [];
+  return {
+    throughSeq,
+    count: Number.isInteger(marker.count) && marker.count > 0 ? marker.count : 0,
+    retainedIds: retained,
+    retainedJson: JSON.stringify(retained)
+  };
+}
+
 // One archived message row (seq at or below the marker), or null. Archived
 // messages are not in the projection, so readers that need one by id use this.
 export function archivedMessageRow(db, roomId, messageId, marker = archiveMarker(db, roomId)) {
