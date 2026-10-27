@@ -141,8 +141,8 @@ not replace this repository's operational file leases.
    Record PR URLs and exact revisions; use structured PR links on create/claim
    when known, because a URL in a note alone does not enable PR settlement.
 4. Follow `CONTRIBUTING.md`: use Node 24.19 or newer, run relevant tests with
-   a worktree-local temp directory (`scripts/test-env.sh`), then contract/lint
-   checks. Poll required hosted CI on the final head until it finishes, and
+   `scripts/test-env.sh` (macOS private per-user temp; Linux worktree-local
+   `.tmp/`), then contract/lint checks. Poll required hosted CI on the final head until it finishes, and
    resolve the exact candidate's review findings. Merge only within existing
    authorization and repository review requirements. Green CI is not deploy
    permission.
