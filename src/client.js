@@ -1089,7 +1089,7 @@ export class RoomClient {
     if (completionEventId !== null) params.set("completionEventId", completionEventId);
     if (draftMessageId !== null) params.set("draftMessageId", draftMessageId);
     try {
-      const value = await this.request(this.path(`/work-result?${params}`));
+      const value = await this.request(this.path(`/work-result?${params}`), { fresh: true });
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
       await verifyWorkResult(value, { roomId: session.roomId, workItemId, completionEventId, draftMessageId });
