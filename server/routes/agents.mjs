@@ -10,7 +10,7 @@ function readContext(ctx) {
   const selected = ctx.roomCredentials(ctx.req, ctx.url);
   const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
   const auth = ctx.roomAuth(selected, roomId, fence);
-  if (selected.bearer && auth.credentialScope !== "room") ctx.reject(403, "access_denied", "Bearer account sessions are not accepted");
+  if (selected.bearer && auth.credentialScope !== "room" && auth.credentialScope !== "oauth") ctx.reject(403, "access_denied", "Bearer account sessions are not accepted"); // AGENT-DOOR-AUTH: oauth admitted, scope-gated in roomCredentials
   if (!selected.bearer && auth.kind !== "session") ctx.reject(401, "unauthenticated", "Browser session required");
   ctx.rate(`read:${auth.credentialHash}`, 600);
   if (auth.kind === "api-key" && !(auth.apiKeyScopes ?? []).some(scope => scope === "rooms:read" || scope === "rooms:*")) {
