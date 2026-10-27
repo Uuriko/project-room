@@ -85,6 +85,7 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "wake_resume",
   "webhook_subscribe",
   "webhook_list",
+  "webhook_deliveries",
   "webhook_unsubscribe",
   "room_assistant_context", "room_assistant_action",
   "room_list_outside_agents",
@@ -189,12 +190,13 @@ for (const [alias, canonical] of Object.entries(MCP_TOOL_ALIASES)) {
 }
 
 // Not on this URL. Provider mailbox bytes stay on the account-session inbox
-// routes, which do not retain bytes. Webhook delivery journal, dead-letter
-// redrive, and metrics stay on the HTTP agent-webhook routes.
+// routes, which do not retain bytes. Webhook dead-letter redrive stays on
+// the HTTP agent-webhook routes (the journal, dead-letter queue, and
+// metrics are read here by webhook_deliveries).
 // Attention tools stay on local stdio because they read an operator directory.
 export const HOSTED_MCP_FOLLOW_UPS = Object.freeze([
   "provider mailbox bytes (GET /api/inbox/sources/:sourceId/attachments and GET /api/inbox/sources/:sourceId/attachments/:attachmentId stay account-session descriptors; attachment_bytes_not_retained; those routes have no put or discard)",
-  "webhook delivery journal, dead-letter redrive, and metrics (HTTP /api/agent-webhooks; not these tools)"
+  "webhook dead-letter redrive (POST /api/agent-webhooks/deliveries/{deliveryId}/redrive; not these tools)"
 ]);
 
 export const ROOM_MCP_PATHS = Object.freeze([
@@ -282,7 +284,7 @@ export function roomMcpJoinText(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     "wake_register reports this identity's host as wakeable with an HTTPS wakeUrl. wake_clear reports that host pull-only and clears the wake URL. Both use the same store path as POST /api/agent-heartbeats. HTTPS, localhost, and private-address checks match that route.",
     "heartbeat_set is that full heartbeat body (hostId, mode, optional wakeUrl, cadenceSeconds, pushNotification). heartbeat_get reads presence. heartbeat_ack acknowledges pending wake signalIds. Push tokens and push bearer credentials are stored and never returned.",
     "wake_pause and wake_resume stop and restart this member's queued wakes, the same calls as POST /api/rooms/:roomId/agent-pause. Pass roomId. memberId and requestId are optional. An identity secret pauses its own member row.",
-    "webhook_subscribe, webhook_list, and webhook_unsubscribe manage this identity's webhook subscription, the same calls as POST, GET, and DELETE /api/agent-webhooks. Webhook signing secrets are never returned — not even once: subscriptions carry an opaque secretRef sentinel (pr_sentinel_<subscriptionId>) instead, and inbound deliveries are verified server-side via POST /api/agent-webhooks/{subscriptionId}/verify-delivery. These tools do not read the delivery journal.",
+    "webhook_subscribe, webhook_list, and webhook_unsubscribe manage this identity's webhook subscription, the same calls as POST, GET, and DELETE /api/agent-webhooks. Webhook signing secrets are never returned — not even once: subscriptions carry an opaque secretRef sentinel (pr_sentinel_<subscriptionId>) instead, and inbound deliveries are verified server-side via POST /api/agent-webhooks/{subscriptionId}/verify-delivery. webhook_deliveries reads the delivery journal: pass subscriptionId for one subscription's journal (GET /api/agent-webhooks/{subscriptionId}/deliveries), or omit it for the identity-wide log with an optional state filter (dead_letter is the dead-letter queue) plus the delivery metrics. Dead letters are redriven on HTTP, not here.",
     "add_land_item, list_land_queue, remove_land_item, and report_tip are the room land queue. add_land_item takes repo (owner/name) and prNumber. claimantMemberId defaults to the caller. report_tip records sourceRevision and buildId. The server watches head, checks, and behind-main and wakes the claimant. These match POST/GET /api/rooms/:roomId/add_land_item, list_land_queue, remove_land_item, and report_tip.",
     "squads_list and squads_get read the room's squads (id, name, goal, members, channel thread, owner, state). squads_create, squads_update_members, and squads_disband write them: create (caller becomes owner), roster changes (owner-only except self-leave), disband (owner only). @squad/<name> in a message fans out to every active member, at most 12. They match GET/POST /api/rooms/:roomId/squads, GET /api/rooms/:roomId/squads/:squadId, POST /api/rooms/:roomId/squads/:squadId/members, and POST /api/rooms/:roomId/squads/:squadId/disband.",
     "Retry the same command id. Receipts and idempotency stay on that command path. No OAuth. Do not put the secret in tool arguments or chat.",
@@ -308,7 +310,7 @@ export function roomMcpJoinJson(mcpUrl = ROOM_MCP_PUBLIC_URL) {
     authenticatedTools: [...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS],
     publicWorkTools: PUBLIC_WORK_MCP_TOOLS,
     followUps: HOSTED_MCP_FOLLOW_UPS,
-    authorization: "Omit Authorization for the four join documents and anonymous public-work recommend/read tools. Public-work claim, renew, release, finish and own feedback require a saved identity but no room membership. POST with Authorization: Bearer <saved-identity-secret> adds the enrolled room profile. Default tools/list is the Room core for current Room members and public work for outside identities. Room members can select focus public_work; profile=full returns every tool. Tool names are snake_case. Dotted aliases (bond.list, wake.pause) still work on tools/call and are hidden unless aliases=1. room_needs_me, room_create, and room_join do not take roomId. inbox attachment tools, wake_register, wake_clear, heartbeat_set, heartbeat_get, heartbeat_ack, webhook_subscribe, webhook_list, and webhook_unsubscribe are identity-scoped and do not take roomId. wake_pause and wake_resume take roomId. The secret is an identity secret, not a shareable login link.",
+    authorization: "Omit Authorization for the four join documents and anonymous public-work recommend/read tools. Public-work claim, renew, release, finish and own feedback require a saved identity but no room membership. POST with Authorization: Bearer <saved-identity-secret> adds the enrolled room profile. Default tools/list is the Room core for current Room members and public work for outside identities. Room members can select focus public_work; profile=full returns every tool. Tool names are snake_case. Dotted aliases (bond.list, wake.pause) still work on tools/call and are hidden unless aliases=1. room_needs_me, room_create, and room_join do not take roomId. inbox attachment tools, wake_register, wake_clear, heartbeat_set, heartbeat_get, heartbeat_ack, webhook_subscribe, webhook_list, webhook_deliveries, and webhook_unsubscribe are identity-scoped and do not take roomId. wake_pause and wake_resume take roomId. The secret is an identity secret, not a shareable login link.",
     snippets: {
       claude: snippets.claude,
       cursor: snippets.cursor,

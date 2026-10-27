@@ -335,6 +335,12 @@ function validWakeArgs(name, args) {
     return validUrlString(args.url) && validEvents(args.events) && secretOk;
   }
   if (name === "webhook_unsubscribe") return SUBSCRIPTION_ID_PATTERN.test(args.subscriptionId);
+  if (name === "webhook_deliveries") {
+    const subscriptionOk = args.subscriptionId === undefined || SUBSCRIPTION_ID_PATTERN.test(args.subscriptionId);
+    const stateOk = args.state === undefined || ["pending", "delivered", "failed", "dead_letter"].includes(args.state);
+    const limitOk = args.limit === undefined || Number.isInteger(args.limit) && args.limit >= 1 && args.limit <= 500;
+    return subscriptionOk && stateOk && limitOk;
+  }
   return false;
 }
 
@@ -699,7 +705,7 @@ function webhookListBody(subscriptions) {
     : subscriptions.slice(0, 3).map(subscription => ({
       action: "check-journal", method: "GET",
       path: `/api/agent-webhooks/${encodeURIComponent(subscription.subscriptionId)}/deliveries`,
-      description: `Delivery journal for ${subscription.subscriptionId} stays on HTTP. Dead letters are redriven at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive.`
+      description: `Delivery journal for ${subscription.subscriptionId}: read it with webhook_deliveries { subscriptionId }. Dead letters are redriven at POST /api/agent-webhooks/deliveries/{deliveryId}/redrive.`
     }));
   return { subscriptions, next };
 }
@@ -717,7 +723,7 @@ function webhookSubscribeBody(subscription) {
     {
       action: "check-journal", method: "GET",
       path: `/api/agent-webhooks/${encodeURIComponent(subscription.subscriptionId)}/deliveries`,
-      description: "The delivery journal, dead-letter redrive, and metrics stay on HTTP /api/agent-webhooks."
+      description: "The delivery journal, dead-letter queue, and metrics are read with webhook_deliveries; dead-letter redrive stays on HTTP /api/agent-webhooks."
     }
   ];
   return { ...subscription, next: steps };
@@ -794,6 +800,24 @@ async function callWakeTool(store, secret, identity, name, args) {
       identityId: agentId, url: args.url, events: args.events, secret: args.secret ?? null
     });
     return webhookSubscribeBody(subscription);
+  }
+  if (name === "webhook_deliveries") {
+    // W-32: the MCP twin of the webhook journal reads. Per-subscription
+    // mirrors GET /api/agent-webhooks/{subscriptionId}/deliveries exactly
+    // (webhookJournalFor 404s cross-identity as unknown_subscription);
+    // identity-wide mirrors GET /api/agent-webhooks/deliveries (state
+    // dead_letter is the dead-letter queue) plus GET
+    // /api/agent-webhooks/metrics. Redrive stays a HTTP write.
+    if (args.subscriptionId !== undefined) {
+      return { subscriptionId: args.subscriptionId,
+        deliveries: store.agentPlugin.webhookJournalFor({ identityId: agentId, subscriptionId: args.subscriptionId }) };
+    }
+    return {
+      deliveries: store.agentPlugin.deliveryLogFor({ identityId: agentId, state: args.state ?? null, limit: args.limit ?? 100 }),
+      metrics: store.agentPlugin.deliveryMetricsFor({ identityId: agentId }),
+      next: [{ action: "redrive", method: "POST", path: "/api/agent-webhooks/deliveries/{deliveryId}/redrive",
+        description: "Redrive a dead-lettered delivery on HTTP: it returns to pending with a clean attempt counter." }]
+    };
   }
   if (name === "webhook_list") return webhookListBody(store.agentPlugin.listWebhooks(agentId));
   if (name === "webhook_unsubscribe") {

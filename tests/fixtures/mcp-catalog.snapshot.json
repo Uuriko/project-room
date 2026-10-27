@@ -1309,6 +1309,15 @@
         "openWorldHint": false
       }
     },
+    "webhook_deliveries": {
+      "inputSchema": "acc9389f75532a1f",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "webhook_list": {
       "inputSchema": "d746974fa9afd5e9",
       "annotations": {
@@ -2302,6 +2311,15 @@
       "inputSchema": "a97dd4e696fbdec2",
       "annotations": {
         "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "webhook_deliveries": {
+      "inputSchema": "acc9389f75532a1f",
+      "annotations": {
+        "readOnlyHint": true,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false

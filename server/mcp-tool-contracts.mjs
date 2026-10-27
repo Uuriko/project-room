@@ -63,6 +63,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   squads_disband: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/disband" },
   webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
+  webhook_deliveries: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks/{subscriptionId}/deliveries, GET /api/agent-webhooks/deliveries, GET /api/agent-webhooks/dead-letter, GET /api/agent-webhooks/metrics" },
   webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" }
 });
 

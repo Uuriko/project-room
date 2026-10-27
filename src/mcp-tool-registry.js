@@ -62,6 +62,7 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "heartbeat_ack", alias: "heartbeat.ack", focus: ["automation"] },
   { name: "webhook_subscribe", alias: "webhook.subscribe", focus: ["automation"] },
   { name: "webhook_list", alias: "webhook.list", focus: ["automation"] },
+  { name: "webhook_deliveries", focus: ["automation"] },
   { name: "webhook_unsubscribe", alias: "webhook.unsubscribe", focus: ["automation"] },
   { name: "room_assistant_context", focus: ["common"] },
   { name: "room_assistant_action", focus: ["work"] },
