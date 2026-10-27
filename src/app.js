@@ -2925,7 +2925,8 @@ function setRequestMode(mode, initial = {}) {
   saveComposer(); assistantDraft = null; requestMode = mode;
   const key = composerKey();
   if (!drafts.entries.has(key)) drafts.save(key, { body: "", toMemberId: mode.requesterId ?? "", replyToId: mode.requestMessageId ?? currentThreadId, ...initial, pending: null, mode, threadId: currentThreadId });
-  else drafts.save(key, { mode });
+  else drafts.save(key, { mode, ...(!drafts.get(key).pending && Object.hasOwn(initial, "toMemberId")
+    ? { toMemberId: initial.toMemberId } : {}) });
   restoreComposer(drafts.get(key));
   syncRequestComposer(); renderComposerError(); persistDrafts();
   $("#message-input").focus();
@@ -2984,7 +2985,11 @@ composerOptions.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
   if (!composerOptions.contains(event.target)) composerOptions.open = false;
 });
-$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+$("#request-reply").addEventListener("click", () => {
+  if (!state || busy || requestReading) return;
+  const toMemberId = $("#message-to-select").value;
+  setRequestMode({ kind: "request" }, toMemberId ? { toMemberId } : {});
+});
 document.addEventListener("click", event => {
   const resume = event.target.closest("[data-resume-credit]");
   if (resume && state && !busy && !requestReading) {
