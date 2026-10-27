@@ -34,6 +34,10 @@ export function parseUsageDays(raw) {
 }
 
 const headroom = (used, limit) => ({ used, limit, remaining: Math.max(0, limit - used) });
+// Room size warns before the 4 MiB store cap refuses writes: at 3.5 MiB the
+// card flags it so the owner can archive older messages while there is room.
+export const ROOM_STORE_WARN_BYTES = 3.5 * 1024 * 1024;
+const roomSizeHeadroom = used => ({ ...headroom(used, PILOT_LIMITS.projectionBytes), warning: used >= ROOM_STORE_WARN_BYTES });
 
 // Folds the period's session events into attempts. A session.started opens a
 // new attempt for its work item; later status changes and stops on that work
@@ -101,7 +105,7 @@ export function roomUsageSummary(store, token, roomId, { days = USAGE_DEFAULT_DA
         members: headroom(activeMemberCount(room.state.members), PILOT_LIMITS.membersPerRoom),
         events: headroom(room.sequence, PILOT_LIMITS.eventsPerRoom),
         workItems: headroom(Object.keys(room.state.workItems ?? {}).length, PILOT_LIMITS.workItemsPerRoom),
-        projectionBytes: headroom(projectionBytes, PILOT_LIMITS.projectionBytes)
+        projectionBytes: roomSizeHeadroom(projectionBytes)
       }
     };
   });
