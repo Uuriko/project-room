@@ -322,6 +322,7 @@ optional.push("src/agent-invite-ui.js"); // People-rail invite-code mint (collab
 optional.push("src/board-ui.js", "src/board-keyboard.mjs", "src/board-mine.js", "src/first-room-copy.js", "src/board.css"); // Tasks › Board (imported by src/app.js)
 optional.push("server/room-export-html.mjs");
 optional.push("server/room-export.mjs", "cloudflare/room-backup.mjs");
+optional.push("cloudflare/sql-cost-scope.mjs"); // optional bounded SQL diagnostic scopes
 optional.push("server/restore-ndjson.mjs"); // whole-store NDJSON restore (imported by cloudflare/room.mjs)
 optional.push("server/jobs.mjs"); // shared job registry (imported by cloudflare/job-heartbeat.mjs and server.mjs)
 optional.push("server/redact-read.mjs"); // read-time message tombstone (imported by server/http.mjs and the MCP room tools)
