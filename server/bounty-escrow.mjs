@@ -2143,6 +2143,17 @@ export class BountyEscrow {
       // criterion with a pass|fail verdict. The citations name the rubric
       // version that governed the work, so arbiters can re-check against it.
       const citations = citationsAgainstRubric(verifierAttestation.citations, bounty.rubric);
+      // UT2 candidate 3 (lane 02-04 F1): accept must honour its citations.
+      // A fail citation is the reviewer's own verdict that a criterion was
+      // not met; accepting anyway paid the award and permanently recorded
+      // the fail next to the acceptance. Refuse before any state moves:
+      // acceptance requires every cited criterion to pass. A delivery that
+      // needs changes goes back through the request-changes path (the
+      // poster returns the delivery to the worker for changes) — never
+      // through an acceptance that contradicts its own citations.
+      const failedCitations = citations.filter(c => c.verdict === "fail");
+      check(failedCitations.length === 0, "accept_has_fail_citations",
+        `acceptance cannot record a fail citation: criterion(s) ${failedCitations.map(c => `"${c.criterionId}"`).join(", ")} cited as fail — acceptance requires every cited criterion to pass; for work that needs changes, use the request-changes path (return the delivery to the worker for changes) instead of accepting it, or reject the delivery`);
       const at = isoNow(this.nowMs());
       // Acceptance track: the verdict (evidence = the verifier attestation).
       // The finality move below (attribute) is gated on this verdict.

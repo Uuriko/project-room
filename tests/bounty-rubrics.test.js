@@ -124,15 +124,17 @@ test("accept requires a citation per pinned criterion with pass|fail verdicts", 
   expectCode(run([{ criterionId: "correctness", verdict: "pass" }]), "missing_citations"); // tests uncited
   expectCode(run([...CITED, { criterionId: "nope", verdict: "pass" }]), "unknown_criterion");
   expectCode(run(CITED.map(c => ({ ...c, verdict: "maybe" }))), "invalid_input");
-  // A fail verdict is still a legal citation (the work can be accepted with
-  // a recorded fail — the dispute machine is the challenge path).
+  // UT2 candidate 3: a fail verdict is a legal citation shape, but an
+  // acceptance may no longer record one — accept honours its citations and
+  // refuses (the request-changes path is the named alternative). This
+  // supersedes the earlier pin that accepted with a recorded fail.
+  expectCode(run([{ criterionId: "correctness", verdict: "pass" },
+    { criterionId: "tests", verdict: "fail" }]), "accept_has_fail_citations");
   const b = post(escrow, { rubric: RUBRIC });
   fund(escrow, b); claim(escrow, b); submit(escrow, b);
   const accepted = escrow.acceptWork(ROOM, b.bountyId, { acceptor: JILL,
-    verifierAttestation: att([{ criterionId: "correctness", verdict: "pass" },
-      { criterionId: "tests", verdict: "fail" }]) }).bounty;
-  assert.deepEqual(accepted.attestation.citations,
-    [{ criterionId: "correctness", verdict: "pass" }, { criterionId: "tests", verdict: "fail" }]);
+    verifierAttestation: att(CITED) }).bounty;
+  assert.deepEqual(accepted.attestation.citations, CITED);
   assert.equal(accepted.attestation.rubricVersion, 1);
   assert.equal(accepted.attestation.rubricHash, accepted.rubric.hash);
 });
