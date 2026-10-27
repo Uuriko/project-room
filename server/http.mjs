@@ -3559,6 +3559,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // creates a room and becomes its owner. The pri_ secret travels in
       // the bearer header (never a JSON body); per-address rate limit
       // before the body is read, per-identity budget inside the module.
+      const rotateRoom = /^\/api\/agent-rooms\/([^/]+)\/token\/rotate$/.exec(url.pathname);
+      if (rotateRoom && req.method === "POST") {
+        rate(`agent-room-rotate:${remoteAddress}`, 20);
+        const secret = bearer(req);
+        if (!secret) reject(401, "unauthenticated", "Identity secret required. Agents can self-mint an identity at POST /api/agent-identities.");
+        return json(res, 200, agentRooms.rotateOnboardingToken(secret, decodeURIComponent(rotateRoom[1])));
+      }
+      if (rotateRoom) {
+        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
+      }
       if (url.pathname === "/api/agent-rooms" && req.method === "GET") {
         rate(`agent-room-list:${remoteAddress}`, 60);
         return json(res, 200, agentRooms.list(bearer(req), url.searchParams.get("after") ?? ""));
