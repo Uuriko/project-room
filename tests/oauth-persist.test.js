@@ -70,7 +70,7 @@ test("google OAuth callback succeeds after server instance recreation (isolate e
   const callbackUrl = `${inst2.origin}${GOOGLE_CALLBACK_PATH}?state=${state}&code=fixture-code`;
   const callback = await fetch(callbackUrl, {
     redirect: "manual",
-    headers: { Cookie: slotCookie.split(";")[0] },
+    headers: { Cookie: start.headers.getSetCookie().map(c => c.split(";")[0]).join("; ") },
   });
   // Success returns the same-origin HTML page (200), not /?google=error.
   assert.equal(callback.status, 200);

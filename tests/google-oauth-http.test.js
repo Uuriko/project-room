@@ -49,7 +49,7 @@ async function beginFlow(origin, cookieHeader) {
   assert.equal(authorize.searchParams.get("scope"), GOOGLE_SCOPES);
   assert.equal(authorize.searchParams.get("code_challenge_method"), "S256");
   assert.match(authorize.searchParams.get("state") || "", /^[A-Za-z0-9_-]{43}$/);
-  return { authorize, slotCookie: accountCookie(start) };
+  return { authorize, slotCookie: accountCookie(start), flowCookie: start.headers.getSetCookie().find(c => c.startsWith("google_oauth_state="))?.split(";")[0] };
 }
 
 test("start redirects to Google with PKCE and mints an account session slot", async t => {
@@ -118,10 +118,10 @@ test("callback success establishes the session and returns the same-origin page"
   f.store.bindHumanAccount("commons", "googler", `google:${sub}`);
 
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
-  const { authorize, slotCookie } = await beginFlow(origin);
+  const { authorize, slotCookie, flowCookie } = await beginFlow(origin);
   const callback = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-fixture`,
-    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}; ${flowCookie}` } });
   assert.equal(callback.status, 200);
   const html = await callback.text();
   assert.match(html, /content="0;url=\/\?room=commons"/);
@@ -144,10 +144,10 @@ test("callback success establishes the session and returns the same-origin page"
 test("callback success without rooms lands on the account home, session established", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
-  const { authorize, slotCookie } = await beginFlow(origin);
+  const { authorize, slotCookie, flowCookie } = await beginFlow(origin);
   const callback = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-fixture`,
-    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}; ${flowCookie}` } });
   assert.equal(callback.status, 200);
   const html = await callback.text();
   // A fresh account has no rooms: the post-login page must land on the
@@ -176,11 +176,12 @@ test("callback with a state mismatch provisions no account", async t => {
 test("callback with a provider denial provisions no account", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
-  const { authorize } = await beginFlow(origin);
+  const { authorize, flowCookie } = await beginFlow(origin);
   const denied = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&error=access_denied`,
-    { redirect: "manual" });
+    { redirect: "manual", headers: { Cookie: flowCookie } });
   assert.equal(denied.status, 200);
+  assert.equal(denied.headers.get("X-Room-Auth-Failure"), "google_consent_denied");
   assert.match(await denied.text(), /url=\/\?google=error/);
   assert.equal(denied.headers.get("X-Room-Auth-Diagnostic"), null);
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
@@ -206,10 +207,10 @@ test("second login with the same Google subject reuses the account", async t => 
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
   for (let i = 0; i < 2; i++) {
-    const { authorize, slotCookie } = await beginFlow(origin);
+    const { authorize, slotCookie, flowCookie } = await beginFlow(origin);
     const callback = await fetch(
       `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-${i}`,
-      { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+      { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}; ${flowCookie}` } });
     assert.equal(callback.status, 200);
     const session = f.store.authenticateAccountSession(accountCookie(callback));
     assert.equal(session.account.id, `google:${sub}`);
@@ -239,10 +240,10 @@ test("GET /api/auth/google/link/start 401s anonymously, 503s when Google is not 
 test("Google callback links through the shared account-login model", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
-  const { authorize, slotCookie } = await beginFlow(origin);
+  const { authorize, slotCookie, flowCookie } = await beginFlow(origin);
   const callback = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-shared`,
-    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
+    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}; ${flowCookie}` } });
   assert.equal(callback.status, 200);
   const session = f.store.authenticateAccountSession(accountCookie(callback));
   // The account is linked through the shared model: the OAuth subject
@@ -265,9 +266,10 @@ test("Google link intent attaches the subject to the signed-in account", async t
     redirect: "manual", headers: { Cookie: creds.cookie } });
   assert.equal(start.status, 302);
   const authorize = new URL(start.headers.get("location"));
+  const flowCookie = start.headers.getSetCookie().find(c => c.startsWith("google_oauth_state="))?.split(";")[0];
   const callback = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&code=code-link`,
-    { redirect: "manual", headers: { Cookie: creds.cookie } });
+    { redirect: "manual", headers: { Cookie: `${creds.cookie}; ${flowCookie}` } });
   assert.equal(callback.status, 200);
   assert.equal(f.store.accountLogins.findAccountByOAuth("google", sub), accountId);
   const methods = f.store.accountLogins.listMethods(accountId);
@@ -287,7 +289,7 @@ for (const stale of ["missing", "expired", "malformed"]) test(`Google start repl
   // A real browser sends back the cookie the start response set; the callback
   // must carry the same session slot the flow's state was issued for.
   const callback = await fetch(origin + GOOGLE_CALLBACK_PATH + "?state=" + flow.authorize.searchParams.get("state") + "&code=fixture",
-    { redirect: "manual", headers: { Cookie: `account_session=${flow.slotCookie}` } });
+    { redirect: "manual", headers: { Cookie: `account_session=${flow.slotCookie}; ${flow.flowCookie}` } });
   assert.equal(callback.headers.get("X-Room-Auth-Failure"), null);
   const token = accountCookie(callback);
   assert.ok(token);
@@ -311,7 +313,7 @@ test("callback completing a state issued to another browser fails closed (login 
   // The victim is tricked into loading the attacker's callback URL.
   const attack = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture`,
-    { redirect: "manual", headers: { Cookie: `account_session=${victim.slotCookie}` } });
+    { redirect: "manual", headers: { Cookie: `account_session=${victim.slotCookie}; ${victim.flowCookie}` } });
   assert.equal(attack.status, 200);
   // Fail closed: the victim must not be authenticated, and no Google account
   // may be provisioned from the cross-session completion.
@@ -334,4 +336,49 @@ test("callback with a valid state but no session cookie fails closed", async t =
   assert.match(await attack.text(), /url=\/\?google=error/);
   assert.equal(attack.headers.get("set-cookie") || "", "");
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
+});
+
+
+test("cross-site Google return authenticates with only the short-lived flow cookie", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const start = await fetch(origin + GOOGLE_START_PATH, { redirect: "manual" });
+  const cookies = start.headers.getSetCookie();
+  assert.match(cookies.find(c => c.startsWith("account_session=")), /SameSite=Strict/);
+  const flowCookie = cookies.find(c => c.startsWith("google_oauth_state="));
+  assert.ok(flowCookie, "a cross-site callback needs its own browser binding");
+  assert.match(flowCookie, /HttpOnly; SameSite=Lax; Max-Age=600/);
+  const state = new URL(start.headers.get("location")).searchParams.get("state");
+  const callback = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${state}&code=fixture`, {
+    redirect: "manual", headers: { Cookie: flowCookie.split(";")[0] }
+  });
+  assert.equal(callback.headers.get("X-Room-Auth-Failure"), null);
+  assert.ok(accountCookie(callback));
+  assert.match(callback.headers.getSetCookie().find(c => c.startsWith("account_session=")), /SameSite=Strict/);
+  assert.match(callback.headers.getSetCookie().find(c => c.startsWith("google_oauth_state=")), /Max-Age=0/);
+});
+
+for (const proof of ["missing", "other-flow"]) test(`cross-site return rejects ${proof} flow proof without an account cookie`, async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const attacker = await beginFlow(origin), victim = await beginFlow(origin);
+  const state = attacker.authorize.searchParams.get("state");
+  const callback = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${state}&code=fixture`, {
+    redirect: "manual", headers: proof === "missing" ? {} : { Cookie: victim.flowCookie }
+  });
+  assert.equal(callback.headers.get("X-Room-Auth-Failure"), "google_state_invalid");
+  assert.equal(accountCookie(callback), null);
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
+});
+
+
+test("a matching flow cookie does not override a different present account slot", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const flow = await beginFlow(origin), other = await beginFlow(origin);
+  const callback = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${flow.authorize.searchParams.get("state")}&code=fixture`, {
+    redirect: "manual", headers: { Cookie: `${flow.flowCookie}; account_session=${other.slotCookie}` }
+  });
+  assert.equal(callback.headers.get("X-Room-Auth-Failure"), "google_state_invalid");
+  assert.equal(accountCookie(callback), null);
 });
