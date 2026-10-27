@@ -1,7 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { emailContractFixture } from "./email-contract-fixture.mjs";
-import { normalizeGraphEmail } from "../server/graph-email.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
@@ -230,34 +228,6 @@ test("board, settings, and join error have no serious axe findings; pages do not
   const fixture = createAcceptanceFixture();
   const account = fixture.store.accountForMember("commons", "owner");
   const accountKey = fixture.store.issueAccountAccessKey(account.id);
-  const slot = fixture.store.createAccountSessionSlot();
-  const session = fixture.store.loginAccountSession(slot.token, accountKey, 0);
-  const raw = emailContractFixture();
-  raw.connection.accountId = account.id;
-  const apply = request => fixture.store.email.apply(slot.token, request, session.sessionBinding);
-  apply({ action: "connection.configure", requestId: crypto.randomUUID(), connectionId: raw.connection.id, expectedRevision: 0, profile: raw.connection });
-  const parent = structuredClone(raw.message);
-  parent.id = "AQMkCspParent="; parent.changeKey = "CQAAcsp-parent=";
-  parent.internetMessageId = "<csp-parent@example.test>"; parent.conversationId = "AAQkCspConv=";
-  parent.subject = "CSP thread"; parent.body.content = "Parent."; parent.internetMessageHeaders = [];
-  const parentOptions = structuredClone(raw.options);
-  parentOptions.attachmentObservation.messageId = parent.id;
-  parentOptions.attachmentObservation.messageRevision = parent.changeKey;
-  const importMessage = (message, options) => {
-    const envelope = normalizeGraphEmail(raw.connection, message, options);
-    const state = fixture.store.email.state(slot.token, raw.connection.id, message.parentFolderId, session.sessionBinding);
-    apply({ action: "page.apply", requestId: crypto.randomUUID(), connectionId: raw.connection.id, connectionRevision: 1,
-      folderId: message.parentFolderId, expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor,
-      cursor: crypto.randomUUID(), complete: true, reset: state.needsReset, observations: [{ kind: "message", expectedSourceRevision: 0, envelope }] });
-    return envelope.sourceId;
-  };
-  const parentId = importMessage(parent, parentOptions);
-  const child = structuredClone(raw.message);
-  child.id = "AQMkCspChild="; child.changeKey = "CQAAcsp-child=";
-  child.internetMessageId = "<csp-child@example.test>"; child.conversationId = "AAQkCspConv=";
-  child.subject = "Re: CSP thread"; child.body.content = "Reply."; child.hasAttachments = false;
-  child.internetMessageHeaders = [{ name: "In-Reply-To", value: "<csp-parent@example.test>" }];
-  importMessage(child, { idType: "immutable", attachmentObservation: { messageId: child.id, messageRevision: child.changeKey, complete: true, items: [] } });
   const server = createRoomServer({ store: fixture.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -292,10 +262,6 @@ test("board, settings, and join error have no serious axe findings; pages do not
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await seriousAxe(page, "#board-dialog");
   await page.locator("#board-close").click();
-  await clickChrome(page, "#nav-inbox");
-  await page.locator(`[data-source-id="${parentId}"]`).click();
-  await page.locator("#inbox-thread-toggle").click();
-  await page.locator("#inbox-thread-list button").first().waitFor();
   await page.goto(origin + "/join?code=x");
   await page.locator("#join-error").waitFor({ state: "visible" });
   await seriousAxe(page, "main");

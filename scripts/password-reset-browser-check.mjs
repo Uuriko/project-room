@@ -168,9 +168,12 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
   assert.equal(await f.page.locator('#auth-link-error').isVisible(), false, 'empty error block consumes no visible spacer');
 });
 
-test('unconfigured Google button returns to usable sign-in with an announced unavailable message', { timeout: 25000 }, async t => {
+test('unconfigured Google entry is hidden and a direct provider URL returns to usable sign-in', { timeout: 25000 }, async t => {
   const f = await setup(t);
-  await f.page.locator('#google-signin').click();
+  // The password form mounts before the asynchronous provider settings arrive.
+  await f.page.locator('#google-signin').waitFor({ state: 'hidden' });
+  assert.equal(await f.page.locator('#google-signin').isVisible(), false);
+  await f.page.goto(new URL('/api/auth/google/start', f.page.url()).href);
   await f.page.locator('#auth-error').filter({ hasText: 'Google sign-in isn’t available' }).waitFor();
   assert.equal(new URL(f.page.url()).pathname, '/');
   assert.equal(new URL(f.page.url()).searchParams.has('google'), false, 'one-shot failure query is scrubbed');

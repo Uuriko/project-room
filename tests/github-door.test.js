@@ -28,6 +28,21 @@ test("a requested inbound delivery fails the CLI when the door is unconfigured",
   assert.equal(scheduled.status, 0, "an unused scheduled door can remain disabled");
 });
 
+test("configured inbound credentials never implicitly authorize public outbound publication", () => {
+  for (const publish of ["", "false", "TRUE", "1"]) {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/github-door.mjs", import.meta.url)), "out"], {
+      env: { ...process.env, ROOM_DOOR_SECRET: "synthetic", GITHUB_REPOSITORY: repo,
+        ROOM_DOOR_PUBLISH: publish, ROOM_ORIGIN: "http://127.0.0.1:1" }, encoding: "utf8"
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /outbound publication disabled/);
+  }
+  const enabled = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/github-door.mjs", import.meta.url)), "out"], {
+    env: { ...process.env, ROOM_DOOR_SECRET: "", GITHUB_REPOSITORY: repo, ROOM_DOOR_PUBLISH: "true" }, encoding: "utf8"
+  });
+  assert.match(enabled.stdout, /ROOM_DOOR_SECRET/, "explicit opt-in reaches configuration validation");
+});
+
 test("outbound checkpoints quiet pages so later public messages remain reachable", async t => {
   for (const ignoredMessages of [false, true]) await t.test(ignoredMessages ? "own and private messages" : "non-message events", async () => {
     const comments = [], requested = [];
@@ -212,7 +227,7 @@ test("outbound cursor scan finds the newest digest marker beyond 3000 older comm
       const parsed = new URL(url);
       const page = Number(parsed.searchParams.get("page") ?? 1);
       const perPage = Number(parsed.searchParams.get("per_page") ?? 100);
-      const ordered = parsed.searchParams.get("direction") === "desc" ? [...comments].reverse() : comments;
+      const ordered = comments; // GitHub issue comments are always ascending by ID.
       return new Response(JSON.stringify(ordered.slice((page - 1) * perPage, page * perPage)));
     }
     const comment = { ...JSON.parse(init.body), user: bot };
@@ -227,7 +242,7 @@ test("outbound cursor scan finds the newest digest marker beyond 3000 older comm
   assert.equal(requestedAfter, 99, "cursor must come from the newest digest, not the oldest fetched page");
   assert.equal(result.posted, false);
   assert.equal(comments.length, 3500, "no duplicate digest may be posted");
-  assert.ok(requestedUrls.length <= 2, `newest-first scan should stop at the first trusted marker, fetched ${requestedUrls.length} pages`);
+  assert.ok(requestedUrls.every(url => !new URL(url).searchParams.has("direction")), "use supported issue-comment parameters");
 });
 
 test("forged markers from humans, other bots and quoted text cannot advance outbound cursor", async () => {
