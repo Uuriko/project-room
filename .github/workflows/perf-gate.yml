@@ -1,0 +1,38 @@
+# NEXT-7: a perf regression gate for server//src/ pull requests.
+#
+# Runs perf/bench.mjs (fixed seed, deterministic clock) against the committed
+# baseline in perf/bench-baseline.json. A run that regresses a gated metric
+# past its threshold fails here; the baseline itself changes only in a PR
+# whose message says why (see perf/bench.mjs --help).
+name: perf-gate
+
+on:
+  pull_request:
+    paths:
+      - "server/**"
+      - "src/**"
+      - "perf/**"
+      - ".github/workflows/perf-gate.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install Playwright Chromium
+        run: npx playwright install chromium --with-deps
+      - name: Perf regression check (2,000-message seed + browser phase)
+        run: node perf/bench.mjs --messages 2000 --browser --check

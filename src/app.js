@@ -1,5 +1,6 @@
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
+import { createDebounce } from "./debounce.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
 import { uiText } from "./strings.js";
@@ -2763,6 +2764,16 @@ function pinnedFilterOn() {
 // brings it back with the same results.
 let searchCollapsed = false;
 const narrowSearch = matchMedia("(max-width: 40rem)");
+// The keystroke answers from the held window first. The network refine (a full
+// history fill while one is owed) waits for a typing pause, so its re-renders
+// cannot land between keystrokes and stall the next one.
+// A true debounce: every keystroke clears and restarts the window, so the
+// refine fires 500ms after the LAST keystroke, never after the first (the
+// first-key-only version let a refine land 100ms after a late keystroke).
+const scheduleSearchRefine = createDebounce(() => {
+  if (!state || !$("#message-search").value.trim()) return;
+  if (client.loadHistory()) renderSearch();
+}, 500);
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
   const resultsOnly = query.trim().toLowerCase() === "has:result";
@@ -2781,7 +2792,10 @@ function renderSearch(now = Date.now()) {
   if (!active) searchCollapsed = false;
   $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const loadingOlder = client.loadHistory(); // search covers the whole room, not just the held window
+  // Search covers the whole room, not just the held window; the fill trigger
+  // lives off the keystroke path (see scheduleSearchRefine).
+  const loadingOlder = Boolean(client.owesHistory);
+  if (loadingOlder) scheduleSearchRefine();
   const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;

@@ -35,6 +35,7 @@
   "src/conversation-intent.js",
   "src/conversation.js",
   "src/curiosity-rank.mjs",
+  "src/debounce.js",
   "src/design-tokens.js",
   "src/display-name-guard.js",
   "src/dm-consents.js",
