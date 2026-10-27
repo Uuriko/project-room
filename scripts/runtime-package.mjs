@@ -278,6 +278,7 @@ optional.push("cloudflare/channel-drain-tick.mjs"); // channel-drain RPC decisio
 optional.push("cloudflare/edge-public.mjs"); // static assets and discovery docs answered outside the Durable Object (imported by cloudflare/room.mjs)
 optional.push("cloudflare/request-timing.mjs"); // Server-Timing and per-request duration logs (imported by cloudflare/room.mjs)
 optional.push("cloudflare/health-probe.mjs"); // Worker-side /api/ready SELECT 1 probe (imported by cloudflare/room.mjs)
+optional.push("cloudflare/signin-options.mjs"); // P0-5: Worker-side signin-options answer (imported by cloudflare/room.mjs)
 optional.push("server/identity-secret-hash.mjs"); // HMAC identity verifiers and legacy scrypt upgrade (imported by server/agent-identities.mjs)
 optional.push("server/retention.mjs", "server/audit-retention.mjs"); // pure planners (imported by server/retention-run.mjs)
 optional.push("server/google-oauth.mjs"); // Google sign-in (imported by server/http.mjs and cloudflare/room.mjs)

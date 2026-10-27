@@ -99,7 +99,7 @@ async function objectSigninOptions(env, origin) {
 
 const ORIGIN = "https://room.example.test";
 const GITHUB_VALID = { GITHUB_OAUTH_CLIENT_ID: "gh-client-id", GITHUB_OAUTH_CLIENT_SECRET: "gh-client-secret" };
-const GOOGLE_VALID = { ROOM_GOOGLE_CLIENT_ID: "123456789-abc123def.apps.googleusercontent.com", ROOM_GOOGLE_CLIENT_SECRET: "google-client-secret" };
+const GOOGLE_VALID = { ROOM_GOOGLE_CLIENT_ID: "123-example.apps.googleusercontent.com", ROOM_GOOGLE_CLIENT_SECRET: "google-client-secret" };
 const MAIL_VALID = { RESEND_API_KEY: "re_test_key" };
 
 const MATRIX = [
