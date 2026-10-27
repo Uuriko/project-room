@@ -174,6 +174,11 @@ const ALLOW = {
       threadId: "'or reads one when threadId is set' — omitted lists threads (GET /api/rooms/{roomId}/peer-dms), set reads one (GET …/peer-dms/{threadId}, where it is required).",
     },
   },
+  webhook_deliveries: {
+    routeSelector: {
+      subscriptionId: "'Omit for the identity-wide log and metrics' \u2014 omitted reads the identity-wide log and metrics (GET /api/agent-webhooks/deliveries, /dead-letter, /metrics, which declare no subscriptionId), set reads one subscription's journal (GET /api/agent-webhooks/{subscriptionId}/deliveries, where it is a required path parameter).",
+    },
+  },
   wake_register: {
     // "Same store call as POST /api/agent-heartbeats with mode wakeable."
     fixed: { mode: "wakeable" },
