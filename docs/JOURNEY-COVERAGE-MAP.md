@@ -169,75 +169,6 @@ carry the claim, and the remaining tiers stay visibly open.
       }
     },
     {
-      "id": "unified-inbox-connections",
-      "claim": "One validated connection record and adapter interface for email and Telegram fixture connections; the Inbox lists channel sources grouped by connection with its state.",
-      "evidence": {
-        "unit": [
-          "tests/channel-connection.test.js",
-          "tests/channel-import.test.js",
-          "tests/inbox-channel-client.test.js"
-        ],
-        "browser": [],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
-      "id": "telegram-fixture-import",
-      "claim": "Recorded Telegram Bot API updates (text, captions, attachments without bytes, edits, channel posts) normalize into Inbox sources through the shared importer, paged by getUpdates offset.",
-      "evidence": {
-        "unit": [
-          "tests/telegram-adapter.test.js",
-          "tests/channel-import.test.js"
-        ],
-        "browser": [],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
-      "id": "inbox-connection-routes",
-      "claim": "Account-session connection routes, loopback-only fixture sync of a recorded page, and secret-verified webhook holding for Telegram; nothing is fetched or sent.",
-      "evidence": {
-        "unit": [
-          "tests/channel-import.test.js"
-        ],
-        "browser": [],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
-      "id": "telegram-live-trigger",
-      "claim": "Live Telegram: bot token and webhook secret read from deployment bindings with a visible not-configured state, a setWebhook registration script, a sendMessage transport with per-attempt idempotency and bounded retry, an owner-authenticated import trigger that works off loopback, and a connection card with status and Reconnect.",
-      "evidence": {
-        "unit": [
-          "tests/telegram-live.test.js",
-          "tests/telegram-adapter.test.js"
-        ],
-        "browser": [
-          "scripts/inbox-telegram-check.mjs"
-        ],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
-      "id": "unified-inbox-ui",
-      "claim": "One Inbox list across email, Telegram and samples with channel badges, channel and connection filters and a grouping toggle; a Telegram reply from the Inbox through the deployment's channel transport (fixture until the bindings are set) with accepted, rejected and unavailable states; connection add, reconnect and remove over owner-authenticated routes; a needs-you marker for messages addressed to the owner; and Telegram excerpt sharing into a room.",
-      "evidence": {
-        "unit": [
-          "tests/inbox-unified-routes.test.js",
-          "tests/inbox-channel-client.test.js"
-        ],
-        "browser": [
-          "scripts/inbox-unified-check.mjs"
-        ],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
       "id": "channel-webhook-journal",
       "claim": "Verified webhook updates are journaled durably per connection and update id, survive a store reopen, drain in cursor order marking exactly the consumed rows imported, and record bounded failed attempts without blocking neighbours.",
       "evidence": {
@@ -303,19 +234,6 @@ carry the claim, and the remaining tiers stay visibly open.
         "browser": [
           "scripts/notification-feed-browser-check.mjs"
         ],
-        "agent": [],
-        "hosted": []
-      }
-    },
-    {
-      "id": "telegram-send-preview",
-      "claim": "A saved Telegram reply previews its bot and target chat and dispatches only over a matching fixture transport through the shared send journal.",
-      "evidence": {
-        "unit": [
-          "tests/channel-import.test.js",
-          "tests/inbox-channel-client.test.js"
-        ],
-        "browser": [],
         "agent": [],
         "hosted": []
       }
@@ -474,23 +392,19 @@ carry the claim, and the remaining tiers stay visibly open.
 | Resumable catch-up | return-brief, return-brief-client, draft-feedback | calm-return-browser-check | open | open |
 | Tab draft recovery | draft-return, recovery | draft-return-browser-check, session-boundary-check | open | open |
 | Combined verification entrypoint | release-evidence | unified-journey-check | open | open |
-| Unified inbox connections | channel-connection, channel-import, inbox-channel-client | open | open | open |
-| Telegram fixture import | telegram-adapter, channel-import | open | open | open |
-| Inbox connection routes | channel-import | open | open | open |
 | Room export portability (JSONL and HTML) | room-export, room-client | room-export-browser-check | open | open |
 | Owner access review | access-review | open | open | open |
-| Live Telegram trigger and card | telegram-live, telegram-adapter | inbox-telegram-check | open | open |
-| Telegram send preview | channel-import, inbox-channel-client | open | open | open |
 | What this agent can access (pre-run preview) | work-context | access-preview-browser-check | open | open |
 | Room review policy | work-actions, state-machine-invariants | room-policy-browser-check | open | open |
 | Room Trust (cross-owner assign/wake kill-switch) | room-trust, agent-error-next | room-trust-browser-check | open | open |
 | Room spend allowance (owner cap, reserve on start, headroom card) | spend-allowance, route-auth-table | spend-allowance-browser-check | open | open |
 | Pinned messages | pinned-messages, route-auth-table | pinned-messages-browser-check | open | open |
 | Report a message, mute a member | moderation, route-auth-table | moderation-browser-check | open | open |
-| Unified inbox UI (list, reply, connections, needs-you, share) | inbox-unified-routes, inbox-channel-client | inbox-unified-check | open | open |
 | Room lifecycle (create, archive, leave) | room-lifecycle, account-rooms | room-lifecycle-browser-check | open | open |
 | Notification feed | notification-feed, notification-preferences | notification-feed-browser-check | open | open |
 
 Follow-up scope: claims made in docs beyond the README list (per-feature
 acceptance docs) can be folded into the same block; the checker format already
 carries them.
+
+Email workspace and external message connectors are deferred from v1. Their former coverage claims are retained in `archive/deferred-email/coverage-claims.json`, not release capabilities.
