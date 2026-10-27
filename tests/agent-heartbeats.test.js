@@ -85,7 +85,7 @@ test("heartbeat upserts hosts and derives online/offline/unregistered status", t
 });
 
 test("wake signals coalesce per message and deliver through pending/ack", t => {
-  const { hb } = unit(t);
+  const { hb, advance } = unit(t);
   hb.heartbeat(wakeable());
   const first = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-1", messageId: "msg-1" });
   assert.equal(first.enqueued, true);
@@ -93,6 +93,7 @@ test("wake signals coalesce per message and deliver through pending/ack", t => {
   const dup = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-1", messageId: "msg-1" });
   assert.equal(dup.enqueued, false, "same message wakes once");
   assert.equal(dup.signal.signalId, first.signal.signalId);
+  advance(1); // Distinct times exercise oldest-first; tied cursor order has its own test.
   hb.enqueueWake({ agentId: "ai_testagent", kind: "dm", roomId: "room-1", messageId: "msg-2" });
   const pending = hb.pendingWakes("ai_testagent");
   assert.equal(pending.length, 2);
@@ -336,6 +337,9 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
 
   // A DM wakes with kind dm (coalescing on messageId is covered at the
   // unit level; the room itself rejects duplicate messageIds).
+  // Wake order is timestamp then signal ID, not insertion order. Give this
+  // later message a later timestamp rather than depending on random IDs.
+  at += 1;
   f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
     data: { messageId: "dm-1", body: "direct ping", toMemberId: "wakeagent" } });
   const afterDm = f.store.agentHeartbeats.pendingWakes(identity.identityId);

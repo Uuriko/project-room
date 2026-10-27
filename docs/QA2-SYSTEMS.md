@@ -112,7 +112,7 @@ QA2_E2E=1 node --test --test-concurrency=1 tests/qa2/*.test.js
 
 | Workflow | When | Against |
 | --- | --- | --- |
-| `qa2-agent-eval.yml` | pull requests that touch `server/`, `src/`, or `deploy/` (and the QA2 scripts, tests, OpenAPI, and package manifests), plus nightly at 09:41 UTC | throwaway local server |
+| `qa2-agent-eval.yml` | nightly at 09:41 UTC, and manual dispatch | throwaway local server |
 | `qa2-fuzz.yml` | nightly at 10:23 UTC, and manual dispatch | throwaway local server |
 
 Production is covered by `live-smoke.yml` and the 5-minute external probe Worker; the former 6-hour qa2-synthetic job was removed after failing every run.
