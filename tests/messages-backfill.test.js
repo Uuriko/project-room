@@ -167,9 +167,9 @@ test('v37 message records migrate lazily, replay populated cursors, and fence ol
   oldWrite.run();
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare('PRAGMA user_version').get().user_version, 42);
+    assert.equal(current.db.prepare('PRAGMA user_version').get().user_version, 43);
     assert.equal(current.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json,null);
-    assert.throws(()=>oldWrite.run(),/project_room_writer_v42|unsupported database writer/);
+    assert.throws(()=>oldWrite.run(),/project_room_writer_v43|unsupported database writer/);
     assert.equal(current.checkMessagesParity().checked,0,'uncertified legacy rows are not ready');
     finish(current);
     assert.equal(JSON.parse(current.db.prepare("SELECT record_json FROM messages WHERE message_id='legacy'").get().record_json).body,'retained legacy text');
@@ -274,9 +274,9 @@ test('v38 archived entities migrate to the current schema lazily and fence the o
  const old=new DatabaseSync(filename);old.function('project_room_writer_v38',()=>38);const write=old.prepare("UPDATE messages SET body=body WHERE message_id='old'");write.run();
  const current=new RoomStore(filename,{messageProjectionWindow:2});
  try{
-  assert.equal(current.db.prepare('PRAGMA user_version').get().user_version, 42);
+  assert.equal(current.db.prepare('PRAGMA user_version').get().user_version, 43);
   assert.equal(current.db.prepare("SELECT reducer_extras_json FROM messages WHERE message_id='old'").get().reducer_extras_json,null);
-  assert.throws(()=>write.run(),/project_room_writer_v42|unsupported database writer/);
+  assert.throws(()=>write.run(),/project_room_writer_v43|unsupported database writer/);
   current.command(token,'commons',{id:'edit-old',type:'message.edited',data:{messageId:'old',body:'Changed.',expectedMessageRevision:0}});
   assert.equal(JSON.parse(current.db.prepare("SELECT reducer_extras_json FROM messages WHERE message_id='old'").get().reducer_extras_json).editHistory[0].body,'Body old.');
  }finally{current.close();old.close();}
@@ -296,7 +296,7 @@ test('v39 writer is fenced before entity references are persisted, and a v41 rea
  let current;
  try {
   current=new RoomStore(filename,{messageProjectionWindow:4,messageEntityProjection:true});
-  assert.throws(()=>write.run(),/project_room_writer_v42|unsupported database writer/);
+  assert.throws(()=>write.run(),/project_room_writer_v43|unsupported database writer/);
   current.command(token,'commons',{id:'new-post',type:'message.posted',data:{messageId:'new-record',body:'New message.'}});
   assert.ok(JSON.parse(current.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection).messages.every(m=>m._entity===1));
  } finally {current?.close();old.close();}
@@ -324,7 +324,7 @@ test('schema 40 snapshots move off the cursor atomically and an open v40 writer 
  let current;
  try {
   current=new RoomStore(filename);
-  assert.throws(()=>write.run(),/project_room_writer_v42|unsupported database writer/);
+  assert.throws(()=>write.run(),/project_room_writer_v43|unsupported database writer/);
   assert.equal(current.db.prepare("SELECT state_json FROM message_replay_snapshots WHERE room_id='commons'").get().state_json,snapshot);
   assert.equal(current.db.prepare("SELECT 1 FROM pragma_table_info('messages_backfill_cursor') WHERE name='state_json'").get(),undefined);
   assert.equal(current.checkMessagesParity().ok,true);

@@ -58,7 +58,7 @@ export const RETENTION_POLICY = Object.freeze({
     Object.freeze({ category: "sessions", description: "Browser account-session slots (account_session_slots) are deleted; every signed-in browser session ends." }),
     Object.freeze({ category: "login_methods", description: "All linked sign-in methods are deleted: password verifiers, magic codes, and recovery codes." }),
     Object.freeze({ category: "passkeys", description: "All registered passkey credentials are deleted." }),
-    Object.freeze({ category: "memberships", description: "Room membership bindings (member_accounts) are deleted; the account leaves every room." }),
+    Object.freeze({ category: "memberships", description: "Room membership bindings and account join requests are deleted; the account leaves every room." }),
     Object.freeze({ category: "connected_data", description: "Connected Gmail data (gmail_mailboxes, gmail_linked_mailboxes, gmail_pending, gmail_operations) and account setup answers (account_setup) are permanently deleted." }),
     Object.freeze({ category: "private_inbox", description: "Private inbox content is permanently deleted: imported message versions (private_inbox_versions), drafts (private_inbox_drafts), sources (private_inbox_sources), and read state (private_inbox_reads)." }),
     Object.freeze({ category: "private_email", description: "Connected email data is permanently deleted: connections (private_email_connections) and folders (private_email_folders)." }),
@@ -436,7 +436,7 @@ export function inventoryFromStore(store, accountId, rooms = null) {
     login_methods: { itemCount: store.accountLogins.listMethods(accountId).length },
     passkeys: { itemCount: store.accountLogins.listPasskeyCredentials(accountId).length },
     memberships: {
-      itemCount: countWhere(store, "member_accounts", accountId),
+      itemCount: countWhere(store, "member_accounts", accountId) + countWhereIfExists(store, "account_join_requests", "account_id", accountId),
       ...(roomWork ? { dependsOn: ["owned_rooms"] } : {}),
     },
     audit: {
@@ -604,7 +604,8 @@ const EXECUTORS = {
   // Owners are skipped (owned_rooms archives or transfers those rooms).
   memberships: (store, accountId) => {
     deactivateBoundMembers(store, accountId);
-    return store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run(accountId).changes;
+    return store.db.prepare("DELETE FROM member_accounts WHERE account_id=?").run(accountId).changes
+      + deleteWhereIfExists(store, "account_join_requests", "account_id", accountId);
   },
   connected_data: (store, accountId) => {
     let removed = 0;
