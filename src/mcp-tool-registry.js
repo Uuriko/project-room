@@ -27,13 +27,13 @@
 // filtering this table, so core entry order IS the core catalog order);
 // the rest follow HOSTED_ROOM_MCP_TOOLS order.
 export const MCP_TOOL_META = Object.freeze([
-  { name: "room_needs_me", core: true, blurb: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Discovery is not resolution.", focus: ["common"] },
-  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns the newest messages. Pass roomId.", focus: ["conversation"] },
+  { name: "room_needs_me", core: true, blurb: "Cross-room attention and messages. Pass the complete cursor as since; continue while hasMore, even on an empty page. Pass roomId to scope one room, or omit it with a room-pinned key; discovery is not resolution.", focus: ["common"] },
+  { name: "room_read_messages", core: true, blurb: "Read room messages oldest first. latest:true returns the newest messages. Pass roomId, or omit it with a room-pinned key.", focus: ["conversation"] },
   { name: "room_post_message", core: true, blurb: "Post a room message. Optional replyToId.", focus: ["common"] },
-  { name: "room_reply", core: true, blurb: "Reply under a room message. Pass roomId, replyToId, and body. Ordinary replies do not close formal requests.", focus: ["common"] },
+  { name: "room_reply", core: true, blurb: "Reply under a room message. Pass replyToId and body; requestId is optional and derived when omitted. Ordinary replies do not close formal requests.", focus: ["common"] },
   { name: "room_list_requests", core: true, blurb: "List formal requests by direction and status (defaults incoming/open). Follow nextReads and finish selected context before responding. Reads do not close requests.", focus: ["common"] },
-  { name: "room_read_request", core: true, blurb: "Read a formal request addressed to or sent by you. Pass roomId and requestMessageId. Finish every page before using responseActions; incomplete or stale context cannot authorize an answer.", focus: ["common"] },
-  { name: "room_respond_to_request", core: true, blurb: "Answer or decline a formal request addressed to you. Use the complete selected read's responseActions, add requestId and body, preserve all fixed arguments. Retry unchanged after an unknown result; follow next to verify current status.", focus: ["common"] },
+  { name: "room_read_request", core: true, blurb: "Read a formal request addressed to or sent by you. Pass requestMessageId; roomId defaults for a room-pinned key. Finish every page before using responseActions; incomplete or stale context cannot authorize an answer.", focus: ["common"] },
+  { name: "room_respond_to_request", core: true, blurb: "Answer or decline a formal request addressed to you. Use the complete selected read's responseActions, add body, and preserve all fixed arguments; requestId is optional and derived when omitted. Retry unchanged after an unknown result; follow next to verify current status.", focus: ["common"] },
   { name: "dm_posted", core: true, blurb: "Send a peer DM. Requires an active bond that includes peer.dm. Pass roomId, to, body, and messageId.", alias: "dm.posted", focus: ["conversation"] },
   { name: "room_check_access", core: true, blurb: "List rooms this identity is in. Pass roomId to check one room.", focus: ["common"] },
   { name: "room_create", core: true, blurb: "Create a room you own. Pass title and purpose. Invite peers at POST /api/rooms/{roomId}/agent-invites." },
@@ -84,6 +84,8 @@ export const MCP_TOOL_META = Object.freeze([
   { name: "room_release_claim", focus: ["work"] },
   { name: "room_renew_claim", focus: ["work"] },
   { name: "room_record_handoff", focus: ["work"] },
+  { name: "room_claim", focus: ["work"] },
+  { name: "room_handoff", focus: ["work"] },
   { name: "room_request_history", focus: ["conversation"] },
   { name: "room_request_reply", focus: ["common"] },
   { name: "room_cancel_request", focus: ["conversation"] }

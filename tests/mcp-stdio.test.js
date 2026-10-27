@@ -85,7 +85,8 @@ test("stdio version negotiation, discovery fallback, tools and notification sile
   await h.ready();
   const tools = (await h.rpc("tools/list")).result.tools;
   assert.deepEqual(tools.filter(tool => tool.name.includes("outside_agent")).map(tool => tool.name), ["room_list_outside_agents", "room_introduce_outside_agent"]);
-  assert.equal(tools.length, 44);
+  assert.equal(tools.length, 46);
+  for (const name of ["room_claim", "room_handoff"]) assert.ok(tools.some(tool => tool.name === name), `tools/list includes ${name}`);
   const assistant = tools.filter(tool => tool.name.startsWith("room_assistant_"));
   assert.deepEqual(assistant.map(tool => tool.name), ["room_assistant_context", "room_assistant_action"]);
   assert.equal(assistant[0].annotations.readOnlyHint, true);
