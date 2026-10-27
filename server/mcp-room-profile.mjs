@@ -45,6 +45,7 @@ import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
 import { withSpendCharge } from "./spend-grants.mjs";
 import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
+import { traceMcpToolCall, tagMcpTraceErrorClass, isBusyMcpError } from "./mcp-trace.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
@@ -952,8 +953,14 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       if (!isRunnableAction(inner)) {
         return mcpCallError(requestId, { reason: "unknown_tool", tool: args.name, suggestion: closestToolName(args.name, HOSTED_ROOM_MCP_TOOLS) });
       }
-      return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
+      const reply = await handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
         { store, secret, identity, mcpUrl, searchParams, agentRooms });
+      // MCP trace v1: the recursion bypasses the /mcp handler funnel, so
+      // the inner dispatch traces itself here, under the inner tool name.
+      // The outer room_run_action call traces once at the funnel, as its
+      // own tool — the inner tool is never double-counted.
+      traceMcpToolCall({ method: "tools/call", params: { name: inner, arguments: args.arguments ?? {} } }, { reply, canonicalName: inner });
+      return reply;
     }
     const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
       : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
@@ -998,7 +1005,13 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
           roomId: args.roomId, ...(typeof args.workItemId === "string" ? { workItemId: args.workItemId } : {})
         } }] };
       }
-      return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
+      const reply = { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
+      // MCP trace v1: failureValue flattens a BUSY/storage error to
+      // {status:500, code:"internal"}; tag the reply (non-serialising
+      // Symbol, wire shape unchanged) so the /mcp handler can still
+      // count it as busy_500. Classification only — no behaviour change.
+      if (isBusyMcpError(error)) tagMcpTraceErrorClass(reply, "busy_500");
+      return reply;
     }
   }
   if (message.method === "server/discover") {

@@ -8,9 +8,10 @@ import { MCP_VERSION, MCP_SUPPORTED_VERSIONS } from "../client/mcp-stdio.mjs";
 import { llmsTxt, kitsTxt, joinPrompt } from "./agent-discovery.mjs";
 import {
   isRoomMcpPath, roomMcpUrlForHost, roomMcpJoinText, roomMcpJoinJson, roomMcpSnippets, ROOM_MCP_SERVER_NAME, ROOM_MCP_PUBLIC_URL,
-  ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, IDENTITY_MINT_MCP_TOOLS, isHostedMcpToolName
+  ROOM_MCP_SERVER_VERSION, HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, IDENTITY_MINT_MCP_TOOLS, isHostedMcpToolName, canonicalMcpToolName
 } from "../src/room-mcp-join.js";
 import { closestToolName, diagnoseArguments, mcpCallError, mcpInvalidRequest, mcpTransportError } from "./mcp-arg-errors.mjs";
+import { traceMcpToolCall } from "./mcp-trace.mjs";
 import { livePublicMcpTools } from "./mcp-discovery.mjs";
 import { isIdentityMintMcpTool } from "./mcp-identity-mint.mjs";
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
@@ -126,7 +127,28 @@ export function legacyMcpHeaders(authorization) {
   return { Deprecation: "@1798761600", Link: '</llms.txt>; rel="deprecation"' };
 }
 
-export async function dispatchRoomMcp(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
+// MCP trace schema v1 (server/mcp-trace.mjs): the /mcp handler is the
+// single funnel for every tools/call — anonymous join tools, identity
+// mint, public work, and the authenticated hosted profile all settle
+// here, on both the Node and fetch transports — so emission wraps this
+// dispatch, in-handler (ruling XW1: not a gateway). One trace row per
+// settled tools/call; other methods emit nothing. A dispatch that throws
+// is traced from the thrown error and rethrown untouched, so the
+// transports' existing error handling is unchanged.
+export async function dispatchRoomMcp(message, options = {}) {
+  if (message?.method !== "tools/call") return dispatchRoomMcpInner(message, options);
+  const canonicalName = canonicalMcpToolName(message.params?.name);
+  try {
+    const reply = await dispatchRoomMcpInner(message, options);
+    traceMcpToolCall(message, { reply, canonicalName });
+    return reply;
+  } catch (error) {
+    traceMcpToolCall(message, { thrown: error, canonicalName });
+    throw error;
+  }
+}
+
+async function dispatchRoomMcpInner(message, { mcpUrl, authorization, roomMcp, searchParams, userAgent, remoteAddress } = {}) {
   // An empty "Bearer" (an MCP host config with an unset secret variable) is
   // treated as no credential, so the public join tools still load.
   const presented = typeof authorization === "string" && !/^(?:bearer)?\s*$/i.test(authorization);

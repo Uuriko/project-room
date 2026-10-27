@@ -65,6 +65,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/mcp-hosted-tools.mjs');
   paths.add('server/mcp-discovery.mjs');
   paths.add('server/mcp-arg-errors.mjs'); // structured MCP tools/call errors (imported by server/mcp-http.mjs)
+  paths.add('server/mcp-trace.mjs'); // MCP trace schema v1 (imported by server/mcp-http.mjs)
   paths.add('server/mcp-room-profile.mjs'); // authenticated hosted MCP room tools (imported by server/http.mjs)
   paths.add('server/spend-grants.mjs'); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/routes/spend-grants.mjs, server/mcp-room-profile.mjs, server/mcp-full-profile.mjs)
   paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
