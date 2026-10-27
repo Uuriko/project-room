@@ -37,6 +37,17 @@ a files/symbols/imports/calls projection, not Graphify's full semantic graph.
 Large graphs can exceed hosted limits; use local queries or an explicit scope.
 Missing results on a scoped/truncated map do not prove absence of dependencies.
 
+Graphify imports retain definitions across the accepted input (at most 20,000
+nodes and 4,000 files), including files with more than 200 symbols. File query and
+explain responses still return at most 200 symbols; `symbolCount` and
+`symbolsReturned` distinguish stored coverage from the response size. Exact
+symbol lookup searches all retained definitions. The fallback source parser
+still caps each file at 200 symbols; imports/call edges and global input limits
+can still make a graph incomplete. An imported graph exceeding the 1,500,000-byte
+storage limit is rejected without replacing the prior map; use an explicit
+smaller source scope when necessary.
+
+
 Rebuild at the intended new commit to refresh. There is currently no automatic
 GitHub push hook or PR-file synchronizer. A successful local build is not a hosted
 update. Check revision before using a map for a current change.
