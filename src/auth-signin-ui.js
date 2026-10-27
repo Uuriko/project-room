@@ -1,7 +1,8 @@
 import { uiText } from './strings.js';
 // Email sign-in uses a delivered single-use link. The account cookie stays
 // HttpOnly; authentication writes use the current browser slot and CSRF token.
-import { escapeHtml, base64urlToBytes, bytesToBase64url } from "./account-settings-ui.js";
+import { base64urlToBytes, bytesToBase64url } from "./account-settings-ui.js";
+import { escapeHtml } from "./html-escape.js";
 
 export function toAuthenticationPublicKey(options) {
   const { challengeId: _challengeId, ...publicKey } = options;

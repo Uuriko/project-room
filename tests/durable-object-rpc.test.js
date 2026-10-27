@@ -185,7 +185,8 @@ test("RPC stub calls target a class that extends DurableObject", () => {
   assert.deepEqual(methods, [
     "ensureJobAlarm",
     "probeStorage",
-    "readJobHealth"
+    "readJobHealth",
+    "runSlowJob"
   ]);
   assert.match(workerSource, /env\.ROOM\.getByName\('invite-only-pilot'\)\.fetch\(/);
   assert.match(workerSource, /import\s*\{[^}]*\bDurableObject\b[^}]*\}\s*from\s*['"]cloudflare:workers['"]/);
@@ -221,7 +222,7 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
   const scheduledAt = workerSource.indexOf("async scheduled(");
   const scheduledBody = sliceBalanced(workerSource, workerSource.indexOf("{", scheduledAt));
   const expected = rpcStubCalls(scheduledBody).map(call => call.method).sort();
-  assert.deepEqual(expected, ["ensureJobAlarm"]);
+  assert.deepEqual([...new Set(expected)], ["ensureJobAlarm", "runSlowJob"]);
 
   await worker.scheduled({ cron: "*/30 * * * *" }, {
     ROOM_MAINTENANCE: "1",
@@ -254,7 +255,8 @@ test("scheduled handler invokes cron RPC on the real ProjectRoom shape", async (
   }, { waitUntil(promise) { pending.push(promise); } });
   await Promise.all(pending);
   assert.equal(name, "invite-only-pilot");
-  assert.deepEqual(invoked.sort(), expected);
+  assert.deepEqual([...new Set(invoked)].sort(), [...new Set(expected)]);
+  assert.equal(invoked.filter(method => method === "runSlowJob").length, 4);
 });
 
 test("inbound mail is rejected while the inbox consumer is not durable", async () => {

@@ -7,6 +7,7 @@
 // the `unit` merge gate can fail closed on stale or partial evidence.
 //
 // Usage: node scripts/unit-ci.mjs --shard=1/3   (run from the repo root)
+//        node scripts/unit-ci.mjs --all         (every discovered file, one job)
 // Use worktree-local scratch by default; create explicit TMPDIR before children.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -158,12 +159,32 @@ export function runTestFiles(files, options = {}) {
   return { status, signal: result.signal, failures, fileDurationsMs };
 }
 
-function main() {
-  const argv = process.argv.slice(2);
-  if (argv.length !== 1 || !argv[0].startsWith("--shard=")) {
-    throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3");
+function selectUnitRun(argv, plan) {
+  if (argv.length === 1 && argv[0] === "--all") {
+    return {
+      label: "all",
+      files: plan.files,
+      receiptName: attempt => `unit-all-attempt-${attempt}.json`,
+      junitName: attempt => `unit-junit-all-attempt-${attempt}.xml`,
+      receiptFields: {},
+    };
   }
-  const shard = parseShard(argv[0].slice("--shard=".length));
+  if (argv.length === 1 && argv[0].startsWith("--shard=")) {
+    const shard = parseShard(argv[0].slice("--shard=".length));
+    return {
+      label: `shard ${shard.index}/${shard.total}`,
+      files: plan.shards[shard.index - 1].files,
+      receiptName: attempt => `unit-shard-${shard.index}-of-${shard.total}-attempt-${attempt}.json`,
+      junitName: attempt => `unit-junit-${shard.index}-of-${shard.total}-attempt-${attempt}.xml`,
+      receiptFields: shard,
+    };
+  }
+  throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3 | --all");
+}
+
+function main() {
+  const plan = unitPlan();
+  const selected = selectUnitRun(process.argv.slice(2), plan);
   // Fresh checkouts do not contain ignored .tmp/. Initialize before both
   // dependency preflight and test children, matching scripts/test-env.sh.
   const worktreeScratch = resolve(".tmp");
@@ -174,22 +195,21 @@ function main() {
   const preflight = spawnSync(process.execPath, ["scripts/check-deps.mjs"], { stdio: "inherit" });
   if (preflight.error) throw preflight.error;
   if (preflight.status !== 0) process.exit(preflight.status ?? 1);
-  const plan = unitPlan();
-  const files = plan.shards[shard.index - 1].files;
-  if (!files.length) throw new Error("Refusing an empty unit shard");
+  const files = selected.files;
+  if (!files.length) throw new Error("Refusing an empty unit run");
   const attempt = process.env.GITHUB_RUN_ATTEMPT ?? "local";
-  const receiptPath = `test-results/unit-shard-${shard.index}-of-${shard.total}-attempt-${attempt}.json`;
+  const receiptPath = `test-results/${selected.receiptName(attempt)}`;
   mkdirSync(dirname(receiptPath), { recursive: true });
   rmSync(receiptPath, { force: true });
-  console.log(`unit-ci: shard ${shard.index}/${shard.total}, ${files.length} test files`);
-  const junitPath = `test-results/unit-junit-${shard.index}-of-${shard.total}-attempt-${attempt}.xml`;
+  console.log(`unit-ci: ${selected.label}, ${files.length} test files`);
+  const junitPath = `test-results/${selected.junitName(attempt)}`;
   const started = Date.now();
   const { status, signal, failures, fileDurationsMs } = runTestFiles(files, { junitPath });
   writeFileSync(
     receiptPath,
     JSON.stringify(
       {
-        ...shard,
+        ...selected.receiptFields,
         files,
         planHash: plan.planHash,
         status,
@@ -197,7 +217,8 @@ function main() {
         failures,
         // Per-file measured runtimes from this actual hosted run (junit
         // sidecar). Backward compatible: older receipts omit this field
-        // and verifyUnitShards does not require it.
+        // and verifyUnitShards does not require it. The single-job receipt
+        // (unit-all-*.json) feeds scripts/refresh-unit-ci-durations.mjs.
         fileDurationsMs,
         revision: process.env.GITHUB_SHA ?? "local",
         runId: process.env.GITHUB_RUN_ID ?? "local",
@@ -208,7 +229,7 @@ function main() {
       2
     ) + "\n"
   );
-  console.log(`unit-ci: shard ${shard.index}/${shard.total} exit ${status} in ${Math.round((Date.now() - started) / 1000)}s`);
+  console.log(`unit-ci: ${selected.label} exit ${status} in ${Math.round((Date.now() - started) / 1000)}s`);
   process.exit(status);
 }
 
