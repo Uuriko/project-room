@@ -6,7 +6,7 @@ import { messageRepository } from "./message-repository.mjs";
 // whose access ended gets 401/403 and never a stale list.
 import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.js";
 import { messageAddressesMember } from "../src/conversation.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { permissionDecisionMessages } from "./member-permission-requests.mjs";
 import { rowInHistory } from "./history-visibility.mjs";
@@ -73,7 +73,7 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     if (decision && decision.memberId === member.id) {
       const current = messages.get(event.data.messageId);
       if (current?.deletedAt) continue;
-      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, outcome: decision.outcome,
+      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, messageId: event.data.messageId, outcome: decision.outcome,
         note: current?.body ?? `Permission request ${decision.outcome}` });
       continue;
     }

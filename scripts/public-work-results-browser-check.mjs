@@ -173,7 +173,7 @@ test('ended account session fences a held committed follow-up and clears private
   await f.page.route('**/public-work/receipts/*/follow-up', async route => { const response = await route.fetch(); assert.equal(response.status(), 200); observed(); await held; await route.fulfill({ response }); });
   await form.locator('[name=publicConfirm]').check(); await form.getByRole('button', { name: 'Publish follow-up' }).click(); await captured;
   const cookie = (await f.page.context().cookies()).find(cookie => cookie.name === 'account_session'); assert.ok(cookie); f.store.logoutAccountSession(cookie.value, f.store.accountSessionSlot(cookie.value).sessionRevision);
-  await f.page.locator('#refresh-button').click(); await f.page.locator('#main').waitFor({ state: 'hidden' });
+  await f.page.locator('#main').waitFor({ state: 'hidden' });
   const delivered = f.page.waitForEvent('requestfinished', request => request.url().endsWith('/follow-up')); release(); await delivered;
   await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await f.page.locator('#owner-results-list').textContent(), ''); assert.equal(await form.locator('[name=summary]').inputValue(), ''); assert.equal(await f.page.locator('#owner-follow-up-context').textContent(), '');

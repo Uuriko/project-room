@@ -4,7 +4,7 @@
 // Object entrypoint, so jobs points at that route.
 
 import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 
 const IDENT = /^[a-zA-Z_][a-zA-Z0-9_]*$/;
@@ -53,6 +53,20 @@ export function collectLargestTables(db, { deadlineMs = 1500, now = () => perfor
   return { tables: counts.slice(0, limit), partial, ...(skipped.length ? { skipped } : {}) };
 }
 
+// Rooms the patrol parked (r67), for operatorStatus below.
+function patrolBlocks(store, limit = 25) {
+  try {
+    return store.db.prepare(`SELECT room_id AS roomId, sequence, event_id AS eventId, head_seq AS headSeq,
+      error_class AS errorClass, error, blocked_at AS blockedAt
+      FROM patrol_blocks ORDER BY room_id LIMIT ?`).all(limit).map(row => ({
+      ...row, error: typeof row.error === "string" ? row.error.slice(0, 240) : null
+    }));
+  } catch (error) {
+    if (/no such table/i.test(error?.message ?? "")) return [];
+    throw error;
+  }
+}
+
 export function operatorStatus(store, options = {}) {
   const tables = collectLargestTables(store.db, options);
   return {
@@ -78,14 +92,19 @@ export function operatorStatus(store, options = {}) {
     // without this an operator sees which room is red but not which event
     // to repair. Operator-token gated; capped; a store without the table
     // reports [].
-    messagesBackfillBlocks: messagesBackfillBlocks(store)
+    messagesBackfillBlocks: messagesBackfillBlocks(store),
+    // Rooms the patrol parked (r67): the patrol_blocks rows (room, cursor,
+    // head, error class, one-line error). The public health surface carries
+    // only "patrol could not process a room (<class>)" and a count, so
+    // without this no surface names the room. Operator-token gated; capped.
+    patrolBlocks: patrolBlocks(store)
   };
 }
 
 function messagesBackfillBlocks(store, limit = 25) {
   try {
     return store.db.prepare(`SELECT room_id AS roomId, sequence, event_id AS eventId, error, head_seq AS headSeq, blocked_at AS blockedAt,
-      last_diagnosed_at AS lastDiagnosedAt
+      last_diagnosed_at AS lastDiagnosedAt, reason, component, skipped
       FROM messages_backfill_blocks ORDER BY room_id LIMIT ?`).all(limit).map(row => ({
       ...row, error: typeof row.error === "string" ? row.error.slice(0, 240) : null
     }));

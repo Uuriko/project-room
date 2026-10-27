@@ -43,6 +43,10 @@ const EMPTY_UNTIL_CRON = new Set([
   "spend_grant_terms",
   "spend_authorizations",
   "spend_room_reservations",
+  // Claim-history spill rows exist only once a claim's history passes the
+  // 200-stamp SEC-2 cap; seeded coverage never trims a claim. Same
+  // exception as the recovery audit.
+  "work_claim_history",
   // GA-2 link exchange records exist only after a guest joins via a single-use link.
   "guest_link_exchanges",
   // Invite authority provenance is recorded when an invite is minted; the
@@ -50,7 +54,10 @@ const EMPTY_UNTIL_CRON = new Set([
   "guest_invite_authority",
   // Settlement links exist only once a paid public task is enabled
   // (First Shift settlement rail).
-  "public_work_settlements"
+  "public_work_settlements",
+  // A public agent page and its questions stay empty until an owner opts in.
+  "agent_public_pages",
+  "agent_public_asks"
 ]);
 
 const EVENTS = 200_000;

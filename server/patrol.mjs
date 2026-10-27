@@ -79,6 +79,7 @@
 // patrolFindings() — record ids deliberately stay off the public health
 // surface, per the #3334 rule.
 import { createHash } from "node:crypto";
+import { tableExists as sqliteTableExists } from "./db-util.mjs";
 import { ACTIVE_CLAIM_STATES, CLAIM_LIFECYCLE, STATES as CLAIM_STATES } from "./work-claims.mjs";
 import { hydrateProjection } from "./projection-at-rest.mjs";
 import { affectedMessageIds, archiveMarker } from "./messages-store.mjs";
@@ -161,8 +162,10 @@ export function ensurePatrolSchema(store) {
   store.db.exec(PATROL_SCHEMA);
 }
 
+// A closed handle throws from the shared check. The patrol treats that as
+// "not ready" so one bad database cannot wake the job.
 function tableExists(db, name) {
-  try { return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }
+  try { return sqliteTableExists(db, name); }
   catch { return false; }
 }
 
@@ -242,16 +245,24 @@ function parkRoom(store, room, error) {
     errorClass: errorClassOf(error),
     error: errorTextOf(error)
   };
-  const existing = db.prepare("SELECT sequence, event_id, head_seq, error_class, error FROM patrol_blocks WHERE room_id=?").get(room.id);
+  const existing = db.prepare("SELECT sequence, event_id, error_class FROM patrol_blocks WHERE room_id=?").get(room.id);
+  // r67: a park is the cursor position plus the error class. The head is
+  // not part of it: a busy parked room's head moves with every post, and
+  // each head-moved retry that throws the same way at the same cursor used
+  // to count as a fresh park, so the job failed on every post (prod, Oct 18:
+  // 46 failures in a row from 20:28Z, one per minute the parked room was
+  // posted to). The retry still records the new head (so the room is skipped
+  // until it moves again) and the latest error text; only a park that moved
+  // or changed class surfaces again. blocked_at stays when the park stands.
   const fresh = !existing || existing.sequence !== block.sequence || existing.event_id !== block.eventId
-    || existing.head_seq !== block.headSeq || existing.error_class !== block.errorClass || existing.error !== block.error;
+    || existing.error_class !== block.errorClass;
   store.transaction(() => {
     db.prepare(`INSERT INTO patrol_blocks (room_id, sequence, event_id, head_seq, error_class, error, blocked_at)
       VALUES (?,?,?,?,?,?,?)
       ON CONFLICT(room_id) DO UPDATE SET sequence=excluded.sequence, event_id=excluded.event_id,
         head_seq=excluded.head_seq, error_class=excluded.error_class, error=excluded.error,
-        blocked_at=excluded.blocked_at`)
-      .run(room.id, block.sequence, block.eventId, block.headSeq, block.errorClass, block.error, store.now());
+        blocked_at=CASE WHEN ? THEN excluded.blocked_at ELSE patrol_blocks.blocked_at END`)
+      .run(room.id, block.sequence, block.eventId, block.headSeq, block.errorClass, block.error, store.now(), fresh ? 1 : 0);
   });
   return { fresh, block: { roomId: room.id, ...block } };
 }
@@ -492,13 +503,12 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
   }
 
   // Idempotency look-back: a key first used before this batch must not be
-  // re-used inside it. One bounded query over the batch's keys.
+  // re-used inside it. A JSON binding keeps even large batches within SQL's parameter limit.
   if (!budgetExceeded && keyUses.length && batchStart > 0) {
     const keys = [...new Set(keyUses.map(use => use.key))];
-    const placeholders = keys.map(() => "?").join(",");
     const prior = db.prepare(`SELECT sequence, json_extract(body, '$.idempotencyKey') AS k
-      FROM events WHERE room_id=? AND sequence<=? AND json_extract(body, '$.idempotencyKey') IN (${placeholders})`)
-      .all(roomId, batchStart, ...keys);
+      FROM events WHERE room_id=? AND sequence<=? AND json_extract(body, '$.idempotencyKey') IN (SELECT value FROM json_each(?))`)
+      .all(roomId, batchStart, JSON.stringify(keys));
     if (prior.length) {
       const firstByKey = new Map(prior.map(row => [row.k, row.sequence]));
       for (const use of keyUses) {

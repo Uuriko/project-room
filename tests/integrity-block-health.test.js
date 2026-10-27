@@ -20,6 +20,8 @@ function assertPublicFailure(view) {
   assert.equal(view.lastErrorCode, "messages_backfill_failed");
   assert.equal(view.lastErrorSubcheck, "messages_backfill");
   assert.equal(view.lastErrorRecordClass, "message");
+  assert.equal(view.lastErrorReason, "log_short");
+  assert.equal(view.lastErrorComponent, "event_log");
   assert.ok(view.consecutiveFailures > 0);
   for (const value of [privateRoom, privateEvent, privateError]) {
     assert.ok(!JSON.stringify(view).includes(value), "public health must not contain block evidence");
@@ -45,8 +47,12 @@ function openParkedFixture(t) {
     get store() { return store; },
     park() {
       const head = store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(privateRoom).sequence;
-      store.db.prepare(`INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error, head_seq, blocked_at)
-        VALUES (?, ?, ?, ?, ?, ?)`).run(privateRoom, head, privateEvent, privateError, head, Date.now());
+      // A log gap parks the room. The stored error names the room; the public
+      // view may carry only the reason and component tokens.
+      store.db.prepare(`INSERT INTO messages_backfill_blocks
+        (room_id, sequence, event_id, error, head_seq, blocked_at, reason, component, skipped)
+        VALUES (?, ?, NULL, ?, ?, ?, 'log_short', 'event_log', 0)`)
+        .run(privateRoom, head, `messages backfill stopped at ${head} before room ${privateRoom} reached sequence ${head + 1}`, head, Date.now());
     },
     reopen() { store.close(); store = new RoomStore(filename, { integrity: "deferred" }); },
     repair() {
@@ -123,8 +129,8 @@ function syntheticStore(t) {
 }
 
 function park(store) {
-  store.db.prepare("INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error) VALUES (?, 7, ?, ?)")
-    .run(privateRoom, privateEvent, privateError);
+  store.db.prepare("INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error) VALUES (?, 7, NULL, ?)")
+    .run(privateRoom, privateError);
 }
 
 test("a budget exit still reads the durable count and only an empty set permits a healthy result", async t => {
@@ -210,8 +216,8 @@ for (const [name, value, errorClass] of [
 test("failing scan: the persisted health summary carries blockedRooms (count only, never room ids)", async t => {
   const store = syntheticStore(t);
   park(store);
-  store.db.prepare("INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error) VALUES (?, 3, ?, ?)")
-    .run("second-blocked-room", privateEvent, privateError);
+  store.db.prepare("INSERT INTO messages_backfill_blocks (room_id, sequence, event_id, error) VALUES (?, 3, NULL, ?)")
+    .run("second-blocked-room", privateError);
   // The live failure shape: an isolated agent_connections failure returned
   // (not thrown), with the scan's ordinary counts alongside it.
   store.verifyRoomIntegrity = async () => ({

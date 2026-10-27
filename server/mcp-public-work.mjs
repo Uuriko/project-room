@@ -4,6 +4,7 @@ import { mcpInvalidRequest } from './mcp-arg-errors.mjs';
 import { PUBLIC_WORK_MCP_TOOLS, ROOM_MCP_PUBLIC_URL } from '../src/room-mcp-join.js';
 import { diagnoseArguments, mcpCallError } from './mcp-arg-errors.mjs';
 import { ServiceError } from './service-error.mjs';
+import { stampPublicWorkReview, stampPublicWorkTask, stampPublicWorkTasks } from './content-trust.mjs';
 const id = { type: 'string', minLength: 1, maxLength: 128, pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$' };
 const positive = { type: 'integer', minimum: 1 };
 const strings = { type: 'array', maxItems: 20, items: { type: 'string', minLength: 1, maxLength: 100 } };
@@ -48,12 +49,12 @@ export function handlePublicWorkMcp(store, message, secret, mcpUrl = ROOM_MCP_PU
  if (problems) return mcpCallError(requestId, { reason: 'invalid_arguments', tool: name, ...problems });
  try {
   let value;
-  if (name === 'public_work_recommend') value = store.publicWorkClaims.match(secret, { ...args, autoClaim: false });
-  else if (name === 'public_work_read_task') value = store.readTransaction(() => {
+  if (name === 'public_work_recommend') value = stampPublicWorkTasks(store.publicWorkClaims.match(secret, { ...args, autoClaim: false }));
+  else if (name === 'public_work_read_task') value = stampPublicWorkTask(store.readTransaction(() => {
    if (secret && !store.identities.resolveGlobalIdentitySecret(secret)) throw new ServiceError(401, 'unauthenticated', 'Unknown or revoked identity');
    return store.publicWorkClaims.read(args.taskId);
-  });
-  else if (name === 'public_work_my_review') value = store.publicWorkReviews.contributorReview(secret, args.receiptId);
+  }));
+  else if (name === 'public_work_my_review') value = stampPublicWorkReview(store.publicWorkReviews.contributorReview(secret, args.receiptId));
   else { const { taskId, ...input } = args; const identity = secret ? store.identities.resolveGlobalIdentitySecret(secret) : null; if (identity) store.publicWorkClaims.enforceIdentityRateLimit(identity.identityId); value = store.publicWorkClaims.act(taskId, secret, name.slice('public_work_'.length), input); }
   if (value.receipt) {
    const base = new URL(mcpUrl);
