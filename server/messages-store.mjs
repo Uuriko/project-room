@@ -468,12 +468,24 @@ export function archivedThreadRecords(db, roomId, rootId) {
 
 // Current records of archived messages whose body contains the lowercase
 // needle, oldest first, for readers that scan every message (search).
+// The live-projection scan folds case with JS `toLowerCase()` (full
+// Unicode); SQLite `lower()` folds ASCII only, so SQL alone must never be
+// the deciding filter or archived messages whose match depends on
+// non-ASCII folding (Ä, İ, É, Σ, Œ, ...) silently drop out of search
+// (B2-4-P4). The SQL predicate below is a proven superset of the JS
+// predicate: a pure-ASCII body can only JS-match an ASCII needle, and for
+// ASCII, `lower()` and `toLowerCase()` agree, so the `instr` leg covers
+// it; every other JS match requires a non-ASCII character in the body,
+// which the byte-length leg covers (a non-ASCII character always encodes
+// to more UTF-8 bytes than characters). The exact JS fold then decides
+// each candidate, so this returns exactly the live scan's matches.
 export function archivedMatchingRecords(db, roomId, needle) {
   const { throughSeq, retainedJson } = archiveMarker(db, roomId);
   if (!throughSeq) return [];
   const out = [];
-  for (const row of db.prepare("SELECT body, record_json FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?)) AND body IS NOT NULL AND instr(lower(body), ?)>0 ORDER BY seq")
+  for (const row of db.prepare("SELECT body, record_json FROM messages WHERE room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?)) AND body IS NOT NULL AND (instr(lower(body), ?)>0 OR length(body) <> length(CAST(body AS BLOB))) ORDER BY seq")
     .all(roomId, throughSeq, retainedJson, needle)) {
+    if (!row.body.toLowerCase().includes(needle)) continue;
     try { out.push({ ...JSON.parse(row.record_json), body: row.body }); } catch { /* an unreadable record is not searchable */ }
   }
   return out;
