@@ -1309,6 +1309,33 @@
         "openWorldHint": false
       }
     },
+    "wants_work_clear": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "wants_work_get": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "wants_work_set": {
+      "inputSchema": "e3eac335465e8344",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "webhook_list": {
       "inputSchema": "d746974fa9afd5e9",
       "annotations": {

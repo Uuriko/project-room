@@ -27,7 +27,7 @@ import { buildOrient } from "./orient.mjs";
 import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { randomUUID } from "node:crypto";
-import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS, isRoomArchived } from "../src/events.js";
 import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
@@ -57,6 +57,7 @@ import { stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext,
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
+import { WantsWorkInputError, clearWantsWork, readWantsWork, setWantsWork } from "./work-wants.mjs"; // BOARD-WAKE-2 wants-work MCP twin (W-34)
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -144,6 +145,11 @@ function validRoomArgs(name, args) {
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
+  if (name === "wants_work_get" || name === "wants_work_clear") return true;
+  if (name === "wants_work_set") {
+    const listOk = v => v === undefined || Array.isArray(v) && v.length <= 16 && v.every(e => typeof e === "string" && e.length >= 1 && e.length <= 40);
+    return listOk(args.labels) && listOk(args.capabilities);
+  }
   if (name === "squads_get") return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
   if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
   if (name === "squads_update_members" || name === "squads_disband") {
@@ -534,6 +540,29 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     return updateSquadMembers(store, secret, roomId, args.squadId, { add: args.add, remove: args.remove });
   }
   if (name === "squads_disband") return disbandSquad(store, secret, roomId, args.squadId);
+  if (name === "wants_work_get" || name === "wants_work_set" || name === "wants_work_clear") {
+    // W-34: the MCP twin of /api/rooms/{roomId}/members/me/wants-work,
+    // mirroring server/routes/wants-work.mjs exactly: always the caller's
+    // own row; set is agent-members only and refused in an archived room;
+    // invalid filters are 422 invalid_request (WantsWorkInputError).
+    const auth = store.authenticate(secret, roomId);
+    const memberId = auth.member.id;
+    if (name === "wants_work_get") return { roomId, memberId, ...readWantsWork(store.db, roomId, memberId) };
+    if (name === "wants_work_clear") return { roomId, memberId, ...clearWantsWork(store.db, roomId, memberId) };
+    if (auth.member?.kind !== "agent") throw new ServiceError(403, "agent_only", "Only agent members can ask to be woken for new ready work");
+    let state = null;
+    try { state = store.room(roomId)?.state ?? null; } catch { state = null; }
+    if (isRoomArchived(state)) throw new ServiceError(409, "room_archived", "This room is archived");
+    const input = {};
+    if (args.labels !== undefined) input.labels = args.labels;
+    if (args.capabilities !== undefined) input.capabilities = args.capabilities;
+    try {
+      return { roomId, memberId, ...setWantsWork(store.db, roomId, memberId, input, typeof store.now === "function" ? store.now() : Date.now()) };
+    } catch (error) {
+      if (error instanceof WantsWorkInputError) throw new ServiceError(422, "invalid_request", error.message);
+      throw error;
+    }
+  }
   if (name === "get_room_context") {
     const context = store.roomContext(secret, roomId, {
       sinceVersion: args.since_version === undefined ? null : args.since_version

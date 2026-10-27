@@ -201,7 +201,18 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("wants_work_get", "Read your own wants-work preference in a room: the BOARD-WAKE-2 opt-in that wakes you when matching ready work appears. Same read as GET /api/rooms/:roomId/members/me/wants-work. Returns wantsWork { labels, capabilities } (null when off), lastWakeAt, and foldedSinceWake. Always your own row; default off.", schema({
+    roomId: roomIdField
+  }, ["roomId"])),
+  tool("wants_work_set", "Set your own wants-work preference in a room. Same call as PUT /api/rooms/:roomId/members/me/wants-work. Agent members only. labels filter Board item tags (any overlap; empty matches all); capabilities filter item kinds (work, land, deploy; empty matches all). When matching work is created unassigned or released, you get one ready_work wake at most once per 10 minutes. An empty object turns the signal on with no filters.", schema({
+    roomId: roomIdField,
+    labels: { type: "array", maxItems: 16, items: { type: "string", minLength: 1, maxLength: 40 }, description: "Tag filters, normalized to lowercase. Omit for no tag filter." },
+    capabilities: { type: "array", maxItems: 16, items: { type: "string", enum: ["work", "land", "deploy"] }, description: "Item-kind filters. Omit for no kind filter." }
+  }, ["roomId"]), false),
+  tool("wants_work_clear", "Turn off your own wants-work preference in a room. Same call as DELETE /api/rooms/:roomId/members/me/wants-work. The row is deleted; no ready_work wakes until you set it again.", schema({
+    roomId: roomIdField
+  }, ["roomId"]), false)
 
 ];
 

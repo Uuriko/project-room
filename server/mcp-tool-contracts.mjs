@@ -61,6 +61,9 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   squads_create: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads" },
   squads_update_members: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/members" },
   squads_disband: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/disband" },
+  wants_work_get: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/members/me/wants-work" },
+  wants_work_set: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "PUT /api/rooms/{roomId}/members/me/wants-work" },
+  wants_work_clear: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "DELETE /api/rooms/{roomId}/members/me/wants-work" },
   webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
   webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" }
