@@ -48,7 +48,11 @@ const activityTailEvent = event => event?.type === "decision.recorded" || ACTIVI
 // Mirror of the server's read-time redaction for the one message a delta
 // touched (server/redact-read.mjs): edit-history bodies never ride a served
 // record, and earlier log entries for the message show only its current
-// body (null once deleted or redacted). Entries are replaced, not mutated.
+// body (null once deleted or redacted). A delete/redact delta also mirrors
+// the server's stored-log rewrite for the message (server/message-
+// redaction.mjs): every earlier entry for it is stamped `redacted: true`
+// and its attachments are nulled, exactly as a fresh read serves them.
+// Entries are replaced, not mutated.
 function deltaReadModel(state, tail, event) {
   const data = event?.data ?? {};
   const messageId = event?.type === "message.posted" ? (typeof data.messageId === "string" ? data.messageId : event.id) : data.messageId;
@@ -62,11 +66,22 @@ function deltaReadModel(state, tail, event) {
     });
   }
   const current = !record || record.deletedAt || record.body == null ? null : record.body;
+  const redacting = event?.type === "message.deleted" || event?.type === "message.redacted";
   for (let i = 0; i < tail.length; i++) {
     const logged = tail[i];
-    if (!logged || !["message.posted", "message.edited"].includes(logged.type) || !logged.data || !Object.hasOwn(logged.data, "body")) continue;
+    if (!logged || !["message.posted", "message.edited"].includes(logged.type) || !logged.data) continue;
     const loggedId = typeof logged.data.messageId === "string" ? logged.data.messageId : logged.type === "message.posted" ? logged.id : null;
-    if (loggedId === messageId && logged.data.body !== current) tail[i] = { ...logged, data: { ...logged.data, body: current } };
+    if (loggedId !== messageId) continue;
+    if (redacting) {
+      if (logged.data.body === current && logged.data.redacted === true && !Object.hasOwn(logged.data, "attachments")) continue;
+      const next = { ...logged.data };
+      if (Object.hasOwn(next, "body")) next.body = current;
+      if (Object.hasOwn(next, "attachments")) next.attachments = null;
+      next.redacted = true;
+      tail[i] = { ...logged, data: next };
+    } else if (Object.hasOwn(logged.data, "body") && logged.data.body !== current) {
+      tail[i] = { ...logged, data: { ...logged.data, body: current } };
+    }
   }
 }
 // Join held history with a `?messages=recent` window. The window must start on
@@ -326,6 +341,11 @@ export class RoomClient {
         let covered = held?.fullSequence ?? 0;
         do {
           const session = this.session, holding = this.heldMessages();
+          // Sequence and snapshot the held state was taken at, for the
+          // carried-event accounting below (this.sequence / this.live move
+          // with the assignment at the end of the iteration).
+          const heldSequence = this.sequence;
+          const heldSnapshot = this.live && this.live.generation === generation && this.live.session === session ? this.live.snapshot : null;
           // With nothing held, read the newest window first (the background fill brings the rest).
           const full = flight.again || flight.fullNow || flight.fullSequence > covered;
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
@@ -352,10 +372,51 @@ export class RoomClient {
           if (complete) covered = Math.max(covered, read.sequence);
           if (partial && holding?.partial) this.partialReads++;
           if (snapshot.sequence >= this.sequence) {
+            // Carried-event accounting for a windowed read: the fill is owed
+            // only for an event this read PASSED — one inside the sequence
+            // advance since the held snapshot that the read did not carry.
+            // A windowed read carries (a) every message in its window that
+            // was not held before (a new arrival serves its own record), and
+            // (b) every change to the state it serves in full (work items,
+            // pins): only the messages are windowed, the rest of the state
+            // is current as of the read's sequence. An edit or delete of a
+            // message before the window changes neither, so it is not
+            // counted: advance > carried means a passed event exists. A
+            // single carried arrival (advance 1, carried 1) therefore owes
+            // no fill — owing one would schedule a background full refresh
+            // whose extra snapshot repaints whatever the reader is doing —
+            // while an advance beyond the carried events (a 9→11 jump with
+            // one carried message: 9 + 1 = 10 < 11) still owes the fill that
+            // heals the passed record. An already-owed fill persists above
+            // through holding.owesFull until a complete read clears it, so
+            // per-read accounting cannot lose a passed event from an
+            // earlier windowed read.
+            let passedEvent = false;
+            if (!complete && holding && !holding.partial) {
+              const advance = snapshot.sequence - heldSequence;
+              if (advance > 0) {
+                const heldIds = new Set(holding.messages.map(message => message?.id));
+                let carried = Array.isArray(read.state?.messages)
+                  ? read.state.messages.filter(message => message && !heldIds.has(message.id)).length : 0;
+                const heldWork = heldSnapshot?.state?.workItems, readWork = read.state?.workItems;
+                if (heldWork && readWork && typeof heldWork === "object" && typeof readWork === "object") {
+                  for (const id of new Set([...Object.keys(heldWork), ...Object.keys(readWork)]))
+                    if (JSON.stringify(heldWork[id]) !== JSON.stringify(readWork[id])) carried++;
+                }
+                if (JSON.stringify(heldSnapshot?.state?.pins ?? null) !== JSON.stringify(read.state?.pins ?? null)) carried++;
+                passedEvent = advance > carried;
+              }
+            }
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
-              partial, owesFull: !complete && (partial || Boolean(holding?.owesFull)) };
+              // A windowed read that passed an event it did not carry (an
+              // edit or delete of a message before the window, e.g. behind
+              // a delivery gap) leaves that record stale in the merged
+              // window, so the held snapshot owes a full fill — the same
+              // heal a reconnect's replay from fullSequence provides,
+              // without the reconnect.
+              partial, owesFull: !complete && (partial || Boolean(holding?.owesFull) || passedEvent) };
             this.live = { generation, session, snapshot };
             this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
             this.onSnapshot(snapshot, this.session);
@@ -506,7 +567,15 @@ export class RoomClient {
         // it is newer than the window, never part of the older segment.
         if (!result.messages.some(message => seen.has(message.id))) { if (++resets > 3) return false; seen = new Set(windowIds()); older = []; cursor = null; continue; }
       } else {
-        for (const message of result.messages) if (!seen.has(message.id)) { seen.add(message.id); older.push(message); }
+        for (const message of result.messages) if (!seen.has(message.id)) {
+          seen.add(message.id);
+          // The /conversation read model trust-stamps other-authored records
+          // (`untrusted: true`); the snapshot read model that owns the held
+          // array stamps nothing. Splice the segment in the snapshot's shape
+          // so one held array never mixes both read models.
+          if (Object.hasOwn(message, "untrusted")) { const { untrusted, ...rest } = message; older.push(rest); }
+          else older.push(message);
+        }
       }
       headPage = false;
       if (result.nextCursor == null) break;

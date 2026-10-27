@@ -301,6 +301,100 @@ test("an edit that arrives while only the first window is held reads the full sn
   assert.equal(f.client.heldMessages().partial, false);
 });
 
+test("shrunk gap case (window 3): a windowed read advancing past the last full read owes a full fill that heals a passed pre-window edit", async t => {
+  // D2-2 F-1, shrunk: the client holds full history at sequence 9. An edit of
+  // m2 (sequence 10, before the 3-message window) is committed but never
+  // presented — the gap. The next arrival is message.posted (sequence 11,
+  // RECENT class), so refresh re-reads only the window: the window's shape
+  // still lines up, the sequence advances to head, and m2 stays stale in the
+  // merged snapshot. The windowed read must therefore owe a full fill, whose
+  // full read is what heals m2 — pre-cure owesFull stayed false and the
+  // divergence was permanent in-connection.
+  let serverMessages = history.map(item => ({ ...item })), serverSeq = 9;
+  const reads = [];
+  const notFound = { ok: false, status: 404, json: async () => ({ error: { code: "not_found", message: "no history endpoint" } }) };
+  const client = new RoomClient({ events: null, onSnapshot: () => {}, fetcher: async url => {
+    reads.push(url);
+    if (url.startsWith("/api/rooms/commons/conversation")) return notFound;
+    if (url === RECENT) return response(recent(serverSeq, serverMessages.slice(-3), serverMessages.length - 3));
+    return response(full(serverSeq, serverMessages.map(item => ({ ...item }))));
+  } });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  const waitFor = async (predicate, label) => { for (let i = 0; i < 60 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 25)); assert.ok(predicate(), label); };
+  await client.refresh(); // windowed first read
+  await waitFor(() => client.heldMessages()?.partial === false, "the background fill completed the warm history");
+  assert.equal(client.sequence, 9);
+  assert.equal(client.heldMessages().fullSequence, 9);
+  assert.equal(client.heldMessages().owesFull, false);
+  // The gap: m2 is edited server-side (sequence 10) and never presented.
+  serverMessages = serverMessages.map(item => item.id === "m2" ? { ...item, body: "edited m2" } : item); serverSeq = 10;
+  // The RECENT-class arrival (sequence 11) is presented.
+  serverMessages = [...serverMessages, message("m6")]; serverSeq = 11;
+  reads.length = 0;
+  await client.refresh(hint(11, "message.posted", { messageId: "m6" }));
+  assert.deepEqual(reads, [RECENT], "the arrival re-read only the window");
+  assert.equal(client.sequence, 11, "the windowed read advanced the sequence to head");
+  assert.equal(client.live.snapshot.state.messages.find(item => item.id === "m2").body, "body m2", "the window did not carry the pre-window edit");
+  assert.equal(client.heldMessages().owesFull, true, "a windowed read advancing past fullSequence owes a full fill");
+  await waitFor(() => client.heldMessages()?.owesFull === false, "the owed fill ran");
+  assert.ok(reads.includes(FULL), "the fill was a full read");
+  assert.equal(client.live.snapshot.state.messages.find(item => item.id === "m2").body, "edited m2", "the fill healed the passed edit");
+  assert.equal(client.heldMessages().fullSequence, 11);
+});
+
+test("carried-event accounting: a single carried arrival owes no fill, a jump beyond the carried events still does", async t => {
+  // The windowed-read counterpart of the shrunk gap case above. Warm to a
+  // full hold at sequence 9, then (1) a single message.posted arrival at
+  // sequence 10 that the window itself carries must NOT owe a fill: the
+  // sequence advanced by exactly the one event the window carried, so no
+  // event was passed and no background full refresh may be scheduled (an
+  // owed fill's extra snapshot is what repaints — and refetches around —
+  // whatever the reader is doing). Then (2) a jump 10→13 carrying only one
+  // new message passes two pre-window edits, so the fill IS owed and heals.
+  let serverMessages = history.map(item => ({ ...item })), serverSeq = 9;
+  const reads = [];
+  const notFound = { ok: false, status: 404, json: async () => ({ error: { code: "not_found", message: "no history endpoint" } }) };
+  const client = new RoomClient({ events: null, onSnapshot: () => {}, fetcher: async url => {
+    reads.push(url);
+    if (url.startsWith("/api/rooms/commons/conversation")) return notFound;
+    if (url === RECENT) return response(recent(serverSeq, serverMessages.slice(-3), serverMessages.length - 3));
+    return response(full(serverSeq, serverMessages.map(item => ({ ...item }))));
+  } });
+  client.session = identity();
+  t.after(() => client.disconnect());
+  const waitFor = async (predicate, label) => { for (let i = 0; i < 60 && !predicate(); i++) await new Promise(resolve => setTimeout(resolve, 25)); assert.ok(predicate(), label); };
+  await client.refresh(); // windowed first read
+  await waitFor(() => client.heldMessages()?.partial === false, "the background fill completed the warm history");
+  assert.equal(client.sequence, 9);
+  assert.equal(client.heldMessages().fullSequence, 9);
+  assert.equal(client.heldMessages().owesFull, false);
+  // (1) Single carried arrival: sequence 10 is the posted m6 itself.
+  serverMessages = [...serverMessages, message("m6")]; serverSeq = 10;
+  reads.length = 0;
+  await client.refresh(hint(10, "message.posted", { messageId: "m6" }));
+  assert.deepEqual(reads, [RECENT], "the arrival re-read only the window");
+  assert.equal(client.sequence, 10);
+  assert.equal(client.heldMessages().owesFull, false, "advance 1 with 1 carried event passes nothing: no fill owed");
+  await new Promise(resolve => setTimeout(resolve, 400));
+  assert.deepEqual(reads, [RECENT], "no background fill followed the single carried arrival");
+  assert.equal(client.heldMessages().fullSequence, 9, "no full read has run yet");
+  // (2) Jump beyond the carried events: edits of m2 (11) and m3 (12) are
+  // passed, the posted m7 (13) is the one carried arrival.
+  serverMessages = serverMessages.map(item => item.id === "m2" ? { ...item, body: "edited m2" } : item.id === "m3" ? { ...item, body: "edited m3" } : item);
+  serverMessages = [...serverMessages, message("m7")]; serverSeq = 13;
+  reads.length = 0;
+  await client.refresh(hint(13, "message.posted", { messageId: "m7" }));
+  assert.deepEqual(reads, [RECENT], "the arrival re-read only the window");
+  assert.equal(client.sequence, 13);
+  assert.equal(client.heldMessages().owesFull, true, "advance 3 with 1 carried event passes two: a fill is owed");
+  await waitFor(() => client.heldMessages()?.owesFull === false, "the owed fill ran");
+  assert.ok(reads.includes(FULL), "the fill was a full read");
+  assert.equal(client.live.snapshot.state.messages.find(item => item.id === "m2").body, "edited m2", "the fill healed the first passed edit");
+  assert.equal(client.live.snapshot.state.messages.find(item => item.id === "m3").body, "edited m3", "the fill healed the second passed edit");
+  assert.equal(client.heldMessages().fullSequence, 13);
+});
+
 test("an aborted first window read reports the interruption, then the retry is windowed again, not a full read", async t => {
   const statuses = [], reads = [];
   let failNext = true;

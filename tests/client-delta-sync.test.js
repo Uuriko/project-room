@@ -137,6 +137,50 @@ test("a message.deleted delta nulls the logged body and a redacted delta applies
   assert.equal(f.client.deltaStats.applied, 2);
 });
 
+test("a delete/redact delta stamps the held log with the server's redacted rewrite: flag and attachments", async t => {
+  const f = fixture(t, { read: () => full(9, history()), page: () => assert.fail("no paging") });
+  await f.warm();
+  // Seed the held tail as a fresh snapshot would carry it: m3's post entry
+  // carries its attachments, and both messages have edited entries too.
+  const posted3 = envelope(T.MESSAGE_POSTED, 3, { messageId: "m3", body: "body m3", channelId: "general", attachments: [{ id: "att-1", filename: "note.png" }] });
+  const edited3 = envelope(T.MESSAGE_EDITED, 4, { messageId: "m3", body: "body m3", expectedMessageRevision: 0 });
+  const posted4 = envelope(T.MESSAGE_POSTED, 5, { messageId: "m4", body: "body m4", channelId: "general", attachments: [{ id: "att-2", filename: "pic.png" }] });
+  f.client.live.snapshot.state.eventLog = [posted3, edited3, posted4];
+  f.client.rawTail = [posted3, edited3, posted4];
+  f.notify(receipt(10, envelope(T.MESSAGE_DELETED, 10, { messageId: "m3", expectedMessageRevision: 0 }))); await f.settle();
+  let log = f.seen.at(-1).state.eventLog;
+  const entry3post = log.find(entry => entry.id === posted3.id), entry3edit = log.find(entry => entry.id === edited3.id);
+  assert.equal(entry3post.data.body, null);
+  assert.equal(entry3post.data.attachments, null, "the server's rewrite nulls a deleted message's logged attachments");
+  assert.equal(entry3post.data.redacted, true, "the server's rewrite stamps the post entry redacted");
+  assert.equal(entry3edit.data.body, null);
+  assert.equal(entry3edit.data.redacted, true, "the server's rewrite stamps the edit entries redacted too");
+  // A redacted delta for another message rewrites its held entries the same way.
+  f.notify(receipt(11, envelope(T.MESSAGE_REDACTED, 11, { messageId: "m4" }))); await f.settle();
+  log = f.seen.at(-1).state.eventLog;
+  const entry4post = log.find(entry => entry.id === posted4.id);
+  assert.equal(entry4post.data.body, null);
+  assert.equal(entry4post.data.attachments, null);
+  assert.equal(entry4post.data.redacted, true);
+  assert.deepEqual(f.reads, [], "both rewrites applied as deltas, no re-read");
+  assert.equal(f.client.deltaStats.applied, 2);
+});
+
+test("the paged fill splices history in the snapshot's read model: no /conversation trust stamp survives", async t => {
+  const all = history();
+  const stamped = all.slice(0, 2).map(record => ({ ...record, untrusted: true }));
+  const f = fixture(t, {
+    read: url => url === RECENT ? recent(9, all.slice(-3), 2) : assert.fail("the paged fill must not read a full snapshot"),
+    page: url => url.includes("cursor=c1") ? page(9, stamped, null) : page(9, all, "c1")
+  });
+  await f.client.refresh();
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const held = f.client.heldMessages();
+  assert.equal(held.partial, false);
+  assert.deepEqual(held.messages.map(message => message.id), ["m1", "m2", "m3", "m4", "m5"]);
+  assert.ok(held.messages.every(message => !Object.hasOwn(message, "untrusted")), "backfilled records carry the snapshot shape, not the conversation stamp");
+});
+
 test("a sequence gap falls back to a read and self-heals (the missed delta is not lost)", async t => {
   const grown = [...history(), record("m6", 6), record("m7", 7)];
   let phase = 9;
