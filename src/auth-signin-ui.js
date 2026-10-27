@@ -532,8 +532,8 @@ export function createAuthSigninUI({ accountClient, ensureAccountSession, onSign
       && event.target.value.trim() !== passwordEmail) {
       passwordRecovery = false;
       for (const offer of surface()?.querySelectorAll('[name="method"][value="email"], [data-email-method="magic"]') ?? []) offer.remove();
-      const password = surface()?.querySelector('[data-signin-form="password"] [name="password"]');
-      if (password) password.required = true;
+      const passwordField = surface()?.querySelector('[data-signin-form="password"] [name="password"]');
+      if (passwordField) passwordField.required = true;
     }
   };
 
