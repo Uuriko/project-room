@@ -73,7 +73,7 @@
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
     "src/board-ui.js": "sha256:22797d7c1a6c581ca3b6e68fe414f741de1413083a55b765051d3c49d348b2a1",
-    "src/board.css": "sha256:3a52248f665c3ef8871a1a815b93cd084827f88d91be0dc7c4237668f6cccb2d",
+    "src/board.css": "sha256:993f3b7be3352ead52a2ac0ae5edb657670b7fcec1ce37eac15d99ccab41778a",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
     "src/client.js": "sha256:fda938799fd66621b5f8b07badb617507afbb475d452eefeba3401a9fb10864f",
