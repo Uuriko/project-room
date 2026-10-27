@@ -6,6 +6,7 @@ import {
 import {
   LEGAL_CACHE_CONTROL, LEGAL_PAGE_CSP, LEGAL_SITEMAP_PATHS, REPORT_PAGE_CSP, legalPageHtml, reportPageHtml,
 } from "./legal-pages.mjs";
+import { refreshDirectoryForRoom, refreshDirectoryForReceipt } from "./public-read-model.mjs";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { nodeJobHealth } from "./jobs.mjs";
 import { workItemBoardDivergence } from "./work-item-board.mjs";
@@ -126,6 +127,11 @@ export async function handleLegalRequest({ req, res, url, store, rate, remoteAdd
     if (!exact(data, ["kind", "id"])) reject(422, "invalid_unpublish", "Send kind and id");
     const result = unpublishPublic(store.db, { kind: data.kind, id: data.id, byAccount: auth.account.id, now: store.now() });
     if (!result.ok) reject(result.status, result.code, result.message);
+    // Directory receipt counts apply the visibility predicate: a
+    // takedown changes what the affected cards may count, so re-sync
+    // them with the takedown, not at the next projection.
+    if (result.kind === "room") refreshDirectoryForRoom(store, result.id);
+    else refreshDirectoryForReceipt(store, result.id);
     json(res, 200, { unpublished: true, kind: result.kind, id: result.id });
     return true;
   }
