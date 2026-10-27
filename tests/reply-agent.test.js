@@ -931,7 +931,7 @@ test("automatic pickup keeps separate failed-request notifications visible", asy
   await runRequestQueue({ ...a, signal: controller.signal, stream: false, intervalMs: 1000,
     execute: async () => { throw new Error("Host needs operator attention"); },
     emit: value => { observed.push(value); if (observed.length === 2) controller.abort(); } });
-  assert.deepEqual(observed, ids.map(requestMessageId => ({ status: "needs_attention", requestMessageId })));
+  assert.deepEqual(observed, ids.map(requestMessageId => ({ status: "needs_attention", requestMessageId, failurePhase: "unknown", failureCode: "execution_failed" })));
 });
 
 test("a reply refused because its channel is archived names channel_archived instead of not_confirmed", () => {
@@ -1070,7 +1070,7 @@ test("request metrics distinguish model work from exact saved replay without exp
   const f = await fixture(t), q = f.open("metrics-request"), db = openRequestJournal(join(f.directory, "metrics.sqlite"));
   t.after(() => db.close());
   let starts = 0;
-  const execute = async () => { starts += 1; return { body: "private metric test answer" }; };
+  const execute = async (_input, { onModelStart }) => { onModelStart(); starts += 1; return { body: "private metric test answer" }; };
   const options = { connection: f.config, requestMessageId: q.command.data.messageId, db, execute };
   const first = await runRequestOnce(options);
   assert.equal(first.metrics.modelStarts, 1);
@@ -1092,9 +1092,27 @@ test("request metrics distinguish model work from exact saved replay without exp
   const error = new Error("private provider failure");
   const next = f.open("metrics-failure");
   await assert.rejects(runRequestOnce({ ...options, requestMessageId: next.command.data.messageId,
-    execute: async () => { throw error; }, onMetrics: value => observed.push(value) }), error);
+    execute: async (_input, { onModelStart }) => { onModelStart(); throw error; }, onMetrics: value => observed.push(value) }), error);
   assert.equal(observed.length, 1);
   assert.equal(observed[0].status, "interrupted");
   assert.equal(observed[0].modelStarts, 1);
   assert.ok(!JSON.stringify(observed).includes(error.message));
+});
+
+for (const observed of [false, true]) test(`generic executor model evidence: ${observed ? "observed once" : "unobserved"}`, async t => {
+  const f = await fixture(t), q = f.open("generic-metrics"), db = openRequestJournal(join(f.directory, "generic.sqlite"));
+  t.after(() => db.close());
+  let calls = 0;
+  const options = { connection: f.config, requestMessageId: q.command.data.messageId, db,
+    execute: async (_input, { onModelStart }) => {
+      calls++;
+      if (observed) { onModelStart(); onModelStart(); }
+      return { body: "generic executor result" };
+    } };
+  const result = await runRequestOnce(options);
+  assert.equal(result.metrics.modelStarts, observed ? 1 : 0);
+  if (!observed) assert.equal(result.metrics.phasesMs.model, 0);
+  const replay = await runRequestOnce(options);
+  assert.equal(replay.metrics.modelStarts, 0);
+  assert.equal(calls, 1, "saved delivery must not invoke the executor again");
 });

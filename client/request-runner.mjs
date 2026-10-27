@@ -162,9 +162,13 @@ async function runMeasuredRequest({ connection, requestMessageId, db, execute, p
   }, 30000);
   try {
     controller.signal.throwIfAborted();
-    metrics.transition("model"); metrics.modelStarted();
+    let modelStartObserved = false;
     const result = await execute({ requestId: id, request: structuredClone(context.request), messages,
-      preparation: context.preparation, signal: controller.signal }, { binding: Object.freeze({
+      preparation: context.preparation, signal: controller.signal }, { onModelStart: () => {
+        if (modelStartObserved) return;
+        modelStartObserved = true;
+        metrics.transition("model"); metrics.modelStarted();
+      }, binding: Object.freeze({
         origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId,
         requestMessageId, requestId: id, attemptId, roomCreatedEventId: context.roomCreatedEventId,
         openingEventId: context.request.openingEventId, ...basis }) });
@@ -264,7 +268,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
         try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest, selectRequest, onMetrics })); }
         catch (error) {
           if (error?.code === "host_isolation_unavailable") throw error;
-          emit({ status: "needs_attention", requestMessageId: request.id });
+          emit({ status: "needs_attention", requestMessageId: request.id, ...requestFailureDiagnostic(error) });
           if ([401, 429].includes(error?.status) || error?.status >= 500
             || ["TypeError", "TimeoutError"].includes(error?.name)) throw error;
         }
@@ -288,4 +292,15 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
       const timer = setTimeout(done, remaining); signal?.addEventListener("abort", done, { once: true });
     });
   }
+}
+
+// A bounded diagnostic, never arbitrary provider error text or participant data.
+export function requestFailureDiagnostic(error) {
+  const phase = error?.runtimePhase === "authorization" ? "authorization" : "unknown";
+  const code = error?.name === "TimeoutError" ? "timeout"
+    : error?.name === "AbortError" ? "cancelled"
+    : error?.status === 401 || error?.status === 403 ? "access_denied"
+    : error?.status === 409 ? "conflict"
+    : error?.name === "TypeError" ? "transport_error" : "execution_failed";
+  return { failurePhase: phase, failureCode: code };
 }

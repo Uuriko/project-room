@@ -84,7 +84,14 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     if (!bindingFields(binding).every(key => typeof binding?.[key] === "string" && binding[key])
       || ["origin", "roomId", "memberId"].some(key => binding[key] !== scope[key]))
       throw new Error("Runtime binding has the wrong Room identity");
-    await authorize(binding, action);
+    try { await authorize(binding, action); }
+    catch (error) {
+      // Preserve the original error and its typed fields; only expose a fixed phase.
+      try {
+        if (error && typeof error === "object" && Object.isExtensible(error)) error.runtimePhase = "authorization";
+      } catch { /* annotation cannot replace the original authorization failure */ }
+      throw error;
+    }
     return keyFor(binding);
   };
   const saveItem = (id, item) => {
@@ -163,7 +170,7 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     db.prepare("UPDATE codex_runtime_inputs SET state='received' WHERE attempt_id=? AND input_id=?").run(id, inputId);
     return { status: "received" }; // Never infer that the model applied it.
   };
-  const execute = async (input, { binding, previousBinding } = {}) => {
+  const execute = async (input, { binding, previousBinding, onModelStart } = {}) => {
     const id = await checked(binding, "start");
     if (get(id)) throw new Error("Runtime attempt already exists; reconcile instead of rerunning");
     let previous;
@@ -234,6 +241,9 @@ export function createCodexRuntimeHost({ db, rpc, scope, authorize, cwd, policy,
     try {
       await checked(binding, "start");
       input.signal?.throwIfAborted();
+      // Counts an attempted turn RPC, not proof of provider acceptance. No
+      // observer runs before both ownership checks and thread preparation.
+      try { onModelStart?.(); } catch { /* diagnostic observers cannot change execution */ }
       const value = await rpc.request("turn/start", { threadId: started.thread.id, input: textInput(prompt) });
       recordTurn(id, value?.turn);
       for (const event of early) receive(event);
