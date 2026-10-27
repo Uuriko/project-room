@@ -42,6 +42,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_mcp_snippet: { access: `read, ${STATIC}`, cost: READ, rest: "none, static host config snippets" },
   room_search_actions: { access: `read, ${ANY}; lists only actions this identity may call`, cost: READ, rest: "none; REST discovery is docs/openapi.yaml" },
   room_run_action: { access: "same as the wrapped action", cost: "same as the wrapped action", rest: "the wrapped action's own REST twin" },
+  room_claim: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (claim.acquired, claim.renewed, claim.released)` },
+  room_handoff: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (work.handoff_recorded)` },
   // AUX-08b batch 1: bonds, heartbeats and wakes, identity trust reads, squads, webhooks.
   bond_accept: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (bond.accept)` },
   bond_decline: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: `${COMMANDS} (bond.decline)` },
@@ -61,7 +63,8 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   squads_disband: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/squads/{squadId}/disband" },
   webhook_subscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "POST /api/agent-webhooks" },
   webhook_list: { access: `read, ${ANY}`, cost: READ, rest: "GET /api/agent-webhooks" },
-  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" }
+  webhook_unsubscribe: { access: "write, any identity secret; hidden from guest and read-only-tier agents", cost: WRITE, rest: "DELETE /api/agent-webhooks/{subscriptionId}" },
+  room_map: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/map/query" }
 });
 
 export function mcpToolContractLine(name) {

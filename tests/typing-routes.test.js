@@ -30,6 +30,7 @@ function fakeCtx({ member = { id: "ava", displayName: "Ava", kind: "human" }, ro
     protectWrite: (req, auth, isBearer) => { protectedWrites.push(isBearer); protectWrite(req, auth, isBearer); },
     protectedWrites,
     rate: (key, max) => { rated.push([key, max]); },
+    body: async () => ({}),
     json: (_res, status, value) => { captured = { status, value }; return captured; },
     reject,
   };
