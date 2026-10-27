@@ -262,7 +262,10 @@ export class AgentPluginStore {
         grants: [],
         status: "active",
         lastSeenAt: null,
-        verification: attestation ? VERIFIED : UNVERIFIED,
+        // TM-1: the card surfaces the CONFERRED tier — an attestation from
+        // an unanchored attester is recorded (approvedBy/At above) but the
+        // card must not present it as "verified".
+        verification: row?.ownerIdentityId ? this.verificationLevel(row.ownerIdentityId) : UNVERIFIED,
       };
     };
     this.directory = createAgentDirectory({ store: this.cards, clock,
@@ -576,6 +579,79 @@ export class AgentPluginStore {
          LIMIT 1`).get(targetIdentityId, attesterIdentityId));
   }
 
+  // SECURITY-FIX-2 TM-1 (Jill's anchor ruling): an attestation is RECORDED
+  // on C1's relationship rules, but it CONFERS the verified tier only when
+  // the attester is itself anchored — the attester's standing reaches
+  // outside the (attester, target) pair. A two-identity ring satisfies
+  // C1's relationship test trivially (the attacker holds both secrets), so
+  // relationship alone cannot be what the tier certifies. Anchored means
+  // exactly one thing: the settlement anchor — the attester took part in
+  // at least one PAID bounty settlement (as poster or as claimant, via
+  // its identity links in that room) whose counterparty identity is
+  // neither the attester nor the target.
+  //
+  // SF2-TM1-FIXUP (Jill's ruling, 2026-10-18): the ruling's second leg —
+  // "or operator-verified" — is NOT implemented, deliberately. No
+  // platform-operator verification register exists in this codebase, so
+  // "operator-verified" has no product referent today; the shipped
+  // substitute (the attester itself attested from outside the pair) was
+  // strictly weaker than the settlement leg and let an attestation-only
+  // 3-cycle anchor all three members with zero settlements. A trust
+  // gate does not ship a leg weaker than its ruling because the ruled
+  // mechanism doesn't exist yet. The operator leg returns only when a
+  // real operator-verification register lands, as a separate charter.
+  //
+  // A revoked attester identity anchors nothing: its attestations persist
+  // as provenance but stop conferring (a departed attester must not become
+  // a laundering path). Fails closed: unknown attester, missing tables,
+  // or no qualifying row all read as unanchored.
+  attesterAnchored(attesterIdentityId, targetIdentityId) {
+    if (!attesterIdentityId || attesterIdentityId === targetIdentityId) return false;
+    return this.store.readTransaction(() => {
+      const identity = this.db.prepare(
+        "SELECT revoked_at FROM agent_identities WHERE identity_id=?").get(attesterIdentityId);
+      if (!identity || identity.revoked_at != null) return false;
+      const hasBounties = this.db.prepare(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounty_records'").get();
+      if (!hasBounties) return false;
+      const settlementAnchor = this.db.prepare(
+        `SELECT 1 FROM bounty_records b
+         WHERE b.state = 'paid' AND (
+           (EXISTS (SELECT 1 FROM identity_links la
+                    WHERE la.room_id = b.room_id AND la.member_id = b.poster
+                      AND la.identity_id = ?)
+            AND EXISTS (SELECT 1 FROM identity_links lc
+                    WHERE lc.room_id = b.room_id AND lc.member_id = b.claimant
+                      AND lc.identity_id NOT IN (?, ?)))
+           OR
+           (EXISTS (SELECT 1 FROM identity_links la
+                    WHERE la.room_id = b.room_id AND la.member_id = b.claimant
+                      AND la.identity_id = ?)
+            AND EXISTS (SELECT 1 FROM identity_links lp
+                    WHERE lp.room_id = b.room_id AND lp.member_id = b.poster
+                      AND lp.identity_id NOT IN (?, ?)))
+         ) LIMIT 1`)
+        .get(attesterIdentityId, attesterIdentityId, targetIdentityId,
+             attesterIdentityId, attesterIdentityId, targetIdentityId);
+      return !!settlementAnchor;
+    });
+  }
+
+  // The recorded attestation, enriched with its conferring status under
+  // the TM-1 anchor rule: `anchored` says whether the attester is anchored
+  // w.r.t. this target, and `effectiveLevel` is the tier the attestation
+  // actually confers (the recorded `level` stays "verified" — the
+  // attestation exists as provenance either way).
+  enrichAttestation(record) {
+    if (!record) return null;
+    const anchored = this.attesterAnchored(record.verifiedBy, record.identityId);
+    return Object.freeze({
+      ...record,
+      anchored,
+      effectiveLevel: anchored ? VERIFIED : UNVERIFIED,
+    });
+  }
+
   verifyIdentity({ identityId, verifiedBy }) {
     return this.mutate(() => {
       const record = this.identityVerification.verify(identityId, { verifiedBy });
@@ -583,7 +659,7 @@ export class AgentPluginStore {
         VALUES (?, ?, ?)
         ON CONFLICT(identity_id) DO UPDATE SET verified_by=excluded.verified_by, verified_at=excluded.verified_at`)
         .run(record.identityId, record.verifiedBy, record.verifiedAt);
-      return record;
+      return this.enrichAttestation(record);
     });
   }
 
@@ -596,15 +672,25 @@ export class AgentPluginStore {
   }
 
   verificationAttestation(identityId) {
-    return this.store.readTransaction(() => this.identityVerification.attestation(identityId));
+    return this.store.readTransaction(() =>
+      this.enrichAttestation(this.identityVerification.attestation(identityId)));
   }
 
+  // The CONFERRED tier (TM-1): "verified" only when a standing attestation
+  // exists AND its attester is anchored w.r.t. this identity. Every
+  // requireVerified gate and tier surface reads through here, so an
+  // unanchored attestation confers nothing anywhere.
   verificationLevel(identityId) {
-    return this.store.readTransaction(() => this.identityVerification.level(identityId));
+    return this.store.readTransaction(() => {
+      const record = this.identityVerification.attestation(identityId);
+      if (!record) return UNVERIFIED;
+      return this.attesterAnchored(record.verifiedBy, identityId) ? VERIFIED : UNVERIFIED;
+    });
   }
 
   verificationAttestations() {
-    return this.store.readTransaction(() => this.identityVerification.attestations());
+    return this.store.readTransaction(() =>
+      this.identityVerification.attestations().map(r => this.enrichAttestation(r)));
   }
 
   // Per-room gate: when requireVerified is set, linking an unverified
