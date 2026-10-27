@@ -35,7 +35,8 @@
 // a forged token, since honest mints can never exceed the cap).
 
 import { createHash, createPrivateKey, createPublicKey, randomUUID, sign as edSign, verify as edVerify } from "node:crypto";
-import { ServiceError, PILOT_LIMITS } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
+import { PILOT_LIMITS } from "./store.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { generateKeyPair } from "./agent-card-signing.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";

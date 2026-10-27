@@ -26,7 +26,7 @@ import { stampNeedsMe } from "./content-trust.mjs";
 // numeric floor. Answered, handled, and cleared updates leave this list even
 // when the caller does not pass a cursor.
 
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";

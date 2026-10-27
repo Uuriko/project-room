@@ -16,7 +16,8 @@
 // server/store.mjs (recovery.mjs requires the version to equal it exactly).
 // This module owns the column and its data only — never PRAGMA user_version.
 import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, isReservedId, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
-import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
+import { provisionalAccountPrefix } from "./store.mjs";
 import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
 import { getRoomTemplate } from "./templates.mjs";
 import { seedStarterForNewAccount, starterTitleForIntent } from "./starter-room.mjs";

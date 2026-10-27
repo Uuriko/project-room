@@ -22,7 +22,8 @@
 // log, naming the minter. The raw code and its hash stay out of that event.
 
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
-import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
+import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { refuseArchivedWrite } from "./room-lifecycle.mjs";
 import { event, EVENT_TYPES as T, memberCan, canInviteMembers, MEMBERSHIP_AUTHORITY_POLICY_VERSION, PERMISSIONS, AGENT_INVITE_SAFE_PERMISSIONS, NEVER_GRANT, validId } from "../src/events.js";

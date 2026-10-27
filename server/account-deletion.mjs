@@ -20,7 +20,7 @@ import { EVENT_TYPES, MEMBERSHIP_AUTHORITY_POLICY_VERSION, applyEvent, event, is
 import { commitMessageRedaction, readRedactionLog, redactRemainingMessageBodies } from "./message-redaction.mjs";
 import { resyncRoomMessageRows } from "./messages-store.mjs";
 import { canonicalLane } from "./bounty-escrow.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import {
   ACTIONS,
   DEFAULT_LEGAL_HOLD_REASON,
