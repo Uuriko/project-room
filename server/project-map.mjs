@@ -315,6 +315,7 @@ export function graphFromGraphify(doc, { repo, revision = null, now = Date.now()
   const files = Object.create(null);
   let truncated = nodes.length > PROJECT_MAP_LIMITS.nodes || edges.length > PROJECT_MAP_LIMITS.edges || root?.truncated === true;
   const byId = new Map();
+  const symbolNames = new Map();
   let fileCount = 0;
   const ensure = path => {
     if (!files[path] && fileCount >= MAX_FILES) { truncated = true; return null; }
@@ -338,8 +339,12 @@ export function graphFromGraphify(doc, { repo, revision = null, now = Date.now()
     }
     const file = ensure(path);
     if (!file) continue;
-    if (file.symbols.length >= 200) { truncated = true; continue; }
-    if (!file.symbols.some(symbol => symbol.name === name)) {
+    // Persist all definitions in the globally bounded input. The 200-result
+    // packet limit must not make later exact symbol lookups impossible.
+    let names = symbolNames.get(path);
+    if (!names) { names = new Set(); symbolNames.set(path, names); }
+    if (!names.has(name)) {
+      names.add(name);
       file.symbols.push({ name, kind, line: nodeLine(node) });
     }
     if (id) byId.set(id, { path, name });
@@ -460,9 +465,11 @@ function missingCoverage(graph, result) {
 export function mapQuery(graph, q) {
   const result = queryGraph(graph, q);
   let truncated = graph?.truncated === true;
+  if (result.kind === "file") result.symbolCount = result.symbols.length;
   for (const key of ["symbols", "neighbors", "external", "dependents", "callers", "definitions"]) {
     if (result[key]?.length > PROJECT_MAP_LIMITS.results) { result[key] = result[key].slice(0, PROJECT_MAP_LIMITS.results); truncated = true; }
   }
+  if (result.kind === "file") result.symbolsReturned = result.symbols.length;
   return { ...result, ...graphMetadata(graph), truncated, ...missingCoverage(graph, result) };
 }
 

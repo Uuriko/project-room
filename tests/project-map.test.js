@@ -327,7 +327,7 @@ test("ambiguous callable aliases return definitions but require file qualificati
 });
 
 test("truncated misses explain missing coverage without changing stored graph limits", () => {
-  const graph = graphFromGraphify({ nodes: Array.from({ length: 201 }, (_, i) =>
+  const graph = graphFromGraphify({ truncated: true, nodes: Array.from({ length: 200 }, (_, i) =>
     ({ id: i, file: "large.js", label: `.f${i}()`, _callable: true })), edges: [] });
   const before = JSON.stringify(graph);
   assert.equal(graph.files["large.js"].symbols.length, 200);
@@ -340,4 +340,34 @@ test("truncated misses explain missing coverage without changing stored graph li
   assert.equal(JSON.stringify(graph), before);
   const complete = graphFromGraphify({ nodes: [], edges: [] });
   assert.equal(mapQuery(complete, "missing").coverageIncomplete, undefined);
+});
+
+
+test("Graphify retains definitions after200 while file packets remain bounded", () => {
+  const nodes = Array.from({length: 250}, (_, i) => ({id: i, file: "server/store.mjs", label: `.f${i}()`, _callable: true}));
+  nodes.push({id: "history", file: "server/store.mjs", label: ".workItemHistory()", _callable: true});
+  nodes.push({id: "duplicate", file: "server/store.mjs", label: ".f0()", _callable: true});
+  nodes.push({id: "caller", file: "client.js", label: ".caller()", _callable: true});
+  const graph = graphFromGraphify({nodes, edges: [
+    {source: "caller", target: "history", relation: "calls"},
+    {source: "duplicate", target: "caller", relation: "calls"}]});
+  assert.equal(graph.files["server/store.mjs"].symbols.length, 251);
+  assert.equal(graph.truncated, false);
+  const hit = mapQuery(graph, "workItemHistory");
+  assert.equal(hit.found, true); assert.equal(hit.callers[0].file, "client.js");
+  assert.equal(mapQuery(graph, "caller").callers[0].file, "server/store.mjs");
+  assert.equal(mapPath(graph, "client.js", "workItemHistory").found, true);
+  for (const result of [mapQuery(graph, "server/store.mjs"), mapExplain(graph, "server/store.mjs")]) {
+    assert.equal(result.symbols.length, 200); assert.equal(result.symbolCount, 251);
+    assert.equal(result.symbolsReturned, 200); assert.equal(result.truncated, true);
+  }
+});
+
+test("single-file Graphify definitions retain the global20k input bound", () => {
+  const graph = graphFromGraphify({nodes: Array.from({length: 20001}, (_, i) =>
+    ({id: i, file: "one.js", label: `f${i}`, type: "function"})), edges: []});
+  assert.equal(graph.files["one.js"].symbols.length, 20000);
+  assert.equal(graph.truncated, true);
+  assert.equal(mapQuery(graph, "f19999").found, true);
+  assert.equal(mapQuery(graph, "f20000").found, false);
 });
