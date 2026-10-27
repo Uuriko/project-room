@@ -58,6 +58,7 @@ import { stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext,
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
+import { runRoomMap } from "./project-map-store.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -145,6 +146,15 @@ function validRoomArgs(name, args) {
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
+  if (name === "room_map") {
+    const repoOk = args.repo === undefined || typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200;
+    if (!repoOk || !["query", "path", "hotspots", "explain"].includes(args.op)) return false;
+    if (args.op === "hotspots") return args.q === undefined && args.from === undefined && args.to === undefined;
+    if (args.op === "path") {
+      return typeof args.from === "string" && typeof args.to === "string" && args.from.length >= 1 && args.to.length <= 300 && args.from.length <= 300 && args.to.length >= 1 && args.q === undefined;
+    }
+    return typeof args.q === "string" && args.q.length >= 1 && args.q.length <= 300 && args.from === undefined && args.to === undefined;
+  }
   if (name === "squads_get") return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
   if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
   if (name === "squads_update_members" || name === "squads_disband") {
@@ -523,6 +533,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     return doc;
   }
   if (name === "squads_list") return listSquads(store, secret, roomId);
+  if (name === "room_map") return runRoomMap(store, secret, args);
   if (name === "squads_get") return getSquad(store, secret, roomId, args.squadId);
   if (name === "squads_create") {
     const data = { name: args.name };
