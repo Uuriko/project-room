@@ -2,7 +2,7 @@
 
 Research checkpoint: 2026-10-18. This extends, rather than replaces, the
 [architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) and
-[frontier infrastructure research](FRONTIER-INFRA-RESEARCH-2026-10-18.md).
+[frontier infrastructure research](../archive/docs/plans/FRONTIER-INFRA-RESEARCH-2026-10-18.md).
 The [delivery ledger](DELIVERY-LEDGER.md) preserves outstanding commitments.
 
 ## Decision

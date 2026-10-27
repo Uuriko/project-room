@@ -32,7 +32,7 @@ This is the full captured inventory, not a priority shortlist. Existing source r
 
 - `docs/ARCHITECTURE-EXECUTION-PLAN.md` — read and mapped; detailed acceptance requirements remain binding; SHA-256 `bf36419a60d1a5d94f4e8062548bac52eb80d6f32acce512796911a55cba3cc7`.
 - `docs/MESSAGE-REPLAY-ISOLATION-PLAN.md` — read and mapped; detailed acceptance requirements remain binding; SHA-256 `fde45494ee0ad5d073c71c26f7839afcf9fac8141c1933787a3c45205e6196f0`.
-- `docs/FRONTIER-INFRA-RESEARCH-2026-10-18.md` — read and mapped; detailed acceptance requirements remain binding; SHA-256 `2f7fe19690521ffa12e7a90461c6ccd6a0a6bf424d9bc7aa16725d39c9862500`.
+- `archive/docs/plans/FRONTIER-INFRA-RESEARCH-2026-10-18.md` — read and mapped; detailed acceptance requirements remain binding; SHA-256 `2f7fe19690521ffa12e7a90461c6ccd6a0a6bf424d9bc7aa16725d39c9862500`.
 - `docs/STARTUP-RESEARCH-AND-PRODUCTIVITY-STRATEGY.md` — read and mapped; detailed acceptance requirements remain binding; SHA-256 `4ef070a7d55909fe4871e1881f9490b00f12015f7b9308913d6d4934aa149ae1`.
 - `docs/QUALITY-AND-PRODUCTIVITY-SCORECARD.md` — read and mapped; detailed acceptance requirements remain binding; SHA-256 `f5286563e99a5f36755a188545c66d98ad8a8f254f622a634f1e640aba2e94c8`.
 - `docs/DELIVERY-LEDGER.md` — read and mapped; detailed acceptance requirements remain binding; SHA-256 `30e7c010ed535423d9d6bb7c938e283bb57e888df043bb6e496b17ef3d2cc263`.

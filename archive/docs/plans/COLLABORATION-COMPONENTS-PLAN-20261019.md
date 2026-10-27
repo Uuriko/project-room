@@ -484,7 +484,7 @@ Final local result: repaired that stale assertion and explicitly asserted that t
 
 ## Finish the chat–result–return flow: execution plan (2026-10-20)
 
-The [collaboration experiments](COLLABORATION-EXPERIMENTS.md) informed the choice of a conversation-first surface with contextual reading. Their automated results do not establish a human usability winner. This next slice completes that real flow rather than adding another work model.
+The [collaboration experiments](../../../docs/COLLABORATION-EXPERIMENTS.md) informed the choice of a conversation-first surface with contextual reading. Their automated results do not establish a human usability winner. This next slice completes that real flow rather than adding another work model.
 
 ### Outcome and boundaries
 
