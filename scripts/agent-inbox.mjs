@@ -1,3 +1,4 @@
+import { resumeAgentSession } from "../client/agent-session-checkpoint.mjs";
 import { workContextMarkdown, RoomAgentClient, RoomClientError, validWorkSearchQuery, createAgentIdentity, createAgentRoom, listAgentRooms, redeemAgentInvite, previewAgentInvite, requestAccess } from "../client/room-agent.mjs";
 import { packetMarkdown } from "../src/work-packet.js";
 import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
@@ -289,6 +290,7 @@ if (action === "join") {
   node scripts/agent-inbox.mjs result WORK_ID [--completion ID | --draft MESSAGE_ID]
   node scripts/agent-inbox.mjs discussion WORK_ID [--since N | --cursor CURSOR] [--limit N]
   node scripts/agent-inbox.mjs [orient|next|brief|context [CONTEXT_VERSION]|changes CHECKPOINT|packet WORK_ID]
+  node scripts/agent-inbox.mjs resume [WORK_ID]  (requires ROOM_AGENT_CONFIG; private session checkpoint)
   node scripts/agent-inbox.mjs presence
   node scripts/agent-inbox.mjs capabilities [QUERY]
   node scripts/agent-inbox.mjs advertise CAPABILITY [CAPABILITY...]
@@ -397,7 +399,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
     // threads the post under an existing message.
     const sayArgs = action === "say" ? parseSayArgs([checkpoint, ...extra].filter(word => word !== undefined)) : null;
     const outsideArgs = action === "outside-agents" ? parseOutsideAgentArgs([checkpoint, ...extra].filter(word => word !== undefined)) : null;
-    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "context", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "room-templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "leave-room", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys", "outside-agents"].includes(action)
+    if (!["connect", "import", "check", "orient", "next", "search", "find", "brief", "context", "resume", "changes", "packet", "work", "discussion", "result", "presence", "capabilities", "advertise", "say", "sessions", "claim", "session", "work-claim", "work-complete", "work-release", "status", "notify", "templates", "room-templates", "apply-template", "heartbeats", "identity-create", "rooms", "room-create", "identity-link", "identity-links", "identity-unlink", "leave-room", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "request-access", "access-requests", "access-decide", "membership-grant", "membership-revoke", "membership-grants", "export", "import-history", "thread", "doctor", "support-export", "agent-keys", "outside-agents"].includes(action)
       || (["connect", "import"].includes(action) && (!checkpoint || checkpoint.startsWith("--") || process.env.ROOM_AGENT_CONFIG !== undefined))
       || (action === "import" && ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_MEMBER", "ROOM_AGENT_TOKEN"].some(name => process.env[name] !== undefined))
       || (["packet", "work", "discussion", "result", "claim", "work-claim", "work-complete", "work-release"].includes(action) && !validId(checkpoint))
@@ -417,6 +419,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
         : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys", "membership-grant", "membership-revoke", "membership-grants", "outside-agents"].includes(action) ? false
         : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
+        : action === "resume" ? extra.length > 0 || !process.env.ROOM_AGENT_CONFIG || checkpoint !== undefined && !validId(checkpoint)
         : action === "context" ? extra.length > 0 || (checkpoint !== undefined && !/^[a-f0-9]{64}$/.test(checkpoint))
         : extra.length || (["check", "orient", "next", "brief"].includes(action) && checkpoint !== undefined))
       || (action === "changes" && (!/^\d+$/.test(checkpoint ?? "") || !Number.isSafeInteger(Number(checkpoint))))
@@ -454,6 +457,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "next" ? await client.orient({ focus: "needs_me" })
       : action === "search" ? await client.orient({ query: checkpoint, focus: extra[0] === "--needs-me" ? "needs_me" : "all" })
       : action === "packet" ? packetMarkdown(await client.workPacket(checkpoint)) : action === "orient" ? await client.orient() : action === "brief" ? await client.returnBrief()
+      : action === "resume" ? await resumeAgentSession(client, { connection: config, directory: process.env.ROOM_AGENT_CONFIG, workItemId: checkpoint })
       : action === "context" ? await client.roomContext(checkpoint === undefined ? {} : { sinceVersion: checkpoint })
       : action === "presence" ? await client.presence()
       : action === "capabilities" ? await client.capabilities(checkpoint === undefined ? {} : { search: checkpoint })
@@ -536,7 +540,9 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
     // Fixed diagnostic text avoids printing transport internals or environment secrets.
     const outsideRefusal = action === "outside-agents" && error instanceof RoomClientError
       && ["outside_agent_changed", "invalid_outside_agent", "outside_agent_not_found", "agent_readonly"].includes(error.code);
-    console.error(JSON.stringify(outsideRefusal
+    const sessionRefusal = action === "resume" && ["session_checkpoint_invalid", "session_checkpoint_not_private", "session_scope_changed", "session_context_invalid", "session_context_too_large", "context_history_changed"].includes(error.code);
+    console.error(JSON.stringify(sessionRefusal ? { type: "agent_session_error", code: error.code,
+      message: "Session refresh refused. Preserve the saved checkpoint and operation journals; reconcile identity, history or context before restarting." } : outsideRefusal
       ? { type: "outside_agent_error", code: error.code, message: error.message }
       : connectionDiagnostic(error)));
     process.exitCode = 1;

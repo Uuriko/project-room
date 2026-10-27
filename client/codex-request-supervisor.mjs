@@ -73,7 +73,7 @@ export async function superviseCodexRequests({ connection, db, directory, connec
     if (!controller.signal.aborted) await runRequestQueue({ connection, db, execute, allowRequest: requesterAllowed, selectRequest,
       signal: controller.signal, intervalMs: pollMs, onPoll: () => {
         owner.health("watching"); state(unresolved() ? "recovery_pending" : "watching_room");
-      }, emit: event => {
+      }, onMetrics: metrics => emit({ status: "request_metrics", metrics }), emit: event => {
         if (event.status === "connection_unavailable") { owner.health("retrying"); state("retrying_room"); }
         else if (event.status === "delivered") {
           state("settled", { runId: event.requestId }); emit(event);

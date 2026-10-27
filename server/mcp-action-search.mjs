@@ -79,6 +79,8 @@ const INTENT_SYNONYMS = Object.freeze([
 const CANONICAL_WRITE_TOOLS = new Set(["room_claim", "room_handoff"]);
 
 export function restRouteOf(tool) {
+  const http = tool._meta?.["project-room/transport"]?.http;
+  if (http) return `${http.method} ${http.pathTemplate}`;
   const match = REST_ROUTE.exec(tool.description ?? "");
   return match ? `${match[1]} ${match[2]}` : null;
 }
@@ -135,6 +137,7 @@ export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, to
     summary: firstSentence(tool.description),
     readOnly: tool.annotations?.readOnlyHint === true,
     rest: restRouteOf(tool),
+    ...(tool._meta?.["project-room/transport"] ? { transport: tool._meta["project-room/transport"] } : {}),
     inputSchema: tool.inputSchema
   }));
   return {

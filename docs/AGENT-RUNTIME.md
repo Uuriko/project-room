@@ -34,3 +34,9 @@ Run only one receiver per journal and dedicated Codex profile. Stop it before sw
 Distinguish supported capability, granted access, local configuration, and verified execution. Presence or a successful protocol/login check does not prove a model turn. Send one bounded formal request from an enabled member and verify its linked response and local receipt. Test restart with synthetic work before enabling backlog. Preserve phase timings and exact build provenance when reporting results.
 
 Use `node scripts/run-codex-room.mjs --help` for status and stop commands. Keep secrets and provider stderr out of shared diagnostics.
+
+## Phase measurements
+
+Directed request results include a content-free `metrics` object. Native failures emit `status: request_metrics` with the same bounded measurements. They cover one selected invocation: discovery/context reads, local preparation, reservation authorization, model execution, publication, and acknowledgement bookkeeping. `httpCalls` includes that invocation's Room reads/writes and progress reports, not the queue's idle stream/poll traffic. `requestBodyBytes` measures outgoing JSON bodies; `preparedContextBytes` measures serialized prepared messages/context. Neither is a token estimate.
+
+`modelStarts` distinguishes new execution from saved-delivery recovery. `duplicateReceipt` means the service recognized the saved operation; it does not prove the latest work state. Response byte counts and model tokens remain `null` until actually measured. Timings are local wall-clock durations, not server or provider CPU time. No credentials, URLs, message bodies, or provider errors are emitted. Preserve the result/diagnostic log when comparing cold work and recovery; do not infer end-to-end throughput from this alone.

@@ -1021,10 +1021,23 @@ export class RoomAgentClient {
   // Compact catch-up. sinceVersion is the previous context_version. An exact
   // match returns { not_modified: true } and no room projection. This read
   // never returns message or file bodies.
-  roomContext({ sinceVersion, signal } = {}) {
+  async roomContext({ sinceVersion, checkpoint, signal } = {}) {
     if (sinceVersion !== undefined && !/^[a-f0-9]{64}$/.test(sinceVersion)) throw new RoomClientError(0, "invalid_context_version", "since_version must be the 64-character context_version");
-    const query = sinceVersion === undefined ? "" : `?since_version=${sinceVersion}`;
-    return this.#request(`/context${query}`, undefined, signal);
+    const query = new URLSearchParams();
+    if (sinceVersion !== undefined) query.set("since_version", sinceVersion);
+    if (checkpoint !== undefined) query.set("checkpoint", JSON.stringify(checkpoint));
+    const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}/context${query.size ? "?" + query : ""}`, undefined, signal);
+    if (this.#memberId) {
+      if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
+        || value.viewerAuthEpoch !== null || value.viewerSessionBinding !== null || value.viewerSessionRevision !== null)
+        throw new RoomClientError(200, "identity_mismatch", "Room context does not match the configured agent");
+      // Modern responses authenticate and identify the viewer in this same read.
+      // Older services still need the separate member-kind check.
+      if (value.viewerKind === undefined && value.viewerActive === undefined) await this.checkConnection({ signal });
+      else if (value.viewerKind !== "agent" || value.viewerActive !== true)
+        throw new RoomClientError(200, "identity_mismatch", "Room context does not match an active agent");
+    }
+    return value;
   }
   returnBrief({ limit = 50, horizon, after, cursor } = {}) {
     const query = new URLSearchParams({ limit });

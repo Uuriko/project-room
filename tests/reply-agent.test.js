@@ -1065,3 +1065,36 @@ for (const change of ["cancelled", "clarified"]) test(`queue recovery preserves 
   assert.equal(context.request.status, change === "cancelled" ? "cancelled" : "open");
   assert.equal(context.page.items.some(row => row.message?.body === "Saved original answer"), false);
 });
+
+test("request metrics distinguish model work from exact saved replay without exposing content", async t => {
+  const f = await fixture(t), q = f.open("metrics-request"), db = openRequestJournal(join(f.directory, "metrics.sqlite"));
+  t.after(() => db.close());
+  let starts = 0;
+  const execute = async () => { starts += 1; return { body: "private metric test answer" }; };
+  const options = { connection: f.config, requestMessageId: q.command.data.messageId, db, execute };
+  const first = await runRequestOnce(options);
+  assert.equal(first.metrics.modelStarts, 1);
+  assert.equal(first.metrics.duplicateReceipt, false);
+  assert.ok(first.metrics.httpCalls >= 4);
+  assert.ok(first.metrics.requestBodyBytes > 0);
+  assert.ok(first.metrics.preparedContextBytes > 0);
+  const replay = await runRequestOnce(options);
+  assert.equal(starts, 1);
+  assert.equal(replay.metrics.modelStarts, 0);
+  assert.equal(replay.metrics.duplicateReceipt, true);
+  assert.equal(replay.metrics.preparedContextBytes, 0);
+  assert.equal(replay.metrics.responseBodyBytes, null);
+  assert.equal(replay.metrics.modelTokens, null);
+  assert.ok(Object.values(replay.metrics.phasesMs).every(value => Number.isFinite(value) && value >= 0));
+  assert.doesNotMatch(JSON.stringify([first.metrics, replay.metrics]), /private metric test answer|Authorization|Bearer/);
+  assert.ok(!JSON.stringify(first.metrics).includes(f.config.token));
+  const observed = [];
+  const error = new Error("private provider failure");
+  const next = f.open("metrics-failure");
+  await assert.rejects(runRequestOnce({ ...options, requestMessageId: next.command.data.messageId,
+    execute: async () => { throw error; }, onMetrics: value => observed.push(value) }), error);
+  assert.equal(observed.length, 1);
+  assert.equal(observed[0].status, "interrupted");
+  assert.equal(observed[0].modelStarts, 1);
+  assert.ok(!JSON.stringify(observed).includes(error.message));
+});

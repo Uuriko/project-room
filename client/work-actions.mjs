@@ -83,8 +83,9 @@ const actions = new Map(definitions.map(([name, title, type, description, proper
   const requiredFields = [...new Set([...Object.keys(fields), ...required])]
     .filter(field => field !== "requestId" && (field !== "expectedRevision" || !Object.hasOwn(fields, "expectedRevision"))
       && (name !== "record_handoff" || !handoffCanonical.has(field)));
-  return ["room_" + name, { type, tool: { name: "room_" + name, title, description: description + retry,
+  return ["room_" + name, { type, requiredInput: required, tool: { name: "room_" + name, title, description: description + retry,
     inputSchema: object({ ...fields, ...aliases, ...properties }, requiredFields),
+    _meta: { "project-room/transport": { mcp: { localScope: "bound_room", hostedRoomArgument: "roomId" }, http: { method: "POST", pathTemplate: "/api/rooms/{roomId}/commands", commandType: type, commandDataRequired: required } } },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
 }));
 // Consolidated front door for the four legacy claim/handoff names. `room_claim`
@@ -144,8 +145,58 @@ const DEPRECATED_WORK_TOOLS = Object.freeze({
   room_release_claim: { successor: "room_claim", action: "release" },
   room_record_handoff: { successor: "room_handoff", action: null }
 });
+// The command descriptors are the transport source of truth for both local and
+// hosted discovery. No route is inferred from human-facing prose.
+claimTool._meta = { "project-room/transport": { mcp: { localScope: "bound_room", hostedRoomArgument: "roomId" }, http: { method: "POST", pathTemplate: "/api/rooms/{roomId}/commands",
+  commandDataRequiredByAction: Object.fromEntries(Object.entries(claimDelegates).map(([operation, delegate]) => [operation, actions.get(delegate).requiredInput])),
+  actionField: "action", commandTypes: Object.fromEntries(Object.entries(claimDelegates).map(([operation, delegate]) => [operation, actions.get(delegate).type])) } } };
+
+// An incomplete, revision-bound recipe. It contains no generated retry id: the
+// caller persists one operation id and the filled input before the first write.
+// Resolve canonical aliases through the same delegates as buildWorkCommand.
+export function workActionRecipe(name, fixedArguments, roomId) {
+  if (!validId(roomId)) throw new Error("A room is required for a work recipe");
+  const canonical = canonicalActions.get(name);
+  if (!canonical) throw new Error("Selected recipes support canonical claim and handoff actions");
+  const delegate = canonical?.kind === "claim" ? claimDelegates[fixedArguments.action] : canonical?.to ?? name;
+  const definition = actions.get(delegate);
+  if (!definition || !validId(fixedArguments.workItemId) || !Number.isSafeInteger(fixedArguments.expectedRevision)
+    || fixedArguments.expectedRevision < 0) throw new Error("A current selected work revision is required");
+  const args = structuredClone(fixedArguments), { action: _action, requestId: _requestId, ...data } = args;
+  const requiredInput = ["requestId", ...definition.requiredInput].filter(key => !Object.hasOwn(args, key));
+  const properties = Object.fromEntries(Object.entries(definition.tool.inputSchema.properties)
+    .filter(([key]) => !Object.hasOwn(args, key) && !Object.hasOwn(HANDOFF_ALIASES, key)));
+  const path = `/api/rooms/${encodeURIComponent(roomId)}`;
+  return {
+    tool: name, arguments: args, requiredInput,
+    hostedMcp: { tool: name, arguments: { roomId, ...args },
+      verify: { tool: "room_read_work", arguments: { roomId, workItemId: args.workItemId } } },
+    inputSchema: structuredClone(object(properties, requiredInput)),
+    http: { method: "POST", path: `${path}/commands`, command: { type: definition.type, data },
+      requiredInput: requiredInput.map(key => key === "requestId" ? "command.id" : `command.data.${key}`),
+      verify: { method: "GET", path: `${path}/work-context?workItemId=${encodeURIComponent(args.workItemId)}` } },
+    verify: { tool: "room_read_work", arguments: { workItemId: args.workItemId } },
+    executionGranted: false,
+    capability: { supported: true, authorization: "checked_on_submit", runtimeConfigured: "unknown", runtimeVerified: "unknown" },
+    instructions: "tool/arguments target room-bound stdio; hostedMcp includes the roomId required by hosted MCP. Supply the required input, persist the filled command with one stable requestId (HTTP command.id), then submit. Keep every fixed argument. On an unknown result retry the exact saved input; never fetch a new revision or replace the operation id for that retry. A receipt confirms the original operation, not current ownership or approval; follow verify. Server authorization and scope checks still apply. No external execution is granted."
+  };
+}
+
 export const workTools = [...actions.values()].map(action => action.tool).concat(claimTool, handoffTool);
 export const isWorkTool = name => actions.has(name) || canonicalActions.has(name);
+
+// Deployment-stable revision of these executable work contracts, not a grant,
+// runtime readiness report or revision of the entire hosted tool catalog.
+const canonicalContract = value => Array.isArray(value) ? value.map(canonicalContract)
+  : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map(key => [key, canonicalContract(value[key])])) : value;
+export function workActionContractRevision(definitions = workTools) {
+  const contracts = definitions.map(tool => ({ name: tool.name, inputSchema: tool.inputSchema,
+    transport: tool._meta?.["project-room/transport"] ?? null, annotations: tool.annotations }))
+    .sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  return createHash("sha256").update(JSON.stringify(canonicalContract(contracts))).digest("hex");
+}
+export const WORK_ACTION_CONTRACT_REVISION = workActionContractRevision();
+
 
 function validCanonicalWorkArguments(name, args) {
   const canonical = canonicalActions.get(name);
