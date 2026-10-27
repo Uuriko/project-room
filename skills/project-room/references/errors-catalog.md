@@ -423,6 +423,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_account_id` | 422 | A valid account is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_limit` | 422 | limit must be an integer between 1 and ${ACTIVITY_LIMIT_MAX} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_read` | 422 | ids is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_work_action` | 422 | Current work revision unavailable | fix+resend | Read the work with room_read_work, then resend with that revision as expectedRevision. Keep the same requestId if the earlier send was uncertain. |
 | `invalid_activity_selection` | 422 | before must be a positive event id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_type` | 422 | type must be one of ${ACTIVITY_TYPES.join(", ")} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_admission_input` | 500 | fail("invalid_admission_input", message); }; // Policy version this instrumentation implements (docs/JEV-GATES.md). export const jevAdmissionPolicyVer | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
@@ -825,6 +826,7 @@ response's own `hint`/`next` when it names something more specific.
 | `outside_agent_not_found` | 404 | Introduce both agents before relating them | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `outside_agent_unlinked` | 422 | There is no link to decide on for this agent | re-list | Re-list the outside agents and decide on a link that is still pending. Do not guess ids. |
 | `owner_cannot_deactivate` | 403 | The room owner cannot deactivate its own membership; transfer ownership first | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `owner_equivalent_forbidden` | 403 | Only the room owner can mint an owner-level invite | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_only` | 403 | Only the room owner may manage Demigod offers | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_required` | 403 | Only the room owner can read the access review | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `passkey_origin_rejected` | 422 | Passkey sign-in needs an https origin or localhost | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
