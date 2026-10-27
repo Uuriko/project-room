@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "platform": "darwin",
+  "arch": "arm64",
+  "node": "v24.19.0",
+  "modelTurnExecuted": true,
+  "protocolReady": true,
+  "publication": false,
+  "hostRestartRetry": false,
+  "physicalSleepTested": false,
+  "productionAccess": false,
+  "inFlightDisconnect": true,
+  "duplicateExecutionPrevented": true,
+  "reconciledState": "interrupted",
+  "recoveredPublication": false,
+  "modelStarts": 1,
+  "status": "passed"
+}

@@ -37,7 +37,11 @@ async function setup(t, touch = false) {
     const draft = async (native = true, selected = false) => {
       const panel = card.locator(selected ? ".work-help" : ".work-details");
       if (!await panel.evaluate(node => node.open)) await panel.locator(":scope > summary").click();
-      await panel.locator('[data-portable-mode="' + (native ? "draft" : "result") + '"]').click();
+      if (native) await panel.locator('[data-portable-mode="draft"]').click();
+      else {
+        await panel.getByRole("button", { name: "Use my AI", exact: true }).click();
+        await page.locator("#portable-add-result").click();
+      }
       await page.locator("#portable-dialog").waitFor({ state: "visible" });
     };
     return { page, card, draft };

@@ -28,8 +28,12 @@ export function chromiumLaunchOptions() {
 // Run axe against the page and return the serious/critical violations in a
 // small printable shape. `include`/`exclude` scope the run to a region
 // (e.g. only the composer) without changing the rule set.
-export async function axeSerious(page, { include = [], exclude = [] } = {}) {
-  let builder = new AxeBuilder({ page }).withTags(A11Y_TAGS);
+export async function axeSerious(page, { include = [], exclude = [], rules = [] } = {}) {
+  // axe-core accepts one runOnly selector type, so an explicit rule list
+  // (for a targeted regression check such as button-name) replaces the tag set.
+  let builder = rules.length
+    ? new AxeBuilder({ page }).withRules(rules)
+    : new AxeBuilder({ page }).withTags(A11Y_TAGS);
   for (const selector of include) builder = builder.include(selector);
   for (const selector of exclude) builder = builder.exclude(selector);
   const result = await builder.analyze();

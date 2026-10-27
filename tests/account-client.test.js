@@ -348,3 +348,22 @@ test('closed invitation fallback is bound to existing account ownership and igno
     assert.equal(client.session.account.id, switched ? 'replacement' : 'member');
   }
 });
+
+for (const denied of [false, true]) test(`confirmation distinguishes concurrent invalidation from a pending restore (${denied ? "denied" : "success"})`, async () => {
+  const first = deferred(), second = deferred(); let reads = 0;
+  const client = new AccountClient({ fetcher: () => (++reads === 1 ? first : second).promise });
+  const old = accountSession("old", 1); client.session = old;
+  const checking = client.confirm();
+  client.invalidate(client.generation, old);
+  first.resolve(response(denied ? { error: { code: "unauthenticated" } } : old, denied ? 401 : 200));
+  assert.equal(await checking, false, "another read already confirmed this account ended");
+
+  const stale = deferred(), restored = deferred(); reads = 0;
+  const replacement = new AccountClient({ fetcher: () => (++reads === 1 ? stale : restored).promise });
+  replacement.session = old;
+  const oldCheck = replacement.confirm(), newRestore = replacement.restore();
+  stale.resolve(response(denied ? { error: { code: "unauthenticated" } } : old, denied ? 401 : 200));
+  assert.equal(await oldCheck, null, "old confirmation must not retire the pending restore UI");
+  const next = accountSession("new", 2); restored.resolve(response(next));
+  assert.equal(await newRestore, next); assert.equal(replacement.session, next);
+});

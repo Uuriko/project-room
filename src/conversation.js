@@ -159,6 +159,16 @@ export function memberStatus(member, context) {
   return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
 }
 
+// One accessible name per member row: who, agent or human, and how available.
+// Screen readers and browser drivers address the row by this name instead of
+// its initials and status chips.
+export function memberRowName(member, status) {
+  const name = String(member?.displayName ?? "").trim();
+  const kind = member?.kind === "agent" ? "agent" : "human";
+  const state = String(status ?? "").trim();
+  return [name, kind, state].filter(Boolean).join(", ");
+}
+
 // Compact Done receipt for an agent who posted completion. Not chat spam.
 export function memberDoneChip(member, { workItems } = {}) {
   if (!member || member.kind !== "agent" || member.active === false) return null;
@@ -466,6 +476,20 @@ export function draftRecoveryScope(identity) {
     identity.member.id, identity.sessionBinding]);
 }
 
+// Only references and recovery state persist. File bytes never enter browser storage.
+function recoveredFiles(files) {
+  return (Array.isArray(files) ? files : []).slice(0, 20).flatMap(file => {
+    if (!file || typeof file.id !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(file.id)
+      || typeof file.filename !== 'string' || file.filename.length > 255
+      || typeof file.mediaType !== 'string' || file.mediaType.length > 255
+      || !['staged', 'uploading', 'error'].includes(file.status)) return [];
+    return [{ id: file.id, filename: file.filename, mediaType: file.mediaType,
+      status: file.status === 'uploading' ? 'error' : file.status,
+      ...(typeof file.commitMessageId === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(file.commitMessageId)
+        ? { commitMessageId: file.commitMessageId } : {}) }];
+  });
+}
+
 // Tab-scoped recovery. The composer used to hide this behind a checkbox; drafts
 // now save for this tab until the 12-hour expiry or sign-out. Read only after
 // an authenticated room snapshot.
@@ -476,12 +500,13 @@ export class DraftRecovery {
   write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }
-      const entries = [...drafts.entries].filter(([, d]) => d.body.trim()).slice(-50).map(([id, d]) =>
+      const entries = [...drafts.entries].filter(([, d]) => d.body.trim() || recoveredFiles(d.files).length).slice(-50).map(([id, d]) =>
         [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
           ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}),
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
           ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
-          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
+          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null,
+          files: recoveredFiles(d.files) }]);
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
       return true;
@@ -528,7 +553,7 @@ export class DraftRecovery {
           // A malformed retained operation must never become a new automatic send.
           if (d.pending && !pending) continue;
           drafts.save(id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
-            mode: d.mode, threadId: d.threadId, channelId, pending });
+            mode: d.mode, threadId: d.threadId, channelId, pending, files: recoveredFiles(d.files) });
           continue;
         }
         let assistantDraft = null;
@@ -561,11 +586,23 @@ export class DraftRecovery {
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
-        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, ...(assistantDraft ? { assistantDraft } : {}) });
+        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, files: recoveredFiles(d.files), ...(assistantDraft ? { assistantDraft } : {}) });
         restoredKeys.set(id, draftId);
       }
       let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)
         : drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      // Keep empty-thread navigation separate from recoverable draft text.
+      // Never turn a rejected private draft into a fresh public reply.
+      if (activeKey === null && typeof saved.threadId === "string"
+        && saved.activeKey === saved.threadId && !saved.entries.some(([id]) => id === saved.threadId)) {
+        const root = index.byId.get(saved.threadId), channelId = root?.channelId ?? "general";
+        if (root && !root.deletedAt && !root.toMemberId && index.threads.has(root.id)
+          && (channelId === "general" || state.channels?.[channelId])
+          && !state.channels?.[channelId]?.archivedAt) {
+          drafts.save(root.id, { body: "", toMemberId: "", replyToId: root.id, channelId, pending: null });
+          activeKey = root.id;
+        }
+      }
       const active = drafts.entries.get(activeKey);
       if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
       const selected = drafts.entries.get(activeKey);
@@ -603,6 +640,7 @@ export function createTimelinePin() {
   const flush = list => list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
   return {
     set(view, list) { pin = { view, top: list.scrollTop }; },
+    tracks(view) { return Boolean(pin && pin.view === view); },
     holds(view, list) { return Boolean(pin && pin.view === view && (list.scrollTop === pin.top || flush(list))); },
     clear() { pin = null; },
   };
