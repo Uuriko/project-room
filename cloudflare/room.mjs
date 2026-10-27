@@ -38,6 +38,7 @@ import { countOpenPublicReports } from '../server/legal-store.mjs'; // open publ
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
+import { edgeAnonymousMcpResponse, edgeMcpApplies } from './edge-mcp.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
@@ -692,6 +693,17 @@ export default {
     // keeps a cold or busy Durable Object from blanking the page.
     const edge = await edgePublicResponse(request, env, url);
     if (edge) return finish(edge, 'edge');
+    // Anonymous MCP is a pure function of deploy-static data (zero store
+    // queries), so the store-free surface is answered here and never
+    // queues behind the single Durable Object. The edge handler decides
+    // eligibility with the dispatch's own predicates; anything else
+    // (presented credential, store-backed public-work / identity-mint
+    // calls) returns null and the ORIGINAL request — body unread, the
+    // edge read a clone — continues to the object exactly as before.
+    if (edgeMcpApplies(url)) {
+      const edgeMcp = await edgeAnonymousMcpResponse(request.clone(), url);
+      if (edgeMcp) return finish(edgeMcp, 'edge');
+    }
     // Read-only cron heartbeat (per-job lastSuccessAt / lastError). 503 when a
     // job is stale or failing, so a plain status check catches dead crons.
     if ((url.pathname === '/api/health/jobs' || url.pathname === '/api/health/jobs/') && (request.method === 'GET' || request.method === 'HEAD')) {
