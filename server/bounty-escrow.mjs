@@ -399,6 +399,19 @@ export const bountyEscrowSchema = `
   CREATE INDEX IF NOT EXISTS bounty_sybil_flags_room ON bounty_sybil_flags(room_id, status);
   CREATE INDEX IF NOT EXISTS bounty_sybil_flags_cluster ON bounty_sybil_flags(room_id, cluster_id);
 `
+// CURE-CLOCK-HIGHWATER (S4): persisted per-room monotonic clock mark. One
+// row per room holding the largest escrow `now` ever persisted for that
+// room; BountyEscrow.nowMs(roomId) never returns less than it. Purely
+// additive (CREATE TABLE IF NOT EXISTS, empty on existing rooms, so a
+// room's first post-cure call behaves exactly as before); rows are written
+// only inside the caller's own transaction, so a rolled-back operation
+// rolls its mark back with its stamps.
++ `
+  CREATE TABLE IF NOT EXISTS bounty_clock_highwater (
+    room_id TEXT PRIMARY KEY,
+    high_water_ms INTEGER NOT NULL
+  );
+`
 // Slice 4 (integration-map candidate #4): probation-gate review packets.
 // Written when the reputation claim-eligibility gate denies a claim — the
 // room's "adverse moves produce review packets for humans/arbiters" rule,
@@ -748,9 +761,59 @@ export class BountyEscrow {
     // provisioning is a later slice), transitions return `signed: []` and
     // journal entries are not stamped.
     this._receipts = receipts;
+    // CURE-CLOCK-HIGHWATER (S4): in-memory monotonic marks, keyed by room.
+    // Seeded from the persisted bounty_clock_highwater rows and updated on
+    // every nowMs() call, so this instance never returns a time earlier
+    // than one it already returned for the room — even on read-only paths,
+    // where the persisted mark cannot be written.
+    this._clockHighWaterMem = new Map();
   }
 
-  nowMs() { return this._now ? this._now() : this.store.now(); }
+  // The escrow clock, clamped to the room's high-water mark (S4): a
+  // backwards step of the source clock (NTP step, snapshot restore, a
+  // second handle with an earlier clock) must not reopen windows the
+  // keeper has already passed or restamp journal/event rows earlier than
+  // rows already written. The mark is the max of the in-memory mark, the
+  // persisted bounty_clock_highwater row, and the raw source time; a new
+  // maximum for a named room is persisted (best effort: never inside a
+  // read-only transaction, and never when the table does not exist yet —
+  // the in-memory mark still guards this instance, and the next
+  // write-capable call after _ensure() persists it). Unscoped calls
+  // (roomId null) clamp against every mark this instance / database has
+  // seen, which is conservative and room-safe. Normal operation is
+  // untouched: a source clock that never goes backwards always returns
+  // exactly the source time.
+  nowMs(roomId = null) {
+    const raw = this._now ? this._now() : this.store.now();
+    if (typeof raw !== "number" || !Number.isFinite(raw)) return raw;
+    let persisted = 0, readable = false;
+    try {
+      const row = roomId === null || roomId === undefined
+        ? this.db.prepare("SELECT MAX(high_water_ms) AS hw FROM bounty_clock_highwater").get()
+        : this.db.prepare("SELECT high_water_ms AS hw FROM bounty_clock_highwater WHERE room_id=?").get(roomId);
+      readable = true;
+      if (row && Number.isSafeInteger(row.hw)) persisted = row.hw;
+    } catch { /* table not created yet (pre-_ensure call): no persisted mark */ }
+    let mark = persisted;
+    if (roomId === null || roomId === undefined) {
+      for (const v of this._clockHighWaterMem.values()) if (v > mark) mark = v;
+    } else {
+      const mem = this._clockHighWaterMem.get(roomId);
+      if (mem !== undefined && mem > mark) mark = mem;
+    }
+    const t = raw > mark ? raw : mark;
+    if (roomId !== null && roomId !== undefined) this._clockHighWaterMem.set(roomId, t);
+    else if (t > 0) this._clockHighWaterMem.set("", Math.max(this._clockHighWaterMem.get("") ?? 0, t));
+    if (roomId !== null && roomId !== undefined && readable && t > persisted
+      && !this.db.readOnlyTransaction) {
+      try {
+        this.db.prepare(`INSERT INTO bounty_clock_highwater (room_id, high_water_ms) VALUES (?,?)
+          ON CONFLICT(room_id) DO UPDATE SET high_water_ms = MAX(bounty_clock_highwater.high_water_ms, excluded.high_water_ms)`)
+          .run(roomId, t);
+      } catch { /* read-only storage adapter: the in-memory mark still guards this instance */ }
+    }
+    return t;
+  }
 
   // --- lane identity: membership validation ---------------------------------
   // A lane id is only meaningful when it names a CURRENT member of the room.
@@ -930,7 +993,7 @@ export class BountyEscrow {
         const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
         const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
           "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
-          "bounty_review_packets", "bounty_sybil_flags", "bounty_reputation_packets"];
+          "bounty_review_packets", "bounty_sybil_flags", "bounty_reputation_packets", "bounty_clock_highwater"];
         if (needed.some(t => !tables.has(t))) this.db.exec(bountyEscrowSchema);
         // Always converge columns after creating missing tables (not
         // either/or): a shard can be missing tables AND carry older columns
@@ -969,7 +1032,7 @@ export class BountyEscrow {
     const tables = new Set(this.db.prepare("SELECT name AS n FROM sqlite_master WHERE type='table'").all().map(r => r.n));
     const needed = ["bounty_journal", "bounty_records", "bounty_disputes", "bounty_events",
       "bounty_idempotency", "bounty_watchers", "bounty_sequences", "bounty_rubric_versions", "bounty_flakes",
-      "bounty_review_packets", "bounty_sybil_flags", "bounty_reputation_packets"];
+      "bounty_review_packets", "bounty_sybil_flags", "bounty_reputation_packets", "bounty_clock_highwater"];
     const missing = needed.filter(t => !tables.has(t));
     if (missing.length) throw new Error(`Bounty escrow schema not converged on read-only path (missing tables: ${missing.join(", ")})`);
     const colsOf = table => new Set(this.db.prepare(`PRAGMA table_info(${table})`).all().map(r => r.name));
@@ -1038,7 +1101,7 @@ export class BountyEscrow {
     const schemaChunks = name => bountyEscrowSchema.trim().split(/;\s*(?=CREATE|$)/).filter(Boolean)
       .filter(sql => sql.includes(name));
     for (const name of ["bounty_rubric_versions", "bounty_flakes", "bounty_review_packets", "bounty_sybil_flags",
-      "bounty_reputation_packets"])
+      "bounty_reputation_packets", "bounty_clock_highwater"])
       for (const ddl of schemaChunks(name)) this.db.exec(ddl);
     // Journal lot_state index (AUDIT-50X X-08 / M-4): every balance SUM in
     // _balanceMillis, _requirePayable, _settleClaimBond and _approvedMillis
@@ -1170,7 +1233,7 @@ export class BountyEscrow {
   // Track is derived from the transition when both states are present
   // (acceptance verdicts vs finality moves); an explicit track overrides.
   _event(roomId, type, { bountyId = null, actor = null, before = null, after = null, data = {}, track = null } = {}) {
-    const at = isoNow(this.nowMs());
+    const at = isoNow(this.nowMs(roomId));
     const resolvedTrack = track ?? (before !== null && after !== null ? trackOfStateTransition(before, after) : null);
     const row = this.db.prepare(
       `INSERT INTO bounty_events (room_id, at, type, bounty_id, actor_kind, actor_id, before_state, after_state, track, data)
@@ -1191,7 +1254,7 @@ export class BountyEscrow {
   ensureGenesis(roomId) {
     return this.store.transaction(() => {
       this._ensure();
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const millis = GENESIS_CREDITS * MILLIS_PER_CREDIT;
       const members = this._members(roomId);
       let recipients;
@@ -1259,7 +1322,7 @@ export class BountyEscrow {
       const lane = this._requireLane(roomId, watcher, "watcher");
       const row = this.db.prepare("SELECT bounty_id FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       this._addWatcher(roomId, bountyId, lane, at);
       const act = this._actorFor(roomId, actor, lane);
       return { bountyId, watcher: lane, watchers: this._watchersOf(roomId, bountyId),
@@ -1297,7 +1360,7 @@ export class BountyEscrow {
   }
 
   _viewBounty(row, roomId) {
-    const now = this.nowMs();
+    const now = this.nowMs(roomId);
     return Object.freeze({
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
@@ -1326,7 +1389,7 @@ export class BountyEscrow {
   }
 
   _saveBounty(bounty) {
-    const at = isoNow(this.nowMs());
+    const at = isoNow(this.nowMs(bounty.roomId));
     this.db.prepare(`UPDATE bounty_records SET title=?, criteria=?, amount_millis=?, poster=?, verifier=?, dispute_decider=?,
       claimant=?, state=?, state_changed_ms=?, deadline_ms=?, challenge_ends_ms=?, dispute_id=?, dispute_opened_ms=?,
       snoozed_until_ms=?, decline_reason=?, duplicate_of=?, label=?,
@@ -1365,7 +1428,7 @@ export class BountyEscrow {
 
   _transition(bounty, toState) {
     bounty.state = toState;
-    bounty.stateChangedMs = this.nowMs();
+    bounty.stateChangedMs = this.nowMs(bounty.roomId);
   }
 
   // --- two-track guards ---------------------------------------------------------
@@ -1420,7 +1483,7 @@ export class BountyEscrow {
       const amountMillis = toMillis(amount);
       const deadlineMs = Date.parse(deadline);
       check(Number.isFinite(deadlineMs), "invalid_input", "deadline must be an ISO timestamp");
-      check(deadlineMs > this.nowMs(), "invalid_input", "deadline must be in the future");
+      check(deadlineMs > this.nowMs(roomId), "invalid_input", "deadline must be in the future");
       let verifier = null;
       if (verifierId !== null && verifierId !== undefined) {
         // The designated verifier must be a CURRENT agent member of the
@@ -1461,7 +1524,7 @@ export class BountyEscrow {
       // default single-criterion pin from the acceptance criteria text.
       const pinned = rubric === null || rubric === undefined ? defaultRubricFor(criteria) : canonicalRubric(rubric);
       const rubricHash = rubricHashOf(pinned), rubricJson = JSON.stringify(pinned);
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const bountyId = this._nextBountyId(roomId);
       this.db.prepare(`INSERT INTO bounty_records
         (bounty_id, room_id, title, criteria, amount_millis, poster, verifier, dispute_decider, approval_mode, claimant, state, state_changed_ms,
@@ -1469,7 +1532,7 @@ export class BountyEscrow {
          duplicate_of, label, evidence_json, attestation_json, resolution_json,
          rubric_json, rubric_hash, rubric_version, created_at, updated_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-        .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, decider, approvalMode, null, "proposed", this.nowMs(),
+        .run(bountyId, roomId, title, criteria, amountMillis, lane, verifier, decider, approvalMode, null, "proposed", this.nowMs(roomId),
           deadlineMs, null, null, null, null, null, null, null, null, null, null,
           rubricJson, rubricHash, 1, at, at);
       this.db.prepare(`INSERT INTO bounty_rubric_versions
@@ -1502,7 +1565,7 @@ export class BountyEscrow {
       check(rubricHash !== bounty.rubric?.hash, "invalid_input", "the rubric is unchanged");
       bounty.rubric = Object.freeze({ version, hash: rubricHash, criteria: pinned });
       this._saveBounty(bounty);
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       this.db.prepare(`INSERT INTO bounty_rubric_versions
         (room_id, bounty_id, version, rubric_hash, rubric_json, pinned_at, pinned_by)
         VALUES (?,?,?,?,?,?,?)`).run(roomId, bountyId, version, rubricHash, rubricJson, at, lane);
@@ -1549,7 +1612,7 @@ export class BountyEscrow {
       const { bounty, lane } = this._triageBounty(roomId, bountyId, funder);
       const act = this._actorFor(roomId, actor, lane);
       this._requirePayable(roomId, lane, bounty.amountMillis, "fund");
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const lotId = newId("lot_");
       // Finality track starts here: the intake lock (proposed -> funded).
       this._requireFinalityMove(bounty, "escrow-lock");
@@ -1577,7 +1640,7 @@ export class BountyEscrow {
       this._transition(bounty, "cancelled");
       bounty.declineReason = reason;
       this._saveBounty(bounty);
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const event = this._event(roomId, "bounty.declined",
         { bountyId, actor: act, before: "proposed", after: "cancelled", data: { reason } });
       return { bounty: this._getBounty(roomId, bountyId),
@@ -1594,10 +1657,10 @@ export class BountyEscrow {
       const act = this._actorFor(roomId, actor, lane);
       const untilMs = Date.parse(until);
       check(Number.isFinite(untilMs), "invalid_input", "until must be an ISO timestamp");
-      check(untilMs > this.nowMs(), "invalid_input", "until must be in the future");
+      check(untilMs > this.nowMs(roomId), "invalid_input", "until must be in the future");
       bounty.snoozedUntilMs = untilMs;
       this._saveBounty(bounty);
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const event = this._event(roomId, "bounty.snoozed",
         { bountyId, actor: act, before: "proposed", after: "proposed", data: { until: new Date(untilMs).toISOString() } });
       return { bounty: this._getBounty(roomId, bountyId),
@@ -1619,7 +1682,7 @@ export class BountyEscrow {
       bounty.duplicateOf = canonicalId;
       bounty.label = "Duplicate";
       this._saveBounty(bounty);
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const event = this._event(roomId, "bounty.duplicated",
         { bountyId, actor: act, before: "proposed", after: "cancelled", data: { canonicalId } });
       return { bounty: this._getBounty(roomId, bountyId),
@@ -1632,16 +1695,22 @@ export class BountyEscrow {
   // forfeit -> 2x bond -> cooldown. Derived on read from the append-only
   // bounty_flakes table; every step is journaled as a bounty_events row.
   _flakeStrikes(roomId, lane, now) {
+    // Upper bound (CURE-CLOCK-HIGHWATER, S4): a strike dated in the future
+    // relative to the (clamped) clock — recorded by a divergent future
+    // clock, or persisted before the high-water guard existed — must not
+    // count until time actually reaches it. Before this bound the filter
+    // was lower-bound only, so 3 strikes recorded at T0+10d imposed the
+    // rung-3 claim cooldown at T0.
     return this.db.prepare(`SELECT struck_at_ms FROM bounty_flakes
-      WHERE room_id=? AND lane=? AND struck_at_ms > ? ORDER BY struck_at_ms DESC`)
-      .all(roomId, lane, now - FLAKE_DECAY_MS).map(r => r.struck_at_ms);
+      WHERE room_id=? AND lane=? AND struck_at_ms > ? AND struck_at_ms <= ? ORDER BY struck_at_ms DESC`)
+      .all(roomId, lane, now - FLAKE_DECAY_MS, now).map(r => r.struck_at_ms);
   }
 
   // The lane's ladder position: { strikes, rung, bondMultiplier,
   // cooldownUntilMs }. rung 0 = clean, 1 = forfeit-on-flake, 2 = double
   // bond, 3+ = cooldown. Pure read — the escalation is deterministic.
   _flakeState(roomId, lane) {
-    const now = this.nowMs();
+    const now = this.nowMs(roomId);
     const strikes = this._flakeStrikes(roomId, lane, now);
     const rung = Math.min(strikes.length, FLAKE_COOLDOWN_RUNG);
     const rawCooldown = rung >= FLAKE_COOLDOWN_RUNG && strikes.length > 0
@@ -1657,7 +1726,7 @@ export class BountyEscrow {
   // on an upheld dispute) and journal the ladder step. Returns the lane's
   // new ladder position.
   _recordFlake(roomId, lane, bountyId, reason) {
-    const now = this.nowMs();
+    const now = this.nowMs(roomId);
     const rung = Math.min(this._flakeStrikes(roomId, lane, now).length + 1, FLAKE_COOLDOWN_RUNG);
     const flakeId = newId("flk_");
     this.db.prepare(`INSERT INTO bounty_flakes (flake_id, room_id, lane, bounty_id, struck_at_ms, reason, rung)
@@ -1677,7 +1746,7 @@ export class BountyEscrow {
   // no keeper for the ladder, so claim time is the deterministic point of
   // observation. Each transition journals exactly once per strike row.
   _journalDecay(roomId, lane) {
-    const now = this.nowMs();
+    const now = this.nowMs(roomId);
     const ended = this.db.prepare(`SELECT rowid, struck_at_ms FROM bounty_flakes
       WHERE room_id=? AND lane=? AND rung >= ? AND struck_at_ms + ? <= ? AND cooldown_end_journaled=0`)
       .all(roomId, lane, FLAKE_COOLDOWN_RUNG, FLAKE_COOLDOWN_MS, now);
@@ -1744,7 +1813,7 @@ export class BountyEscrow {
       check(bounty.state === "funded" || bounty.state === "claimed", "invalid_state",
         `bounty is ${bounty.state}, not open for claims — only funded bounties are claimable`);
       if (bounty.state === "claimed") fail("already_claimed", "this bounty is already claimed");
-      check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the claim window closed at the deadline");
+      check(this.nowMs(roomId) < bounty.deadlineMs, "invalid_state", "the claim window closed at the deadline");
       // Slice 8: graduated anti-flake ladder. Rung 3+ lanes sit out a
       // cooldown; rung 2+ lanes post a double bond. The bond is forfeited
       // (not returned) on the next flake — see _timeoutRefund.
@@ -1756,7 +1825,7 @@ export class BountyEscrow {
         fail("claim_cooldown", `anti-flake cooldown: no new claims until ${new Date(flake.cooldownUntilMs).toISOString()}`);
       const bondMillis = CLAIM_BOND_MILLIS * flake.bondMultiplier;
       this._requirePayable(roomId, lane, bondMillis, "claim bond");
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
         amountMillis: bondMillis, kind: "bond-lock", bountyId, lotId,
@@ -1784,7 +1853,7 @@ export class BountyEscrow {
       const bounty = this._mutable(row);
       check(bounty.state === "claimed", "invalid_state", `bounty is ${bounty.state}, not awaiting submission`);
       check(bounty.claimant === lane, "not_authorized", "only the claimant may submit");
-      check(this.nowMs() < bounty.deadlineMs, "invalid_state", "the submission deadline passed");
+      check(this.nowMs(roomId) < bounty.deadlineMs, "invalid_state", "the submission deadline passed");
       const receipt = this._evidenceOf(evidence, lane);
       // Acceptance track: the work enters review, evidence-cited.
       this._acceptanceTransition(bounty, "submitted", { evidence: receipt });
@@ -1794,7 +1863,7 @@ export class BountyEscrow {
       bounty.submissionHash = submissionHashOf(receipt);
       this._transition(bounty, "submitted");
       this._saveBounty(bounty);
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const event = this._event(roomId, "bounty.submitted",
         { bountyId, actor: act, before: "claimed", after: "submitted", data: { evidenceUrl: receipt.evidenceUrl } });
       // Slice 10: claim-graph correlation -> review packet; above-threshold
@@ -1903,7 +1972,7 @@ export class BountyEscrow {
     for (const m of matched.values()) link(m);
     const frozen = value => deepFreeze(JSON.parse(JSON.stringify(value)));
     const packet = {
-      packetId: newId("rpkt_"), roomId, createdAt: isoNow(this.nowMs()),
+      packetId: newId("rpkt_"), roomId, createdAt: isoNow(this.nowMs(roomId)),
       bountyId: bounty.bountyId, submissionHash: fingerprint,
       signals: frozen(signals),
       matchedBounties: frozen([...matched.values()]),
@@ -1934,7 +2003,7 @@ export class BountyEscrow {
   // bonds, or reputation.
   _flagSybilCluster(roomId, bounty, fingerprint, signal, packet) {
     const flagId = newId("sybf_"), clusterId = newId("sycl_");
-    const createdAt = isoNow(this.nowMs());
+    const createdAt = isoNow(this.nowMs(roomId));
     const memberLanes = [...(signal.lanes ?? [])];
     const memberBounties = [...(signal.members ?? [])];
     this.db.prepare(`INSERT INTO bounty_sybil_flags
@@ -2004,7 +2073,7 @@ export class BountyEscrow {
       check(row.status === "open", "invalid_state", `flag is ${row.status}, not open`);
       const by = this._requireLane(roomId, resolver, "resolver");
       this._requireRoomOwner(roomId, by, "resolver");
-      const resolvedAt = isoNow(this.nowMs());
+      const resolvedAt = isoNow(this.nowMs(roomId));
       const trimmed = reason.trim();
       this.db.prepare(`UPDATE bounty_sybil_flags SET status=?, resolved_at=?, resolved_by=?, resolution_reason=?
         WHERE room_id=? AND flag_id=?`).run(resolution, resolvedAt, by, trimmed, roomId, flagId);
@@ -2025,12 +2094,12 @@ export class BountyEscrow {
   // suspension or a ban. Deduped to one packet per lane per 24h so a lane
   // retrying a claim does not spam the queue.
   _storeReputationPacket(roomId, lane, bountyId, eligibility) {
-    const cutoff = new Date(this.nowMs() - REPUTATION_PACKET_DEDUPE_MS).toISOString();
+    const cutoff = new Date(this.nowMs(roomId) - REPUTATION_PACKET_DEDUPE_MS).toISOString();
     const recent = this.db.prepare(`SELECT packet_id FROM bounty_reputation_packets
       WHERE room_id=? AND agent_id=? AND created_at >= ? LIMIT 1`).get(roomId, lane, cutoff);
     if (recent) return null;
-    const summary = reputationSummary(this, roomId, lane, { nowMs: this.nowMs() });
-    const packetId = newId("rpkt_"), createdAt = isoNow(this.nowMs());
+    const summary = reputationSummary(this, roomId, lane, { nowMs: this.nowMs(roomId) });
+    const packetId = newId("rpkt_"), createdAt = isoNow(this.nowMs(roomId));
     const signals = summary.signals.map(s => ({ seq: s.seq, at: s.at, type: s.type }));
     this.db.prepare(`INSERT INTO bounty_reputation_packets
       (room_id, packet_id, created_at, agent_id, band, score, max_claim_millis, bounty_id, signals_json)
@@ -2143,7 +2212,7 @@ export class BountyEscrow {
       // criterion with a pass|fail verdict. The citations name the rubric
       // version that governed the work, so arbiters can re-check against it.
       const citations = citationsAgainstRubric(verifierAttestation.citations, bounty.rubric);
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       // Acceptance track: the verdict (evidence = the verifier attestation).
       // The finality move below (attribute) is gated on this verdict.
       this._acceptanceTransition(bounty, "accepted", { evidence: verifierAttestation });
@@ -2152,7 +2221,7 @@ export class BountyEscrow {
       const event = this._event(roomId, "bounty.accepted",
         { bountyId, actor: act, before: "submitted", after: "accepted",
           data: { approval: { decision: approval.decision, by: approval.by, at: approval.at },
-            claimant: bounty.claimant, challengeEnds: new Date(this.nowMs() +
+            claimant: bounty.claimant, challengeEnds: new Date(this.nowMs(roomId) +
               (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS)).toISOString() } });
       // 2. The escrow release is the explicit consequence of the approval:
       // finality (attribute) requires the terminal acceptance verdict above.
@@ -2166,7 +2235,7 @@ export class BountyEscrow {
         rubricVersion: bounty.rubric.version, rubricHash: bounty.rubric.hash,
         recordedBy: lane, recordedAt: at });
       this._transition(bounty, "accepted");
-      bounty.challengeEndsMs = this.nowMs() + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
+      bounty.challengeEndsMs = this.nowMs(roomId) + (bounty.amountMillis < MILLIS_PER_CREDIT ? CHALLENGE_WINDOW_SMALL_MS : CHALLENGE_WINDOW_MS);
       this._saveBounty(bounty);
       return { bounty: this._getBounty(roomId, bountyId),
         approval,
@@ -2203,7 +2272,7 @@ export class BountyEscrow {
       "settlement reason must be 1..500 characters");
     const existing = this._settledVerdict(bounty);
     if (existing) return { settlement: existing, event: null, alreadySettled: true };
-    const at = isoNow(this.nowMs());
+    const at = isoNow(this.nowMs(bounty.roomId));
     const settlement = Object.freeze({ kind,
       workerMillis, workerCredits: toCredits(workerMillis),
       refundMillis, refundCredits: toCredits(refundMillis),
@@ -2245,12 +2314,12 @@ export class BountyEscrow {
       const settled = this._settledVerdict(bounty);
       if (settled) {
         return { bounty: this._getBounty(roomId, bountyId), settlement: settled, alreadySettled: true,
-          receipt: { kind: "reject", bountyId, at: isoNow(this.nowMs()), actor: act, replayed: true } };
+          receipt: { kind: "reject", bountyId, at: isoNow(this.nowMs(roomId)), actor: act, replayed: true } };
       }
       check(bounty.state === "submitted", "invalid_state", `bounty is ${bounty.state}, not awaiting verification`);
       check(typeof reason === "string" && reason.length >= 1 && reason.length <= 500, "invalid_input",
         "reason must be 1..500 characters");
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       // 1. Acceptance track: record the rejection verdict first (evidence = the reason).
       this._acceptanceTransition(bounty, "refunded",
         { evidence: { decision: "rejected", reason, rejectedBy: lane } });
@@ -2311,7 +2380,7 @@ export class BountyEscrow {
 
   // --- disputes -------------------------------------------------------------------
   _persistDispute(roomId, dispute) {
-    const at = isoNow(this.nowMs());
+    const at = isoNow(this.nowMs(roomId));
     this.db.prepare(`INSERT INTO bounty_disputes (dispute_id, room_id, body, updated_at) VALUES (?,?,?,?)
       ON CONFLICT(dispute_id) DO UPDATE SET body=excluded.body, updated_at=excluded.updated_at`)
       .run(dispute.disputeId, roomId, JSON.stringify(encodeRow(BOUNTY_DISPUTE_ROW_KIND, dispute)), at);
@@ -2374,7 +2443,7 @@ export class BountyEscrow {
       // freeze a settled payout until the timeout default pays it out
       // anyway (#3703).
       if (bounty.challengeEndsMs !== null
-          && this.nowMs() >= bounty.challengeEndsMs)
+          && this.nowMs(roomId) >= bounty.challengeEndsMs)
         fail("invalid_state", "the challenge window for this bounty has closed");
       check(lane !== bounty.claimant, "not_authorized", "the claimant cannot dispute their own submission");
       check(typeof grounds === "string" && grounds.length >= 1 && grounds.length <= 2000, "invalid_input", "grounds must be 1..2000 characters");
@@ -2426,7 +2495,7 @@ export class BountyEscrow {
         `dispute is unavailable for this bounty: ${seating?.reason
           ?? "no designated decider — a dispute needs a dispute decider (or verifier) named at posting to seat its decider"}`);
       this._requirePayable(roomId, lane, bondMillis, "dispute bond");
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const disputeId = newId("dsp_");
       const lotId = newId("lot_");
       const movement = this._move({ roomId, at, from: { account: lane, state: "payable" }, to: { account: lane, state: "locked" },
@@ -2455,7 +2524,7 @@ export class BountyEscrow {
         if (error instanceof DisputeError) fail("invalid_input", error.message);
         throw error;
       }
-      bounty.disputeId = disputeId; bounty.disputeOpenedMs = this.nowMs();
+      bounty.disputeId = disputeId; bounty.disputeOpenedMs = this.nowMs(roomId);
       let event;
       try {
         this._transition(bounty, "disputed");
@@ -2551,7 +2620,7 @@ export class BountyEscrow {
               verifier: bounty.attestation?.recordedBy ?? null } });
         this._settlementDecidedEvent = null;
         return { bounty: this._getBounty(roomId, bountyId), resolution: settled.resolution,
-          receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs()), actor: act, event, signed } };
+          receipt: { kind: "dispute-settle", bountyId, disputeId: bounty.disputeId, at: isoNow(this.nowMs(roomId)), actor: act, event, signed } };
       } catch (error) {
         this._restoreDisputeRecord(bounty.disputeId, disputeBefore);
         this._settlementSigned = null;
@@ -2581,7 +2650,7 @@ export class BountyEscrow {
 
   _settleDispute(bounty, { outcome, terminal, reasonCodes = [], bondSnapshot, forfeitedBond, actor, bondToChallenger = false }) {
     const roomId = bounty.roomId, bountyId = bounty.bountyId;
-    const at = isoNow(this.nowMs());
+    const at = isoNow(this.nowMs(roomId));
     const amount = bounty.amountMillis;
     const challenger = this._disputeRecords.get(bounty.disputeId)?.raisedBy;
     const worker = bounty.claimant;
@@ -2926,7 +2995,7 @@ export class BountyEscrow {
       const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
       if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
       const bounty = this._mutable(row);
-      const now = this.nowMs(), at = isoNow(now);
+      const now = this.nowMs(roomId), at = isoNow(now);
       const pass = this._keeperPass(bounty, now, at);
       check(pass !== null, "invalid_state", `bounty is ${bounty.state}: nothing to finalize`);
       return { bounty: this._getBounty(roomId, bountyId), action: pass.action,
@@ -2939,7 +3008,7 @@ export class BountyEscrow {
       this._ensure();
       this.ensureGenesis(roomId);
       const triggeredBy = caller === undefined ? null : this._requireLane(roomId, caller, "caller");
-      const now = this.nowMs(), at = isoNow(now);
+      const now = this.nowMs(roomId), at = isoNow(now);
       const summary = { approved: [], swept: [], refunded: [], released: [], paid: [], expiredUnfunded: [] };
       // The snapshot MUST cover every state the epoch keeper's due-scan
       // (bounty-epoch-keeper.mjs DUE_WHERE) can count as due — including
@@ -3012,7 +3081,7 @@ export class BountyEscrow {
       check(sender !== recipient, "invalid_input", "cannot transfer to yourself");
       const amountMillis = toMillis(amount);
       this._requirePayable(roomId, sender, amountMillis, "transfer");
-      const at = isoNow(this.nowMs());
+      const at = isoNow(this.nowMs(roomId));
       const movement = this._move({ roomId, at, from: { account: sender, state: "payable" }, to: { account: recipient, state: "payable" },
         amountMillis, kind: "transfer", lotId: newId("lot_"), memo: `transfer ${sender} -> ${recipient}`, actor: act });
       const event = this._event(roomId, "credit.transferred",
@@ -3108,7 +3177,7 @@ export class BountyEscrow {
       const rep = this.db.prepare(`SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN 1 ELSE 0 END),0) AS n,
           COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END),0) AS earned
         FROM bounty_journal WHERE room_id=? AND account_id=? AND kind='payout'`).get(roomId, lane);
-      const cutoff = isoNow(this.nowMs() - 30 * 24 * 3600 * 1000);
+      const cutoff = isoNow(this.nowMs(roomId) - 30 * 24 * 3600 * 1000);
       const rep30 = this.db.prepare(`SELECT COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END),0) AS earned
         FROM bounty_journal WHERE room_id=? AND account_id=? AND kind='payout' AND at >= ?`).get(roomId, lane, cutoff).earned;
       // Slice 8: the graduated anti-flake ladder, derived from strikes
@@ -3295,7 +3364,7 @@ export class BountyEscrow {
       }
       const body = thunk();
       this.db.prepare("INSERT INTO bounty_idempotency (room_id, idem_key, route, status, response, created_at, scope_key, caller_lane, version, request_hash) VALUES (?,?,?,?,?,?,?,?,2,?)")
-        .run(roomId, key, route, status, JSON.stringify(body), isoNow(this.nowMs()), scopeKey, callerLane, requestHash);
+        .run(roomId, key, route, status, JSON.stringify(body), isoNow(this.nowMs(roomId)), scopeKey, callerLane, requestHash);
       return { replayed: false, status, body };
     });
   }

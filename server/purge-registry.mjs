@@ -457,6 +457,16 @@ const ROWS = [
     }
   },
   {
+    "table": "bounty_clock_highwater",
+    "key": "room_id",
+    "action": "delete",
+    "match": {
+      "room": [
+        "room_id"
+      ]
+    }
+  },
+  {
     "table": "bounty_disputes",
     "key": "room_id",
     "action": "delete",
