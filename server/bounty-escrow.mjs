@@ -733,6 +733,10 @@ export class BountyEscrow {
     this.store = store;
     this.db = store.db;
     this._now = typeof now === "function" ? now : null;
+    // CURE-CLOCK-UNIFY: a tick-pinned instant (see closeEpoch's `now`
+    // option). While set, nowMs() returns the pin instead of re-reading
+    // the live clock, so one keeper tick judges and acts on ONE `now`.
+    this._pinnedNowMs = null;
     this._allowLegacyStringLanes = allowLegacyStringLanes === true;
     this._ready = false;
     this._disputes = null; // createDisputes instance, hydrated lazily
@@ -750,7 +754,7 @@ export class BountyEscrow {
     this._receipts = receipts;
   }
 
-  nowMs() { return this._now ? this._now() : this.store.now(); }
+  nowMs() { return this._pinnedNowMs !== null ? this._pinnedNowMs : (this._now ? this._now() : this.store.now()); }
 
   // --- lane identity: membership validation ---------------------------------
   // A lane id is only meaningful when it names a CURRENT member of the room.
@@ -2934,7 +2938,23 @@ export class BountyEscrow {
     });
   }
 
-  closeEpoch(roomId, { caller } = {}) {
+  // `now` (CURE-CLOCK-UNIFY): the keeper tick's single instant. When
+  // supplied it is pinned for the whole close — every nowMs() read inside
+  // (the pass conditions, transitions, event and journal stamps) returns
+  // the pin — so a close can never judge a bounty by a later live-clock
+  // read than the scan that selected its room (S2), and a scan/escrow
+  // clock divergence can never split a settlement inside one tick (S5).
+  // Without `now` the behaviour is exactly the historical one: one live
+  // read at entry, which the pin then also holds for the whole close.
+  closeEpoch(roomId, { caller, now } = {}) {
+    if (now !== undefined) check(Number.isFinite(now), "invalid_input", "now must be a finite millisecond timestamp");
+    const previous = this._pinnedNowMs;
+    this._pinnedNowMs = now === undefined ? this.nowMs() : Number(now);
+    try { return this._closeEpoch(roomId, { caller }); }
+    finally { this._pinnedNowMs = previous; }
+  }
+
+  _closeEpoch(roomId, { caller } = {}) {
     return this.store.transaction(() => {
       this._ensure();
       this.ensureGenesis(roomId);

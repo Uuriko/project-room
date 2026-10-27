@@ -479,7 +479,10 @@ export class ProjectRoom extends DurableObject {
   async progressEscrowEpochs() {
     if (this.paused) return { skipped: 1, paused: 1 };
     await yieldToQueuedRequests();
-    return runEscrowEpochs(this.store, { now: Date.now() });
+    // CURE-CLOCK-UNIFY: the tick's `now` comes from the store's clock —
+    // the same source the escrow is built with — not a separate
+    // wall-clock sample.
+    return runEscrowEpochs(this.store, { now: this.store.now() });
   }
   // Copies opted-in rooms into the public read model, a bounded batch per tick.
   // Paused rooms return before the store exists. The constructor does not do this.

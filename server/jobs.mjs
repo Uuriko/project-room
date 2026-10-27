@@ -10,7 +10,7 @@ import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
-import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { assertUnifiedEscrowClocks, escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
@@ -580,12 +580,20 @@ export const JOBS = Object.freeze([
     // challenge window, an approved one awaiting its sweep, a dispute past
     // its timeout, a deadline refund. One closeEpoch per room per tick:
     // the two-step close (approve, then sweep) is never collapsed.
-    enabled(_env, store) { return store ? escrowEpochNextDueAt(store, Date.now()) != null : true; },
+    // CURE-CLOCK-UNIFY: the gate reads the store's own clock when the
+    // store exposes one — the same source the production escrow is
+    // built with (store.mjs) — never an independent wall-clock sample.
+    enabled(_env, store) { return store ? escrowEpochNextDueAt(store, typeof store.now === "function" ? store.now() : Date.now()) != null : true; },
     disabledReason: () => "No bounty is waiting on an epoch close",
     nextDueAt: (store, now) => escrowEpochNextDueAt(store, now),
     async run(store, ctx) {
       if (ctx.room?.progressEscrowEpochs) return ctx.room.progressEscrowEpochs();
-      return progressEscrowEpochs(store, { now: ctx.now?.() ?? Date.now() });
+      // One sample for the whole tick, asserted against the store /
+      // escrow clocks before any settlement: three independently-wired
+      // sources must be the same source, or the tick fails loud (S5).
+      const now = ctx.now?.() ?? Date.now();
+      assertUnifiedEscrowClocks({ scanNow: now, store });
+      return progressEscrowEpochs(store, { now });
     }
   }),
   defineJob({
