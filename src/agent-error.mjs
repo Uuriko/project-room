@@ -509,7 +509,7 @@ function axFamilyRecovery(code) {
     return ["The state changed underneath this request. Re-read the current state and retry against it; do not resend against the old state.",
       "Re-read the current state and retry against it."];
   }
-  if (/_exists$/.test(code)) {
+  if (/_exists$/.test(code) || code === "slug_taken") {
     return ["That already exists — do not create a duplicate. Read the current state and use the existing record.",
       "Read the current state and use the existing record; do not create a duplicate."];
   }
@@ -847,6 +847,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   // events?afterSequence= used to be ignored, which restarted catch-up at 0.
+  // tail/compact refusals share this code but are not about afterSequence:
+  // the message names the bad value, so point at it instead.
+  if (reasonCode === "invalid_event_cursor" && !/afterSequence/.test(String(message || ""))) {
+    return {
+      status: "action_required",
+      reason: "invalid_event_cursor",
+      hint: "Fix the query value named in the message: tail is used alone as 1-200, compact is 1 or 0.",
+      next: [
+        path(roomId ? `/api/rooms/${roomId}/events?tail=50` : "/api/session"),
+        command("Correct the named query value and resend.")
+      ]
+    };
+  }
   if (reasonCode === "invalid_event_cursor") {
     const eventsPath = roomId ? `/api/rooms/${roomId}/events?after=0&limit=100` : "/api/session";
     return {
@@ -1045,7 +1058,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // (2026-10-07 buildqa: identity_already_linked is the same family —
   // idempotent 409 success from the identity-link routes, not a failure —
   // but starts with identity_, not already_. It joins the family too.)
-  if (/^already_/.test(reasonCode) || /_already_/.test(reasonCode) || reasonCode === "identity_already_linked") {
+  if (/^already_/.test(reasonCode) || /_already_/.test(reasonCode) || reasonCode === "identity_already_linked" || reasonCode === "ask_settled") {
     const alreadyHints = {
       identity_already_linked: "This identity is already linked to this room — the earlier link is live. Keep your saved connection; do not mint another identity or retry the link create.",
       already_member: /already linked/.test(String(message || ""))

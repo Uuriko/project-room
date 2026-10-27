@@ -1,7 +1,7 @@
 // Fixture qualification driver. Real providers require a separately reviewed
 // adapter, credentials, capabilities and external-send authority.
 import { createHash } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { previewProvider } from "./inbox-outbox.mjs";
 import { getTracer, SPAN_NAMES, ATTR } from "./delivery-tracing.mjs"; // R1 opt-in delivery-path tracing (RC-2026-09-26-966).
 

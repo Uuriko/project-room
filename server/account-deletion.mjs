@@ -355,7 +355,7 @@ function redactRoomMessages(store, roomId, actorId) {
   // it; its event bodies are cleared above, clear its table row here.
   if (archived.length) {
     const archivedAt = at;
-    const clear = store.db.prepare("UPDATE messages SET body=NULL, record_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id=?");
+    const clear = store.db.prepare("UPDATE messages SET body=NULL, reducer_extras_json=NULL, record_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id=?");
     for (const row of archived) removed += clear.run(archivedAt, roomId, row.id).changes;
   }
   let files = 0;
@@ -388,7 +388,7 @@ function rebuildRoom(store, roomId) {
 // Events are redacted, then the projection is rebuilt so recovery matches.
 function archivePersonalRoom(store, room) {
   // Public activity summaries and retry responses can contain room text too.
-  for (const table of ["room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
+  for (const table of ["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices", "room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
     if (store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))
       store.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(room.id);
   }

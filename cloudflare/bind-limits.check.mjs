@@ -84,7 +84,7 @@ async function worker(t) {
     durableObjects: { ROOM: { className: "BindLimitProbeRoom", useSQLite: true } },
     durableObjectsPersist: join(directory, "persist"),
     kvNamespaces: ["ROOM_BACKUPS_KV"], kvPersist: join(directory, "kv"),
-    bindings: { ROOM_ORIGIN: origin, ROOM_BACKUP_TOKEN: token },
+    bindings: { ROOM_ORIGIN: origin, ROOM_RESTORE_TOKEN: token },
   });
   t.after(async () => { await mf.dispose(); await rm(directory, { recursive: true, force: true }); });
   const get = async path => { const response = await mf.dispatchFetch(origin + path); assert.equal(response.status, 200, path); return response.json(); };

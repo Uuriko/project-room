@@ -195,7 +195,7 @@ test("the Reconnect trigger starts a rotation when the binding changes instead o
   // Obviously fake bindings: the shape Telegram uses, never a real token.
   const config = telegramConfig({ TELEGRAM_BOT_TOKEN: "7000000001:" + "A".repeat(35), TELEGRAM_WEBHOOK_SECRET: NEW_SECRET });
   assert.equal(config.state, "configured");
-  const server = createRoomServer({ store: f.store, channelWebhooks: f.webhooks, telegram: config });
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store, channelWebhooks: f.webhooks, telegram: config });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;

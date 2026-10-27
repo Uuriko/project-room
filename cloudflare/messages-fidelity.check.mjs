@@ -24,7 +24,7 @@ test('Worker SQLite upgrades v37 message storage, preserves records and redacts 
     const receipt = await seeded.json();
     await mf.dispose();
     mf = new Miniflare(config);
-    const resumed = await mf.dispatchFetch('http://localhost/resume-v38', { method: 'POST', body: JSON.stringify(receipt) });
+    const resumed = await mf.dispatchFetch('http://localhost/resume-v39', { method: 'POST', body: JSON.stringify(receipt) });
     assert.equal(resumed.status, 200, await resumed.clone().text());
     assert.deepEqual(await resumed.json(), { migrated: true, recordPreserved: true, deleted: true });
   } finally { await mf.dispose(); await rm(persistence, { recursive: true, force: true }); }
