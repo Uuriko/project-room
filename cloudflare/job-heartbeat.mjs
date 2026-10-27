@@ -36,7 +36,14 @@ export const CRON_JOBS = Object.freeze(REGISTRY.filter(job => job.runtimes.inclu
 const JOBS = new Map(CRON_JOBS.map(job => [job.name, job]));
 
 export function selectWorkerJobs(env, store) {
-  return REGISTRY.filter(job => job.runtimes.includes("worker") && jobEnabled(job, env, store));
+  return REGISTRY.filter(job => {
+    if (!job.runtimes.includes("worker")) return false;
+    // A throwing due probe (B8-4/B8-5) excludes only its own job this
+    // pass — jobEnabled already logged it, and the health view renders
+    // that job failing — instead of failing the whole selection.
+    try { return jobEnabled(job, env, store); }
+    catch { return false; }
+  });
 }
 
 // Kept for callers that still ask by name. The registry gate is the source.
@@ -229,13 +236,29 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
     const record = stored?.[job.name] ?? {};
     const staleAfterSeconds = job.periodSeconds * STALE_PERIODS;
     const source = REGISTRY.find(item => item.name === job.name);
-    const enabled = !gatesKnown || (source ? jobEnabled(source, env ?? {}, store) : true);
-    const reason = enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
-    const next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
+    // A throwing due probe (B8-4/B8-5) is a failure of this job's gate,
+    // not a disable and not a pass: the entry renders failing with the
+    // probe error as its reason, and the rest of the view still renders.
+    let enabled = true;
+    let reason = null;
+    let next = null;
+    let probeError = null;
+    if (gatesKnown) {
+      try {
+        enabled = source ? jobEnabled(source, env ?? {}, store) : true;
+        reason = enabled || !source ? null : jobDisabledReason(source, env ?? {}, store);
+        next = enabled && source && store ? jobNextDue(source, store, now, record.lastRunAt) : null;
+      } catch (error) {
+        probeError = redactError(error?.message ?? error);
+        enabled = true;
+        reason = `Probe failed: ${probeError}`;
+        next = null;
+      }
+    }
     const waiting = Number.isFinite(next) && next > now;
     const ageSeconds = Number.isFinite(record.lastSuccessAt) ? Math.max(0, Math.round((now - record.lastSuccessAt) / 1000)) : null;
     const stale = enabled && !waiting && (ageSeconds === null || ageSeconds > staleAfterSeconds);
-    const failing = enabled && (record.consecutiveFailures ?? 0) > 0;
+    const failing = enabled && ((record.consecutiveFailures ?? 0) > 0 || probeError !== null);
     // A tick that succeeded but was held by GitHub's rate limit did no work.
     // Show it, without turning a recoverable wait into a 503.
     // Escrow overdue (guardian census F1): the keeper's own pass left due
@@ -252,7 +275,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       lastRunAt: iso(record.lastRunAt),
       lastSuccessAt: iso(record.lastSuccessAt),
       secondsSinceSuccess: enabled ? ageSeconds : null,
-      lastError: record.lastError ?? null,
+      lastError: record.lastError ?? probeError,
       lastErrorAt: iso(record.lastErrorAt),
       // A success keeps lastError/lastErrorAt as history (applyOutcomes), so
       // the text alone cannot say whether it is today's failure. On
@@ -276,7 +299,7 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       stale,
       degraded,
       reason,
-      status: !enabled ? 'disabled' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
+      status: !enabled ? 'disabled' : probeError !== null ? 'failing' : stale ? 'stale' : failing ? 'failing' : degraded ? 'degraded' : 'ok'
     };
   });
   const active = jobs.filter(job => job.status !== 'disabled');
