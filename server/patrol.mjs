@@ -79,6 +79,7 @@
 // patrolFindings() — record ids deliberately stay off the public health
 // surface, per the #3334 rule.
 import { createHash } from "node:crypto";
+import { tableExists as sqliteTableExists } from "./db-util.mjs";
 import { ACTIVE_CLAIM_STATES, CLAIM_LIFECYCLE, STATES as CLAIM_STATES } from "./work-claims.mjs";
 import { hydrateProjection } from "./projection-at-rest.mjs";
 import { affectedMessageIds, archiveMarker } from "./messages-store.mjs";
@@ -161,8 +162,10 @@ export function ensurePatrolSchema(store) {
   store.db.exec(PATROL_SCHEMA);
 }
 
+// A closed handle throws from the shared check. The patrol treats that as
+// "not ready" so one bad database cannot wake the job.
 function tableExists(db, name) {
-  try { return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }
+  try { return sqliteTableExists(db, name); }
   catch { return false; }
 }
 
