@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 import { LEAN_MCP_TOOLS, searchActions, isRunnableAction } from "../server/mcp-action-search.mjs";
+import { PUBLIC_WORK_MCP_TOOLS } from "../src/room-mcp-join.js";
 import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 
 async function serve(t) {
@@ -45,15 +46,39 @@ async function member(t) {
 const stable = body => JSON.parse(JSON.stringify(body, (key, value) => key === "operationId" ? undefined : value));
 const size = tools => JSON.stringify(tools).length;
 
-test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
+test("lean is the default (flip agreed 2026-10-27): explicit core and full lists are unchanged", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
-  assert.equal(core.length, 22, "default core is unchanged until the flip is agreed");
+  assert.deepEqual(listedMcpTools(), lean, "the no-profile default is the lean profile");
+  assert.equal(core.length, 22, "explicit core profile is unchanged");
   assert.equal(full.length, 119, "full adds room_claim and room_handoff");
-  assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
+  assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to explicit core");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
+  // The member default also carries the whole public-work set, so gaining a
+  // membership removes nothing the identity-stage default listed (10-2).
+  for (const name of PUBLIC_WORK_MCP_TOOLS) assert.ok(names.includes(name), `lean default lists ${name}`);
+  assert.equal(lean.length, 21, "lean default is 10 front-door + 4 join + 7 public-work tools");
   assert.ok(lean.every(Boolean) && names.every(name => typeof name === "string"));
-  assert.ok(size(lean) < size(core) * 0.75, `lean ${size(lean)} B should be well under core ${size(core)} B`);
+  // Size pin, re-based for the flip: lean alone measured 9,181 B (57% of
+  // core); the mandated public-work definitions add 6,185 B of schemas, so
+  // the old <75%-of-core pin cannot hold at the same time as the
+  // membership-superset rule. The honest new bound is: still smaller than
+  // the core profile it replaced (measured 15,362 B vs core 16,180 B at the
+  // flip), on top of the unchanged hard budgets in mcp-core-profile and
+  // mcp-untrusted-content.
+  assert.ok(size(lean) < size(core), `lean ${size(lean)} B should stay under core ${size(core)} B`);
+});
+
+test("membership never shrinks the default listing, and the identity default can reach room_create", () => {
+  const identity = listedMcpTools("lean", false, { memberships: [] });
+  const member = listedMcpTools("lean", false, { memberships: [{ active: true }] });
+  const memberNames = new Set(member.map(tool => tool.name));
+  for (const tool of identity) assert.ok(memberNames.has(tool.name), `member default still lists ${tool.name}`);
+  const identityNames = new Set(identity.map(tool => tool.name));
+  for (const name of [...PUBLIC_WORK_MCP_TOOLS, "room_search_actions", "room_run_action"]) {
+    assert.ok(identityNames.has(name), `identity default lists ${name}`);
+  }
+  assert.equal(isRunnableAction("room_create"), true, "room_create is reachable through room_run_action at the identity stage");
 });
 
 test("every lean name is a real definition or join tool", () => {

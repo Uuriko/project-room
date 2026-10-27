@@ -163,7 +163,7 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   const coreTokens = JSON.stringify(coreTools).length / 4;
   const fullTokens = JSON.stringify(fullTools).length / 4;
   assert.ok(coreTools.length <= 25 && coreTokens <= 9000,
-    `core profile has ${coreTools.length} tools and ${coreTokens} tokens of tool JSON; limits are 25 tools and 9000 tokens`);
+    `default (lean) profile has ${coreTools.length} tools and ${coreTokens} tokens of tool JSON; limits are 25 tools and 9000 tokens`);
   // Keep the existing catalog budget while accounting explicitly for the
   // assistant facade and claim provenance added by this release. New tools
   // cannot silently consume this allowance; the core budget stays unchanged.
@@ -180,7 +180,10 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
     assert.equal(coreTools.find(tool => tool.name === name).annotations.openWorldHint, true, name);
   }
   assert.equal(coreTools.find(tool => tool.name === "room_post_message").annotations.openWorldHint, false);
-  assert.equal(coreTools.find(tool => tool.name === "room_list_requests").annotations.openWorldHint, false);
+  // room_list_requests is not in the lean default (reachable through
+  // room_search_actions/room_run_action); its annotation is profile-free,
+  // so it is checked on the full catalog instead.
+  assert.equal(fullTools.find(tool => tool.name === "room_list_requests").annotations.openWorldHint, false);
   for (const name of READ_TOOLS) {
     const tool = fullTools.find(entry => entry.name === name);
     assert.ok(tool, `full profile is missing ${name}`);

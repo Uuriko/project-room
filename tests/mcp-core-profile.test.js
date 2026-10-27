@@ -52,7 +52,7 @@ function namesOf(body) {
   return body.result.tools.map(tool => tool.name);
 }
 
-test("default tools/list is the short core profile and every listed name is legal", async t => {
+test("default tools/list is the lean profile and every listed name is legal", async t => {
   const { origin, store, rooms } = await serve(t);
   const ada = store.identities.create("Ada");
   const carol = store.identities.create("Carol");
@@ -63,10 +63,12 @@ test("default tools/list is the short core profile and every listed name is lega
   const listed = await rpc(origin, "tools/list", undefined, ada.secret);
   const body = await listed.json();
   const names = namesOf(body);
-  assert.equal(body.result.profile, "core");
-  assert.deepEqual(names, [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
-  // Core still names bond_propose; the rest of the bond lifecycle is
-  // advertised from the conversation focus (see the focus test below).
+  assert.equal(body.result.profile, "lean");
+  assert.deepEqual(names, [...LEAN_MCP_TOOLS, ...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
+  // The explicit core profile still names bond_propose; the rest of the bond
+  // lifecycle is advertised from the conversation focus (see the focus test
+  // below). The lean default reaches it through room_search_actions /
+  // room_run_action instead.
   assert.ok(names.every(name => MCP_TOOL_NAME_RE.test(name)));
   assert.equal(names.includes("bond.list"), false);
   assert.equal(names.includes("room_read_board"), false);
@@ -82,17 +84,22 @@ test("default tools/list is the short core profile and every listed name is lega
   assert.equal(readMessages.inputSchema.properties.after.default, 0);
   const coreBytes = Buffer.byteLength(JSON.stringify(body));
   const coreResultBytes = Buffer.byteLength(JSON.stringify(body.result));
-  console.log(`core tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
-  // QA7-04 added the latest flag to room_read_messages' schema: the core
-  // profile stays small for cold agents, with headroom for one more flag.
-  assert.ok(coreBytes < 17 * 1024, `core tools/list is ${coreBytes} bytes`);
+  console.log(`default (lean) tools/list JSON-RPC bytes=${coreBytes} result bytes=${coreResultBytes}`);
+  // The default profile stays small for cold agents under the same 17 KiB
+  // budget the core profile carried (measured 15,673 B at the flip; the
+  // budget itself is unchanged).
+  assert.ok(coreBytes < 17 * 1024, `default tools/list is ${coreBytes} bytes`);
 
   const aliased = await rpc(origin, "tools/list", { aliases: 1 }, ada.secret);
   const aliasBody = await aliased.json();
   assert.ok(namesOf(aliasBody).every(name => MCP_TOOL_NAME_RE.test(name)));
-  assert.equal(aliasBody.result.tools.find(tool => tool.name === "bond_propose").aliases[0], "bond.propose");
   assert.equal(aliasBody.result.tools.find(tool => tool.name === "wake_pause").aliases[0], "wake.pause");
   assert.equal(aliasBody.result.tools.some(tool => tool.name === "bond.list"), false);
+  // bond_propose keeps its dotted alias on the explicit core profile.
+  const aliasedCore = await rpc(origin, "tools/list", { profile: "core", aliases: 1 }, ada.secret);
+  const aliasCoreBody = await aliasedCore.json();
+  assert.deepEqual(namesOf(aliasCoreBody), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  assert.equal(aliasCoreBody.result.tools.find(tool => tool.name === "bond_propose").aliases[0], "bond.propose");
 
   const queried = await rpc(origin, "tools/list", undefined, ada.secret, "?aliases=1&profile=full");
   const queryBody = await queried.json();
@@ -309,9 +316,13 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   } });
   const catalog = await (await rpc(origin, "tools/list", undefined, recipient.secret)).json();
   const advertised = new Set(namesOf(catalog));
+  // The lean default lists the discovery pair, so a tool the default does
+  // not list directly (for example room_reply) is still invocable by a
+  // fresh client — through room_run_action, never by unadvertised name.
   const invoke = async (name, args) => {
-    assert.ok(advertised.has(name), `Fresh client cannot invoke unadvertised tool ${name}`);
-    return call(origin, name, args, recipient.secret);
+    if (advertised.has(name)) return call(origin, name, args, recipient.secret);
+    assert.ok(advertised.has("room_run_action"), `Fresh client cannot reach unlisted tool ${name}: no room_run_action in the default list`);
+    return call(origin, "room_run_action", { name, arguments: args }, recipient.secret);
   };
   const needs = await invoke("room_needs_me", {});
   const pointer = needs.value.items.find(item => item.kind === "direct_ask" && item.id === "core-question").next;
@@ -379,7 +390,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   assert.equal(invalidQuery.error.data.reason, "invalid_arguments");
   const defaultAgain = await (await rpc(origin, "tools/list", undefined, owner.secret)).json();
   assert.equal(defaultAgain.result.focus, undefined);
-  assert.deepEqual(namesOf(defaultAgain), [...CORE_MCP_TOOLS, ...JOIN_TOOLS]);
+  assert.deepEqual(namesOf(defaultAgain), [...LEAN_MCP_TOOLS, ...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
   const full = await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json();
   assert.equal(full.result.focus, undefined);
   assert.ok(namesOf(full).includes("room_propose_work"));
@@ -575,8 +586,12 @@ test("every lean tool is callable with required business fields after a fresh jo
   }).secret;
 
   const catalog = await (await rpc(origin, "tools/list", { profile: "lean" }, key)).json();
-  assert.deepEqual(namesOf(catalog), [...LEAN_MCP_TOOLS, ...JOIN_TOOLS]);
-  for (const tool of catalog.result.tools) {
+  assert.deepEqual(namesOf(catalog), [...LEAN_MCP_TOOLS, ...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
+  // The transport-requestId rule covers the lean front door and join tools:
+  // the server derives their requestId. The public-work tools in the same
+  // list keep their own contract, where requestId is a caller-chosen
+  // business idempotency key (as on the outside and full listings).
+  for (const tool of catalog.result.tools.filter(tool => !PUBLIC_WORK_MCP_TOOLS.includes(tool.name))) {
     assert.equal((tool.inputSchema.required ?? []).includes("requestId"), false, `${tool.name} does not require a transport requestId`);
   }
 

@@ -51,8 +51,9 @@ export const actionMetaToolDefs = Object.freeze([
   }
 ]);
 
-// The lean default under discussion: read, post, needs-me, answer a formal
-// request, access, join, stop wakes, plus search and run for everything else.
+// The lean default (the decided default catalog since 2026-10-27): read,
+// post, needs-me, answer a formal request, access, join, stop wakes, plus
+// search and run for everything else.
 export const LEAN_MCP_TOOLS = Object.freeze([
   "room_needs_me",
   "room_read_messages",
