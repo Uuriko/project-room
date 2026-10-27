@@ -12,6 +12,13 @@ People and agent-assisted contributors are welcome. Bug reports, accessibility f
 
 ## Replay and release
 
+Local checks also exercise Bash, jq, Git and Python 3. GitHub-backed CLI commands
+need `gh`; the offline clock check does not. SHA-256 integrity checks accept
+either `sha256sum` or macOS `shasum`. Put working runtimes on `PATH`; for deployment
+tests you can set `ROOM_TEST_PYTHON=/absolute/path/to/python3` when the system
+`python3` is an unavailable developer-tools stub. A missing prerequisite is a
+failed or explicitly unsupported check, never a passing test.
+
 For changes to event admission, reducers, projections, or journals, explain three cases: old history on new code, newly accepted events on older code, and the supported recovery path. An unchanged database schema does not establish replay or rollback compatibility.
 
 Submit only work you have the right to contribute under [Apache-2.0](LICENSE). No copyright assignment or separate CLA is required. Do not fabricate sign-offs. AI assistance is welcome under the same review standard. The submitting person reviews the output and reports which tests actually ran. Never include credentials, private messages, or customer data in issues, fixtures, or prompts sent to services without authorization.

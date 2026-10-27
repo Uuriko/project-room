@@ -44,6 +44,18 @@ need() {
   command -v "$1" >/dev/null 2>&1 || die "missing dependency: $1 (need bash + gh + jq)"
 }
 
+# Read stdin and emit the same digest on Linux and macOS. Integrity and freshness
+# checks must fail closed when neither implementation is available.
+sha256_digest() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | cut -d' ' -f1
+  else
+    die "missing dependency: sha256sum or shasum (SHA-256 integrity checks required)"
+  fi
+}
+
 iso_now() { date -u +%Y-%m-%dT%H:%M:%SZ; }
 # jq is already required; unlike date -d, this works on macOS and Linux.
 iso_epoch() { jq -enr --arg value "$1" '$value | fromdateiso8601'; }
@@ -272,10 +284,12 @@ EOF
 # ---------------------------------------------------------------------------
 
 gh_api() { # args... -> stdout JSON; dies on failure
+  need gh
   gh api "$@" || die "gh api failed: $*"
 }
 
 fetch_comments() { # -> JSON array of all comments on the board issue
+  need gh
   gh api --paginate "repos/$REPO/issues/$ISSUE/comments?per_page=100" 2>/dev/null \
     | jq -s 'add // []' \
     || die "failed to fetch board comments from $(board_addr)"
@@ -1745,7 +1759,7 @@ file_rows_json() { # $1 = ROOM-STATE.md path -> {open,expiring,lanes}
   # partial board. Files predating the stamp get a loud warning: their rows
   # cannot be verified, so treat them as suspect or rebuild.
   marker="$(sed -n 's/.*integrity: sha256=\([0-9a-f]\{64\}\).*/\1/p' "$f" | head -n 1)"
-  actual="$(state_canon_rows "$f" | sha256sum | cut -d' ' -f1)"
+  actual="$(state_canon_rows "$f" | sha256_digest)" || die "query: SHA-256 integrity check unavailable"
   if [ -n "$marker" ]; then
     [ "$actual" = "$marker" ] || die "query: integrity check failed for $f (content sha256 $actual != generated $marker): the board file is truncated or hand-edited — rebuild it with scripts/room rebuild"
   else
@@ -1931,7 +1945,6 @@ room_self_path() {
 guard_enforcer_freshness() { # $1 = verb
   local verb="$1"
   [ "${ROOM_ENFORCER_ALLOW_STALE:-0}" = "1" ] && return 0
-  need sha256sum
   local rr ref self_path self_sha main_sha
   rr="$(repo_root)"
   # 2026-09-30 (phase-2 gap audit L-P2-3): refresh the origin/main ref
@@ -1943,8 +1956,8 @@ guard_enforcer_freshness() { # $1 = verb
   [ -n "$ref" ] || die "refusing $verb: cannot locate origin/main in $rr — run from a full clone of $DEFAULT_REPO with origin/main fetched"
   self_path="$(room_self_path)"
   [ -f "$self_path" ] || die "refusing $verb: cannot read the running script ($self_path)"
-  self_sha="$(sha256sum < "$self_path" | cut -d' ' -f1)"
-  main_sha="$(git -C "$rr" show "$ref:scripts/room" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+  self_sha="$(sha256_digest < "$self_path")" || die "refusing $verb: cannot hash the running script"
+  main_sha="$(git -C "$rr" show "$ref:scripts/room" 2>/dev/null | sha256_digest)" || die "refusing $verb: cannot hash origin/main script"
   [ -n "$main_sha" ] || die "refusing $verb: cannot read scripts/room at origin/main ($ref)"
   [ "$self_sha" = "$main_sha" ] || die "refusing $verb: stale scripts/room copy — self=$self_sha, origin/main@$ref=$main_sha. Run main's copy (git checkout $ref -- scripts/room), then restore it before committing."
 }
@@ -1969,7 +1982,7 @@ cmd_rebuild() {
   # F1: stamp sha256 over the canonical rows into the banner comment, so a
   # truncated copy fails loudly in `query` instead of parsing silently.
   # (awk, not sed -i, for macOS portability.)
-  ihash="$(state_canon_rows "$out.tmp" | sha256sum | cut -d' ' -f1)"
+  ihash="$(state_canon_rows "$out.tmp" | sha256_digest)" || die "rebuild: SHA-256 integrity stamping unavailable"
   awk -v h="$ihash" '{sub(/do-not-hand-edit -->/, "do-not-hand-edit · integrity: sha256=" h " -->")}1' \
     "$out.tmp" > "$out.tmp.stamped" && mv "$out.tmp.stamped" "$out.tmp" \
     || die "rebuild: integrity stamping failed"
@@ -2929,7 +2942,9 @@ main() {
   esac; done
   [ $# -ge 1 ] || { usage >&2; exit 1; }
   local verb="$1"; shift
-  need gh; need jq
+  case "$verb" in help|--help|-h) usage; exit 0 ;; esac
+  case "${1:-}" in --help|-h) usage; exit 0 ;; esac
+  need jq
   case "$verb" in
     help|--help|-h) usage; exit 0 ;;
     rebuild|sweep|receipts-scan|rotation-check|metrics)
@@ -2943,6 +2958,8 @@ main() {
       # Per-verb --help must not fall through to a live run (2026-09-19:
       # `sweep --help` executed a live sweep because cmd_sweep ignores args).
       case "${1:-}" in --help|-h) usage; exit 0 ;; esac
+      # Pure parsing, local state reads and fixture plans need no GitHub CLI.
+      # The transport checks its dependency immediately before any board I/O.
       "cmd_${verb//-/_}" "$@" ;;
     *) printf 'room: unknown verb: %s\n' "$verb" >&2; exit 1 ;;
   esac
