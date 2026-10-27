@@ -365,7 +365,7 @@ test("fund issues a signed escrow-locked receipt stamped on both journal entries
 
 test("claim and dispute lock signed bond-locked receipts with the bond kind", () => {
   const { escrow, db } = makeEscrow({ signed: true });
-  const bounty = runToSubmitted(escrow, { verifier: INSTINCT });
+  const bounty = runToAccepted(escrow, { verifier: INSTINCT });
   const bounty2 = post(escrow);
   escrow.fundBounty(ROOM, bounty2.bountyId, { funder: JILL });
   const { receipt: claim } = escrow.claimBounty(ROOM, bounty2.bountyId, { claimant: CODEX });
@@ -438,10 +438,10 @@ test("epoch sweep issues a signed payout-released receipt with net + fee == awar
   expectConserved(escrow);
 });
 
-test("dispute cancel issues refund-issued (dispute-cancel); split issues attributed + refund-issued (split)", () => {
+test("dispute cancel issues refund-issued (dispute-cancel); split issues refund-issued (split)", () => {
   const { escrow, db } = makeEscrow({ signed: true });
-  // CANCEL from a pre-accept dispute: the award is still locked, so it refunds.
-  const bounty = runToSubmitted(escrow, { verifier: INSTINCT });
+  // CANCEL from an accepted-work dispute: the attributed award refunds.
+  const bounty = runToAccepted(escrow, { verifier: INSTINCT });
   escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 1.25, grounds: "plagiarized" });
   const { receipt: cancelReceipt } = escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
@@ -450,31 +450,32 @@ test("dispute cancel issues refund-issued (dispute-cancel); split issues attribu
   assert.equal(cancelReceipt.signed[0].payload.reason, "dispute-cancel");
   assert.equal(cancelReceipt.signed[0].payload.refundTo, JILL);
   expectVerifiable(db, cancelReceipt.signed[0]);
-  // SPLIT from a pre-accept dispute: half attributes to the worker, half refunds.
-  const bounty2 = runToSubmitted(escrow, { verifier: INSTINCT });
+  // SPLIT from an accepted-work dispute: the worker half vests out of the
+  // attribution the accept already issued (no new attributed receipt);
+  // the poster half refunds with a signed refund-issued receipt.
+  const bounty2 = runToAccepted(escrow, { verifier: INSTINCT });
   escrow.disputeBounty(ROOM, bounty2.bountyId, { challenger: CODEX, bond: 1.25, grounds: "partial" });
   const { receipt: splitReceipt } = escrow.decideDispute(ROOM, bounty2.bountyId,
     { decider: INSTINCT, outcome: "split", reasonCodes: ["criterion-unmet"] });
-  assert.equal(splitReceipt.signed.length, 2);
-  const types = splitReceipt.signed.map(r => r.type).sort();
-  assert.deepEqual(types, ["attributed", "refund-issued"]);
-  const splitRefund = splitReceipt.signed.find(r => r.type === "refund-issued");
-  assert.equal(splitRefund.payload.reason, "split");
-  assert.equal(splitRefund.payload.refundTo, JILL);
-  for (const r of splitReceipt.signed) expectVerifiable(db, r);
+  assert.equal(splitReceipt.signed.length, 1);
+  assert.equal(splitReceipt.signed[0].type, "refund-issued");
+  assert.equal(splitReceipt.signed[0].payload.reason, "split");
+  assert.equal(splitReceipt.signed[0].payload.refundTo, JILL);
+  expectVerifiable(db, splitReceipt.signed[0]);
   expectConserved(escrow);
 });
 
-test("dispute release from pre-accept issues a signed attributed receipt", () => {
-  const { escrow, db } = makeEscrow({ signed: true });
-  const bounty = runToSubmitted(escrow, { verifier: INSTINCT });
+test("dispute release from accepted vests with no new attributed receipt", () => {
+  const { escrow } = makeEscrow({ signed: true });
+  // Since #3726 disputes open only on accepted work, attribution was already
+  // issued (and signed) at accept; the release settlement itself signs
+  // nothing — the approve and bond-compensate moves carry no receipts.
+  const bounty = runToAccepted(escrow, { verifier: INSTINCT });
   escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 1.25, grounds: "looks wrong" });
-  const { receipt } = escrow.decideDispute(ROOM, bounty.bountyId,
+  const { receipt, bounty: settled } = escrow.decideDispute(ROOM, bounty.bountyId,
     { decider: INSTINCT, outcome: "rejected", reasonCodes: ["evidence-insufficient"] });
-  assert.equal(receipt.signed.length, 1);
-  assert.equal(receipt.signed[0].type, "attributed");
-  assert.equal(receipt.signed[0].payload.claimant, GROK);
-  expectVerifiable(db, receipt.signed[0]);
+  assert.equal(settled.state, "approved");
+  assert.deepEqual(receipt.signed, []);
   expectConserved(escrow);
 });
 
@@ -506,7 +507,7 @@ test("the full signed lifecycle conserves the ledger", () => {
   escrow.fundBounty(ROOM, b2.bountyId, { funder: JILL });
   tick(3_600_000 + 1);
   escrow.finalizeBounty(ROOM, b2.bountyId, {});
-  const b3 = runToSubmitted(escrow, { amount: 4, verifier: INSTINCT });
+  const b3 = runToAccepted(escrow, { amount: 4, verifier: INSTINCT });
   escrow.disputeBounty(ROOM, b3.bountyId, { challenger: CODEX, bond: 1, grounds: "bad" });
   escrow.decideDispute(ROOM, b3.bountyId, { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
   expectConserved(escrow);

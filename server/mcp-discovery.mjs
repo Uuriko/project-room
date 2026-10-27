@@ -74,8 +74,13 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
   return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(withOpenWorldHint);
 }
 
+// The card's enrolled tier is the member catalog: the default (core) list a
+// bearer with a current room membership gets from tools/list with no profile
+// argument. It is NOT the non-member list — an identity with no memberships
+// is served the public-work lobby list at the door (the "public_work" focus
+// branch above), which is a different subject (#3769).
 export function liveEnrolledMcpTools() {
-  return listedMcpTools("core", false, null, "public_work");
+  return listedMcpTools("core", false, null);
 }
 
 export function liveMcpServerCardJson() {

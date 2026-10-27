@@ -114,5 +114,5 @@ burns.
 ## Stay-outs
 
 Live kit door · Connect door HTML · People rail · Done-chip chrome ·
-Phase 0 #8 / #9 · Quill trees · Compute Start · people-data ·
+Phase 0 #8 / #9 · Quill trees · Compute Start ·
 auto-merge · Potter keys · hosting Skillbox / Warp Factories now.
