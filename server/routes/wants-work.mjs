@@ -71,13 +71,13 @@ const PATH = "/api/rooms/{roomId}/members/me/wants-work";
 
 export const WANTS_WORK_ROUTES = Object.freeze([
   Object.freeze({ id: "read-own-wants-work", method: "GET", path: PATH,
-    auth: "room", capability: null, scope: "room", handler: readOwnWantsWork,
+    auth: "room", capability: null, scope: "room", handler: readOwnWantsWork, parity: "mcp:wants_work_get",
     schema: { params: parameters, response: { type: "object" } }, events: [] }),
   Object.freeze({ id: "set-own-wants-work", method: "PUT", path: PATH,
-    auth: "room", capability: null, scope: "room", handler: putOwnWantsWork,
+    auth: "room", capability: null, scope: "room", handler: putOwnWantsWork, parity: "mcp:wants_work_set",
     schema: { params: parameters, body: { type: "object", additionalProperties: false, properties: { labels: list, capabilities: list } }, response: { type: "object" } },
     events: [] }),
   Object.freeze({ id: "clear-own-wants-work", method: "DELETE", path: PATH,
-    auth: "room", capability: null, scope: "room", handler: deleteOwnWantsWork,
+    auth: "room", capability: null, scope: "room", handler: deleteOwnWantsWork, parity: "mcp:wants_work_clear",
     schema: { params: parameters, response: { type: "object" } }, events: [] }),
 ]);
