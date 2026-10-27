@@ -26,7 +26,7 @@ export function createResultsFixture() {
       accountableMemberId: "producer", verifierMemberId: gated ? "reviewer" : null,
       independentVerificationRequired: gated, ownerDecisionRequired: gated, humanDecisionMakerId: gated ? "owner" : null, mode: "read" });
     change(id, T.WORK_ACCEPTED);
-    const body = "  Café notes 🪷\n\nOne useful result, with its original spacing.\n";
+    const body = "  Café notes 🪷\n\nOne useful result, with its original spacing.\n" + "Detailed supporting notes for reading alongside the conversation.\n".repeat(24);
     const posted = native ? send("producer", T.MESSAGE_POSTED, {
       messageId: id + "-draft", workItemId: id, packetId: id + "-packet", basisRevision: 1, body }) : null;
     change(id, T.WORK_COMPLETED, { summary: title + " — ready to revisit.", nextAction: "Read the result.",
