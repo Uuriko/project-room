@@ -79,6 +79,7 @@
 // patrolFindings() — record ids deliberately stay off the public health
 // surface, per the #3334 rule.
 import { createHash } from "node:crypto";
+import { tableExists as sqliteTableExists } from "./db-util.mjs";
 import { ACTIVE_CLAIM_STATES, CLAIM_LIFECYCLE, STATES as CLAIM_STATES } from "./work-claims.mjs";
 import { hydrateProjection } from "./projection-at-rest.mjs";
 import { affectedMessageIds, archiveMarker } from "./messages-store.mjs";
@@ -161,8 +162,10 @@ export function ensurePatrolSchema(store) {
   store.db.exec(PATROL_SCHEMA);
 }
 
+// A closed handle throws from the shared check. The patrol treats that as
+// "not ready" so one bad database cannot wake the job.
 function tableExists(db, name) {
-  try { return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name)); }
+  try { return sqliteTableExists(db, name); }
   catch { return false; }
 }
 
@@ -500,13 +503,12 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
   }
 
   // Idempotency look-back: a key first used before this batch must not be
-  // re-used inside it. One bounded query over the batch's keys.
+  // re-used inside it. A JSON binding keeps even large batches within SQL's parameter limit.
   if (!budgetExceeded && keyUses.length && batchStart > 0) {
     const keys = [...new Set(keyUses.map(use => use.key))];
-    const placeholders = keys.map(() => "?").join(",");
     const prior = db.prepare(`SELECT sequence, json_extract(body, '$.idempotencyKey') AS k
-      FROM events WHERE room_id=? AND sequence<=? AND json_extract(body, '$.idempotencyKey') IN (${placeholders})`)
-      .all(roomId, batchStart, ...keys);
+      FROM events WHERE room_id=? AND sequence<=? AND json_extract(body, '$.idempotencyKey') IN (SELECT value FROM json_each(?))`)
+      .all(roomId, batchStart, JSON.stringify(keys));
     if (prior.length) {
       const firstByKey = new Map(prior.map(row => [row.k, row.sequence]));
       for (const use of keyUses) {

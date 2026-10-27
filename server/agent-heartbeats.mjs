@@ -26,7 +26,7 @@ import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
-const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land"]);
+const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land", "ask"]);
 const STATUSES = Object.freeze(["online", "offline", "unregistered"]);
 // RC-2026-09-24-203: the default reachability window is 180s (was 60s).
 // Per host the window is max(180s, cadenceSeconds * 1.5).
@@ -79,7 +79,7 @@ export const agentHeartbeatSchema = `
   CREATE INDEX IF NOT EXISTS agent_hosts_seen ON agent_hosts(agent_id, last_seen_at);
   CREATE TABLE IF NOT EXISTS agent_wake_signals (
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land')),
+    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land','ask')),
     room_id TEXT, message_id TEXT,
     created_at INTEGER NOT NULL, delivered_at INTEGER
   );
@@ -185,6 +185,24 @@ const checkCadenceSeconds = cadenceSeconds =>
   check(Number.isFinite(cadenceSeconds) && cadenceSeconds > 0 && cadenceSeconds <= MAX_CADENCE_SECONDS,
     422, "invalid_heartbeat", `cadenceSeconds must be a positive number of seconds, at most ${MAX_CADENCE_SECONDS} (7 days)`);
 
+// BUILD-HEARTBEAT-CADENCE: cadence is server-dictated. The host's
+// declaration is a hint; the server assigns the governing value:
+//   - a hint inside the server bounds is honoured as the assignment;
+//   - a hint above the ceiling is assigned the ceiling — the 7-day
+//     declaration (and its ~10.5-day reachability window) stops being
+//     reachable by declaration alone;
+//   - no hint (never declared, or explicitly cleared) is assigned the
+//     default. 120s is chosen so the default's window — max(180s,
+//     120 x 1.5) = 180s — equals the pre-assignment undeclared window
+//     exactly: a host that never declares and never reads the response
+//     field observes no behaviour change.
+export const DEFAULT_CADENCE_SECONDS = 120;
+export const MAX_ASSIGNED_CADENCE_SECONDS = 3600;
+export const assignedCadenceSeconds = hint =>
+  (typeof hint === "number" && Number.isFinite(hint) && hint > 0)
+    ? Math.min(hint, MAX_ASSIGNED_CADENCE_SECONDS)
+    : DEFAULT_CADENCE_SECONDS;
+
 // RC-2026-09-24-203: validate a pushNotification subscription body.
 // Returns the normalized { url, token, authJson }. The sync shape checks
 // live here; the async DNS-rebinding check runs in assertPushDns (the route
@@ -226,9 +244,10 @@ const hostView = (row, cadenceSeconds = null) => Object.freeze({
   agentId: row.agent_id, hostId: row.host_id, mode: row.mode,
   wakeUrl: row.wake_url, lastSeenAt: row.last_seen_at,
   createdAt: row.created_at, updatedAt: row.updated_at,
-  // RC-2026-09-24-203: the host's declared poll cadence (null when none
-  // is in effect — never declared, or cleared by an explicit null);
-  // drives the per-host reachability window.
+  // The host's governing poll cadence: the server-assigned value
+  // (BUILD-HEARTBEAT-CADENCE) — a number on every read path that
+  // resolves assignments; null only in a view built without one.
+  // Drives the per-host reachability window.
   cadenceSeconds,
 });
 // work-claim:{id}:{reason}:… is the claim wake id. Poll and heartbeat
@@ -240,13 +259,20 @@ const claimWakeOf = messageId => {
   if (parts.length < 3 || parts[1].length === 0 || parts[2].length === 0) return null;
   return { workClaim: parts[1], reason: parts[2] };
 };
+const publicAskOf = messageId => {
+  if (typeof messageId !== "string") return null;
+  const match = /^public-ask:(ask_[A-Za-z0-9_-]{8,80})$/.exec(messageId);
+  return match ? match[1] : null;
+};
 const signalView = row => {
   const claim = claimWakeOf(row.message_id);
+  const publicAsk = publicAskOf(row.message_id);
   return Object.freeze({
     signalId: row.signal_id, agentId: row.agent_id, kind: row.kind,
     roomId: row.room_id, messageId: row.message_id,
     createdAt: row.created_at, deliveredAt: row.delivered_at,
     ...(claim ? { workClaim: claim.workClaim, reason: claim.reason } : {}),
+    ...(publicAsk ? { publicAsk } : {}),
     // The explicit ack copy rides the journaled pending-wake signal too.
     ackHint: WAKE_ACK_HINT,
   });
@@ -494,23 +520,32 @@ export class AgentHeartbeats {
   // Pending signals are NOT marked delivered here — the host acknowledges
   // them via ackWakes once it has actually handled them.
   //
-  // RC-2026-09-24-203: cadenceSeconds (optional) declares the host's poll
-  // cadence and drives its reachability window; pushNotification (optional)
-  // registers a push subscription for the wake path. One subscription per
-  // (agent, host): each heartbeat replaces the host's push config — a body
-  // that carries pushNotification stores it fresh (resetting the failure
-  // counters, which re-arms a suspended subscription); a body without it
-  // leaves the existing subscription untouched, so old heartbeat bodies
-  // keep working unchanged.
+  // RC-2026-09-24-203: cadenceSeconds (optional) started as the host's
+  // declared poll cadence; pushNotification (optional) registers a push
+  // subscription for the wake path. One subscription per (agent, host):
+  // each heartbeat replaces the host's push config — a body that carries
+  // pushNotification stores it fresh (resetting the failure counters,
+  // which re-arms a suspended subscription); a body without it leaves
+  // the existing subscription untouched, so old heartbeat bodies keep
+  // working unchanged.
   //
-  // Cadence is sticky (rotation review P5-F2): cadenceSeconds defaults to
-  // undefined, and omission is distinct from an explicit null. Omitting
-  // the field preserves the stored declaration; a number replaces it;
-  // only an explicit null clears it (back to the 180s default window).
-  // The old shape defaulted to null, so any bare heartbeat silently
-  // erased a declared cadence — collapsing the presence window, and
-  // with #3592 the wakeability window too — for a host that had
-  // declared its cadence once and then heartbeated bare.
+  // BUILD-HEARTBEAT-CADENCE: the declaration is now a HINT and the
+  // server assigns the governing cadence (assignedCadenceSeconds): a
+  // hint inside the server bounds is honoured, a hint above
+  // MAX_ASSIGNED_CADENCE_SECONDS is assigned the ceiling, and no hint
+  // (never declared, or cleared) is assigned DEFAULT_CADENCE_SECONDS —
+  // whose window equals the old 180s undeclared window, so a host that
+  // never reads the response field observes no change. The stored value
+  // and every response carry the assignment, never the raw hint.
+  //
+  // The hint is sticky (rotation review P5-F2): cadenceSeconds defaults
+  // to undefined, and omission is distinct from an explicit null.
+  // Omitting the field re-presents the stored value as the hint; a
+  // number replaces it; only an explicit null clears it (back to the
+  // server default). The old shape defaulted omission to null, so any
+  // bare heartbeat silently erased a declared cadence — collapsing the
+  // presence window, and with #3592 the wakeability window too — for a
+  // host that had declared its cadence once and then heartbeated bare.
   heartbeat({ agentId, hostId, mode, wakeUrl = null, cadenceSeconds = undefined, pushNotification = null, workWakes = undefined, workScopeRoomId = null, activityRoomId = null, door = "heartbeat" }) {
     checkAgentId(agentId);
     checkHostId(hostId);
@@ -551,13 +586,15 @@ export class AgentHeartbeats {
     // The push/cadence row tracks the latest heartbeat; push fields change
     // only when the body carries pushNotification (never on bare
     // heartbeats), and a fresh subscription resets failures/suspension.
-    // Cadence is sticky (see the heartbeat() header): an omitted
-    // cadenceSeconds resolves to the stored declaration before the
-    // upsert, so the upsert itself always writes the effective value.
-    const cadence = cadenceSeconds === undefined
+    // Cadence is server-assigned (see the heartbeat() header): an omitted
+    // cadenceSeconds re-presents the stored value as the hint before the
+    // upsert, and the upsert always writes the ASSIGNED value, so the
+    // stored row is the governing cadence, never a raw declaration.
+    const hint = cadenceSeconds === undefined
       ? this.db.prepare("SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
           .get(agentId, hostId)?.cadenceSeconds ?? null
       : cadenceSeconds;
+    const cadence = assignedCadenceSeconds(hint);
     this.db.prepare(`INSERT INTO agent_push_configs
       (agent_id, host_id, cadence_seconds, updated_at)
       VALUES (?, ?, ?, ?)
@@ -592,7 +629,7 @@ export class AgentHeartbeats {
     const pausedRooms = this.pausedRoomsOf(agentId);
     return Object.freeze({
       host: { ...host, workWakes: this.store.workWakes?.hostEnabled(agentId, hostId) ?? false },
-      pendingWakes: page.signals, more: page.more,
+      pendingWakes: page.signals, more: page.more, nextCursor: page.nextCursor,
       ...(pausedRooms.length ? { paused: pausedRooms } : {}),
       pushConfigured, pushSuspended, reachability,
     });
@@ -981,8 +1018,8 @@ export class AgentHeartbeats {
     return Object.freeze({ released: dropped.changes > 0 });
   }
 
-  // Enqueue a wake signal for an agent (mention, DM, bond, assignment, or
-  // land update — WAKE_KINDS). Coalesced on
+  // Enqueue a wake signal for an agent (mention, DM, bond, assignment,
+  // land update, or public ask — WAKE_KINDS). Coalesced on
   // (agent_id, room_id, message_id) — issue #2913: message ids repeat
   // across rooms, so the same message wakes an agent once per room.
   enqueueWake({ agentId, kind, roomId = null, messageId }) {
@@ -1020,20 +1057,33 @@ export class AgentHeartbeats {
   // `more` is true when a signal remains past the cap. Fetching one extra
   // row from each source is enough: the oldest page takes at most `limit`
   // rows from either source.
-  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat" } = {}) {
+  pendingWakePage(agentId, { limit = MAX_PENDING_WAKES, roomId = null, hostId = null, door = "heartbeat", cursor = null } = {}) {
     checkAgentId(agentId);
     check(Number.isInteger(limit) && limit > 0 && limit <= MAX_PENDING_WAKES,
       422, "invalid_heartbeat", `limit must be 1..${MAX_PENDING_WAKES}`);
+    const scope = [1, agentId, roomId, hostId];
+    let after = null;
+    if (cursor !== null) {
+      try {
+        if (typeof cursor !== "string" || cursor.length > 1024) throw new Error();
+        const value = JSON.parse(Buffer.from(cursor, "base64url").toString());
+        if (!Array.isArray(value) || value.length !== 6 || JSON.stringify(value.slice(0, 4)) !== JSON.stringify(scope)
+          || !Number.isSafeInteger(value[4]) || value[4] < 0 || typeof value[5] !== "string" || value[5].length > 128) throw new Error();
+        after = { createdAt: value[4], signalId: value[5] };
+      } catch { check(false, 422, "invalid_wake_cursor", "Wake cursor does not match this scope"); }
+    }
     const probe = limit + 1;
-    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
-      WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at ASC LIMIT ?`)
-      .all(agentId, roomId, roomId, probe).map(signalView);
-    const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe }) ?? [];
-    // R327-1 (r6): a paused member's room wakes are HELD, not dropped - they
-    // stay unacknowledged and reappear on resume. The caller learns why from
-    // pausedRoomsOf() (heartbeat and poll carry `paused`).
     const held = new Set(this.pausedRoomsOf(agentId).map(p => p.roomId));
-    const combined = [...messages, ...work].filter(s => !held.has(s.roomId)).sort((a, b) => a.createdAt - b.createdAt);
+    const messages = this.db.prepare(`SELECT * FROM agent_wake_signals
+      WHERE agent_id=? AND delivered_at IS NULL AND (? IS NULL OR room_id=?)
+      AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
+      AND (room_id IS NULL OR room_id NOT IN (SELECT value FROM json_each(?)))
+      ORDER BY created_at,signal_id LIMIT ?`)
+      .all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0,
+        after?.createdAt ?? 0, after?.signalId ?? "", JSON.stringify([...held]), probe).map(signalView);
+    const work = this.store.workWakes?.pending(agentId, { roomId, hostId, limit: probe, after }) ?? [];
+    const combined = [...messages, ...work].filter(s => !held.has(s.roomId))
+      .sort((a, b) => a.createdAt - b.createdAt || (a.signalId < b.signalId ? -1 : a.signalId > b.signalId ? 1 : 0));
     const page = combined.slice(0, limit);
     // #3345: a served page is a delivery on this door. Count presentations
     // per store/kind (batched) so emitted vs delivered vs acked reconciles.
@@ -1054,6 +1104,7 @@ export class AgentHeartbeats {
     return Object.freeze({
       signals: Object.freeze(page),
       more: combined.length > limit,
+      nextCursor: combined.length > limit ? Buffer.from(JSON.stringify([...scope, page.at(-1).createdAt, page.at(-1).signalId])).toString("base64url") : null,
     });
   }
 
@@ -1066,7 +1117,7 @@ export class AgentHeartbeats {
   // unregistered agents the same way presence reads report them
   // "unregistered" — an unknown agent has nothing to wait on. This never
   // acknowledges: signals leave the queue only through ackWakes().
-  notePoll({ agentId, roomId = null, hostId = null }) {
+  notePoll({ agentId, roomId = null, hostId = null, cursor = null }) {
     checkAgentId(agentId);
     let known = null;
     try {
@@ -1093,10 +1144,33 @@ export class AgentHeartbeats {
     // #3265: the poll door carries the same truncation flag as heartbeat —
     // the page object used to be discarded here, so a poll-only agent
     // could not distinguish "exactly 50 pending" from a longer queue.
-    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll" });
+    const page = this.pendingWakePage(agentId, { roomId, hostId, door: "poll", cursor });
     return Object.freeze({
-      agentId, registered: true, pendingWakes: page.signals, more: page.more,
+      agentId, registered: true, pendingWakes: page.signals, more: page.more, nextCursor: page.nextCursor,
+      // BUILD-HEARTBEAT-CADENCE: the poll response carries the
+      // server-assigned cadence, so a pull-only seat that never reads a
+      // heartbeat response still meets the contract on this door.
+      cadenceSeconds: this.assignedCadenceFor(agentId, hostId),
     });
+  }
+
+  // BUILD-HEARTBEAT-CADENCE: the server-assigned cadence for one host —
+  // its stored value read as the standing hint, run through the
+  // assignment. A hostless read (no hostId) carries the server default:
+  // the assignment a host with no hint would get.
+  assignedCadenceFor(agentId, hostId = null) {
+    checkAgentId(agentId);
+    if (hostId === null || hostId === undefined) return DEFAULT_CADENCE_SECONDS;
+    let stored = null;
+    try {
+      stored = this.db.prepare(
+        "SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+        .get(agentId, hostId)?.cadenceSeconds ?? null;
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      // Older database without the push table: no hint is stored.
+    }
+    return assignedCadenceSeconds(stored);
   }
 
   // RC-2026-09-28-3602: register one in-process waiter per HOST for the
@@ -1146,8 +1220,10 @@ export class AgentHeartbeats {
   // unregistered when no host ever reported.
   //
   // RC-2026-09-24-203: the window is per host — max(180s, cadenceSeconds *
-  // 1.5) — read from the host's push/cadence row; hosts that never declared
-  // a cadence read the 180s default.
+  // 1.5) — computed from the host's push/cadence row. BUILD-HEARTBEAT-
+  // CADENCE: the cadence in that formula is the server-assigned value for
+  // the host's stored hint; hosts that never declared read the assigned
+  // default, whose window is the same 180s.
   statusOf(agentId) {
     checkAgentId(agentId);
     const at = this.now();
@@ -1177,7 +1253,12 @@ export class AgentHeartbeats {
       // default window (read-only never migrates).
     }
     const withState = hosts.map(row => {
-      const cadenceSeconds = cadences.get(row.host_id) ?? null;
+      // BUILD-HEARTBEAT-CADENCE: the stored value is read as the host's
+      // standing hint and the ASSIGNED value governs — so a row stored
+      // under the old declaration contract (up to a 7-day declaration)
+      // is enforced at the server ceiling on read, with no migration;
+      // each host's next heartbeat rewrites its row as an assignment.
+      const cadenceSeconds = assignedCadenceSeconds(cadences.get(row.host_id) ?? null);
       const windowMs = this.windowFor(cadenceSeconds);
       const view = hostView(row, cadenceSeconds);
       return Object.freeze({ ...view, state: at - view.lastSeenAt <= windowMs ? "online" : "stale" });

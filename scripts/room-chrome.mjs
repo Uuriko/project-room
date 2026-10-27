@@ -39,6 +39,7 @@ export async function ensurePeopleOpen(page) {
 export async function openCatchUp(page) {
   const dialog = page.locator("#catchup-dialog");
   if (!(await dialog.evaluate(node => node.open))) {
+    if (!(await page.locator("#updates-dialog").isVisible())) await page.locator("#topbar-updates").click();
     await page.locator("#topbar-catchup").click();
   }
   await dialog.waitFor({ state: "visible" });
@@ -112,10 +113,14 @@ export async function openMemberProfile(page, memberId) {
 export async function clickChrome(page, selector) {
   if (selector === "#choose-room") selector = "#nav-rooms";
   const control = page.locator(selector);
+  if (selector === "#topbar-catchup" && !(await control.isVisible())) {
+    await ensureSidebarClosed(page);
+    await page.locator("#topbar-updates").click();
+  }
   if (['#signout-button', '#account-settings-button', '#refresh-button', '#clear-session-menu'].includes(selector)) {
     if (!(await control.isVisible())) await page.locator('#session-menu-button').click();
   }
-  if (['#topbar-activity', '#topbar-later', '#topbar-settings', '#room-actions-open'].includes(selector)) {
+  if (['#topbar-later', '#topbar-settings', '#room-actions-open'].includes(selector)) {
     await ensureSidebarClosed(page);
     const more = page.locator('#room-more');
     if (!(await more.evaluate(node => node.open))) await more.locator(':scope > summary').click();
