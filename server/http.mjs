@@ -7,7 +7,7 @@ import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSe
 import { readConversation } from "./conversation-sync.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
-import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
+import { publicAssetPaths, generatedAgentPages, isClientBundlePath, clientBundleDiskPath } from "./public-assets.mjs";
 import { vapidFromEnv } from "./push-subscriptions.mjs";
 import { createServer } from "node:http";
 import { readFile } from "node:fs/promises";
@@ -2385,8 +2385,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (acquisition) reject(405, "method_not_allowed", "Method not allowed");
       // --- end GR2 ---
-      if (assets.has(url.pathname) && ["GET", "HEAD"].includes(req.method)) {
-        const [path, type] = assets.get(url.pathname);
+      // Client bundles are generated output with content-hash names, so
+      // they classify by pattern (server/public-assets.mjs), not by the
+      // exact-path map; their bytes live under cloudflare/client-dist/.
+      const bundlePath = !assets.has(url.pathname) && isClientBundlePath(url.pathname.slice(1)) ? url.pathname.slice(1) : null;
+      if ((assets.has(url.pathname) || bundlePath) && ["GET", "HEAD"].includes(req.method)) {
+        const [path, type] = assets.get(url.pathname) ?? [clientBundleDiskPath(bundlePath), "text/javascript"];
         let data = null;
         try {
           data = await loadAsset(path);
@@ -2395,8 +2399,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // build output an exact-commit package deliberately does not
           // contain, so their absence is the designed state — fall through
           // to the standard not-found handling below (404), never a 500.
-          // Any other missing or failed asset stays fail-closed.
-          if (error?.code !== "ENOENT" || !generatedAgentPages.includes(path)) throw error;
+          // Client bundles are the same shape: generated output a package
+          // or checkout may legitimately lack. Any other missing or failed
+          // asset stays fail-closed.
+          if (error?.code !== "ENOENT" || !(generatedAgentPages.includes(path) || bundlePath)) throw error;
         }
         if (data) {
         const canonical = publicSearchCanonical(url.pathname, publicAssetPaths);
@@ -2416,7 +2422,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const linkPath = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : (gr1Alias ? url.pathname : null);
         res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
-        if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        if (bundlePath) res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        else if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
         // The front door keeps the GitHub anchor in source. Omit it from the
         // served bytes unless this server was given a GitHub auth config.
         const payload = path === "index.html"

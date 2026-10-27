@@ -12,3 +12,24 @@ export const publicAssetPaths = Object.freeze(['src/room-administration.js', 'sr
 // standalone filter, pinned equal by test), and the Node server answers 404
 // for them while they are absent rather than failing the request.
 export const generatedAgentPages = Object.freeze(['docs/agents/index.html', 'docs/agents/paste.html', 'docs/agents/claude-code.html', 'docs/agents/codex.html', 'docs/agents/cursor.html', 'docs/agents/cline.html', 'docs/agents/vscode.html', 'docs/agents/aider.html', 'docs/agents/openai-agents-sdk.html', 'docs/agents/langgraph.html', 'docs/agents/crewai.html']);
+
+// Client bundling (tranche-2 item 1): the browser entry modules bundled by
+// cloudflare/build-client.mjs into content-hashed files under
+// cloudflare/client-dist/. Bundles are generated output, never committed —
+// the generatedAgentPages posture: when no build has run, nothing matches
+// the pattern on disk and every asset is served unbundled and source-exact.
+// The names live beside publicAssetPaths, deliberately NOT inside that
+// declaration: scripts/runtime-package.mjs parses the declaration itself.
+export const clientBundleEntries = Object.freeze(['src/entry.js', 'src/signin-entry.js', 'src/app.js']);
+// A bundle file is a source-shaped name carrying esbuild's content hash:
+// src/<name>-<8-char hash>.js for entries, src/chunk-<8-char hash>.js for
+// shared chunks. The hash segment is exactly eight uppercase letters and digits
+// (esbuild's [hash] encoding at the pinned version is uppercase letters and digits only; a lowercase eight-letter tail is a source word, never a hash) and the name segment is lowercase
+// words, so no existing source name can collide: hyphenated sources such
+// as visibility-coordinator.js or peer-dm-client.js never match. Only
+// paths of this shape may be generated output; every other asset keeps the
+// exact-path contract of publicAssetPaths.
+export const clientBundlePattern = /^src\/(?:[a-z0-9]+(?:-[a-z0-9]+)*-[A-Z0-9]{8}|chunk-[A-Z0-9]{8})\.js$/;
+export const isClientBundlePath = path => typeof path === 'string' && clientBundlePattern.test(path);
+export const clientBundleManifestPath = 'cloudflare/client-dist/manifest.json';
+export const clientBundleDiskPath = path => 'cloudflare/client-dist/' + path;
