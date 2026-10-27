@@ -5,6 +5,7 @@ import { replyPostMode } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
+import { withDerivedRequestId } from "./request-id.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const text = { type: "string", minLength: 1, maxLength: 4096, pattern: "\\S" };
@@ -22,14 +23,14 @@ const definitions = [
   ["room_request_history", "/reply-history", "Read an anchored incoming/outgoing request history, including requests answered between polls. Follow nextCursor; retain completedCheckpoint only after draining the window. Never mix cursor/checkpoint or silently reset on changed history/identity. Reading does not acknowledge anything.",
     { direction, cursor: token, checkpoint: token, limit }, []],
   ["room_request_reply", null, "Ask one other active participant for an explicit reply in this room. Does not start a model or grant permission." + retry,
-    { requestId: id, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["requestId", "toMemberId", "body"]],
+    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, toMemberId: id, body: text, workItemId: id, replyToId: id }, ["toMemberId", "body"]],
   ["room_reply", null, "Post an ordinary clarification under a message. This does not answer or close a reply request, even when addressed to someone." + retry,
-    { requestId: id, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["requestId", "replyToId", "body"]],
+    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, replyToId: id, body: replyBody, toMemberId: id, workItemId: id }, ["replyToId", "body"]],
   ["room_respond_to_request", null, "Explicitly answer or decline a request addressed to you. Read the complete selected exchange first. Copy its inspected answerBasis, requester as toMemberId, and exact nullable workItemId. Never refresh these automatically during a retry." + retry,
-    { requestId: id, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
-      contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: text }],
+    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, responseToRequestId: id, expectedRequestRevision: revision, responseOutcome: { type: "string", enum: ["answered", "declined"] },
+      contextEventId: id, contextSequence: { ...revision, minimum: 1 }, toMemberId: id, workItemId: { ...id, type: ["string", "null"] }, body: text }, ["responseToRequestId", "expectedRequestRevision", "responseOutcome", "toMemberId"]],
   ["room_cancel_request", null, "Cancel your open request with a reason. The actual human room owner may also cancel. Does not stop another process." + retry,
-    { requestId: id, requestMessageId: id, expectedRequestRevision: revision, reason: text }]
+    { requestId: { ...id, description: "Optional idempotency key. Omit on the first call and the service derives one; keep the returned ID on retry." }, requestMessageId: id, expectedRequestRevision: revision, reason: text }, ["requestMessageId", "expectedRequestRevision", "reason"]]
 ];
 const actions = new Map(definitions.map(([name, route, description, properties, required = Object.keys(properties)]) =>
   [name, { route, tool: { name, description, inputSchema: { type: "object", properties, required, additionalProperties: false },
@@ -42,19 +43,15 @@ export function validReplyArguments(name, args) {
     && !(Object.hasOwn(args, "cursor") && Object.hasOwn(args, "checkpoint"));
 }
 export function buildReplyCommand(identity, name, args) {
-  if (!validId(identity?.roomId) || !validId(identity?.memberId) || !validReplyArguments(name, args) || replyRoute(name) !== null) {
-    // G-H2: room_reply mints its command id (the idempotency key) from
-    // requestId, so a missing requestId meant every retry posted a duplicate
-    // message. The schema now requires it; name the missing field so the
-    // caller can repair the call instead of guessing.
-    if (name === "room_reply" && args && !validId(args.requestId))
+  const prepared = replyRoute(name) === null && validId(identity?.roomId) && validId(identity?.memberId)
+    ? withDerivedRequestId(name, args, identity) : args;
+  if (!validId(identity?.roomId) || !validId(identity?.memberId) || !validReplyArguments(name, prepared) || replyRoute(name) !== null) {
+    if (name === "room_reply" && prepared && !validId(prepared.requestId))
       throw Object.assign(new Error("room_reply requires requestId: supply one stable id per reply and keep it unchanged when retrying an unknown result"), { code: "missing_request_id" });
     throw Object.assign(new Error("Invalid reply action input or identity"), { code: "invalid_reply_action" });
   }
-  // Every command-built tool (replyRoute === null) now requires requestId in
-  // its schema, so the caller-supplied key is always present here.
-  const requestId = args.requestId;
-  const { requestId: _requestId, ...data } = structuredClone(args), type = name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted";
+  const requestId = prepared.requestId;
+  const { requestId: _requestId, ...data } = structuredClone(prepared), type = name === "room_cancel_request" ? "reply_request.cancelled" : "message.posted";
   if (type === "message.posted") data.messageId = "reply-" + createHash("sha256").update(JSON.stringify([identity.roomId, identity.memberId, requestId])).digest("hex");
   if (name === "room_request_reply") data.requestKind = "reply";
   if (name === "room_respond_to_request") data.replyToId = data.responseToRequestId;
