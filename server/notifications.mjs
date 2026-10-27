@@ -6,7 +6,7 @@ import { messageRepository } from "./message-repository.mjs";
 // whose access ended gets 401/403 and never a stale list.
 import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.js";
 import { messageAddressesMember } from "../src/conversation.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { permissionDecisionMessages } from "./member-permission-requests.mjs";
 import { rowInHistory } from "./history-visibility.mjs";

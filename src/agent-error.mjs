@@ -509,7 +509,7 @@ function axFamilyRecovery(code) {
     return ["The state changed underneath this request. Re-read the current state and retry against it; do not resend against the old state.",
       "Re-read the current state and retry against it."];
   }
-  if (/_exists$/.test(code)) {
+  if (/_exists$/.test(code) || code === "slug_taken") {
     return ["That already exists — do not create a duplicate. Read the current state and use the existing record.",
       "Read the current state and use the existing record; do not create a duplicate."];
   }
@@ -1058,7 +1058,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // (2026-10-07 buildqa: identity_already_linked is the same family —
   // idempotent 409 success from the identity-link routes, not a failure —
   // but starts with identity_, not already_. It joins the family too.)
-  if (/^already_/.test(reasonCode) || /_already_/.test(reasonCode) || reasonCode === "identity_already_linked") {
+  if (/^already_/.test(reasonCode) || /_already_/.test(reasonCode) || reasonCode === "identity_already_linked" || reasonCode === "ask_settled") {
     const alreadyHints = {
       identity_already_linked: "This identity is already linked to this room — the earlier link is live. Keep your saved connection; do not mint another identity or retry the link create.",
       already_member: /already linked/.test(String(message || ""))
