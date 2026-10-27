@@ -1,4 +1,12 @@
 // Public discovery and anonymous recommendations only. Copying a brief never joins, reserves work or moves money.
+import { installButtonEnterActivation } from "./button-enter-activation.js";
+
+// UT27 14-1 (WCAG 2.1.1): offer cards and this page's other buttons must
+// activate on Enter even when the key event arrives without the browser's
+// native activation step (synthesized Enter — see the module). Inert for
+// hardware Enter, which activates natively.
+installButtonEnterActivation();
+
 const $ = selector => document.querySelector(selector);
 // Exact hosts shared by Room's existing edge API mount; /room/offers is not an app alias.
 const apiPath = path => ['getdasha.com', 'www.getdasha.com'].includes(location.hostname) ? `/room${path}` : path;

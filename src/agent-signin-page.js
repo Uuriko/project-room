@@ -7,6 +7,12 @@
 // the room, and a returning agent (card seen) goes straight in.
 import { createAgentSigninUI } from "./agent-signin-ui.js";
 import { agentFirstRunSeen } from "./agent-first-run.js";
+import { installButtonEnterActivation } from "./button-enter-activation.js";
+
+// UT27 14-1 (WCAG 2.1.1): the Continue button must activate on Enter even
+// when the key event arrives without the browser's native activation step
+// (synthesized Enter — see the module). Inert for hardware Enter.
+installButtonEnterActivation();
 
 const mountPrefix = location.pathname.startsWith("/room/") ? "/room" : "";
 let roomTarget = `${mountPrefix}/`;

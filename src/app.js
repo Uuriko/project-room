@@ -1,3 +1,4 @@
+import { installButtonEnterActivation } from "./button-enter-activation.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
@@ -64,6 +65,10 @@ import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
 import "./entry-started.js";
 export function startApp({ accountClient = new AccountClient(), signedIn = false, restoreRoomSession = false } = {}) {
+// UT27 14-1 (WCAG 2.1.1): every button in the app must activate on Enter
+// even when the key event arrives without native activation (synthesized
+// Enter — see src/button-enter-activation.js). Inert for hardware Enter.
+installButtonEnterActivation();
 const bodyHtmlCache = createBodyHtmlCache();
 
 // Keep a connector/native consent journey through password or provider login.
