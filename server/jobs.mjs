@@ -48,7 +48,15 @@ const oneLine = value => String(value ?? "").replace(/[\r\n]+/g, " ").trim().sli
 function read(store, sql, params = []) {
   if (!store?.db?.prepare) return null;
   try { return store.db.prepare(sql).get(...params) ?? null; }
-  catch { return null; }
+  catch (error) {
+    // A missing table is a legitimate cold store (the probed queue has
+    // never been created) and still reads as "nothing waiting". Any
+    // other store error surfaces (B8-4/B8-5): swallowing it here turned
+    // a locked or corrupt store into "not due" for every probe below,
+    // stalling the affected drains with no log and no failure record.
+    if (/no such table/i.test(error?.message ?? "")) return null;
+    throw error;
+  }
 }
 
 // Status-blind on purpose (#3927, the narrowed R1 invariant): ANY
@@ -700,9 +708,20 @@ export function jobsFor(runtime) {
   return JOBS.filter(job => job.runtimes.includes(runtime));
 }
 
+// Due-probe wrappers (B8-4/B8-5): a throwing gate probe is a failure,
+// never a fabricated verdict. Each wrapper logs one line naming the job
+// and the probe, then rethrows; the iterating consumers (scheduler pass,
+// health views, alarm arming) isolate the throw per job into their own
+// failure channels, so one broken probe neither reads as "nothing due"
+// nor stalls the jobs whose probes still work.
+function probeFailure(site, job, error) {
+  console.error(`[jobs] ${site} probe failed for ${job?.name ?? "unknown job"}: ${oneLine(error?.message ?? error)}`);
+  return error;
+}
+
 export function jobEnabled(job, env, store) {
   try { return job.enabled(env ?? {}, store ?? null) === true; }
-  catch { return false; }
+  catch (error) { throw probeFailure("enabled", job, error); }
 }
 
 export function jobDisabledReason(job, env, store) {
@@ -710,7 +729,7 @@ export function jobDisabledReason(job, env, store) {
   try {
     const reason = job.disabledReason(env ?? {}, store ?? null);
     return typeof reason === "string" && reason.trim() ? reason : "Not configured";
-  } catch { return "Not configured"; }
+  } catch (error) { throw probeFailure("disabled-reason", job, error); }
 }
 
 // Null means this job has nothing queued. A number is the next UTC millisecond.
@@ -720,7 +739,7 @@ export function jobNextDue(job, store, now, lastRanAt) {
     try {
       const value = job.nextDueAt(store, now);
       return Number.isFinite(value) ? value : null;
-    } catch { return null; }
+    } catch (error) { throw probeFailure("next-due", job, error); }
   }
   const last = Number.isFinite(lastRanAt) ? lastRanAt : 0;
   return last + job.cadenceMs;
@@ -753,8 +772,12 @@ export function lastRanFrom(stored) {
 export function earliestFutureAlarm(jobs, { env, store, now, lastRan, runtime = "worker" }) {
   let earliest = null;
   for (const job of jobs) {
-    if (job.slow || !job.runtimes.includes(runtime) || !jobEnabled(job, env, store)) continue;
-    let next = jobNextDue(job, store, now, lastRan?.[job.name]);
+    if (job.slow || !job.runtimes.includes(runtime)) continue;
+    let next;
+    try {
+      if (!jobEnabled(job, env, store)) continue;
+      next = jobNextDue(job, store, now, lastRan?.[job.name]);
+    } catch { continue; } // probe wrappers already logged the failure; arm the remaining jobs
     if (next == null) continue;
     if (next <= now) next = now + job.cadenceMs;
     if (earliest == null || next < earliest) earliest = next;
@@ -895,9 +918,20 @@ export function startNodeScheduler({
       for (const job of jobsFor("node")) {
         if (job.name === "growth-watch" && !growthEnabled) continue;
         if (job.name === "channel-drain" && !channelEnabled) continue;
-        if (!jobEnabled(job, env, store)) continue;
         const cadenceMs = overrides.get(job.name) ?? job.cadenceMs;
-        if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs)) continue;
+        try {
+          if (!jobEnabled(job, env, store)) continue;
+          if (!jobIsDue(job, store, at, lastRan.has(job.name) ? lastRan.get(job.name) : undefined, cadenceMs)) continue;
+        } catch (error) {
+          // A due probe that throws (B8-4/B8-5) is this job's failed
+          // tick: record it so job health counts it, and keep evaluating
+          // the remaining jobs instead of losing the whole pass.
+          lastRan.set(job.name, at);
+          record(job.name, at, false, { error: oneLine(error?.message ?? error), failure: failureDetailOf(error), durationMs: 0 });
+          console.warn(`[${job.name}] due probe failed: ${oneLine(error?.message ?? error)}`);
+          outcomes.push({ job: job.name, ok: false });
+          continue;
+        }
         // #3767: the budget window opens at this job's own start, not at
         // the pass start — the Worker builds each runner's deadline when
         // the job runs. A pass-relative deadline let early jobs burn the
@@ -952,15 +986,30 @@ export function startNodeScheduler({
       return JOBS.map(job => {
         const inRuntime = job.runtimes.includes("node");
         const gated = (job.name === "growth-watch" && !growthEnabled) || (job.name === "channel-drain" && !channelEnabled);
-        const enabled = inRuntime && !gated && jobEnabled(job, env, store);
-        const reason = !inRuntime ? (job.singleRuntimeReason ?? "Runs on the Worker only")
-          : gated ? "Disabled for this process" : enabled ? null : jobDisabledReason(job, env, store);
+        // A throwing due probe (B8-4/B8-5) marks only this job: the entry
+        // reports the probe failure as its reason and error instead of
+        // blanking the whole health list or reading as a clean disable.
+        let enabled = false;
+        let probeError = null;
+        if (inRuntime && !gated) {
+          try { enabled = jobEnabled(job, env, store); }
+          catch (error) { probeError = oneLine(error?.message ?? error); }
+        }
+        let reason;
+        if (!inRuntime) reason = job.singleRuntimeReason ?? "Runs on the Worker only";
+        else if (gated) reason = "Disabled for this process";
+        else if (probeError) reason = `Probe failed: ${probeError}`;
+        else if (enabled) reason = null;
+        else {
+          try { reason = jobDisabledReason(job, env, store); }
+          catch (error) { probeError = oneLine(error?.message ?? error); reason = `Probe failed: ${probeError}`; }
+        }
         const rec = records.get(job.name) ?? {};
         return {
           name: job.name, runtime: inRuntime ? "node" : "worker-only", enabled, reason,
           periodSeconds: Math.round((overrides.get(job.name) ?? job.cadenceMs) / 1000),
           lastRunAt: iso(rec.lastRunAt), lastSuccessAt: iso(rec.lastSuccessAt), lastErrorAt: iso(rec.lastErrorAt),
-          lastError: rec.lastError ?? null,
+          lastError: rec.lastError ?? probeError,
           lastErrorCode: rec.lastFailure?.code ?? null,
           lastErrorSubcheck: rec.lastFailure?.subcheck ?? null,
           lastErrorClass: rec.lastFailure?.errorClass ?? null,

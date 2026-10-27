@@ -531,7 +531,11 @@ export class ProjectRoom extends DurableObject {
     const selected = selectWorkerJobs(this.env, this.store).filter(job => {
       if (onlyJob !== null && job.name !== onlyJob) return false;
       if (job.slow && !includeSlow) return false;
-      return jobIsDue(job, this.store, now, lastRan[job.name]);
+      // A throwing due probe (B8-4/B8-5) stands only its own job down
+      // this pass — jobNextDue already logged it and the health view
+      // renders the job failing — instead of failing the whole selection.
+      try { return jobIsDue(job, this.store, now, lastRan[job.name]); }
+      catch { return false; }
     });
     const outcomes = [];
     for (const job of selected) {
