@@ -1,7 +1,7 @@
 // Gmail-native workspace; provider capabilities stay distinct from room sharing.
 
 // Pure helpers extracted from installGmailWorkspace for unit tests
-// (tests/gmail-ui.js). The installer below keeps using them internally, so
+// (tests/gmail-ui.test.js). The installer below keeps using them internally, so
 // these are not test-only seams.
 
 // Email-address extraction used when building reply/recipient lists.

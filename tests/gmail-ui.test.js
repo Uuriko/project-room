@@ -1,4 +1,4 @@
-// Gmail UI pure helpers (src/gmail-ui.js): error-code -> user message mapping,
+// Gmail UI pure helpers (archive/deferred-email/src/gmail-ui.js): error-code -> user message mapping,
 // email-address extraction, and the email-URL scheme block used by the HTML
 // sanitizer. Pure extraction of the closures inside installGmailWorkspace;
 // the module's install path arms a 60s setInterval and needs a full browser

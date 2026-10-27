@@ -1,4 +1,4 @@
-// Jev-harness receipt-acceptance gate: pure scorer tests (docs/JEV-GATES.md).
+// Jev-harness receipt-acceptance gate: pure scorer tests (archive/docs/history/JEV-GATES.md).
 //
 // Fixtures: artifact-linked vs bare claims, verdict mapping, the
 // low-confidence-accept escalate flag. Also asserts shadow semantics

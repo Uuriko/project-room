@@ -1168,7 +1168,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (url.pathname === "/.well-known/security.txt" || url.pathname === "/security.txt" || url.pathname === "/room/.well-known/security.txt") {
         return writeSecurityTxt(req, res);
       }
-      // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md): score
+      // Jev-harness admission gate, shadow mode (archive/docs/history/JEV-GATES.md): score
       // the join with the cheap classifier, journal the would-be decision,
       // then proceed unchanged. Shadow mode never enforces — this helper
       // never throws, so a scoring or journal failure cannot break admission.
@@ -2844,7 +2844,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!exact(data, ["inviteCode", "card"]) || typeof data.inviteCode !== "string") reject(422, "invalid_guest_invite", "Supply the invite code and a signed agent card");
         rate(`guest-invite-redeem-code:${rateHash(data.inviteCode)}`, 5);
         const result = store.guestInvites.redeem(data.inviteCode, identitySecret, data.card);
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // Jev-harness admission gate, shadow mode (archive/docs/history/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway. The
         // redeem verifies the signed card signature and rejects invalid
         // cards, so a successful redeem means the card was present+valid.
@@ -2879,7 +2879,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const data = await body(req);
         if (!exact(data, ["linkToken", "displayName"])) reject(422, "invalid_join", "Invitation link and agent name required");
         const result = store.shareLinks.joinAgent(identitySecret, data.linkToken, data.displayName, { address: String(remoteAddress ?? "") });
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // Jev-harness admission gate, shadow mode (archive/docs/history/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("share-link:join-agent", { roomId: result.roomId, identityId: result.identityId,
           displayName: data.displayName, card: null });
@@ -3036,7 +3036,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // exactly like MCP room_join). bearer() is null for the anonymous
           // browser join page, which changes nothing there.
           const redeemed = store.invites.redeem(data.inviteCode, { displayName: name, identitySecret: bearer(req), requestId });
-          // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+          // Jev-harness admission gate, shadow mode (archive/docs/history/JEV-GATES.md):
           // score the join, journal the would-be decision, admit anyway.
           jevShadowAdmission("join:invite", { roomId: redeemed.roomId, identityId: redeemed.identityId,
             displayName: redeemed.displayName ?? name, card: null });
@@ -3097,7 +3097,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // Same working session as the invite branch: the browser that just
         // created this room lands inside it.
         const firstJoined = store.createJoinSession(room.roomId, room.ownerMemberId);
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // Jev-harness admission gate, shadow mode (archive/docs/history/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("join:first-room", { roomId: room.roomId, identityId: identity.identityId,
           displayName: name, card: null });
@@ -3384,7 +3384,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           requestId = data.requestId;
         }
         const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req), requestId });
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // Jev-harness admission gate, shadow mode (archive/docs/history/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("agent-invite:redeem", { roomId: redeemedInvite.roomId, identityId: redeemedInvite.identityId,
           displayName: redeemedInvite.displayName ?? data.displayName, card: null });
@@ -3440,7 +3440,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           address: String(remoteAddress ?? ""),
           proof: data.proof,
         });
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
+        // Jev-harness admission gate, shadow mode (archive/docs/history/JEV-GATES.md):
         // score the join, journal the would-be decision, admit anyway.
         jevShadowAdmission("referral-invite:redeem", { roomId: redeemedReferral.roomId, identityId: redeemedReferral.identityId,
           displayName: redeemedReferral.displayName ?? data.displayName, card: null });
@@ -4866,7 +4866,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         return json(res, 200, attentionReport({ store, accessRequests }, selected.token, roomId, fence, Date.now(), { cursor: url.searchParams.get("cursor"), includeShadow: shadow[0] === "true" }));
       }
       if (route === "jev-shadow" && req.method === "GET") {
-        // Jev-harness shadow-review surface (docs/JEV-GATES.md): owner-only,
+        // Jev-harness shadow-review surface (archive/docs/history/JEV-GATES.md): owner-only,
         // read-only listing of recent shadow decisions with scores for hand
         // review. Shadow data is measurement, never membership — nothing here
         // mutates state.
@@ -5050,7 +5050,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_request", "decision is required; permissions and note are optional");
         }
         const decided = accessRequests.decide(selected.token, roomId, accessRequestId, data, fence);
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md): an
+        // Jev-harness admission gate, shadow mode (archive/docs/history/JEV-GATES.md): an
         // approved access request is an admission — score it, journal the
         // would-be decision, keep the approval unchanged.
         if (data.decision === "approve") {

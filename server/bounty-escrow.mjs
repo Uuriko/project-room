@@ -156,7 +156,7 @@ const AWARD_KINDS = new Set(["escrow-lock", "attribute", "approve", "payout", "r
 export const TRACK_ACCEPTANCE = "acceptance";
 export const TRACK_FINALITY = "finality";
 
-// Free-miss settlement vocabulary (docs/FREE-MISS-SETTLEMENT.md): the
+// Free-miss settlement vocabulary (archive/docs/history/FREE-MISS-SETTLEMENT.md): the
 // verdict stamped onto every terminal settlement. verified-complete is the
 // only settlement that pays the worker; partial is the dispute-split
 // exception; failed and unverified settle the worker at zero and return
@@ -2176,7 +2176,7 @@ export class BountyEscrow {
     });
   }
 
-  // --- free-miss settlement (docs/FREE-MISS-SETTLEMENT.md) -----------------------------
+  // --- free-miss settlement (archive/docs/history/FREE-MISS-SETTLEMENT.md) -----------------------------
   // Failed or unverified work settles at zero; agents earn only on verified
   // completion. A settlement is recorded once per escrow lock: the monetary
   // legs move through bounty_journal with the existing kinds

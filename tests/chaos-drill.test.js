@@ -34,7 +34,7 @@
 //   §4.3 A fresh restart (low uptimeMs) + SEV1: the drill's eviction test
 //       re-attaches a new DO instance to the same durable storage and shows
 //       committed writes intact — restart is safe, not destructive.
-//   §6   Escalation to docs/V8-RECOVERY-RUNBOOK.md (restore from backup) is
+//   §6   Escalation to archive/docs/history/V8-RECOVERY-RUNBOOK.md (restore from backup) is
 //       for LOST COMMITTED data or a lost host. A mid-write kill loses only
 //       the uncommitted journal, so recovery is a RETRY, not a restore. The
 //       drill asserts that boundary: nothing committed is ever lost.

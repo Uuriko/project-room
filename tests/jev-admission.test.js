@@ -1,4 +1,4 @@
-// Jev-harness admission gate: pure scorer tests (docs/JEV-GATES.md).
+// Jev-harness admission gate: pure scorer tests (archive/docs/history/JEV-GATES.md).
 //
 // Fixtures: fresh vs established identities, sybil-like names, duplicate
 // joins, signed-card paths. Also asserts shadow semantics: the decision is

@@ -175,7 +175,7 @@ import { Referrals, referralSchema } from "./referrals.mjs";
 import { AccountLoginMethods, accountLoginMethodsSchema, ensureVerifiedEmailSchema } from "./account-login-methods.mjs";
 import { verifyTextCompletion, selectedWorkResult } from "./text-results.mjs";
 import { verifyCompletionEvidence, EvidenceError } from "./signed-evidence.mjs"; // Integration map slice 5: signed external evidence for work.completed.
-import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gate (docs/JEV-GATES.md): pure scorer, no imports of its own.
+import { evaluateReceipt } from "./jev-receipts.mjs"; // Jev-harness receipt gate (archive/docs/history/JEV-GATES.md): pure scorer, no imports of its own.
 import { charterContext, charterFromEvent } from "../src/room-charter.js";
 import { REPLY_FIELDS, REPLY_POLICY_VERSION, replyPostMode } from "../src/reply-requests.js";
 import { ReplyRequests } from "./reply-requests.mjs";
@@ -1453,7 +1453,7 @@ export class RoomStore {
     this.channelUpdates = new ChannelUpdateJournal(this); // B20: durable webhook update journal.
     this.telegramLiveStatus = new DurableTelegramLiveStatus(this); // Task 10: durable live-delivery/send facts.
     this.spamQuarantine = new SpamQuarantineJournal(this); // Durable spam-guard quarantine journal (PR #554 queue, now restart-safe).
-    this.jevShadow = new JevShadowJournal(this); // Jev-harness shadow-decision journal (docs/JEV-GATES.md): append-only measurement, never enforced.
+    this.jevShadow = new JevShadowJournal(this); // Jev-harness shadow-decision journal (archive/docs/history/JEV-GATES.md): append-only measurement, never enforced.
 this.quarantineSplits = new QuarantineThreadSplits(this); // Thread-split records for the quarantine review UI (owner "split" action).
 this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-app sink for SLA-breach deliver.
     this.handoffs = new InboxHandoffJournal(this); // Task 23: durable agent handoff journal.
@@ -6400,7 +6400,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       }
       try { retryActivityFanoutFailures(this, roomId); }
       catch (error) { console.error(`activity fan-out retry failed for room ${roomId}:`, error?.message ?? error); }
-      // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
+      // Jev-harness receipt-acceptance gate, shadow mode (archive/docs/history/JEV-GATES.md):
       // score the legacy event-sourced work.completed receipt, journal the
       // would-be verdict, accept anyway. Runs in the same transaction as
       // the completion; never throws — shadow measurement must not fail
@@ -6517,7 +6517,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return next;
   }
 
-  // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
+  // Jev-harness receipt-acceptance gate, shadow mode (archive/docs/history/JEV-GATES.md):
   // maps the legacy event-sourced work.completed receipt onto the receipt
   // scorer and journals the would-be verdict. The completion is already
   // accepted at this point — this is measurement, never enforcement.

@@ -307,7 +307,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // and the referrals module verifies its own schema on open.
   "referrals",
   // jev_shadow_decisions (Jev-harness shadow-decision journal,
-  // docs/JEV-GATES.md): append-only measurement rows (gate, score,
+  // archive/docs/history/JEV-GATES.md): append-only measurement rows (gate, score,
   // would-be decision). Purely additive and intentionally NOT fenced —
   // older writers have no code path to it, IPs are stored hash-only, and
   // the journal verifies its own schema on open.

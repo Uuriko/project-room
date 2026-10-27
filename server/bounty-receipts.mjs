@@ -19,7 +19,7 @@
 // `receipts` constructor option; when absent, transitions return
 // `signed: []` and no journal entries are stamped. Production key
 // provisioning (operator key registry, rotation, validity windows) is a
-// later slice — see docs/bounty-receipts.md for the trust statement.
+// later slice — see archive/docs/history/bounty-receipts.md for the trust statement.
 //
 // Pure: node:crypto only, no I/O, no dependencies.
 import {

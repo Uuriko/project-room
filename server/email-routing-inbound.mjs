@@ -3,7 +3,7 @@
 // it onto the shared envelope and build the page.apply request the existing
 // importer already accepts. No network, no credentials, no send authority.
 // The Worker email() handler that feeds this lives in cloudflare/room.mjs
-// (proposal in docs/EMAIL-ROUTING.md); nothing here receives mail on its own.
+// (proposal in archive/docs/history/EMAIL-ROUTING.md); nothing here receives mail on its own.
 import { MimeError, addressPattern, mimeLimits, parseMimeMessage } from "./mime-message.mjs";
 import { emailConnection, emailDigest } from "./email-envelope.mjs";
 import { emailRoutingFolderId, normalizeRoutedEmail, rawEmailDigest } from "./channel-adapters/email.mjs";

@@ -1269,7 +1269,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         }
       }
     }
-    // Jev-harness receipt-acceptance gate (docs/JEV-GATES.md): the receipt
+    // Jev-harness receipt-acceptance gate (archive/docs/history/JEV-GATES.md): the receipt
     // is scored BEFORE the transition so the verdict can ride the
     // verification fact (#3546) as an advisory signal; the shadow journal
     // below still records every scored done. Shadow mode never changes the
