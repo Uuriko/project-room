@@ -60,6 +60,36 @@ export function refuseArchivedWrite(state) {
   if (isRoomArchived(state)) fail(409, "room_archived", "This room is archived: reading and export stay available, nothing new is recorded");
 }
 
+// Money guard (UT2 candidate 8): the bounty states whose escrow principal
+// is still locked — every non-terminal state past proposal (the same set
+// the escrow metrics count as locked, server/bounty-escrow.mjs metrics()).
+export const LOCKED_ESCROW_BOUNTY_STATES = Object.freeze(["funded", "claimed", "submitted", "accepted", "disputed", "approved"]);
+
+// The room's locked-escrow bounties, enumerated for a refusal: id, state,
+// claimant when one holds it, and the locked principal in credits. A store
+// predating the escrow tables has no locked escrow by construction.
+export function lockedEscrowBounties(store, roomId) {
+  try {
+    if (!store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounty_records'").get()) return [];
+    return store.db.prepare(`SELECT bounty_id AS bountyId, state, amount_millis AS amountMillis, claimant
+      FROM bounty_records WHERE room_id=? AND state IN (${LOCKED_ESCROW_BOUNTY_STATES.map(() => "?").join(",")})
+      ORDER BY bounty_id`).all(roomId, ...LOCKED_ESCROW_BOUNTY_STATES);
+  } catch { return []; }
+}
+
+// Archiving a room with locked escrow used to succeed silently — response
+// `data: {}` — while the escrow stayed live and even kept growing (funding
+// and posting still worked post-archive). Refuse, naming every affected
+// bounty and the total, so the owner settles or finalizes first. This
+// guard moves no money; it only blocks the archive write.
+export function refuseArchiveWithLockedEscrow(store, roomId) {
+  const locked = lockedEscrowBounties(store, roomId);
+  if (!locked.length) return;
+  const totalCredits = locked.reduce((sum, bounty) => sum + bounty.amountMillis, 0) / 1000;
+  const parts = locked.map(bounty => `${bounty.bountyId} (${bounty.state}${bounty.claimant ? `, claimed by ${bounty.claimant}` : ""}, ${bounty.amountMillis / 1000} credits)`);
+  fail(409, "room_archive_locked_escrow", `This room has locked escrow: ${totalCredits} credits locked in ${locked.length} ${locked.length === 1 ? "bounty" : "bounties"} — ${parts.join(", ")}. Settle or finalize those bounties first (a funded bounty finalized after its deadline refunds in full); archiving now would strand the locked credits.`);
+}
+
 export const archivedAtOf = state => (typeof state?.room?.archivedAt === "string" ? state.room.archivedAt : null);
 
 export const ACCOUNT_ROOM_SELECT = "SELECT id, archived_at, json_extract(projection,'$.room.title') AS title, json_extract(projection,'$.room.kind') AS kind FROM rooms WHERE id=?";

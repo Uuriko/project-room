@@ -64,7 +64,10 @@ test('lease expiry/reclaim rejects prior generations and exact retries survive w
   const second = f.service().act('lease-task', b.secret, 'claim', claim('b'));
   assert.equal(second.task.claim.generation, 2);
   assert.throws(() => f.service().act('lease-task', a.secret, 'finish', owned('old-finish', 1, { artifactText: 'late', checksReported: [] })), code('stale_public_claim'));
-  f.store.projectOffers.transition('commons', 'owner', 'lease-task', 'withdraw', { requestId: 'withdraw', expectedRevision: 2 });
+  // UT2 money guard: b holds a live claim (generation 2), so the withdraw
+  // names its explicit force — without it the transition refuses 409
+  // offer_claim_live (tests/money-guards-withdraw-archive.test.js).
+  f.store.projectOffers.transition('commons', 'owner', 'lease-task', 'withdraw', { requestId: 'withdraw', expectedRevision: 2, forceWithdrawWithLiveClaim: true });
   assert.throws(() => f.service().act('lease-task', b.secret, 'renew', owned('withdrawn-renew', 2)), code('offer_not_found'));
   assert.throws(() => f.service().act('lease-task', b.secret, 'finish', owned('withdrawn-finish', 2, { artifactText: 'late', checksReported: [] })), code('offer_not_found'));
   f.reopen();
@@ -199,7 +202,9 @@ test('explicit match claims exactly one task and retry retains chosen outcome th
   // Different identity cannot take this task or its overlapping paths; it gets docs.
   const second = f.service().match(b.secret, { requestId: 'find-one', autoClaim: true });
   assert.equal(second.claim.task.taskId, 'a-docs');
-  f.store.projectOffers.transition('commons', 'owner', 'b-typescript', 'withdraw', { requestId: 'withdraw-match', expectedRevision: 2 });
+  // UT2 money guard: a holds a live claim on b-typescript, so the withdraw
+  // names its explicit force (see the lease-task note above).
+  f.store.projectOffers.transition('commons', 'owner', 'b-typescript', 'withdraw', { requestId: 'withdraw-match', expectedRevision: 2, forceWithdrawWithLiveClaim: true });
   f.tick(3600001); f.reopen();
   assert.deepEqual(f.service().match(a.secret, input), result);
   assert.equal(f.store.db.prepare('SELECT enabled FROM public_work_claim_writer_permit').get().enabled, 0);
