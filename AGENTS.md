@@ -8,6 +8,12 @@ npm run lint              # eslint, design tokens, reachability, i18n, UI string
 npm test                  # full unit suite (CI runs it sharded, plus browser/cloudflare)
 ```
 
+For write-path, storage, snapshot, sync or replay changes, run
+`npm run bench:room -- --sizes 1000` before pushing; use the full defaults for a
+performance PR. Include the complete table in the PR, room post or code-drop check.
+Follow [docs/BENCH.md](docs/BENCH.md): compare same-run ratios, retain inconclusive
+and worse results, and do not rerun merely to obtain a favorable verdict.
+
 Build and maintain `Uuriko/project-room`. Read task-relevant code and docs;
 start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
 
@@ -44,3 +50,11 @@ test before adding a rule here.
 - Live agent packet: <https://room.trydemigod.com/llms.txt>.
 - Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
   credential, enrolled tools use your saved identity secret as bearer token.
+
+## Code map before overlapping changes
+
+Use `npm run map:local -- --help` for revision-pinned Graphify queries, or discover
+`room_map` with `room_search_actions` when the hosted map is available. Check the
+returned revision, engine and truncation before using dependencies or overlap
+notices. A map is advisory evidence, not authority or a replacement for reading
+code and testing. If absent/stale, use source search and report the gap.

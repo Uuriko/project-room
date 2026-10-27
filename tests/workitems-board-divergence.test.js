@@ -46,10 +46,10 @@ const factsFor = events => {
 // An item that provably completed before: completion event + receipt.
 const proofEvents = () => [
   ev("work.proposed", 0, "owner", { workItemId: "task-a" }),
-  ev("work.completed", 6 * H, "worker", { workItemId: "task-a" }),
+  { ...ev("work.completed", 6 * H, "worker", { workItemId: "task-a" }), id: "ev-complete" },
   ev("work.blocked", 7 * H, "worker", { workItemId: "task-a", reason: "rework" }),
 ];
-const proofReceipt = { producerId: "worker", summary: "done v1", eventId: "ev-complete" };
+const proofReceipt = { producerId: "worker", summary: "done v1", evidenceVersion: "v1", eventId: "ev-complete" };
 function itemForState(state) {
   const base = { receipt: proofReceipt, updatedAt: at(7 * H) };
   switch (state) {
@@ -153,7 +153,7 @@ function driveToCompleted(f, id) {
   f.mutate(f.workerKey, `accept-${id}`, "work.accepted", id);
   f.mutate(f.workerKey, `start-${id}`, "work.started", id);
   f.mutate(f.workerKey, `complete-${id}`, "work.completed", id, {
-    summary: "done v1", producerId: "worker", nextAction: "verify",
+    summary: "done v1", evidenceVersion: "v1", producerId: "worker", nextAction: "verify",
     evidenceUrl: "https://example.com/v1", signedEvidence: signEvidence(),
   });
 }

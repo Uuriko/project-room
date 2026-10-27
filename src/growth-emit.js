@@ -27,7 +27,6 @@ export const ROOM_TO_GROWTH = Object.freeze({
   [EVENT_TYPES.MEMBER_ADDED]: "member.joined",
   [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: "member.joined",
   [EVENT_TYPES.MESSAGE_POSTED]: "message.sent",
-  "message.reaction_set": "reaction.added", // historical events only; reactions were removed
   [EVENT_TYPES.MESSAGE_PINNED]: "message.pinned",
   [EVENT_TYPES.WORK_PROPOSED]: "work.proposed",
   [EVENT_TYPES.WORK_COMPLETED]: "work.completed",
@@ -131,15 +130,6 @@ const fieldBuilders = {
     const bucket = lengthBucket(data.body);
     if (bucket) fields.lengthBucket = bucket;
     return fields;
-  },
-  "reaction.added": (roomEvent, data) => {
-    // The room core treats active:false as a removal (the member is deleted
-    // from the reaction set). A removal is not an addition: projecting it as
-    // reaction.added would inflate reaction totals.
-    if (data.active === false) return null;
-    if (typeof data.messageId !== "string" || !data.messageId) return null;
-    if (typeof data.reaction !== "string" || !data.reaction) return null;
-    return { roomId: roomIdOf(roomEvent), messageId: data.messageId, reaction: data.reaction };
   },
   "message.pinned": (roomEvent, data) => {
     if (typeof data.messageId !== "string" || !data.messageId) return null;
