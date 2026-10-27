@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Version: 2026-10-02
+Version: 2026-10-27
 
 Demigod Labs, Inc., a Delaware corporation, operates Project Room at https://room.trydemigod.com. Contact potter@trydemigod.com. This policy describes what that service collects and what the software does with it.
 
