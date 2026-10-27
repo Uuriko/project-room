@@ -24,7 +24,7 @@ import { BOND_SCOPES } from "./bonds.mjs";
 import { EscrowError } from "./bounty-escrow.mjs";
 import { buildActivationPack } from "./room-activation-pack.mjs";
 import { buildOrient } from "./orient.mjs";
-import { memoizeBoardList } from "./available-work.mjs";
+import { memoizeBoardList, ownClaimsFromBoard } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
@@ -385,6 +385,15 @@ function listWork(store, secret, args) {
       .sort((a, b) => (order.get(a.id)?.index ?? 0) - (order.get(b.id)?.index ?? 0));
     sort = "curiosity";
   }
+  // UT26 lane 10 F3: the default listing also carries the viewer's own
+  // held board claims. The seeded starter is a board claim, never a work
+  // item, so a work-items-only list told its holder the room had no work.
+  let boardClaims = null;
+  if (focus === "all") {
+    let board = [];
+    try { board = store.workClaims?.list?.(args.roomId) ?? []; } catch { board = []; }
+    boardClaims = ownClaimsFromBoard(board, args.roomId, snapshot.viewerId);
+  }
   const replyListing = focus === "needs_me" ? store.replyRequests.list(secret, args.roomId, { direction: "incoming", status: "open" }) : null;
   const replyRequests = replyListing?.requests.map(request => ({
     id: request.id, requesterId: request.requesterId, workItemId: request.workItemId, revision: request.revision,
@@ -396,7 +405,8 @@ function listWork(store, secret, args) {
     charter: snapshot.charter ?? null,
     ...(matches ? { selection: { query: args.query.trim(), matches: matches.total, shown: work.length } } : {}),
     ...(sort ? { sort } : {}),
-    work, ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
+    work, ...(boardClaims ? { boardClaims } : {}),
+    ...(focus === "needs_me" ? { replyRequests, replyRequestsEvaluatedThrough: replyListing.evaluatedThrough } : {})
   });
 }
 
