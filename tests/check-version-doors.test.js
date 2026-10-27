@@ -68,4 +68,6 @@ test("workflows read both doors: gate skips on converged or do-stale, drift sett
   const drift = readFileSync(new URL("../.github/workflows/deploy-drift.yml", import.meta.url), "utf8");
   parse(drift);
   assert.match(drift, /--settle-ms 120000/);
+  assert.match(drift, /unknown revision/);
+  assert.match(drift, /revision_status" = "unknown revision" \] && \[ "\$code" -eq 0 \]/);
 });

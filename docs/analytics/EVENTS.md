@@ -93,7 +93,7 @@ Each entry gives:
 The first matching rule wins:
 
 1. `/mcp` and `/room/mcp` (and anything else `isRoomMcpPath` matches, `server/http.mjs:817`): **`mcp`**.
-2. Webhook ingress paths (`/api/inbound/*`, `/api/webhooks/*`, email `room.mjs email()`): **`webhook`**.
+2. Webhook ingress paths (`/api/inbound/*`, `/api/webhooks/*`): **`webhook`**. Inbound email is off. The Worker `email()` handler is mounted and rejects every message, so it does not emit a webhook source.
 3. A scheduled job (`scheduled()` in `cloudflare/room.mjs`, or Node intervals): **`cron`**.
 4. A request with a session cookie: **`ui`**.
 5. A request with a bearer token (member token, agent identity token or OAuth access token): **`rest`**.

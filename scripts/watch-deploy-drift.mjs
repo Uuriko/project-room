@@ -77,6 +77,9 @@ if (doorSplit) {
 if (doors.doRev) report.sourceRevision = doors.doRev;
 const measured = report.sourceRevision ? lag(report.sourceRevision, REF, Date.now() / 1000) : null;
 const drift = Boolean(measured?.reason);
+// A missing revision, or one this repo cannot resolve to a commit, is an
+// unknown revision. That is a reported fact, not a quiet pass.
+const unknownRevision = !report.sourceRevision || measured?.known === false;
 const out = {
   checked_at: report.probed_at,
   base: BASE,
@@ -88,6 +91,7 @@ const out = {
   behind_prs: measured?.commits ?? null,
   behind_hours: measured?.hours ?? null,
   lag: measured?.reason ?? null,
+  revision_status: unknownRevision ? "unknown revision" : null,
   drift,
   probe_verdict: report.verdict,
   jobs_health: report.jobsHealth ?? null,
@@ -97,7 +101,8 @@ const out = {
   incident_window: report.verdict === "do-rpc-fail"
 };
 console.log(JSON.stringify(out, null, 2));
-if (drift) console.error(`DRIFT: prod ${report.sourceRevision} lags ${REF} ${mainTip} (${measured.reason})`);
+if (unknownRevision) console.error(`unknown revision: prod sourceRevision ${report.sourceRevision ?? "missing"} is not a commit this repo can compare`);
+else if (drift) console.error(`DRIFT: prod ${report.sourceRevision} lags ${REF} ${mainTip} (${measured.reason})`);
 if (doorSplit) console.error(`${doorState === "do-stale" ? "DO still on old revision" : "VERSION DOORS DISAGREE"}: /api/version ${doors.doRev} vs /api/version/worker ${doors.workerRev}`);
 if (report.verdict !== "healthy") console.error(`PROBE ${report.verdict}: ${(report.endpoints ?? []).filter(e => !e.ok).map(e => `${e.label} ${e.status}`).join(", ") || report.note || "no detail"}`);
 if (out.incident_window) console.error("1101 WINDOW: do-rpc-fail signature present - docs/INCIDENT-1101-RUNBOOK.md");

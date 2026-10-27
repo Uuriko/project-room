@@ -8,11 +8,11 @@ this tree. Telegram has a live path (webhook in, `sendMessage` out, a reply box
 in the Inbox) that is inert until a person sets two deployment bindings; no
 token or secret is in code, tests, docs or journals. See
 [Live Telegram](#live-telegram-zero-spend) and
-[Fixture versus live](#fixture-versus-live) below. The ordered human steps to switch
-Telegram and email on in production, and the checks that prove they are
-live, are in [GO-LIVE-CHECKLIST.md](../archive/docs/history/GO-LIVE-CHECKLIST.md). A live email provider still
-needs its own reviewed slice and separate authorization, exactly as
-[CURRENT-ROOM.md](CURRENT-ROOM.md) says for a real mailbox.
+[Fixture versus live](#fixture-versus-live) below. The ordered human steps to switch Telegram on in production, and the checks
+that prove it is live, are in [GO-LIVE-CHECKLIST.md](../archive/docs/history/GO-LIVE-CHECKLIST.md).
+Inbound email is off. That checklist is not an activation path for mail. A
+live mailbox needs its own reviewed slice and separate authorization, exactly
+as [CURRENT-ROOM.md](CURRENT-ROOM.md) says.
 
 ## Connection record
 
@@ -267,7 +267,7 @@ form says so. Email fixtures carry no credentials at all.
 
 | Piece | Today | Becomes live when |
 | --- | --- | --- |
-| Email inbound | Recorded Graph fixtures; cards read "Inbound: fixture mailbox · not yet routed" | Cloudflare Email Routing hands mail to the Worker (#144: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`, `docs/EMAIL-ROUTING.md`) and the Worker's `email()` handler is mounted |
+| Email inbound | Inbound email is off. Recorded Graph fixtures; cards read "Inbound: fixture mailbox · not yet routed". The Worker `email()` handler is mounted and rejects every message because no durable consumer is wired. There is no live mailbox | A durable consumer is wired. The handler is already mounted and rejects until then |
 | Email outbound | None; sources say "Sending unavailable", `capabilities.send: false` | An outbound email slice (B23) |
 | Attachment bytes | Never retained; the reader lists descriptors (name, type, size) and downloads stay unavailable | A live provider fetch slice that downloads bytes with the account's credentials, reusing the phase-4 auth, ownership, and membership path |
 | Telegram inbound | Webhook route verifies and journals (`pending_channel_updates`); Reconnect imports | `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` are set and `setWebhook` is registered |
@@ -421,8 +421,10 @@ still lands in the inbox — the journal is the review backlog, not a hide.
 
 ## Status: email is fixture only; Telegram is live once configured
 
-The email adapter reads recorded fixtures: no mailbox is polled and nothing is
-sent. Telegram's live path exists but does nothing until the two bindings below
+Inbound email is off. The email adapter reads recorded fixtures: no mailbox is
+polled and nothing is sent. The Worker `email()` handler is mounted and rejects
+every message because no durable consumer is wired. There is no live mailbox.
+Telegram's live path exists but does nothing until the two bindings below
 are set; without them every connection card reads "Live: not configured" and
 imported messages arrive only from `scripts/*-contract-fixture.mjs` recordings
 and tests. The Inbox empty state says so in the browser.
@@ -500,20 +502,17 @@ once that file is next edited).
    (`server/channel-journal.mjs`); the server must be started with a
    `ChannelWebhookInbox`, which `cloudflare/room.mjs` does.
 
-### Email setup (fixture today; #144 merged the parser, routing still pending)
+### Email setup (fixture only; inbound email is off)
 
 1. In the Inbox, **Add connection**, choose "Email mailbox (fixture)", enter
    the address and a name. The card reads "Inbound: fixture mailbox · not yet
    routed" and "Sending: not available". Recorded fixtures import through
    `scripts/*-contract-fixture.mjs`; nothing polls a mailbox.
-2. To route real mail (#144 is merged: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`; still pending: the Worker `email()` mount in `cloudflare/room.mjs` and the rules below, see [EMAIL-ROUTING.md](../archive/docs/history/EMAIL-ROUTING.md)): enable Email Routing on the domain (or a subdomain such
-   as `mail.<domain>`), accept the MX and SPF records Cloudflare adds, add a
-   routing rule per address (or the domain catch-all) with the action "Send
-   to a Worker" pointing at the room Worker, and agree the address scheme
-   (one connection per mailbox, plus-addressing for tags, an optional
-   `*@domain` alias for catch-all). No secret, token or paid plan is involved.
-   See `docs/EMAIL-ROUTING.md` on that branch for caps and the handler
-   proposal.
+2. Inbound email is off. The Worker `email()` handler in `cloudflare/room.mjs`
+   is mounted and rejects every message because `durableInboundEmailConsumer()`
+   in `server/email-routing-inbound.mjs` is not wired. There is no live mailbox.
+   `archive/docs/history/EMAIL-ROUTING.md` is an archived note, not an
+   activation path.
 3. Outbound email remains a separate slice (B23).
 
 ### Connection cards and the list

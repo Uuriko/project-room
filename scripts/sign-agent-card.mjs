@@ -54,7 +54,7 @@ export function signAgentCard({ privateKey, card, publicKey = AGENT_CARD_PUBLIC_
   if (!privateKey) {
     if (!allowUnsigned) throw new Error("sign-agent-card: signing key unavailable; release stopped. Restore signing custody before deployment.");
     writeFileSync(outputPath, nullModule("Unsigned: explicit --allow-unsigned was passed and no private key was found at ROOM_AGENT_CARD_SIGNING_KEY or ~/.config/project-room/agent-card-signing.key; the card carries no signature."));
-    console.log("sign-agent-card: no private key; card will be served unsigned.");
+    console.log("sign-agent-card: NOTICE: no signing key is configured; the card will be served unsigned.");
     return;
   }
   if (!isValidPublicKey(publicKey)) {

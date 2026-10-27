@@ -68,6 +68,7 @@ import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { isRoomArchived } from "../src/events.js";
+import { receiptPublishedCostOf } from "./receipt-cards.mjs";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -493,9 +494,12 @@ const receiptOf = item => {
 // fields are null, stating plainly that this receipt has no public page.
 const receiptWithPublicLink = (store, roomId, item) => {
   const receipt = receiptOf(item);
+  const workItems = store.room(roomId).state.workItems ?? {};
+  const cost = receiptPublishedCostOf(workItems[item.workItemId] ?? workItems[item.id] ?? null);
+  const withCost = { ...receipt, cost };
   const publicId = publicWorkClaimReceiptId(roomId, item.id);
-  if (!publicReceiptById(store, publicId)) return Object.freeze({ ...receipt, publicId: null, publicUrl: null });
-  return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
+  if (!publicReceiptById(store, publicId)) return Object.freeze({ ...withCost, publicId: null, publicUrl: null });
+  return Object.freeze({ ...withCost, publicId, publicUrl: publicReceiptUrl(publicId) });
 };
 
 const receiptsQueryOf = (reject, params) => {

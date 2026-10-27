@@ -25,10 +25,11 @@
 // Semantics:
 //   production + unsigned            -> THROW (production must be signed;
 //                                        --allow-unsigned is dev-only)
-//   dev + unsigned, no opt-in record  -> loud member-facing WARNING naming
+//   dev + unsigned, no opt-in record  -> loud member-facing NOTICE naming
 //                                        the fix; boot continues (dev
 //                                        ergonomics), and the served card
-//                                        carries signed:false.
+//                                        carries signed:false. A missing
+//                                        signer is not a failed boot.
 //   dev + unsigned, explicit opt-in   -> loud warning; boot continues; the
 //                                        served card carries signed:false
 //                                        plus the recorded reason.
@@ -66,9 +67,9 @@ export function validateCriticalConfig({ production = false, cardSignature = nul
       );
     } else {
       warnings.push(
-        "ERROR: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — " +
+        "NOTICE: the agent card is UNSIGNED and no explicit opt-in was recorded at build time — " +
         "members fetching /.well-known/agent-card.json will see an unsigned card (marked signed:false). " +
-        "To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass " +
+        "No signing key is configured. To fix: set ROOM_AGENT_CARD_SIGNING_KEY and re-run scripts/sign-agent-card.mjs, or pass " +
         "--allow-unsigned explicitly to record the choice."
       );
     }

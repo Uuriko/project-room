@@ -50,13 +50,39 @@ test('valid public responses permit a matching revision and detect a real mismat
   const base = await withServer(t, path => path === '/api/version'
     ? { status: 200, body: { status: 'ok', sourceRevision: liveRevision } } : healthy(path));
   const result = await run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']);
-  assert.equal(JSON.parse(result.stdout).probe_verdict, 'healthy');
+  const healthyReport = JSON.parse(result.stdout);
+  assert.equal(healthyReport.probe_verdict, 'healthy');
+  assert.equal(healthyReport.revision_status, null);
   liveRevision = 'f'.repeat(40);
   await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']), error => {
     assert.equal(error.code, 1);
     const report = JSON.parse(error.stdout);
     assert.equal(report.drift, true);
     assert.equal(report.lag, 'unknown');
+    return true;
+  });
+});
+
+test('a production revision this repo cannot compare is an unknown revision', async t => {
+  const base = await withServer(t, path => path === '/api/version'
+    ? { status: 200, body: { status: 'ok', sourceRevision: 'unknown' } } : healthy(path));
+  await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', base, '--ref', 'HEAD']), error => {
+    const report = JSON.parse(error.stdout);
+    assert.equal(error.code, 1);
+    assert.equal(report.revision_status, 'unknown revision');
+    assert.equal(report.drift, true);
+    assert.equal(report.lag, 'unknown');
+    assert.match(error.stderr, /unknown revision/);
+    return true;
+  });
+  const missing = await withServer(t, path => path === '/api/version'
+    ? { status: 200, body: { status: 'ok' } } : healthy(path));
+  await assert.rejects(run(process.execPath, ['scripts/watch-deploy-drift.mjs', '--base', missing, '--ref', 'HEAD']), error => {
+    const report = JSON.parse(error.stdout);
+    assert.equal(error.code, 1);
+    assert.equal(report.revision_status, 'unknown revision');
+    assert.equal(report.probe_verdict, 'unverified');
+    assert.match(error.stderr, /unknown revision/);
     return true;
   });
 });

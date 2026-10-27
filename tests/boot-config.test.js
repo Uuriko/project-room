@@ -49,6 +49,8 @@ test("dev + unsigned card with no opt-in record warns loudly but boots", () => {
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /UNSIGNED/i);
   assert.match(warnings[0], /no explicit opt-in/i);
+  assert.match(warnings[0], /NOTICE/);
+  assert.doesNotMatch(warnings[0], /\bERROR\b/);
   assert.match(warnings[0], /ROOM_AGENT_CARD_SIGNING_KEY|--allow-unsigned/);
 });
 
@@ -116,6 +118,8 @@ test("QA200-REG-14: bare validateCriticalConfig() (dev default path) warns loudl
   const { warnings } = validateCriticalConfig();
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /UNSIGNED/i);
+  assert.match(warnings[0], /NOTICE/);
+  assert.doesNotMatch(warnings[0], /\bERROR\b/);
   assert.match(warnings[0], /ROOM_AGENT_CARD_SIGNING_KEY|--allow-unsigned/);
 });
 

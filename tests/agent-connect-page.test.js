@@ -260,7 +260,11 @@ test("a dead invite link opened in a browser gets a page with a way home", { tim
   assert.match(html.headers.get("content-type"), /^text\/html/);
   assert.match(html.text, /Ask the room owner for a new link\./);
   assert.match(html.text, /<a href="\/">/);
-  assert.match(html.headers.get("content-security-policy"), /default-src 'none'/);
+  const csp = html.headers.get("content-security-policy");
+  assert.match(csp, /default-src 'none'/);
+  assert.match(csp, /script-src 'none'/);
+  assert.doesNotMatch(csp, /cloudflareinsights/);
+  assert.doesNotMatch(html.text, /cloudflareinsights|beacon\.min\.js/);
   const md = await send(origin, "/a/RM-0123456789ABCDEF?format=md", { headers: { Accept: "text/html" } });
   assert.equal(md.text, UNAVAILABLE);
   const plain = await send(origin, "/a/RM-0123456789ABCDEF");
