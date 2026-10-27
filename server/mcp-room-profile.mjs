@@ -323,6 +323,7 @@ function validWakeArgs(name, args) {
       && (args.pushNotification === undefined || validPush(args.pushNotification))
       && (args.workWakes === undefined || typeof args.workWakes === "boolean");
   }
+  if (name === "agent_presence") return validId(args.identityId);
   if (name === "heartbeat_ack") return validSignalIds(args.signalIds) && (args.fencingToken === undefined || typeof args.fencingToken === "string" && args.fencingToken.length > 0);
   if (name === "wake_pause" || name === "wake_resume") {
     const reasonOk = args.reason === undefined || args.reason === null || typeof args.reason === "string" && args.reason.length <= 200;
@@ -768,6 +769,16 @@ async function callWakeTool(store, secret, identity, name, args) {
     // R269-1 v2: a room-scoped key reads the same scoped presence view as HTTP GET.
     const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
     return auth.scopedKey ? scopedKeyPresenceView(store, auth) : store.agentHeartbeats.statusOf(agentId);
+  }
+  if (name === "agent_presence") {
+    // W-33: the MCP twin of GET /api/agents/{id}/presence. Same actor and
+    // caller shape as the HTTP route: a room-scoped key binds the read to
+    // its one room, an identity secret reads across the rooms it shares
+    // with the target. The store derivation joins target seats against
+    // caller standing, so unshared rooms contribute no row.
+    const auth = createHeartbeatActor({ store, bearer: () => secret, reject: (status, code, message) => { throw new HeartbeatError(status, code, message); } })(null, MCP_WAKE_SCOPE);
+    if (auth.identityId !== agentId) throw new HeartbeatError(403, "identity_changed", "Credential identity changed during request");
+    return store.agentPresence({ identityId: auth.identityId, boundRoomId: auth.roomId ?? null }, args.identityId);
   }
   if (name === "heartbeat_ack") {
     // R273-1: with or without a fencingToken, ack inside the credential's own

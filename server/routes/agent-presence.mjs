@@ -51,5 +51,5 @@ export const AGENT_PRESENCE_ROUTES = Object.freeze([
   Object.freeze({ id: "agent-presence", method: "GET", path: "/api/agents/{identityId}/presence",
     auth: "bearer", capability: null, scope: "directory", handler: readAgentPresence, authenticate: authenticateAgentPresence,
     schema: { params: parameters, response: { type: "object" } },
-    events: [], parity: "exempt:heartbeat_get reads only the caller's own host status; no MCP tool reads another identity's per-room presence across the caller's rooms" }),
+    events: [], parity: "mcp:agent_presence" }),
 ]);

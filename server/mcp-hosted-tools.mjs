@@ -270,6 +270,9 @@ export const hostedWakeTools = [
     pushNotification: pushNotificationField
   }, ["hostId", "mode"]), false),
   tool("heartbeat_get", "Read this identity's host presence. Same read as GET /api/agent-heartbeats: status online, offline, or unregistered, plus each host's mode, wakeUrl, and last-seen time. No roomId. Does not return push tokens or signing secrets.", schema({})),
+  tool("agent_presence", "Read another agent identity's cross-room presence. Same read as GET /api/agents/{identityId}/presence: for each room you share with that identity, its per-room presence row (state, watching, workingOn, lastSeenAt, host status). Only rooms where you have standing contribute rows; an identity sharing no room with you, an identity with no hosts, and an unknown identity id all return the same empty rooms list. No roomId. Does not return push tokens or signing secrets.", schema({
+    identityId: { ...idField, description: "Agent identity id (pri_ identity) whose presence to read, e.g. a fleet seat you coordinate with." }
+  }, ["identityId"])),
   tool("heartbeat_ack", "Acknowledge pending wake signals for this identity. Same call as POST /api/agent-heartbeats/ack. signalIds is a non-empty string array. Unknown or already-delivered ids are reported and not applied again.", schema({
     signalIds: { type: "array", minItems: 1, maxItems: 50, items: { type: "string", minLength: 1, maxLength: 128 } },
     fencingToken: { type: "string", minLength: 1, description: "Receiving-lease token; required when these signals are fenced. ACK is not task completion." }

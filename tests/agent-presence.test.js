@@ -107,6 +107,29 @@ test("cross-room presence returns exactly the rooms the caller shares with the t
   assert.equal(doc.rooms[0].presence.status, "online");
 });
 
+test("agent_presence MCP tool returns the same cross-room read as HTTP (W-33)", async t => {
+  const { origin, caller, target, stranger, targetMemberOne } = await probeFixture(t);
+  const beat = await post(origin, "/api/agent-heartbeats", { hostId: "gap4-host" }, target.secret);
+  assert.equal(beat.status, 200);
+  const call = async (identityId, secret) => {
+    const res = await post(origin, "/room/mcp", {
+      jsonrpc: "2.0", id: "w33", method: "tools/call",
+      params: { name: "agent_presence", arguments: { identityId } },
+    }, secret);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    return body.result?.structuredContent;
+  };
+  const doc = await call(target.identityId, caller.secret);
+  assert.equal(doc.identityId, target.identityId);
+  assert.equal(doc.rooms.length, 1, "only the shared room is visible over MCP");
+  assert.equal(doc.rooms[0].roomId, "gap4-one");
+  assert.equal(doc.rooms[0].memberId, targetMemberOne);
+  assert.equal(doc.rooms[0].presence.status, "online");
+  const empty = await call(stranger.identityId, caller.secret);
+  assert.deepEqual(empty.rooms, [], "no shared room reads empty over MCP, same as HTTP");
+});
+
 test("no shared room and unknown identity return the same empty shape", async t => {
   const { origin, caller, stranger } = await probeFixture(t);
   const strangerRes = await get(origin, `/api/agents/${stranger.identityId}/presence`, caller.secret);
