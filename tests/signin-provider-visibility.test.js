@@ -16,9 +16,11 @@ function stubElement() {
   };
 }
 
-function mountNavigation(t) {
+function mountNavigation(t, { missing = [] } = {}) {
   const nodes = new Map();
+  const absent = new Set(missing);
   const node = selector => {
+    if (absent.has(selector)) return null;
     if (!nodes.has(selector)) nodes.set(selector, stubElement());
     return nodes.get(selector);
   };
@@ -57,4 +59,17 @@ test("sync still runs when the served page has no GitHub sign-in anchor", t => {
   assert.equal(node("#google-signin").hidden, false);
   assert.doesNotThrow(() => navigation.sync("welcome"));
   assert.equal(node("#google-signin").hidden, true);
+});
+
+test("a stripped GitHub anchor does not throw, and the rest of the sign-in view still syncs", t => {
+  const { navigation, node } = mountNavigation(t, { missing: ["#github-signin"] });
+  assert.doesNotThrow(() => navigation.sync("password-login"));
+  assert.equal(node("#google-signin").hidden, false);
+  assert.equal(node("#signin-methods").hidden, false);
+  assert.equal(node("#terms-notice").hidden, false);
+  assert.doesNotThrow(() => navigation.setProviderUnavailable("github"));
+  assert.doesNotThrow(() => navigation.sync("welcome"));
+  assert.equal(node("#google-signin").hidden, true);
+  assert.equal(node("#terms-notice").hidden, true);
+  assert.equal(node("#signin-methods").hidden, false);
 });

@@ -10494,8 +10494,9 @@ paths:
                 properties:
                   roomId: { type: string }
                   roomTitle: { type: string }
-                  permissions: { type: array, items: { type: string } }
-                  profile: { type: string, description: "chat, contribute, review, collaborate or custom" }
+                  permissions: { type: array, items: { type: string }, description: "Full granted set. An owner-equivalent invite lists every delegable permission." }
+                  profile: { type: string, description: "chat, contribute, review, collaborate, owner, or custom" }
+                  ownerEquivalent: { type: boolean, description: "True when the code grants owner-level permissions. Preview does not consume the code." }
                   expiresAt: { type: integer }
                   inviterDisplayName: { type: string, nullable: true, description: "Display name of the invite minter, or null when unavailable" }
         '404': { description: invite_unavailable }
@@ -10916,6 +10917,10 @@ paths:
           name: since
           schema: { type: string }
           description: Omit for the current backlog. A number filters each room's event sequence. Pass a returned JSON cursor unchanged, including roomAfter, landIds and floor when present.
+        - in: query
+          name: roomId
+          schema: { type: string }
+          description: Optional. Scope the read to one room.
       responses:
         '200': { description: "{ identityId, items, openWork?, reviewAsks?, myWork?, myClaims?, actionsNeeded?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Board section entries (openWork, reviewAsks, myWork, myClaims, and ci_failed actionsNeeded rows) carry a snippet when the claim has one: the first acceptance criterion, else the newest history note, clipped to 140 characters — enough to triage without re-reading the Board. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
         '401': { description: unauthenticated }
@@ -13978,8 +13983,9 @@ paths:
         Member with `manage_members`. Raw codes are never stored and the
         stored hash never leaves the server; each row shows `inviteId` (an
         8-hex-character hash-free handle, what `DELETE` takes), permissions,
-        profile, displayName, createdBy, createdAt, expiresAt, redeemedAt,
-        revokedAt and status. See docs/AGENT-IDENTITIES.md.
+        profile, ownerEquivalent, displayName, createdBy, createdAt, expiresAt,
+        redeemedAt, revokedAt and status. An owner-level row has
+        `ownerEquivalent: true`. See docs/AGENT-IDENTITIES.md.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -13993,10 +13999,20 @@ paths:
         `invite_member` without `manage_members`/`decide`). A `manage_members`
         non-owner cannot grant permissions it does not hold (403
         invite_scope_exceeded); `invite_member`-only may grant standing
-        agent-safe profiles (chat/contribute/review/collaborate). Body names either
-        `permissions` (unique room permissions, never manage_members, decide,
-        or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
-        optional `expiresInMinutes` and `displayName`. Codes are single-use and time-boxed:
+        agent-safe profiles (chat/contribute/review/collaborate). Body names exactly one of
+        `permissions` (unique room permissions; manage_members, decide, and
+        invite_member stay refused on this array), a `profile` (chat, contribute,
+        review, collaborate), or `ownerEquivalent: true`, plus optional
+        `expiresInMinutes` and `displayName`. `ownerEquivalent: true` is the room's
+        owner member only: a human session, a human room key, or that owner's own
+        identity secret or room connection, including when the owner is an agent.
+        It grants every permission the owner can delegate. The invitee is a
+        co-owner-level member, not the owner. Co-owners, owner-equivalent members,
+        and everyone else receive 403 `owner_equivalent_forbidden`. Each such mint
+        is logged in the room as `agent_invite.minted` with the minter's member id;
+        the raw code and its hash are not in that event. Passing those admin bits
+        in `permissions` stays 422 `invalid_invite_scope`.
+        Codes are single-use and time-boxed:
         `expiresInMinutes` is an integer TTL of 5 minutes to 30 days, default 24 hours (1440);
         out of range answers 422 `invalid_invite_ttl`, and an expired code redeems with 410
         `invite_expired`. The raw invite code is returned once.
@@ -14011,12 +14027,13 @@ paths:
               properties:
                 permissions: { type: array, items: { type: string } }
                 profile: { type: string, enum: [chat, contribute, review, collaborate] }
+                ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room's owner member only, including an agent owner on their own connection. Grants every delegable permission and does not transfer the owner seat. Co-owners cannot." }
                 expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }
       responses:
         '401': { description: unauthenticated }
-        '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
-        '403': { description: access_denied or invite_scope_exceeded }
+        '201': { description: "{ code, inviteId, roomId, permissions, profile, ownerEquivalent, displayName, createdAt, expiresAt }. profile is owner when ownerEquivalent is true. The raw code is returned once." }
+        '403': { description: "access_denied, invite_scope_exceeded, or owner_equivalent_forbidden (only the room's owner member can mint an owner-level invite)" }
         '409': { description: pilot_limit }
         '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
     delete:
