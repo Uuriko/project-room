@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { realpathSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createServer, connect } from "node:net";
@@ -9,7 +9,7 @@ import { isolatedHostCommand } from "../client/host-subprocess.mjs";
 
 // The executable is not a model: these are adversarial capabilities attempted
 // from inside a real subprocess, even if room text asks for them.
-test("automatic host cannot read parent secrets or reach the network", async t => {
+test("automatic host cannot read parent secrets or reach the network", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, async t => {
   let connections = 0;
   const listener = createServer(socket => { connections++; socket.end(); });
   await new Promise(resolve => listener.listen(0, "127.0.0.1", resolve));
@@ -22,7 +22,7 @@ test("automatic host cannot read parent secrets or reach the network", async t =
     socket.once("error", reject); socket.once("end", resolve); socket.resume();
   });
   assert.equal(connections, 1);
-  const parent = mkdtempSync(join(tmpdir(), "room-host-boundary-"));
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "room-host-boundary-")));
   t.after(() => rmSync(parent, { recursive: true, force: true }));
   const checkout = join(parent, "checkout"); mkdirSync(checkout);
   writeFileSync(join(parent, "private.txt"), "DO-NOT-READ");
@@ -38,8 +38,8 @@ test("automatic host cannot read parent secrets or reach the network", async t =
   assert.equal(connections, 1, "the isolated host never reached the parent's live listener");
 });
 
-test("sandbox refuses executables outside the checkout and system paths", () => {
-  const parent = mkdtempSync(join(tmpdir(), "room-host-policy-"));
+test("sandbox refuses executables outside the checkout and system paths", { skip: process.platform !== "linux" && "Requires Linux bubblewrap isolation" }, () => {
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "room-host-policy-")));
   try {
     const checkout = join(parent, "checkout"); mkdirSync(checkout);
     const external = join(parent, "external"); writeFileSync(external, "#!/bin/sh\n");
@@ -49,7 +49,7 @@ test("sandbox refuses executables outside the checkout and system paths", () => 
 
 test("hosted runner Node is exposed as a single read-only binary, not a tool-cache directory", t => {
   if (!process.execPath.startsWith("/opt/hostedtoolcache/node/")) return t.skip("requires setup-node runner");
-  const checkout = mkdtempSync(join(tmpdir(), "room-host-runner-"));
+  const checkout = realpathSync(mkdtempSync(join(tmpdir(), "room-host-runner-")));
   try {
     const command = isolatedHostCommand({ command: process.execPath, args: ["--version"] }, checkout);
     const bind = command.args.indexOf("--ro-bind", command.args.indexOf("--bind") + 1);
@@ -59,7 +59,7 @@ test("hosted runner Node is exposed as a single read-only binary, not a tool-cac
 });
 
 test("configured environment is refused before a host starts", () => {
-  const parent = mkdtempSync(join(tmpdir(), "room-host-env-"));
+  const parent = realpathSync(mkdtempSync(join(tmpdir(), "room-host-env-")));
   try { assert.throws(() => isolatedHostCommand({ command: process.execPath, args: [], env: { API_TOKEN: "private" } }, parent), /configured environment/); }
   finally { rmSync(parent, { recursive: true, force: true }); }
 });

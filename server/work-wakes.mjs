@@ -102,12 +102,14 @@ export class WorkWakes {
     // door sleeps through the assignment until its wait expires.
     if (inserted.changes > 0) this.store.agentHeartbeats?._releaseWakeWaiter(agentId, roomId);
   }
-  pending(agentId, { roomId = null, hostId = null, limit = 50 } = {}) {
+  pending(agentId, { roomId = null, hostId = null, limit = 50, after = null } = {}) {
     // Existing hostless callers retain their mention/DM contract. New work delivery
     // requires the reporting host, whose explicit consent is checked below.
     if (!this.available || hostId === null) return [];
     const rows = this.db.prepare(`SELECT * FROM agent_work_wakes WHERE agent_id=? AND delivered_at IS NULL
-      AND invalidated_at IS NULL AND (? IS NULL OR room_id=?) ORDER BY created_at,signal_id`).all(agentId, roomId, roomId);
+      AND invalidated_at IS NULL AND (? IS NULL OR room_id=?)
+      AND (? IS NULL OR created_at>? OR (created_at=? AND signal_id>?))
+      ORDER BY created_at,signal_id`).all(agentId, roomId, roomId, after?.createdAt ?? null, after?.createdAt ?? 0, after?.createdAt ?? 0, after?.signalId ?? "");
     const result = [], rooms = new Map(), now = this.store.now();
     for (const row of rows) {
       if (!this.optedIn(agentId, row.room_id, hostId)) continue;

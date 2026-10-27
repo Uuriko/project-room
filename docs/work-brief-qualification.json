@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "runtime": "v24.19.0",
+  "synthetic": true,
+  "scope": "Payload and freshness contracts only; broad fixture contains only synthetic public messages.",
+  "payloadBytes": {
+    "minimal": 123,
+    "selectedBrief": 4027,
+    "broadContext": 65850
+  },
+  "historyGrowthPreservesBrief": true,
+  "changes": [
+    {
+      "scenario": "requirements",
+      "status": "changed",
+      "changedSections": [
+        "objective"
+      ],
+      "requiresFreshRead": true,
+      "authorityGranted": false
+    },
+    {
+      "scenario": "access",
+      "status": "changed",
+      "changedSections": [
+        "authority"
+      ],
+      "requiresFreshRead": true,
+      "authorityGranted": false
+    },
+    {
+      "scenario": "handoff",
+      "status": "changed",
+      "changedSections": [
+        "progress"
+      ],
+      "requiresFreshRead": true,
+      "authorityGranted": false
+    },
+    {
+      "scenario": "result",
+      "status": "changed",
+      "changedSections": [
+        "evidence"
+      ],
+      "requiresFreshRead": true,
+      "authorityGranted": false
+    }
+  ],
+  "limitations": [
+    "No model execution comparison",
+    "No human productivity measurement",
+    "Brief omits discussion and external evidence; unchanged version does not validate omitted content"
+  ]
+}

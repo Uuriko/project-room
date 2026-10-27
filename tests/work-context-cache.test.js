@@ -13,6 +13,7 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
 import { readResumablePreparation } from "../client/work-context-cache.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
+import { compareWorkBriefs } from "../client/work-brief.mjs";
 
 async function fixture(t) {
   const f = createAcceptanceFixture(); let store = f.store, server, port;
@@ -52,6 +53,7 @@ test("retained discussion survives service/client restart and appends without re
   await f.restart(); f.post("later", "A new contribution");
   const second = await readResumablePreparation(new RoomAgentClient(f.connection), "test-handoff", f.options);
   assert.equal(second.continuation.reused, true); assert.equal(second.continuation.deltaItems, 1);
+  assert.equal(compareWorkBriefs(first.workBrief, second.workBrief).status, "same", "discussion growth is not a changed task brief");
   assert.deepEqual(bodies(second), [...bodies(first), "A new contribution"]);
   assert.ok(second.continuation.receivedBytes < first.continuation.receivedBytes / 2);
   t.diagnostic(`Controlled discussion bytes: full ${first.continuation.receivedBytes}, resumed ${second.continuation.receivedBytes}; retained ${second.continuation.retainedItems}, delta ${second.continuation.deltaItems}`);
@@ -59,6 +61,7 @@ test("retained discussion survives service/client restart and appends without re
     purpose: "Use the revised instructions", outputs: null, boundaries: null, escalation: null });
   const third = await f.read(); assert.equal(third.continuation.deltaItems, 0); assert.deepEqual(bodies(third), bodies(second));
   assert.equal(third.instructions.charter.purpose, "Use the revised instructions");
+  assert.deepEqual(compareWorkBriefs(second.workBrief, third.workBrief).changedSections, ["instructions"]);
   assert.equal(third.changedDuringRead, false); assert.equal(third.eventsAfterDiscussion, false);
 });
 
@@ -182,7 +185,7 @@ test("existing preflight CLI opts into durable resume while numeric checkpoints 
     const child = spawn(process.execPath, [script, f.directory, "test-handoff", mode], { cwd, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "";
     child.stdout.on("data", chunk => stdout += chunk); child.stderr.on("data", chunk => stderr += chunk);
-    child.on("error", reject); child.on("close", code => { try { assert.equal(code, 2, stderr); resolve(JSON.parse(stdout)); } catch (error) { reject(error); } });
+    child.on("error", reject); child.on("close", code => { try { assert.equal(code, mode === "--brief" ? 0 : 2, stderr); resolve(JSON.parse(stdout)); } catch (error) { reject(error); } });
   });
   const first = await run("--resume"); assert.equal(first.preparation.continuation.reused, false);
   f.post("cli-later");
@@ -191,4 +194,10 @@ test("existing preflight CLI opts into durable resume while numeric checkpoints 
   assert.equal(JSON.stringify(next).includes(f.connection.token), false);
   const legacy = await run(String(next.preparation.discussion.checkpoint));
   assert.deepEqual(legacy.preparation.discussion.items, []); assert.equal(legacy.preparation.continuation, undefined);
+  const cacheBefore = readFileSync(f.files()[0], "utf8");
+  const brief = await run("--brief");
+  assert.equal(brief.type, "agent_work_brief");
+  assert.equal(brief.workBrief.version, next.preparation.workBrief.version);
+  assert.equal(JSON.stringify(brief).includes("cli-later"), false);
+  assert.equal(readFileSync(f.files()[0], "utf8"), cacheBefore, "brief-only read does not touch discussion cache");
 });

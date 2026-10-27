@@ -65,7 +65,7 @@ function createRoom(ctx, roomId, kind, title) {
 
 const SECRET = "secret-phrase-p2-11";
 
-test("a solely owned personal room is archived and its messages and files are purged", async t => {
+for (const entityProjection of [false, true]) test(`a solely owned personal room is archived and its messages and files are purged (entities=${entityProjection})`, async t => {
   const ctx = await deletionAccount(t, 1);
   const roomId = "solo-notes";
   const { key } = createRoom(ctx, roomId, "personal", "Solo notes");
@@ -74,10 +74,26 @@ test("a solely owned personal room is archived and its messages and files are pu
     id: "secret-file", filename: "secret.txt", mediaType: "text/plain",
     data: Buffer.from("secret-bytes-p211").toString("base64")
   });
+  const { pushProjectMap, recordProjectMapPull } = await import('../server/project-map-store.mjs');
+  await pushProjectMap(ctx.f.store, roomId, { repo: 'private/repo', revision: 'r1', files: [{ path: 'private.js', source: 'export const secret = 1;' }] });
+  recordProjectMapPull(ctx.f.store, roomId, { repo: 'private/repo', number: 1, files: ['private.js'] });
+  const { countPurge } = await import('../server/operator-purge.mjs');
+  assert.equal(countPurge(ctx.f.store, [{ kind: 'room', id: roomId }]).find(row => row.table === 'project_maps').rows, 1);
   // Distinct cleanup risk: private record-only rail notes and exact-retry
   // outputs must not survive personal-room account deletion.
   ctx.f.store.command(key,roomId,{id:randomUUID(),type:T.MEMBER_ADDED,data:{memberId:"rail-agent",displayName:"Rail agent",kind:"agent",permissions:["accept_work"]}});
   ctx.f.store.trialTasks.apply(roomId,"owner",{action:"create",requestId:"private-trial",taskId:"private-trial",candidateId:"rail-agent",buyerId:"owner",demigodReqId:"delete-room",title:SECRET,trialScope:{hoursMax:"1",deliverableShape:"other"},vettingRubric:[{criterion:"c1",weightBps:"10000"}],feePolicyRef:"record-only",budgetRecord:{note:SECRET}});
+  if (entityProjection) {
+    const store=ctx.f.store;
+    store.messageProjectionWindow=4;store.messageEntityProjection=true;store.maintainMessageCertification=true;
+    while(!store.backfillMessages({limit:1000}).done) {}
+    for(let i=0;i<40;i++) {
+      store.checkMessagesParity();
+      if(store.db.prepare("SELECT parity_at_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId)?.parity_at_seq===store.headSequence(roomId))break;
+    }
+    store.command(key,roomId,{id:randomUUID(),type:T.MESSAGE_EDITED,data:{messageId:"secret-note",body:SECRET+" revised",expectedMessageRevision:0}});
+    assert.ok(JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection).messages.every(m=>m._entity===1));
+  }
   const audit = ctx.f.store.db.prepare("SELECT COALESCE(MAX(revision),0) AS revision FROM account_access_events WHERE account_id=?").get(ctx.accountId);
   ctx.f.store.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)")
     .run(ctx.accountId, audit.revision + 1, 1, 0, "deletion-audit", Date.now());
@@ -99,6 +115,8 @@ test("a solely owned personal room is archived and its messages and files are pu
   const projection = ctx.f.store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection;
   assert.equal(logged.includes(SECRET), false);
   assert.equal(projection.includes(SECRET), false);
+  const normalized=ctx.f.store.db.prepare("SELECT body,record_json,reducer_extras_json FROM messages WHERE room_id=?").all(roomId);
+  assert.equal(JSON.stringify(normalized).includes(SECRET),false);
   const file = ctx.f.store.db.prepare("SELECT state, bytes, filename FROM room_attachments WHERE room_id=? AND id=?").get(roomId, "secret-file");
   assert.equal(file.state, "deleted");
   assert.equal(file.bytes, null);
@@ -110,6 +128,8 @@ test("a solely owned personal room is archived and its messages and files are pu
   const rebuilt = ctx.f.store.rebuildProjection(roomId);
   assert.equal(rebuilt.state.room.archivedAt, room.state.room.archivedAt);
   assert.equal(rebuilt.state.messages.find(message => message.id === "secret-note").body, null);
+  for (const table of ['project_maps', 'project_map_queue', 'project_map_pulls', 'project_map_notices'])
+    assert.equal(ctx.f.store.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE room_id=?`).get(roomId).n, 0, `${table} purged`);
   for(const table of ["room_trial_tasks","room_trial_requests","room_vetting_keys","room_vetting_receipts","demigod_offer_profiles","demigod_offer_requests","demigod_contracts","demigod_contract_requests","buyer_signoff_loops","buyer_signoff_requests"]) assert.equal(ctx.f.store.db.prepare(`SELECT count(*) n FROM ${table} WHERE room_id=?`).get(roomId).n,0,`${table} personal data purged`);
 });
 

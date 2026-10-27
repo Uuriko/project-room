@@ -1,6 +1,6 @@
 // Owner-only live Gmail operations. Private bodies never enter the operation journal.
 import { createHash } from 'node:crypto';
-import { ServiceError } from './store.mjs';
+import { ServiceError } from './service-error.mjs';
 import { gmailHeader as header, projectGmailMessage as project, findGmailPart, attachmentBytes, gmailAttachmentLimit, gmailMimeBody } from './gmail-content.mjs';
 const base = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const scope = 'https://www.googleapis.com/auth/gmail.modify';
