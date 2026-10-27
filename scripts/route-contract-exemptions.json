@@ -72,26 +72,6 @@
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
     },
     {
-      "template": "/api/auth/github/callback",
-      "class": "human-auth",
-      "reason": "Human browser sign-in flow (OAuth redirect dance); the API contract is the session it establishes (POST /api/session, account-session routes)."
-    },
-    {
-      "template": "/api/auth/github/start",
-      "class": "human-auth",
-      "reason": "Human browser sign-in flow (OAuth redirect dance); the API contract is the session it establishes (POST /api/session, account-session routes)."
-    },
-    {
-      "template": "/api/auth/google/callback",
-      "class": "human-auth",
-      "reason": "Human browser sign-in flow (OAuth redirect dance); the API contract is the session it establishes (POST /api/session, account-session routes)."
-    },
-    {
-      "template": "/api/auth/google/start",
-      "class": "human-auth",
-      "reason": "Human browser sign-in flow (OAuth redirect dance); the API contract is the session it establishes (POST /api/session, account-session routes)."
-    },
-    {
       "template": "/apps.md",
       "class": "discovery-doc",
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
