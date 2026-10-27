@@ -6,6 +6,7 @@ import * as compatibility from "../src/work-status.js";
 import { needsAttention, workInvolvingMe } from "../server/return-selectors.mjs";
 import { ConversationDrafts, DraftRecovery, draftRecoveryScope } from "../src/conversation.js";
 import { ReturnBrief } from "../src/return-brief.js";
+import { deriveBrowserSuites } from "../scripts/browser-suites.mjs";
 
 const work = () => ({
   id: "work", revision: 5, state: "completed", accountableMemberId: "producer",
@@ -90,7 +91,7 @@ test("browser entry wires both invitation paths and unified catch-up, not two ne
   for (const name of ["installShareLinks", "AccountClient", "ReturnBrief", "draftRecoveryScope", "nextWorkStep"]) assert.ok(app.includes(name));
   assert.equal((app.match(/function renderComposerError\(/g) || []).length, 1);
   assert.ok(!app.includes('next.className = "work-next"'));
-  const scripts = JSON.parse(readFileSync(new URL("../package.json", import.meta.url))).scripts;
-  assert.ok(scripts["test:browser"].includes("invitation-check.mjs"));
-  assert.ok(scripts["test:browser"].includes("composer-browser-check.mjs"));
+  const suites = deriveBrowserSuites(new URL("../scripts", import.meta.url).pathname);
+  assert.ok(suites.includes("scripts/invitation-check.mjs"));
+  assert.ok(suites.includes("scripts/composer-browser-check.mjs"));
 });

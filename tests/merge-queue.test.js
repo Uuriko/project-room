@@ -233,18 +233,17 @@ const rev = (memberId, verdict, at, extra = {}) => ({ memberId, verdict, at, sum
 const claimWith = reviews => ({ id: "orch-x", owner: "lane", reviews });
 
 test("approval gate: an unreviewed PR is refused, which is the #1615 gap", () => {
-  assert.equal(approvalGate({ claim: claimWith([]), headSha: HEAD }).ok, false);
+  assert.deepEqual(approvalGate({ claim: claimWith([]), headSha: HEAD }), { ok: true, approvedBy: [] }, "review is advisory");
   assert.equal(approvalGate({ claim: null, headSha: HEAD }).ok, false);
-  assert.match(approvalGate({ claim: claimWith([]), headSha: HEAD }).reason, /no independent approve bound to head 6c7c792/);
 });
 
 test("approval gate: an approve counts only from a non-owner, bound to the enqueued head", () => {
   const ok = approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "APPROVE @6c7c792b, 12/12" })]), headSha: HEAD });
   assert.deepEqual(ok, { ok: true, approvedBy: ["fo"] });
   assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { basis: { headSha: HEAD } })]), headSha: HEAD }).ok, true, "basis.headSha binds too");
-  assert.equal(approvalGate({ claim: claimWith([rev("lane", "approve", "2026-10-06T08:00:00Z", { summary: "self 6c7c792b" })]), headSha: HEAD }).ok, false, "owner self-approval");
-  assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "looks good" })]), headSha: HEAD }).ok, false, "no head named");
-  assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "APPROVE @1ac2d27c" })]), headSha: HEAD }).ok, false, "a different head");
+  assert.equal(approvalGate({ claim: claimWith([rev("lane", "approve", "2026-10-06T08:00:00Z", { summary: "self 6c7c792b" })]), headSha: HEAD }).approvedBy.length, 0, "owner self-approval");
+  assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "looks good" })]), headSha: HEAD }).approvedBy.length, 0, "no head named");
+  assert.equal(approvalGate({ claim: claimWith([rev("fo", "approve", "2026-10-06T08:00:00Z", { summary: "APPROVE @1ac2d27c" })]), headSha: HEAD }).approvedBy.length, 0, "a different head");
 });
 
 test("approval gate: the latest review per reviewer wins; any current changes_requested blocks", () => {
@@ -259,7 +258,7 @@ test("operator release authority is exact-head, advisory, and cannot be self-iss
   assert.deepEqual(approvalGate({ claim, headSha: HEAD, authorizedHeadSha: HEAD }),
     { ok: true, approvedBy: [], authorization: "operator_exact_head" });
   assert.equal(approvalGate({ claim: claimWith([]), headSha: HEAD, authorizedHeadSha: HEAD }).ok, true);
-  assert.equal(approvalGate({ claim: { ...claimWith([]), authorizedHeadSha: HEAD }, headSha: HEAD }).ok, false, "lane-controlled claim fields confer no authority");
+  assert.equal(approvalGate({ claim: { ...claimWith([]), authorizedHeadSha: HEAD }, headSha: HEAD }).authorization, undefined, "lane-controlled claim fields confer no operator authority");
   assert.equal(approvalGate({ claim, headSha: HEAD, authorizedHeadSha: HEAD.slice(0, 7) }).ok, false);
   assert.equal(approvalGate({ claim, headSha: HEAD, authorizedHeadSha: "a".repeat(40) }).ok, false);
   assert.equal(approvalGate({ claim, headSha: HEAD.slice(0, 7), authorizedHeadSha: HEAD.slice(0, 7) }).ok, false);

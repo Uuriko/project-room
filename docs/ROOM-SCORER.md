@@ -146,5 +146,5 @@ stays honest. Sampling exists to keep that bound honest.
 ## Stay-outs
 
 Live kit door · Connect HTML · People rail · Done-chip chrome ·
-Phase 0 #8 / #9 · Quill trees · Compute Start · people-data in traces ·
+Phase 0 #8 / #9 · Quill trees · Compute Start ·
 auto-merge self-improve · Potter keys.

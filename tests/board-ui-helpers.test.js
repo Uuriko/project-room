@@ -1,33 +1,18 @@
-// Board UI pure helpers: escapeHtml, columnOf, claimUpdateText,
+// Board UI pure helpers: columnOf, claimUpdateText,
 // collapseClaimUpdates, boardToolNames, canWriteClaims.
-// The browser checks own the rendered board and its controls; these tests
-// guard the classification, copy, and permission contracts the renderer
-// consumes, independent of any DOM.
+// HTML escaping lives in src/html-escape.js. The browser checks own the
+// rendered board and its controls; these tests guard the classification,
+// copy, and permission contracts the renderer consumes, independent of any DOM.
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  escapeHtml,
   columnOf,
+  placeClaims,
   claimUpdateText,
   collapseClaimUpdates,
   boardToolNames,
   canWriteClaims,
 } from "../src/board-ui.js";
-
-// --- escapeHtml: the XSS boundary every board string crosses ---
-
-test("escapeHtml escapes the five HTML metacharacters", () => {
-  assert.equal(escapeHtml(`<script>alert("x&y")</script>`), "&lt;script&gt;alert(&quot;x&amp;y&quot;)&lt;/script&gt;");
-  assert.equal(escapeHtml("it's"), "it&#39;s");
-  assert.equal(escapeHtml("a>b"), "a&gt;b");
-});
-
-test("escapeHtml tolerates nullish and non-string input", () => {
-  assert.equal(escapeHtml(null), "");
-  assert.equal(escapeHtml(undefined), "");
-  assert.equal(escapeHtml(42), "42");
-  assert.equal(escapeHtml("plain"), "plain");
-});
 
 // --- columnOf: board placement is a pure function of claim state ---
 
@@ -43,10 +28,17 @@ test("columnOf drops a null item and unknown states instead of guessing", () => 
 });
 
 test("columnOf lands only completions from the last week", () => {
-  const fresh = claim("fresh", { state: "done", updatedAt: iso(NOW - DAY) });
-  const stale = claim("stale", { state: "done", updatedAt: iso(NOW - 8 * DAY) });
-  assert.equal(columnOf(fresh, byId([fresh]), NOW), "landed");
-  assert.equal(columnOf(stale, byId([stale]), NOW), null);
+  for (const [updatedAt, expected] of [
+    [iso(NOW - DAY), "landed"],
+    [iso(NOW - 7 * DAY), "landed"],
+    [iso(NOW - 7 * DAY - 1), null],
+    [iso(NOW + DAY), "landed"],
+    [undefined, null],
+    ["invalid", null],
+  ]) {
+    const item = claim("done", { state: "done", updatedAt });
+    assert.equal(columnOf(item, byId([item]), NOW), expected, String(updatedAt));
+  }
 });
 
 test("columnOf prefers the newest history stamp over updatedAt", () => {
@@ -92,6 +84,30 @@ test("columnOf maps blocked/claimed/in_progress to their columns", () => {
   const progress = claim("p", { state: "in_progress", owner: "w" });
   assert.equal(columnOf(blocked, byId([blocked]), NOW), "blocked");
   assert.equal(columnOf(progress, byId([progress]), NOW), "claimed");
+});
+
+// Delivery awaits review even when no open pull request can place the card.
+// Only done claims age out of the board; lease and update dates must not hide
+// delivered evidence while its review is still pending.
+for (const [label, pullRequest] of [
+  ["no linked PR", undefined],
+  ["an open PR", { url: "https://github.com/o/r/pull/12" }],
+  ["a closed PR", { url: "https://github.com/o/r/pull/12", outcome: "closed" }],
+  ["a merged PR", { url: "https://github.com/o/r/pull/12", outcome: "merged" }],
+]) test(`placeClaims keeps delivered work in review with ${label}`, () => {
+  for (const extra of [
+    {},
+    { leaseExpiresAt: iso(NOW - DAY) },
+    { updatedAt: iso(NOW - 8 * DAY) },
+    { updatedAt: iso(NOW + DAY) },
+    { updatedAt: "invalid" },
+  ]) {
+    const item = claim("delivered", { state: "delivered", owner: "w", pullRequest, ...extra });
+    const before = structuredClone(item);
+    const columns = placeClaims([item], NOW);
+    assert.deepEqual(columns, { ready: [], claimed: [], blocked: [], review: [item], landed: [] }, JSON.stringify(extra));
+    assert.deepEqual(item, before, "placing a claim must not mutate it");
+  }
 });
 
 // --- claimUpdateText: activity feed copy ---
