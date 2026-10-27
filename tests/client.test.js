@@ -392,7 +392,7 @@ function liveRefreshFixture(t, snapshotRead = async sequence => response(snapsho
   t.after(() => client.disconnect());
   return { client, seen, reads: () => reads, setSequence: value => { current = value; }, event,
     notify: (value = event(current)) => stream.dispatchEvent(new MessageEvent('room-event', { data: JSON.stringify(value) })),
-    emit: type => stream.dispatchEvent(new Event(type)) };
+    emit: (type, readyState) => { if (readyState !== undefined) stream.readyState = readyState; stream.dispatchEvent(new Event(type)); } };
 }
 
 test('a command and its stream notifications need only one snapshot in either arrival order', async t => {
@@ -435,10 +435,12 @@ test('unknown event hints and reconnects still fetch snapshots even when room se
     f.notify(value); await f.client.flight.promise;
     assert.equal(f.reads(), before + 1);
   }
-  for (const type of ['open', 'error']) {
-    const before = f.reads(); f.emit(type); await f.client.flight.promise;
+  // A retrying (CONNECTING) stream's error waits for open; a CLOSED one reads now.
+  for (const [type, readyState] of [['open', 1], ['error', 2]]) {
+    const before = f.reads(); f.emit(type, readyState); await f.client.flight.promise;
     assert.equal(f.reads(), before + 1, type);
   }
+  { const before = f.reads(); f.emit('error', 0); await f.client.flight?.promise; assert.equal(f.reads(), before, 'error while CONNECTING'); }
   const before = f.reads();
   await f.client.refresh();
   assert.equal(f.reads(), before + 1, 'manual refresh');
