@@ -159,6 +159,16 @@ export function memberStatus(member, context) {
   return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
 }
 
+// One accessible name per member row: who, agent or human, and how available.
+// Screen readers and browser drivers address the row by this name instead of
+// its initials and status chips.
+export function memberRowName(member, status) {
+  const name = String(member?.displayName ?? "").trim();
+  const kind = member?.kind === "agent" ? "agent" : "human";
+  const state = String(status ?? "").trim();
+  return [name, kind, state].filter(Boolean).join(", ");
+}
+
 // Compact Done receipt for an agent who posted completion. Not chat spam.
 export function memberDoneChip(member, { workItems } = {}) {
   if (!member || member.kind !== "agent" || member.active === false) return null;

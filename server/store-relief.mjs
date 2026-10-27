@@ -25,7 +25,7 @@
 // (server/messages-store.mjs) puts every moved message back.
 
 import { ARCHIVE_DEFAULT_KEEP, operatorArchive } from "./operator-archive.mjs";
-import { messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { healBackfillQuarantines, messagesBackfillCaughtUp } from "./messages-store.mjs";
 
 export const RELIEF_REASON = "store-growth automatic projection relief";
 export const RELIEF_ROOMS_PER_TICK = 3;
@@ -38,7 +38,7 @@ function roomsPastLine(db, limitBytes, max) {
 }
 
 function parked(db, roomId) {
-  try { return Boolean(db.prepare("SELECT 1 FROM messages_backfill_blocks WHERE room_id=?").get(roomId)); }
+  try { return Boolean(db.prepare("SELECT 1 FROM messages_backfill_blocks WHERE room_id=? AND skipped=0").get(roomId)); }
   catch { return false; }
 }
 
@@ -59,6 +59,10 @@ export async function relieveProjectionsIncrementally(store, options = {}) {
   }
   let catchUpEvents = 0, catchUpChunks = 0;
   if (!store?.readOnly && Number.isFinite(limitBytes) && recovery && typeof recovery === "object") {
+    // A quarantined event must not keep this room out of catch-up. The
+    // heal is the same one the integrity tick runs; a real park (skipped=0)
+    // still skips catch-up and archives below the cursor.
+    try { healBackfillQuarantines(store); } catch { /* parked() still treats an unreadable row as not parked */ }
     for (const roomId of roomsPastLine(store.db, limitBytes, maxRooms)) {
       if (parked(store.db, roomId)) continue;
       while (catchUpEvents < eventCap && !messagesBackfillCaughtUp(store.db, roomId)) {
