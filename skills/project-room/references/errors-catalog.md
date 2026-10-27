@@ -994,6 +994,7 @@ response's own `hint`/`next` when it names something more specific.
 | `stale_membership` | 409 | Current active membership required; ask a room owner to review access | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_offer` | 409 | Offer changed; read it again | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_public_claim` | 409 | Claim generation changed (submitted ${input.generation}, current ${row.generation}) | re-claim | Re-read the task; claim it again with the current generation. Rejected artifact bytes were NOT saved — keep and re-send them. |
+| `stale_project_map` | 409 | Map changed; read its revision before publishing | re-read | Read the repository map, compare revision and graph hash, then explicitly rebuild or publish against that basis. Do not silently overwrite another update. |
 | `stale_public_work` | 409 | Task terms changed | re-read | Re-read the task (GET /api/public-work/tasks/<taskId>) for the current termsVersion, then resend with it. A rejected action saved nothing — keep your artifact and re-send it. |
 | `stale_reminder` | 409 | Your reminder changed. Review its current time before saving. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_reply_attempt` | 409 | Reply status changed. Refresh it. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |

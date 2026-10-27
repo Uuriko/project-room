@@ -17189,6 +17189,110 @@ paths:
         '200': {description: Signed receipt and configured trust provenance}
         '403': {description: Room or party access denied}
         '404': {description: Receipt not available}
+  /api/rooms/{roomId}/map/query:
+    get:
+      operationId: project-map-query
+      summary: Query a file or symbol on the room code map
+      description: Room member read. Returns neighbors and dependents for one file or symbol. Disabled rooms return enabled false.
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string}}
+        - {in: query, name: repo, schema: {type: string}}
+      responses:
+        '200': {description: Map query}
+        '401': {description: No room credential}
+  /api/rooms/{roomId}/map/path:
+    get:
+      operationId: project-map-path
+      summary: Shortest code-map path between two files or symbols
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: query, name: from, schema: {type: string}}
+        - {in: query, name: to, schema: {type: string}}
+        - {in: query, name: repo, schema: {type: string}}
+      responses:
+        '200': {description: Path, or found false}
+        '401': {description: No room credential}
+        '422': {description: from and to are required}
+  /api/rooms/{roomId}/map/hotspots:
+    get:
+      operationId: project-map-hotspots
+      summary: Most coupled files on the room code map
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: query, name: repo, schema: {type: string}}
+      responses:
+        '200': {description: Hotspot list}
+        '401': {description: No room credential}
+  /api/rooms/{roomId}/map/explain:
+    get:
+      operationId: project-map-explain
+      summary: Short explanation of one file or symbol
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string}}
+        - {in: query, name: repo, schema: {type: string}}
+      responses:
+        '200': {description: Explanation}
+        '401': {description: No room credential}
+  /api/rooms/{roomId}/map:
+    post:
+      x-room-permission: manage_claims
+      operationId: project-map-push
+      summary: Push sources and rebuild the room code map
+      description: Owner, manage_claims or steer write, subject to autonomy policy. Bounded source updates use the local parser. Graphify intake requires operator enablement, repository binding and a matching repo/revision envelope; no server subprocess or model runs.
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, revision]
+              properties:
+                repo: {type: string}
+                revision: {type: string}
+                expectedRevision: {type: string, nullable: true}
+                expectedGraphSha256: {type: string, nullable: true, description: "Previously read provenance.graphSha256; null when absent. Detects changed Graphify content at the same revision."}
+                replace: {type: boolean}
+                files: {type: array}
+                removed: {type: array}
+                graphify: {type: object}
+      responses:
+        '200': {description: Map rebuilt, or enabled false}
+        '401': {description: No room credential}
+        '403': {description: Missing current authority or configuration}
+        '409': {description: Map revision or graph digest changed}
+        '422': {description: Invalid repo or body}
+  /api/rooms/{roomId}/map/pulls:
+    post:
+      x-room-permission: manage_claims
+      operationId: project-map-pulls
+      summary: Record an open pull request file set
+      description: Owner, manage_claims or steer write, subject to autonomy policy. Compares same-repository file sets with known open work; possible duplicates are advisory and need review.
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, number, files]
+              properties:
+                repo: {type: string}
+                number: {type: integer}
+                title: {type: string}
+                state: {type: string}
+                files: {type: array, items: {type: string}}
+                claimId: {type: string}
+      responses:
+        '200': {description: Pull recorded. overlap is present when the file set matches open work}
+        '401': {description: No room credential}
+        '403': {description: Missing current authority or configuration}
+        '409': {description: Map revision or graph digest changed}
+        '422': {description: Invalid repo or number}
 components:
   securitySchemes:
     accountBrowserSession:
