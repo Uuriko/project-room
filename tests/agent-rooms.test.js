@@ -60,9 +60,9 @@ test("an identity creates a room self-serve and becomes its owner", async t => {
   assert.equal(created.duplicate, false);
   // RC-2026-09-18-030: the create response names the first-owner moves.
   assert.deepEqual(created.next.map(n => n.action),
-    ["start-work", "post-message", "finish-work", "create-task", "invite-members", "publish-card", "read-quickstart"]);
-  assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.doc)),
-    "every next step names a path or doc plus what to do");
+    ["start-work", "post-message", "finish-work", "claim-work", "handoff-work", "create-task", "invite-members", "publish-card", "read-quickstart"]);
+  assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.tool || n.doc)),
+    "every next step names a path, tool or doc plus what to do");
   assert.equal(created.next[0].path, "/api/rooms/agent-den/work-claims/starter/update",
     "room-scoped next steps are templated with the new roomId");
   assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/work-claims/starter/update");

@@ -148,7 +148,7 @@ test("owner account session reads the full review; removed members are absent", 
   const [pending] = report.pendingInvites;
   assert.equal(pending.inviteId, f.invite.inviteId);
   assert.match(pending.inviteId, /^[a-f0-9]{8}$/, "the handle is the short inviteId, not a full hash");
-  assert.deepEqual(pending, { inviteId: f.invite.inviteId, displayName: "Scribe", permissions: f.invite.permissions, inviterMemberId: "owner",
+  assert.deepEqual(pending, { inviteId: f.invite.inviteId, displayName: "Scribe", permissions: f.invite.permissions, ownerEquivalent: false, inviterMemberId: "owner",
     createdAt: new Date(f.invite.createdAt).toISOString(), expiresAt: new Date(f.invite.expiresAt).toISOString(), status: "active" });
   assert.equal(Date.parse(pending.expiresAt) - Date.parse(pending.createdAt), 3600000);
   assert.ok(!JSON.stringify(report).includes(f.revokedInvite.inviteId), "a revoked invite code is not pending");

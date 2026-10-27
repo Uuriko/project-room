@@ -166,7 +166,8 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   // Keep the existing catalog budget while accounting explicitly for the
   // assistant facade and claim provenance added by this release. New tools
   // cannot silently consume this allowance; the core budget stays unchanged.
-  const releaseTools = new Set(["room_assistant_context", "room_assistant_action", "room_work_claim_provenance"]);
+  const releaseTools = new Set(["room_assistant_context", "room_assistant_action", "room_work_claim_provenance",
+    "room_claim", "room_handoff"]);
   for (const name of releaseTools) {
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);
     assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`);
