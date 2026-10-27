@@ -31,6 +31,7 @@ import { backfillPublicReadModel as fillPublicReadModel } from '../server/public
 import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-keeper.mjs';
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
+import { pruneBountyIdempotency } from '../server/bounty-escrow.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
@@ -506,10 +507,12 @@ export class ProjectRoom extends DurableObject {
     let webhookDeliveries = { deleted: 0 };
     let oauthProvider = { pruned: 0 };
     let abuseRateBuckets = { pruned: 0 };
+    let bountyIdempotency = { pruned: 0, byAge: 0, byCount: 0 };
     try {
       webhookDeliveries = this.store.agentPlugin.pruneWebhookDeliveries();
       oauthProvider = pruneOAuthProvider(this.store.db, { now: Date.now(), limit: 100 });
       abuseRateBuckets = pruneAbuseRateBuckets(this.store.db, { now: Date.now(), limit: 100 });
+      bountyIdempotency = pruneBountyIdempotency(this.store.db, { now: Date.now(), limit: 500 });
     } finally {
       console.info(JSON.stringify({
         event: 'room.retention', table: receipt.table, deleted: receipt.deleted,
@@ -517,10 +520,11 @@ export class ProjectRoom extends DurableObject {
         eligible: receipt.categories?.[receipt.table]?.eligible ?? 0,
         webhookDeleted: webhookDeliveries?.deleted ?? 0,
         oauthPruned: oauthProvider?.pruned ?? 0,
-        abuseRatePruned: abuseRateBuckets?.pruned ?? 0
+        abuseRatePruned: abuseRateBuckets?.pruned ?? 0,
+        bountyIdempotencyPruned: bountyIdempotency?.pruned ?? 0
       }));
     }
-    return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+    return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets, bountyIdempotency };
   }
   // Due jobs only. Slow jobs (retention, integrity, backup) run from the
   // safety-net cron. Fast jobs run from the alarm when their nextDueAt arrives.

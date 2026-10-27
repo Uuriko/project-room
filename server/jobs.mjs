@@ -11,6 +11,7 @@ import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
+import { pruneBountyIdempotency } from "./bounty-escrow.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
 import { GmailMailbox } from "./gmail-mailbox.mjs";
@@ -251,12 +252,16 @@ async function runNodeRetention(store, ctx) {
   let webhookDeliveries = { deleted: 0 };
   let oauthProvider = { pruned: 0 };
   let abuseRateBuckets = { pruned: 0 };
+  let bountyIdempotency = { pruned: 0, byAge: 0, byCount: 0 };
   try {
     webhookDeliveries = store.agentPlugin.pruneWebhookDeliveries();
     oauthProvider = pruneOAuthProvider(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
     abuseRateBuckets = pruneAbuseRateBuckets(store.db, { now: ctx.now?.() ?? Date.now(), limit: 100 });
+    // The bounty idempotency replay cache is the same kind of cache: rows
+    // past the retention window are deleted in a bounded batch per tick.
+    bountyIdempotency = pruneBountyIdempotency(store.db, { now: ctx.now?.() ?? Date.now(), limit: 500 });
   } catch { /* a room that has never stored these caches has no table */ }
-  return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets };
+  return { ...receipt, webhookDeliveries, oauthProvider, abuseRateBuckets, bountyIdempotency };
 }
 
 function defineJob(job) {
