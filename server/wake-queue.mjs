@@ -72,8 +72,19 @@ const view = row => ({ queueKey: row.queue_key, intent: JSON.parse(row.intent), 
   attempts: row.attempts, maxAttempts: row.max_attempts, leaseOwner: row.lease_owner, leaseExpiresAt: row.lease_expires_at,
   lastError: row.last_error, createdAt: row.created_at, updatedAt: row.updated_at });
 
+// B3-5-F1/F3 time discipline: lease and backoff terms are wall-clock in the
+// table (that is what survives a restart), but a lease this process handed
+// out is also tracked against the monotonic clock. A forward wall step
+// (NTP correction, VM resume) can push wall time past lease_expires_at
+// while the holder has had only milliseconds of real time; recover() must
+// not treat that lease as expired until the lease term has also elapsed
+// in monotonic time. After a restart the registry is empty and the wall
+// terms govern alone, exactly as before.
+const monoNowMs = () => performance.now();
+const liveLeaseKey = (roomId, memberId, queueKey) => `${roomId}\0${memberId}\0${queueKey}`;
+
 export class WakeQueue {
-  constructor(store) { this.store = store; this.db = store.db; }
+  constructor(store) { this.store = store; this.db = store.db; this._liveLeases = new Map(); }
   // The wake queue is purely additive at v27, so a v27 store written before
   // W4-45 has none of these objects. A read-only open (backup verification,
   // invitation audit) must not migrate, so allowAbsent accepts a file where the
@@ -381,6 +392,7 @@ export class WakeQueue {
     // Paused members start no new attempts, even by direct lease.
     const changed = this.db.prepare("UPDATE wake_queue SET state='leased',attempts=attempts+1,lease_owner=?,lease_expires_at=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=? AND state='pending' AND due_at<=? AND NOT EXISTS (SELECT 1 FROM wake_queue_pause p WHERE p.room_id=wake_queue.room_id AND p.member_id=wake_queue.member_id)")
       .run(owner, now + wakeQueueLimits.leaseMs, now, roomId, memberId, queueKey, now).changes;
+    if (changed) this._liveLeases.set(liveLeaseKey(roomId, memberId, queueKey), { owner, monoStart: monoNowMs() });
     return changed ? this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, memberId, queueKey) : null;
   }
   // complete is receipt-idempotent: the requestId receipt is written in the
@@ -406,6 +418,7 @@ export class WakeQueue {
       if (!row || row.state !== "leased" || row.lease_owner !== leaseOwner) fail(409, "wake_not_leased", "Only the lease holder can complete a wake.");
       const now = this.store.now();
       this.db.prepare("UPDATE wake_queue SET state='done',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=?").run(now, roomId, memberId, queueKey);
+      this._liveLeases.delete(liveLeaseKey(roomId, memberId, queueKey));
       const receipt = { requestId, queueKey, state: "done", effect, completedAt: now };
       this.db.prepare("INSERT INTO wake_queue_commands VALUES(?,?,?,?,?)").run(roomId, memberId, requestId, fingerprint, JSON.stringify(receipt));
       return { receipt, duplicate: false, wake: view(this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, memberId, queueKey)) };
@@ -418,13 +431,21 @@ export class WakeQueue {
       const row = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND queue_key=?").get(roomId, memberId, queueKey);
       if (!row || row.state !== "leased" || row.lease_owner !== leaseOwner) fail(409, "wake_not_leased", "Only the lease holder can fail a wake.");
       const message = String(error ?? "unknown").slice(0, 200);
+      this._liveLeases.delete(liveLeaseKey(roomId, memberId, queueKey));
       if (row.attempts >= row.max_attempts) {
         this.db.prepare("UPDATE wake_queue SET state='dead',lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=?").run(message, now, roomId, memberId, queueKey);
         return { state: "dead", attempts: row.attempts };
       }
       const backoff = Math.min(wakeQueueLimits.baseBackoffMs * 2 ** (row.attempts - 1), wakeQueueLimits.maxBackoffMs);
-      this.db.prepare("UPDATE wake_queue SET state='pending',due_at=?,lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=?").run(now + backoff, message, now, roomId, memberId, queueKey);
-      return { state: "pending", attempts: row.attempts, dueAt: now + backoff };
+      // B3-5-F3: backoff is anchored at the lease, not at the seam clock at
+      // fail time. A backward wall step between lease and fail would
+      // otherwise stamp due_at before the wake was even leased, erasing
+      // the backoff in real terms; the lease's own time base
+      // (lease_expires_at - leaseMs) cannot move backwards.
+      const leasedAt = Number.isSafeInteger(row.lease_expires_at) ? row.lease_expires_at - wakeQueueLimits.leaseMs : now;
+      const dueAt = Math.max(now, leasedAt) + backoff;
+      this.db.prepare("UPDATE wake_queue SET state='pending',due_at=?,lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=?").run(dueAt, message, now, roomId, memberId, queueKey);
+      return { state: "pending", attempts: row.attempts, dueAt };
     });
   }
   // recover runs at store open: leases whose holder vanished (process died)
@@ -432,10 +453,31 @@ export class WakeQueue {
   // crash-retry consumes budget exactly like an observed failure. Returns the
   // number of recovered wakes.
   recover(now = this.store.now()) {
-    // M-18: exhausted leases must not get an extra attempt after a crash —
-    // they go to dead, like fail() would have, instead of back to pending.
-    this.db.prepare("UPDATE wake_queue SET state='dead',lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE state='leased' AND lease_expires_at<=? AND attempts>=max_attempts")
-      .run("crash_recovery_attempts_exhausted", now, now);
-    return this.db.prepare("UPDATE wake_queue SET state='pending',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE state='leased' AND lease_expires_at<=? AND attempts<max_attempts").run(now, now).changes;
+    // B3-5-F1: a lease handed out by this process whose term has not
+    // elapsed in monotonic time is not expired, however far the wall
+    // clock has stepped; skip it (the holder is still in flight). Once
+    // the monotonic term has elapsed the wall-expired lease recovers as
+    // before, and the registry entry is dropped with it.
+    const expired = this.db.prepare("SELECT room_id,member_id,queue_key,attempts,max_attempts FROM wake_queue WHERE state='leased' AND lease_expires_at<=?").all(now);
+    const mono = monoNowMs();
+    let recovered = 0;
+    for (const row of expired) {
+      const key = liveLeaseKey(row.room_id, row.member_id, row.queue_key);
+      const live = this._liveLeases.get(key);
+      if (live) {
+        if (mono - live.monoStart < wakeQueueLimits.leaseMs) continue;
+        this._liveLeases.delete(key);
+      }
+      // M-18: exhausted leases must not get an extra attempt after a crash —
+      // they go to dead, like fail() would have, instead of back to pending.
+      if (row.attempts >= row.max_attempts) {
+        this.db.prepare("UPDATE wake_queue SET state='dead',lease_owner=NULL,lease_expires_at=NULL,last_error=?,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=? AND state='leased'")
+          .run("crash_recovery_attempts_exhausted", now, row.room_id, row.member_id, row.queue_key);
+      } else {
+        recovered += this.db.prepare("UPDATE wake_queue SET state='pending',lease_owner=NULL,lease_expires_at=NULL,updated_at=? WHERE room_id=? AND member_id=? AND queue_key=? AND state='leased'")
+          .run(now, row.room_id, row.member_id, row.queue_key).changes;
+      }
+    }
+    return recovered;
   }
 }

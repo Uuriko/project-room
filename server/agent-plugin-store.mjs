@@ -150,6 +150,17 @@ export const SKIPPED_RECHECK_MS = 10 * 60 * 1000;
 // that died mid-attempt and the row is reclaimable.
 export const WEBHOOK_DELIVERY_CLAIM_LEASE_MS = 5 * 60 * 1000;
 
+// B3-5-F2 time discipline: the claim lease above is wall-clock in the
+// table (that is what lets another process reclaim a dead drain's row),
+// but a claim this process handed out is also tracked against the
+// monotonic clock. A forward wall step (NTP correction, VM resume) can
+// push wall time past claim_expires_at while the attempt it protects
+// has had only milliseconds of real time; a second local attempt must
+// not reclaim — and re-POST — the delivery until the lease term has
+// also elapsed in monotonic time. The registry is per store instance:
+// cross-process reclaim still rests on the wall lease alone.
+const monoNowMs = () => performance.now();
+
 // The in-memory journal keeps this many newest rows per subscription.
 // Retention keeps those, plus delivered and dead-letter rows inside the
 // window below. Pending and failed rows are never pruned: they can still
@@ -1325,6 +1336,16 @@ export class AgentPluginStore {
   // Returns the claim's expiry (the ownership token completion writes
   // must present), or null when another drain owns the row.
   claimWebhookDelivery(row, now) {
+    // B3-5-F2: a live local claim whose lease term has not elapsed in
+    // monotonic time blocks reclaim no matter what the wall clock says
+    // (see the registry note at WEBHOOK_DELIVERY_CLAIM_LEASE_MS). A
+    // registry entry whose monotonic term HAS elapsed is stale — the
+    // holder is gone or done in real terms too — and is dropped.
+    const inFlight = (this._inFlightClaims ??= new Map()).get(row.delivery_id);
+    if (inFlight) {
+      if (monoNowMs() - inFlight.monoStart < WEBHOOK_DELIVERY_CLAIM_LEASE_MS) return null;
+      this._inFlightClaims.delete(row.delivery_id);
+    }
     const claimExpiresAt = now + WEBHOOK_DELIVERY_CLAIM_LEASE_MS;
     const claimed = this.store.transaction(() => this.db.prepare(
       `UPDATE agent_webhook_deliveries SET claim_expires_at=?
@@ -1332,6 +1353,7 @@ export class AgentPluginStore {
          AND next_attempt_at=? AND next_attempt_at<=?
          AND (claim_expires_at IS NULL OR claim_expires_at<=?)`)
       .run(claimExpiresAt, row.delivery_id, row.next_attempt_at, now, now).changes);
+    if (claimed === 1) this._inFlightClaims.set(row.delivery_id, { claimExpiresAt, monoStart: monoNowMs() });
     return claimed === 1 ? claimExpiresAt : null;
   }
 
@@ -1403,6 +1425,11 @@ export class AgentPluginStore {
       // (The drain loop keeps a last-resort guard for throws that happen
       // before this layer can record anything.)
       return this.#isolateClaimedDelivery(row, { error, now, claimExpiresAt, isolated });
+    } finally {
+      // B3-5-F2: the attempt is over in real time; release the monotonic
+      // in-flight guard for this claim so a later retry can claim at once.
+      const inFlight = this._inFlightClaims?.get(row.delivery_id);
+      if (inFlight?.claimExpiresAt === claimExpiresAt) this._inFlightClaims.delete(row.delivery_id);
     }
   }
 

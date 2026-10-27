@@ -131,6 +131,35 @@ export function wakeForAgent(store, { agentId, kind, roomId, messageId }) {
   return { woken: Boolean(signal), enqueued, signal };
 }
 
+// B3-5-F4: signals older than the selection window are never selected
+// again. That bound is deliberate, but it used to be silent — no
+// dead-letter, no counter — so a forward wall step (or a mis-set clock
+// at signal time) could age a minutes-old wake out of the window and
+// lose it without a trace. Count the aged-out rows so the loss is
+// observable on the catch-up result (and via this export) instead.
+// A signal counts as aged out when it is undelivered, of a sleeper
+// kind, has no agent.wake delivery, and predates the window.
+export function agedOutMissedWakes(store, now) {
+  if (!sleeperWakeEnabled(store, null) || !store?.db?.prepare) return 0;
+  const coverage = roomFilter(store);
+  if (!coverage) return 0;
+  try {
+    const row = store.db.prepare(`SELECT COUNT(*) AS n
+      FROM agent_wake_signals s
+      WHERE s.delivered_at IS NULL AND s.kind IN ('dm','mention') AND s.created_at < ?
+        AND NOT EXISTS (
+          SELECT 1 FROM agent_webhook_deliveries d
+          WHERE d.event_id = s.signal_id AND d.event_type = ?
+        )
+        ${coverage.sql}`)
+      .get(nowOf(store, now) - DAY_MS, WAKE_PING_EVENT, ...coverage.params);
+    return row?.n ?? 0;
+  } catch (error) {
+    if (missingTable(error)) return 0;
+    throw error;
+  }
+}
+
 export function catchUpMissedWakes(store, { limit = 20, now } = {}) {
   const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 20) : 20;
   let replayed = 0;
@@ -142,5 +171,7 @@ export function catchUpMissedWakes(store, { limit = 20, now } = {}) {
     });
     if (result?.deliveries?.length > 0) replayed += 1;
   }
-  return { replayed };
+  const agedOut = agedOutMissedWakes(store, now);
+  if (agedOut > 0) console.warn(`sleeper wake: ${agedOut} missed wake signal(s) aged out of the 24h catch-up window undelivered`);
+  return { replayed, agedOut };
 }
