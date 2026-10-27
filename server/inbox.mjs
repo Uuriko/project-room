@@ -1246,7 +1246,7 @@ export class Inbox {
         && this.db.prepare("SELECT count(*) n FROM private_inbox_commands WHERE account_id=?").get(accountId).n >= inboxLimits.commands)
         fail(409, "inbox_limit", "Private inbox pilot capacity reached.");
       const now = this.store.now(), { sourceId, action, requestId } = request;
-      let receipt = { requestId, action, sourceId };
+      const receipt = { requestId, action, sourceId };
       if (isReplyUpdate(request)) {
         this.source(accountId, sourceId);
         const updates = this.replyUpdateHistory(accountId), prior = updates.get(request.updateId);
