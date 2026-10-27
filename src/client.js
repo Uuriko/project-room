@@ -81,10 +81,23 @@ function mergeRecentMessages(held, read) {
   if (start !== window.omitted) return null;
   return { ...snapshot, state: { ...snapshot.state, messages: [...held.slice(0, start), ...recent] } };
 }
-// A fresh client holds no history, so its first read used to be the whole room
-// (muse-room: 4+ MB, ~7s on prod, 3s short of the 10s read timeout). It now
-// reads the newest window first and fills the rest in the background; `partial`
-// marks held history that is only that window.
+// A fresh client holds no history. The first read is the work view plus the
+// newest message window. Older history pages in the background. The client
+// never requests the unbounded room document: that body is large enough to
+// hit the 10s abort. `partial` marks held history that is only that window.
+// A response is the whole history only when it says nothing was left out.
+// A server that still answers with every message (no window, no page) is
+// used as is.
+function messageHistoryComplete(read) {
+  const window = read?.messagesWindow;
+  if (window) return window.mode === "recent" && Number.isSafeInteger(window.omitted) && window.omitted === 0;
+  if (read?.messagesPage && typeof read.messagesPage.hasMore === "boolean") return read.messagesPage.hasMore === false;
+  return true;
+}
+function mergeWorkView(read, work) {
+  if (!work || work.snapshotView !== "work" || work.sequence !== read?.sequence || work.roomId !== read?.roomId || !read?.state || !work.state) return read;
+  return { ...read, state: { ...read.state, room: work.state.room, members: work.state.members, workItems: work.state.workItems } };
+}
 const FILL_DELAY_MS = 250;
 // Lazy history (opt-in, `lazyHistory: true`): the first windowed read is not
 // followed by the background fill. Older history loads when the reader asks
@@ -326,11 +339,29 @@ export class RoomClient {
         let covered = held?.fullSequence ?? 0;
         do {
           const session = this.session, holding = this.heldMessages();
-          // With nothing held, read the newest window first (the background fill brings the rest).
-          const full = flight.again || flight.fullNow || flight.fullSequence > covered;
+          // The message read is always the newest window. Opening also reads
+          // the work view and uses its room, members, and current work.
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
           const auditView = this.auditView;
-          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView });
+          const readPromise = this.request(this.path("?messages=recent"), { offerContext: true, auditView });
+          // The work read is settled into a result so a rejection cannot escape
+          // when the message read fails first and this promise is never awaited.
+          const workPromise = holding ? null : this.request(this.path("?view=work")).then(
+            work => ({ work }),
+            error => ({ error })
+          );
+          let read = await readPromise;
+          if (workPromise) {
+            const outcome = await workPromise;
+            if (outcome.error) {
+              if ([401, 403].includes(outcome.error.status) || outcome.error.code === "session_binding_changed") throw outcome.error;
+            } else {
+              const work = outcome.work;
+              if (generation !== this.generation || !this.session) return;
+              if (!this.ownsResponse(work)) { this.endAccess(); return; }
+              read = mergeWorkView(read, work);
+            }
+          }
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
           this.lastReadAt = Date.now();
@@ -339,7 +370,7 @@ export class RoomClient {
           if (read.auditView !== undefined && (read.auditView !== "activity" || read.auditVersion !== 1 || auditView !== "activity"))
             throw new Error(uiText("record.invalidView"));
           // A server without the recent view ignores the parameter and answers in full.
-          const whole = full || !Object.hasOwn(read, "messagesWindow");
+          const whole = messageHistoryComplete(read);
           if (!whole && read.messagesWindow?.mode === "recent" && Number.isSafeInteger(read.messagesWindow.omitted)) this.windowOmitted = read.messagesWindow.omitted;
           let snapshot, partial = false, complete = whole;
           if (whole) snapshot = read;
@@ -348,8 +379,16 @@ export class RoomClient {
             const first = firstWindow(read);
             snapshot = first?.snapshot ?? null; partial = Boolean(first?.partial); complete = Boolean(first) && !partial;
           } else snapshot = mergeRecentMessages(holding.messages, read);
-          if (!snapshot) { flight.fullNow = true; continue; }
+          if (!snapshot) {
+            // The window does not continue held history. One more window, then
+            // keep what is held. The unbounded room document is not a repair.
+            if (flight.retriedWindow) break;
+            flight.retriedWindow = true;
+            flight.again = true;
+            continue;
+          }
           if (complete) covered = Math.max(covered, read.sequence);
+          else if (flight.fullSequence > covered) covered = flight.fullSequence;
           if (partial && holding?.partial) this.partialReads++;
           if (snapshot.sequence >= this.sequence) {
             this.sequence = snapshot.sequence;
@@ -361,6 +400,9 @@ export class RoomClient {
             this.onSnapshot(snapshot, this.session);
           }
         } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
+        // A non-window event can change a message outside the newest page.
+        // Rebuild that history from bounded pages. Never from the unbounded document.
+        if (!windowed) await this.reloadHistory();
         if (this.heldMessages()?.owesFull && this.fillWanted()) this.scheduleFill();
       } catch (error) {
         if (generation !== this.generation) return;
@@ -414,9 +456,9 @@ export class RoomClient {
       this.backfilling = true;
       (async () => {
         try {
-          // Paged history first; the legacy full read is the fallback
-          // whenever paging cannot prove a contiguous merge (backfill()).
-          if (!await this.backfill()) await this.refresh(null, { fill: true });
+          // Paged history. A page that cannot prove a contiguous merge leaves
+          // the window held and retries; the unbounded room document is not a fallback.
+          if (!await this.backfill() && this.heldMessages()?.owesFull && this.fillWanted()) throw Object.assign(new Error("history_page_incomplete"), { code: "history_page_incomplete" });
         } finally { if (generation === this.generation) this.backfilling = false; }
       })().then(() => { this.fillDelay = 1000; }, error => {
         if (generation !== this.generation || this.session !== session) return;
@@ -474,9 +516,46 @@ export class RoomClient {
   // are head-anchored, so a mutation mid-walk restarts the chain (bounded)
   // instead of splicing two heads. The records are the server's history
   // read model, the same surface the recent window serves (edit-history
-  // bodies ride neither). Returns false — the legacy full read takes over —
-  // whenever contiguity cannot be proved; auth failures throw, like
-  // refresh()'s reads.
+  // bodies ride neither). Returns false whenever contiguity cannot be proved.
+  // The caller leaves the window held. Auth failures throw, like refresh()'s reads.
+  // Replace held history from bounded /conversation pages when a non-window
+  // event may have changed an older message. The head page must overlap the
+  // held tail. Failure leaves the window in place.
+  async reloadHistory() {
+    const generation = this.generation, session = this.session;
+    const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
+    const held0 = this.heldMessages();
+    if (!held0 || !anchored()) return false;
+    const tailIds = new Set(held0.messages.map(message => message.id));
+    let head = null, older = [], cursor = null, resets = 0;
+    for (let page = 0; page < 1000; page++) {
+      let result;
+      try { result = await this.conversation({ limit: 100, cursor }); }
+      catch (error) {
+        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") throw error;
+        return false;
+      }
+      if (generation !== this.generation || this.session !== session) return false;
+      if (result.mode === "reset") { if (++resets > 3) return false; head = null; older = []; cursor = null; continue; }
+      if (!head) {
+        if (!result.messages?.some(message => tailIds.has(message.id))) { if (++resets > 3) return false; cursor = null; continue; }
+        head = result.messages;
+      } else {
+        const seen = new Set([...head, ...older].map(message => message.id));
+        for (const message of result.messages ?? []) if (!seen.has(message.id)) older.push(message);
+      }
+      if (result.nextCursor == null) break;
+      cursor = result.nextCursor;
+    }
+    const heldNow = this.heldMessages(), live = anchored();
+    if (!heldNow || !live || !head?.length) return false;
+    const messages = [...older, ...head];
+    const snapshot = { ...live.snapshot, state: { ...live.snapshot.state, messages } };
+    this.held = { ...heldNow, messages: messages.slice(), partial: false, owesFull: false, fullSequence: live.snapshot.sequence };
+    this.live = { generation, session, snapshot };
+    this.onSnapshot(snapshot, session);
+    return true;
+  }
   async backfill() {
     const generation = this.generation, session = this.session;
     const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;

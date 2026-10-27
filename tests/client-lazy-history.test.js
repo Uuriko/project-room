@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { RoomClient } from "../src/client.js";
 import { event, EVENT_TYPES as T } from "../src/events.js";
 
-const RECENT = "/api/rooms/commons?messages=recent";
+const RECENT = "/api/rooms/commons?messages=recent", WORK = "/api/rooms/commons?view=work";
 const response = body => ({ ok: true, status: 200, json: async () => body });
 const owner = { roomId: "commons", cursor: 0, viewerId: "human", viewerAccountId: "account-human", viewerAuthEpoch: 0, viewerSessionBinding: "session-human" };
 const identity = () => ({ account: { id: "account-human", authEpoch: 0 }, member: { id: "human" }, roomId: "commons", csrf: "c", sessionBinding: "session-human" });
@@ -53,19 +53,19 @@ const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 test("a lazy client holds the first window and does not fill on its own", async t => {
   const all = history();
-  const f = fixture(t, { read: url => url === RECENT ? recent(9, all.slice(-3), 2) : assert.fail("no full read") });
+  const f = fixture(t, { read: url => url === RECENT || url === WORK ? recent(9, all.slice(-3), 2) : assert.fail("no full read") });
   await f.client.refresh();
   await wait(400); // past the eager client's 250ms fill
   assert.equal(f.client.heldMessages().partial, true);
   assert.equal(f.client.owesHistory, true);
   assert.deepEqual(f.pages, [], "no /conversation page was read");
-  assert.deepEqual(f.reads, [RECENT]);
+  assert.deepEqual(f.reads, [RECENT, WORK]);
 });
 
 test("loadHistory pages the older segment in and completes history", async t => {
   const all = history();
   const f = fixture(t, {
-    read: url => url === RECENT ? recent(9, all.slice(-3), 2) : assert.fail("the paged fill must not read a full snapshot"),
+    read: url => url === RECENT || url === WORK ? recent(9, all.slice(-3), 2) : assert.fail("the paged fill must not read a full snapshot"),
     page: url => url.includes("cursor=c1") ? page(9, all.slice(0, 2), null) : page(9, all, "c1")
   });
   await f.client.refresh();
@@ -83,7 +83,7 @@ test("while only a window is held, an edit re-reads the window instead of the fu
   const all = history();
   let edited = false;
   const f = fixture(t, { read: url => {
-    if (url !== RECENT) return assert.fail("an edit must not force a full read on a lazy window");
+    if (url !== RECENT && url !== WORK) return assert.fail("an edit must not force a full read on a lazy window");
     const window = all.slice(-3).map(message => edited && message.id === "m5" ? { ...message, body: "changed", editedAt: at(10) } : message);
     return recent(edited ? 10 : 9, window, 2);
   } });
@@ -99,7 +99,7 @@ test("repeated window re-reads eventually fill, so a long-open tab returns to de
   const all = history();
   let sequence = 9;
   const f = fixture(t, {
-    read: url => url === RECENT ? recent(sequence, all.slice(-3), 2) : assert.fail("no full read"),
+    read: url => url === RECENT || url === WORK ? recent(sequence, all.slice(-3), 2) : assert.fail("no full read"),
     page: url => url.includes("cursor=c1") ? page(sequence, all.slice(0, 2), null) : page(sequence, all, "c1")
   });
   await f.warm();
@@ -115,7 +115,7 @@ test("repeated window re-reads eventually fill, so a long-open tab returns to de
 test("an eager client (the default) still fills 250ms after the first window", async t => {
   const all = history();
   const f = fixture(t, { lazy: false,
-    read: url => url === RECENT ? recent(9, all.slice(-3), 2) : assert.fail("no full read"),
+    read: url => url === RECENT || url === WORK ? recent(9, all.slice(-3), 2) : assert.fail("no full read"),
     page: url => url.includes("cursor=c1") ? page(9, all.slice(0, 2), null) : page(9, all, "c1")
   });
   await f.client.refresh();
@@ -125,7 +125,7 @@ test("an eager client (the default) still fills 250ms after the first window", a
 
 test("a new session forgets an earlier request for history", async t => {
   const all = history();
-  const f = fixture(t, { read: url => url === RECENT ? recent(9, all.slice(-3), 2) : assert.fail("no full read"),
+  const f = fixture(t, { read: url => url === RECENT || url === WORK ? recent(9, all.slice(-3), 2) : assert.fail("no full read"),
     page: () => page(9, [], null) });
   await f.client.refresh();
   f.client.historyWanted = true; f.client.partialReads = 30;
