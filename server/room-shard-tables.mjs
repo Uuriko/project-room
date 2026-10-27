@@ -87,7 +87,7 @@ export const DIRECTORY_TABLES = Object.freeze([
   "room_vetting_receipts", "saved_messages", "share_link_access", "share_link_codes",
   "share_link_join_redemptions", "share_link_joins", "share_links", "sla_breach_alerts",
   "spam_quarantine", "spend_authorizations", "spend_grant_terms", "spend_room_reservations",
-  "squads", "stitch_identities", "stitch_links", "stitch_receipts", "stitch_revocations",
+  "squads", "stitch_identities", "stitch_links", "stitch_receipts", "stitch_revocations", "storage_failure_streak",
   "stitch_suggestions", "telegram_live_status", "thread_mutes", "wake_queue", "wake_queue_commands",
   "wake_queue_pause", "wake_queue_pause_by", "web_fetch_cache", "web_fetch_cache_rooms",
   "web_fetch_log", "web_research_log", "work_item_board_backfill",

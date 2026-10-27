@@ -19,6 +19,15 @@ export const CHANNEL_DRAIN_STUCK_MS = 120000;
 // CHANNEL_DRAIN_STUCK_MS: room.mjs cannot carry test-only exports.
 export const CHANNEL_DRAIN_INFLIGHT_KEY = 'cron:channel-drain-inflight:v1';
 
+// B3-2 F1: the durable mirror of a completed drain's outcome, written to
+// DO storage when the outcome is stashed and deleted when recordCronTick
+// consumes it. The outcome itself is instance memory, so without this
+// record an eviction between completion and the heartbeat record lost
+// it permanently — the successor reported the drain `unobserved`. The
+// record holds { outcome, held } in the stash's shape (the head outcome
+// plus one queued behind it while the head awaits its record).
+export const CHANNEL_DRAIN_OUTCOME_KEY = 'cron:channel-drain-outcome:v1';
+
 // The fields of a completed drain tick that may cross the RPC to the
 // heartbeat: the numeric digest plus the failure strings summaryFailure
 // reads. The full summary (per-connection results, account and connection

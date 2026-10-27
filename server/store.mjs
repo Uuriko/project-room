@@ -1144,7 +1144,7 @@ function roomSchemaStamp() {
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
-    INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN,
+    INTEGRITY_JOB_CURSOR_SCHEMA, INTEGRITY_ROOM_STATE_SCHEMA, INTEGRITY_SWEEP_COLUMN, STORAGE_FAILURE_STREAK_SCHEMA,
     ROOM_SCHEMA_STAMP_SCHEMA, LOOKUP_INDEXES, MESSAGES_SCHEMA, MESSAGE_REPLAY_SNAPSHOT_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, WANTS_WORK_SCHEMA, CODE_DROPS_SCHEMA, PROJECTION_BODIES_SCHEMA, WORK_REPOSITORY_SCHEMA,
     PUBLIC_READ_MODEL_SCHEMA,
     // Additive tables converged outside the version bump. A warm wake whose
@@ -1168,6 +1168,17 @@ const INTEGRITY_SNAPSHOT_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_snapshot
 const INTEGRITY_JOB_CURSOR_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_job_cursor (
   singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
   step INTEGER NOT NULL
+)`;
+// B3-2 F2: durable mirror of the consecutive-storage-failure streak.
+// The counter itself is instance memory, so an eviction (or a process
+// restart) used to reset it to zero without a committed write, silently
+// clearing the degraded/readiness state. One singleton row, written
+// best-effort when the streak changes and rehydrated at store open; a
+// missing row means no failure has been recorded yet.
+const STORAGE_FAILURE_STREAK_SCHEMA = `CREATE TABLE IF NOT EXISTS storage_failure_streak (
+  singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+  failures INTEGER NOT NULL,
+  last_failure_at INTEGER NOT NULL
 )`;
 const INTEGRITY_ROOM_STATE_SCHEMA = `CREATE TABLE IF NOT EXISTS integrity_room_state (
   room_id TEXT PRIMARY KEY,
@@ -1392,9 +1403,13 @@ export class RoomStore {
       throw new Error("stitch must be null or a stitchConfigFromEnv() triple");
     }
     // Consecutive storage refusals; readiness (server/http.mjs) turns 503 at
-    // the threshold and recovers on the next committed write.
+    // the threshold and recovers on the next committed write. The streak is
+    // mirrored to the storage_failure_streak row (B3-2 F2) so an eviction
+    // or restart cannot reset it without that committed write; the fields
+    // below are the in-memory copy, rehydrated at open below.
     this.storageFailureThreshold = storageFailureThreshold;
     this.storageFailures = 0;
+    this.storageFailureLastAt = null;
     // Delta sync: a per-room append stamp, bumped when an events INSERT
     // commits (see _armProjectionWatch + transaction()). Stream pumps poll
     // this in-memory counter instead of re-reading the store on a timer; a
@@ -1537,6 +1552,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         verifyRoomLifecycle(this);
         this.moderation.verifySchema({ allowAbsent: true }); // E4 message reports: additive at v27 as well.
         this.bountyEscrow.verifySchema({ allowAbsent: true }); // Escrowed bounties: additive, read-only never migrates.
+        this._rehydrateStorageFailureStreak();
         logColdStart(coldStart, this.db, false);
         return;
       } catch (error) { logColdStart(coldStart, this.db, error); this.db.close(); throw error; }
@@ -2100,6 +2116,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.storagePlatform.verifyWriterFence(this.db);
       this.db.exec(INTEGRITY_SNAPSHOT_SCHEMA);
       this.db.exec(INTEGRITY_JOB_CURSOR_SCHEMA);
+      this.db.exec(STORAGE_FAILURE_STREAK_SCHEMA);
       this.ensureIntegrityRoomState();
       if (!deferIntegrity) this.verifyInvitationAudit();
       this.reminders.verifySchema();
@@ -2157,6 +2174,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     configureWorkRepository(this.db, this.workEntities);
     if (this.workEntities && version < 42) this.migrateWorkProjections();
+    // B3-2 F2: rehydrate LAST. The constructor's own later passes commit
+    // changing writes, and a committed write legitimately clears the
+    // streak — rehydrating any earlier would let the open itself erase
+    // the degraded state it is supposed to inherit.
+    this._rehydrateStorageFailureStreak();
   }
 
   // Convert one room atomically; interrupted multi-room runs resume by
@@ -3517,14 +3539,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   // server/http.mjs calls this for errors raised outside any transaction.
   storageFailure(error, outermost = true) {
     if (!isStorageUnavailable(error)) return error;
-    if (outermost && ++this.storageFailures === this.storageFailureThreshold) {
-      console.warn(`room storage unavailable after ${this.storageFailures} consecutive failures; readiness now 503`);
+    if (outermost) {
+      this.storageFailures += 1;
+      this.storageFailureLastAt = this.now();
+      if (this.storageFailures === this.storageFailureThreshold) {
+        console.warn(`room storage unavailable after ${this.storageFailures} consecutive failures; readiness now 503`);
+      }
+      this._persistStorageFailureStreak();
     }
     return error instanceof StorageUnavailableError ? error : new StorageUnavailableError(error);
   }
   storageRecovered() {
     if (this.storageFailures >= this.storageFailureThreshold) console.warn("room storage recovered after a committed write; readiness now 200");
     this.storageFailures = 0;
+    this.storageFailureLastAt = null;
+    this._persistStorageFailureStreak();
+  }
+  // B3-2 F2: best-effort durable mirror of the streak above. The store
+  // is by definition failing when this runs, so a failed mirror write is
+  // expected and swallowed — the next counted failure retries it, and a
+  // flapping store whose writes intermittently succeed lands one. Never
+  // called inside a transaction: the mirror must not join (and be rolled
+  // back with) the transaction whose failure it records.
+  _persistStorageFailureStreak() {
+    if (this.readOnly) return;
+    try {
+      if (this.db.isTransaction) return;
+      this.db.exec(STORAGE_FAILURE_STREAK_SCHEMA);
+      if (this.storageFailures > 0) {
+        this.db.prepare(`INSERT INTO storage_failure_streak (singleton, failures, last_failure_at) VALUES (1, ?, ?)
+          ON CONFLICT(singleton) DO UPDATE SET failures=excluded.failures, last_failure_at=excluded.last_failure_at`)
+          .run(this.storageFailures, this.storageFailureLastAt ?? this.now());
+      } else {
+        this.db.prepare("DELETE FROM storage_failure_streak WHERE singleton=1").run();
+      }
+    } catch { /* storage is unavailable; the in-memory streak stands */ }
+  }
+  _rehydrateStorageFailureStreak() {
+    try {
+      const row = this.db.prepare("SELECT failures, last_failure_at FROM storage_failure_streak WHERE singleton=1").get();
+      if (row && Number.isSafeInteger(row.failures) && row.failures > 0) {
+        this.storageFailures = row.failures;
+        this.storageFailureLastAt = Number.isSafeInteger(row.last_failure_at) ? row.last_failure_at : null;
+      }
+    } catch { /* table absent on a pre-cure database: no streak recorded */ }
   }
   storageStatus() {
     return { failures: this.storageFailures, threshold: this.storageFailureThreshold, unavailable: this.storageFailures >= this.storageFailureThreshold };
