@@ -93,6 +93,33 @@ const PROBES = {
   "GET /api/health": [undefined, 200],
   "GET /api/health/jobs": [undefined, 200],
   "HEAD /api/health/jobs": [undefined, 200],
+  // Wiki read API (W009, routes-17): public by design, served from embedded
+  // docs data. Lists answer 200; an unknown detail id answers 404
+  // wiki_not_found (never plain not_found, so the sweep above counts these
+  // as served-open); search without q is a 400 bad_request.
+  "GET /api/wiki/procedures": [undefined, 200],
+  "HEAD /api/wiki/procedures": [undefined, 200],
+  "GET /api/wiki/procedures/{}": [undefined, 404],
+  "HEAD /api/wiki/procedures/{}": [undefined, 404],
+  "GET /api/wiki/entries": [undefined, 200],
+  "HEAD /api/wiki/entries": [undefined, 200],
+  "GET /api/wiki/entries/{}": [undefined, 404],
+  "HEAD /api/wiki/entries/{}": [undefined, 404],
+  "GET /api/wiki/runbooks": [undefined, 200],
+  "HEAD /api/wiki/runbooks": [undefined, 200],
+  "GET /api/wiki/runbooks/{}": [undefined, 404],
+  "HEAD /api/wiki/runbooks/{}": [undefined, 404],
+  "GET /api/wiki/search": [undefined, 400],
+  "HEAD /api/wiki/search": [undefined, 400],
+  // Growth surface (Track C C14, routes-17): declared open in the spec, but
+  // this server has no growth handle injected (paused), so the registered
+  // routes answer the handler's 404 not_found.
+  "GET /growth/summary": [undefined, 404],
+  "HEAD /growth/summary": [undefined, 404],
+  "GET /growth/digest": [undefined, 404],
+  "HEAD /growth/digest": [undefined, 404],
+  "GET /growth/health": [undefined, 404],
+  "HEAD /growth/health": [undefined, 404],
   "GET /api/reports/public/challenge": [undefined, 200],
   "POST /api/reports/public": [{}, 428],
   // Hosted MCP is outside the /api template scan. Unauthenticated GET/POST

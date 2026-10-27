@@ -162,6 +162,31 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
+  // Public read-only wiki API for agents (W009, clean-slate routes-17): the
+  // procedures, experience-entries and runbooks planes plus search, served
+  // from embedded docs data. Unknown ids answer 404 wiki_not_found.
+  route("/api/wiki/procedures", ["GET", "HEAD"], "none", "List the validated wiki procedures.", "listWikiProcedures",
+    { operationIds: { GET: "listWikiProcedures", HEAD: "headWikiProcedures" } }),
+  route("/api/wiki/procedures/{id}", ["GET", "HEAD"], "none", "Read one wiki procedure by id.", "getWikiProcedure",
+    { operationIds: { GET: "getWikiProcedure", HEAD: "headWikiProcedure" } }),
+  route("/api/wiki/entries", ["GET", "HEAD"], "none", "List wiki experience-log entries, paged by limit/offset.", "listWikiEntries",
+    { operationIds: { GET: "listWikiEntries", HEAD: "headWikiEntries" } }),
+  route("/api/wiki/entries/{id}", ["GET", "HEAD"], "none", "Read one wiki experience-log entry by id.", "getWikiEntry",
+    { operationIds: { GET: "getWikiEntry", HEAD: "headWikiEntry" } }),
+  route("/api/wiki/runbooks", ["GET", "HEAD"], "none", "List the wiki runbooks.", "listWikiRunbooks",
+    { operationIds: { GET: "listWikiRunbooks", HEAD: "headWikiRunbooks" } }),
+  route("/api/wiki/runbooks/{id}", ["GET", "HEAD"], "none", "Read one wiki runbook by id.", "getWikiRunbook",
+    { operationIds: { GET: "getWikiRunbook", HEAD: "headWikiRunbook" } }),
+  route("/api/wiki/search", ["GET", "HEAD"], "none", "Search the wiki procedures, entries and runbooks planes; requires the q query parameter.", "searchWiki",
+    { operationIds: { GET: "searchWiki", HEAD: "headWikiSearch" } }),
+  // Read-only growth analytics surface (Track C C14, clean-slate routes-17):
+  // served only while the growth handle is injected; 404 while paused.
+  route("/growth/summary", ["GET", "HEAD"], "none", "Growth collector summary.", "getGrowthSummary",
+    { operationIds: { GET: "getGrowthSummary", HEAD: "headGrowthSummary" } }),
+  route("/growth/digest", ["GET", "HEAD"], "none", "Rendered digest of the growth collector summary; the format query parameter selects the digest format.", "getGrowthDigest",
+    { operationIds: { GET: "getGrowthDigest", HEAD: "headGrowthDigest" } }),
+  route("/growth/health", ["GET", "HEAD"], "none", "Growth scheduler status and collector size.", "getGrowthHealth",
+    { operationIds: { GET: "getGrowthHealth", HEAD: "headGrowthHealth" } }),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity",
     { requestBodies: { POST: IDENTITY_MINT_BODY } }),

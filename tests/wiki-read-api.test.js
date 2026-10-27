@@ -212,7 +212,7 @@ test("GET /api/wiki/procedures/{id}: unknown id is a 404 envelope", { timeout: 3
   const res = await get(origin, "/api/wiki/procedures/no-such-procedure");
   assert.equal(res.status, 404);
   const body = await res.json();
-  assert.equal(body.error?.code, "not_found");
+  assert.equal(body.error?.code, "wiki_not_found");
   assertEnvelope(t, body, 404, "unknown procedure");
 });
 
@@ -252,7 +252,7 @@ test("GET /api/wiki/entries/{id}: full entry; unknown id is a 404 envelope", { t
   const res = await get(origin, "/api/wiki/entries/2099-01-01-nope");
   assert.equal(res.status, 404);
   const body = await res.json();
-  assert.equal(body.error?.code, "not_found");
+  assert.equal(body.error?.code, "wiki_not_found");
   assertEnvelope(t, body, 404, "unknown entry");
 });
 
@@ -271,7 +271,7 @@ test("GET /api/wiki/runbooks lists runbooks and serves one", { timeout: 30000 },
   assert.ok(one.body.length > 0, "runbook body served");
   const missing = await get(origin, "/api/wiki/runbooks/no-such-runbook");
   assert.equal(missing.status, 404);
-  assert.equal((await missing.json()).error?.code, "not_found");
+  assert.equal((await missing.json()).error?.code, "wiki_not_found");
 });
 
 test("GET /api/wiki/search: matches and echoes the query; missing q is 400", { timeout: 30000 }, async t => {
