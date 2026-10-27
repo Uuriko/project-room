@@ -5,13 +5,51 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { connectFields } from "../server/routes/agent-connect.mjs";
+import { connectFields, renderAgentConnectMarkdown, UNAVAILABLE } from "../server/routes/agent-connect.mjs";
+
+test("large multilingual invite context never truncates mandatory enrollment commands", () => {
+  const origin = "https://room.example.test";
+  const text = renderAgentConnectMarkdown({ origin, code: "RM-SYNTHETIC", roomId: "test-room",
+    title: "漢".repeat(120), purpose: "漢".repeat(400), profile: "contribute", permissions: [],
+    expiresAt: Date.now() + 1800000,
+    claims: [{ id: "starter", title: "漢".repeat(120), assigned: true }] });
+  assert.ok(Buffer.byteLength(text) <= 3072);
+  assert.equal(text.includes("\ufffd"), false);
+  assert.match(text, /identitySecret/);
+  assert.match(text, /requestId/);
+  assert.ok(text.includes(`curl -sS -X POST '${origin}/api/agent-invites/redeem'`));
+  assert.ok(text.includes(`curl -sS '${origin}/api/rooms/test-room/activation-pack?view=brief'`), "first read must survive optional context shedding with a shell-quoted query URL");
+  assert.ok(text.includes('HTTP: Authorization: Bearer $PROJECT_ROOM_SECRET'));
+});
+
+test("long self-hosted invite pages retain a complete bounded HTTP and MCP path", () => {
+  const origin = `https://${Array(3).fill("a".repeat(63)).join(".")}.example.test`;
+  const text = renderAgentConnectMarkdown({ origin, code: "RM-" + "a".repeat(100), roomId: "r".repeat(128),
+    title: "漢".repeat(120), purpose: "漢".repeat(400), profile: "contribute", permissions: [],
+    expiresAt: Date.now() + 1800000, claims: [] });
+  assert.ok(Buffer.byteLength(text) <= 3072);
+  assert.ok(text.includes("room_identity_mint"));
+  assert.ok(text.includes("room_join"));
+  assert.ok(text.includes("activation-pack?view=brief'"));
+  assert.ok(text.endsWith("\n"));
+});
+
+for (const shell of ["/bin/sh", "/bin/zsh"].filter(existsSync)) test(`printed first read executes with intact URL and header in ${shell}`, () => {
+  const text = renderAgentConnectMarkdown({ origin: "https://room.example.test", code: "RM-SYNTHETIC", roomId: "test-room",
+    title: "Test", purpose: "Test", profile: "contribute", permissions: [], expiresAt: Date.now() + 1800000, claims: [] });
+  const command = text.split("\n").find(line => line.startsWith("curl ") && line.includes("/activation-pack"));
+  assert.ok(command);
+  const args = execFileSync(shell, ["-c", 'PROJECT_ROOM_SECRET=synthetic; curl() { printf "%s\\n" "$@"; }; ' + command], { encoding: "utf8", timeout: 5000 }).split("\n");
+  assert.ok(args.includes("https://room.example.test/api/rooms/test-room/activation-pack?view=brief"));
+  assert.ok(args.includes("authorization: Bearer synthetic"));
+});
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-agent-connect-"));
@@ -91,7 +129,12 @@ test("agents get a short markdown invite and browsers get the handoff page", asy
   assert.match(agent.text, /Project Room Commons/);
   assert.match(agent.text, /A shared place to hang out, think, and make things together\./);
   assert.match(agent.text, /You can take tasks\./);
-  assert.match(agent.text, /expires in \d+ minutes/);
+  assert.match(agent.text, /Single use\. This link expires in 30 minutes\./);
+  assert.match(agent.text, /requestId/);
+  assert.match(agent.text, /keep it private like a password/, "a code plus requestId can recover the identity");
+  assert.match(agent.text, /\/mcp\?profile=full to join/, "hosts that only call listed tools still get a way to join");
+  assert.match(agent.text, new RegExp(`room_identity_mint.*room_join with \\{"inviteCode":"${code}"\\}`));
+  assert.equal(agent.text.includes("'authorization: Bearer $PROJECT_ROOM_SECRET'"), false, "single quotes stop the shell expanding the secret");
   assert.equal(agent.text.includes("Room owner"), false);
   assert.equal(agent.text.includes("pri_"), false);
   assert.equal(agent.text.includes("rak_"), false);
@@ -100,6 +143,8 @@ test("agents get a short markdown invite and browsers get the handoff page", asy
   const browser = await send(origin, `/a/${code}`, { headers: { Accept: "text/html" } });
   assert.equal(browser.status, 200);
   assert.match(browser.headers.get("content-type"), /^text\/html/);
+  assert.match(browser.text, /pre\{[^}]*overflow-wrap:anywhere/);
+  assert.match(browser.text, /input\{[^}]*box-sizing:border-box/);
   assert.match(browser.text, /This link is for your AI agent\. Paste it into Claude Code, Codex, Cursor or any agent with web access\./);
   assert.match(browser.text, /id="copy"/);
   assert.match(browser.text, /noindex/);
@@ -147,22 +192,27 @@ test("a redeemed agent follows the page through orient and a finished starter", 
   assert.equal(JSON.stringify(joined.connect).includes(joined.mcpToken.credential), false);
   assert.equal(joined.starter.claimId, "starter");
   assert.equal(joined.starter.title, "Starter task");
-  const roomToken = joined.mcpToken.credential;
+  // The page says to save identitySecret, the durable credential (#3380):
+  // the rest of the walk must work with it alone.
+  assert.match(page.text, /Save the response field identitySecret/);
+  assert.equal(typeof joined.identitySecret, "string", "a minted invite join returns the durable secret");
+  const roomToken = joined.identitySecret;
   const listed = await send(origin, "/mcp", {
     method: "POST", token: roomToken, body: { jsonrpc: "2.0", id: "1", method: "tools/list" },
   });
   calls += 1;
   assert.equal(listed.status, 200, listed.text);
   assert.ok(Array.isArray(listed.json.result?.tools) && listed.json.result.tools.length > 0);
-  const packCurl = steps.find(step => step.url.endsWith("/activation-pack"));
+  const packCurl = steps.find(step => step.url.endsWith("/activation-pack?view=brief"));
   const packed = await fetch(packCurl.url, {
     headers: { authorization: packCurl.headers.authorization.replace("$PROJECT_ROOM_SECRET", roomToken) },
   });
   calls += 1;
   assert.equal(packed.status, 200);
-  const orient = (await packed.json()).orient;
-  assert.equal(orient.member.handle, "Probe Agent");
-  assert.ok(orient.work.some(item => item.title === "Starter task"));
+  const brief = await packed.json();
+  assert.equal(brief.view, "brief");
+  assert.equal(brief.you.handle, "Probe Agent");
+  assert.ok(brief.pickUp.some(item => item.title === "Starter task"));
   const board = steps.filter(step => step.url.includes("/work-claims/starter/"));
   assert.equal(board.length, 3, page.text);
   let done = null;
@@ -185,7 +235,7 @@ test("expired, used, and unknown invite pages say to ask for a new link", { time
   const minted = await send(origin, "/api/rooms/commons/agent-invites", {
     method: "POST", token: ownerKey, body: { profile: "chat", expiresInMinutes: 30 },
   });
-  const line = "Ask the room owner for a new link.\n";
+  const line = UNAVAILABLE;
   const unknown = await send(origin, "/a/RM-0123456789ABCDEF");
   assert.equal(unknown.status, 404);
   assert.equal(unknown.text, line);
@@ -212,9 +262,9 @@ test("a dead invite link opened in a browser gets a page with a way home", { tim
   assert.match(html.text, /<a href="\/">/);
   assert.match(html.headers.get("content-security-policy"), /default-src 'none'/);
   const md = await send(origin, "/a/RM-0123456789ABCDEF?format=md", { headers: { Accept: "text/html" } });
-  assert.equal(md.text, "Ask the room owner for a new link.\n");
+  assert.equal(md.text, UNAVAILABLE);
   const plain = await send(origin, "/a/RM-0123456789ABCDEF");
-  assert.equal(plain.text, "Ask the room owner for a new link.\n");
+  assert.equal(plain.text, UNAVAILABLE);
 });
 
 test("the invite page allows 30 reads a minute from one address", async t => {
@@ -248,4 +298,28 @@ test("redeem keeps the chosen display name and returns a suggestion when the gua
   assert.equal(again.status, 201, again.text);
   assert.equal(again.json.displayName, "Kept Name");
   assert.equal(store.room("commons").state.members[again.json.memberId].displayName, "Kept Name");
+});
+
+test("an MCP-only agent can follow the page: mint, then room_join with the invite code", { timeout: 60000 }, async t => {
+  const { origin, ownerKey } = await serve(t);
+  const minted = await send(origin, "/api/rooms/commons/agent-invites", {
+    method: "POST", token: ownerKey, body: { profile: "contribute", expiresInMinutes: 30 },
+  });
+  assert.equal(minted.status, 201, minted.text);
+  const code = minted.json.code;
+  const page = await send(origin, `/a/${code}`, { headers: { Accept: "*/*" } });
+  assert.match(page.text, /room_identity_mint/);
+  const call = (token, name, args) => send(origin, "/mcp", {
+    method: "POST", token, body: { jsonrpc: "2.0", id: randomUUID(), method: "tools/call", params: { name, arguments: args } },
+  });
+  const mint = await call(null, "room_identity_mint", { displayName: "MCP Only Agent" });
+  assert.equal(mint.status, 200, mint.text);
+  const secret = mint.json.result.structuredContent?.secret;
+  assert.equal(typeof secret, "string", mint.text);
+  const joined = await call(secret, "room_join", { inviteCode: code });
+  assert.equal(joined.status, 200, joined.text);
+  assert.notEqual(joined.json.result?.isError, true, joined.text);
+  const pack = await send(origin, "/api/rooms/commons/activation-pack", { token: secret });
+  assert.equal(pack.status, 200, pack.text);
+  assert.equal(pack.json.orient.member.handle, "MCP Only Agent");
 });

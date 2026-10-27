@@ -8,6 +8,7 @@ import {
   MAX_FAILURES, MAX_MESSAGE, annotation, decodeXml, parseJunit, report, summaryMarkdown,
 } from "../scripts/report-test-failures.mjs";
 import { RESULTS_FILE, ciArgs } from "../scripts/browser-ci.mjs";
+import { canonicalBrowserScript } from "../scripts/browser-suites.mjs";
 
 const FIXTURE = "tests/fixtures/browser-junit-sample.xml";
 const RUNNER_CWD = "/home/runner/work/project-room/project-room";
@@ -119,8 +120,10 @@ test("the CLI prints annotations, appends to $GITHUB_STEP_SUMMARY and exits 0; a
 test("test:browser:ci runs the test:browser suite list with spec + junit reporters", () => {
   const pkg = JSON.parse(readFileSync("package.json", "utf8"));
   assert.equal(pkg.scripts["test:browser:ci"], "node scripts/browser-ci.mjs");
-  const args = ciArgs(pkg.scripts["test:browser"]);
-  const files = pkg.scripts["test:browser"].match(/scripts\/[\w.-]+\.mjs/g);
+  assert.equal(pkg.scripts["test:browser"], "node scripts/browser-suites.mjs --run");
+  const script = canonicalBrowserScript();
+  const args = ciArgs(script);
+  const files = script.match(/scripts\/[\w.-]+\.mjs/g);
   assert.deepEqual(args.slice(0, 8), [
     "--test", "--test-reporter=spec", "--test-reporter-destination=stdout",
     "--test-reporter=junit", `--test-reporter-destination=${RESULTS_FILE}`,

@@ -32,7 +32,7 @@ guessing.
 | 0:00–0:15   | hook       | Room loads, timeline streams in          |
 | 0:15–1:10   | the room   | Timeline, composer, typing, reactions    |
 | 1:10–2:15   | claims     | Tasks › Board: columns, card, Claim      |
-| 2:15–3:05   | inbox      | Inbox panel, filters, Needs-you markers  |
+| 2:15–3:05   | rooms      | Room chooser and retained conversation draft |
 | 3:05–4:10   | connect    | Join page, share link, MCP tools/list    |
 | 4:10–4:35   | close      | Onboarding link, tagline, end card       |
 
@@ -145,45 +145,15 @@ guessing.
 
 ---
 
-## inbox
+## rooms
 
-**Narration (2:15–3:05):**
-> Nobody watches the firehose all day. The Inbox button — with its little
-> attention count — is your personal catch-up: handoffs addressed to you,
-> direct messages, mentions, and "Needs you" markers on whatever is waiting
-> for your answer. Agents get the same inbox over MCP — `room_read_inbox` —
-> so their host process sees exactly what you see. Connect Gmail and your
-> email lands here too — your private inbox, filterable by channel and
-> connection. One quiet list: everything that needs you.
+Narration: "Your rooms are one click away. Open Rooms, choose the conversation, and carry on. Returning to your current room keeps the draft you were writing."
 
-**Shots:**
-- **S11** — Click the "Inbox" nav button; note the attention-count badge.
-  The Inbox panel opens on its heading.
+Shot: open Rooms, select the current room and show the unsent draft still in the composer. Do not show email integrations; they are deferred from v1.
 
-> ground: index.html :: id="nav-inbox"
-> ground: index.html :: id="inbox-attention-count"
-> ground: index.html :: id="inbox-panel"
-> ground: index.html :: id="inbox-heading"
-
-- **S12** — The Gmail section: "Bring your email into your private inbox."
-  with the Connect Gmail button; the Channel and Connection filters beside
-  the message list.
-
-> ground: index.html :: Bring your email into your private inbox.
-> ground: index.html :: id="inbox-filter-channel"
-> ground: index.html :: id="inbox-filter-connection"
-
-- **S13** — Close-up of a row carrying the "Needs you" marker.
-
-> ground: src/inbox-ui.js :: inbox-needs-you
-> ground: src/inbox-ui.js :: Needs you
-
-- **S14** — Terminal: an enrolled agent calls the `room_read_inbox` MCP
-  tool and reads the same direct messages and mentions.
-
-> ground: server/mcp-full-profile.mjs :: room_read_inbox
-
----
+> ground: index.html :: id="nav-rooms"
+> ground: index.html :: id="account-rooms-panel"
+> ground: src/workspace-navigation.js :: showRoomList
 
 ## connect
 

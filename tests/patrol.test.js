@@ -541,3 +541,33 @@ test("operator status names the parked room the public health surface cannot", (
     assert.ok(row.error.length > 0 && row.error.length <= 240);
   } finally { store.close(); }
 });
+
+test('large idempotency look-back stays within Workers SQL binding limits', () => {
+  const store = openStore();
+  store.roomFlood={consume(){}};
+  try {
+    post(store, 'prior-key', 'Prior batch');
+    const prior = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.messageId')=?").get('alpha','prior-key');
+    const key = JSON.parse(prior.body).idempotencyKey;
+    store.patrolTick();
+    for(let i=0;i<120;i++)post(store,`large-${i}`,'Next batch');
+    const row=store.db.prepare("SELECT id,body FROM events WHERE room_id=? AND json_extract(body,'$.data.messageId')=?").get('alpha','large-119');
+    const event=JSON.parse(row.body);event.idempotencyKey=key;
+    store.db.prepare('UPDATE events SET body=? WHERE id=?').run(JSON.stringify(event),row.id);
+    const prepare=store.db.prepare.bind(store.db);
+    let lookbacks=0;
+    store.db.prepare=sql=>{
+      const statement=prepare(sql);
+      if(sql.includes("AS k") && sql.includes('FROM events')) {
+        lookbacks++;
+        const all=statement.all.bind(statement);
+        statement.all=(...args)=>{assert.ok(args.length<=100,'Workers SQL parameter ceiling');return all(...args);};
+      }
+      return statement;
+    };
+    const result=store.patrolTick();
+    assert.equal(result.errors,undefined);
+    assert.ok(lookbacks>0);
+    assert.ok(store.patrolFindings().some(f=>f.code==='idempotency_duplicate' || f.kind==='idempotency_duplicate'));
+  } finally { store.close(); }
+});

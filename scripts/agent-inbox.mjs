@@ -315,6 +315,7 @@ if (action === "join") {
   node scripts/agent-inbox.mjs leave-room
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review|collaborate [EXPIRES_MINUTES] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs invite-code owner [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke INVITE_ID
   node scripts/agent-inbox.mjs agent-keys create SCOPES_CSV [--label LABEL] [--expires-in 24h|7d] [--expires-at MS_EPOCH]
@@ -478,7 +479,9 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "identity-links" ? await client.identityLinks()
       : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)
       : action === "leave-room" ? await client.deactivateMembership()
-      : action === "invite-code" ? await client.createAgentInvite({ ...(checkpoint.startsWith("profile:")
+      : action === "invite-code" ? await client.createAgentInvite({ ...(checkpoint === "owner"
+            ? { ownerEquivalent: true }
+            : checkpoint.startsWith("profile:")
             ? { profile: checkpoint.slice("profile:".length) }
             : { permissions: checkpoint.split(",").map(p => p.trim()).filter(Boolean) }),
           ...(extra[0] === undefined ? {} : { expiresInMinutes: Number(extra[0]) }),
