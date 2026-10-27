@@ -50,7 +50,14 @@ test('owner retains withdrawn submissions and records one explicit decision with
   // level stays hash_only and the stamp names the deciding review.
   // #3733: the canonical read also composes the review summary onto the
   // stamped record — the five public outcome fields, nothing member-side.
-  assert.deepEqual(await read(await f.call('/api/public-work/receipts/' + f.receipt.receiptId, undefined, null)),
+  // FIX-SETTLE-SNAPSHOT: the decision also freezes the claim record onto
+  // the record as claimSnapshot — asserted here, then set aside so the
+  // rest of the face stays pinned exactly.
+  const canonical = await read(await f.call('/api/public-work/receipts/' + f.receipt.receiptId, undefined, null));
+  const { claimSnapshot, ...canonicalRest } = canonical;
+  assert.equal(claimSnapshot.decision, 'accepted');
+  assert.equal(typeof claimSnapshot.claim.leaseExpiresAt, 'string');
+  assert.deepEqual(canonicalRest,
     { ...f.receipt, state: 'verified', verified: { by: 'owner', at: outcome.review.decision.at, reviewRevision: outcome.review.revision, passVerdict: null },
       review: { state: 'accepted', verificationVerdict: null, verificationReviewerKind: null, verifiedAt: null, decidedAt: outcome.review.decision.at } });
   assert.equal(await (await f.call('/api/public-work/receipts/' + f.receipt.receiptId + '/artifact', undefined, null)).text(), f.artifactText);

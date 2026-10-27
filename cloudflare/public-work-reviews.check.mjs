@@ -77,8 +77,17 @@ test('actual Worker review verification/acceptance and exact journals survive di
   // #3546: acceptance rewrites only the receipt's verified successor
   // fields (state/verification/executedChecks/verified); the submitted
   // artifact bytes and every other row column survive byte-exactly.
+  // FIX-SETTLE-SNAPSHOT: the decision also appends the claimSnapshot
+  // evidence block — its stable fields are asserted here and the block
+  // itself is carried into the expected record (its lease timestamps
+  // are the claim's own, read back from the record).
   const beforeReceipt=JSON.parse(before.submitted[0].receipt_json);
-  const expectedSubmitted=before.submitted.map(row=>({...row,receipt_json:JSON.stringify({...beforeReceipt,state:'verified',verification:'system_checked',executedChecks:verified.review.verification.executedChecks,verified:{by:'owner',at:accepted.review.decision.at,reviewRevision:accepted.review.revision,passVerdict:verified.review.verification.verdict}})}));
+  const snapshot=JSON.parse(persisted.submitted[0].receipt_json).claimSnapshot;
+  assert.equal(snapshot.schema,'public-work-claim-snapshot/1');
+  assert.equal(snapshot.decision,'accepted');
+  assert.deepEqual(snapshot.criteria,['Keep exact bytes']);
+  assert.equal(typeof snapshot.claim.leaseExpiresAt,'string');
+  const expectedSubmitted=before.submitted.map(row=>({...row,receipt_json:JSON.stringify({...beforeReceipt,state:'verified',verification:'system_checked',executedChecks:verified.review.verification.executedChecks,verified:{by:'owner',at:accepted.review.decision.at,reviewRevision:accepted.review.revision,passVerdict:verified.review.verification.verdict},claimSnapshot:snapshot})}));
   assert.deepEqual(persisted.submitted,expectedSubmitted);assert.deepEqual(persisted.kernel,before.kernel);assert.deepEqual(persisted.balances,before.balances);
   assert.deepEqual(persisted.members,before.members);assert.equal(persisted.permit,0);assert.ok(!persisted.members.includes(producer.identityId));
   await reopen();assert.deepEqual(await json(await call('state')),persisted);
