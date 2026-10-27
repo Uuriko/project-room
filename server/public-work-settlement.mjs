@@ -1,4 +1,5 @@
-import { canonicalLane, toCredits, MAX_CREDITS, MILLIS_PER_CREDIT } from './bounty-escrow.mjs';
+import { canonicalLane, toCredits, MAX_CREDITS, MILLIS_PER_CREDIT,
+  CLAIM_BOND_MILLIS, FEE_NUMERATOR, FEE_DENOMINATOR } from './bounty-escrow.mjs';
 import { claimEligibility } from './bounty-reputation.mjs';
 import { ServiceError } from './service-error.mjs';
 
@@ -35,6 +36,21 @@ import { ServiceError } from './service-error.mjs';
 //   be decided instead of running undecidable into the timeout default.
 //   (The #3307 dispute-bond specification conflict is neither resolved
 //   nor altered by any of this.);
+// - sponsor room cap (COMP-DEEP #23 C1, pattern P5 / rule R4): the funding
+//   act may carry a sponsorRoomCap — the total credits the sponsor
+//   authorizes this room's funded bounties to draw at once. The cap is set
+//   at funding time (never discovered in settings), persisted per room,
+//   and enforced in fund(): a funding that would push the room's
+//   outstanding funded exposure (awards whose escrow bounty is not yet
+//   paid/refunded/cancelled) above the cap is refused with
+//   sponsor_room_cap_exceeded before any money moves. No-overage default:
+//   when no cap has ever been supplied, the cap defaults to the amount of
+//   the funding act itself, so a sponsor is never drawn beyond what they
+//   explicitly funded. A later funding act may supply a new cap, which
+//   replaces the stored one from that act onward.
+// - credit exposure (COMP-DEEP #23 C2, rules R2/R3): publicWorkExposure()
+//   derives the pre-claim exposure line from the task terms — award, the
+//   flat claim bond at risk, and the pool fee — display only.
 // - reviewer silence settles NOTHING here: settlement fires only on an
 //   actual review verdict. The free-miss flip (Constitution VIII.1) is
 //   John-gated and not decided, so the mirror bounty's deadline is set a
@@ -45,6 +61,9 @@ CREATE TABLE IF NOT EXISTS public_work_settlements (
   offer_id TEXT PRIMARY KEY, room_id TEXT NOT NULL, bounty_id TEXT NOT NULL UNIQUE,
   poster_lane TEXT NOT NULL, claimant_lane TEXT, amount_millis INTEGER NOT NULL,
   receipt_id TEXT, created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public_work_room_caps (
+  room_id TEXT PRIMARY KEY, cap_millis INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );`;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -72,6 +91,42 @@ export function publicWorkRewardMillis(offer) {
   return millis;
 }
 
+// The sponsor room cap as supplied at the funding act (enable input), in
+// credits as a JSON number (100, 2.5). Returns milli-credits, null when
+// absent, or undefined when malformed — mirrors publicWorkRewardMillis.
+export function sponsorRoomCapMillisOf(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value > MAX_CREDITS) return undefined;
+  const millis = Math.round(value * MILLIS_PER_CREDIT);
+  if (Math.abs(value * MILLIS_PER_CREDIT - millis) > 1e-9) return undefined;
+  return millis;
+}
+
+const creditText = millis => String(toCredits(millis));
+
+// COMP-DEEP #23 C2: the credit-exposure line for one paid task, computed
+// from its terms alone so it is knowable before claiming (R2) and shown
+// where the work happens (R3). Display only — nothing here moves money.
+// The pool fee is carved FROM the award on released payouts (the escrow's
+// existing shape), never charged on top, so it is not added to the draw.
+// The claim bond is the flat task-terms bond; the escrow's anti-flake
+// ladder can raise an individual claimant's bond from their own history,
+// which is claimant state, not task terms, and stays out of this line.
+// Worst-case draw = the sponsor's funded award plus the claimant's bond:
+// every credit that can be locked around this task at claim time.
+export function publicWorkExposure(amountMillis) {
+  if (!Number.isSafeInteger(amountMillis) || amountMillis <= 0) return null;
+  const poolFeeMillis = Math.floor(amountMillis * FEE_NUMERATOR / FEE_DENOMINATOR);
+  const totalWorstCaseDrawMillis = amountMillis + CLAIM_BOND_MILLIS;
+  return { schema: 'public-work-exposure/1',
+    awardMillis: amountMillis, awardCredits: toCredits(amountMillis),
+    claimBondMillis: CLAIM_BOND_MILLIS, claimBondCredits: toCredits(CLAIM_BOND_MILLIS),
+    poolFeeMillis, poolFeeCredits: toCredits(poolFeeMillis), poolFeeCarvedFromAward: true,
+    sponsorDrawMillis: amountMillis, sponsorDrawCredits: toCredits(amountMillis),
+    totalWorstCaseDrawMillis, totalWorstCaseDrawCredits: toCredits(totalWorstCaseDrawMillis),
+    line: `Award ${creditText(amountMillis)} cr · claim bond at risk ${creditText(CLAIM_BOND_MILLIS)} cr · pool fee ${creditText(poolFeeMillis)} cr (carved from the award on payout) · worst-case draw ${creditText(totalWorstCaseDrawMillis)} cr` };
+}
+
 export class PublicWorkSettlement {
   constructor(store) { this.store = store; this.db = store.db; }
   verifySchema({ allowAbsent = false } = {}) {
@@ -85,6 +140,33 @@ export class PublicWorkSettlement {
   link(offerId) {
     if (!this.hasTable()) return null;
     return this.db.prepare('SELECT * FROM public_work_settlements WHERE offer_id=?').get(offerId) ?? null;
+  }
+  hasCapsTable() { return Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_work_room_caps'").get()); }
+  roomCapRow(roomId) {
+    if (!this.hasCapsTable()) return null;
+    return this.db.prepare('SELECT * FROM public_work_room_caps WHERE room_id=?').get(roomId) ?? null;
+  }
+  // Outstanding funded exposure in a room: the awards of every settlement
+  // link whose escrow bounty has not reached a terminal state (paid out,
+  // refunded, or cancelled). A link whose bounty row is missing counts as
+  // outstanding — the conservative direction for a cap check.
+  outstandingMillis(roomId) {
+    if (!this.hasTable()) return 0;
+    const hasBounties = Boolean(this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='bounty_records'").get());
+    if (!hasBounties) return this.db.prepare('SELECT COALESCE(SUM(amount_millis),0) AS t FROM public_work_settlements WHERE room_id=?').get(roomId).t;
+    return this.db.prepare(`SELECT COALESCE(SUM(s.amount_millis),0) AS t FROM public_work_settlements s
+      LEFT JOIN bounty_records b ON b.bounty_id=s.bounty_id AND b.room_id=s.room_id
+      WHERE s.room_id=? AND (b.state IS NULL OR b.state NOT IN ('paid','refunded','cancelled'))`).get(roomId).t;
+  }
+  // The room's sponsor cap as a read view, or null when no funding act has
+  // ever set one (possible only for links funded before caps existed).
+  roomCap(roomId) {
+    const row = this.roomCapRow(roomId);
+    if (!row) return null;
+    const outstandingMillis = this.outstandingMillis(roomId);
+    return { capMillis: row.cap_millis, capCredits: toCredits(row.cap_millis),
+      outstandingMillis, outstandingCredits: toCredits(outstandingMillis),
+      headroomMillis: row.cap_millis - outstandingMillis, headroomCredits: toCredits(row.cap_millis - outstandingMillis) };
   }
   escrow() {
     const escrow = this.store.bountyEscrow;
@@ -113,9 +195,24 @@ export class PublicWorkSettlement {
   // from the poster's existing balance and record the link. Runs inside the
   // caller's transaction (escrow transactions nest), so a funding failure
   // rolls the enable back with it — a paid task is never listed unfunded.
-  fund(roomId, posterId, offer, amountMillis) {
+  fund(roomId, posterId, offer, amountMillis, { sponsorRoomCapMillis = null } = {}) {
     const escrow = this.escrow();
     const posterLane = canonicalLane(posterId);
+    // Sponsor room cap (C1): resolve the effective cap BEFORE any money
+    // moves — the cap supplied in this funding act, else the room's stored
+    // cap, else (no-overage default) this funding act's own amount. A
+    // malformed supplied cap refuses the funding rather than being
+    // silently ignored: a sponsor who typed a cap must never fund uncapped.
+    if (sponsorRoomCapMillis !== null
+      && (!Number.isSafeInteger(sponsorRoomCapMillis) || sponsorRoomCapMillis <= 0
+        || sponsorRoomCapMillis > MAX_CREDITS * MILLIS_PER_CREDIT))
+      fail(422, 'invalid_sponsor_room_cap', 'Sponsor room cap must be a positive amount of credits');
+    const storedCap = this.roomCapRow(roomId);
+    const capMillis = sponsorRoomCapMillis ?? storedCap?.cap_millis ?? amountMillis;
+    const outstandingMillis = this.outstandingMillis(roomId);
+    if (outstandingMillis + amountMillis > capMillis)
+      fail(409, 'sponsor_room_cap_exceeded',
+        `Funding ${toCredits(amountMillis)} credits would draw ${toCredits(outstandingMillis + amountMillis)} credits against this room's sponsor cap of ${toCredits(capMillis)} credits`);
     const deadline = new Date(this.store.now() + 365 * 24 * 3600 * 1000).toISOString();
     // Designate the dispute decider (#3702): the offer's first named
     // reviewer who is not the poster. Rail bounties previously designated
@@ -146,6 +243,14 @@ export class PublicWorkSettlement {
     } catch (error) { throw escrowError(error); }
     this.db.prepare('INSERT INTO public_work_settlements VALUES (?,?,?,?,?,?,?,?)')
       .run(offer.id, roomId, bountyId, posterLane, null, amountMillis, null, this.store.now());
+    // Persist the effective cap with the funding act that set it (an
+    // explicit cap replaces the stored one; the no-overage default is
+    // persisted too, so the room's cap is a fact, not a recomputation).
+    // Runs in the caller's transaction with the link insert, so a funding
+    // failure leaves no cap behind either.
+    if (this.hasCapsTable())
+      this.db.prepare('INSERT INTO public_work_room_caps VALUES (?,?,?) ON CONFLICT(room_id) DO UPDATE SET cap_millis=excluded.cap_millis, updated_at=excluded.updated_at')
+        .run(roomId, capMillis, this.store.now());
     return this.view(this.link(offer.id));
   }
 
@@ -247,6 +352,7 @@ export class PublicWorkSettlement {
       amountMillis: link.amount_millis, amountCredits: toCredits(link.amount_millis),
       posterLane: link.poster_lane, claimantLane: link.claimant_lane, receiptId: link.receipt_id,
       disputeDecider: bounty?.disputeDecider ?? null,
+      roomCap: this.roomCap(link.room_id),
       phase: bounty?.state ?? 'funded', challengeEndsAt: bounty?.challengeEnds ?? null, payoutReceipt };
   }
   viewForOffer(offerId) { return this.view(this.link(offerId)); }

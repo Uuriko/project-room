@@ -291,7 +291,10 @@ test('claimable gate: a probation-band lane is refused above the probation cap o
   store.projectOffers.create('commons', 'owner', { requestId: 'create-small', offerId: 'small-task', reviewerMemberIds: ['owner'], terms });
   store.projectOffers.transition('commons', 'owner', 'small-task', 'publish', { requestId: 'publish-small', expectedRevision: 1 });
   store.publicWorkClaims.enable('commons', 'owner', 'small-task',
-    { requestId: 'enable-small', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['result.txt'] });
+    // COMP-DEEP #23 C1: the 8-credit task above set the room's no-overage
+    // default cap to its own amount, so this second funding act names an
+    // explicit sponsor room cap.
+    { requestId: 'enable-small', expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: ['result.txt'], sponsorRoomCap: 100 });
   assert.equal(store.publicWorkSettlement.assertClaimable('commons', 'small-task', f.producer.identityId), 'worker');
   conserved(store);
 });
