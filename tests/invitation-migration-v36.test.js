@@ -120,7 +120,7 @@ test("v35→v36 migration preserves invitation rows and unlocks accountless-owne
   raw.exec("DROP TABLE membership_invitations_backup");
   // A real v35 database has writer_v6..v35 triggers but none from the current
   // schema. Drop those so the pre-migration fence check passes.
-  const currentTriggers = raw.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v3[6-9]_*'").all();
+  const currentTriggers = raw.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND (name GLOB 'writer_v3[6-9]_*' OR name GLOB 'writer_v4[012]_*')").all();
   for (const { name } of currentTriggers) raw.exec(`DROP TRIGGER ${name}`);
   raw.exec("PRAGMA user_version=35");
   // A real v35 DB carries the full v35 writer-trigger set; the v36 install

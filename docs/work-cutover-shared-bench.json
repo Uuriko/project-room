@@ -1,0 +1,666 @@
+{
+  "env": {
+    "node": "v24.19.0",
+    "cpu": "Apple M5",
+    "cores": 10,
+    "runs": 6,
+    "writes": 200,
+    "floor": 0.1,
+    "sizes": [
+      1000
+    ],
+    "bodiesAtRest": false,
+    "date": "2026-10-18T09:44:54.013Z"
+  },
+  "base": {
+    "ref": "ee32e58f",
+    "sha": "ee32e58fbdbd6504ff4f37bb96e56495377facef"
+  },
+  "head": {
+    "sha": "ee32e58fbdbd6504ff4f37bb96e56495377facef",
+    "dirty": true
+  },
+  "sizes": {
+    "1000": [
+      {
+        "key": "writeP50Ms",
+        "name": "write p50 (ms)",
+        "verdict": "~",
+        "base": 4.65,
+        "head": 4.655,
+        "baseCi": {
+          "low": 4.12,
+          "high": 7.6,
+          "exact": true
+        },
+        "headCi": {
+          "low": 4.32,
+          "high": 5.41,
+          "exact": true
+        },
+        "ratio": 1.0010752688172042,
+        "p": 0.9372294372294372,
+        "baseSamples": [
+          4.12,
+          4.64,
+          4.66,
+          4.81,
+          7.6,
+          4.49
+        ],
+        "headSamples": [
+          4.61,
+          5.18,
+          4.51,
+          4.7,
+          5.41,
+          4.32
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "writeP95Ms",
+        "name": "write p95 (ms)",
+        "verdict": "~",
+        "base": 8.49,
+        "head": 8.31,
+        "baseCi": {
+          "low": 7.44,
+          "high": 12.61,
+          "exact": true
+        },
+        "headCi": {
+          "low": 8.02,
+          "high": 9.24,
+          "exact": true
+        },
+        "ratio": 0.9787985865724382,
+        "p": 0.8181818181818182,
+        "baseSamples": [
+          7.44,
+          8,
+          8.21,
+          8.84,
+          12.61,
+          8.77
+        ],
+        "headSamples": [
+          8.19,
+          9.09,
+          8.24,
+          8.38,
+          9.24,
+          8.02
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "storedProjectionMs",
+        "name": "storedProjection (ms)",
+        "verdict": "~",
+        "base": 0.8700000000000001,
+        "head": 0.845,
+        "baseCi": {
+          "low": 0.75,
+          "high": 1.26,
+          "exact": true
+        },
+        "headCi": {
+          "low": 0.73,
+          "high": 0.96,
+          "exact": true
+        },
+        "ratio": 0.9712643678160918,
+        "p": 0.6991341991341992,
+        "baseSamples": [
+          0.75,
+          1.16,
+          0.81,
+          0.77,
+          1.26,
+          0.93
+        ],
+        "headSamples": [
+          0.89,
+          0.87,
+          0.82,
+          0.79,
+          0.96,
+          0.73
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "coldRoomMs",
+        "name": "cold room() (ms)",
+        "verdict": "~",
+        "base": 1.81,
+        "head": 1.615,
+        "baseCi": {
+          "low": 1.37,
+          "high": 1.99,
+          "exact": true
+        },
+        "headCi": {
+          "low": 1.25,
+          "high": 1.74,
+          "exact": true
+        },
+        "ratio": 0.8922651933701657,
+        "p": 0.2878787878787879,
+        "baseSamples": [
+          1.37,
+          1.99,
+          1.91,
+          1.5,
+          1.91,
+          1.71
+        ],
+        "headSamples": [
+          1.66,
+          1.6,
+          1.52,
+          1.63,
+          1.74,
+          1.25
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "projectionKB",
+        "name": "projection (KB)",
+        "verdict": "~",
+        "base": 1211,
+        "head": 1211,
+        "baseCi": {
+          "low": 1211,
+          "high": 1211,
+          "exact": true
+        },
+        "headCi": {
+          "low": 1211,
+          "high": 1211,
+          "exact": true
+        },
+        "ratio": 1,
+        "p": 1,
+        "baseSamples": [
+          1211,
+          1211,
+          1211,
+          1211,
+          1211,
+          1211
+        ],
+        "headSamples": [
+          1211,
+          1211,
+          1211,
+          1211,
+          1211,
+          1211
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "snapshotBuildMs",
+        "name": "snapshot build (ms)",
+        "verdict": "better",
+        "base": 2.705,
+        "head": 1.87,
+        "baseCi": {
+          "low": 2.19,
+          "high": 3.11,
+          "exact": true
+        },
+        "headCi": {
+          "low": 1.55,
+          "high": 2.15,
+          "exact": true
+        },
+        "ratio": 0.6913123844731978,
+        "p": 0.0021645021645021645,
+        "baseSamples": [
+          2.19,
+          2.52,
+          2.89,
+          2.6,
+          3.11,
+          2.81
+        ],
+        "headSamples": [
+          1.98,
+          1.94,
+          1.8,
+          1.8,
+          2.15,
+          1.55
+        ],
+        "pAdjusted": 0.017316017316017316
+      },
+      {
+        "key": "httpFullKB",
+        "name": "GET full room (KB)",
+        "verdict": "~",
+        "base": 1322.9,
+        "head": 1322.9,
+        "baseCi": {
+          "low": 1322.9,
+          "high": 1322.9,
+          "exact": true
+        },
+        "headCi": {
+          "low": 1322.9,
+          "high": 1322.9,
+          "exact": true
+        },
+        "ratio": 1,
+        "p": 1,
+        "baseSamples": [
+          1322.9,
+          1322.9,
+          1322.9,
+          1322.9,
+          1322.9,
+          1322.9
+        ],
+        "headSamples": [
+          1322.9,
+          1322.9,
+          1322.9,
+          1322.9,
+          1322.9,
+          1322.9
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "httpFullMs",
+        "name": "GET full room (ms)",
+        "verdict": "~",
+        "base": 8,
+        "head": 6.395,
+        "baseCi": {
+          "low": 6.28,
+          "high": 10.23,
+          "exact": true
+        },
+        "headCi": {
+          "low": 5.6,
+          "high": 7.68,
+          "exact": true
+        },
+        "ratio": 0.799375,
+        "p": 0.17965367965367965,
+        "baseSamples": [
+          6.32,
+          8.62,
+          6.28,
+          10.23,
+          7.58,
+          8.42
+        ],
+        "headSamples": [
+          6.57,
+          6.14,
+          6.43,
+          6.36,
+          7.68,
+          5.6
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "httpRecentKB",
+        "name": "GET recent window (KB)",
+        "verdict": "~",
+        "base": 221.3,
+        "head": 221.3,
+        "baseCi": {
+          "low": 221.3,
+          "high": 221.3,
+          "exact": true
+        },
+        "headCi": {
+          "low": 221.3,
+          "high": 221.3,
+          "exact": true
+        },
+        "ratio": 1,
+        "p": 1,
+        "baseSamples": [
+          221.3,
+          221.3,
+          221.3,
+          221.3,
+          221.3,
+          221.3
+        ],
+        "headSamples": [
+          221.3,
+          221.3,
+          221.3,
+          221.3,
+          221.3,
+          221.3
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "httpRecentMs",
+        "name": "GET recent window (ms)",
+        "verdict": "~",
+        "base": 4.455,
+        "head": 4.0200000000000005,
+        "baseCi": {
+          "low": 3.68,
+          "high": 4.8,
+          "exact": true
+        },
+        "headCi": {
+          "low": 3.81,
+          "high": 4.63,
+          "exact": true
+        },
+        "ratio": 0.9023569023569025,
+        "p": 0.30952380952380953,
+        "baseSamples": [
+          3.68,
+          4.36,
+          4.07,
+          4.55,
+          4.72,
+          4.8
+        ],
+        "headSamples": [
+          4.26,
+          4.15,
+          3.85,
+          3.89,
+          4.63,
+          3.81
+        ],
+        "pAdjusted": 1
+      },
+      {
+        "key": "replayMs",
+        "name": "replay from log (ms)",
+        "verdict": "~",
+        "base": 105,
+        "head": 93,
+        "baseCi": {
+          "low": 91,
+          "high": 124,
+          "exact": true
+        },
+        "headCi": {
+          "low": 84,
+          "high": 119,
+          "exact": true
+        },
+        "ratio": 0.8857142857142857,
+        "p": 0.16666666666666666,
+        "baseSamples": [
+          91,
+          105,
+          95,
+          124,
+          117,
+          105
+        ],
+        "headSamples": [
+          103,
+          94,
+          87,
+          92,
+          119,
+          84
+        ],
+        "pAdjusted": 1
+      }
+    ]
+  },
+  "raw": {
+    "1000": {
+      "base ee32e58f (ee32e58f)": [
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.12,
+          "writeP95Ms": 7.44,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.75,
+          "coldRoomMs": 1.37,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 2.19,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 6.32,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 3.68,
+          "replayMs": 91,
+          "heapMB": 66
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.64,
+          "writeP95Ms": 8,
+          "writeFailures": 0,
+          "storedProjectionMs": 1.16,
+          "coldRoomMs": 1.99,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 2.52,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 8.62,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 4.36,
+          "replayMs": 105,
+          "heapMB": 66
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.66,
+          "writeP95Ms": 8.21,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.81,
+          "coldRoomMs": 1.91,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 2.89,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 6.28,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 4.07,
+          "replayMs": 95,
+          "heapMB": 51
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.81,
+          "writeP95Ms": 8.84,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.77,
+          "coldRoomMs": 1.5,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 2.6,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 10.23,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 4.55,
+          "replayMs": 124,
+          "heapMB": 66
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 7.6,
+          "writeP95Ms": 12.61,
+          "writeFailures": 0,
+          "storedProjectionMs": 1.26,
+          "coldRoomMs": 1.91,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 3.11,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 7.58,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 4.72,
+          "replayMs": 117,
+          "heapMB": 51
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.49,
+          "writeP95Ms": 8.77,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.93,
+          "coldRoomMs": 1.71,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 2.81,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 8.42,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 4.8,
+          "replayMs": 105,
+          "heapMB": 66
+        }
+      ],
+      "head ee32e58f+changes": [
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.61,
+          "writeP95Ms": 8.19,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.89,
+          "coldRoomMs": 1.66,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 1.98,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 6.57,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 4.26,
+          "replayMs": 103,
+          "heapMB": 51
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 5.18,
+          "writeP95Ms": 9.09,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.87,
+          "coldRoomMs": 1.6,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 1.94,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 6.14,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 4.15,
+          "replayMs": 94,
+          "heapMB": 66
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.51,
+          "writeP95Ms": 8.24,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.82,
+          "coldRoomMs": 1.52,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 1.8,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 6.43,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 3.85,
+          "replayMs": 87,
+          "heapMB": 66
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.7,
+          "writeP95Ms": 8.38,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.79,
+          "coldRoomMs": 1.63,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 1.8,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 6.36,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 3.89,
+          "replayMs": 92,
+          "heapMB": 51
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 5.41,
+          "writeP95Ms": 9.24,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.96,
+          "coldRoomMs": 1.74,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 2.15,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 7.68,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 4.63,
+          "replayMs": 119,
+          "heapMB": 66
+        },
+        {
+          "size": 1000,
+          "sequence": 1061,
+          "writeP50Ms": 4.32,
+          "writeP95Ms": 8.02,
+          "writeFailures": 0,
+          "storedProjectionMs": 0.73,
+          "coldRoomMs": 1.25,
+          "projectionKB": 1211,
+          "snapshotBuildMs": 1.55,
+          "snapshotKB": 1323,
+          "httpFullKB": 1322.9,
+          "httpFullMs": 5.6,
+          "httpRecentKB": 221.3,
+          "httpRecentMs": 3.81,
+          "replayMs": 84,
+          "heapMB": 51
+        }
+      ]
+    }
+  },
+  "candidateProvenance": {
+    "note": "Hashes of measured files, including untracked repository module. Benchmark preceded the retained v41 writer-function registration repair; that line is restored to its measured form for this hash. Subsequent changes are migration fixtures, retained writer registration and documentation. This result was run once and is not a release qualification.",
+    "sha256": {
+      "server/store.mjs": "568449f9725e45a4ae9e843a66090a15ed2e320dbc39aa8356397dc360c23451",
+      "server/work-repository.mjs": "76c9780b03578a69b81573afae0f28bd025ea20555647a6fcd60d0b2e9a4bb90",
+      "server/projection-at-rest.mjs": "9f8cd3c401b3121c73029ad2ef04656e02ea3551a3fac1055603f6af67c37039",
+      "server/writer-fence.mjs": "0e7a8ad9feb54d9694a4d634ae9b1c0e5e6d3ea257b511871389cd3534ace996",
+      "server/work-item-board.mjs": "47fcd4f3c5b513487c6cf9bf73afa0b75ffc01aaa899ac2b54932d6031450d26",
+      "src/board-ui.js": "66f670acf90a942c542fcd0ccc8f329a6f865352131796b8423230e77708146f",
+      "scripts/bench/compare.mjs": "79497c3ecbd55959033a60d68dbb9e6ab0c13ca694fb3ab7206236e8828d7185",
+      "scripts/bench/fixture.mjs": "ceecdd95a0a754cf2562b1b0ddb89f3745aed9571c860e56d4ec7d9bddc112f0",
+      "scripts/bench/room-scale.mjs": "1ff1fd17847fa0e210e09af894b5b3e84f6ab618682db14bd76f617fb83e1156",
+      "scripts/bench/stats.mjs": "41c30c1dcdd2a171951bf055b74fe537042e2caa2f3b6266a1056b08e21ea280"
+    },
+    "codeDrop": "cd-7ecd9dea2554",
+    "codeDropSha256": "7ecd9dea2554fa149773053d3b1313f7bae2adcdcc8d9fe89de2c004e7b752ab",
+    "roomMessageId": "work-cutover-shared-bench-20261018",
+    "roomEventId": "e0bfe538-a40c-40e0-956a-fce93f693588"
+  }
+}

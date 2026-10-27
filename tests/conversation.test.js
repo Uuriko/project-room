@@ -221,6 +221,9 @@ test("composer @ query picks people and agents and mention HTML stays escaped", 
   assert.equal(memberStatus({ kind: "agent", active: true }), "Agent");
   assert.equal(memberStatus({ kind: "human", active: true }), "Person");
   assert.equal(memberStatus({ kind: "agent", active: false }), "access revoked");
+  // R350-n1: an active seat whose identity signed out for good says so; removal still wins.
+  assert.equal(memberStatus({ kind: "agent", active: true, identityRevoked: true }), "Signed out for good");
+  assert.equal(memberStatus({ kind: "agent", active: false, identityRevoked: true }), "access revoked");
   assert.equal(memberHandle({ kind: "agent", displayName: "Codex" }), "@Codex");
   assert.equal(memberHandle({ kind: "human", displayName: "Maya" }), "Maya");
   assert.equal(memberHandle({ kind: "agent", displayName: "Codex" }, "Codex (codex)"), "@Codex (codex)");

@@ -104,7 +104,8 @@ test("parity poison: one drifted room is isolated and reported until repaired; t
   );
 
   // The job still fails the tick — isolation is not a silent pass — and
-  // the public detail names the sub-check without the room id.
+  // the public error string names the sub-check without the room id (the
+  // failure detail itself names the room — see integrity-naming.test.js).
   const run = await integrityJob.run(store, { deadline: Date.now() + 5000 });
   assert.ok(Number(run.errors) >= 1);
   assert.equal(run.failureDetail.subcheck, "messages_parity");
@@ -185,8 +186,11 @@ test("backfill interruption is control flow, not a room failure: a throwing yiel
     () => store.backfillMessages({ limit: 400, yieldBetween: () => { throw new Error("interrupted"); } }),
     /interrupted/
   );
-  const cursor = store.db.prepare("SELECT applied_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
-  assert.ok(cursor.applied_seq > 0 && cursor.applied_seq < store.room(roomId).sequence, "the committed prefix survives the interruption");
+  const cursor = store.db.prepare("SELECT applied_seq,state_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
+  assert.ok(cursor.state_seq > 0 && cursor.state_seq < store.room(roomId).sequence, "the committed staging prefix survives the interruption");
+  assert.equal(cursor.applied_seq, 0, "partial replay must not publish a serving head");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages WHERE room_id=?").get(roomId).n, 0,
+    "partial replay must not publish serving message rows");
   const result = store.backfillMessages({ limit: 400 });
   assert.deepEqual(result.failed, []);
   assert.equal(result.done, true);

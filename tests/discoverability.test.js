@@ -509,6 +509,8 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   assert.ok(listTools.description.includes("public_work_read_task"),
     "list-tools pointer names public_work_read_task");
   assert.ok(listTools.description.includes("seven"), "list-tools pointer states the seven-tool count");
+  assert.equal(listTools.path, "/mcp", "list-tools pointer uses the canonical /mcp path");
+  assert.equal(minted.next.find(s => s.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   for (const step of minted.nextActions) {
     assert.equal(typeof step.transport, "string", "nextActions names the transport");
     assert.ok(step.method || step.tool, "nextActions names the method or tool");
@@ -522,9 +524,9 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   assert.ok(roomActions.includes("invite-members"), "room create points at invite mint");
   assert.ok(roomActions.includes("post-message"), "room create points at first post");
   assert.deepEqual(room.nextActions.map(s => s.action),
-    ["start-work", "post-message", "finish-work", "create-task", "invite-members"],
+    ["start-work", "post-message", "finish-work", "claim-work", "handoff-work", "create-task", "invite-members"],
     "room create nextActions is the canonical verb list");
-  assert.ok(room.nextActions.every(s => s.path.includes(room.roomId)), "room nextActions paths are room-scoped");
+  assert.ok(room.nextActions.every(s => s.transport !== "http" || s.path.includes(room.roomId)), "room nextActions HTTP paths are room-scoped");
   // Invite redemption -> orient + access pointers.
   const invite = store.invites.create(secret, room.roomId, { permissions: ["accept_work"] });
   const redeemRes = await post(origin, "/api/agent-invites/redeem", { code: invite.code, displayName: "Guest Two" });
@@ -533,7 +535,8 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   const redeemActions = redeemed.next.map(s => s.action);
   assert.ok(redeemActions.includes("see-who-is-around"), "redeem points at orientation");
   assert.ok(redeemActions.includes("post-first-message"), "redeem points at first post");
-  assert.deepEqual(redeemed.nextActions.map(s => s.action), ["see-who-is-around", "room_check_access"],
+  assert.deepEqual(redeemed.nextActions.map(s => s.action),
+    ["see-who-is-around", "room_check_access", "claim-work", "handoff-work"],
     "redeem nextActions is the canonical verb list");
   assert.ok(redeemed.nextActions.some(s => s.transport === "mcp" && s.tool === "room_check_access"),
     "redeem nextActions names the MCP access-check tool");

@@ -17,7 +17,7 @@
 
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { EVENT_TYPES, MEMBERSHIP_AUTHORITY_POLICY_VERSION, applyEvent, event, isRoomArchived, roomKind } from "../src/events.js";
-import { commitMessageRedaction, redactRemainingMessageBodies } from "./message-redaction.mjs";
+import { commitMessageRedaction, readRedactionLog, redactRemainingMessageBodies } from "./message-redaction.mjs";
 import { resyncRoomMessageRows } from "./messages-store.mjs";
 import { canonicalLane } from "./bounty-escrow.mjs";
 import { ServiceError } from "./store.mjs";
@@ -337,8 +337,16 @@ function redactRoomMessages(store, roomId, actorId) {
   let state = room.state;
   let removed = 0;
   const at = new Date(store.now()).toISOString();
-  for (const messageId of ids) {
-    const result = commitMessageRedaction(store.db, { roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRest });
+  // One read of the room's log for the whole pass, and one projection write
+  // (on the last message). Per message, each call re-read and re-parsed the
+  // entire log and rewrote the whole projection: O(messages x events), which
+  // put a solely owned room of a few thousand messages past the Worker's
+  // 30 s CPU limit, so the account could not be deleted.
+  const log = readRedactionLog(store.db, roomId);
+  for (const [index, messageId] of ids.entries()) {
+    const result = commitMessageRedaction(store.db, {
+      roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRest, log, writeProjection: index === ids.length - 1
+    });
     state = result.state;
     removed += result.rewritten;
   }
@@ -347,7 +355,7 @@ function redactRoomMessages(store, roomId, actorId) {
   // it; its event bodies are cleared above, clear its table row here.
   if (archived.length) {
     const archivedAt = at;
-    const clear = store.db.prepare("UPDATE messages SET body=NULL, record_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id=?");
+    const clear = store.db.prepare("UPDATE messages SET body=NULL, reducer_extras_json=NULL, record_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id=?");
     for (const row of archived) removed += clear.run(archivedAt, roomId, row.id).changes;
   }
   let files = 0;
@@ -380,7 +388,7 @@ function rebuildRoom(store, roomId) {
 // Events are redacted, then the projection is rebuilt so recovery matches.
 function archivePersonalRoom(store, room) {
   // Public activity summaries and retry responses can contain room text too.
-  for (const table of ["room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
+  for (const table of ["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices", "room_assistant_config", "room_assistant_runs", "room_assistant_ops", "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests"]) {
     if (store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(table))
       store.db.prepare(`DELETE FROM ${table} WHERE room_id=?`).run(room.id);
   }

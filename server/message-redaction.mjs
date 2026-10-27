@@ -1,3 +1,4 @@
+import { readMessageReplaySnapshot, writeMessageReplaySnapshot, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 // PRIV-1: rewrite a message out of the log, the projection, and the messages
 // table in one transaction. Read-time masking stays; this is the write that
 // makes the old text unreadable in storage.
@@ -40,18 +41,34 @@ function receiptCites(state, messageId) {
 // Already-redacted messages are left as they are. Returns the compact state
 // the rooms row now stores. `sequence` on the command that triggered this
 // stays the delete event; the room sequence advances past the new events.
-export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId, bodiesAtRest = false }) {
+// Read and parse a room's whole log once. A caller that redacts many messages
+// in one transaction (account deletion) passes the result to every
+// commitMessageRedaction call as `log`, so the room's history is read once
+// instead of once per message. The calls keep it current: rewritten entries
+// are mutated in place and appended events are pushed onto it.
+export function readRedactionLog(db, roomId) {
+  const parsed = [];
+  let maxSequence = 0;
+  for (const row of db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(roomId)) {
+    parsed.push({ sequence: row.sequence, entry: parseEvent(row.body) });
+    if (row.sequence > maxSequence) maxSequence = row.sequence;
+  }
+  return { roomId, parsed, maxSequence };
+}
+
+// writeProjection: false skips the rooms-row projection write. Only for a
+// caller that writes or rebuilds the projection itself after its last call.
+export function commitMessageRedaction(db, { roomId, state, actorId, at, messageId, bodiesAtRest = false, log = null, writeProjection = true }) {
   if (typeof roomId !== "string" || typeof messageId !== "string" || !messageId) {
     return { state, sequence: null, rewritten: 0 };
   }
-  const rows = db.prepare("SELECT sequence, body FROM events WHERE room_id=? ORDER BY sequence").all(roomId);
+  const shared = log && log.roomId === roomId ? log : readRedactionLog(db, roomId);
   let postedBody = null;
   let alreadyRedacted = false;
   let alreadyWithdrawn = false;
-  const parsed = [];
-  for (const row of rows) {
-    const entry = parseEvent(row.body);
-    parsed.push({ sequence: row.sequence, entry });
+  const parsed = shared.parsed;
+  for (const row of parsed) {
+    const entry = row.entry;
     if (!entry) continue;
     if (entry.type === EVENT_TYPES.MESSAGE_REDACTED && entry.data?.messageId === messageId) alreadyRedacted = true;
     if (entry.type === EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN && entry.data?.messageId === messageId) alreadyWithdrawn = true;
@@ -87,7 +104,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
   }
 
   let next = state;
-  let sequence = rows.reduce((max, row) => Math.max(max, row.sequence), 0);
+  let sequence = shared.maxSequence;
   if (!isRoomArchived(state)) {
     const insert = db.prepare("INSERT INTO events VALUES(?,?,?,?)");
     const length = Number.isInteger(byteLength) && byteLength > 0 ? { byteLength } : {};
@@ -100,6 +117,7 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
       next = applyEvent(next, incoming);
       sequence += 1;
       insert.run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+      parsed.push({ sequence, entry: incoming });
     }
     if (!alreadyRedacted) {
       const incoming = event({
@@ -110,13 +128,15 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
       next = applyEvent(next, incoming);
       sequence += 1;
       insert.run(roomId, sequence, incoming.id, JSON.stringify(incoming));
+      parsed.push({ sequence, entry: incoming });
       syncMessageRows(db, { roomId, sequence, event: incoming, state: next });
     }
   }
+  shared.maxSequence = sequence;
 
   const ids = messageId.endsWith(":channel") ? [messageId] : [messageId, `${messageId}:channel`];
   try {
-    db.prepare(`UPDATE messages SET body=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(at, roomId, ...ids);
+    db.prepare(`UPDATE messages SET body=NULL, reducer_extras_json=NULL, deleted_at=COALESCE(deleted_at, ?) WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(at, roomId, ...ids);
     if (isRoomArchived(state)) {
       db.prepare(`UPDATE messages SET record_json=NULL WHERE room_id=? AND message_id IN (${ids.map(() => "?").join(",")})`).run(roomId, ...ids);
     }
@@ -154,7 +174,8 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 
   const stored = compact(next);
   if (!isRoomArchived(state)) {
-    db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(db, roomId, stored, { enabled: bodiesAtRest }), roomId);
+    if (writeProjection) db.prepare("UPDATE rooms SET sequence=?, projection=? WHERE id=?").run(sequence, storedProjection(db, roomId, stored, { enabled: bodiesAtRest }), roomId);
+    else db.prepare("UPDATE rooms SET sequence=? WHERE id=?").run(sequence, roomId);
   }
   return { state: stored, sequence, rewritten };
 }
@@ -166,15 +187,15 @@ export function commitMessageRedaction(db, { roomId, state, actorId, at, message
 // backfill rebuilds it from the redacted log. Never keeps a snapshot that
 // still holds removed text.
 function redactReplaySnapshot(db, roomId, ids, removedTexts) {
-  const cursor = db.prepare("SELECT state_json FROM messages_backfill_cursor WHERE room_id=?").get(roomId);
-  if (!cursor) return;
+  const cursor = readMessageReplaySnapshot(db,roomId);
   const discard = () => {
-    db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId);
+    discardMessageReplaySnapshot(db,roomId);
+    db.prepare("UPDATE messages_backfill_cursor SET state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId);
     // A split snapshot (cursor parts, research r21) goes with its marker.
     try { db.prepare("DELETE FROM messages_backfill_state WHERE room_id=?").run(roomId); }
     catch (error) { if (!/no such table/i.test(error?.message ?? "")) throw error; }
   };
-  if (typeof cursor.state_json !== "string") return discard();
+  if (!cursor || typeof cursor.state_json !== "string") return discard();
   let state;
   try { state = JSON.parse(cursor.state_json); } catch { return discard(); }
   if (!state || !Array.isArray(state.messages)) return discard();
@@ -200,7 +221,9 @@ function redactReplaySnapshot(db, roomId, ids, removedTexts) {
     return false;
   };
   if (holdsRemovedText(state)) return discard();
-  db.prepare("UPDATE messages_backfill_cursor SET state_json=?, parity_at_seq=NULL WHERE room_id=?").run(JSON.stringify(state), roomId);
+  writeMessageReplaySnapshot(db,roomId,JSON.stringify(state));
+  db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id=?").run(roomId);
+
 }
 
 // Account deletion also clears dm.posted and any string body the per-message
@@ -223,7 +246,8 @@ export function redactRemainingMessageBodies(db, roomId) {
   // These bodies are not tied to one message's snapshot redaction: discard
   // the replay snapshot so no removed text survives in it.
   if (rewritten) {
-    try { db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId); }
+    try { discardMessageReplaySnapshot(db,roomId);
+    db.prepare("UPDATE messages_backfill_cursor SET state_seq=0, parity_at_seq=NULL WHERE room_id=?").run(roomId); }
     catch (error) { if (!/no such table/i.test(error?.message ?? "")) throw error; }
   }
   return rewritten;

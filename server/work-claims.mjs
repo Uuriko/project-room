@@ -146,11 +146,21 @@ const repoOf = value => {
   check(typeof value === "string" && NAME_PATTERN.test(value), "repo must be 1..200 characters of letters, numbers, or . _ / -");
   return value;
 };
+// Canonical work keeps the caller's repository spelling for replay. The Board
+// and live conflict checks share this identity conversion for public GitHub URLs.
+export function normalizeClaimRepository(value) {
+  if (typeof value !== "string") return value;
+  const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(value);
+  return match ? `${match[1]}/${match[2]}` : value;
+}
+export { repoOf as claimRepositoryOf };
+
 const branchOf = value => {
   if (value === undefined || value === null || value === "") return null;
   check(typeof value === "string" && NAME_PATTERN.test(value), "branch must be 1..200 characters of letters, numbers, or . _ / -");
   return value;
 };
+export { branchOf as claimBranchOf };
 const MAX_PULLS = 16;
 const MAX_CHAIN = 20;
 const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -737,11 +747,16 @@ const requireBundleComplete = (item, bundle, { required }) => {
 // How a stored replay record answers a new update under the same
 // requestId: "replay" when the record binds this payload (or predates the
 // binding), "conflict" when it binds a different payload, null when the
-// requestId has not landed on this claim.
-export const requestReplayVerdict = (outcomes, requestId, digest) => {
+// requestId has not landed on this claim. B4/H2: a record stamped with a
+// DIFFERENT claim round than the current one answers null — it landed in
+// an earlier round, so in this round the id is simply unused (the update
+// applies as this round's own operation, whatever its payload). Records
+// without a round stamp predate the binding and keep their old verdict.
+export const requestReplayVerdict = (outcomes, requestId, digest, round) => {
   if (!outcomes || !Object.hasOwn(outcomes, requestId)) return null;
   const record = outcomes[requestId];
   if (typeof record === "string") return "replay";
+  if (Number.isSafeInteger(record?.round) && Number.isSafeInteger(round) && record.round !== round) return null;
   return record.digest === digest ? "replay" : "conflict";
 };
 const requestOutcomeRecordOf = record => {
@@ -750,7 +765,27 @@ const requestOutcomeRecordOf = record => {
   if (record === null || typeof record !== "object" || Array.isArray(record)) return undefined;
   if (typeof record.at !== "string" || !Number.isFinite(Date.parse(record.at))) return undefined;
   if (typeof record.digest !== "string" || !/^[0-9a-f]{64}$/.test(record.digest)) return undefined;
-  return Object.freeze({ at: record.at, digest: record.digest });
+  // Reviewer replay authority is never inferred from legacy timestamps or
+  // digest-only records. Malformed provenance loses only this extra authority.
+  let reviewer;
+  const value = record.reviewer;
+  if (value && typeof value === "object" && !Array.isArray(value)
+    && typeof value.actorId === "string" && value.actorId.length > 0 && value.actorId.length <= 128
+    && ["done", "in_progress"].includes(value.state)
+    && Number.isSafeInteger(value.historyLength) && value.historyLength > 0
+    && typeof value.readingAckDigest === "string" && /^[0-9a-f]{64}$/.test(value.readingAckDigest)
+    && value.basis && Object.hasOwn(value.basis, "deliveryDigest") && Object.hasOwn(value.basis, "deliveryGeneration")) {
+    try {
+      reviewer = Object.freeze({ actorId: value.actorId, state: value.state, historyLength: value.historyLength,
+        basis: reviewBasisOf(value.basis), readingAckDigest: value.readingAckDigest });
+    } catch { /* old or malformed provenance cannot authorize reviewer replay */ }
+  }
+  // B4/H2: the round stamp survives normalization when it is well-formed;
+  // a malformed stamp is dropped (the record then replays as a legacy
+  // unstamped record rather than gaining cross-round authority).
+  const round = Number.isSafeInteger(record.round) && record.round >= 0 ? record.round : undefined;
+  return Object.freeze({ at: record.at, digest: record.digest,
+    ...(round !== undefined ? { round } : {}), ...(reviewer ? { reviewer } : {}) });
 };
 const requestOutcomesOf = value => {
   if (value === undefined || value === null) return null;
@@ -761,7 +796,66 @@ const requestOutcomesOf = value => {
   // String-key insertion order is oldest-first: drop the oldest beyond the cap.
   return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
 };
-const recordRequestOutcome = (current, key, at, digest) => requestOutcomesOf({ ...(current ?? {}), [key]: { at, digest } });
+const recordRequestOutcome = (current, key, at, digest, round) => requestOutcomesOf({
+  // Reserve the new record's slot before adding it: integer-like ids sort
+  // ahead of string keys and must not be evicted by the normalization cap.
+  ...Object.fromEntries(Object.entries(current ?? {}).filter(([id]) => id !== key).slice(-(MAX_REQUEST_OUTCOMES - 1))),
+  [key]: { at, digest, ...(Number.isSafeInteger(round) && round >= 0 ? { round } : {}) },
+});
+// B4/H2: recorded request outcomes are bound to the claim ROUND that
+// landed them, the way #3829 bound reviewer outcomes. Each record is
+// stamped with the item's claimRound (a counter every fresh claim /
+// fresh assignment advances); the replay verdict consults the stamp, so
+// an outcome from an earlier round neither replays into nor conflicts
+// with a later round — a release resets deliveryGeneration to 0, so a
+// same-owner re-claim used to derive round 1's exact deliver requestId
+// and its recorded outcome silently swallowed the round-2 delivery
+// (identical payload) or refused it as id reuse (changed payload). The
+// records themselves are RETAINED across rounds: they are also the
+// tombstone the routes use to refuse a stale reviewer requestId
+// re-presented as fresh authority in a new round (#3829). Records
+// written before the binding existed carry no stamp and keep replaying,
+// like the legacy bare-timestamp records.
+// The route seals a successful reviewer exit after all same-request writes
+// (including readingAck). This metadata is server-created, never request input.
+// Lifetime history length makes the binding exact even if a release/reclaim
+// uses the same timestamp and identical delivery bytes. Later edits fail closed.
+const readingAckDigest = value => createHash("sha256").update(canonicalPayload(value), "utf8").digest("hex");
+export function bindReviewerRequestOutcome(before, work, actorId, requestId, readingAck) {
+  const item = workOf(work), prior = workOf(before), actor = agentOf(actorId), key = requestIdOf(requestId);
+  const record = item.requestOutcomes?.[key];
+  check(prior.state === "delivered" && prior.owner !== actor
+    && !Object.hasOwn(prior.requestOutcomes ?? {}, key)
+    && prior.id === item.id && sameBasis(reviewBasisFor(prior), reviewBasisFor(item))
+    && record && typeof record === "object" && item.owner !== actor
+    && item.verification?.by === actor && item.verification.at === record.at
+    && ((item.state === "done" && item.verification.state === "verified")
+      || (item.state === "in_progress" && item.verification.state === "changes_requested")),
+  "reviewer request outcome must describe a successful reviewer exit");
+  const reviewer = Object.freeze({ actorId: actor, state: item.state, historyLength: claimHistoryLength(item),
+    basis: reviewBasisFor(item), readingAckDigest: readingAckDigest(readingAck) });
+  return Object.freeze({ ...work, requestOutcomes: requestOutcomesOf({ ...item.requestOutcomes, [key]: { ...record, reviewer } }) });
+}
+// Provenance is necessary, never sufficient: the route must also recheck live
+// membership and the current review policy before returning a stored outcome.
+export function reviewerRequestOutcome(work, requestId, actorId) {
+  const record = work.requestOutcomes && Object.hasOwn(work.requestOutcomes, requestId)
+    ? requestOutcomeRecordOf(work.requestOutcomes[requestId]) : undefined;
+  const bound = record?.reviewer, verification = work.verification;
+  // B4/H2: a reviewer outcome stamped in an earlier claim round binds
+  // nothing in this one, however the other fields line up.
+  if (record && Number.isSafeInteger(record.round) && Number.isSafeInteger(work.claimRound)
+    && record.round !== work.claimRound) return null;
+  return bound && bound.actorId === actorId && bound.state === work.state
+    && bound.historyLength === claimHistoryLength(work)
+    && sameBasis(bound.basis, reviewBasisFor(work))
+    && verification?.by === actorId && verification.at === record.at
+    && sameBasis(verification.basis, bound.basis)
+    && verification.state === (bound.state === "done" ? "verified" : "changes_requested")
+    ? bound : null;
+}
+export const reviewerReadingAckMatches = (outcome, readingAck) => outcome.readingAckDigest === readingAckDigest(readingAck);
+
 // Exported so writer paths that build claim rows outside the state machine
 // (the work-item-board backfill, #3465) validate a row BEFORE storing it:
 // the durable registry's codec decodes without validation, so a row stored
@@ -818,6 +912,12 @@ export const workOf = value => {
     // round's first delivery; the counter is what makes "first" a fact
     // the kernel can check rather than a narrative.
     deliveryGeneration: Number.isSafeInteger(value.deliveryGeneration) && value.deliveryGeneration > 0 ? value.deliveryGeneration : 0,
+    // B4/H2: the claim-round counter request outcomes are bound to. A
+    // fresh claim or fresh assignment advances it; nothing else does, so
+    // a round is exactly one ownership spell — including a same-owner
+    // re-claim after a release, which reuses claimedAt at the same
+    // millisecond in the worst case but never reuses this counter.
+    claimRound: Number.isSafeInteger(value.claimRound) && value.claimRound > 0 ? value.claimRound : 0,
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
@@ -1017,6 +1117,7 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     // to inherit any residue that reached the pool anyway (bug sweep
     // 2026-10-16 F1 — the lease sweep once leaked exactly this).
     ci: null, deliveryGeneration: 0, delivery: null, verification: null,
+    claimRound: (item.claimRound ?? 0) + 1,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",
@@ -1142,7 +1243,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
   const digest = key === undefined ? undefined
     : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery });
   if (key !== undefined) {
-    const verdict = requestReplayVerdict(item.requestOutcomes, key, digest);
+    const verdict = requestReplayVerdict(item.requestOutcomes, key, digest, item.claimRound);
     if (verdict === "replay") return item;
     if (verdict === "conflict") fail("work_claim_conflict",
       `requestId "${key}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
@@ -1300,7 +1401,7 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     ...withProvenance };
   return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
     : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
-      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs), digest) });
+      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs), digest, item.claimRound) });
 }
 // Release a claim, bound to the claim round the caller read (E5/D4, QA-200
 // 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
@@ -1522,6 +1623,7 @@ export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expec
   const fresh = item.state === "unclaimed";
   const hours = fresh ? roomWorkClaimConfig(room).defaultLeaseHours : null;
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
+    claimRound: (item.claimRound ?? 0) + 1,
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
   // A fresh assignment opens a fresh round (delivery state cleared,

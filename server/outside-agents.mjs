@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
@@ -22,7 +23,7 @@ export class OutsideAgents {
   }
   #view(roomId, room) {
     const verifiers = this.#verifiers(roomId, room);
-    const agents = assembleOutsideAgents(room.state.messages ?? [], room.state.members ?? {}, { verifiers });
+    const agents = assembleOutsideAgents([...messageRepository(this.store, roomId, room.state).records({ bodyPrefix: "outside-agent.v1\n" })], room.state.members ?? {}, { verifiers });
     // Human approve/deny surface (1e hs2-outside-agent-approval): links
     // waiting on a decision, plus the verify step for each. Mirrors the
     // access-requests list/next[] pattern.
@@ -64,7 +65,7 @@ export class OutsideAgents {
   record(token, roomId, input, expectedSessionBinding = null) {
     const { auth, room } = this.#open(token, roomId, expectedSessionBinding);
     this.#refuse(auth, roomId, room);
-    const plan = planOutsideAgentRecord(room.state.messages ?? [], room.state.members ?? {}, roomId, auth.member.id, input);
+    const plan = planOutsideAgentRecord([...messageRepository(this.store, roomId, room.state).records({ bodyPrefix: "outside-agent.v1\n" })], room.state.members ?? {}, roomId, auth.member.id, input);
     if (plan.recorded === "replay") return { ...this.#view(roomId, room), recorded: "replay", externalRef: plan.externalRef };
     this.#post(token, roomId, plan.commandId, plan.record, expectedSessionBinding);
     return { ...this.list(token, roomId, expectedSessionBinding), recorded: plan.recorded, externalRef: plan.externalRef };
@@ -100,7 +101,7 @@ export class OutsideAgents {
     // sequence, so a re-link after a denial is a fresh command - a bare
     // (room, ref) id made store.command drop the re-link as a duplicate of
     // the first, and the API answered recorded:"link" for nothing.
-    const priorLinks = (room.state.messages ?? []).reduce((count, message) => {
+    const priorLinks = ([...messageRepository(this.store, roomId, room.state).records({ bodyPrefix: "outside-agent.v1\n" })]).reduce((count, message) => {
       const parsed = parseOutsideAgentBody(message?.body);
       return count + (parsed?.kind === "link" && parsed.externalRef === externalRef ? 1 : 0);
     }, 0);
@@ -120,7 +121,7 @@ export class OutsideAgents {
     const verifiers = this.#verifiers(roomId, room);
     if (!verifiers.has(auth.member.id))
       fail(403, "outside_agent_forbidden", "Only the room owner or a membership administrator may decide on outside-agent links");
-    const plan = planOutsideAgentVerify(room.state.messages ?? [], room.state.members ?? {}, roomId, auth.member.id, input, { verifiers });
+    const plan = planOutsideAgentVerify([...messageRepository(this.store, roomId, room.state).records({ bodyPrefix: "outside-agent.v1\n" })], room.state.members ?? {}, roomId, auth.member.id, input, { verifiers });
     if (plan.recorded === "replay") return { ...this.#view(roomId, room), recorded: "replay", externalRef: plan.externalRef, decision: plan.decision };
     this.#post(token, roomId, plan.commandId, plan.record, expectedSessionBinding);
     return { ...this.list(token, roomId, expectedSessionBinding), recorded: plan.recorded, externalRef: plan.externalRef, decision: plan.decision };

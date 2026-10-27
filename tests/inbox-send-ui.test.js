@@ -13,7 +13,7 @@ import {
   installInboxDirectSend,
   isSendableDraft,
   validReplyReviewPending,
-} from "../src/inbox-send-ui.js";
+} from "../archive/deferred-email/src/inbox-send-ui.js";
 
 // --- directSendErrorText: every failure line carries the no-send guarantee ---
 
