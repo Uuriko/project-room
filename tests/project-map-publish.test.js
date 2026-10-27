@@ -20,8 +20,12 @@ function transport(override = () => undefined) {
     calls.push({ url: String(url), options });
     const intercepted = await override({ url: String(url), options, setCurrent: value => { current = value; } });
     if (intercepted) return intercepted;
-    if (!String(url).includes('/map')) return Response.json({ roomId: 'commons', viewerId: 'agent', state: {
+    if (!String(url).includes('/map')) {
+      assert.equal(new URL(url).pathname + new URL(url).search, '/api/rooms/commons?view=work');
+      return Response.json({ snapshotView: 'work', snapshotVersion: 1, roomId: 'commons', viewerId: 'agent',
+        viewerAccountId: null, viewerAuthEpoch: null, viewerSessionBinding: null, viewerSessionRevision: null, state: {
       room: { ownerId: 'owner' }, members: { agent: { id: 'agent', kind: 'agent', active: true, revision: 1, permissions: ['manage_claims'] } } } });
+    }
     if (options.method === 'POST') current = saved;
     return Response.json(current);
   } };
