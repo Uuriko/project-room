@@ -553,7 +553,7 @@ test("pre-v24 acknowledgment namespace collisions roll back without installing n
 
 test("HTTP exposes neither update dispatch nor child plans through the existing review projection", async t => {
   const f = setup(t); f.save("Edited"); const request = f.reserve();
-  const server = createRoomServer({ store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store }); await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port, session = f.store.authenticateAccountSession(f.args.token, null, f.args.binding);
   const headers = { Cookie: "account_session=" + f.args.token, "X-Session-Binding": f.args.binding,
