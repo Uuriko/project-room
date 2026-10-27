@@ -26,7 +26,7 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest }) {
+export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest, savedRequestId }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
   if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
   if (selectRequest !== undefined && typeof selectRequest !== "function") throw new Error("Execution selection must be a function");
@@ -59,7 +59,14 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     if (record.attempt_id) await report(record.attempt_id, "delivered").catch(() => {});
     return { status: "delivered", requestId: id, receipt, hostExecuted: false };
   };
+  // Queue recovery is bound to the original local intent, including the room
+  // incarnation and opening event. A changed/missing binding must never fall
+  // through into fresh execution, even if the message ID has been reused.
+  if (savedRequestId !== undefined && savedRequestId !== id)
+    throw new Error("Saved reply identity changed; reconcile the original attempt");
   const prior = db.prepare("SELECT * FROM request_runs WHERE id=?").get(id);
+  if (savedRequestId !== undefined && !prior?.response)
+    throw new Error("Saved reply is unavailable; reconcile the original attempt");
   if (prior) {
     if (!prior.response) throw new Error("Host outcome is unknown; reconcile the original attempt before proceeding");
     // Even an already delivered response is reconciled through the service's
@@ -171,9 +178,9 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
 // bounded; work is serialized and every invocation re-reads its eligibility.
 
 /**
- * Whether a reply request is eligible to be (re)run. The second disjunct
- * covers retrying a locally-saved response — it must still require the
- * request to be open, or closed/cancelled requests would be re-run (G-L2).
+ * Whether an open reply request is eligible for the execution scan. Closed
+ * requests never enter execution. Saved replies have a separate, journal-bound
+ * reconciliation pass so a lost acknowledgement cannot strand a committed answer.
  * Standing blockers suppress new work only; saved delivery still revalidates
  * through the service and must not be stranded by an execution-only pause.
  */
@@ -186,7 +193,7 @@ export function isRequestEligible(request, { owned, runState, hasPendingDelivery
 export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, selectRequest, onPoll = () => {} }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
-  let delay = intervalMs, connectionUnavailable = false, pendingStatement;
+  let delay = intervalMs, connectionUnavailable = false, pendingStatement, recoveryRow = 0;
   const pending = request => (pendingStatement ??= db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?")).get(request.id);
   while (!signal?.aborted) {
     let cursor = null;
@@ -195,7 +202,32 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
       onPoll();
       cursor = evaluatedThrough;
       const owned = request => Object.hasOwn(runs, request.id);
-      const eligible = requests.filter(request => (!allowRequest || allowRequest(request) === true)
+      const recovering = new Set();
+      // agentWork deliberately lists open requests only. A reply may already be
+      // committed while its acknowledgement was lost, so enumerate local saved
+      // deliveries independently. Rotate the bounded scan past refused records.
+      const saved = db.prepare(`SELECT rowid AS recovery_row, id, response FROM request_runs
+        WHERE delivered=0 AND response IS NOT NULL
+        ORDER BY (rowid > ?) DESC, rowid LIMIT 50`).all(recoveryRow);
+      for (const record of saved) {
+        signal?.throwIfAborted();
+        recoveryRow = record.recovery_row;
+        let requestMessageId;
+        try {
+          requestMessageId = JSON.parse(record.response).responseToRequestId;
+          if (typeof requestMessageId !== "string" || !requestMessageId) throw new Error("Saved reply has no request identity");
+          recovering.add(requestMessageId);
+          // Preserve explicit attention fences for requests still being worked.
+          if (runs[requestMessageId]?.state === "needs_attention") continue;
+          emit(await runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal,
+            allowRequest, selectRequest, savedRequestId: record.id }));
+        } catch (error) {
+          emit({ status: "needs_attention", ...(requestMessageId ? { requestMessageId } : {}) });
+          if ([401, 429].includes(error?.status) || error?.status >= 500
+            || ["TypeError", "TimeoutError"].includes(error?.name)) throw error;
+        }
+      }
+      const eligible = requests.filter(request => !recovering.has(request.id) && (!allowRequest || allowRequest(request) === true)
         && (!selectRequest || selectRequest(request) === true || owned(request) && Boolean(pending(request))) && isRequestEligible(request, {
         owned: owned(request),
         blocked: Object.hasOwn(blockedBy, request.id),

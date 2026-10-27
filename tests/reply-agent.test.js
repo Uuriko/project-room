@@ -1036,3 +1036,32 @@ test("implicit private replies confirm over HTTP without changing retry input or
   const unavailable = { command: async () => receipt, messageThread: async () => { throw new Error("parent unavailable"); } };
   assert.equal((await submitReplyAction(unavailable, f.identity, "room_reply", args)).status, "unconfirmed");
 });
+
+for (const change of ["cancelled", "clarified"]) test(`queue recovery preserves saved answer and refuses ${change} request without rebase`, async t => {
+  const f = await fixture(t), a = runner(t, f), requestMessageId = f.open(`queue-${change}`).command.data.messageId;
+  const connection = { ...f.config, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("Delivery unavailable before commit");
+    return fetch(url, options);
+  } };
+  let calls = 0;
+  const execute = async () => { calls++; return { body: "Saved original answer" }; };
+  await assert.rejects(runRequestOnce({ ...a, connection, requestMessageId, execute }));
+  const original = a.db.prepare("SELECT response FROM request_runs").get().response;
+  if (change === "cancelled") {
+    const context = await f.client.replyContext(requestMessageId);
+    f.store.command(f.keys.owner, "commons", { id: "cancel-recovery", type: "reply_request.cancelled", data: {
+      requestMessageId, expectedRequestRevision: context.request.revision, reason: "No longer needed" } });
+  } else await f.client.replyAction("room_reply", { requestId: "clarify-recovery", replyToId: requestMessageId, body: "Changed requirement" });
+  const controller = new AbortController(), events = [];
+  await runRequestQueue({ ...a, execute, intervalMs: 1000, stream: false,
+    signal: AbortSignal.any([controller.signal, AbortSignal.timeout(5000)]), emit: e => {
+      events.push(e); if (e.status === "needs_attention") controller.abort();
+    } });
+  assert.ok(events.some(e => e.status === "needs_attention"));
+  assert.equal(calls, 1);
+  assert.deepEqual(a.db.prepare("SELECT response, delivered FROM request_runs").get(),
+    Object.assign(Object.create(null), { response: original, delivered: 0 }));
+  const context = await f.client.replyContext(requestMessageId);
+  assert.equal(context.request.status, change === "cancelled" ? "cancelled" : "open");
+  assert.equal(context.page.items.some(row => row.message?.body === "Saved original answer"), false);
+});

@@ -16,10 +16,14 @@ test("Mac runtime runs outside checkout with verified closure and no installed p
   const manifest = JSON.parse(readFileSync(join(output, "runtime-manifest.json")));
   for (const file of manifest.files) assert.equal(createHash("sha256").update(readFileSync(join(output, file.path))).digest("hex"), file.sha256);
   assert.equal(existsSync(join(output, "server/agent-discovery.mjs")), false, "agent runtime must not package server discovery to route client URLs");
+  assert.ok(manifest.files.some(file => file.path === "AGENT-RUNTIME.md"));
+  assert.match(readFileSync(join(output, "AGENT-RUNTIME.md"), "utf8"), /omitting it enables all eligible requests/);
   assert.equal(existsSync(join(output, "node_modules")), false);
   assert.equal(existsSync(join(output, ".git")), false);
   const host = spawnSync(process.execPath, [join(output, "scripts/run-codex-room.mjs"), "--help"], { cwd: root, encoding: "utf8" });
   assert.equal(host.status, 0, host.stderr); assert.match(host.stdout, /Usage:/);
+  assert.match(host.stdout, /AGENT-RUNTIME.md/);
+  assert.match(host.stdout, /Omitting it enables all eligible backlog/);
   const setup = spawnSync(process.execPath, [join(output, "scripts/native-agent-setup.mjs")], { cwd: root, input: '{"action":"invalid"}', encoding: "utf8" });
   assert.equal(setup.status, 1, setup.stderr); assert.deepEqual(JSON.parse(setup.stdout), { status: "setup_failed" });
   assert.throws(() => packageMacRuntime(fileURLToPath(new URL("../", import.meta.url)), output), /must be new/);

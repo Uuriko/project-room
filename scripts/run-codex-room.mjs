@@ -27,6 +27,9 @@ export async function main(argv = process.argv.slice(2)) {
 Runtime JSON requires command (absolute Codex executable), cwd (real workspace), codexHome (dedicated private directory outside workspace and operator Codex home), policy {approvalPolicy:"never",sandbox:"read-only"|"workspace-write"}; optional model, requestTimeoutMs, turnTimeoutMs.
 Authenticate the dedicated Codex home explicitly using Codex login with CODEX_HOME set to that directory and cli_auth_credentials_store="file". No operator credentials or sessions are imported.
 --check starts the isolated-home App Server protocol only; it performs no model turn and does not prove provider authentication.
+Operational guidance is shipped at AGENT-RUNTIME.md in the runtime root.
+The optional REQUEST_ID selection limits NEW execution. Omitting it enables all eligible backlog from allowed requesters. Saved replies retain their original operation for recovery; disabling a requester blocks delivery. Native allowedRequesterIds and allowedRequestIds bind receiving consent; changing selection requires explicit enabling again.
+
 Normal invocation executes one already-created public Room assistant run assigned to this member. --watch-requests instead receives formal requests addressed to this member from the explicitly enabled requester member IDs over Room HTTPS; it does not use Tailscale or consume ordinary messages. Run only one mode per journal and dedicated Codex profile. Keep the private journal and Codex home for exact retries and reconciliation. Interactive approvals/questions are denied with an attention notice. No unsandboxed fallback is used.`);
     return;
   }
