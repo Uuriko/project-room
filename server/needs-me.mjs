@@ -1,5 +1,6 @@
 import { messageRepository } from "./message-repository.mjs";
 import { sessionWatermark } from "./read-cursor.mjs";
+import { stampNeedsMe } from "./content-trust.mjs";
 // Cross-room "what needs me" for one identity.
 //
 // One read replaces listing rooms and then opening each inbox. Items are
@@ -627,7 +628,7 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
-export function collectNeedsMe(store, secret, { since } = {}) {
+export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null } = {}) {
   let identity = null;
   let allowedRooms = null;
   if (typeof secret === "string" && secret.startsWith("rak_")) {
@@ -643,13 +644,17 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   }
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
   const parsed = parseNeedsMeSince(since);
+  if (scopedRoom !== null && (typeof scopedRoom !== "string" || !scopedRoom))
+    fail(422, "invalid_room", "roomId must be a non-empty string");
+  if (scopedRoom !== null && allowedRooms && !allowedRooms.includes(scopedRoom))
+    fail(403, "insufficient_scope", "This key is limited to its room");
   // Seats come from the shared resolver (#3882): identity_links plus
   // guest_members trial seats — a guest seat's room belongs in the inbox
   // with the same membership truth as everywhere else. archivedAt rides
   // from the rooms row; a seat whose room row is gone reads as archived
   // (the old INNER JOIN dropped it the same way).
   const seats = identityRoomSeats(store.db, identity.identityId,
-    { after: parsed.roomAfter ?? "", limit: MAX_ROOMS + 1 });
+    { after: scopedRoom === null ? parsed.roomAfter ?? "" : "", limit: MAX_ROOMS + 1 });
   const roomRows = seats.length ? store.db.prepare(
     `SELECT id, archived_at AS archivedAt FROM rooms WHERE id IN (${seats.map(() => "?").join(",")})`
   ).all(...seats.map(seat => seat.roomId)) : [];
@@ -657,7 +662,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const links = seats.map(seat => ({
     ...seat,
     archivedAt: archivedByRoom.has(seat.roomId) ? archivedByRoom.get(seat.roomId) : 1
-  }));
+  })).filter(link => scopedRoom === null || link.roomId === scopedRoom);
   const items = [];
   const rooms = { ...parsed.rooms };
   const land = { ...parsed.land };
@@ -669,7 +674,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const myClaims = [];
   const actionsNeeded = [];
   let roomAfter = parsed.roomAfter ?? "";
-  let hasMore = links.length > MAX_ROOMS;
+  let hasMore = scopedRoom === null && links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
     if (allowedRooms && !allowedRooms.includes(link.roomId)) { roomAfter = link.roomId; continue; }
     if (link.archivedAt) { roomAfter = link.roomId; continue; }
@@ -748,10 +753,11 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // R327-1 (r6): tell a paused agent it is paused. Items stay readable (this
   // is a read surface) but carry paused:true; `paused` names each paused room
   // and who holds the pause.
-  const pausedRooms = store.agentHeartbeats?.pausedRoomsOf?.(identity.identityId)?.filter(p => !allowedRooms || allowedRooms.includes(p.roomId)) ?? [];
+  const pausedRooms = store.agentHeartbeats?.pausedRoomsOf?.(identity.identityId)?.filter(p =>
+    (!allowedRooms || allowedRooms.includes(p.roomId)) && (scopedRoom === null || p.roomId === scopedRoom)) ?? [];
   if (pausedRooms.length) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, untrusted: true };
+  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore });
 }

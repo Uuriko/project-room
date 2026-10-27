@@ -1,7 +1,7 @@
 // Private send-intent state. No network I/O and no provider credentials live here.
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { toCsv, toJsonExport } from "./csv-export.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };

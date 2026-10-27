@@ -24,6 +24,11 @@ test('agent work pickup is one authenticated read and only missing routes fall b
   assert.deepEqual(paths, ['/api/rooms/commons/agent-work']);
   for (const corrupt of [v => { v.viewerId = 'owner'; }, v => { v.member.kind = 'human'; },
     v => { v.member.active = false; }, v => { v.executionGranted = true; },
+    v => { v.blockedBy = []; }, v => { v.blockedBy = null; },
+    v => { v.blockedBy = { foreign: ['paused'] }; },
+    v => { v.requests = [{ id: 'q', recipientId: 'producer', status: 'open', revision: 0 }]; v.blockedBy = { q: 'paused' }; },
+    v => { v.requests = [{ id: 'q', recipientId: 'producer', status: 'open', revision: 0 }]; v.blockedBy = { q: [] }; },
+    v => { v.requests = [{ id: 'q', recipientId: 'producer', status: 'open', revision: 0 }]; v.blockedBy = { q: ['paused', 'paused'] }; },
     v => { v.runs = 7; }, v => { v.evaluatedThrough = -1; }, v => { v.runs = { foreign: { state: 'working', updatedAt: 1 } }; },
     v => { v.requests = [{ id: 'foreign', recipientId: 'owner', status: 'open', revision: 0 }]; }]) {
     mode = corrupt; paths.length = 0;
@@ -33,6 +38,10 @@ test('agent work pickup is one authenticated read and only missing routes fall b
   for (const status of [401, 403, 500]) {
     mode = status; paths.length = 0; await assert.rejects(client.agentWork()); assert.equal(paths.length, 1);
   }
+  mode = v => { delete v.blockedBy; };
+  assert.deepEqual((await client.agentWork()).requests, [], 'older observation without blockers remains supported');
+  mode = v => { v.requests = [{ id: 'q', recipientId: 'producer', status: 'open', revision: 0 }]; v.blockedBy = { q: ['future_standing_reason'] }; };
+  assert.deepEqual((await client.agentWork()).blockedBy, { q: ['future_standing_reason'] });
   mode = 404; paths.length = 0;
   assert.deepEqual((await client.agentWork()).requests, []);
   assert.ok(paths.some(path => path.endsWith('/reply-requests')));
