@@ -9147,6 +9147,146 @@ paths:
         '403':
           description: owner_only
 
+  /api/wiki/procedures:
+    get:
+      summary: Wiki procedures index
+      description: >-
+        Open (also HEAD). Public read-only wiki API for agents (W009): the validated procedures plane, served from embedded docs data (server/wiki-read-api.mjs). Registered in the route table by clean-slate routes-17.
+      security: []
+      responses:
+        '200': { description: "{ procedures, count }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/procedures/{id}:
+    get:
+      summary: Wiki procedure by id
+      description: >-
+        Open (also HEAD). One validated procedure from the wiki procedures plane by id (W009, server/wiki-read-api.mjs).
+      security: []
+      responses:
+        '200': { description: "{ id, title, body, source }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/entries:
+    get:
+      summary: Wiki experience entries
+      description: >-
+        Open (also HEAD). Public read-only wiki API for agents (W009): the append-only experience log plane, paged by limit/offset query parameters.
+      security: []
+      responses:
+        '200': { description: "{ entries, count, total, limit, offset }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/entries/{id}:
+    get:
+      summary: Wiki experience entry by id
+      description: >-
+        Open (also HEAD). One experience-log entry from the wiki entries plane by id (W009, server/wiki-read-api.mjs).
+      security: []
+      responses:
+        '200': { description: "{ id, date, slice, agent, tried, outcome, lesson, rejected }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/runbooks:
+    get:
+      summary: Wiki runbooks index
+      description: >-
+        Open (also HEAD). Public read-only wiki API for agents (W009): the runbooks plane index, served from embedded docs data.
+      security: []
+      responses:
+        '200': { description: "{ runbooks, count }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/runbooks/{id}:
+    get:
+      summary: Wiki runbook by id
+      description: >-
+        Open (also HEAD). One runbook from the wiki runbooks plane by id (W009, server/wiki-read-api.mjs).
+      security: []
+      responses:
+        '200': { description: "{ id, title, path, body }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /api/wiki/search:
+    get:
+      summary: Wiki search
+      description: >-
+        Open (also HEAD). Public read-only wiki API for agents (W009): search across the procedures, entries and runbooks planes; requires the q query parameter.
+      security: []
+      responses:
+        '200': { description: "{ query, procedures, entries, runbooks, count }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /growth/summary:
+    get:
+      summary: Growth summary
+      description: >-
+        Open (also HEAD). Read-only growth analytics surface (Track C C14, src/growth-http.js): collector summary. Served only while the growth handle is injected; 404 while paused.
+      security: []
+      responses:
+        '200': { description: "{ summary }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /growth/digest:
+    get:
+      summary: Growth digest
+      description: >-
+        Open (also HEAD). Read-only growth analytics surface (Track C C14, src/growth-http.js): rendered digest of the collector summary; format query parameter selects the digest format. Served only while the growth handle is injected; 404 while paused.
+      security: []
+      responses:
+        '200': { description: "{ format, digest }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
+  /growth/health:
+    get:
+      summary: Growth health
+      description: >-
+        Open (also HEAD). Read-only growth analytics surface (Track C C14, src/growth-http.js): scheduler status and collector size. Served only while the growth handle is injected; 404 while paused.
+      security: []
+      responses:
+        '200': { description: "{ status, scheduler, collector }" }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      responses:
+        '200': { description: Response headers only }
   /api/health:
     get:
       summary: Liveness
