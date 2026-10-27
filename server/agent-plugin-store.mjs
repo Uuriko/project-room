@@ -1451,6 +1451,56 @@ export class AgentPluginStore {
     });
   }
 
+  // D4-2 F-1: the triggering message's current state, derived from the
+  // room's event log — the same source the read paths honour. Returns
+  // null when there is nothing to consult (no room/event link, a
+  // non-message payload, no events table, or the triggering event is not
+  // in the log — synthetic fan-outs in tests), { withdrawn: true } when
+  // the message was deleted or redacted after the delivery was journaled
+  // (PRIV-1 also rewrites the triggering event itself with redacted:true
+  // and a null body, which covers archived rooms where no message.redacted
+  // event is appended), otherwise { body } with the latest edited body.
+  // Only message.posted / message.edited deliveries carry a message body
+  // that an edit/delete/redact disposition can reach; every other event
+  // type has no such disposition in the product, so its snapshot stands.
+  #messageStateForDelivery(row, data) {
+    if (!row.room_id || !row.event_id) return null;
+    if (row.event_type !== "message.posted" && row.event_type !== "message.edited") return null;
+    if (!data || typeof data !== "object" || typeof data.body !== "string") return null;
+    const messageId = typeof data.messageId === "string" && data.messageId
+      ? data.messageId : row.event_id;
+    let original;
+    try {
+      original = this.db.prepare(
+        "SELECT sequence, body FROM events WHERE room_id=? AND id=?").get(row.room_id, row.event_id);
+    } catch { return null; }
+    if (!original) return null;
+    let entry = null;
+    try { entry = JSON.parse(original.body); } catch { /* unparseable log row: no state to consult */ }
+    if (entry?.data?.redacted === true) return { withdrawn: true };
+    let dispositions;
+    try {
+      dispositions = this.db.prepare(
+        `SELECT json_extract(body,'$.type') AS type,
+                json_extract(body,'$.data.body') AS body
+         FROM events
+         WHERE room_id=? AND sequence>?
+           AND json_extract(body,'$.data.messageId')=?
+           AND json_extract(body,'$.type') IN ('message.edited','message.deleted','message.redacted')
+         ORDER BY sequence`).all(row.room_id, original.sequence, messageId);
+    } catch { return null; }
+    let body = data.body;
+    for (const disposition of dispositions) {
+      if (disposition.type === "message.deleted" || disposition.type === "message.redacted") {
+        return { withdrawn: true };
+      }
+      if (disposition.type === "message.edited" && typeof disposition.body === "string") {
+        body = disposition.body;
+      }
+    }
+    return { body };
+  }
+
   async #attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt }) {
     const sub = this.subs.get(row.subscription_id);
     if (!sub) {
@@ -1481,6 +1531,27 @@ export class AgentPluginStore {
     // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
     if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now)) return skip();
     const payload = JSON.parse(row.payload_json);
+    // Depth audit D4-2 F-1: the stored payload is a fan-out-time snapshot.
+    // Subscription-enabled and room-seat state are re-checked above, but
+    // until now the triggering event's own state never was — a message
+    // edited after a failed attempt was retried with its pre-edit body
+    // verbatim, and a deleted message's body was delivered verbatim on
+    // retry, to subscribers whose filter (e.g. message.posted-only) never
+    // delivers them the correction. Consult the event's current state
+    // before POSTing: a withdrawn (deleted/redacted) message's delivery
+    // dead-letters like an unsubscribed subscription's does, and a
+    // message.posted delivery is re-snapshotted to the current body.
+    const current = this.#messageStateForDelivery(row, payload?.data);
+    if (current?.withdrawn) {
+      const changed = this.mutate(() =>
+        this.markDeadLetter(row.delivery_id,
+          "event's message was deleted before delivery", now, null, claimExpiresAt));
+      return changed ? "deadLettered" : "skipped";
+    }
+    if (current && row.event_type === "message.posted"
+      && typeof current.body === "string" && payload?.data?.body !== current.body) {
+      payload.data = { ...payload.data, body: current.body };
+    }
     const issuedAt = now;
     // payload?.data: a stored payload that parses to a non-object (or an
     // object without an object data) reaches signDelivery's own check
