@@ -430,6 +430,8 @@ const AX_NAMED_RECOVERIES = {
   message_deleted: ["A deleted message cannot be saved. Work with a current message instead.", "Use a current, undeleted message."],
   ndjson_required: ["This route requires an NDJSON body. Resend with Content-Type application/x-ndjson.", "Resend the request as application/x-ndjson."],
   nonprogressing_email_page: ["The sync page did not advance. Restart the sync from a fresh cursor; do not re-fetch the same page.", "Restart the sync from a fresh cursor."],
+  no_adverse_decision: ["No adverse decision is recorded for this work, so there is no decision packet to read or follow up on. Re-read the work's current state; a packet exists only after a rejection or a failed verification.", "Re-read the current state of the contribution or bounty; act on its recorded decision once one exists."],
+  no_distinct_human_reviewer: ["No human reviewer distinct from the original decider is recorded for this work, so a human-review request cannot be routed. Ask the room owner to name a reviewer, or file a correction instead.", "Ask the room owner to name a distinct human reviewer, or file a correction follow-up instead."],
   not_declared: ["Declare what you are looking for before asking for a match.", "Declare what you are looking for, then ask for a match."],
   nothing_to_request: ["You already hold the permissions named in the message — nothing to request.", "Treat it as done; the permissions are already held."],
   password_already_set: ["This account already has a password. Change it instead of setting a new one.", "Change the existing password instead."],
