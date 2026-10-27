@@ -8,7 +8,7 @@ export function createWorkReducers({ WORK_STATES, requirePermission, requireFiel
 function proposeWork(state, incoming) {
   requirePermission(state, incoming.actorId, "steer");
   requireFields(incoming.data, ["workItemId", "title", "definitionOfDone", "accountableMemberId"]);
-  if (state.workItems[incoming.data.workItemId]) throw new Error("Work Item already exists");
+  if (Object.hasOwn(state.workItems, incoming.data.workItemId)) throw new Error("Work Item already exists");
   requireMember(state, incoming.data.accountableMemberId);
   // Trust off refuses a cross-owner assign before the item is recorded.
   // Same-owner assigns, including an owner handing work to their own agent,
