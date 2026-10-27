@@ -69,11 +69,10 @@ test("GET / leaves GitHub sign-in out until GitHub is configured", async t => {
   assert.match(shownAuth, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start" hidden>/);
   assert.match(shownAuth, /Continue with GitHub/);
   assert.equal(shown.includes("fixture-secret"), false);
-  // The welcome view still hides the button in JS, and the click still
-  // stashes a pending invite. app.js null-checks the anchor.
+  // The click still stashes a pending invite. app.js null-checks the anchor.
+  // A stripped anchor must not throw during view sync; that contract lives
+  // in tests/signin-provider-visibility.test.js.
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  const navigation = readFileSync(new URL("../src/signin-navigation.js", import.meta.url), "utf8");
-  assert.match(navigation, /\$\("#github-signin"\)\.hidden = view === "welcome";/);
   const stash = app.match(/githubButton\.addEventListener\("click", stashInviteForOAuth\)/);
   assert.ok(stash, "GitHub anchor stashes a pending invite like Google does");
 });

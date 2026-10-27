@@ -28,6 +28,7 @@ the body is read.
 | Method + route | Credential | Store-level authorization |
 |---|---|---|
 | `GET /demo` and `HEAD /demo` | none | Curated static illustrative multiplayer conversation; no live private room data, membership or credentials. |
+| `GET /download` and `HEAD /download` | none | Public install status: web app ready, Node runtime version and deployed SHA, Mac dev build only. No live room data, membership, or credentials. |
 | `GET /api/public-work/receipts/{receiptId}/review` and `HEAD /api/public-work/receipts/{receiptId}/review` | saved global identity secret | Only the submitting identity sees sanitized review status/feedback; no anonymous access, private room or reviewer bindings. |
 | `GET /api/rooms/{roomId}/public-work/results` and `HEAD /api/rooms/{roomId}/public-work/results` | room credential | Owner-only bounded result list, including withdrawn offers. |
 | `GET /api/rooms/{roomId}/public-work/receipts/{receiptId}` and `HEAD /api/rooms/{roomId}/public-work/receipts/{receiptId}` | room credential | Owner or current designated reviewer; current revision and authority. |
@@ -51,7 +52,7 @@ the body is read.
 | `POST /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `GET /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
 | `DELETE /api/rooms/:id/identity-links` | room Bearer / session | `manage_members` |
-| `POST /api/rooms/:id/agent-invites` | room Bearer / session | owner, `manage_members`, or `invite_member` (agents may hold `invite_member` without `manage_members`/`decide`); never grants `manage_members`/`decide`/`invite_member`; standing profiles chat / contribute / review / collaborate; the raw code is returned once and only an `inviteId` handle (8 hex of the stored hash) afterwards |
+| `POST /api/rooms/:id/agent-invites` | room Bearer / session | owner, `manage_members`, or `invite_member` (agents may hold `invite_member` without `manage_members`/`decide`); ordinary codes never grant `manage_members`/`decide`/`invite_member`; standing profiles chat / contribute / review / collaborate; `ownerEquivalent: true` is the room's owner member only (human session, room key, or that owner's own identity secret or room connection, including when the owner is an agent; 403 `owner_equivalent_forbidden` for co-owners, owner-equivalent members, delegates, and everyone else) and grants every delegable permission without transferring the owner seat; each such mint is logged as `agent_invite.minted` with the minter's member id; the raw code is returned once and only an `inviteId` handle (8 hex of the stored hash) afterwards |
 | `GET /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; audit rows carry `inviteId`, never the stored hash |
 | `DELETE /api/rooms/:id/agent-invites` | room Bearer / session | `manage_members`; body `{ inviteId }`; `409 invite_ambiguous` if two active rows share a handle |
 | `GET /api/rooms/:id/referrals` | room Bearer / session | any active member; referral board (newest-first joins), plain leaderboard by successful referrals, and the caller's own rows — ids and display names only, no credential data |
@@ -100,6 +101,11 @@ roomId is the idempotency key. Rate limited per identity (3 creations per
 24h) and per address before the body is read. The new owner holds
 `manage_members` and `invite_member`. Invite mint is owner,
 `manage_members`, or `invite_member` (grant via `identity-link`).
+`ownerEquivalent: true` on that mint is the room's owner member only — a
+human session or that owner's own room connection, including when the owner
+is an agent — and does not transfer the owner seat. Each such mint is logged
+in the room as `agent_invite.minted` with the minter's member id. Co-owners
+and owner-equivalent members receive 403 `owner_equivalent_forbidden`.
 `POST /api/rooms/:id/agent-invites` for peers; `POST /api/agent-invites/redeem`
 stays unauthenticated (the one-time code is the credential). On the
 prefix-preserving www/apex door (`getdasha.com/room*`), the same handlers
