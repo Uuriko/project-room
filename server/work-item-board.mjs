@@ -26,18 +26,18 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // second run writes nothing.
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
 
-export const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
-export const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
+const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
+const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
 // Lazily created by this module on first use (the run-once/request_replays
 // pattern); registered in server/writer-fence.mjs lazyAdditiveTables.
-export const WORK_ITEM_BOARD_BACKFILL_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_BACKFILL_TABLE} (room_id TEXT PRIMARY KEY, version INTEGER NOT NULL, at TEXT NOT NULL)`;
-export const WORK_ITEM_BOARD_DIVERGENCE_TABLE = "work_item_board_divergence";
+const WORK_ITEM_BOARD_BACKFILL_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_BACKFILL_TABLE} (room_id TEXT PRIMARY KEY, version INTEGER NOT NULL, at TEXT NOT NULL)`;
+const WORK_ITEM_BOARD_DIVERGENCE_TABLE = "work_item_board_divergence";
 // Per-room divergence snapshot (Appendix D §D.2.3 monitor): persisted
 // whenever a backfill run or a sync plan computes diverged rows.
 // Zero is the only healthy value; any non-zero reading re-opens #3607.
-export const WORK_ITEM_BOARD_DIVERGENCE_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_DIVERGENCE_TABLE} (room_id TEXT PRIMARY KEY, diverged INTEGER NOT NULL, rework INTEGER NOT NULL, board_native INTEGER NOT NULL, at TEXT NOT NULL)`;
+const WORK_ITEM_BOARD_DIVERGENCE_SCHEMA = `CREATE TABLE IF NOT EXISTS ${WORK_ITEM_BOARD_DIVERGENCE_TABLE} (room_id TEXT PRIMARY KEY, diverged INTEGER NOT NULL, rework INTEGER NOT NULL, board_native INTEGER NOT NULL, at TEXT NOT NULL)`;
 export const DIVERGENCE_REPAIR_NOTE = "divergence repair: board reopened to match the work item; was done";
 
 const MAX_CLAIM_HISTORY = 200; // mirrors withHistory in server/work-claims.mjs
@@ -560,7 +560,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
       ...(existing?.pullRequests ?? []),
     ].map(pull => [pull.url, pull])).values()].slice(0, MAX_PULLS),
     updatedAt: isoOrNull(item.updatedAt) ?? isoOrNull(item.createdAt) ?? iso(nowMs),
-    repo: claimForScope ? (claimForScope.repository ?? null) : null,
+    repo: claimForScope ? (normalizeClaimRepository(claimForScope.repository) ?? null) : null,
     branch: claimForScope ? (claimForScope.ref ?? null) : null,
     chain: chain.slice(-MAX_CHAIN),
     supersededBy: item.state === "superseded" && typeof item.supersededBy === "string" ? boardClaimId(item.supersededBy) : null,
@@ -708,7 +708,7 @@ function provablyCompleted(item, facts) {
   return (facts?.events ?? []).some(event => event.type === "work.completed")
     || Boolean(item?.receipt) || (Array.isArray(item?.receiptHistory) && item.receiptHistory.length > 0);
 }
-export function classifyWorkItemBoardDivergence(current, mapped, item, facts) {
+function classifyWorkItemBoardDivergence(current, mapped, item, facts) {
   // A board delivery is an independent execution record. Work receipts cannot
   // prove that its verification or send-back should be rewritten.
   if (current?.delivery) return "board_native";
@@ -839,7 +839,7 @@ function isDiverged(current, mapped, item) {
 // Canonical comparison for the unchanged check: both sides are board rows
 // (existing rows arrive decoded from the registry; mapped rows are built
 // above), so a sorted-key JSON form is stable across runs.
-export function canonicalClaimRow(row) {
+function canonicalClaimRow(row) {
   if (row === null || typeof row !== "object") return row;
   if (Array.isArray(row)) return row.map(canonicalClaimRow);
   const out = {};
