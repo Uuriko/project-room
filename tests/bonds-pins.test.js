@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { Bonds, bondSchema, canonicalPair, peerThreadId, BOND_TTL_MS } from "../server/bonds.mjs";
 
-const ROOM = "room1", ROOM2 = "room2";
+const ROOM = "room1";
 let nowMs = 1_700_000_000_000;
 function fixture() {
   const db = new DatabaseSync(":memory:");
