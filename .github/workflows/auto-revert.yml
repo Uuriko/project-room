@@ -1,0 +1,80 @@
+name: auto-revert
+
+# Trunk-based safety net: when `test` or `schema-gate` fails on a main push,
+# revert that commit on main so every agent is unblocked within minutes.
+# Skipped when a newer main commit already passed the same workflow (someone
+# fixed forward), when the commit is no longer on main, or when it is itself
+# a revert. The first failure only re-runs the failed jobs (flake guard);
+# the second failure reverts. Set repo variable ROOM_AUTO_REVERT=0 to turn it off.
+on:
+  workflow_run:
+    workflows: [test, schema-gate]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: auto-revert
+  cancel-in-progress: false
+
+jobs:
+  revert:
+    if: >-
+      vars.ROOM_AUTO_REVERT != '0' &&
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Flake guard - re-run failed jobs once before reverting
+        id: flake
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          if [ "$ATTEMPT" = "1" ]; then
+            gh run rerun "$RUN_ID" --failed --repo "$GITHUB_REPOSITORY"
+            echo "first failure: re-ran failed jobs; a second failure reverts" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "rerun=1" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.flake.outputs.rerun != '1'
+        with:
+          ref: main
+          fetch-depth: 200
+      - name: Revert the red commit unless main already moved past it green
+        if: steps.flake.outputs.rerun != '1'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+          WF_ID: ${{ github.event.workflow_run.workflow_id }}
+          WF_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+        run: |
+          set -euo pipefail
+          git merge-base --is-ancestor "$SHA" HEAD || { echo "$SHA is not on main; nothing to do"; exit 0; }
+          subject="$(git log -1 --format=%s "$SHA")"
+          case "$subject" in Revert*) echo "red commit is itself a revert; leaving it for a human"; exit 0;; esac
+          # Any newer main commit with a green run of the same workflow means
+          # main was fixed forward: do not revert.
+          for c in $(git rev-list "$SHA..HEAD"); do
+            ok="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$WF_ID/runs?head_sha=$c&status=success&per_page=1" --jq '.total_count')"
+            if [ "${ok:-0}" != "0" ]; then echo "newer commit $c is green on $WF_NAME; skipping revert"; exit 0; fi
+          done
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if ! git revert --no-edit "$SHA"; then
+            git revert --abort || true
+            echo "::error::revert of $SHA does not apply cleanly; fix forward by hand ($RUN_URL)"
+            exit 1
+          fi
+          git commit --amend -m "Revert \"$subject\"" -m "auto-revert: $WF_NAME failed on $SHA ($RUN_URL). Fix and push again."
+          git push origin HEAD:main
+          # Pushes made with GITHUB_TOKEN do not trigger workflows; start CI on the revert.
+          gh workflow run test.yml --ref main
+          echo "reverted $SHA" | tee -a "$GITHUB_STEP_SUMMARY"

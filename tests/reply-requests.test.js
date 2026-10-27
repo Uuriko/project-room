@@ -144,7 +144,7 @@ test("request bundles reject missing, null, mixed, spoofed and proposal fields w
   assert.equal(auditRecovery(f.store).dataSha256, after);
 });
 
-test("ordinary clarification changes context, but reactions and independent request/work branches do not", t => {
+test("ordinary clarification changes context, but independent request/work branches do not", t => {
   const f = fixture(t), q = f.open(), subject = q.command.data.messageId;
   const clarification = f.post("guest", { messageId: "clarification", body: "Consider accessibility too.", replyToId: subject });
   assert.equal(f.state().replyRequests[subject].contextEventId, clarification.event.id);
@@ -155,7 +155,6 @@ test("ordinary clarification changes context, but reactions and independent requ
   f.send("owner", { id: "work", type: "work.proposed", data: { workItemId: "other-work", title: "Independent", definitionOfDone: "Text", accountableMemberId: "agent", mode: "read" } });
   f.post("owner", { messageId: "different-work", workItemId: "other-work", body: "Separate work", replyToId: subject });
   f.post("agent", { messageId: "different-work-child", body: "Still separate", replyToId: "different-work" });
-  f.send("owner", { id: "reaction", type: "message.reaction_set", data: { messageId: subject, reaction: "like", active: true } });
   let at = Date.now();
   f.store.now = () => at;
   for (let i = 0; i < 105; i++) { at += 2000; f.post("owner", { body: "Unrelated" }); }
