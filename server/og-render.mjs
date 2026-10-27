@@ -218,19 +218,54 @@ export function wrapOgText(text, { size, maxWidth, maxLines, atlas }) {
 }
 
 let assetsCache = null;
+const assetsByLoader = new WeakMap();
 
-function loadAssets() {
-  if (assetsCache) return assetsCache;
-  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "og");
-  const atlas = JSON.parse(readFileSync(join(dir, "atlas.json"), "utf8"));
+function decodeAssets(atlas, readPngBytes) {
   const bitmaps = {};
   for (const [size, entry] of Object.entries(atlas.sizes)) {
-    bitmaps[size] = decodePng(readFileSync(join(dir, entry.file)));
+    bitmaps[size] = decodePng(readPngBytes(entry.file));
   }
-  const base = decodePng(readFileSync(join(dir, "base-receipt.png")));
+  const base = decodePng(readPngBytes("base-receipt.png"));
   if (base.width !== OG_WIDTH || base.height !== OG_HEIGHT) throw new Error("base receipt image must be 1200 by 630");
-  assetsCache = { atlas, bitmaps, base: base.rgba };
-  return assetsCache;
+  return { atlas, bitmaps, base: base.rgba };
+}
+
+function loadAssetsFromDisk() {
+  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "og");
+  const atlas = JSON.parse(readFileSync(join(dir, "atlas.json"), "utf8"));
+  return decodeAssets(atlas, file => readFileSync(join(dir, file)));
+}
+
+// The Worker bundle has no host filesystem holding og/: its node:fs
+// virtual filesystem contains only bundle modules, and the atlas/base
+// PNGs are data files, not modules — reading them by filesystem path
+// there throws ERR_INVALID_ARG_TYPE and every receipt card 500s
+// (DOOR-CURE-10). Callers in that runtime pass assetLoader, the server's
+// own asset pipeline (the ASSETS binding on Cloudflare, the asset root
+// on Node — the same pipeline that serves og/home.png), which returns
+// the bytes for a repo-relative path like "og/atlas.json". The files
+// ride the public asset catalog (server/public-assets.mjs) so the
+// pipeline can serve them in both runtimes. Without a loader the disk
+// read above stands, so Node tooling and tests keep the old path.
+// Failed loads are not retained: a later call may retry.
+async function loadAssets(assetLoader) {
+  if (!assetLoader) {
+    if (!assetsCache) assetsCache = loadAssetsFromDisk();
+    return assetsCache;
+  }
+  let pending = assetsByLoader.get(assetLoader);
+  if (!pending) {
+    pending = (async () => {
+      const atlas = JSON.parse(new TextDecoder().decode(await assetLoader("og/atlas.json")));
+      const pngBytes = {};
+      for (const entry of Object.values(atlas.sizes)) pngBytes[entry.file] = await assetLoader(`og/${entry.file}`);
+      pngBytes["base-receipt.png"] = await assetLoader("og/base-receipt.png");
+      return decodeAssets(atlas, file => pngBytes[file]);
+    })();
+    assetsByLoader.set(assetLoader, pending);
+    pending.catch(() => { if (assetsByLoader.get(assetLoader) === pending) assetsByLoader.delete(assetLoader); });
+  }
+  return pending;
 }
 
 function blit(dst, bitmap, glyph, dx, dy, color) {
@@ -273,8 +308,8 @@ function drawLines(dst, lines, { size, x, baseline, color, atlas, bitmaps }) {
   return cursorY;
 }
 
-export async function renderOgPng({ title = "", subtitle = "", badges = [], footer = "" } = {}) {
-  const { atlas, bitmaps, base } = loadAssets();
+export async function renderOgPng({ title = "", subtitle = "", badges = [], footer = "" } = {}, { assetLoader } = {}) {
+  const { atlas, bitmaps, base } = await loadAssets(assetLoader);
   const rgba = new Uint8Array(base);
   const titleLines = wrapOgText(title, { size: TITLE_SIZE, maxWidth: TEXT_MAX_WIDTH, maxLines: 3, atlas });
   let y = titleLines.length
