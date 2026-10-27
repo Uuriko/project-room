@@ -78,6 +78,10 @@ import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibilit
  *       untrusted: true        // pinned message body is member-authored
  *     }
  *   ],
+ *   attention?: {              // authenticated viewer's formal obligations
+ *     incomingRequests: { requestMessageId: string, revision: number }[], // at most 3
+ *     incomingRequestTotal: number
+ *   },
  *   repoHead: null,            // rooms record no repository head; per-work
  *                             // write claims carry repository/ref instead
  *   participationRules: {      // owner-set room policy, off by default
@@ -198,6 +202,16 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
     generatedAt: now
   });
   if (typeof viewerId === "string" && viewerId && state.members?.[viewerId]) {
+    // Formal obligations are independent of the orient feed's recency limit and
+    // private notice retirement. Match reply-requests' incoming/open selection;
+    // carry no message bodies or other participants' exchanges.
+    const incoming = Object.values(state.replyRequests ?? {})
+      .filter(request => request.recipientId === viewerId && request.status === "open")
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    pack.attention = {
+      incomingRequests: incoming.slice(0, BRIEF_ITEMS).map(request => ({ requestMessageId: request.id, revision: request.revision })),
+      incomingRequestTotal: incoming.length
+    };
     pack.orient = buildOrient(store, roomSlug, viewerId, { text: false, boardList });
   }
   return pack;
@@ -206,7 +220,7 @@ export function buildActivationPack(store, roomSlug, viewerId = null, options = 
 // GET …/activation-pack?view=brief: the first read for a newly joined agent.
 // The full pack lists every member and every open item; in a long-lived room
 // that is tens of KB, mostly people who left weeks ago. The brief keeps what
-// decides the next call: who is around, what you may do, and up to three
+// decides the next call: incoming obligations, who is around, what you may do, and up to three
 // things to pick up. Presence comes from store.presence(): watching or a
 // a live derived presence state is online, within ACTIVE_MS is recent, older is
 // counted as quiet rather than listed.
@@ -252,9 +266,15 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     .map(item => ({ id: item.id, title: clip(item.title, 100), state: item.state, untrusted: true }));
   const roomPath = `/api/rooms/${encodeURIComponent(pack.room.slug)}`;
   const firstClaim = claims[0]?.claimAction;
-  const next = firstClaim ? { why: "claim the top open task", ...firstClaim }
+  const attention = pack.attention ?? { incomingRequests: [], incomingRequestTotal: 0 };
+  const firstRequest = attention.incomingRequests[0];
+  const requestNext = firstRequest ? {
+    why: "read the incoming request before picking up optional work", method: "GET",
+    endpoint: `${roomPath}/reply-context?requestMessageId=${encodeURIComponent(firstRequest.requestMessageId)}`
+  } : null;
+  const next = requestNext ?? (firstClaim ? { why: "claim the top open task", ...firstClaim }
     : unclaimed[0] ? { why: "read the top open item", method: "GET", endpoint: `${roomPath}/work-context?workItemId=${encodeURIComponent(unclaimed[0].id)}` }
-      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` };
+      : { why: "nothing open; read the conversation", method: "GET", endpoint: `${roomPath}/conversation` });
   const brief = {
     contentTrust: pack.contentTrust,
     view: "brief",
@@ -264,6 +284,7 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     around,
     aroundMore: listed.length - around.length,
     quietMembers: quiet,
+    attention: { ...attention, incomingRequests: [...attention.incomingRequests] },
     pickUp: [...claims, ...unclaimed],
     openWorkTotal: pack.openWork.length,
     recentDecisions: (pack.orientation?.recentDecisions ?? []).slice(0, BRIEF_ITEMS)
@@ -282,7 +303,7 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     () => { while (brief.around.length > 3) { brief.around.pop(); brief.aroundMore += 1; } },
     () => { brief.purpose = clip(brief.purpose, 80); for (const item of brief.pickUp) item.title = clip(item.title, 40); },
     () => { brief.aroundMore += brief.around.length; brief.around = []; },
-    () => { brief.pickUp = brief.pickUp.slice(0, 1); },
+    () => { brief.pickUp = brief.pickUp.slice(0, 1); brief.attention.incomingRequests = brief.attention.incomingRequests.slice(0, 1); },
     () => { for (const item of brief.pickUp) delete item.claimAction; },
     () => { delete brief.rules; brief.recentDecisions = []; },
   ];
@@ -304,7 +325,8 @@ export function briefActivationPack(pack, presenceMembers, nowMs, viewerId = nul
     aroundCount: brief.around.length + brief.aroundMore,
     quietMembers: brief.quietMembers,
     openWorkTotal: brief.openWorkTotal,
-    next: { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
+    attention: { incomingRequestTotal: attention.incomingRequestTotal },
+    next: requestNext ?? { method: "GET", endpoint: brief.full, why: "this room's brief is over budget; read the full pack" },
     full: brief.full,
     eventCursor: brief.eventCursor
   };

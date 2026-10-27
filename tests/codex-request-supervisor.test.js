@@ -214,3 +214,57 @@ test("empty, invalid and duplicate explicit request selections refuse before con
     await assert.rejects(f.run({ allowedRequestIds: ids }).promise, /valid request IDs/);
   assert.equal(f.connects, 0);
 });
+
+test("restart reconciles committed reply with lost acknowledgement outside open requests", { timeout: 15000 }, async t => {
+  const f = await fixture(t), id = f.post(), first = new AbortController();
+  let committedInput;
+  const dropping = { ...f.connection, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands") && response.ok) {
+      committedInput = options.body;
+      await response.text();
+      throw new TypeError("Synthetic acknowledgement lost after successful commit");
+    }
+    return response;
+  } };
+  await f.run({ controller: first, connection: dropping, allowedRequestIds: [id], emit: e => {
+    if (e.status === "needs_attention") first.abort();
+  } }).promise;
+  assert.equal((await f.client.replyContext(id)).request.status, "answered");
+  assert.equal((await f.client.agentWork()).requests.some(r => r.id === id), false);
+  assert.equal(f.db.prepare("SELECT delivered FROM request_runs").get().delivered, 0);
+  assert.equal(f.rpc.starts, 1);
+  f.reopen();
+  const fresh = f.post();
+  const denied = f.run({ allowedRequesterIds: ["reviewer"], allowedRequestIds: [fresh] });
+  await delay(150); denied.controller.abort(); await denied.promise;
+  assert.equal(f.db.prepare("SELECT delivered FROM request_runs").get().delivered, 0, "requester permission still gates reconciliation");
+  let replayInput, receipt;
+  const retry = new AbortController();
+  await f.run({ controller: retry, allowedRequestIds: [fresh], connection: { ...f.connection,
+    fetchImpl: async (url, options) => {
+      if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) replayInput = options.body;
+      return fetch(url, options);
+    } }, emit: e => { if (e.status === "delivered") { receipt = e; retry.abort(); } } }).promise;
+  assert.equal(replayInput, committedInput, "recovery sends the identical saved command, without rebase");
+  assert.equal(receipt.hostExecuted, false);
+  assert.equal(receipt.receipt.duplicate, true);
+  assert.equal(f.db.prepare("SELECT delivered FROM request_runs").get().delivered, 1);
+  assert.equal(f.rpc.starts, 1);
+  assert.equal((await f.client.replyContext(fresh)).request.status, "open", "saved delivery precedes fresh execution");
+  const context = await f.client.replyContext(id);
+  assert.equal(context.page.items.filter(row => row.message.body === "Synthetic linked reply").length, 1);
+});
+
+test("journal reconciliation refuses changed intent binding without fresh execution", async t => {
+  const f = await fixture(t), id = f.post();
+  const response = JSON.stringify({ responseToRequestId: id, requestId: "host-other-incarnation", body: "Saved answer" });
+  f.db.prepare("INSERT INTO request_runs(id,response) VALUES (?,?)").run("host-other-incarnation", response);
+  const controller = new AbortController();
+  await f.run({ controller, allowedRequestIds: [id], emit: e => {
+    if (e.status === "needs_attention") controller.abort();
+  } }).promise;
+  assert.equal(f.rpc.starts, 0);
+  assert.equal(f.db.prepare("SELECT delivered FROM request_runs").get().delivered, 0);
+  assert.equal((await f.client.replyContext(id)).request.status, "open");
+});

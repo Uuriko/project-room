@@ -835,3 +835,46 @@ test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extende
     assert.ok(robots.includes(`User-agent: ${bot}\nAllow: /`), `robots.txt must explicitly allow ${bot}`);
   }
 });
+
+test("discovery preserves working room HTTP credentials and configured origin", () => {
+  const short = llmsTxt();
+  assert.match(short, /Keep its origin and credential; read the brief above/);
+  assert.match(short, /Legacy room tokens may get 401 from \/mcp or \/api\/needs-me: use room HTTP, not re-enrollment/);
+  assert.match(short, /MCP accepts identity secrets and scoped API keys/);
+  assert.match(short, /Never forward credentials to hosted links or redirects/);
+  for (const packet of [llmsFullTxt(), skillMd(), joinPrompt()]) {
+    assert.match(packet, /Reuse your saved connection's service origin, room ID and credential/);
+    assert.match(packet, /legacy room access token can work on room HTTP/);
+    assert.match(packet, /do not repeatedly try MCP or re-enroll/);
+    assert.match(packet, /supported scoped API keys, including room-pinned keys/);
+    assert.match(packet, /never send its credential to a hosted URL/);
+    assert.match(packet, /selected reply-context read/);
+  }
+});
+
+test("legacy room credential can follow discovery over HTTP despite hosted MCP refusal", async t => {
+  const { AgentRooms } = await import("../server/agent-rooms.mjs");
+  const store = new RoomStore(":memory:"), rooms = new AgentRooms(store);
+  const identity = store.identities.create("Discovery agent");
+  rooms.create(identity.secret, { roomId: "discovery-auth", title: "Discovery", purpose: "Test", kind: "personal" });
+  const legacy = store.issueAccessKey("discovery-auth", identity.identityId);
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const read = path => fetch(origin + path, { headers: { Authorization: `Bearer ${legacy}` }, redirect: "error" });
+  const mcp = token => fetch(origin + "/mcp", { method: "POST", headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }), redirect: "error" });
+  const packet = await (await fetch(origin + "/llms.txt")).text();
+  assert.match(packet, /use room HTTP, not re-enrollment/);
+  assert.equal((await mcp(legacy)).status, 401);
+  assert.equal((await read("/api/needs-me")).status, 401);
+  const briefResponse = await read("/api/rooms/discovery-auth/activation-pack?view=brief");
+  assert.equal(briefResponse.status, 200);
+  const brief = await briefResponse.json();
+  assert.equal(brief.you.memberId, identity.identityId);
+  assert.equal((await read(brief.next.endpoint)).status, 200);
+  assert.equal((await mcp(identity.secret)).status, 200, "identity credentials remain supported");
+  const key = store.agentPlugin.issueApiKey({ identityId: identity.identityId, scopes: ["rooms:read"] });
+  assert.equal((await mcp(`rak_${key.secret}`)).status, 200, "scoped API keys are not blanket rejected");
+});

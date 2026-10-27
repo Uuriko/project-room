@@ -31,6 +31,7 @@ export function packageMacRuntime(source, destination) {
     walk(ast);
   }
   for (const entry of entries) visit(join(root, entry));
+  files.set("AGENT-RUNTIME.md", readFileSync(join(root, "docs/AGENT-RUNTIME.md")));
   files.set("package.json", Buffer.from(JSON.stringify({ private: true, type: "module" }) + "\n"));
   const manifest = { version: 1, entries, files: [...files].sort(([a], [b]) => a.localeCompare(b)).map(([path, data]) => ({ path, bytes: data.length, sha256: createHash("sha256").update(data).digest("hex") })) };
   mkdirSync(output, { recursive: true });
