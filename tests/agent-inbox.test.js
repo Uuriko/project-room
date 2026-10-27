@@ -151,7 +151,16 @@ test("inbox discovery finds older open requests outside its DM window through ex
   assert.equal(selectedResponse.status, 200); assert.equal((await selectedResponse.json()).request.status, "open");
   const rpc = async (method, params) => (await post(origin, "/room/mcp", { jsonrpc: "2.0", id: "discovery", method, params }, friendSecret)).json();
   const catalog = await rpc("tools/list", {});
-  assert.ok(catalog.result.tools.some(tool => tool.name === discovery.nextRead.tool));
+  const listedNames = catalog.result.tools.map(tool => tool.name);
+  // Flip-to-lean (decided 2026-10-27): the default listing is the lean front
+  // door, so the discovery step's long-tail nextRead tool is not listed
+  // directly; it is reached through the listed room_search_actions /
+  // room_run_action pair, which must find it by name.
+  assert.ok(listedNames.includes("room_search_actions") && listedNames.includes("room_run_action"),
+    "default catalog must list the search/run meta pair");
+  const found = (await rpc("tools/call", { name: "room_search_actions", arguments: { query: discovery.nextRead.tool } })).result.structuredContent;
+  assert.ok(found.matches.some(match => match.name === discovery.nextRead.tool),
+    `search must find the discovery tool ${discovery.nextRead.tool}`);
   const mcpInbox = (await rpc("tools/call", { name: "room_read_inbox", arguments: { roomId, limit: 1 } })).result.structuredContent;
   const pointer = mcpInbox.next.find(step => step.action === "list-open-requests").nextRead;
   const mcpList = await rpc("tools/call", { name: pointer.tool, arguments: pointer.arguments });
