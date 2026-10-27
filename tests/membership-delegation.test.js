@@ -455,3 +455,53 @@ test("a delegate cannot link an identity with permissions it does not hold (#152
     identityId: fresh.identityId, displayName: "Escalating Agent", permissions: ["decide"]
   }), err => err.status === 403 && /Cannot grant permissions not held: decide/.test(err.message));
 });
+
+// IR-5 (SEC2-C-C): the identity link/unlink/list gates are symmetric. All
+// three verbs gate on canAdministerMembership — the predicate
+// membership-delegation.mjs calls "the one predicate every
+// membership-administration gate uses" — so a delegate who can link an
+// identity in can also enumerate the room's links, and is no longer
+// refused at unlink's gate by a message naming the very grant it holds.
+test("IR-5: identity list gates on the delegation grant, like link does", t => {
+  const { store, delegation, ownerToken, agent, other } = setup(t);
+  // Before the grant, the would-be delegate is refused at the list gate.
+  assert.throws(() => store.identities.list(agent.secret, "commons"),
+    err => err.status === 403 && err.code === "access_denied" && /Membership administration required/.test(err.message));
+  delegation.grant(ownerToken, "commons", { identityId: agent.identityId });
+  // After the grant, the delegate enumerates the room's linked identities.
+  const rows = store.identities.list(agent.secret, "commons");
+  assert.deepEqual(rows.map(r => r.identityId).sort(), [agent.identityId, other.identityId].sort());
+  // Owner path unchanged.
+  assert.equal(store.identities.list(ownerToken, "commons").length, 2);
+});
+
+test("IR-5: a member with no grant is refused on link, unlink and list with the true requirement named", t => {
+  const { store, other } = setup(t);
+  const fresh = store.identities.create("Ungranted Target");
+  const refusal = err => err.status === 403 && err.code === "access_denied"
+    && /Membership administration required: room owner, a member with manage_members, or a membership administration grant/.test(err.message);
+  assert.throws(() => store.identities.link(other.secret, "commons", { identityId: fresh.identityId, permissions: [] }), refusal);
+  assert.throws(() => store.identities.unlink(other.secret, "commons", other.identityId), refusal);
+  assert.throws(() => store.identities.list(other.secret, "commons"), refusal);
+});
+
+test("IR-5: delegate passes the unlink gate; the event layer is the remaining fence (layer 2)", t => {
+  const { store, delegation, ownerToken, agent, other } = setup(t);
+  delegation.grant(ownerToken, "commons", { identityId: agent.identityId });
+  // The gate no longer refuses the delegate: unlink gets past
+  // canAdministerMembership and is refused one layer down, by the
+  // member.access_changed reducer, whose actor must hold manage_members
+  // in the projection (a delegation grant has no projection footprint the
+  // reducer honours — its footprint is the invite_member bit, which only
+  // member.added's agent-safe branch reads). That second fence also
+  // refuses a delegate's re-link of a previously unlinked identity at
+  // base today. It is an authority-model question for the IR-3 exit
+  // event, which needs the same answer; this test pins the boundary so
+  // the layer-2 fix turns it red and it is rewritten to assert success.
+  assert.throws(() => store.identities.unlink(agent.secret, "commons", other.identityId),
+    err => err.status === 422 && err.code === "command_rejected" && /lacks manage_members/.test(err.message));
+  // The refused command rolled back: the link row is untouched.
+  assert.ok(store.identities.resolveIdentityLink(other.identityId, "commons"));
+  // A member holding manage_members itself unlinks through the same gate.
+  assert.equal(store.identities.unlink(ownerToken, "commons", other.identityId).unlinked, true);
+});

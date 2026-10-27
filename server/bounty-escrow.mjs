@@ -97,17 +97,17 @@ export const CLAIM_BOND_MILLIS = 1000; // 1 credit anti-flake bond, fixed per ro
 // never touches payouts and never bans.
 export const FLAKE_DECAY_MS = 30 * 24 * 3600 * 1000; // strikes older than 30d stop counting
 export const FLAKE_COOLDOWN_MS = 7 * 24 * 3600 * 1000; // rung 3+: no new claims for 7d
-export const FLAKE_BOND_MULTIPLIER = 2; // rung 2+: the claim bond doubles
-export const FLAKE_COOLDOWN_RUNG = 3;
+const FLAKE_BOND_MULTIPLIER = 2; // rung 2+: the claim bond doubles
+const FLAKE_COOLDOWN_RUNG = 3;
 export const FEE_NUMERATOR = 1;
 export const FEE_DENOMINATOR = 100; // 1% of the award to the room pool, on released payouts only
 export const DISPUTE_BOND_RATIO = 0.25; // challenger stakes exactly 25% of the bounty (<=25% total dispute cost, per v2)
-export const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
+const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credit)
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
 export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
 export const MAX_CREDITS = 1000000;
-export const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
-export const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
+const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
+const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
 
 // Journal kinds eligible for an Ed25519-signed, externally verifiable
 // receipt, mapped to the receipt type issued for them. approve / fee /
@@ -133,7 +133,7 @@ export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in
 // AI verifier lane judges against the pinned rubric. Chosen at post time,
 // pinned at fund time, immutable after.
 export const APPROVAL_MODES = Object.freeze(["human", "agent"]);
-export function stateGroup(state) {
+function stateGroup(state) {
   switch (state) {
     case "proposed": return "proposed";
     case "funded": return "funded";
@@ -484,7 +484,7 @@ export function convergeBountyDeployedSchema(db) {
 // slice 6, and record each pin in bounty_rubric_versions. Exported for the
 // _migrateColumns fallback path (older test doubles); the boot convergence
 // above is the production path.
-export function _backfillRubricPins(db) {
+function _backfillRubricPins(db) {
   const rows = db.prepare(
     "SELECT bounty_id, room_id, criteria, poster, created_at FROM bounty_records WHERE rubric_json IS NULL").all();
   const insert = db.prepare(`INSERT OR IGNORE INTO bounty_rubric_versions
@@ -616,7 +616,7 @@ export const SYBIL_GRAPH_MIN_DISTINCT_BOUNTIES = 3;  // one lane's shared finger
 
 // Slice 4: probation-gate review-packet dedupe window. One packet per lane
 // per 24h — a lane retrying a denied claim does not spam the arbiter queue.
-export const REPUTATION_PACKET_DEDUPE_MS = 24 * 3600 * 1000;
+const REPUTATION_PACKET_DEDUPE_MS = 24 * 3600 * 1000;
 
 // Slice 10: normalized text for the submission fingerprint. Deterministic:
 // line endings -> \n, horizontal whitespace runs collapse to one space,
@@ -663,8 +663,8 @@ const isoNow = ms => new Date(ms).toISOString();
 // verdict} against the pinned version; arbiters re-check against the exact
 // pinned version from bounty_rubric_versions. Canonical form is sorted by
 // criterionId so the hash is stable.
-export const RUBRIC_MAX_CRITERIA = 50;
-export const CITATION_VERDICTS = Object.freeze(["pass", "fail"]);
+const RUBRIC_MAX_CRITERIA = 50;
+const CITATION_VERDICTS = Object.freeze(["pass", "fail"]);
 
 export function canonicalRubric(rubric) {
   check(Array.isArray(rubric) && rubric.length >= 1 && rubric.length <= RUBRIC_MAX_CRITERIA,
@@ -2381,8 +2381,12 @@ export class BountyEscrow {
       // Acceptance track: the challenge re-opens the verdict, evidence = grounds.
       this._acceptanceTransition(bounty, "disputed", { evidence: grounds });
       const bondMillis = toMillis(bond);
-      // The dispute bond is exactly 25% of the bounty: the >= 25% minimum
-      // and the <= 25% total-dispute-cost cap (v2 economics) coincide.
+      // The dispute bond is exactly 25% of the bounty (#3307). That is
+      // this production rule, not a machine minimum: the dispute machine's
+      // own floor is 5% (MIN_BOND_RATIO in server/bounty-disputes.mjs),
+      // which 25% satisfies, and the machine's 25% is its cap on total
+      // recorded dispute cost — so the bond equals the maximum total
+      // dispute cost the machine will record (v2 economics).
       const required = Math.ceil(bounty.amountMillis * DISPUTE_BOND_RATIO);
       check(bondMillis === required, "invalid_bond",
         `dispute bond must be exactly 25% of the bounty (${toCredits(required)} credits)`);
@@ -2989,7 +2993,17 @@ export class BountyEscrow {
       const triggeredBy = caller === undefined ? null : this._requireLane(roomId, caller, "caller");
       const now = this.nowMs(), at = isoNow(now);
       const summary = { approved: [], swept: [], refunded: [], released: [], paid: [], expiredUnfunded: [] };
-      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','accepted','disputed','approved') ORDER BY created_at").all(roomId);
+      // The snapshot MUST cover every state the epoch keeper's due-scan
+      // (bounty-epoch-keeper.mjs DUE_WHERE) can count as due — including
+      // 'submitted': _keeperPass has the free-miss refund for it, but a
+      // snapshot that never selects the row makes that branch unreachable
+      // from closeEpoch. That omission was the live stall behind the
+      // guardian census F1 finding (2026-10-18): submitted bounties past
+      // their deadline counted due + overdue every tick while no keeper
+      // action could ever touch them (failed stayed 0 — nothing threw;
+      // the rows were simply never read). finalizeBounty was unaffected
+      // (it selects by id), which is why manual closes always worked.
+      const rows = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND state IN ('proposed','funded','claimed','submitted','accepted','disputed','approved') ORDER BY created_at").all(roomId);
       for (const row of rows) {
         const bounty = this._mutable(row);
         // X-06 due-filter: skip bounties the keeper pass provably cannot

@@ -91,7 +91,8 @@ test("a delete-forced full replay no longer parks a room whose log holds a v1 fi
   // sequence 0 through today's reducer. Step the cursor back one event to
   // stand in for the event that arrives after the delete.
   const head = store.db.prepare("SELECT sequence, id FROM events WHERE room_id='aaa' ORDER BY sequence DESC LIMIT 2").all();
-  store.db.prepare("UPDATE messages_backfill_cursor SET state_json=NULL, state_seq=0, applied_seq=?, applied_event_id=? WHERE room_id='aaa'")
+  store.db.prepare("DELETE FROM message_replay_snapshots WHERE room_id='aaa'").run();
+  store.db.prepare("UPDATE messages_backfill_cursor SET state_seq=0, applied_seq=?, applied_event_id=? WHERE room_id='aaa'")
     .run(head[1].sequence, head[1].id);
   store.db.prepare("DELETE FROM messages WHERE room_id='aaa' AND message_id='m3'").run();
   const second = store.backfillMessages({ limit: 1000 });
