@@ -7,6 +7,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
+import { RECEIPT_TYPE_BY_SHORT } from "./bounty-receipts.mjs";
 import {
   OPERATOR_HIDDEN_RECEIPT_SQL,
   ownerHiddenReceiptSql,
@@ -375,11 +376,46 @@ function optedInRows(store, state) {
   return rows;
 }
 
+// A room's public-work (pwr_) rows carry that room in two ways: the
+// row's origin (the resolved task room, or the claim namespace a legacy
+// receipt fell back to) and the task record behind the receipt
+// (public_work_receipts -> public_work_tasks), because an origin can be
+// a namespace rather than a room id. An opt-out deletes by either
+// attribution, so neither form survives it — the write-time parity
+// wcr_/wir_ rows already have with the recorded public-receipts
+// setting (F-3). The task-join leg is probe-guarded: a store predating
+// the public-work tables has no task records, so the origin leg alone
+// decides there, exactly as the read predicate degrades.
+function deletePublicWorkReceiptsForRoom(store, roomId) {
+  store.db.prepare("DELETE FROM public_receipts WHERE origin_room_id=? AND source='public-work'").run(roomId);
+  if (!publicWorkTablesReadable(store.db)) return;
+  store.db.prepare(`DELETE FROM public_receipts WHERE source='public-work' AND id IN (
+    SELECT pwr.receipt_id FROM public_work_receipts pwr
+    JOIN public_work_tasks pwt ON pwt.offer_id = pwr.offer_id
+    WHERE pwt.room_id=?)`).run(roomId);
+}
+
+// Whether a room's RECORDED public-receipts setting is exactly off:
+// json_extract yields 0 only for a recorded false — a room whose
+// setting was never recorded yields NULL and keeps today's behaviour,
+// and a missing room (or a store that cannot answer) is not off.
+function recordedPublicReceiptsOff(store, roomId) {
+  if (typeof roomId !== "string" || !roomId) return false;
+  try {
+    const row = store.db.prepare(
+      "SELECT json_extract(projection, '$.room.publicReceipts.enabled') AS enabled FROM rooms WHERE id=?").get(roomId);
+    return row?.enabled === 0;
+  } catch { return false; }
+}
+
 function replaceOptedInReceipts(store, state) {
   const roomId = state?.room?.id;
   if (!roomId) return;
   store.db.prepare("DELETE FROM public_receipts WHERE origin_room_id=? AND source IN ('work-claim','work-item')").run(roomId);
-  if (publicReceipts(state).enabled !== true) return;
+  if (publicReceipts(state).enabled !== true) {
+    deletePublicWorkReceiptsForRoom(store, roomId);
+    return;
+  }
   for (const row of optedInRows(store, state)) insertReceipt(store, row);
 }
 
@@ -602,6 +638,21 @@ export function projectPublicWorkReceipt(store, body, artifactSha256 = null) {
       const task = store.db.prepare("SELECT room_id FROM public_work_tasks WHERE offer_id=?").get(body.taskId);
       if (typeof task?.room_id === "string" && task.room_id) roomId = task.room_id;
     } catch { /* no task table/row (legacy receipt): keep the namespace fallback */ }
+  }
+  // Write-time parity with the recorded public-receipts setting (F-3):
+  // a room whose recorded setting is exactly off does not gain a pwr_
+  // row, and a re-projection (a review stamp, the backfill) removes a
+  // row projected before the opt-out instead of resurrecting it. A
+  // room whose setting was never recorded is not exactly off and keeps
+  // today's behaviour exactly.
+  if (recordedPublicReceiptsOff(store, roomId)) {
+    const remove = () => {
+      store.db.prepare("DELETE FROM public_receipts WHERE id=?").run(body.receiptId);
+      if (typeof body.identityId === "string") refreshDirectoryIdentity(store, body.identityId);
+    };
+    if (store.db.isTransaction) remove();
+    else store.transaction(remove);
+    return;
   }
   const listed = roomId ? isListed(store, roomId) : false;
   let roomTitle = null;
@@ -858,8 +909,17 @@ export function publicReceiptById(store, id) {
   const pub = receiptWithOutcome(store, row);
   if (typeof id === "string" && id.startsWith("pwr_")) {
     try {
-      const j = store.db.prepare("SELECT lot_id, amount, lot_state FROM bounty_journal WHERE receipt_id=? LIMIT 1").get(id);
-      if (j && j.lot_id) {
+      const j = store.db.prepare("SELECT lot_id, amount, lot_state, room_id FROM bounty_journal WHERE receipt_id=? ORDER BY seq LIMIT 1").get(id);
+      // F-2: the cross-reference discloses the lot id, the settled
+      // amount, and the lot state, so it may only be attached when the
+      // lot itself is public under the one lot gate (lotReceiptVisible:
+      // operator unpublish, the room's recorded opt-in, and the owner's
+      // directory toggle). The gate is consumed as-is here; its
+      // internals are owned by the LOT-AUTH chain and are not read or
+      // reimplemented at this call site. The gate's room is the first
+      // journal entry's room — the lot's own room, not the work
+      // receipt's — and a missing room fails the gate closed.
+      if (j && j.lot_id && lotReceiptVisible(store.db, { id: j.lot_id, roomId: j.room_id })) {
         pub.lotId = j.lot_id;
         pub.settlement = {
           lotId: j.lot_id,
@@ -1058,6 +1118,15 @@ export function publicLotReceiptById(store, id) {
       roomTitle = cleanName(store.db.prepare("SELECT title FROM public_rooms WHERE slug=?").get(roomId)?.title ?? null);
     }
   } catch { roomTitle = null; }
+  // F-4: stop naming a receipt across a broken (unpublished) link.
+  // Unpublish is a read-time per-id veto, so filter the receipt ids this
+  // lot names by the same veto instead of propagating writes: an
+  // unpublished receipt's id discloses its parties and amounts when a
+  // live public lot names it in signedReceiptIds, signedReceiptLinks,
+  // or workReceiptId.
+  const signedReceiptIds = [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))]
+    .filter(receiptId => !isUnpublished(store.db, "receipt", receiptId));
+  const workReceiptId = signedReceiptIds.find(receiptId => typeof receiptId === "string" && receiptId.startsWith("pwr_")) ?? null;
   const debit = entries.find(entry => entry.amount < 0) ?? null;
   const credit = entries.find(entry => entry.amount > 0) ?? null;
   const principal = credit ?? first;
@@ -1115,8 +1184,9 @@ export function publicLotReceiptById(store, id) {
         amountMillis: entry.amount,
       })),
       entries: entries.map(entry => entry.entry_id),
-      signedReceiptIds: [...new Set(entries.map(entry => entry.receipt_id).filter(Boolean))],
-      workReceiptId: entries.map(entry => entry.receipt_id).find(id => typeof id === "string" && id.startsWith("pwr_")) ?? null,
+      signedReceiptIds,
+      signedReceiptLinks: signedReceiptIds.map(id => ({ receiptId: id, type: RECEIPT_TYPE_BY_SHORT[id.split(":")[1]] ?? null, href: `/receipts/signed/${id}` })),
+      workReceiptId,
       journalHash: HEX64.test(first.hash ?? "") ? first.hash : null,
       prevHash: HEX64.test(first.prev_hash ?? "") ? first.prev_hash : null,
       bountyCreatedAt: iso(bounty.created_at),

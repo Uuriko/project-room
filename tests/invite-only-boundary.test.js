@@ -69,6 +69,11 @@ const PROBES = {
   "HEAD /api/ready": [undefined, 200],
   "HEAD /api/guest-invites": [undefined, 200],
   "HEAD /api/public/receipts": [undefined, 200],
+  // Signed receipt face (proof layer S4): public document surface; every
+  // non-serving state (malformed, unknown, gated, unpublished) converges on
+  // the identical 404, so an invented id is never an existence oracle.
+  "GET /receipts/signed/{}": [undefined, 404],
+  "HEAD /receipts/signed/{}": [undefined, 404],
   "HEAD /api/agent-identities/{}/keys": [undefined, 404],
   "HEAD /api/agents/directory/{}": [undefined, 404],
   "HEAD /api/agents/{}/card": [undefined, 404],
