@@ -44,7 +44,7 @@ test("contextual email creation signs in using the actual password signup API", 
   assert.doesNotMatch(page.url(), /password=|new-email-password/);
 });
 
-test("password signup opens one personal room without optional setup, with profile editing available later", { timeout: 40000 }, async t => {
+test("password signup offers room choices and creates only after an explicit choice", { timeout: 40000 }, async t => {
   const { page, origin } = await setup(t, { login: false });
   const shots = "test-results/onboarding";
   mkdirSync(shots, { recursive: true });
@@ -60,16 +60,24 @@ test("password signup opens one personal room without optional setup, with profi
   await form.locator('[name="email"]').fill("room-landing@example.invalid");
   await form.locator('[name="password"]').fill(password);
   await form.locator('button[type="submit"]').click();
-  await page.locator("#main").waitFor({ state: "visible", timeout: 3000 });
-  assert.equal(await page.locator('#account-setup-dialog').isVisible(), false, 'optional naming does not block the first conversation');
+  await page.locator("#room-choices").waitFor({ state: "visible", timeout: 3000 });
+  assert.equal(await page.locator('#account-setup-dialog').isVisible(), false, 'room choice does not force an optional naming prompt');
   assert.deepEqual(await page.evaluate(() => window.signupButtonClicks), ['Create account', 'Create account']);
-  assert.match(page.url(), /[?&]room=personal-/);
-  assert.equal(await page.locator("#inbox-panel").isVisible(), false);
-  assert.equal(await page.locator("#identity-label").textContent(), "Owner", 'the existing default identity remains intact');
+  assert.equal(await page.locator('#account-rooms-search-controls').isVisible(), false);
   const account = await (await page.context().request.get(origin + '/api/account-session')).json();
   assert.equal(account.authenticated, true); assert.equal(account.terms.required, false);
   const rooms = async () => (await (await page.context().request.get(origin + '/api/account-rooms', { headers: { 'X-Session-Binding': account.sessionBinding } })).json()).rooms;
-  assert.equal((await rooms()).length, 1, 'automatic first-room creation stays singular');
+  assert.equal((await rooms()).length, 0, 'signup creates no room implicitly');
+  await page.reload(); await page.locator('#room-choices').waitFor();
+  assert.equal((await rooms()).length, 0, 'reload preserves the choice');
+  await page.getByRole('button', { name: 'Create room', exact: true }).first().click();
+  assert.equal(await page.locator('#account-room-title').evaluate(node => node === document.activeElement), true);
+  await page.locator('#account-room-title').fill('My private room');
+  await page.locator('#account-room-purpose').fill('Plan my work');
+  await page.locator('#account-room-name').fill('Ada');
+  await page.locator('#account-room-submit').click();
+  await page.locator('#main').waitFor({ state: 'visible' });
+  assert.equal((await rooms()).length, 1, 'explicit creation creates one room');
   const initialRoom = new URL(page.url()).searchParams.get('room');
   await page.reload(); await page.locator('#main').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#account-setup-dialog').isVisible(), false);
@@ -146,4 +154,57 @@ test("signup guidance, password visibility and pending-write controls work befor
     headers: { Origin: origin, Cookie: "" }, data: { code: callback.searchParams.get("code"), verifier }
   });
   assert.equal(mac.status(), 201);
+});
+
+test("no-room discovery is lazy and supports empty, retry and paginated results", { timeout: 30000 }, async t => {
+  const { page, store } = await setup(t);
+  const email = "discovery@example.invalid";
+  store.createAccount("discovery-account"); store.completeOnboarding("discovery-account");
+  store.accountLogins.linkPasswordMethod("discovery-account", { email, verifier: hashPassword(password) });
+  const requests = [];
+  page.on('request', request => { if (new URL(request.url()).pathname === '/api/public/rooms/directory') requests.push(request.url()); });
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
+  await form.locator('[name="email"]').fill(email); await form.locator('[name="password"]').fill(password);
+  await form.locator('button[type="submit"]').click();
+  await page.locator('#room-choices').waitFor();
+  assert.equal(requests.length, 0, 'sign-in does not wait for or fetch discovery');
+  await page.locator('#room-choice-discover').click();
+  await page.getByText('No rooms are listed yet. You can create a room or join with an invitation.', { exact: true }).waitFor();
+  assert.equal(requests.length, 1, 'empty public directory uses the real endpoint');
+  await page.reload(); await page.locator('#room-choices').waitFor();
+  let attempts = 0;
+  await page.route('**/api/public/rooms/directory*', route => {
+    attempts++;
+    if (attempts === 1) return route.fulfill({ status: 503, json: { error: 'temporarily_unavailable' } });
+    const after = new URL(route.request().url()).searchParams.get('after');
+    return route.fulfill({ json: after ? {
+      rooms: [{ roomId: 'listed-b', title: 'Second listed room', purpose: 'Another public description' }], nextCursor: null
+    } : {
+      rooms: [{ roomId: 'listed-a', title: '<img src=x onerror=alert(1)>', purpose: 'Public description only' }], nextCursor: 'listed-a'
+    } });
+  });
+  await page.locator('#room-choice-discover').click();
+  await page.locator('#room-discovery-retry').waitFor();
+  await page.locator('#room-discovery-retry').click();
+  await page.locator('#room-discovery-more').waitFor();
+  assert.equal(await page.locator('#room-discovery-list img').count(), 0, 'directory titles render as text');
+  await page.locator('#room-discovery-more').click();
+  await page.getByRole('heading', { name: 'Second listed room' }).waitFor();
+  assert.equal(await page.locator('.room-discovery-entry').count(), 2);
+  assert.equal(await page.locator('#room-discovery-more').isVisible(), false);
+  assert.equal(await page.locator('#account-rooms-search-controls').isVisible(), false, 'discovery does not masquerade as membership');
+  assert.equal(new URL(requests.at(-1)).searchParams.get('after'), 'listed-a');
+  for (const colorScheme of ['light', 'dark']) {
+    await page.emulateMedia({ colorScheme });
+    await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, colorScheme);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'choices and directory fit a phone');
+    await page.screenshot({ path: `test-results/onboarding/discovery-${colorScheme}-390.png` });
+  }
+  await page.locator('#room-choice-discover').click();
+  assert.equal(await page.locator('#room-discovery').isVisible(), false);
+  await page.locator('#session-menu-button').click();
+  await page.locator('#signout-button').click();
+  await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('.room-discovery-entry').count(), 0, 'signout clears cached directory UI');
 });

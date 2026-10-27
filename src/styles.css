@@ -1786,6 +1786,10 @@ body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
 @media (max-width: 700px) { #account-rooms-panel { margin: 1rem .75rem; } }
 
 #account-rooms-panel > p > .button { display: inline-flex; align-items: center; min-height: 44px; }
+#room-choices { margin-block: var(--space-4); }
+#room-choices .button { display: inline-flex; align-items: center; min-height: 44px; }
+.room-discovery-entry { padding-block: var(--space-4); border-bottom: 1px solid var(--line); }
+.room-discovery-entry h4, .room-discovery-entry p { overflow-wrap: anywhere; }
 body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: none; }
 
 #signin-methods:has(#google-signin[hidden]):has(#github-signin[hidden]) .signin-divider { display: none; }

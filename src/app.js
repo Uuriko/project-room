@@ -48,7 +48,8 @@ import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
-import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-navigation.js";
+import { installWorkspaceNavigation } from "./workspace-navigation.js";
+import { installRoomDiscovery } from "./room-discovery.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
@@ -752,6 +753,11 @@ workspaceUI = installWorkspaceNavigation({ account: accountClient, getRoom: () =
   onRooms: () => loadAccountRooms(),
   onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+const roomDiscovery = installRoomDiscovery({ getSession: () => accountClient.session });
+$("#room-choice-create").addEventListener("click", () => {
+  $("#account-room-create").open = true;
+  $("#account-room-title").focus();
+});
 // Account-session restore flight: declared before the sign-in UI mounts.
 // The magic-link auto-redeem runs synchronously during mount (page load
 // with ?magic=), so ensureAccountSession must not sit in the temporal dead
@@ -935,6 +941,8 @@ function filterAccountRooms() {
 }
 $("#account-rooms-search").addEventListener("input", filterAccountRooms);
 function clearPrivateWorkspace(options) {
+  roomDiscovery.reset();
+  $("#account-rooms-search-controls").hidden = true;
   $("#account-profile-dialog").close(); profileSettingsUI.reset();
   workspaceUI?.reset(options); roomListVersion++;
   $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
@@ -979,27 +987,6 @@ async function openRememberedRoomOrList() {
     return false;
   }
 }
-// --- Q3-C: signup with no chosen room opens that account's room. ---
-async function openPersonalRoomAfterSignup() {
-  const owned = accountClient.session;
-  // /?start=room already asks for the name and then creates the room.
-  // A second create here would make the room while that dialog is still open.
-  if (startRoomIntent || startRoomFlight) {
-    showAccountWorkspace();
-    if (startRoomFlight) await startRoomFlight;
-    return;
-  }
-  showAccountWorkspace();
-  if (accountClient.session !== owned || state) return;
-  const body = await ensureDefaultRoom();
-  if (accountClient.session !== owned || state) return;
-  const roomId = body?.room?.id;
-  if (!roomId) { showAccountWorkspace(); return; }
-  history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); workspaceUI.showRooms(); workspaceUI.refreshSetup?.(); }
-  catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
-}
-// --- end Q3-C ---
 // The verification resume is a convenience on top of the normal landing. A
 // failed read must fall through to that landing, not strand the tab (the
 // intent stays in sessionStorage for 30 minutes and would repeat on reload).
@@ -1041,10 +1028,8 @@ async function landAfterSignIn() {
   });
   if (!target.explicit) {
     if (target.roomId) await openRememberedRoomOrList();
-    // ?account=1 opens the room list. A sign-in without a room target
-    // opens that account's room after the name step.
-    else if (accountHomeFromLocation()) showAccountWorkspace();
-    else await openPersonalRoomAfterSignup();
+    // Without a chosen room, let the person create, join, or discover one.
+    else showAccountWorkspace();
     return;
   }
   try {
@@ -1139,6 +1124,7 @@ async function loadAccountRooms(more = false) {
   if (!owned?.authenticated) return;
   if (!more) ownerCockpit.refresh();
   if (!more) { roomListCursor = null; $("#account-rooms-list").replaceChildren(); }
+  $("#account-rooms-search-controls").hidden = !$("#account-rooms-list").children.length;
   $("#account-rooms-more").hidden = true; $("#account-rooms-status").textContent = "Loading…";
   try {
     const value = await accountClient.rooms(more ? roomListCursor : null);
@@ -1164,13 +1150,9 @@ async function loadAccountRooms(more = false) {
       button.addEventListener("click", () => openAccountRoom(room.id)); $("#account-rooms-list").append(button);
     }
     filterAccountRooms();
+    $("#account-rooms-search-controls").hidden = !$("#account-rooms-list").children.length;
     roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;
     $("#account-rooms-status").textContent = $("#account-rooms-list").children.length ? "" : roomListCursor ? "No available rooms on this page." : "No rooms yet.";
-    // RC-2026-09-19-088: first sign-in must never land in an empty void. A
-    // fresh account with no rooms and no pending invitation gets its default
-    // room created and opened.
-    if (!more && !$("#account-rooms-list").children.length && !roomListCursor
-      && !startRoomIntent && !startRoomFlight) nameThenEnsureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
@@ -1181,8 +1163,6 @@ async function loadAccountRooms(more = false) {
 // invitation is being redeemed — the invite flow owns the landing. Idempotent
 // server-side; a second call returns the existing room.
 let defaultRoomFlight = null;
-const nameThenEnsureDefaultRoom = nameBeforeFirstRoom({
-  askName: () => workspaceUI.askSetupName?.(), ensure: () => ensureDefaultRoom(), session: () => accountClient.session });
 async function ensureDefaultRoom() {
   if (defaultRoomFlight) return defaultRoomFlight;
   // Never create a default room when entering through an invitation or a

@@ -548,5 +548,10 @@ export default {
   "cockpit.jobTimes": "last run {run} · last success {success}",
   "cockpit.jobNever": "never",
   "cockpit.jobRowHtml": "<li data-job=\"{name}\" data-job-result=\"{result}\" data-job-alert=\"{alert}\"><strong>{name}</strong> {label}{failures} <small>{times}</small></li>",
-  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>"
+  "cockpit.jobsHtml": "<details class=\"cockpit-jobs\" {open}><summary>{title}</summary><ul>{rows}</ul></details>",
+  "rooms.discovery.loading": "Loading listed rooms…",
+  "rooms.discovery.joining": "Request access",
+  "rooms.discovery.emptyPage": "No listed rooms on this page. Try the next page.",
+  "rooms.discovery.empty": "No rooms are listed yet. You can create a room or join with an invitation.",
+  "rooms.discovery.error": "Couldn’t load listed rooms. Retry when you’re ready."
 };
