@@ -1,11 +1,11 @@
 // Task #41 — per-connection send budgets via token bucket. Unit tests for the
-// budget registry (server/channel-send-budgets.mjs) and the token-bucket peek:
+// budget registry (server/channel-send-budgets.mjs) and the rate-limiter peek:
 // config precedence, burst/exhaustion with an honest 429 + Retry-After, refill,
 // per-connection isolation, parallel-send atomicity, non-consuming diagnostics,
 // and the Gmail no-op (live Gmail budgets are [JOHN]-gated on task 17).
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createLimiter, RateLimitError } from "../server/token-bucket.mjs";
+import { createRateLimiter, RateLimitError } from "../server/identity-ratelimit.mjs";
 import { ServiceError } from "../server/store.mjs";
 import { createSendBudgetRegistry, resolveSendBudget, parseConnectionBudgets,
   DEFAULT_SEND_BUDGET_PER_MIN, DEFAULT_SEND_BUDGET_BURST, GMAIL_BUDGET_PENDING_APPROVAL } from "../server/channel-send-budgets.mjs";
@@ -143,18 +143,19 @@ test("the connectionBudget callback receives channel, accountId and connectionId
   throwsServiceError(() => budgets.check({ channel: "telegram", accountId: "acct-9", connectionId: "conn-9" }), 429, "send_budget_exhausted");
 });
 
-test("token-bucket peek snapshots without consuming", () => {
-  const limiter = createLimiter({ rate: 1, burst: 2 });
-  assert.deepEqual(limiter.peek("k", { now: 1000 }), { remaining: 2, retryAfterMs: 0, fullAtMs: null });
-  limiter.tryTake("k", { now: 1000 });
-  assert.deepEqual(limiter.peek("k", { now: 1000 }), { remaining: 1, retryAfterMs: 0, fullAtMs: 2000 });
-  limiter.tryTake("k", { now: 1000 });
-  const empty = limiter.peek("k", { now: 1000 });
+test("rate-limiter peek snapshots without consuming", () => {
+  const t = 1000;
+  const limiter = createRateLimiter({ capacity: 2, refillPerSecond: 1, now: () => t });
+  assert.deepEqual(limiter.peek("k"), { remaining: 2, retryAfterMs: 0, fullAtMs: null });
+  limiter.check("k");
+  assert.deepEqual(limiter.peek("k"), { remaining: 1, retryAfterMs: 0, fullAtMs: 2000 });
+  limiter.check("k");
+  const empty = limiter.peek("k");
   assert.equal(empty.remaining, 0);
   assert.ok(empty.retryAfterMs > 0);
   assert.equal(empty.fullAtMs, 3000);
   assert.ok(Object.isFrozen(empty));
-  assert.throws(() => limiter.peek("", { now: 0 }), error => error instanceof RateLimitError);
+  assert.throws(() => limiter.peek(""), error => error instanceof RateLimitError);
 });
 
 test("telegramLiveView carries the budget on the connection card only when provided", () => {

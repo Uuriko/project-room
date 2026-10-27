@@ -1066,7 +1066,6 @@
   "tests/text-results.test.js": 98912,
   "tests/thread-options.test.js": 45951,
   "tests/timeline-pin.test.js": 5246,
-  "tests/token-bucket.test.js": 4258,
   "tests/touch-targets-coarse.test.js": 3394,
   "tests/trace-entry.test.mjs": 159.234,
   "tests/trial-task-http.test.js": 4332,
