@@ -44,7 +44,7 @@ const { channelDrainTickShape, CHANNEL_DRAIN_STUCK_MS, CHANNEL_DRAIN_INFLIGHT_KE
 
 function memoryStorage() {
   const map = new Map();
-  return { map, async get(key) { return structuredClone(map.get(key)); }, async put(key, value) { map.set(key, structuredClone(value)); } };
+  return { map, async get(key) { return structuredClone(map.get(key)); }, async put(key, value) { map.set(key, structuredClone(value)); }, async delete(key) { map.delete(key); } };
 }
 
 // A DO stub that behaves like workerd RPC: real ProjectRoom methods only, each

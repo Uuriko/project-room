@@ -60,6 +60,29 @@ function drainOutcomeFields(summary) {
 // durable start stamp survives): the drain will never complete, so past
 // the stuck bound the tick reports the wedge AND starts a replacement —
 // a live drain past the bound is merely wedged and must not be doubled.
+// B3-2 F1: write the durable outcome mirror — the post-consumption
+// rewrite recordCronTick performs once the heartbeat record is durable,
+// and the stash-time mirror #drainChannelsInBackground's stash performs.
+// This lives here, not as a ProjectRoom method, for two reasons: a
+// private method's brand check rejects the plain-object receivers the
+// heartbeat glue is exercised against in tests (room.mjs's prototype
+// methods run against DO-shaped stubs there), and room.mjs cannot carry
+// extra exports without widening the runtime's RPC surface. The mirror
+// holds a JSON copy of the stash; the in-memory fields keep the original
+// objects, so recordCronTick's identity comparisons are unaffected on
+// the instance that stashed them. An empty stash deletes the record, so
+// a successor instance's peek finds no outcome to report.
+export async function persistChannelDrainOutcome(storage, outcome, held) {
+  const current = outcome ?? null;
+  const queued = held ?? null;
+  if (current === null && queued === null) {
+    await storage.delete(CHANNEL_DRAIN_OUTCOME_KEY);
+    return;
+  }
+  const copy = value => value === null ? null : JSON.parse(JSON.stringify(value));
+  await storage.put(CHANNEL_DRAIN_OUTCOME_KEY, { outcome: copy(current), held: copy(queued) });
+}
+
 export function channelDrainTickShape({ connections, inflight, inflightSince, now, completed, orphaned = false }) {
   const report = drainOutcomeFields(completed);
   const unobserved = completed == null ? { unobserved: 1 } : {};
