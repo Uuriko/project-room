@@ -794,13 +794,32 @@ export function backfillPublicReadModel(store, { limit = PUBLIC_BACKFILL_BATCH, 
 // visibility package); the claim that it did was false before it.
 const HIDDEN_RECEIPT = OPERATOR_HIDDEN_RECEIPT_SQL;
 
+// The agent needle is folded with JS `toLowerCase()` (full Unicode)
+// in queryPublicReceipts below, and the documented semantics are a
+// case-insensitive substring of an agent name; SQLite `lower()` folds
+// ASCII only, so SQL alone must never decide this filter or receipts
+// whose match depends on non-ASCII folding (Ä, İ, É, Σ, Œ, ...)
+// silently drop out of the public agent search. The SQL predicate
+// below is a proven superset of the JS predicate
+// `agents_json.toLowerCase().includes(needle)`: a pure-ASCII
+// agents_json can only JS-match through characters `lower()` and
+// `toLowerCase()` fold identically, so the `instr` leg covers it (a
+// non-ASCII needle cannot be a substring of an ASCII folded string);
+// every other JS match requires a non-ASCII character in agents_json,
+// which the byte-length leg covers (a non-ASCII character always
+// encodes to more UTF-8 bytes than characters). The exact JS fold
+// then decides each candidate — in the page scan, before pagination,
+// and in the cursor lookup — so the served list is exactly the JS
+// predicate's matches.
 const receiptFilter = (room, needle) => {
   const clauses = [];
   const params = [];
   if (room) { clauses.push("room_id=?"); params.push(room); }
-  if (needle) { clauses.push("instr(lower(agents_json), ?) > 0"); params.push(needle); }
+  if (needle) { clauses.push("(instr(lower(agents_json), ?) > 0 OR length(agents_json) <> length(CAST(agents_json AS BLOB)))"); params.push(needle); }
   return { clauses, params };
 };
+
+const RECEIPT_AGENT_SCAN_BATCH = 100;
 
 export function queryPublicReceipts(store, { room = null, agent = null, cursor = null, limit = 20 } = {}) {
   if (room != null && (typeof room !== "string" || !room || room.length > 128)) {
@@ -835,17 +854,50 @@ export function queryPublicReceipts(store, { room = null, agent = null, cursor =
     // never-existent id.
     const where = `WHERE ${[...filter.clauses, "id=?", ...visibility].join(" AND ")}`;
     const current = store.db.prepare(`SELECT id, at, agents_json, room_id FROM public_receipts ${where}`).get(...filter.params, cursor);
-    if (!current) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
+    // The SQL filter is only a superset (see receiptFilter): the exact
+    // JS fold decides whether the cursor receipt is in this list. A
+    // superset candidate that is not a JS match is not a receipt this
+    // list could serve — same 422 as a never-existent id.
+    if (!current || (needle && !current.agents_json.toLowerCase().includes(needle))) return { error: { status: 422, code: "invalid_receipt_query", message: "cursor is not a receipt from this list" } };
     after = "(at < ? OR (at = ? AND id > ?))";
     afterParams.push(current.at, current.at, current.id);
   }
   const clauses = [...filter.clauses, ...visibility];
   if (after) clauses.push(after);
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
-    .all(...filter.params, ...afterParams, limit + 1);
-  const page = rows.slice(0, limit).map(row => receiptWithOutcome(store, row));
-  const nextCursor = rows.length > limit ? page.at(-1)?.id ?? null : null;
+  if (!needle) {
+    const rows = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts ${where} ORDER BY at DESC, id ASC LIMIT ?`)
+      .all(...filter.params, ...afterParams, limit + 1);
+    const page = rows.slice(0, limit).map(row => receiptWithOutcome(store, row));
+    const nextCursor = rows.length > limit ? page.at(-1)?.id ?? null : null;
+    return { receipts: page, nextCursor };
+  }
+  // Agent-filtered reads: scan superset candidates in listing order,
+  // in bounded batches, and let the exact JS fold decide each one
+  // BEFORE pagination — post-filtering a SQL-paginated page would
+  // serve short pages and hand out cursors the follow-up request
+  // cannot anchor on the true match list. The scan stops as soon as
+  // one match beyond the page is in hand (that match proves a
+  // nextCursor) or the candidate set is exhausted.
+  const matches = [];
+  let scanAfter = after;
+  let scanAfterParams = afterParams;
+  while (matches.length <= limit) {
+    const scanClauses = [...filter.clauses, ...visibility];
+    if (scanAfter) scanClauses.push(scanAfter);
+    const batch = store.db.prepare(`SELECT ${RECEIPT_COLUMNS} FROM public_receipts WHERE ${scanClauses.join(" AND ")} ORDER BY at DESC, id ASC LIMIT ?`)
+      .all(...filter.params, ...scanAfterParams, RECEIPT_AGENT_SCAN_BATCH);
+    if (!batch.length) break;
+    for (const row of batch) {
+      if (row.agents_json.toLowerCase().includes(needle)) matches.push(row);
+    }
+    if (batch.length < RECEIPT_AGENT_SCAN_BATCH) break;
+    const last = batch.at(-1);
+    scanAfter = "(at < ? OR (at = ? AND id > ?))";
+    scanAfterParams = [last.at, last.at, last.id];
+  }
+  const page = matches.slice(0, limit).map(row => receiptWithOutcome(store, row));
+  const nextCursor = matches.length > limit ? page.at(-1)?.id ?? null : null;
   return { receipts: page, nextCursor };
 }
 
