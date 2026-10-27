@@ -45,6 +45,20 @@ export function validateCodexRuntimeConfig(config) {
 }
 
 // A dedicated process, never the desktop daemon/proxy or the operator's HOME.
+// The same exclusive directory fences runtime processes and explicit reconciliation.
+// Never remove an existing lock, even when its process cannot be observed.
+export function acquireCodexProfileLock(settings) {
+  const lock = join(settings.codexHome, ".room-runtime.lock");
+  try { mkdirSync(lock, { mode: 0o700 }); } catch { throw Object.assign(new Error("Dedicated runtime is active or unresolved; reconcile its process before clearing .room-runtime.lock"), { code: "runtime_profile_locked" }); }
+  const owned = lstatSync(lock);
+  return () => {
+    try {
+      const current = lstatSync(lock);
+      if (current.dev === owned.dev && current.ino === owned.ino && !current.isSymbolicLink()) rmdirSync(lock);
+    } catch { /* Retain an unresolved or replaced lock. */ }
+  };
+}
+
 // Runtime policy controls its model tools; clearing environment is not an OS sandbox.
 export function openCodexStdio(config, { allowedThreadIds = [], onAttention = () => {}, authenticationOnly = false, onDisconnect = () => {} } = {}) {
   const authMethods = new Set(["initialize", "account/read", "account/login/start", "account/login/cancel"]);
@@ -55,8 +69,7 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   if (existsSync(privateHome) && (lstatSync(privateHome).isSymbolicLink() || realpathSync(privateHome) !== privateHome))
     throw new Error("Dedicated process HOME cannot be a symlink");
   mkdirSync(privateHome, { recursive: true, mode: 0o700 }); chmodSync(privateHome, 0o700);
-  const lock = join(settings.codexHome, ".room-runtime.lock");
-  try { mkdirSync(lock, { mode: 0o700 }); } catch { throw Object.assign(new Error("Dedicated runtime is active or unresolved; reconcile its process before clearing .room-runtime.lock"), { code: "runtime_profile_locked" }); }
+  const releaseProfile = acquireCodexProfileLock(settings);
   const args = ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="file"',
     "-c", 'shell_environment_policy.inherit="none"', "-c", `approval_policy=${JSON.stringify(settings.policy.approvalPolicy)}`,
     "-c", `sandbox_mode=${JSON.stringify(settings.policy.sandbox)}`,
@@ -83,7 +96,7 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
     kill("SIGKILL");
     for (let i = 0; i < 100 && alive(); i++) await new Promise(resolve => setTimeout(resolve, 20));
     if (alive()) throw new Error("Runtime process group is unresolved; private profile lock retained");
-    try { rmdirSync(lock); } catch { /* retain an unresolved lock */ }
+    releaseProfile();
   })();
   const fail = error => {
     if (closed) return;

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { codexRuntimeFingerprint, reconcileCancelledCodexRequest } from "../client/request-reconciliation.mjs";
 import { validId } from "../src/events.js";
 import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
@@ -15,6 +16,7 @@ import { superviseCodexRequests } from "../client/codex-request-supervisor.mjs";
 export async function main(argv = process.argv.slice(2)) {
   if (argv[0] === "--help") {
     console.log(`Usage:
+  ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --reconcile-cancelled-request /absolute/journal.sqlite /absolute/runtime.json REQUEST_ID ATTEMPT_ID
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --list
   node scripts/run-codex-room.mjs --check /absolute/runtime.json
   node scripts/run-codex-room.mjs --preflight /absolute/runtime.json
@@ -42,6 +44,21 @@ Normal invocation executes one already-created public Room assistant run assigne
   if (["--status-watch", "--stop-watch"].includes(argv[0])) {
     if (argv.length !== 2 || !isAbsolute(argv[1])) throw new Error("Absolute journal path required");
     console.log(JSON.stringify(argv[0] === "--stop-watch" ? stopCodexHost(argv[1]) : readCodexHostStatus(argv[1])));
+    return;
+  }
+  if (argv[0] === "--reconcile-cancelled-request") {
+    if (argv.length !== 5 || !isAbsolute(argv[1]) || !isAbsolute(argv[2]) || !validId(argv[3]) || !validId(argv[4]))
+      throw new Error("Choose the exact journal, runtime config, cancelled request and original attempt");
+    try {
+      console.log(JSON.stringify(await reconcileCancelledCodexRequest({ connection: agentConnectionFromEnvironment(),
+        journal: argv[1], config: JSON.parse(readFileSync(argv[2], "utf8")), requestMessageId: argv[3], attemptId: argv[4] })));
+    } catch (error) {
+      const allowed = ["reconciliation_proof_unavailable", "reconciliation_binding_mismatch", "reconciliation_outcome_present",
+        "reconciliation_dispatch_unknown", "reconciliation_cancellation_required", "reconciliation_private_path_required",
+        "already_watching", "runtime_profile_locked", "private_state_required", "state_schema_mismatch"];
+      const code = allowed.includes(error.code) ? error.code : "reconciliation_failed";
+      throw Object.assign(new Error(code), { code });
+    }
     return;
   }
   const preflight = argv[0] === "--preflight";
@@ -83,7 +100,7 @@ Normal invocation executes one already-created public Room assistant run assigne
       };
       const supervise = requestWatch ? superviseCodexRequests : superviseCodexRoom;
       await supervise({ connection, db, directory: `${journal}.watch`, cwd: settings.cwd, policy: settings.policy, allowedRequesterIds, allowedRequestIds,
-        signal: controller.signal, timeoutMs: settings.turnTimeoutMs, connectOnStart: true, emit,
+        signal: controller.signal, timeoutMs: settings.turnTimeoutMs, connectOnStart: true, emit, runtimeFingerprint: codexRuntimeFingerprint(settings),
         connect: async allowedThreadIds => {
           const transport = openCodexStdio(settings, { allowedThreadIds, onAttention: event => console.error(JSON.stringify(event)) });
           try {

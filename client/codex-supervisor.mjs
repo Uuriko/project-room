@@ -1,3 +1,4 @@
+import { hasUnresolvedRequestIntents } from "./request-reconciliation.mjs";
 import { setTimeout as delay } from "node:timers/promises";
 import { RoomAgentClient } from "./room-agent.mjs";
 import { WatchJournal } from "./watch-journal.mjs";
@@ -29,7 +30,7 @@ export function scopedCodexThreads(db, connection) {
 // Reuse the watcher lifetime ownership lock and stop control; execution ownership
 // remains the existing shared-attempt journal and server claim, never a new lease.
 export async function superviseCodexRoom({ connection, db, directory, connect, cwd, policy,
-  signal, emit = () => {}, connectOnStart = false, pollMs = 2000, retryMaxMs = 30000, timeoutMs = 300000 }) {
+  signal, emit = () => {}, connectOnStart = false, pollMs = 2000, retryMaxMs = 30000, timeoutMs = 300000, runtimeFingerprint }) {
   if (!Number.isInteger(pollMs) || pollMs < 100 || pollMs > 30000 || !Number.isInteger(retryMaxMs) || retryMaxMs < pollMs || retryMaxMs > 300000)
     throw new Error("Invalid supervisor polling/backoff interval");
   const owner = new WatchJournal(directory), controller = new AbortController();
@@ -67,8 +68,7 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
         // The native journal is shared across receiving modes. A directed
         // attempt with no saved outcome still owns this workspace; changing
         // modes must not bypass its reconciliation requirement.
-        const directedUnknown = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='request_runs'").get()
-          && db.prepare("SELECT 1 FROM request_runs WHERE response IS NULL LIMIT 1").get();
+        const directedUnknown = hasUnresolvedRequestIntents(db, connection, runtimeFingerprint);
         const directedRuntimeUnknown = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_runtime_attempts'").get()
           && db.prepare("SELECT binding,state FROM codex_runtime_attempts WHERE state NOT IN ('completed','interrupted','failed')").all()
             .some(row => JSON.parse(row.binding).kind !== "shared-assistant");
