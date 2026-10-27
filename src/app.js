@@ -78,17 +78,23 @@ function validatedOAuthReturn(value) {
       && !target.username && !target.password ? target.pathname + target.search : null;
   } catch { return null; }
 }
+function validatedDesktopConsent(value) {
+  const target = validatedOAuthReturn(value);
+  if (!target) return false;
+  const consent = new URL(target, location.origin).searchParams;
+  return consent.getAll("client_id").length === 1 && consent.get("client_id") === "project-room-macos"
+      && consent.getAll("redirect_uri").length === 1 && consent.get("redirect_uri") === location.origin + "/api/auth/desktop/callback"
+      && consent.getAll("state").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("state") || "")
+      && consent.getAll("code_challenge").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("code_challenge") || "")
+      && consent.getAll("code_challenge_method").length === 1 && consent.get("code_challenge_method") === "S256";
+}
 try {
   const params = new URLSearchParams(location.search);
   const target = params.get("oauth") === "login" ? validatedOAuthReturn(params.get("return")) : null;
   if (target) {
     sessionStorage.setItem(oauthReturnKey, target);
-    const providers = params.getAll("provider"), consent = new URL(target, location.origin).searchParams;
-    const nativeConsent = consent.getAll("client_id").length === 1 && consent.get("client_id") === "project-room-macos"
-      && consent.getAll("redirect_uri").length === 1 && consent.get("redirect_uri") === location.origin + "/api/auth/desktop/callback"
-      && consent.getAll("state").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("state") || "")
-      && consent.getAll("code_challenge").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("code_challenge") || "")
-      && consent.getAll("code_challenge_method").length === 1 && consent.get("code_challenge_method") === "S256";
+    const providers = params.getAll("provider");
+    const nativeConsent = validatedDesktopConsent(target);
     if (nativeConsent && params.getAll("return").length === 1 && params.getAll("oauth").length === 1
       && providers.length === 1 && ["google", "github"].includes(providers[0])) initialDesktopProvider = providers[0];
     // Consume intent in this document only, so refresh/cancel cannot restart it.
@@ -202,6 +208,20 @@ if (initialGitHubFailed) {
   const url = new URL(location.href);
   url.searchParams.delete("github");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+// End only the exact native PKCE journey retained in this tab. The server
+// callback restricts the custom scheme response and the app verifies its state.
+// Consume before navigating: browser refresh/retry must not replay cancellation.
+if (initialGoogleFailed || initialGitHubFailed) {
+  try {
+    const target = sessionStorage.getItem(oauthReturnKey);
+    if (validatedDesktopConsent(target)) {
+      const consent = new URL(target, location.origin).searchParams;
+      sessionStorage.removeItem(oauthReturnKey);
+      location.assign("/api/auth/desktop/callback?" + new URLSearchParams({ state: consent.get("state"), error: "access_denied" }));
+      return;
+    }
+  } catch { /* Storage unavailable: retain ordinary browser sign-in recovery. */ }
 }
 const initialJoinFragment = (() => {
   // [QA-Join]: a Google/GitHub OAuth round-trip drops the #join/ fragment (it
