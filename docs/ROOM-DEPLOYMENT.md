@@ -54,6 +54,17 @@ Also run the cross-worker identity check in `cloudflare/http.check.mjs` in CI (t
 
 The shared lane does this step in GitHub Actions: run `deploy-prod` with the commit sha, and roll back with `rollback-prod`. See [DEPLOY-LANE.md](DEPLOY-LANE.md). The commands below are the manual fallback.
 
+Before the local fallback, verify the clean checkout is the exact intended commit
+on freshly fetched `origin/main`. With Node 24, run the full
+`node scripts/schema-gate/schema-gate.mjs` from the repository root and retain
+its complete output, exit status, Node version and commit SHA. A failure stops
+the release. This is the same qualification used by hosted manual deployment;
+it does not claim a successful hosted check. Coordinate the deployment claim
+and pending or active Actions deployments before uploading: the Actions
+`production-deploy` concurrency group cannot serialize this local process.
+Use the same predeployment snapshot, smoke and guarded recovery scripts as the
+hosted lane, including exact version/source/schema evidence.
+
 Do not pull, commit, or rebuild from a different tree between staging and production. Deploy the canonical Worker first, then the entry. Only the canonical Worker has the cron. The entry must not run a second cron against the shared store.
 
 ```sh

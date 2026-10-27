@@ -8,7 +8,7 @@ Anyone whose GitHub account has **write** (or higher) on `Uuriko/project-room`. 
 
 ## Deployment checks
 
-Every deployment requires a commit on `main` and a successful `schema-gate` push run on that exact commit. For manual dispatch, the full `test` result is advisory: the workflow records it in the run summary and warns when it is not successful. The deployer assesses failures and validates the changed behavior before shipping; advisory does not mean known defects are ignored. Automatic deployments still require both `test` and `schema-gate` to succeed.
+Every deployment requires a commit on `main` and successful schema qualification on that exact commit. A manual hosted dispatch runs `node scripts/schema-gate/schema-gate.mjs` inline with Node 24 after checking out and verifying the requested SHA; a queued or missing schema push run does not substitute for or block this check. Its output and exact revision are retained in the run summary. Automatic deployment still requires a successful `schema-gate` push run. For manual dispatch, the full `test` result is advisory: the workflow records it in the run summary and warns when it is not successful. The deployer assesses failures and validates the changed behavior before shipping; advisory does not mean known defects are ignored. Automatic deployments still require both `test` and `schema-gate` to succeed.
 
 ## Deploy
 
@@ -18,7 +18,7 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
    - `gh workflow run deploy-prod.yml -R Uuriko/project-room -f sha=<40-hex> -f reason="<why>"`; or
    - REST `POST /repos/Uuriko/project-room/actions/workflows/deploy-prod.yml/dispatches` with `{"ref":"main","inputs":{"sha":"<40-hex>"}}`.
 3. The run:
-   - refuses unless the commit is on `main` and `schema-gate` is green; records the advisory `test` result for manual dispatch and requires it green for automatic deployment;
+   - refuses unless the commit is on `main` and the full schema harness passes inline for manual dispatch (or the hosted schema gate is green for automatic deployment); records the advisory `test` result for manual dispatch and requires it green for automatic deployment;
    - records each live Worker version, independently observed `/api/version/worker` source revision, and code schema parsed from that exact Git blob (artifact `pre-deploy-<sha>` and the run summary);
    - pins `ROOM_BODIES_AT_REST=1` on both Workers while preserving other variables (`--var ROOM_BODIES_AT_REST:1` alongside `--keep-vars` in deploy-prod.yml; in force since 2026-10-07, eda439246 — the 2026-10-06 rollout's `=0` pin was superseded the next day after muse-room hit the projection cap with bodies stored inline);
    - deploys `project-room` with `wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1`, then the public entry `project-room-staging` with `wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1`;
@@ -71,6 +71,16 @@ unchanged. Ordinary commits do not opt in when `ROOM_AUTO_DEPLOY` is unset.
 ### Optional onboarding gate
 
 When the repository variable `ROOM_ONBOARDING_GATE` is `1`, a `probe` job runs between the deployment checks and the deploy. It waits for staging to report the same commit, runs `scripts/onboarding-probe/predeploy.mjs`, and blocks the deploy on a regression (see [ONBOARDING-PROBE.md](ONBOARDING-PROBE.md#pre-deploy-gate)). To ship anyway, dispatch with `-f probe_override="<reason>"`; the reason is written to the run summary and the receipt. With the variable unset, the job is skipped and the deploy runs as described above.
+
+### Local fallback during runner delays
+
+The documented [local fallback](ROOM-DEPLOYMENT.md#3-promote-that-same-checkout)
+uses the same schema harness on the exact clean main checkout. Retain the SHA,
+Node version, full output, and successful exit before any upload. A local pass
+is local evidence; it does not turn a queued GitHub check green. Preserve signing,
+predeployment snapshot, production pins, smoke and guarded recovery. The Room
+deployment claim must coordinate local uploads with pending and active Actions
+deployments: Actions concurrency does not lock a local process.
 
 ## Receipt format
 

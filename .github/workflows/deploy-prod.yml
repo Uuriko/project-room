@@ -6,7 +6,7 @@ name: deploy-prod
 #
 # Triggers
 #   workflow_dispatch  sha = full 40-hex commit on main. The run refuses the
-#                      deploy unless the `schema-gate` push run succeeded.
+#                      deploy unless the exact commit passes schema qualification inline.
 #                      The `test` result is advisory and recorded in the summary.
 #   onboarding gate    optional. When the repo variable ROOM_ONBOARDING_GATE is
 #                      "1", the `probe` job runs the onboarding probe against
@@ -37,7 +37,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Full 40-character commit SHA on main (schema-gate required; test advisory)"
+        description: "Full 40-character commit SHA on main (inline schema qualification; test advisory)"
         required: true
         type: string
       reason:
@@ -91,6 +91,9 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
       - name: Resolve the commit and check deployment policy
         id: gate
         env:
@@ -124,11 +127,24 @@ jobs:
               fi
               continue
             fi
+            if [ "$EVENT" = "workflow_dispatch" ] && [ "$wf" = "schema-gate" ]; then
+              # This run qualifies the exact target itself; an unrelated runner
+              # queue must not replace or delay the actual schema check.
+              continue
+            fi
             if [ "$CONCLUSION" != "success" ]; then
-              if [ "$EVENT" = "workflow_dispatch" ]; then refuse "$wf is $CONCLUSION on $SHA; schema-gate must succeed"; fi
               skip "auto: $wf is $CONCLUSION on $SHA; the other gate's completion will retry"
             fi
           done
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            git checkout --quiet --detach "$SHA"
+            [ "$(git rev-parse HEAD)" = "$SHA" ] || refuse "schema checkout does not match requested commit"
+            echo "Qualifying schema inline on $SHA with $(node --version)" >> "$GITHUB_STEP_SUMMARY"
+            # Builtin-only harness, identical to schema-gate.yml. pipefail
+            # preserves failure while retaining its evidence in the summary.
+            node scripts/schema-gate/schema-gate.mjs 2>&1 | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "Inline schema qualification passed on $SHA" >> "$GITHUB_STEP_SUMMARY"
+          fi
           if [ "$EVENT" != "workflow_dispatch" ]; then
             # Read BOTH version doors. /api/version is answered by the Durable
             # Object and can lag the Worker by about a minute after a deploy, so
@@ -147,7 +163,7 @@ jobs:
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "go=true" >> "$GITHUB_OUTPUT"
-          echo "Deploying $SHA (schema-gate green; test advisory for manual dispatch, required for automatic deployment)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploying $SHA (schema qualified inline for manual dispatch or by hosted gate for automatic deployment; test advisory for manual dispatch)" >> "$GITHUB_STEP_SUMMARY"
 
   # --- ACT-5b onboarding gate (off unless vars.ROOM_ONBOARDING_GATE == '1') ---
   # Probes staging at the commit about to ship and fails on a >20% regression
