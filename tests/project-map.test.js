@@ -4,7 +4,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
-  applyFiles, assessOverlap, emptyGraph, fileSetSimilarity, graphFromGraphify,
+  applyFiles, assessOverlap, createOverlapContext, emptyGraph, fileSetSimilarity, graphFromGraphify,
   graphifyPreferred, mapExplain, mapHotspots, mapPath, mapQuery, parseModule, projectMapEnabled
 } from "../server/project-map.mjs";
 
@@ -155,4 +155,123 @@ test("symbol overlap across different files is reported once for every counterpa
   assert.match(overlap.summary, /^Overlap: /);
   assert.match(overlap.summary, /helper\(\)/);
   assert.equal(overlap.with[0].label, "Owner");
+});
+
+test("oversized source invalidates stale symbols and reports incomplete reads", () => {
+  const first = applyFiles(emptyGraph("acme/widgets"), { files: [{ path: "a.js", source: helper }] }, 10);
+  const next = applyFiles(first, { revision: "new", files: [{ path: "a.js", source: "é".repeat(40000) }] }, 20);
+  assert.equal(next.files["a.js"], undefined);
+  for (const result of [mapQuery(next, "helper"), mapPath(next, "a.js", "helper"), mapExplain(next, "a.js")]) {
+    assert.equal(result.engine, "parser");
+    assert.equal(result.revision, "new");
+    assert.equal(result.builtAt, 20);
+    assert.equal(result.truncated, true);
+    assert.equal(result.found, false);
+  }
+  assert.equal(applyFiles(next, { files: [] }).truncated, true);
+  assert.equal(parseModule("large.js", " ".repeat(65536) + helper).truncated, true);
+});
+
+test("Graphify import bounds nodes, files and edges without claiming completeness", () => {
+  const nodes = Array.from({ length: 20001 }, (_, i) => ({ id: String(i), source_file: `f${i}.js`, label: `f${i}`, kind: "file" }));
+  const graph = graphFromGraphify({ nodes, links: [] }, { repo: "acme/widgets", revision: "r1", now: 30 });
+  assert.equal(Object.keys(graph.files).length, 4000);
+  assert.equal(graph.truncated, true);
+  const edgeBound = graphFromGraphify({ nodes: nodes.slice(0, 2), links: Array.from({ length: 40001 }, () => ({ source: "0", target: "1", relation: "imports" })) });
+  assert.equal(edgeBound.truncated, true);
+  assert.deepEqual(edgeBound.files["f0.js"].imports, ["f1.js"]);
+  assert.equal(mapQuery(graph, "f0.js").revision, "r1");
+});
+
+test("Graphify calls retain their exact target without requiring an imports edge", () => {
+  const graph = graphFromGraphify({ graph: { schema_version: 1, graphify_version: "0.9.96" }, nodes: [
+    { id: "a", source_file: "a.js", label: "helper" },
+    { id: "other", source_file: "other.js", label: "helper" },
+    { id: "b", source_file: "b.js", label: "run" }
+  ], links: [{ source: "b", target: "a", relation: "calls" }] }, { revision: "exact", now: 40 });
+  assert.deepEqual(mapQuery(graph, "a.js").callers, [{ file: "b.js", symbol: "helper" }]);
+  assert.deepEqual(mapQuery(graph, "other.js").callers, []);
+  assert.equal(mapPath(graph, "b.js", "a.js#helper").found, true);
+  for (const result of [mapQuery(graph, "helper"), mapPath(graph, "b.js", "a.js#helper"), mapExplain(graph, "missing")]) {
+    assert.equal(result.engine, "graphify");
+    assert.equal(result.graphifyVersion, "0.9.96");
+    assert.equal(result.schemaVersion, 1);
+    assert.equal(result.semanticCompleteness, "partial");
+    assert.equal(result.revision, "exact");
+    assert.equal(result.builtAt, 40);
+    assert.equal(result.truncated, false);
+  }
+});
+
+test("bounded query results and exhausted path depth explicitly report truncation", () => {
+  const nodes = Array.from({ length: 202 }, (_, i) => ({ id: String(i), source_file: `f${i}.js`, label: "same" }));
+  const graph = graphFromGraphify({ nodes });
+  assert.equal(mapQuery(graph, "same").definitions.length, 200);
+  assert.equal(mapExplain(graph, "same").truncated, true);
+  const chain = graphFromGraphify({ nodes, links: nodes.slice(1).map((_, i) => ({ source: String(i), target: String(i + 1), relation: "imports" })) });
+  assert.equal(mapPath(chain, "f0.js", "f201.js").found, false);
+  assert.equal(mapPath(chain, "f0.js", "f201.js").truncated, true);
+});
+
+
+test("overlap requires known matching repositories and duplicate advice stays heuristic", () => {
+  const subject = { id: "one", repo: "Acme/Widgets", files: ["a.js", "b.js"] };
+  const other = { id: "two", repo: "acme/widgets", files: ["a.js", "b.js"] };
+  for (const repo of [undefined, "", "invalid", "other/widgets"]) {
+    assert.equal(assessOverlap({ subject, others: [{ ...other, repo }] }), null);
+    assert.equal(assessOverlap({ subject: { ...subject, repo }, others: [other] }), null);
+  }
+  assert.equal(assessOverlap({ subject: { ...subject, repo: undefined }, others: [{ ...other, repo: undefined }] }), null);
+  const advice = assessOverlap({ subject, others: [other] });
+  assert.equal(advice.duplicate, true);
+  assert.match(advice.summary, /^Duplicate: .*may overlap/);
+  assert.match(advice.summary, /review the changes to confirm/);
+});
+
+
+test("Graphify extract no-cluster shape resolves callable labels and file nodes", () => {
+  const graph = graphFromGraphify({ nodes: [
+    { id: "file-a", label: "helper.py", source_file: "src/helper.py", file_type: "code" },
+    { id: "fn-a", label: "helper()", source_file: "src/helper.py", _callable: true, file_type: "code" },
+    { id: "file-b", label: "main.py", source_file: "src/main.py", file_type: "code" }
+  ], edges: [
+    { source: "file-b", target: "file-a", relation: "imports_from", confidence: "EXTRACTED" },
+    { source: "file-b", target: "fn-a", relation: "calls", confidence: "EXTRACTED" }
+  ] });
+  const result = mapQuery(graph, "helper");
+  assert.equal(result.found, true);
+  assert.deepEqual(result.callers, [{ file: "src/main.py", symbol: "helper" }]);
+  assert.deepEqual(graph.files["src/helper.py"].symbols.map(s => s.name), ["helper"]);
+  assert.deepEqual(mapQuery(graph, "src/helper.py").dependents, ["src/main.py"]);
+  assert.equal(result.schemaVersion, null);
+  assert.equal(result.semanticCompleteness, "partial");
+});
+
+
+test("imported source scope is bounded and retained on positive and negative reads", () => {
+  const scoped = graphFromGraphify({ graph: { source_scope: "server" }, nodes: [], edges: [] });
+  for (const result of [mapQuery(scoped, "missing"), mapExplain(scoped, "missing"), mapPath(scoped, "a", "b")]) assert.equal(result.sourceScope, "server");
+  assert.equal(mapQuery(graphFromGraphify({ nodes: [], edges: [] }), "missing").sourceScope, null);
+  assert.equal(graphFromGraphify({ graph: { source_scope: "x".repeat(301) }, nodes: [], edges: [] }).sourceScope.length, 300);
+});
+
+
+test("request-scoped overlap reuse preserves results and new requests observe changed graph", () => {
+  const build = target => graphFromGraphify({ nodes: [
+    { id: "a", source_file: "a.js", label: "alpha" },
+    { id: "b", source_file: "b.js", label: "beta" },
+    { id: "caller", source_file: "caller.js", label: "run" }
+  ], edges: [{ source: "caller", target, relation: "calls" }] }, { repo: "acme/widgets" });
+  const graph = build("a");
+  const claims = ["a.js", "b.js", "caller.js"].map((file, i) => ({ id: String(i), repo: "acme/widgets", files: [file] }));
+  const overlapContext = createOverlapContext(graph);
+  const cached = claims.map(subject => assessOverlap({ subject, others: claims, graph, overlapContext }));
+  const uncached = claims.map(subject => assessOverlap({ subject, others: claims, graph }));
+  assert.deepEqual(cached, uncached);
+  assert.deepEqual(cached[2].symbols, ["alpha"]);
+  const changed = build("b");
+  // Even an accidentally retained old context cannot contaminate a new graph.
+  const fresh = assessOverlap({ subject: claims[2], others: claims, graph: changed, overlapContext });
+  assert.deepEqual(fresh.symbols, ["beta"]);
+  assert.equal(assessOverlap({ subject: { ...claims[0], files: [] }, others: claims, graph, overlapContext }), null);
 });

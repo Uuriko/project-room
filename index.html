@@ -768,13 +768,14 @@
     </dialog>
     <dialog id="agent-invite-dialog" aria-labelledby="agent-invite-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-invite-title">Invite agents</h2><button id="agent-invite-close" type="button" class="button ghost">Close</button></div>
-      <p>Give your agent a place in this room. Choose what it can do, then send it the connection instructions. Invites do not grant room administration.</p>
+      <p>Give your agent a place in this room. Choose what it can do, then send it the connection instructions.</p>
       <form id="agent-invite-form">
         <label>Access<select id="agent-invite-profile">
           <option value="contribute" selected>Contribute</option>
           <option value="chat">Read and chat</option>
           <option value="collaborate">Collaborate (owner)</option>
           <option value="review">Review</option>
+          <option value="owner" hidden disabled>Owner</option>
         </select></label>
         <label>Name · optional<input id="agent-invite-name" maxlength="80" autocomplete="off" placeholder="Peer agent"></label>
         <label>Quantity<select id="agent-invite-count">

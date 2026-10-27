@@ -31,12 +31,13 @@ import { paginateRoomMessages, latestSnapshotPage } from "../client/room-agent.m
 import { roomTools, validRoomToolArguments, buildDraftCommand } from "../client/mcp-stdio.mjs";
 import { bountyTools, isBountyTool, validBountyToolArguments } from "../client/bounty-tools.mjs";
 import { trustTools, isTrustTool, validTrustToolArguments } from "../client/trust-tools.mjs";
-import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction } from "../client/work-actions.mjs";
-import { isHelpTool, buildHelpCommand, recordedHelpAction } from "../client/help-actions.mjs";
+import { isWorkTool, buildWorkCommand, confirmsAgentCommand, recordedWorkAction, withWorkDeprecation, workUsesExpectedRevision } from "../client/work-actions.mjs";
+import { isHelpTool, buildHelpCommand, recordedHelpAction, helpUsesExpectedRevision } from "../client/help-actions.mjs";
 import { isReplyTool, replyRoute, buildReplyCommand, recordedReplyAction } from "../client/reply-actions.mjs";
 import { markIfOther, stampAssistantResult, stampBoard, withContentTrust } from "./content-trust.mjs";
+import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
 
-const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work"]);
+const ALREADY_HOSTED = new Set(["room_check_access", "get_room_context", "room_list_work", "room_map"]);
 const roomIdField = { type: "string", minLength: 1, maxLength: 128, description: "Room id this identity is linked to." };
 
 function withRoomId(entry) {
@@ -196,6 +197,7 @@ function enforceHostedStdioApiKeyScope(store, secret, name) {
 }
 
 export async function callHostedStdioTool(store, secret, name, args) {
+  args = withDefaultRoomId(store, secret, name, args, { properties: { roomId: roomIdField }, required: ["roomId"] });
   // Spend-primitive MVP (charge-then-forward): same boundary as callRoomTool
   // in mcp-room-profile.mjs, adapted to this path's { value, isError }
   // contract. The catalog visibility/tier denial runs FIRST so restricted
@@ -232,6 +234,13 @@ export async function callHostedStdioTool(store, secret, name, args) {
     { unwrap: outcome => outcome?.value, isErrorOutcome: outcome => outcome?.isError === true });
 }
 
+async function currentWorkRevision(store, secret, roomId, name, args, usesRevision) {
+  if (!usesRevision(name) || args?.expectedRevision !== undefined || !validId(args?.workItemId)) return undefined;
+  const context = await store.workContext(secret, roomId, args.workItemId, {});
+  if (!Number.isSafeInteger(context?.work?.revision)) throw new ServiceError(422, "invalid_work_action", "Current work revision unavailable");
+  return context.work.revision;
+}
+
 async function dispatchHostedStdioTool(store, secret, name, args) {
   const { roomId, ...rest } = args;
   const auth = store.authenticate(secret, roomId);
@@ -245,7 +254,8 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
   if (name === "room_list_outside_agents") return { value: new OutsideAgents(store).list(secret, roomId), isError: false };
   if (name === "room_introduce_outside_agent") return { value: new OutsideAgents(store).record(secret, roomId, rest), isError: false };
   if (isHelpTool(name)) {
-    const command = buildHelpCommand(name, rest);
+    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, helpUsesExpectedRevision);
+    const command = buildHelpCommand(name, rest, identity, { expectedRevision });
     return recorded(store, secret, roomId, identity, command, receipt => recordedHelpAction(name, command, receipt));
   }
   if (isReplyTool(name)) {
@@ -338,8 +348,10 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     return { value: { roomId, ...store.workClaims.configure(roomId, patch) }, isError: false };
   }
   if (isWorkTool(name)) {
-    const command = buildWorkCommand(name, rest);
-    return recorded(store, secret, roomId, identity, command, receipt => recordedWorkAction(name, command, receipt));
+    const expectedRevision = await currentWorkRevision(store, secret, roomId, name, rest, workUsesExpectedRevision);
+    const command = buildWorkCommand(name, rest, identity, { expectedRevision });
+    return recorded(store, secret, roomId, identity, command,
+      receipt => withWorkDeprecation(name, recordedWorkAction(name, command, receipt)));
   }
   if (name === "room_read_result") {
     return { value: store.workResult(secret, roomId, rest.workItemId, {
@@ -397,7 +409,7 @@ async function dispatchHostedStdioTool(store, secret, name, args) {
     return { value: { status: "unconfirmed", message: "Draft outcome is unknown. Retry the exact original input; do not generate a new requestId." }, isError: true };
   }
   return { value: {
-    status: "draft_posted", requestId: rest.requestId, sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
+    status: "draft_posted", requestId: command.id, sequence: receipt.sequence, eventId: receipt.event.id, duplicate: receipt.duplicate,
     messageId: command.data.messageId, workStateChanged: false,
     message: "Draft posted for review. No work completion or approval was recorded."
   }, isError: false };

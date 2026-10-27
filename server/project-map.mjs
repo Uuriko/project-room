@@ -20,7 +20,8 @@ const OFF = new Set(["0", "false", "off", "no"]);
 const ON = new Set(["1", "true", "on", "yes"]);
 const SOURCE_EXT = new Set([".js", ".mjs", ".cjs", ".jsx", ".ts", ".tsx", ".mts", ".cts"]);
 const CALL_KEYWORDS = new Set("if for while switch catch function class return typeof instanceof new await yield throw case do else try finally with debugger import export from as of in const let var async static get set delete void super this".split(" "));
-const MAX_FILES = 4000;
+export const PROJECT_MAP_LIMITS = Object.freeze({ files: 4000, nodes: 20000, edges: 40000, sourceBytes: 65536, results: 200 });
+const MAX_FILES = PROJECT_MAP_LIMITS.files;
 const MAX_PUSH = 200;
 const MAX_SOURCE = 64 * 1024;
 const HOTSPOTS = 15;
@@ -150,9 +151,11 @@ function bindingsFrom(clause) {
 }
 
 export function parseModule(path, source) {
-  const empty = { symbols: [], specs: [], calls: [] };
+  const empty = { symbols: [], specs: [], calls: [], truncated: false };
   if (!SOURCE_EXT.has(extensionOf(path))) return empty;
-  const text = String(source ?? "").slice(0, MAX_SOURCE);
+  const raw = String(source ?? "");
+  const text = Buffer.from(raw).subarray(0, MAX_SOURCE).toString("utf8");
+  let truncated = Buffer.byteLength(raw) > MAX_SOURCE;
   const readable = stripComments(text);
   const specs = [];
   const importRe = /\bimport\s+(?:type\s+)?([\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
@@ -171,7 +174,8 @@ export function parseModule(path, source) {
   const symbols = [];
   const seen = new Set();
   const add = (name, kind, index) => {
-    if (!name || seen.has(name) || symbols.length >= 200) return;
+    if (!name || seen.has(name)) return;
+    if (symbols.length >= 200) { truncated = true; return; }
     seen.add(name);
     symbols.push({ name, kind, line: lineOf(code, index) });
   };
@@ -182,7 +186,8 @@ export function parseModule(path, source) {
   const callSeen = new Set();
   for (const match of code.matchAll(/(?:^|[^\w$])([A-Za-z_$][\w$]*)\s*\(/g)) {
     const name = match[1];
-    if (CALL_KEYWORDS.has(name) || callSeen.has(name) || calls.length >= 200) continue;
+    if (CALL_KEYWORDS.has(name) || callSeen.has(name)) continue;
+    if (calls.length >= 200) { truncated = true; continue; }
     const before = code.slice(Math.max(0, match.index - 16), match.index + 1);
     if (/\b(?:function|class|catch|new)\s*$/.test(before)) continue;
     callSeen.add(name);
@@ -191,11 +196,12 @@ export function parseModule(path, source) {
   const specSeen = new Set();
   const uniqueSpecs = [];
   for (const entry of specs) {
-    if (!entry.spec || specSeen.has(entry.spec) || uniqueSpecs.length >= 50) continue;
+    if (!entry.spec || specSeen.has(entry.spec)) continue;
+    if (uniqueSpecs.length >= 50) { truncated = true; continue; }
     specSeen.add(entry.spec);
     uniqueSpecs.push(entry);
   }
-  return { symbols, specs: uniqueSpecs, calls };
+  return { symbols, specs: uniqueSpecs, calls, truncated };
 }
 
 function resolveSpec(fromFile, spec, known) {
@@ -230,7 +236,7 @@ function recomputeImports(files) {
 }
 
 export function emptyGraph(repo, revision = null) {
-  return { version: 1, repo, revision, builtAt: 0, engine: "parser", files: {} };
+  return { version: 1, repo, revision, builtAt: 0, engine: "parser", files: Object.create(null), truncated: false };
 }
 
 function hashSource(source) {
@@ -244,9 +250,9 @@ export function applyFiles(graph, change, now = Date.now()) {
     revision: typeof change.revision === "string" ? change.revision.slice(0, 120) : (graph?.revision ?? null),
     builtAt: now,
     engine: change.engine === "graphify" ? "graphify" : "parser",
-    files: { ...(graph?.files ?? {}) }
+    files: Object.assign(Object.create(null), graph?.files ?? {})
   };
-  let truncated = false;
+  let truncated = graph?.truncated === true || change.truncated === true;
   for (const path of change.removed ?? []) {
     const key = normalizePath(path);
     if (key) delete next.files[key];
@@ -257,12 +263,13 @@ export function applyFiles(graph, change, now = Date.now()) {
     const path = normalizePath(file?.path);
     const source = typeof file?.source === "string" ? file.source : null;
     if (!path || source === null) continue;
-    if (source.length > MAX_SOURCE) { truncated = true; continue; }
+    if (Buffer.byteLength(source) > MAX_SOURCE) { truncated = true; delete next.files[path]; continue; }
     if (!next.files[path] && Object.keys(next.files).length >= MAX_FILES) { truncated = true; continue; }
     const hash = hashSource(source);
     const prev = next.files[path];
     if (prev && prev.hash === hash) continue;
     const parsed = parseModule(path, source);
+    truncated ||= parsed.truncated;
     next.files[path] = {
       bytes: Buffer.byteLength(source),
       hash,
@@ -285,7 +292,9 @@ function nodeFile(node) {
 
 function nodeName(node) {
   const name = node?.label || node?.name || node?.data?.label || node?.data?.name;
-  return typeof name === "string" && name.trim() ? name.trim().slice(0, 160) : null;
+  if (typeof name !== "string" || !name.trim()) return null;
+  const normalized = node?._callable === true ? name.trim().replace(/\(\)$/, "") : name.trim();
+  return normalized.slice(0, 160);
 }
 
 function nodeLine(node) {
@@ -303,44 +312,64 @@ export function graphFromGraphify(doc, { repo, revision = null, now = Date.now()
   const root = doc && typeof doc === "object" && !Array.isArray(doc.nodes) && doc.graph && typeof doc.graph === "object" ? doc.graph : doc;
   const nodes = Array.isArray(root?.nodes) ? root.nodes : [];
   const edges = Array.isArray(root?.edges) ? root.edges : (Array.isArray(root?.links) ? root.links : []);
-  const files = {};
+  const files = Object.create(null);
+  let truncated = nodes.length > PROJECT_MAP_LIMITS.nodes || edges.length > PROJECT_MAP_LIMITS.edges || root?.truncated === true;
   const byId = new Map();
+  let fileCount = 0;
   const ensure = path => {
-    files[path] ??= { bytes: 0, hash: "", symbols: [], specs: [], calls: [], imports: [], external: [] };
+    if (!files[path] && fileCount >= MAX_FILES) { truncated = true; return null; }
+    if (!files[path]) fileCount += 1;
+    files[path] ??= { bytes: 0, hash: "", symbols: [], specs: [], calls: [], callTargets: [], imports: [], external: [] };
     return files[path];
   };
-  for (const node of nodes) {
+  for (const node of nodes.slice(0, PROJECT_MAP_LIMITS.nodes)) {
     const path = nodeFile(node);
     const name = nodeName(node);
     if (!path || !name) continue;
-    const kind = String(node.kind || node.type || "symbol").slice(0, 40);
+    const inferred = node._callable === true ? "function" : (name === path || name === path.split("/").at(-1) ? "file" : "symbol");
+    const kind = String(node.kind || node.type || inferred).slice(0, 40);
     const id = node.id !== undefined ? String(node.id) : null;
     // File nodes are edge endpoints. They have to stay addressable or an
     // imports edge between two files never becomes a neighbor.
     if (kind === "file" || kind === "module") {
-      ensure(path);
+      if (!ensure(path)) continue;
       if (id) byId.set(id, { path, name: path });
       continue;
     }
     const file = ensure(path);
+    if (!file) continue;
+    if (file.symbols.length >= 200) { truncated = true; continue; }
     if (!file.symbols.some(symbol => symbol.name === name)) {
       file.symbols.push({ name, kind, line: nodeLine(node) });
     }
     if (id) byId.set(id, { path, name });
   }
-  for (const edge of edges) {
+  for (const edge of edges.slice(0, PROJECT_MAP_LIMITS.edges)) {
+    if (!edge || typeof edge !== "object") continue;
     const from = byId.get(String(edge.from ?? edge.source ?? ""));
     const to = byId.get(String(edge.to ?? edge.target ?? ""));
     if (!from || !to) continue;
     const rel = String(edge.kind || edge.relation || edge.type || edge.label || "").toLowerCase();
     const file = ensure(from.path);
     if (rel.includes("import") || rel.includes("depend")) {
-      if (!file.imports.includes(to.path)) file.imports.push(to.path);
+      if (!file.imports.includes(to.path)) {
+        if (file.imports.length >= 200) truncated = true;
+        else file.imports.push(to.path);
+      }
     } else if (rel.includes("call") || rel.includes("invoke")) {
-      if (!file.calls.includes(to.name)) file.calls.push(to.name);
+      if (!file.callTargets.some(target => target.file === to.path && target.name === to.name)) {
+        if (file.callTargets.length >= 200) truncated = true;
+        else { file.callTargets.push({ file: to.path, name: to.name }); if (!file.calls.includes(to.name)) file.calls.push(to.name); }
+      }
     }
   }
-  return { version: 1, repo: normalizeRepo(repo) ?? repo ?? null, revision, builtAt: now, engine: "graphify", files, truncated: false };
+  return { version: 1, repo: normalizeRepo(repo) ?? repo ?? null, revision, builtAt: now, engine: "graphify", files, truncated,
+    sourceScope: boundedSourceScope(root?.graph?.source_scope),
+    projection: "files-symbols-imports-calls",
+    semanticCompleteness: "partial",
+    graphifyVersion: typeof root?.graph?.graphify_version === "string" ? root.graph.graphify_version.slice(0, 80) : null,
+    schemaVersion: Number.isInteger(root?.graph?.schema_version) ? root.graph.schema_version : null
+  };
 }
 
 function indexGraph(graph) {
@@ -373,6 +402,7 @@ function localBinding(file, name) {
 }
 
 function resolvedCalls(path, file, files, defined) {
+  if (Array.isArray(file.callTargets)) return file.callTargets.filter(target => files[target.file]);
   const known = new Set(Object.keys(files));
   const out = [];
   for (const name of file.calls ?? []) {
@@ -394,7 +424,29 @@ function resolvedCalls(path, file, files, defined) {
   return out;
 }
 
+function boundedSourceScope(value) {
+  return typeof value === "string" && value.trim() ? value.trim().replace(/[\u0000-\u001f]/g, " ").slice(0, 300) : null;
+}
+
+function graphMetadata(graph) {
+  return { engine: graph?.engine ?? "unknown", revision: graph?.revision ?? null, builtAt: graph?.builtAt ?? null, truncated: graph?.truncated === true,
+    sourceScope: boundedSourceScope(graph?.sourceScope),
+    projection: graph?.projection ?? "files-symbols-imports-calls",
+    semanticCompleteness: graph?.semanticCompleteness ?? "heuristic",
+    graphifyVersion: graph?.graphifyVersion ?? null, schemaVersion: graph?.schemaVersion ?? null
+  };
+}
+
 export function mapQuery(graph, q) {
+  const result = queryGraph(graph, q);
+  let truncated = graph?.truncated === true;
+  for (const key of ["symbols", "neighbors", "external", "dependents", "callers", "definitions"]) {
+    if (result[key]?.length > PROJECT_MAP_LIMITS.results) { result[key] = result[key].slice(0, PROJECT_MAP_LIMITS.results); truncated = true; }
+  }
+  return { ...result, ...graphMetadata(graph), truncated };
+}
+
+function queryGraph(graph, q) {
   const query = typeof q === "string" ? q.trim() : "";
   const { files, defined, dependents } = indexGraph(graph);
   const path = normalizePath(query);
@@ -459,6 +511,11 @@ function presentNode(id) {
 }
 
 export function mapPath(graph, from, to) {
+  const result = pathGraph(graph, from, to);
+  return { ...result, ...graphMetadata(graph), truncated: graph?.truncated === true || result.truncated === true };
+}
+
+function pathGraph(graph, from, to) {
   const start = nodeIdFor(graph, from);
   const goal = nodeIdFor(graph, to);
   if (!start || !goal) return { found: false, from, to, nodes: [] };
@@ -483,6 +540,7 @@ export function mapPath(graph, from, to) {
   const prev = new Map([[start, null]]);
   let visits = 0;
   let found = null;
+  let truncated = false;
   while (queue.length && visits < PATH_VISITS) {
     const current = queue.shift();
     visits += 1;
@@ -492,7 +550,7 @@ export function mapPath(graph, from, to) {
       while (prev.get(cursor)) { cursor = prev.get(cursor); n += 1; }
       return n;
     })();
-    if (depth >= PATH_DEPTH) continue;
+    if (depth >= PATH_DEPTH) { truncated = true; continue; }
     for (const next of adjacent.get(current) ?? []) {
       if (prev.has(next)) continue;
       prev.set(next, current);
@@ -501,7 +559,7 @@ export function mapPath(graph, from, to) {
     }
     if (found) break;
   }
-  if (!found) return { found: false, from, to, nodes: [] };
+  if (!found) return { found: false, from, to, nodes: [], truncated: truncated || queue.length > 0 };
   const nodes = [];
   let cursor = found;
   while (cursor) { nodes.push(presentNode(cursor)); cursor = prev.get(cursor); }
@@ -572,9 +630,13 @@ function itemFiles(item) {
   return [...new Set(files)];
 }
 
-function coupledSymbols(graph, left, right) {
-  if (!graph?.files) return [];
-  const { files, defined } = indexGraph(graph);
+export function createOverlapContext(graph) {
+  return { graph, index: indexGraph(graph), calls: new Map() };
+}
+
+function coupledSymbols(context, left, right) {
+  if (!context?.graph?.files || left.length === 0 || right.length === 0) return [];
+  const { files, defined } = context.index;
   const setA = new Set(left);
   const setB = new Set(right);
   const names = new Set();
@@ -582,7 +644,8 @@ function coupledSymbols(graph, left, right) {
     for (const path of from) {
       const file = files[path];
       if (!file) continue;
-      for (const call of resolvedCalls(path, file, files, defined)) {
+      if (!context.calls.has(path)) context.calls.set(path, resolvedCalls(path, file, files, defined));
+      for (const call of context.calls.get(path)) {
         if (into.has(call.file)) names.add(call.name);
       }
     }
@@ -612,18 +675,22 @@ function joinLabels(labels) {
   return `${labels.slice(0, -1).join(", ")}, and ${labels.at(-1)}`;
 }
 
-export function assessOverlap({ subject, others, graph }) {
+export function assessOverlap({ subject, others, graph, overlapContext }) {
   if (!subject) return null;
   const files = itemFiles(subject);
+  if (files.length === 0) return null;
+  let context = overlapContext?.graph === graph ? overlapContext : null;
   const subjectRepo = subject.repo ? normalizeRepo(subject.repo) : null;
   const hits = [];
   for (const other of others ?? []) {
     if (!other || other.id === subject.id) continue;
     const otherRepo = other.repo ? normalizeRepo(other.repo) : null;
-    if (subjectRepo && otherRepo && subjectRepo !== otherRepo) continue;
+    if (!subjectRepo || !otherRepo || subjectRepo !== otherRepo) continue;
     const otherFiles = itemFiles(other);
+    if (otherFiles.length === 0) continue;
     const sim = fileSetSimilarity(files, otherFiles);
-    const symbols = coupledSymbols(graph, files, otherFiles).slice(0, 40);
+    if (!context && graph?.files) context = createOverlapContext(graph);
+    const symbols = coupledSymbols(context, files, otherFiles).slice(0, 40);
     if (sim.shared.length === 0 && symbols.length === 0) continue;
     hits.push({ other, sim, symbols });
   }
@@ -636,7 +703,7 @@ export function assessOverlap({ subject, others, graph }) {
   const more = shown.length > 8 ? ` and ${shown.length - 8} more` : "";
   const names = joinLabels([labelOf(subject), ...hits.map(hit => labelOf(hit.other))]);
   const summary = duplicate
-    ? `Duplicate: ${names} change the same files (${head}${more}).`
+    ? `Duplicate: ${names} may overlap (${head}${more}); review the changes to confirm whether they duplicate work.`
     : `Overlap: ${names} share ${head}${more}.`;
   return {
     duplicate,

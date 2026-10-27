@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { RoomAgentClient } from "../client/room-agent.mjs";
 import { RoomStore } from "../server/store.mjs";
+import { setTier } from "../server/autonomy-tiers.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { searchActions } from "../server/mcp-action-search.mjs";
@@ -26,9 +27,10 @@ async function room(t, featureEnv) {
   const bea = store.identities.create("Bea");
   for (const [identity, memberId, displayName] of [[ada, "ada", "Ada"], [bea, "bea", "Bea"]]) {
     store.identities.link(ownerKey, "commons", {
-      identityId: identity.identityId, memberId, displayName, permissions: ["accept_work", "complete_work"]
+      identityId: identity.identityId, memberId, displayName, permissions: ["accept_work", "complete_work", ...(memberId === "ada" ? ["manage_claims"] : [])]
     });
   }
+  setTier(store.db, "commons", "ada", "t2_standard", { updatedBy: "owner", nowMs: store.now() });
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {

@@ -1,25 +1,35 @@
 // Code map routes. room_map is the read. Push and pull intake rebuild the
 // map and are not a second tool.
 
+import { enforceAutonomyTierForAction } from "../autonomy-tiers.mjs";
+import { ownMember } from "../../src/events.js";
 import { pushProjectMap, readProjectMap, recordProjectMapPull } from "../project-map-store.mjs";
 
-function mapContext(ctx, write) {
+function mapContext(ctx, write, { meter = true } = {}) {
   const roomId = ctx.params.roomId;
   const selected = ctx.roomCredentials(ctx.req, ctx.url);
   const fence = selected.mode === "account" ? ctx.accountBinding(ctx.req) : ctx.expectedBinding(ctx.req);
   const auth = ctx.roomAuth(selected, roomId, fence);
   if (selected.bearer && auth.credentialScope !== "room") ctx.reject(403, "access_denied", "Bearer sessions are not accepted");
   if (!selected.bearer && auth.kind !== "session") ctx.reject(401, "unauthenticated", "Browser session required");
-  ctx.rate(`read:${auth.credentialHash}`, 600);
+  if (meter) ctx.rate(`read:${auth.credentialHash}`, 600);
   if (write) {
     ctx.protectWrite(ctx.req, auth, selected.bearer);
-    ctx.rate(`write:${auth.credentialHash}`, 60);
+    if (meter) ctx.rate(`write:${auth.credentialHash}`, 60);
   }
   if (auth.kind === "api-key") {
     const requiredScope = write ? "rooms:write" : "rooms:read";
     const granted = (auth.apiKeyScopes ?? []).some(scope =>
       scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
     if (!granted) ctx.reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
+  }
+  if (write) {
+    const state = ctx.store.room(roomId).state;
+    const actor = ownMember(state.members, auth.member?.id);
+    if (!actor || actor.active !== true) ctx.reject(403, "access_denied", "Active room membership required");
+    enforceAutonomyTierForAction({ db: ctx.store.db, roomId, state, actor, action: "update the project map", fail: ctx.reject });
+    if (actor.id !== state.room.ownerId && !(actor.permissions ?? []).some(permission => permission === "manage_claims" || permission === "steer"))
+      ctx.reject(403, "access_denied", "Project map updates require room owner, manage_claims or steer authority");
   }
   return { roomId };
 }
@@ -54,12 +64,15 @@ export async function explainMapRoute(ctx) {
 export async function pushMapRoute(ctx) {
   const { roomId } = mapContext(ctx, true);
   const data = await ctx.body(ctx.req, { limit: 1_500_000 });
+  // Body reads yield; reauthenticate and recheck live policy before intake.
+  mapContext(ctx, true, { meter: false });
   return ctx.json(ctx.res, 200, await pushProjectMap(ctx.store, roomId, data));
 }
 
 export async function recordPullRoute(ctx) {
   const { roomId } = mapContext(ctx, true);
   const data = await ctx.body(ctx.req, { limit: 262_144 });
+  mapContext(ctx, true, { meter: false });
   return ctx.json(ctx.res, 200, recordProjectMapPull(ctx.store, roomId, data));
 }
 
@@ -67,8 +80,8 @@ const roomParameters = Object.freeze({ type: "object", required: ["roomId"], pro
 const queryParameters = Object.freeze({ type: "object", properties: { q: { type: "string" }, repo: { type: "string" } } });
 const pathParameters = Object.freeze({ type: "object", properties: { from: { type: "string" }, to: { type: "string" }, repo: { type: "string" } } });
 const repoQuery = Object.freeze({ type: "object", properties: { repo: { type: "string" } } });
-const pushBody = Object.freeze({ type: "object", required: ["repo"], properties: {
-  repo: { type: "string" }, revision: { type: "string" }, files: { type: "array" }, removed: { type: "array" }, graphify: { type: "object" }
+const pushBody = Object.freeze({ type: "object", required: ["repo", "revision"], properties: {
+  repo: { type: "string" }, revision: { type: "string" }, expectedRevision: { type: ["string", "null"] }, expectedGraphSha256: { type: ["string", "null"], description: "Previously read provenance.graphSha256; null when absent. Detects changed Graphify content at the same revision." }, replace: { type: "boolean" }, files: { type: "array" }, removed: { type: "array" }, graphify: { type: "object" }
 } });
 const pullBody = Object.freeze({ type: "object", required: ["repo", "number", "files"], properties: {
   repo: { type: "string" }, number: { type: "integer" }, title: { type: "string" }, state: { type: "string" }, files: { type: "array" }, claimId: { type: "string" }
