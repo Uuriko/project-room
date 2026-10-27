@@ -574,10 +574,12 @@ test("board v2 routes answer 410 and point at work claims", async t => {
     headers: { authorization: `Bearer ${ownerKey}` }
   });
   assert.equal(near.status, 404);
+  // T0 cut C-02: the board_vtwo_* tables are no longer created (they had no
+  // reader and no production writer). The 410 behaviour above is unchanged.
   const tables = ["board_vtwo_claims", "board_vtwo_events", "board_vtwo_mirror", "board_vtwo_idempotency"];
   const { store } = await fixture(t);
   for (const name of tables) {
-    assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name=?").get(name).name, name);
+    assert.equal(store.db.prepare("SELECT name FROM sqlite_master WHERE name=?").get(name), undefined);
   }
 });
 

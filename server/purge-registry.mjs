@@ -783,16 +783,6 @@ const ROWS = [
     }
   },
   {
-    "table": "guest_link_exchanges",
-    "key": "room_id",
-    "action": "delete",
-    "match": {
-      "room": [
-        "room_id"
-      ]
-    }
-  },
-  {
     "table": "handoff_envelopes",
     "key": "room_id",
     "action": "delete",

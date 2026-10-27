@@ -32,19 +32,9 @@ export const GUEST_AGENT_KIND = "agent";
 export const GUEST_AGENT_PERMISSIONS = Object.freeze([]);
 export const GUEST_AGENT_MAX_JOINS = 10;
 export const GUEST_AGENT_MEMBER_PREFIX = "guest-agent-";
-// GA-2 (issue #941): single-use link redemptions. The v0 join() that wrote
-// this table was cut with the rest of the v0 exchange (#3216); the table is
-// retained read-only for audit — no writer remains, and no rows are deleted.
-export const guestLinkExchangeSchema = `
-  CREATE TABLE IF NOT EXISTS guest_link_exchanges (
-    link_hash TEXT PRIMARY KEY,
-    room_id TEXT NOT NULL,
-    member_id TEXT NOT NULL,
-    session_hash TEXT NOT NULL,
-    exchanged_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS guest_link_exchanges_seat ON guest_link_exchanges(room_id, member_id);
-`;
+// GA-2 (issue #941): the guest_link_exchanges table is no longer created
+// (T0 cut C-02): the v0 join() that wrote it was cut in #3216 and no
+// reader ever existed. Existing databases keep their copies.
 
 export function isRoomAccessToken(token) {
   return typeof token === "string" && ROOM_ACCESS_TOKEN_PATTERN.test(token);

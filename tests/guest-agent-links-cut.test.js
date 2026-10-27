@@ -6,7 +6,8 @@
 //   guestAgentMemberId, isGuestAgentMemberId) that guest-invites v1 and
 //   ~25 modules classify members/tokens with;
 // - the v1 guest-invites door itself (GET /api/guest-invites contract);
-// - the guest_link_exchanges table, kept read-only for audit (no DROP).
+// - the guest_link_exchanges table: kept read-only for audit at the #3216
+//   cut; T0 cut C-02 later stopped creating it (no writer, no reader).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
@@ -72,8 +73,8 @@ test("v1 guest-invites door is untouched by the v0 cut", async t => {
   assert.equal(contract.status, 200);
 });
 
-test("guest_link_exchanges table is retained read-only for audit", async t => {
+test("guest_link_exchanges table is no longer created (T0 cut C-02)", async t => {
   const { store } = await serve(t);
   const row = store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='guest_link_exchanges'").get();
-  assert.ok(row, "guest_link_exchanges must not be dropped");
+  assert.equal(row, undefined, "guest_link_exchanges had no writer and no reader; fresh stores do not create it (existing databases keep their copies)");
 });
