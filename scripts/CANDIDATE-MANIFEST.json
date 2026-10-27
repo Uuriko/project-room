@@ -68,7 +68,7 @@
     "src/agent-invite-ui.js": "sha256:ec09f0c4d8ecebd75609c14fa3243c27d6ac21f8fb6645614c3d1522c3e7cf1f",
     "src/agent-signin-page.js": "sha256:af475afc023431b066c2cabd490adc9c2b4d52f86af8741f471065475d773cd2",
     "src/agent-signin-ui.js": "sha256:bdaab08f6a4e92e1c6937a94ca48b29b6130621d9a435f73468aac22d6dd6e66",
-    "src/app.js": "sha256:e0480bf65a12ec984c2c8d6d2ef63fc96ff9d2056c0136a2cb55d6ab56e36079",
+    "src/app.js": "sha256:512eaf5511631e9a0da03931a0ba9abf3dc3981e6ffb4f615b33d7609a934e45",
     "src/auth-signin-ui.js": "sha256:952dbdc3ebdf238a469a169ca23fb936d41b111c01c7f1fac3e0a2461719e485",
     "src/board-keyboard.mjs": "sha256:1e28eb4d4d03bf8249be10e0c7cdc987602bbbb1b7e568fc3b8b29046d32e4bb",
     "src/board-mine.js": "sha256:6284ebd6b0a316ea332f9da34b42735506b6a7aa8d20cc0d7a18bd580121530a",
