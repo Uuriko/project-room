@@ -201,3 +201,10 @@ test("confirmed room purge removes human request records without orphaned accoun
  assert.equal(s.db.prepare("SELECT COUNT(*) AS n FROM account_join_requests").get().n,0);
  assert.equal(s.account("requester").active,true);
 });
+
+test("malformed request IDs refuse before writing account admission or events",t=>{
+ const {s,token,binding,input}=setup(t),before=s.room("commons").sequence;
+ for(const requestId of [123,true,null,[],{}]) assert.throws(()=>s.accountJoinRequests.request(token,binding,{...input,requestId}),{status:422,code:"invalid_join_request"});
+ assert.equal(s.accountJoinRequests.listOwn(token,binding).requests.length,0);
+ assert.equal(s.room("commons").sequence,before);
+});

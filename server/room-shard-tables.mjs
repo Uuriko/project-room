@@ -42,7 +42,7 @@ export const ROOM_TABLE_KEYS = Object.freeze({
 });
 
 export const DIRECTORY_TABLES = Object.freeze([
-  "access_requests", "account_access_events", "account_credentials", "account_login_methods",
+  "access_requests", "account_join_requests", "account_access_events", "account_credentials", "account_login_methods",
   "account_magic_codes", "account_passkey_credentials", "account_recovery_codes",
   "account_security_events", "account_session_slots", "account_setup", "account_terms", "accounts",
   "activity_events", "activity_fanout_failures", "agent_api_keys", "agent_autonomy_tiers",

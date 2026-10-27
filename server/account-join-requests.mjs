@@ -52,7 +52,7 @@ export class AccountJoinRequests {
     return this.store.transaction(() => {
       const auth = this.store.authenticateAccountSession(token, null, binding);
       const { roomId, requestId, displayName, note = "" } = input ?? {};
-      if ((!validId(roomId) || roomId.length > 64) || (!idPattern.test(requestId ?? "") || !requestId.startsWith("humanjoin-")) || typeof displayName !== "string" || !displayName.trim() || displayName.length > 80 || typeof note !== "string" || note.length > 1000 || Object.keys(input).some(k => !["roomId", "requestId", "displayName", "note"].includes(k))) fail(422, "invalid_join_request", "Room, request ID and display name are required; note is at most 1000 characters");
+      if ((!validId(roomId) || roomId.length > 64) || (typeof requestId !== "string" || !idPattern.test(requestId) || !requestId.startsWith("humanjoin-")) || typeof displayName !== "string" || !displayName.trim() || displayName.length > 80 || typeof note !== "string" || note.length > 1000 || Object.keys(input).some(k => !["roomId", "requestId", "displayName", "note"].includes(k))) fail(422, "invalid_join_request", "Room, request ID and display name are required; note is at most 1000 characters");
       const fingerprint = createHash("sha256").update(JSON.stringify([roomId, displayName.trim(), note.trim()])).digest("hex");
       const prior = this.db.prepare("SELECT * FROM account_join_requests WHERE request_id=?").get(requestId);
       if (prior) {
