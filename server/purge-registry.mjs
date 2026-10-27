@@ -21,6 +21,7 @@ function freezeVia(via) {
 }
 
 const ROWS = [
+  ...["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   { table: "mention_observations", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   { table: "share_link_join_redemptions", key: "account_id", action: "retain", reason: "Immutable link-redemption journal prevents cross-account replay; retained alongside share_link_joins", match: { account: ["account_id"] } },
 

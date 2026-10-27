@@ -42,7 +42,9 @@
     "detect-flaky": "node scripts/flaky-detect.mjs",
     "fuzz:mime": "node scripts/fuzz-mime.mjs",
     "test:contributor": "node --test --test-concurrency=1 scripts/selfhost-onboarding-browser-check.mjs scripts/contribution-journey-check.mjs tests/github-work-sync.test.js tests/claim-autolink-http.test.js",
-    "bench:room": "node scripts/bench/compare.mjs"
+    "bench:room": "node scripts/bench/compare.mjs",
+    "map:local": "node scripts/project-map-local.mjs",
+    "map:publish": "node scripts/project-map-publish.mjs"
   },
   "engines": {
     "node": ">=24.19.0"
