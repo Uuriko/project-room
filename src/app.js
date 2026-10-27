@@ -4271,7 +4271,8 @@ $("#message-form").addEventListener("submit", e => {
     if (!ownsSendingDraft()) return;
     const delivery = $("#message-delivery");
     const savedMessageId = data.messageId || sendingCommand.id;
-    const visible = state.messages.some(message => message.id === savedMessageId);
+    // An optimistic copy is not history: only a held (read-confirmed) copy counts.
+    const visible = state.messages.some(message => message.id === savedMessageId && !message.pendingSend);
     delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
     const link = document.createElement("a");
     link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");

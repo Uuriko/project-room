@@ -153,6 +153,8 @@ export class RoomClient {
   }
   async request(path, options = {}) {
     const method = options.method ?? "GET";
+    // A write makes every read already in flight stale: later reads must not join them.
+    if (method !== "GET") this.getFlights.clear();
     if (method !== "GET" || options.fresh === true) return this.performRequest(path, options);
     const key = [path, options.authMode ?? this.session?.authMode ?? "", options.offerContext ? "1" : "", options.auditView ?? "", options.authSession?.sessionBinding ?? this.session?.sessionBinding ?? ""].join("\n");
     const pending = this.getFlights.get(key);
@@ -701,7 +703,9 @@ export class RoomClient {
       const cached = await readBootSnapshot(this.session.roomId);
       if (!cached || cached.viewerId !== this.session.member?.id) return;
       if (this.sequence !== 0 || this.heldMessages()) return;
-      this.onSnapshot(cached, this.session);
+      // A warm paint cannot vouch for offer support: the fresh read decides it.
+      const { offerContextVersion: _stale, ...warm } = cached;
+      this.onSnapshot(warm, this.session);
     } catch { /* a missing warm snapshot still loads from the network */ }
   }
   async rememberBoot(snapshot) {

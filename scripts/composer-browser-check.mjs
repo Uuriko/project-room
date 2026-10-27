@@ -75,6 +75,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.unroute("**/api/rooms/commons/stream**", failRead);
     await page.locator("#refresh-button").click();
     await page.locator("#main").waitFor({ state: "visible" });
+    // The boot cache can paint the last held window first; the fresh read then adds the saved message.
+    await page.locator('[data-message-record-id="' + savedMessage.id + '"]').waitFor({ state: "attached", timeout: 10000 });
     assert.equal(await page.locator('[data-message-record-id="' + savedMessage.id + '"]').count(), 1);
 
     // Paste must retain overflow rather than silently send a truncated message.
