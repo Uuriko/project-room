@@ -7,6 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
+import { ACTION_META_TOOL_NAMES } from "../server/mcp-action-search.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -118,7 +119,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   const fullNames = (await full.json()).result.tools.map(tool => tool.name);
   assert.equal(fullNames.includes("room_react"), false);
   assert.deepEqual(fullNames.slice(0, HOSTED_ROOM_MCP_TOOLS.length), [...HOSTED_ROOM_MCP_TOOLS]);
-  assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), [...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
+  assert.deepEqual(fullNames.slice(HOSTED_ROOM_MCP_TOOLS.length), [...ACTION_META_TOOL_NAMES, ...JOIN_TOOLS, ...PUBLIC_WORK_MCP_TOOLS]);
   for (const name of fullNames) assert.match(name, MCP_TOOL_NAME_RE);
   for (const name of ["add_land_item", "list_land_queue", "remove_land_item", "report_tip"]) {
     assert.equal(fullNames.includes(name), true, name);
