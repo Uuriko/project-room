@@ -2,13 +2,14 @@ import { validId } from "../src/events.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, validateHelpOfferData } from "../src/help-offers.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
+import { withDerivedRequestId } from "./request-id.mjs";
 
 const id = { type: "string", minLength: 1, maxLength: 128, pattern: "^(?!(?:constructor|prototype|__proto__)$)[A-Za-z0-9][A-Za-z0-9_.:-]*$" };
 const revision = { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 };
 const text = { type: "string", minLength: 1, maxLength: 600, pattern: "\\S" };
 const invitation = { expectedHelpRevision: revision, helpEventId: id };
-const common = { requestId: { ...id, description: "Stable operation ID. Preserve ALL input on uncertain retry, including across reconnects." },
-  workItemId: id, offerId: id, expectedRevision: { ...revision, description: "Exact task revision inspected; never automatically refresh it on retry." } };
+const common = { requestId: { ...id, description: "Optional stable operation ID. Omit on the first call and the service derives one from the tool, room, actor and input; preserve ALL input on uncertain retry, including across reconnects." },
+  workItemId: id, offerId: id, expectedRevision: { ...revision, description: "Optional exact task revision inspected. Omit to use the current revision; a conflict means the task changed before this attempt was recorded." } };
 const definitions = [
   ["room_offer_help", null, "Offer help", "Offer one bounded contribution to a current help invitation. Read room_read_work with includeOffers=true first. Requires current invitation eligibility and capacity; no assignment, execution or payment follows.", { ...invitation, plan: text }],
   ["room_select_help_offer", "selected", "Select helper", "Select one current offer as the task's accountable member. At most one helper can be selected; competing selections are refused. This reserves coordination only, not external authority or work completion.", invitation],
@@ -22,7 +23,7 @@ const actions = new Map(definitions.map(([name, status, title, description, extr
   const properties = { ...common, ...(status ? { expectedOfferRevision: revision, reason: text } : {}), ...extra };
   return [name, { status, type: status ? HELP_OFFER_UPDATED : HELP_OFFER_OPENED,
     tool: { name, title, description: description + " Keep the exact input and requestId after an unknown result. Read current offers after a receipt; receipts describe the original operation, not current selection.",
-      inputSchema: { type: "object", properties, required: Object.keys(properties), additionalProperties: false },
+      inputSchema: { type: "object", properties, required: Object.keys(properties).filter(field => field !== "requestId" && field !== "expectedRevision"), additionalProperties: false },
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false } } }];
 }));
 export const helpTools = [...actions.values()].map(action => action.tool);
@@ -35,13 +36,26 @@ function commandData(action, args) {
 export function validHelpArguments(name, args) {
   const action = actions.get(name);
   if (!action || !conforms(args, action.tool.inputSchema)) return false;
-  try { validateHelpOfferData(action.type, commandData(action, args)); return true; }
-  catch { return false; }
+  try {
+    const data = commandData(action, args);
+    validateHelpOfferData(action.type, data.expectedRevision === undefined ? { ...data, expectedRevision: 0 } : data);
+    return true;
+  } catch { return false; }
 }
-export function buildHelpCommand(name, args) {
-  if (!validHelpArguments(name, args)) throw Object.assign(new Error("Invalid help action input"), { code: "invalid_help_action" });
+export function helpUsesExpectedRevision(name) {
+  return actions.get(name)?.tool.inputSchema.properties.expectedRevision !== undefined;
+}
+export function buildHelpCommand(name, args, identity = null, { expectedRevision } = {}) {
+  let prepared = withDerivedRequestId(name, args, identity);
+  if (expectedRevision !== undefined && helpUsesExpectedRevision(name) && prepared && typeof prepared === "object"
+      && prepared.expectedRevision === undefined && Object.hasOwn(prepared, "workItemId")) {
+    prepared = { ...prepared, expectedRevision };
+  }
+  if (prepared && !validId(prepared.requestId))
+    throw Object.assign(new Error(`${name} requires requestId: supply one stable id per operation, or use an MCP connection that can derive and return one`), { code: "missing_request_id" });
+  if (!validHelpArguments(name, prepared)) throw Object.assign(new Error("Invalid help action input"), { code: "invalid_help_action" });
   const action = actions.get(name);
-  return { id: args.requestId, type: action.type, data: structuredClone(commandData(action, args)) };
+  return { id: prepared.requestId, type: action.type, data: structuredClone(commandData(action, prepared)) };
 }
 export function recordedHelpAction(name, command, receipt) {
   return { contractVersion: 1, status: "recorded", action: name, requestId: command.id, workItemId: command.data.workItemId,
@@ -53,13 +67,20 @@ export function recordedHelpAction(name, command, receipt) {
 }
 export async function submitHelpAction(client, identity, name, args, { signal } = {}) {
   if (!validId(identity?.roomId) || !validId(identity?.memberId)) throw new Error("Pinned agent identity required");
-  const command = buildHelpCommand(name, args), receipt = await client.command(command, { signal });
+  let expectedRevision;
+  if (helpUsesExpectedRevision(name) && args && typeof args === "object" && !Array.isArray(args)
+      && args.expectedRevision === undefined && validId(args.workItemId)) {
+    const context = await client.workContext(args.workItemId, { signal });
+    if (!Number.isSafeInteger(context?.work?.revision)) throw Object.assign(new Error("Current work revision unavailable"), { code: "invalid_help_action" });
+    expectedRevision = context.work.revision;
+  }
+  const command = buildHelpCommand(name, args, identity, { expectedRevision }), receipt = await client.command(command, { signal });
   if (!confirmsAgentCommand(receipt, command, identity)) return { status: "unconfirmed", requestId: command.id,
     message: "Outcome unknown. Retain and retry the exact original input; do not create a replacement requestId." };
   return recordedHelpAction(name, command, receipt);
 }
-export function helpActionRefusal(cause) {
-  const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: cause?.code, message: cause?.message });
+export function helpActionRefusal(cause, { workItemId } = {}) {
+  const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: cause?.code, message: cause?.message, workItemId });
   const common = { type: "help_offer_refused", outcome: "not_confirmed",
     message: "Outcome not confirmed. Keep the exact original input and requestId; a lost response does not prove the operation was not saved.",
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };

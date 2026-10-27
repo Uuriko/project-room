@@ -29,6 +29,9 @@ export async function postTypingBeat(ctx) {
   }
   ctx.rate(`write:${auth.credentialHash}`, 60);
   ctx.rate(`typing:${auth.credentialHash}`, 120);
+  // No fields. A blank body is a heartbeat. Malformed JSON is 400. Any
+  // field is unknown and is named in the 422.
+  await ctx.body(ctx.req, { allowEmpty: true, fields: [], unknownCode: "invalid_body" });
   if (!recordBeat(typingBeats, roomId, auth.member)) ctx.reject(429, "typing_busy", "Too many active typing indicators; retry shortly");
   return ctx.json(ctx.res, 200, { ok: true, ttlMs: TYPING_TTL_MS });
 }
