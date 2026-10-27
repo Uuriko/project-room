@@ -191,7 +191,7 @@ test("a registered host queues one wake per message regardless of mode or presen
 test("hosts and signals survive a restart (new instance on the same database)", t => {
   const db = new DatabaseSync(":memory:");
   db.exec(agentHeartbeatSchema);
-  let at = T0;
+  const at = T0;
   const first = new AgentHeartbeats({ db, now: () => at, transaction: fn => { db.exec("BEGIN IMMEDIATE"); try { const result = fn(); db.exec("COMMIT"); return result; } catch (error) { db.exec("ROLLBACK"); throw error; } } });
   first.heartbeat(wakeable());
   first.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "r", messageId: "m1" });
@@ -353,7 +353,7 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
 
 test("fresh wakeable agents retain mentions while non-agent mentions queue nothing", async t => {
   const f = createAcceptanceFixture();
-  let at = Date.now();
+  const at = Date.now();
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-agent-2");

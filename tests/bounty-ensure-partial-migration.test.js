@@ -24,7 +24,7 @@ import { BountyEscrow, bountyEscrowSchema } from "../server/bounty-escrow.mjs";
 
 const ROOM = "room-partial-shard";
 const LANE = "id:agent/instinct";
-let nowMs = 1_786_000_000_000;
+const nowMs = 1_786_000_000_000;
 const deadline = new Date(nowMs + 3_600_000).toISOString();
 
 function makeStore(db) {

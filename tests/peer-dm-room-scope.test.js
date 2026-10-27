@@ -14,7 +14,7 @@ import { setTier } from "../server/autonomy-tiers.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 function storeFixture(t) {
-  let now = Date.now();
+  const now = Date.now();
   const store = new RoomStore(":memory:", { now: () => now });
   store.initialize(initialRoom());
   t.after(() => store.close());

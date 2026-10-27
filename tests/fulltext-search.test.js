@@ -189,7 +189,7 @@ test("kind=pinned searches only pinned messages, follows unpin, and hides a mute
   pin("owner", second, true);
   pin("owner", first, true);
   // Message order is preserved (not pin order), the term still applies, work stays out.
-  let r = await search("meeting", "pinned");
+  const r = await search("meeting", "pinned");
   assert.deepEqual(r.messages.map(m => m.id), [first, second]);
   assert.equal(r.workItems.length, 0);
   assert.deepEqual((await search("4411", "pinned")).messages, [], "an unpinned match stays out");

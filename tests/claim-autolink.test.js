@@ -316,7 +316,7 @@ test("linkDeployToSettledClaims: stamped revision links back to the items it shi
   // settle via merge, then stamp the required revision and close it live
   handlePrWebhookPayload(make.store,
     prPayload({ top: { action: "closed" }, pull_request: { head: { ref: "lane-deploy" }, merged: true, state: "closed" } }), {});
-  let item = make.store.workClaims.get(make.roomId, "lane-deploy");
+  const item = make.store.workClaims.get(make.roomId, "lane-deploy");
   assert.equal(item.revision, null); // normal claims carry no required revision
   const out = linkDeployToSettledClaims(make.store, { revision: rev, nowMs: 1_700_000_000_000 });
   assert.equal(out.linked, 0);

@@ -4,7 +4,7 @@ import { createAgentDirectory, DirectoryError } from "../server/agent-directory.
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 
 const fresh = () => {
-  let t = 1_700_000_000_000;
+  const t = 1_700_000_000_000;
   return createAgentDirectory({ clock: () => t });
 };
 const CARD = {
