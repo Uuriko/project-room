@@ -7,6 +7,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
+import { MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -444,4 +445,42 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   assert.match(page, /webhook_subscribe, webhook_list, and webhook_unsubscribe/);
   assert.doesNotMatch(page, /wake, heartbeats, and webhook delivery/);
   assert.doesNotMatch(page, /Bond beyond/);
+});
+
+test("a room key initialize names the room and hides identity-only tools", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Room key owner");
+  const created = rooms.create(owner.secret, {
+    roomId: "key-room", title: "Key room", purpose: "Room key copy", kind: "personal", displayName: "Room key owner"
+  });
+  const token = created.mcpToken.credential;
+  assert.match(token, /^rak_/);
+  const initParams = { protocolVersion: MCP_VERSION, capabilities: {}, clientInfo: { name: "b4", version: "1" } };
+  const roomInit = await (await rpc(origin, "initialize", initParams, token)).json();
+  const roomText = roomInit.result.instructions;
+  assert.match(roomText, /^Room key accepted \(room key-room\)\./);
+  assert.equal(roomText.includes("Identity secret accepted"), false);
+  assert.equal(roomText.includes("public_work_recommend"), false);
+  assert.ok(roomText.split("\n").length > 3, "instructions are split into short lines");
+  const roomList = await (await rpc(origin, "tools/list", undefined, token)).json();
+  const roomNames = roomList.result.tools.map(tool => tool.name);
+  assert.equal(roomNames.includes("room_create"), false);
+  assert.equal(roomNames.includes("room_join"), false);
+  assert.equal(roomNames.includes("room_check_access"), true);
+  const roomFull = await (await rpc(origin, "tools/list", { profile: "full" }, token)).json();
+  const roomFullNames = roomFull.result.tools.map(tool => tool.name);
+  assert.equal(roomFullNames.includes("room_create"), false);
+  assert.equal(roomFullNames.includes("room_join"), false);
+  const identityInit = await (await rpc(origin, "initialize", initParams, owner.secret)).json();
+  const identityText = identityInit.result.instructions;
+  assert.match(identityText, /^Identity secret accepted\./);
+  assert.equal(identityText.includes("Room key accepted"), false);
+  assert.equal(identityText.includes("public_work_recommend"), false);
+  const identityNames = (await (await rpc(origin, "tools/list", undefined, owner.secret)).json()).result.tools.map(tool => tool.name);
+  assert.equal(identityNames.includes("room_create"), true);
+  const outsider = store.identities.create("Roomless");
+  const outsideInit = await (await rpc(origin, "initialize", initParams, outsider.secret)).json();
+  assert.match(outsideInit.result.instructions, /public_work_recommend/);
+  const outsideNames = (await (await rpc(origin, "tools/list", undefined, outsider.secret)).json()).result.tools.map(tool => tool.name);
+  assert.equal(outsideNames.includes("public_work_recommend"), true);
 });

@@ -130,7 +130,7 @@ test("chat-only and wrong-assignee tools cannot widen enrollment; unknown produc
   const before = auditRecovery(f.store).dataSha256;
   for (const actor of [chat, reviewer]) {
     const response = (await actor.mcp.call("room_accept_work", { requestId: randomUUID(), workItemId, expectedRevision: 0 })).result;
-    assert.equal(response.isError, true); assert.equal(response.structuredContent.code, "command_rejected");
+    assert.equal(response.isError, true); assert.equal(response.structuredContent.code, "permission_denied");
   }
   const proposed = (await chat.mcp.call("room_propose_work", { requestId: "not-steering", workItemId: "new", title: "No grant", definitionOfDone: "Must not exist",
     accountableMemberId: "managed-chat", mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false })).result;

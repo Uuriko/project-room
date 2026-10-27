@@ -1046,7 +1046,7 @@ const workSessionsNext = (roomId, sessions) => {
     action: "register-work-item",
     method: "POST",
     path: `/api/rooms/${roomId}/work-claims`,
-    description: "No work sessions are open. Register a work item first: POST { id: \"<slug>\", title: \"<task>\", note: \"<context>\" } to this path, then claim it with the claim-session action above.",
+    description: `No work sessions are open. Register a work item first: POST { id: "<slug>", title: "<task>", note: "<context>" } to this path. Then claim it with POST /api/rooms/${roomId}/work-sessions { requestId: "<uuid>", workItemId: "<slug>", expectedRevision: <rev>, action: "set_status", status: "processing" }.`,
   })];
 };
 
@@ -6251,6 +6251,20 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           && command.data[tooLongField[1]].length > 4096) {
           fail(422, "payload_too_large", `${tooLongField[1]} must be at most 4096 characters`);
         }
+        // A second accept lands after the winner has already moved the item
+        // to accepted. Name that holder instead of "Invalid transition".
+        if (command.type === T.WORK_ACCEPTED && error.message === "Invalid transition from accepted") {
+          const item = room.state.workItems?.[command.data?.workItemId];
+          if (item?.state === "accepted") {
+            const member = ownMember(room.state.members, item.accountableMemberId);
+            const name = typeof member?.displayName === "string" && member.displayName.trim()
+              ? member.displayName.trim()
+              : (item.accountableMemberId || "another member");
+            fail(409, "work_already_accepted", `Already accepted by ${name} at rev ${item.revision}`);
+          }
+        }
+        if (/^Only the .* may/.test(error.message)) fail(403, "permission_denied", error.message);
+        if (/missing|Invalid messageId|must be/.test(error.message)) fail(422, "invalid_command", error.message);
         fail(/Stale|already exists|Invalid transition|Invalid session|Stop already|capacity reached|cannot be pinned|already_offered|helper_selected|history_full|offer_limit|Offer transition unavailable/.test(error.message) ? 409 : 422, "command_rejected", error.message);
       }
       // Integration map slice 5: the external path is only as strong as

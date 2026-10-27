@@ -120,10 +120,11 @@ export function replyRefusal(cause, { name, args = {} } = {}) {
   }
   const allowed = ["invalid_reply_action", "reply_action_too_large", "invalid_reply_selection", "invalid_reply_cursor", "reply_request_not_found", "reply_context_unavailable",
     "reply_cursor_identity_changed", "reply_history_changed", "reply_entry_too_large", "reply_list_too_large", "command_rejected", "idempotency_conflict", "invalid_command",
-    "channel_archived"];
+    "permission_denied", "channel_archived"];
   const ax = agentErrorAx({ httpStatus: cause?.status ?? 0, code: allowed.includes(cause?.code) ? cause.code : "not_confirmed", message: cause?.message });
+  const refusedStatus = [409, 422].includes(cause?.status) || (cause?.status === 403 && cause?.code === "permission_denied");
   return { type: "reply_refused", code: allowed.includes(cause?.code) ? cause.code : "not_confirmed",
-    outcome: ["invalid_reply_action", "reply_action_too_large"].includes(cause?.code) ? "this_attempt_not_sent" : [409, 422].includes(cause?.status) ? "this_attempt_refused" : "not_confirmed",
+    outcome: ["invalid_reply_action", "reply_action_too_large"].includes(cause?.code) ? "this_attempt_not_sent" : refusedStatus ? "this_attempt_refused" : "not_confirmed",
     message: "Preserve unknown write input and its requestId exactly. For a stale context, reread the request and explicitly review changes before a new attempt. Changed history or identity requires reconciliation; never silently reset the checkpoint.",
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
 }

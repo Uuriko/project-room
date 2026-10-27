@@ -77,6 +77,21 @@ test("invalid_event_cursor hint stays short and followable", () => {
   assert.ok(validAgentNext(body.next));
 });
 
+test("events rejects an unknown query key and lists the allowed keys", async t => {
+  const { request } = await serve(t);
+  const refused = await request("/api/rooms/commons/events?foo=1");
+  const body = await refused.json();
+  assert.equal(refused.status, 422);
+  assert.equal(body.error.code, "invalid_event_cursor");
+  assert.match(body.error.message, /Allowed keys: after, limit, actor, since, until, type, mentions, compact, tail, auth/);
+  assert.match(body.hint, /unknown query keys/);
+  assert.doesNotMatch(body.hint, /afterSequence|not caught up/);
+  assert.equal(body.category, "input");
+  assert.ok(validAgentNext(body.next));
+  const kept = await request("/api/rooms/commons/events?after=0&limit=10");
+  assert.equal(kept.status, 200);
+});
+
 test("tail and compact refusals get a hint about the value they name, not afterSequence", () => {
   for (const message of ["tail must be an integer from 1 to 200", "tail is used alone, as an integer from 1 to 200", "compact must be 1 or 0"]) {
     const body = agentErrorBody({ httpStatus: 422, code: "invalid_event_cursor", roomId: "commons", message });

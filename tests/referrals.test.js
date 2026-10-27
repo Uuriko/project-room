@@ -245,7 +245,7 @@ test("member admission refuses inherited referrers without persisting membership
   for (const referredBy of ["toString", "hasOwnProperty", "valueOf", "missing-member"]) {
     assert.throws(() => store.command(ownerKey, roomId, { id: `bad-referrer-${referredBy}`, type: "member.added", data: {
       memberId: `candidate-${referredBy}`, displayName: "Candidate", kind: "agent", permissions: [], referredBy
-    } }), error => error.code === "command_rejected" && error.status === 422 && /referredBy must be an active member/.test(error.message));
+    } }), error => error.code === "invalid_command" && error.status === 422 && /referredBy must be an active member/.test(error.message));
     assert.equal(store.room(roomId).sequence, before.sequence);
     assert.equal(Object.hasOwn(store.room(roomId).state.members, `candidate-${referredBy}`), false);
   }

@@ -39,8 +39,8 @@ function orderedAttention(items) {
 }
 
 function requireOwner(store, auth, roomId) {
-  // Mirrors the diagnostics-export owner gate on main.
-  if (auth.member.kind !== "human" || auth.member.id !== store.room(roomId).state.room.ownerId
+  // Any room owner with manage_members. Diagnostics export stays human-only.
+  if (auth.member.id !== store.room(roomId).state.room.ownerId
     || !auth.member.permissions.includes("manage_members")) {
     fail(403, "owner_required", "Only the room owner can view the attention rollup");
   }

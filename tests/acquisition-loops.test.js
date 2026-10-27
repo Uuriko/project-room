@@ -85,14 +85,16 @@ test("a public room page stays off until the owner opts in, and private text sta
     headers: { authorization: `Bearer ${adaKey}`, "content-type": "application/json" },
     body: JSON.stringify({ id: "ada-page", type: "room.public_page_set", data: { enabled: true } }),
   });
-  assert.equal(denied.status, 422);
+  assert.equal(denied.status, 403);
+  assert.equal(JSON.parse(denied.text).error.code, "permission_denied");
   assert.equal(store.room("alpha").state.room.publicPage, undefined);
   const deniedJoin = await raw(origin, "/api/rooms/alpha/commands", {
     method: "POST",
     headers: { authorization: `Bearer ${adaKey}`, "content-type": "application/json" },
     body: JSON.stringify({ id: "ada-join", type: "room.join_link_set", data: { enabled: true } }),
   });
-  assert.equal(deniedJoin.status, 422);
+  assert.equal(deniedJoin.status, 403);
+  assert.equal(JSON.parse(deniedJoin.text).error.code, "permission_denied");
   send(ownerKey, "publish-page", "room.public_page_set", { enabled: true });
   send(ownerKey, "publish-task", "work.public_set", { workItemId: "public-work", enabled: true });
   const ref = publicRef("Ada");

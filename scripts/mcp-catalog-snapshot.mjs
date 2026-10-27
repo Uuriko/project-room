@@ -16,7 +16,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { listedMcpTools, livePublicMcpTools, liveEnrolledMcpTools } from "../server/mcp-discovery.mjs";
+import { listedMcpTools, livePublicMcpTools, liveEnrolledMcpTools, omitRoomKeyHiddenTools } from "../server/mcp-discovery.mjs";
 
 export const SNAPSHOT_PATH = join(dirname(fileURLToPath(import.meta.url)), "..", "tests", "fixtures", "mcp-catalog.snapshot.json");
 
@@ -40,6 +40,9 @@ export function servedProfiles() {
     "focus=review": listedMcpTools("core", false, null, "review"),
     "focus=automation": listedMcpTools("core", false, null, "automation"),
     "focus=public_work": listedMcpTools("core", false, null, "public_work"),
+    "room-key": omitRoomKeyHiddenTools(listedMcpTools("core")),
+    "room-key-full": omitRoomKeyHiddenTools(listedMcpTools("full")),
+    "room-key-lean": omitRoomKeyHiddenTools(listedMcpTools("lean")),
     enrolled: liveEnrolledMcpTools(),
   };
 }

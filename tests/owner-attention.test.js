@@ -10,6 +10,8 @@ import { AccessRequests, accessRequestSchema } from "../server/access-requests.m
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { attentionReport } from "../server/owner-attention.mjs";
+import { createRoomServer } from "../server/http.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
@@ -289,4 +291,39 @@ test("exactly at the cap keeps insertion order; past the cap actions move first"
   report = f.report();
   assert.equal(report.itemCount, 26);
   assert.equal(report.items[0].kind, "spend", "past the cap, actions come first");
+});
+
+test("an agent room owner can read needs-attention", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "project-room-attention-agent-owner-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  const rooms = new AgentRooms(store);
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const owner = store.identities.create("Agent owner");
+  const created = rooms.create(owner.secret, {
+    roomId: "agent-owned", title: "Agent owned", purpose: "Owner rollup", kind: "personal", displayName: "Agent owner"
+  });
+  assert.equal(store.room(created.roomId).state.members[created.ownerMemberId].kind, "agent");
+  const get = (secret) => fetch(`${origin}/api/rooms/${created.roomId}/needs-attention`, {
+    headers: { authorization: `Bearer ${secret}` }
+  });
+  const ok = await get(owner.secret);
+  assert.equal(ok.status, 200);
+  const body = await ok.json();
+  assert.equal(body.roomId, created.roomId);
+  assert.equal(Array.isArray(body.items), true);
+  const peer = store.identities.create("Peer");
+  store.identities.link(owner.secret, created.roomId, {
+    identityId: peer.identityId, displayName: "Peer", permissions: ["manage_members"]
+  });
+  const refused = await get(peer.secret);
+  assert.equal(refused.status, 403);
+  assert.equal((await refused.json()).error.code, "owner_required");
 });

@@ -311,6 +311,31 @@ export const ERROR_REGISTRY = {
     ],
     catalog: { http: 428, retry: "fix", recovery: "Do the SHA-256 proof-of-work from the 428 body, or redeem a member-issued invite code (no proof needed)." },
   },
+  // Reducer permission refusals ("Only the … may") used to collapse into
+  // 422 command_rejected, which reads as a conflict. They are access denials.
+  permission_denied: {
+    status: "action_required",
+    hint: "You can't do that. The message names who may. Ask them, or use their credential.",
+    next: [tool("room_check_access"), command("Ask the member named in the message, or use their credential.")],
+    catalog: { http: 403, retry: "no", recovery: "You can't do that. The message names who may. Ask them, or use their credential." },
+  },
+  // A losing work.accepted after the item is already accepted.
+  work_already_accepted: {
+    status: "action_required",
+    hint: ({ message }) => {
+      const parsed = /^Already accepted by (.+) at rev (\d+)$/.exec(String(message || ""));
+      const who = parsed ? [parsed[1], "at rev", parsed[2]].join(" ") : "";
+      const text = who
+        ? `${who} already accepted this work. Read it; do not accept again.`
+        : "This work is already accepted. Read the current work and do not accept it again.";
+      return text.length < 160 ? text : "This work is already accepted. Read the current work and do not accept it again.";
+    },
+    next: ({ workItemId }) => [
+      workItemId ? tool("room_read_work", { workItemId }) : tool("room_read_work"),
+      command("Read the current work. Do not accept it again."),
+    ],
+    catalog: { http: 409, retry: "no", recovery: "Already accepted. Read the current work and the acceptor; do not accept again." },
+  },
 };
 
 // Resolve a registry-owned code's envelope. Returns null for codes the
@@ -567,6 +592,22 @@ function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
 
+function ownerRequiredHint(message) {
+  const text = String(message || "");
+  if (/\bexport\b/i.test(text)) return "Only the room owner can export this room.";
+  if (/attention rollup|needs-attention/.test(text)) return "Only the room owner can view the attention rollup.";
+  if (/guest invite|Add agent/i.test(text)) return "Only the room owner can mint a guest invite or Add agent.";
+  return "Only the room owner can do that.";
+}
+
+function ownerRequiredNext(message) {
+  const text = String(message || "");
+  if (/\bexport\b/i.test(text)) return [tool("room_check_access"), command("Ask the room owner to export.")];
+  if (/attention rollup|needs-attention/.test(text)) return [tool("room_check_access"), command("Ask the room owner to open the attention rollup.")];
+  if (/guest invite|Add agent/i.test(text)) return [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")];
+  return [tool("room_check_access"), command("Ask the room owner.")];
+}
+
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
@@ -805,13 +846,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : "Ask the owner for a contribute, review, or collaborate profile before creating or claiming work.")]
     };
   }
-  if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
+  if (reasonCode === "owner_required") {
     return {
       status: "action_required",
-      reason: reasonCode === "owner_required" ? "owner_required" : "access_denied",
-      hint: reasonCode === "owner_required"
-        ? "Only the room owner can mint a guest invite or Add agent."
-        : "This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.",
+      reason: "owner_required",
+      hint: ownerRequiredHint(message),
+      next: ownerRequiredNext(message),
+    };
+  }
+  if (httpStatus === 403 || ["access_denied", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
+    return {
+      status: "action_required",
+      reason: "access_denied",
+      hint: "This credential cannot do that. Run room_check_access to see what this identity can do, then ask the owner for the missing permission.",
       next: [tool("room_check_access"), path("/api/session"), command("Ask the owner to mint a guest invite or Add agent")]
     };
   }
@@ -849,6 +896,17 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // events?afterSequence= used to be ignored, which restarted catch-up at 0.
   // tail/compact refusals share this code but are not about afterSequence:
   // the message names the bad value, so point at it instead.
+  if (reasonCode === "invalid_event_cursor" && /Allowed keys:/.test(String(message || ""))) {
+    return {
+      status: "action_required",
+      reason: "invalid_event_cursor",
+      hint: "Drop the unknown query keys. Allowed: after, limit, actor, since, until, type, mentions, compact, tail, auth.",
+      next: [
+        path(roomId ? `/api/rooms/${roomId}/events?after=0&limit=100` : "/api/session"),
+        command("Resend with only the allowed query keys.")
+      ]
+    };
+  }
   if (reasonCode === "invalid_event_cursor" && !/afterSequence/.test(String(message || ""))) {
     return {
       status: "action_required",

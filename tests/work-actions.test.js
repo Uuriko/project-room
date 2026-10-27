@@ -164,6 +164,13 @@ test("known business refusals have fixed recovery guidance and never echo servic
   }
   assert.equal(workActionRefusal({ status: 503, code: "private-code" }), null);
   assert.equal(workActionRefusal({ status: 422, code: "unrecognized" }), null);
+  assert.equal(workActionRefusal({ status: 409, code: "permission_denied", message: "PRIVATE SECRET" }), null);
+  for (const [status, code] of [[403, "permission_denied"], [409, "work_already_accepted"], [422, "invalid_command"]]) {
+    const response = workActionRefusal({ status, code, message: "PRIVATE SECRET" });
+    assert.equal(response.code, code);
+    assert.equal(response.outcome, "this_attempt_refused");
+    assert.equal(JSON.stringify(response).includes("PRIVATE SECRET"), false);
+  }
   const unsigned = workActionRefusal({ status: 422, code: "missing_signed_evidence", message: "PRIVATE SECRET" });
   assert.equal(unsigned.code, "missing_signed_evidence");
   assert.equal(unsigned.outcome, "this_attempt_refused");
@@ -258,7 +265,7 @@ test("room policy: work recorded before a flip keeps its recorded requirements; 
 test("room policy: only the room owner sets it, and the command shape is strict", t => {
   const f = policyFixture(t);
   const on = { requireIndependentReview: true, requireOwnerDecision: true };
-  assert.throws(() => f.setPolicy("guest", on), { status: 422, code: "command_rejected", message: /Only the Room owner may set room policy/ });
+  assert.throws(() => f.setPolicy("guest", on), { status: 403, code: "permission_denied", message: /Only the Room owner may set room policy/ });
   assert.throws(() => f.setPolicy("reviewer", on), /Only the Room owner may set room policy/);
   assert.equal(f.state().room.policy, undefined, "a refused policy leaves no trace");
   assert.throws(() => f.setPolicy("owner", { requireIndependentReview: "yes", requireOwnerDecision: true }), { status: 422, code: "invalid_command", message: /Invalid field: requireIndependentReview/ });

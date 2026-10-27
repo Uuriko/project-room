@@ -189,9 +189,9 @@ test("strangers cannot mutate; commands are idempotent; writer stays 26", async 
   const denied = await request("/api/rooms/commons/work-sessions", {
     method: "POST", token: guestKey, data: sessionBody({ action: "request_stop" })
   });
-  assert.equal(denied.status, 422);
+  assert.equal(denied.status, 403);
   const deniedBody = await denied.json();
-  assert.equal(deniedBody.error.code, "command_rejected");
+  assert.equal(deniedBody.error.code, "permission_denied");
   assert.ok(validAgentNext(deniedBody.next));
 
   const body = sessionBody({ action: "set_status", status: "processing" });
@@ -257,7 +257,8 @@ test("HTTP: second agent gets 409 on a claimed session; owner can override; card
 
   // request_stop is still restricted to the accountable member or steerers (pre-existing model)
   const nudge = await post(bKey, sessionBody({ action: "request_stop", expectedRevision: 1 }));
-  assert.equal(nudge.status, 422);
+  assert.equal(nudge.status, 403);
+  assert.equal((await nudge.json()).error.code, "permission_denied");
 
   // owner holds manage_claims: may drive someone else's session
   const over = await post(ownerKey, sessionBody({ action: "set_status", status: "suspended", expectedRevision: 1 }));

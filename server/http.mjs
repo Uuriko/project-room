@@ -5298,6 +5298,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           reject(422, "invalid_event_cursor",
             "events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up.");
         }
+        const allowedEventKeys = ["after", "limit", "actor", "since", "until", "type", "mentions", "compact", "tail", "auth"];
+        if ([...params.keys()].some(key => !allowedEventKeys.includes(key))) {
+          reject(422, "invalid_event_cursor", `Unknown events query. Allowed keys: ${allowedEventKeys.join(", ")}.`);
+        }
         if (params.has("tail")) {
           if ([...params.keys()].some(key => !["tail", "auth"].includes(key) || params.getAll(key).length !== 1)) {
             reject(422, "invalid_event_cursor", "tail is used alone, as an integer from 1 to 200");

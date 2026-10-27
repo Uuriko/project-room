@@ -86,11 +86,17 @@ export function helpActionRefusal(cause, { workItemId } = {}) {
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next };
   if (cause?.code === "invalid_help_action") return { ...common, code: cause.code, outcome: "this_attempt_not_sent",
     message: "Use the listed fields and a short plan or reason. If an earlier attempt was uncertain, reconcile that exact input before changing it." };
-  if ([409, 422].includes(cause?.status) && ["command_rejected", "idempotency_conflict", "pilot_limit"].includes(cause.code)) return {
+  if (cause?.status === 403 && cause?.code === "permission_denied") return {
+    ...common, code: cause.code, outcome: "this_attempt_refused",
+    message: "You can't do that. The message names who may. Ask them, or use their credential."
+  };
+  if ([409, 422].includes(cause?.status) && ["command_rejected", "idempotency_conflict", "pilot_limit", "invalid_command"].includes(cause.code)) return {
     ...common, code: cause.code, outcome: "this_attempt_refused",
     message: cause.code === "idempotency_conflict"
       ? "This requestId belongs to different input. Recover the original; never replace its ID blindly."
-      : "The task, invitation, offer, membership or capacity no longer permits this action. Read current offers and review the change; never automatically rebase or take over."
+      : cause.code === "invalid_command"
+        ? "Fix the refused fields named in the message, then resend. Keep any earlier uncertain requestId."
+        : "The task, invitation, offer, membership or capacity no longer permits this action. Read current offers and review the change; never automatically rebase or take over."
   };
   return null;
 }
