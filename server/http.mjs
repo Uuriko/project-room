@@ -361,6 +361,63 @@ function defaultAssetLoader(assetRoot) {
   };
 }
 
+// NEXT-1 latency: Server-Timing phases + one structured perf log line per
+// measured request, added in this one shared place (createRoomServer is the
+// finalisation point for both the Node server and the Worker Durable Object
+// bridge). Phases are the stages the handlers actually have at a single
+// choke point each — auth and store work are interleaved inside individual
+// handlers, so they are not separable here and stay inside `handler`:
+//   body      — request-body read time (readText segments: API body(),
+//               the /mcp POST body, the A2A body)
+//   handler   — total minus body minus serialise: routing, auth, store
+//               reads/writes and handler work
+//   serialise — JSON.stringify time (the json() helper; the /mcp writer in
+//               server/mcp-http.mjs pushes its reply stringify segment onto
+//               res.roomPerf.serialiseSegments when present)
+//   total     — request start to response writeHead
+// In the Worker deployment the outer layer appends its own app/total
+// metrics after these (cloudflare/request-timing.mjs); parsers that read
+// the first value per name get the handler-side phases above.
+export const PERF_PHASES = Object.freeze(["body", "handler", "serialise", "total"]);
+// Measured surfaces as data: the API and MCP prefixes, plus their /room/*
+// edge-door twins. These are prefixes of existing registered routes, not
+// new routes.
+export const PERF_MEASURED_EXACT = Object.freeze(["/api", "/mcp", "/room/api", "/room/mcp"]);
+export const PERF_MEASURED_PREFIXES = Object.freeze(["/api/", "/mcp/", "/room/api/", "/room/mcp/"]);
+export function isPerfMeasuredPath(pathname) {
+  return typeof pathname === "string" && (PERF_MEASURED_EXACT.includes(pathname)
+    || PERF_MEASURED_PREFIXES.some(prefix => pathname.startsWith(prefix)));
+}
+export function perfSegmentsMs(segments) {
+  if (!Array.isArray(segments) || segments.length === 0) return 0;
+  const sorted = segments.filter(pair => Array.isArray(pair) && Number.isFinite(pair[0]) && Number.isFinite(pair[1]) && pair[1] >= pair[0])
+    .sort((a, b) => a[0] - b[0]);
+  let total = 0, start = null, end = null;
+  for (const [segStart, segEnd] of sorted) {
+    if (start === null || segStart > end) {
+      if (start !== null) total += end - start;
+      start = segStart; end = segEnd;
+    } else if (segEnd > end) end = segEnd;
+  }
+  if (start !== null) total += end - start;
+  return total;
+}
+export function perfPhases({ started, bodySegments, serialiseSegments }, now = performance.now()) {
+  const total = Math.max(0, now - started);
+  const body = Math.min(total, perfSegmentsMs(bodySegments));
+  const serialise = Math.min(total - body, perfSegmentsMs(serialiseSegments));
+  return { body, handler: Math.max(0, total - body - serialise), serialise, total };
+}
+const perfRound = value => Math.max(0, Math.round(Number(value) || 0));
+export function formatServerTiming(phases) {
+  return PERF_PHASES.map(name => `${name};dur=${perfRound(phases?.[name])}`).join(", ");
+}
+export function perfLogLine({ method, route, status, phases }) {
+  return JSON.stringify({ event: "room.perf", method, route, status,
+    totalMs: perfRound(phases?.total),
+    phases: { body: perfRound(phases?.body), handler: perfRound(phases?.handler), serialise: perfRound(phases?.serialise) } });
+}
+
 // Per-credential write budget for routes that carry no user-authored content.
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
@@ -737,6 +794,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // Avoid local-instance sign-in collisions; namespacing is not host isolation.
   const scopedCookieName = name => `${expectedOrigin().startsWith("https:") ? "__Host-" : ""}${cookieNamespace ? cookieNamespace + "_" : ""}${name}`;
   const streams = new Set();
+  // NEXT-1 latency: per-request perf trackers, keyed by req/res so the
+  // json()/readText() closures and the /mcp writer can add segments without
+  // threading a context through every route. See PERF_PHASES above.
+  const perfByReq = new WeakMap(), perfByRes = new WeakMap();
   // Typing heartbeat state lives in server/typing.mjs (shared with the route
   // table's POST /typing handler); the SSE pump below prunes on read.
   const diagnostics = new DiagnosticsLog();
@@ -903,7 +964,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     res.setHeader("Set-Cookie", `${scopedCookieName(name)}=${token}; Path=/; HttpOnly; SameSite=${sameSite}; Max-Age=${maxAge}${expectedOrigin().startsWith("https:") ? "; Secure" : ""}`);
   }
   function json(res, status, value, head = false) {
+    const serialiseStart = performance.now();
     const body = JSON.stringify(value);
+    const perf = perfByRes.get(res);
+    if (perf) perf.serialiseSegments.push([serialiseStart, performance.now()]);
     res.writeHead(status, { "Content-Type": "application/json; charset=utf-8", "Content-Length": Buffer.byteLength(body) });
     res.end(head ? undefined : body);
   }
@@ -917,8 +981,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // unknown-length bodies, discard over-limit chunks while draining to end,
   // so a client that finishes sending can read the 413. Aborts fail promptly.
   function readText(req, limit, tooLarge) {
+    const bodyStart = performance.now();
+    const perf = perfByReq.get(req);
+    const finishBodySegment = () => { if (perf) perf.bodySegments.push([bodyStart, performance.now()]); };
     const declaredBytes = Number(req.headers["content-length"]);
-    if (declaredBytes > limit) { req.resume(); throw tooLarge(declaredBytes); }
+    if (declaredBytes > limit) { req.resume(); finishBodySegment(); throw tooLarge(declaredBytes); }
     return new Promise((resolve, rejectPromise) => {
       let bytes = 0;
       let oversize = false;
@@ -931,9 +998,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (bytes > limit) { oversize = true; chunks.length = 0; }
         else chunks.push(chunk);
       });
-      req.on("end", () => oversize ? rejectPromise(tooLarge(bytes)) : resolve(Buffer.concat(chunks).toString("utf8")));
-      req.on("error", rejectPromise);
-      req.on("aborted", () => rejectPromise(new ServiceError(400, "aborted", "Request ended early")));
+      req.on("end", () => { finishBodySegment(); oversize ? rejectPromise(tooLarge(bytes)) : resolve(Buffer.concat(chunks).toString("utf8")); });
+      req.on("error", error => { finishBodySegment(); rejectPromise(error); });
+      req.on("aborted", () => { finishBodySegment(); rejectPromise(new ServiceError(400, "aborted", "Request ended early")); });
     });
   }
   // Every JSON route takes the default limit; a caller passes `limit` only where
@@ -1134,6 +1201,32 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   }
   const server = createServer(async (req, res) => {
     const operationId = `op_${randomBytes(6).toString("base64url")}`;
+    // NEXT-1 latency: start the per-request perf tracker and wrap writeHead
+    // — the one finalisation point every API//mcp response passes through
+    // (directly, or implicitly via res.end) — so the Server-Timing header
+    // and the single perf log line are emitted exactly once, with the same
+    // phase values. Perf work never breaks a request: any failure inside
+    // the wrapper is swallowed and the original writeHead still runs.
+    const perf = { started: performance.now(), bodySegments: [], serialiseSegments: [], pathname: null, logged: false };
+    perfByReq.set(req, perf);
+    perfByRes.set(res, perf);
+    res.roomPerf = perf;
+    const originalWriteHead = res.writeHead.bind(res);
+    res.writeHead = (...args) => {
+      if (!perf.logged) {
+        perf.logged = true;
+        try {
+          const pathname = perf.pathname ?? requestPathname(req.url);
+          if (isPerfMeasuredPath(pathname)) {
+            const phases = perfPhases(perf);
+            if (!res.headersSent && !res.getHeader("Server-Timing")) res.setHeader("Server-Timing", formatServerTiming(phases));
+            const status = typeof args[0] === "number" ? args[0] : res.statusCode;
+            console.info(perfLogLine({ method: req.method, route: serviceRoute(req.url), status, phases }));
+          }
+        } catch { /* perf instrumentation must never break a response */ }
+      }
+      return originalWriteHead(...args);
+    };
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("X-Content-Type-Options", "nosniff");
     res.setHeader("Referrer-Policy", "no-referrer");
@@ -1221,6 +1314,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         } catch { /* shadow-only: never break the join */ }
       };
       const inboundPath = url.pathname;
+      perf.pathname = inboundPath;
       if (isRoomMcpPath(inboundPath) || isRoomMcpPath(rewriteRoomApiPrefix(inboundPath))) {
         rate(`mcp-join:${remoteAddress}`, 60);
         if (req.method === "POST") {

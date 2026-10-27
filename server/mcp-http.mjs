@@ -258,6 +258,15 @@ export async function roomMcpFetchPost(request, options = {}) {
   return new Response(JSON.stringify(reply), { status: mcpRpcStatus(reply), headers: { ...headers, ...mcpAuthHeaders(reply), ...legacyMcpHeaders(request.headers.get("authorization")) } });
 }
 
+// NEXT-1 latency: when server/http.mjs has attached its per-request perf
+// tracker to the response (res.roomPerf), record this writer's reply
+// serialisation as a segment so the Server-Timing `serialise` phase covers
+// /mcp too. Duck-typed on purpose: no import cycle with http.mjs, and the
+// fetch-shaped writers above (no tracker) are unaffected.
+function markMcpSerialise(res, started) {
+  try { res?.roomPerf?.serialiseSegments?.push([started, performance.now()]); } catch { /* perf only */ }
+}
+
 export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMcp, remoteAddress } = {}) {
   const cors = mcpJoinCorsHeaders();
   const method = req.method;
@@ -320,7 +329,9 @@ export async function writeRoomMcpNode(req, res, url, { bodyText, accept, roomMc
     res.writeHead(202, { ...cors, "Cache-Control": "no-store" });
     return res.end();
   }
+  const serialiseStart = performance.now();
   const bytes = Buffer.from(JSON.stringify(reply));
+  markMcpSerialise(res, serialiseStart);
   res.writeHead(mcpRpcStatus(reply), {
     ...cors,
     ...mcpAuthHeaders(reply),
