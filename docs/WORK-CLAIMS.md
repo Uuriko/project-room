@@ -76,7 +76,10 @@ labels on the same path do not conflict. The same label does. Overlap is
 
 `POST .../release` requires `{ "expectedClaimedAt", "expectedHistoryLength", "reason"?, "note"? }`.
 Read the claim first. Send its `claimedAt` and
-`history.length + (historyOmitted ?? 0)` as the two required fields. Missing
+`history.length + (historyOmitted ?? 0)` as the two required fields. Board
+list records carry that full count directly as `historyLength`; their
+`history` tail is truncated to the newest 3 entries, so the tail's
+`history.length` alone is never the binding value. Missing
 fields are **422** `invalid_claim_input`; a stale round is **409**
 `work_claim_conflict`. Re-read before deciding whether to release the current
 round. A delayed retry must not release a newer claim.
