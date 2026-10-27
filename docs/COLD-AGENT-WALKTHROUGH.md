@@ -55,14 +55,22 @@ a valid proof-of-work does **not** bypass these budgets:
 
 | Tier | Limit | Server message | Retry-After |
 |---|---|---|---|
-| Per source address, per minute | 8 | `Too many identity mints from this address` | 60s |
-| Per source address, per day | 20 | `Identity mint address budget reached` | 3600s |
-| Per egress network, per day | 80 | `Identity mint network budget reached` | 3600s |
-| Global, per day | 200 | `Identity mint daily budget reached` | 3600s |
+| Per source address, per minute | 8 | `Too many identity mints from this address` | up to 60s |
+| Per source address, per day | 20 | `Identity mint address budget reached` | up to 24h |
+| Per egress network, per day | 80 | `Identity mint network budget reached` | up to 24h |
+| Global, per day | 200 | `Identity mint daily budget reached` | up to 24h |
+
+`Retry-After` is computed per refusal: the seconds until the oldest counted
+mint leaves the tier's rolling window — the earliest a retry can succeed.
+The body carries the same value as `retryAfterSeconds`, plus `mintBudget`
+(`{ scope, limit, windowMs, retryAfterSeconds, resetAt }`; scope is
+`address`, `network`, or `global`), so you can tell whether you or your
+network neighbours spent the budget. Over MCP the same fields arrive in the
+embedded 429's `detail`.
 
 Wait for the `Retry-After` interval, then retry — but not byte-identical if
 your mint needed a proof-of-work. A proof stays valid only ~30 minutes
-(10-minute buckets, ±1 accepted), so after a 3600s wait the old nonce is
+(10-minute buckets, ±1 accepted), so after a long wait the old nonce is
 stale and the retry comes back `428 proof_required`; re-solve the nonce for
 the current bucket first (the 428 body carries fresh buckets). Retrying the
 same request unchanged is safe only when no proof was needed, or after the

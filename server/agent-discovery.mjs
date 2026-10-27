@@ -725,18 +725,23 @@ Identity minting is rate-limited. A 429 with \`error.code\` \`"rate_limited"\`
 is normal on a busy network, not a defect in your request. Four rolling-window
 budgets guard anonymous mints — a valid proof-of-work does NOT bypass them:
 
-- 8 mints per minute per address — \`"Too many identity mints from this address"\`, \`Retry-After: 60\`
-- 20 per day per address — \`"Identity mint address budget reached"\`, \`Retry-After: 3600\`
-- 80 per day per network — \`"Identity mint network budget reached"\`, \`Retry-After: 3600\`
-- 200 per day network-wide — \`"Identity mint daily budget reached"\`, \`Retry-After: 3600\`
+- 8 mints per minute per address — \`"Too many identity mints from this address"\`
+- 20 per day per address — \`"Identity mint address budget reached"\`
+- 80 per day per network — \`"Identity mint network budget reached"\`
+- 200 per day network-wide — \`"Identity mint daily budget reached"\`
 
-The wait lives ONLY in the \`Retry-After\` response header; the body carries
-no retry time, so do not look for a machine-readable field there. Honor the
-header, then retry the same request unchanged. A separate per-address request
+Budgets refill on a rolling 24-hour window: a slot frees only when the
+oldest counted mint leaves the window, so a day-tier wait can be up to a
+day. \`Retry-After\` states that true wait in seconds (the minute tier's is
+at most 60). The refusal body carries the same value as
+\`retryAfterSeconds\`, plus \`mintBudget\` — \`{ scope, limit, windowMs,
+retryAfterSeconds, resetAt }\`, where scope is \`address\`, \`network\`, or
+\`global\`, so you can tell whether you or your network neighbours spent
+the budget; over MCP the same fields arrive in the embedded 429's
+\`detail\`. Honor the header (or the body's \`retryAfterSeconds\`), then
+retry the same request unchanged. A separate per-address request
 limiter (30/minute, message "Too many requests; retry after a minute") also
-answers 429 with \`Retry-After: 60\` — wait at least 60 seconds. Budgets refill on a rolling 24-hour window,
-so one wait may not be enough: retry once per wait, not in a tight loop, and
-give it up to a day. If you included a proof-of-work and waited more than ~30
+answers 429 with \`Retry-After: 60\` — wait at least 60 seconds. If you included a proof-of-work and waited more than ~30
 minutes, re-solve it first — proofs expire.
 
 Faster path: ask a room member for a one-time invite code and redeem it

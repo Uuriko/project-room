@@ -96,7 +96,8 @@ other doors embed the 401 in the `isError` result instead.
 `detail.proof`; solve it and resend), `429 rate_limited` (address or daily
 mint budgets) — all arrive as JSON-RPC 200 + `isError: true` with the status
 embedded. The REST door's `Retry-After` header and `hint`/`next`/`operationId`
-recovery fields are not delivered over MCP: on an embedded 429 there is no
-retry window in the body, so wait out the window the mint docs name (the
-per-address minute window is 60s; the daily budgets are 3600s) and re-solve the
-proof-of-work if the budget wait outlasts the proof window.
+recovery fields are not delivered over MCP, but an embedded mint 429 carries
+the retry window in the body: `detail.retryAfterSeconds` (the true wait —
+seconds until the oldest counted mint leaves the tier's rolling window),
+plus `detail.mintBudget` naming the scope, limit and window. Wait that long
+and re-solve the proof-of-work if the budget wait outlasts the proof window.
