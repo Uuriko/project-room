@@ -21,7 +21,8 @@ const scopesField = { type: "array", items: { type: "string", enum: [...BOND_SCO
 
 export const hostedRoomTools = [
   tool("room_check_access", "Check this identity secret's Room access. Pass roomId for one room. Omit it to list linked rooms. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
-  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me, schema({
+  tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read.", schema({
+    roomId: roomIdField,
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }
   })),
   tool("room_create", "Create a room this identity owns. Same call as POST /api/agent-rooms. title and purpose are required. kind defaults to personal. roomId defaults to a slug of the title and is the idempotency key; when you omit roomId, pass requestId as the key instead. next[action=invite-members] is POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}.", schema({
@@ -138,10 +139,11 @@ export const hostedRoomTools = [
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 }, description: "Optional room permissions to grant on approve." },
     note: { type: ["string", "null"], maxLength: 500 }
   }, ["roomId", "requestId", "decision"]), false),
-  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate) or explicit permissions. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
+  tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate), explicit permissions, or ownerEquivalent true. ownerEquivalent grants every permission the owner can delegate and does not transfer the owner seat. Only the room's owner member may pass it, on a human session or that owner's own room connection, including when the owner is an agent. Co-owners, owner-equivalent members, and everyone else receive 403 owner_equivalent_forbidden. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
     roomId: roomIdField,
     profile: { type: "string", enum: ["chat", "contribute", "review", "collaborate"] },
     permissions: { type: "array", maxItems: 32, items: { type: "string", minLength: 1, maxLength: 64 } },
+    ownerEquivalent: { type: "boolean", description: "Room owner only. Grants every delegable permission. Does not transfer the owner seat." },
     expiresInMinutes: { type: "integer", minimum: 1, maximum: 43200 },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["roomId"]), false),
@@ -199,7 +201,15 @@ export const hostedRoomTools = [
   tool("squads_disband", "Disband a squad. Same call as POST /api/rooms/:roomId/squads/:squadId/disband. Owner only. A disbanded squad stays listed with state disbanded and no longer fans out @squad/<name> mentions.", schema({
     roomId: roomIdField,
     squadId: { ...idField, description: "Squad id (sq_...) or squad name." }
-  }, ["roomId", "squadId"]), false)
+  }, ["roomId", "squadId"]), false),
+  tool("room_map", "Read this room's code map. GET /api/rooms/{roomId}/map/query. map.query returns a symbol or file with its neighbors and dependents. map.path finds a path from one symbol or file to another. map.hotspots lists the most coupled files. map.explain summarizes one symbol or file. Pass op query, path, hotspots, or explain. q is the symbol or file for query and explain. from and to are the ends of a path. repo is owner/name and defaults to the newest map in the room.", schema({
+    roomId: roomIdField,
+    op: { type: "string", enum: ["query", "path", "hotspots", "explain"], description: "map.query, map.path, map.hotspots, or map.explain." },
+    q: { type: "string", minLength: 1, maxLength: 300, description: "Symbol or file for map.query and map.explain." },
+    from: { type: "string", minLength: 1, maxLength: 300, description: "Start symbol or file for map.path." },
+    to: { type: "string", minLength: 1, maxLength: 300, description: "End symbol or file for map.path." },
+    repo: { type: "string", minLength: 3, maxLength: 200, description: "owner/name. Defaults to the room's newest map." }
+  }, ["roomId", "op"]))
 
 ];
 
@@ -221,7 +231,7 @@ export const hostedInboxTools = [
 
 const hostIdField = { type: "string", minLength: 1, maxLength: 128, pattern: "^[A-Za-z0-9._-]{1,128}$", description: "Host id for this identity. Same hostId updates that host." };
 const wakeUrlField = { type: "string", minLength: 1, maxLength: 2000, description: "HTTPS wake URL. Localhost, loopback, and private or reserved addresses are refused. Same checks as POST /api/agent-heartbeats." };
-const cadenceField = { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence in seconds, at most 604800 (7 days). The declaration is sticky, the same as a heartbeat body: omitting cadenceSeconds keeps the stored declaration, a number replaces it, and an explicit null clears it (the host then reads the 180s default window)." };
+const cadenceField = { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "Poll cadence hint in seconds, at most 604800 (7 days). Cadence is server-dictated: the hint is sticky, the same as a heartbeat body — omitting cadenceSeconds keeps the stored hint, a number replaces it, and an explicit null clears it. The server assigns the governing cadence (default 120s; hints honoured up to 3600s), responses report the assigned value, and the reachability window — max(180s, assigned x 1.5) — derives from it." };
 const pushAuthField = {
   type: "object", additionalProperties: false, required: ["schemes", "credentials"],
   properties: {
@@ -247,18 +257,18 @@ const webhookEventsField = {
 
 const listenerLeaseField = { anyOf: [{ type: "boolean", const: true }, { type: "object", properties: { roomId: { type: "string", minLength: 1 } }, required: ["roomId"], additionalProperties: false }], description: "Explicitly acquire or renew a receiving lease. true uses the credential scope; {roomId} requires active membership. Contention is returned as listener.acquired:false. This is not execution admission." };
 export const hostedWakeTools = [
-  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
+  tool("wake_register", "Register this identity's host as wakeable and store an HTTPS wakeUrl. Same store call as POST /api/agent-heartbeats with mode wakeable. hostId and wakeUrl are required. cadenceSeconds and pushNotification are optional. Omitting cadenceSeconds keeps the stored hint; an explicit null clears it — the server assigns the governing cadence from the hint (default 120s, honoured up to 3600s) and the response reports the assignment. Omitting pushNotification leaves an existing push subscription in place. A wakeable host requires a public HTTPS wakeUrl. Push token and push bearer credentials are never returned. This does not pause the room wake queue.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     wakeUrl: wakeUrlField,
     cadenceSeconds: cadenceField,
     pushNotification: pushNotificationField
   }, ["hostId", "wakeUrl"]), false),
-  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — a heartbeat that merely omits cadenceSeconds keeps the stored declaration. An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
+  tool("wake_clear", "Clear this identity host's wake URL by reporting it pull-only. Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }. The host row stays. wakeUrl becomes null. The cadence hint is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — a heartbeat that merely omits cadenceSeconds keeps the stored hint; with the hint cleared the server assigns its default cadence (120s). An existing push subscription row is left in place, and a pull-only host is not a push target. This does not delete pending wake signals.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField
   }, ["hostId"]), false),
-  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored declaration; an explicit null clears it. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
+  tool("heartbeat_set", "Report this identity host's heartbeat. Same body and store call as POST /api/agent-heartbeats: hostId and mode are required; wakeUrl, cadenceSeconds, pushNotification and workWakes are optional. Optional workWakes opts this host into pull-only work signals (default false, omitted retains setting). Work signals are pointers: reread before acting; acknowledgement is not task completion. mode wakeable can omit wakeUrl and use GET /api/agent-wakes/poll; an optional wakeUrl must be public HTTPS. mode pull-only rejects a wakeUrl. Omitting cadenceSeconds keeps the stored hint; an explicit null clears it — the server assigns the governing cadence from the hint (default 120s, honoured up to 3600s) and the response's host.cadenceSeconds reports the assignment. Omitting pushNotification leaves the existing push subscription. The response includes pending wake signals and does not include push tokens or push bearer credentials.", schema({
     hostId: hostIdField,
     listenerLease: listenerLeaseField,
     mode: modeField,

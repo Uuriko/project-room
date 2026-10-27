@@ -57,6 +57,7 @@ function makeEscrow() {
   // The read path joins directory/unpublish/public-room tables; stub them.
   db.exec(`CREATE TABLE room_directory_settings (room_id TEXT PRIMARY KEY, discoverable INTEGER NOT NULL DEFAULT 0, public_receipts INTEGER NOT NULL DEFAULT 1);
     CREATE TABLE room_public_settings (room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE room_public_receipts_setting (room_id TEXT PRIMARY KEY, enabled INTEGER NOT NULL);
     CREATE TABLE public_unpublish (kind TEXT, target TEXT);
     CREATE TABLE public_rooms (slug TEXT PRIMARY KEY, title TEXT);`);
   return { escrow, db, store };
@@ -76,6 +77,10 @@ function settledLot() {
   escrow.finalizeBounty(ROOM, bounty.bountyId, {}); escrow.closeEpoch(ROOM, {});
   const lotId = db.prepare("SELECT lot_id FROM bounty_journal WHERE room_id=? AND bounty_id=? AND kind='payout' ORDER BY seq LIMIT 1")
     .get(ROOM, bounty.bountyId).lot_id;
+  // #3594: verification runs on the public shape, so the fixture records
+  // the owner's public-receipts opt-in (the room_public_receipts_setting
+  // mirror row) — without it the settled lot is private and unresolvable.
+  db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 1)").run(ROOM);
   return { db, store, lotId };
 }
 

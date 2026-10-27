@@ -47,18 +47,21 @@ for (const script of ["project-room", "project-room-staging"]) {
     assert.equal(metadata.compatibility_date, "2026-07-30");
     assert.ok(metadata.compatibility_flags.includes("nodejs_compat"));
     assert.equal(Object.hasOwn(metadata, "migrations"), false);
+    assert.equal(vars.ROOM_PROJECT_MAP_GRAPHIFY, "on");
+    assert.equal(vars.ROOM_PROJECT_MAP_REPO, "Uuriko/project-room");
     if (script === "project-room") {
       assert.deepEqual(room, { type: "durable_object_namespace", name: "ROOM", class_name: "ProjectRoom" });
       assert.equal(metadata.limits.cpu_ms, 30000);
       assert.equal(vars.ROOM_DEPLOYMENT, "production");
       assert.equal(vars.ROOM_GMAIL_ENABLED, "0");
+      assert.equal(vars.ROOM_PUBLIC_AGENT_PAGES, "0");
       assert.equal(vars.ROOM_GMAIL_PILOT_ONLY, "1");
       assert.equal(vars.ROOM_SECURITY_CONTACT, "potter@trydemigod.com");
     } else {
       assert.deepEqual(room, { type: "durable_object_namespace", name: "ROOM", class_name: "ProjectRoom", script_name: "project-room" });
       assert.equal(metadata.limits.cpu_ms, 1000);
       // The entry door serves production traffic, so it reports production (QA5R G-1).
-      assert.deepEqual(vars, { ROOM_ORIGIN: "https://room.trydemigod.com", ROOM_DEPLOYMENT: "production", ROOM_SERVICE_MODE: "cloudflare-production", ROOM_SECURITY_CONTACT: "potter@trydemigod.com" });
+      assert.deepEqual(vars, { ROOM_ORIGIN: "https://room.trydemigod.com", ROOM_DEPLOYMENT: "production", ROOM_SERVICE_MODE: "cloudflare-production", ROOM_SECURITY_CONTACT: "potter@trydemigod.com", ROOM_PROJECT_MAP_GRAPHIFY: "on", ROOM_PROJECT_MAP_REPO: "Uuriko/project-room" });
     }
   });
 }
