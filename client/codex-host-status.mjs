@@ -62,6 +62,10 @@ export function createCodexStatusWriter(directory, connection, { onError = () =>
       if (!["host_status", "host_readiness", "host_failure"].includes(event.type)) return;
       if (event.type === "host_status" && phases.has(event.status)) {
         record.phase = event.status;
+        if (event.status === "retrying_room") {
+          if (failureCodes.has(event.code)) record.failureCode = event.code;
+          else delete record.failureCode;
+        } else if (["watching_room", "protocol_qualified", "running", "settled"].includes(event.status)) delete record.failureCode;
         if (event.status === "protocol_qualified") record.protocol = "qualified";
         if (event.status === "recovery_pending") record.protocol = "unverified";
         if (typeof event.runId === "string" && event.runId.length <= 128) record.runId = event.runId;

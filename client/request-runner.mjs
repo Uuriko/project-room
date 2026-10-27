@@ -26,9 +26,10 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest }) {
+export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest, selectRequest }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
   if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
+  if (selectRequest !== undefined && typeof selectRequest !== "function") throw new Error("Execution selection must be a function");
   const checkSelection = request => {
     if (allowRequest && allowRequest(request) !== true)
       throw Object.assign(new Error("Requester is not enabled for this host"), { code: "requester_not_allowed" });
@@ -65,6 +66,9 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
     // idempotent command path, never a stale local assertion of current access.
     return deliver(prior);
   }
+  // Selection limits new execution, never recovery of this exact saved reply.
+  if (selectRequest && selectRequest(context.request) !== true)
+    throw Object.assign(new Error("Request is not selected for execution"), { code: "request_not_selected" });
   const messages = [...context.page.items];
   let pages = 1;
   while (context.page.hasMore) {
@@ -89,10 +93,14 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   // before recording a new intent, so unavailable tools cannot strand a request.
   await preflight?.();
   signal?.throwIfAborted();
+  if (selectRequest && selectRequest(context.request) !== true)
+    throw Object.assign(new Error("Request is not selected for execution"), { code: "request_not_selected" });
   // Preparation is only for new work: a saved answer must remain deliverable
   // even when its original execution backend is no longer available.
   if (execute.prepare) await execute.prepare({ signal });
   signal?.throwIfAborted();
+  if (selectRequest && selectRequest(context.request) !== true)
+    throw Object.assign(new Error("Request is not selected for execution"), { code: "request_not_selected" });
   const attemptId = randomUUID();
   const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id) VALUES (?,?)").run(id, attemptId).changes;
   if (!claimed) throw new Error("Another runner owns this attempt; reconcile before proceeding");
@@ -175,7 +183,7 @@ export function isRequestEligible(request, { owned, runState, hasPendingDelivery
   return runState !== "needs_attention" && hasPendingDelivery;
 }
 
-export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, onPoll = () => {} }) {
+export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, selectRequest, onPoll = () => {} }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
   let delay = intervalMs, connectionUnavailable = false, pendingStatement;
@@ -187,7 +195,8 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
       onPoll();
       cursor = evaluatedThrough;
       const owned = request => Object.hasOwn(runs, request.id);
-      const eligible = requests.filter(request => (!allowRequest || allowRequest(request) === true) && isRequestEligible(request, {
+      const eligible = requests.filter(request => (!allowRequest || allowRequest(request) === true)
+        && (!selectRequest || selectRequest(request) === true || owned(request) && Boolean(pending(request))) && isRequestEligible(request, {
         owned: owned(request),
         blocked: Object.hasOwn(blockedBy, request.id),
         runState: runs[request.id]?.state,
@@ -198,7 +207,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
         // A saved response may be retried only by its original local journal.
         // Another host's ownership is never a lease that can be stolen.
         if (owned(request) && !pending(request)) continue;
-        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest })); }
+        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest, selectRequest })); }
         catch (error) {
           if (error?.code === "host_isolation_unavailable") throw error;
           emit({ status: "needs_attention", requestMessageId: request.id });

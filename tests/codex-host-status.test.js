@@ -165,3 +165,17 @@ test("directed CLI preserves profile lock diagnosis without clearing the lock or
   assert.equal(readCodexHostStatus(f.journal).failureCode, "runtime_profile_locked");
   assert.equal(existsSync(lock), true);
 });
+
+
+test("retry diagnostics clear on recovery and never expose unknown service errors", t => {
+  const f = setup(t), directory = `${f.journal}.watch`, owner = new WatchJournal(directory);
+  const writer = createCodexStatusWriter(directory, { origin: "https://room.example", roomId: "room", memberId: "agent" });
+  t.after(() => { writer.close(); owner.close(); });
+  writer.event({ type: "host_status", status: "retrying_room", code: "runtime_profile_locked" });
+  assert.equal(readCodexHostStatus(f.journal).failureCode, "runtime_profile_locked");
+  writer.event({ type: "host_status", status: "protocol_qualified" });
+  assert.equal(readCodexHostStatus(f.journal).failureCode, undefined);
+  writer.event({ type: "host_status", status: "retrying_room", code: "PRIVATE-ERROR" });
+  assert.equal(readCodexHostStatus(f.journal).failureCode, undefined);
+  assert.doesNotMatch(readFileSync(join(directory, "status.json"), "utf8"), /PRIVATE-ERROR/);
+});

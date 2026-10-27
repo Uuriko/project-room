@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { validId } from "../src/events.js";
 import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -20,7 +21,7 @@ export async function main(argv = process.argv.slice(2)) {
   node scripts/run-codex-room.mjs --status-watch /absolute/journal.sqlite
   node scripts/run-codex-room.mjs --stop-watch /absolute/journal.sqlite
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch /absolute/journal.sqlite /absolute/runtime.json
-  ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch-requests /absolute/journal.sqlite /absolute/runtime.json MEMBER_ID[,MEMBER_ID...]
+  ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs --watch-requests /absolute/journal.sqlite /absolute/runtime.json MEMBER_ID[,MEMBER_ID...] [REQUEST_ID[,REQUEST_ID...]]
   ROOM_AGENT_CONFIG="/path/room" node scripts/run-codex-room.mjs RUN_ID /absolute/journal.sqlite /absolute/runtime.json
 
 Runtime JSON requires command (absolute Codex executable), cwd (real workspace), codexHome (dedicated private directory outside workspace and operator Codex home), policy {approvalPolicy:"never",sandbox:"read-only"|"workspace-write"}; optional model, requestTimeoutMs, turnTimeoutMs.
@@ -44,12 +45,15 @@ Normal invocation executes one already-created public Room assistant run assigne
   const requestWatch = argv[0] === "--watch-requests";
   const check = argv[0] === "--check" || preflight, watch = argv[0] === "--watch" || requestWatch;
   const [runId, journal, configPath] = check ? [null, null, argv[1]] : argv;
-  if (argv.length !== (check ? 2 : requestWatch ? 4 : 3) || !isAbsolute(configPath ?? "") || !check && (!runId || !isAbsolute(journal ?? "")))
+  if ((requestWatch ? ![4, 5].includes(argv.length) : argv.length !== (check ? 2 : 3)) || !isAbsolute(configPath ?? "") || !check && (!runId || !isAbsolute(journal ?? "")))
     throw new Error("Invalid arguments; use --help");
   const allowedRequesterIds = requestWatch ? argv[3].split(",") : undefined;
   if (requestWatch && (allowedRequesterIds.length > 20 || new Set(allowedRequesterIds).size !== allowedRequesterIds.length
     || allowedRequesterIds.some(id => !/^[A-Za-z0-9_-]{1,128}$/.test(id))))
     throw new Error("Choose 1 to 20 distinct requester member IDs");
+  const allowedRequestIds = requestWatch && argv.length === 5 ? argv[4].split(",") : undefined;
+  if (allowedRequestIds && (allowedRequestIds.length > 20 || new Set(allowedRequestIds).size !== allowedRequestIds.length
+    || !allowedRequestIds.every(validId))) throw new Error("Choose 1 to 20 distinct valid request IDs");
   const settings = validateCodexRuntimeConfig(JSON.parse(readFileSync(configPath, "utf8")));
   const connection = check ? null : agentConnectionFromEnvironment();
   // Native setup pins the visible room identity. Validate the connection that
@@ -75,7 +79,7 @@ Normal invocation executes one already-created public Room assistant run assigne
         statusWriter.event(event); console.log(JSON.stringify(event));
       };
       const supervise = requestWatch ? superviseCodexRequests : superviseCodexRoom;
-      await supervise({ connection, db, directory: `${journal}.watch`, cwd: settings.cwd, policy: settings.policy, allowedRequesterIds,
+      await supervise({ connection, db, directory: `${journal}.watch`, cwd: settings.cwd, policy: settings.policy, allowedRequesterIds, allowedRequestIds,
         signal: controller.signal, timeoutMs: settings.turnTimeoutMs, connectOnStart: true, emit,
         connect: async allowedThreadIds => {
           const transport = openCodexStdio(settings, { allowedThreadIds, onAttention: event => console.error(JSON.stringify(event)) });

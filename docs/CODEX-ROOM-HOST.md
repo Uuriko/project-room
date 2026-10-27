@@ -319,11 +319,30 @@ The allowlist authorizes use of the configured unattended runtime policy; it doe
 not expand Room permissions or grant unsandboxed execution. Choose only trusted
 requesters and an appropriate read-only or workspace-write configuration.
 
-The native host manifest accepts optional `allowedRequesterIds: ["MEMBER_ID"]`.
+Before enabling a peer with existing backlog, select the intended request explicitly.
+For one request, append its message ID as the final argument:
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/private/connection node scripts/run-codex-room.mjs \
+  --watch-requests /absolute/private/journal.sqlite /absolute/private/runtime.json \
+  REQUESTER_MEMBER_ID REQUEST_MESSAGE_ID
+```
+
+The optional final argument accepts 1–20 distinct Room request IDs separated by
+commas. Only those requests may start a model; older requests from the same
+requester stay queued. Omitting the argument permits all eligible formal requests
+from enabled requesters. An explicitly empty or invalid selection is refused.
+The exact saved reply from a previously owned attempt can still be delivered
+when selection narrows, without running the model again. Requester/recipient
+checks and the original reply basis still apply. Unknown execution outcomes
+continue to block new work until reconciled.
+
+The native host manifest accepts optional `allowedRequesterIds: ["MEMBER_ID"]`
+and, in directed mode, `allowedRequestIds: ["REQUEST_MESSAGE_ID"]`.
 Import that manifest through the existing host configuration, then explicitly
-enable receiving. The selected identity, receiver mode and requester list are bound
-to the saved receiving preference. A changed list cannot inherit automatic-start
-consent. Omit the field to retain the shared-assistant mode. The native status
+enable receiving. The selected identity, receiver mode, requester list and request selection are bound
+to the saved receiving preference. Changing or removing an explicit selection cannot inherit automatic-start
+consent. Connecting Mac tools preserves both selections. Omit the field to retain the shared-assistant mode. The native status
 identifies the selected mode; configuring directed requests does not change the
 room's selected shared assistant.
 
