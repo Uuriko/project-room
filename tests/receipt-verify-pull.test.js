@@ -98,6 +98,41 @@ test("GitHub unreachable or declining is partially verifiable, never failed", as
   }
 });
 
+// --- B1-5 pins (methods audit Phase B, mutant survivors RV9/RV10) ------------
+// Each test below is the audit's distinguishing case, landed unweakened:
+// it passes on the pristine verifier and fails on the named mutant.
+
+test("B1-5 F4 pin: GitHub declining (401/403/429) is named as declined, not a bare status", async t => {
+  // Mutant pinned: checkPullRequest 401 || 403 || 429 -> && (RV9). Status
+  // and verdict are unchanged under the mutant; only the detail loses the
+  // classification that names why the check did not run, degrading an
+  // auth/rate-limit signal to "GitHub answered <status>".
+  const { store, receiptId } = serveClaimRoom(t);
+  for (const status of [401, 403, 429]) {
+    const decliningFetch = async () => ({ status, ok: false, text: async () => "{}" });
+    const verification = await verify(store, receiptId, decliningFetch);
+    assert.equal(check(verification, "pull-request").status, "not-checked", `GitHub ${status}: not-checked`);
+    assert.match(check(verification, "pull-request").detail, /declined the re-check/,
+      `GitHub ${status}: the detail must classify the decline (rate limit or authorization)`);
+    assert.equal(verification.verdict, "partially-verifiable", `GitHub ${status}: verdict`);
+  }
+});
+
+test("B1-5 F5 pin: a GitHub body of exactly 65,536 chars is still read (body-cap boundary)", async t => {
+  // Mutant pinned: checkPullRequest text.length <= MAX_BODY_CHARS -> <
+  // (RV10). At exactly the cap the pristine code parses the body and the
+  // merged pull passes; the mutant discards it as unreadable.
+  const { store, receiptId } = serveClaimRoom(t);
+  const head = `{"merged":true,"state":"closed","merged_at":"2026-10-01T00:00:00Z","merge_commit_sha":"${"a".repeat(40)}","pad":"`;
+  const tail = `"}`;
+  const body = head + "x".repeat(65_536 - head.length - tail.length) + tail;
+  assert.equal(body.length, 65_536, "the fixture body sits exactly at the cap");
+  const atCapFetch = async () => ({ status: 200, ok: true, text: async () => body });
+  const verification = await verify(store, receiptId, atCapFetch);
+  assert.equal(check(verification, "pull-request").status, "pass",
+    "a body at exactly the cap must be read, not discarded");
+});
+
 test("a work item's evidence pull is reported as fact, never scored as a merge claim", async t => {
   const { store, key } = serveClaimRoom(t);
   const command = (k, id, type, data) => store.command(k, "alpha", { id, type, data });
