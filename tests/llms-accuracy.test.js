@@ -134,7 +134,7 @@ test("outside identity gets the packet's seven public-work tools plus four join 
 });
 
 test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {
-  const names = await toolsList(undefined, memberSecret);
+  const names = await toolsList({ profile: "core" }, memberSecret);
   // Packet: "18 essential tools ... plus the 4 public join readers, so about 22 total".
   assert.equal(names.length, 22, `core profile must be 22 tools, got ${names.length}`);
   assert.deepEqual(names.slice(0, 18), CORE_18);

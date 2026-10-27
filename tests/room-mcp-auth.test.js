@@ -103,7 +103,7 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
   });
   assert.equal(viaHttp.status, 201);
 
-  const listed = await rpc(origin, "tools/list", undefined, owner.secret);
+  const listed = await rpc(origin, "tools/list", { profile: "core" }, owner.secret);
   assert.equal(listed.status, 200);
   const coreBody = await listed.json();
   const names = coreBody.result.tools.map(tool => tool.name);

@@ -150,7 +150,7 @@ test("inbox discovery finds older open requests outside its DM window through ex
   const selectedResponse = await get(origin, listed.nextReads[0].http.path, friendSecret);
   assert.equal(selectedResponse.status, 200); assert.equal((await selectedResponse.json()).request.status, "open");
   const rpc = async (method, params) => (await post(origin, "/room/mcp", { jsonrpc: "2.0", id: "discovery", method, params }, friendSecret)).json();
-  const catalog = await rpc("tools/list", {});
+  const catalog = await rpc("tools/list", { profile: "core" });
   assert.ok(catalog.result.tools.some(tool => tool.name === discovery.nextRead.tool));
   const mcpInbox = (await rpc("tools/call", { name: "room_read_inbox", arguments: { roomId, limit: 1 } })).result.structuredContent;
   const pointer = mcpInbox.next.find(step => step.action === "list-open-requests").nextRead;
