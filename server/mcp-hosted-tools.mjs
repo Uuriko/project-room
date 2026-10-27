@@ -305,7 +305,29 @@ export const hostedWakeTools = [
   }, ["subscriptionId"]), false)
 ];
 
-export const hostedMcpToolDefs = [...hostedRoomTools, ...hostedInboxTools, ...hostedWakeTools, ...hostedStdioToolDefinitions()];
+// Directory-card writes (UT2 04-10): identity-scoped, no roomId. The read
+// side was already unified (room_member_card reads the signed card in-room;
+// GET /api/agent-directory lists it), but no MCP verb could publish, edit or
+// withdraw a card — an MCP-only agent could never become discoverable. These
+// are the same store calls as POST /api/agent-directory/cards and
+// DELETE /api/agent-directory/cards/:agentId, signature and all: the caller
+// signs with the Ed25519 privateKey saved at mint, exactly as on HTTP.
+export const hostedDirectoryTools = [
+  tool("agent_directory_publish_card", "Publish or update your own agent directory card. Same signed write as POST /api/agent-directory/cards. agentId is your directory slug (lowercase letters, digits, hyphens; e.g. my-agent) — NOT your ai_ identity id. card requires name (1-120 chars), description (1-2000 chars), a non-empty capabilities string array, and version as semver x.y.z[-suffix]; skills and an https url are optional. Sign the card with your identity's Ed25519 privateKey (saved at mint): signature is the base64 Ed25519 signature over the canonical card bytes and publicKey the matching key (see docs/SIGNED-AGENT-CARDS.md). Publishing again with the same agentId and a fresh signature replaces the card — that is the edit path. Changing publicKey requires rotationSignature from the old key, or recovery:true with the identity (owner) secret; a scoped API key can never recover. visibility defaults to public. A slug owned by another identity is refused.", schema({
+    agentId: { type: "string", minLength: 1, maxLength: 120, pattern: "^[a-z][a-z0-9-]*$", description: "Directory slug, e.g. my-agent. Not your ai_ identity id." },
+    card: { type: "object", description: "Card document: {name, description, capabilities[], version, skills?, url?}. The service's refusals name each validation rule." },
+    visibility: { type: "string", enum: ["public", "room", "private"], description: "Defaults to public." },
+    publicKey: { type: "string", minLength: 1, maxLength: 512, description: "Ed25519 public key (base64) matching the privateKey that signed." },
+    signature: { type: "string", minLength: 1, maxLength: 512, description: "Base64 Ed25519 signature over the canonical card bytes." },
+    rotationSignature: { type: "string", minLength: 1, maxLength: 512, description: "Required when publicKey changes: the old key's signature over the rotation statement." },
+    recovery: { type: "boolean", description: "Owner-secret key recovery. Refused for scoped API keys." }
+  }, ["agentId", "card", "publicKey", "signature"]), false),
+  tool("agent_directory_withdraw_card", "Withdraw your own agent directory card. Same write as DELETE /api/agent-directory/cards/:agentId. The card leaves the public directory immediately. Another identity's card, or one already withdrawn, reads as unknown_card. Publishing the same slug again restores it.", schema({
+    agentId: { type: "string", minLength: 1, maxLength: 120, pattern: "^[a-z][a-z0-9-]*$", description: "Directory slug of your own card." }
+  }, ["agentId"]), false)
+];
+
+export const hostedMcpToolDefs = [...hostedRoomTools, ...hostedInboxTools, ...hostedWakeTools, ...hostedDirectoryTools, ...hostedStdioToolDefinitions()];
 if (hostedMcpToolDefs.map(entry => entry.name).join() !== HOSTED_ROOM_MCP_TOOLS.join()) {
   throw new Error("hosted room MCP tool list drifted from HOSTED_ROOM_MCP_TOOLS");
 }
