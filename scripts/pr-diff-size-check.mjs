@@ -61,12 +61,116 @@ export function resolveThreshold() {
   return MAX_DIFF_LINES;
 }
 
+// Git C-quotes a numstat path when it is not plain ASCII. Octal escapes are
+// UTF-8 bytes. A still-quoted generated file does not match dist/ or .min.js,
+// so the size gate counts lines that should be excluded. Fail-safe: a token
+// that does not decode cleanly comes back unchanged, so it is tested as-is
+// and counts — decoding can only ever correct a path git actually quoted.
+function unquoteGitPath(token) {
+  if (token.length < 2 || token[0] !== '"' || token.at(-1) !== '"') return token;
+  const body = token.slice(1, -1);
+  const bytes = [];
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] !== "\\") {
+      const code = body.charCodeAt(i);
+      if (code > 0xff) return token;
+      bytes.push(code);
+      i += 1;
+      continue;
+    }
+    const next = body[i + 1];
+    if (next == null) return token;
+    if (next === "n") { bytes.push(0x0a); i += 2; continue; }
+    if (next === "t") { bytes.push(0x09); i += 2; continue; }
+    if (next === "r") { bytes.push(0x0d); i += 2; continue; }
+    if (next === "\\" || next === '"') { bytes.push(next.charCodeAt(0)); i += 2; continue; }
+    if (next >= "0" && next <= "7") {
+      let oct = "";
+      let j = i + 1;
+      while (oct.length < 3 && j < body.length && body[j] >= "0" && body[j] <= "7") {
+        oct += body[j];
+        j += 1;
+      }
+      const value = Number.parseInt(oct, 8);
+      if (!Number.isInteger(value) || value > 0xff) return token;
+      bytes.push(value);
+      i = j;
+      continue;
+    }
+    return token;
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+// Split a numstat path field on the rename arrow ` => ` where it appears
+// outside C-quotes; quoted sides keep their quotes for unquoteGitPath.
+function splitRenameArrow(field) {
+  const sides = [];
+  let current = "";
+  let quoted = false;
+  for (let i = 0; i < field.length; i += 1) {
+    const ch = field[i];
+    if (quoted && ch === "\\") {
+      current += ch + (field[i + 1] ?? "");
+      if (field[i + 1] !== undefined) i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      quoted = !quoted;
+      current += ch;
+      continue;
+    }
+    if (!quoted && field.startsWith(" => ", i)) {
+      sides.push(current);
+      current = "";
+      i += 3;
+      continue;
+    }
+    current += ch;
+  }
+  sides.push(current);
+  return sides;
+}
+
+// Brace rename form: `prefix{old => new}suffix` shares the prefix and suffix,
+// so the destination is prefix + new + suffix. Returns null when the two
+// halves are not brace fragments.
+function braceDestination(left, right) {
+  const open = left.lastIndexOf("{");
+  const close = right.indexOf("}");
+  if (open === -1 || close === -1) return null;
+  return left.slice(0, open) + right.slice(0, close) + right.slice(close + 1);
+}
+
+// The path the gate must test is the destination: a generated file renamed
+// into source still counts, and a source file renamed into dist/ does not.
+// Rename numstat is `old => new`, with each side quoted on its own, or the
+// brace form above (one token, C-quoted whole when it is not plain ASCII).
+function numstatDestination(field) {
+  const sides = splitRenameArrow(field);
+  if (sides.length > 1) {
+    const left = unquoteGitPath(sides[0]);
+    const right = unquoteGitPath(sides.at(-1).trim());
+    return braceDestination(left, right) ?? right;
+  }
+  const path = unquoteGitPath(sides[0].trim());
+  // Whole-token-quoted brace form: the arrow sat inside the quotes, so the
+  // split above never saw it; it is visible now the token is decoded.
+  const arrow = path.indexOf(" => ");
+  if (arrow !== -1) {
+    return braceDestination(path.slice(0, arrow), path.slice(arrow + 4)) ?? path;
+  }
+  return path;
+}
+
 function countedLines(numstat) {
   let total = 0;
   for (const line of String(numstat).split("\n")) {
     const parts = line.split("\t");
     if (parts.length < 3) continue;
-    const [added, removed, path] = parts;
+    const [added, removed] = parts;
+    const path = numstatDestination(parts.slice(2).join("\t"));
     if (isExcluded(path)) continue;
     const a = Number.parseInt(added, 10);
     const b = Number.parseInt(removed, 10);

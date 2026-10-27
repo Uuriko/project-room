@@ -1,3 +1,4 @@
+import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
 
@@ -129,7 +130,7 @@ function roomProjection(db, roomId) {
   // request is cheaper than pinning its object graph in memory.
   if (bytes.length > PROJECTION_MEMO_MAX_BYTES) {
     try {
-      const projection = JSON.parse(bytes);
+      const projection = hydrateWorkItems(db, roomId, JSON.parse(bytes));
       return projection && typeof projection === "object" ? projection : null;
     } catch { return null; }
   }
@@ -138,7 +139,7 @@ function roomProjection(db, roomId) {
   if (cached && cached.hash === hash) return cached.projection;
   let projection = null;
   try {
-    projection = JSON.parse(bytes);
+    projection = hydrateWorkItems(db, roomId, JSON.parse(bytes));
     if (!projection || typeof projection !== "object") projection = null;
   } catch { projection = null; }
   if (!projectionMemo.has(roomId) && projectionMemo.size >= PROJECTION_MEMO_MAX_ROOMS) {

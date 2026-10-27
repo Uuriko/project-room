@@ -89,7 +89,6 @@ test("message commands write one row per message and keep the posting sequence",
   const reply = f.send(f.human, T.MESSAGE_POSTED, { messageId: "reply", body: "Reply", replyToId: "topic" });
   createdAt.set("reply", reply.sequence);
   f.send(f.human, T.MESSAGE_EDITED, { messageId: "topic", body: "Topic revised", expectedMessageRevision: 0 });
-  f.send(f.human, T.MESSAGE_REACTION_SET, { messageId: "topic", reaction: "like", active: true });
   f.send(f.human, T.MESSAGE_PINNED, { messageId: "topic" });
   let state = f.store.room("commons").state;
   assert.equal(state.messages.find(message => message.id === "topic").body, "Topic revised");
@@ -180,7 +179,7 @@ test("a seeded command sequence keeps one row aligned with each projection messa
       f.send(f.human, T.MESSAGE_EDITED, { messageId, body: `edited ${i}`, expectedMessageRevision: revision.get(messageId) });
       revision.set(messageId, revision.get(messageId) + 1);
     } else if (roll < 0.75) {
-      f.send(f.human, T.MESSAGE_REACTION_SET, { messageId: pick(alive), reaction: "like", active: next() < 0.5 });
+      createdAt.set(`extra-${i}`, f.send(f.human, T.MESSAGE_POSTED, { messageId: `extra-${i}`, body: `extra ${i}` }).sequence);
     } else if (roll < 0.9) {
       const messageId = pick(alive);
       const pinned = f.store.room("commons").state.pins?.some(pin => pin.messageId === messageId);
@@ -337,7 +336,7 @@ test("changing or replying to an archived message is refused with a clear error,
   const code = fn => { try { fn(); } catch (error) { return error.code ?? error.message; } return null; };
   const before = f.store.room("commons").sequence;
   assert.equal(code(() => f.send(f.human, T.MESSAGE_EDITED, { messageId: "old-pub", body: "x", expectedMessageRevision: 0 })), "message_archived");
-  assert.equal(code(() => f.send(f.human, T.MESSAGE_REACTION_SET, { messageId: "old-pub", reaction: "like", active: true })), "message_archived");
+  assert.equal(code(() => f.send(f.human, T.POLL_VOTED, { messageId: "old-pub", option: 0, active: true })), "message_archived");
   assert.equal(code(() => f.send(f.human, T.MESSAGE_PINNED, { messageId: "old-pub" })), "message_archived");
   assert.equal(code(() => f.send(f.human, T.MESSAGE_POSTED, { messageId: "reply-1", body: "r", replyToId: "old-pub" })), "message_archived");
   assert.equal(code(() => f.send(f.human, T.MESSAGE_POSTED, { messageId: "reply-2", body: "r", replyToId: "old-dm" })), "message_archived");
@@ -459,9 +458,9 @@ test("unpinning or reacting to an archived DM as a non-party confirms nothing an
   assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
   assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old-dm"), false);
   const before = f.store.room("commons").sequence;
-  for (const type of [T.MESSAGE_UNPINNED, T.MESSAGE_PINNED, T.MESSAGE_REACTION_SET]) {
+  for (const type of [T.MESSAGE_UNPINNED, T.MESSAGE_PINNED, T.POLL_VOTED]) {
     let code = null;
-    try { f.send(f.stranger, type, { messageId: "old-dm", reaction: "like", active: true }); } catch (error) { code = error.code ?? error.message; }
+    try { f.send(f.stranger, type, { messageId: "old-dm", option: 0, active: true }); } catch (error) { code = error.code ?? error.message; }
     assert.ok(code, `${type} is refused`);
     assert.notEqual(code, "message_archived", `${type} does not confirm the archived DM`);
   }
