@@ -32,9 +32,10 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
 
 ### Temporary SQL cost diagnosis
 
-The production Durable Object has `ROOM_SQL_COST_LOG=1` for the bounded SQL-cost
-investigation. The entry Worker and staging omit it and remain off. After the
-qualified release, collect a short ordinary-traffic sample of `room.sql_cost`,
+The production Durable Object defaults to `ROOM_SQL_COST_LOG=0`. The entry Worker
+and staging omit it and remain off. For a bounded investigation, explicitly set
+production to `1`, qualify and deploy that revision, then collect a short
+ordinary-traffic sample of `room.sql_cost`,
 group by `scopeKind` and `operation`, and retain `unscoped`, `late` and unknown
 counter totals. The records contain fixed categories and numeric counters, never
 SQL text, bindings, request paths or identity values. Existing request logs are
