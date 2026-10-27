@@ -15,16 +15,21 @@ import { WatchJournal } from "../client/watch-journal.mjs";
 import { acquireCodexProfileLock, validateCodexRuntimeConfig } from "../client/codex-stdio.mjs";
 import { codexRuntimeFingerprint, hasUnresolvedRequestIntents, reconcileCancelledCodexRequest } from "../client/request-reconciliation.mjs";
 
-async function fixture(t) {
+async function fixture(t, roomTools = false) {
   const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const root = realpathSync(f.directory), journal = join(root, "requests.sqlite"), db = openRequestJournal(journal);
   const cwd = join(root, "workspace"), codexHome = join(root, "profile");
   mkdirSync(cwd, { mode: 0o700 }); mkdirSync(codexHome, { mode: 0o700 });
   const config = validateCodexRuntimeConfig({ command: realpathSync(process.execPath), cwd, codexHome, policy: { approvalPolicy: "never", sandbox: "read-only" } });
-  const runtimeFingerprint = codexRuntimeFingerprint(config);
   const owner = new WatchJournal(journal + ".watch"); owner.health("stopped"); owner.close();
   const connection = { origin: `http://127.0.0.1:${server.address().port}`, roomId: "commons", memberId: "producer", token: f.keys.producer };
+  if (roomTools) {
+    const directory = join(root, "connection");
+    saveAgentConnection(directory, { version: 1, ...connection });
+    config.roomTools = { directory, scope: { origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId } };
+  }
+  const runtimeFingerprint = codexRuntimeFingerprint(config);
   let sequence = 0;
   const open = () => {
     const id = `question-${++sequence}`;
@@ -143,9 +148,8 @@ test("read-only journal and failed authenticated reads never append a resolution
 
 
 test("operator CLI reports reconciliation and refuses legacy proof without disclosing errors", async t => {
-  const f = await fixture(t), attempt = await f.failAttempt(); f.cancel(attempt.requestMessageId);
+  const f = await fixture(t, true), attempt = await f.failAttempt(); f.cancel(attempt.requestMessageId);
   const directory = join(dirname(f.journal), "connection"), configPath = join(dirname(f.journal), "runtime.json");
-  saveAgentConnection(directory, { version: 1, ...f.connection });
   writeFileSync(configPath, JSON.stringify(f.config), { mode: 0o600 });
   const env = { ...process.env, ROOM_AGENT_CONFIG: directory };
   for (const name of ["ROOM_AGENT_ORIGIN", "ROOM_AGENT_ROOM", "ROOM_AGENT_TOKEN", "ROOM_AGENT_MEMBER"]) delete env[name];
@@ -189,4 +193,15 @@ for (const malformed of ["missing-cursor", "negative-cursor", "unsafe-cursor", "
   await assert.rejects(f.reconcile(attempt, { connection }), { code: "reconciliation_cancellation_required" });
   assert.equal(f.db.prepare("SELECT count(*) n FROM codex_request_audit WHERE phase='resolved'").get().n, 0);
   assert.equal(hasUnresolvedRequestIntents(f.db, f.connection, f.runtimeFingerprint), true);
+});
+
+test("adding Room tools cannot reuse proof from a runtime without those tools", async t => {
+  const f = await fixture(t), attempt = await f.failAttempt(); f.cancel(attempt.requestMessageId);
+  const directory = join(dirname(f.journal), "room-tool-connection");
+  saveAgentConnection(directory, { version: 1, ...f.connection });
+  const scope = { origin: f.connection.origin, roomId: f.connection.roomId, memberId: f.connection.memberId };
+  const config = validateCodexRuntimeConfig({ ...f.config, roomTools: { directory, scope } });
+  assert.notEqual(codexRuntimeFingerprint(config), f.runtimeFingerprint);
+  await assert.rejects(f.reconcile(attempt, { config }), { code: "reconciliation_binding_mismatch" });
+  assert.deepEqual(f.db.prepare("SELECT * FROM request_runs WHERE id=?").get(attempt.row.id), attempt.row);
 });

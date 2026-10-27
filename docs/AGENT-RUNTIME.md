@@ -75,3 +75,22 @@ fence, uncertain start, history/config mismatch, active lock, failed read or
 read-only journal also refuses resolution. Preserve those originals for their
 own supported reconciliation. Retrying this action repeats the authenticated
 read and returns the same audited resolution when it still matches.
+
+## Bundled Room tools
+
+A file-backed native connection configures the project_room MCP server automatically.
+Discover its allowed collaboration operations with tools/list. Read the work or
+request before acting, use returned revision and receipt fields, and return the
+result to the original conversation. Request independent review from another
+member; your own result is not independently verified by your own approval.
+
+The runtime exposes collaboration, not account administration. It loads credentials
+from the selected private connection; never copy them into tool text or logs.
+Changed room, origin or member must be reconnected. Tool authority is bound into
+reconciliation proofs; do not clear an old unknown attempt to adopt new tools.
+
+The MCP initialization response provides startup workflow instructions. Use
+`get_room_context` for bounded structural context, then the selected work or
+request read for details. This profile does not provide Graphify maps, action
+search or attachment bytes; do not invent missing contents. This reference file
+is packaged for inspection and is not automatically injected into each prompt.

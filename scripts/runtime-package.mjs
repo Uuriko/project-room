@@ -62,6 +62,7 @@ optional.push("src/inbox-client.js", "src/inbox-ui.js", "src/inbox-quarantine-ui
   "src/account-setup-ui.js", "src/gmail-ui.js", "src/inbox-send-ui.js");
 optional.push("scripts/build-ui-strings.mjs", "src/strings.js", "strings/en.js", "strings/en.json");
 optional.push("client/work-brief.mjs");
+optional.push("client/runtime-room-tools.mjs", "scripts/runtime-room-mcp.mjs");
 optional.push("server/public-work-claims.mjs", "server/public-work-claim-fence.mjs", "client/public-work-claims.mjs");
 optional.push("server/public-work-reviews.mjs", "server/mcp-public-work.mjs", "server/public-work-successors.mjs");
 optional.push("server/public-work-settlement.mjs"); // First Shift settlement rail (imported by server/store.mjs, server/public-work-claims.mjs, server/public-work-reviews.mjs)

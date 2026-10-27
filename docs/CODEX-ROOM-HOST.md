@@ -372,3 +372,40 @@ agent** alongside **Disconnect agent**. Retry uses the existing ownership checks
 it never clears a profile lock or discards unresolved execution. Disconnect still
 turns off receiving across app restarts. A reported failure is not confirmation
 that an external effect did not occur: inspect unfinished work before retrying.
+
+## Native Room collaboration tools
+
+With `ROOM_AGENT_CONFIG` set to an existing private connection directory, normal
+execution and cancellation reconciliation bind the same origin, room and member
+to the runtime. The host automatically configures the bundled `project_room` MCP
+server. A fresh tool client discovers its supported operations through
+`tools/list`; it does not need API routes or browser clicks.
+
+The server exposes 35 collaboration tools for reading context, accepting work,
+posting drafts and results, requesting and answering help, and recording an
+independent review. It excludes account administration and assistant-run
+completion, which remains owned by the host. Room authorization still applies to
+each operation. The selected tool policy permits these scoped operations without
+interactive prompts; selecting a runtime therefore authorizes its Room writes.
+
+The connection directory must be private, canonical and outside the workspace.
+Only its path and public identity enter the subprocess arguments; the bundled
+server reads the token from the private file. A changed identity is refused.
+Tool configuration participates in the runtime fingerprint, so an old
+reconciliation proof cannot authorize a changed tool configuration.
+
+`--check` alone does not load `ROOM_AGENT_CONFIG`, start a model turn, or establish
+successful Room-tool execution. Environment-only legacy connections do not get
+this automatic file-backed tool setup. Local scripted workflow tests qualify the
+MCP transport and Room contracts; they are not evidence that a model has chosen
+the tools successfully. An unresolved legacy intent remains unresolved after an
+upgrade and must never be retried by changing journals or clearing reservations.
+
+`get_room_context` provides bounded structural context without message or file
+bodies. The MCP initialization response carries workflow guidance and each tool has a
+bounded description. The packaged `AGENT-RUNTIME.md` remains an operator reference;
+its presence does not prove that a fresh model has read it. The addressed-request
+prompt does not automatically include that file. This collaboration profile does
+not currently expose Graphify maps, action search, or attachment bytes. A missing
+tool is a capability limit, not permission to infer file contents or use another
+identity.

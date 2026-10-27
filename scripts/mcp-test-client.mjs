@@ -1,8 +1,11 @@
 // Test harness, not an AI host integration or a production dependency.
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-export async function openMcpTestClient(configDirectory, { attentionDirectory, attentionVersion } = {}) {
-  const child = spawn(process.execPath, [fileURLToPath(new URL("./agent-mcp.mjs", import.meta.url))], {
+export async function openMcpTestClient(configDirectory, { attentionDirectory, attentionVersion, runtimeScope, cwd } = {}) {
+  const args = runtimeScope
+    ? [fileURLToPath(new URL("./runtime-room-mcp.mjs", import.meta.url)), configDirectory, JSON.stringify(runtimeScope)]
+    : [fileURLToPath(new URL("./agent-mcp.mjs", import.meta.url))];
+  const child = spawn(process.execPath, args, { cwd,
     env: { ROOM_AGENT_CONFIG: configDirectory, ...(attentionDirectory === undefined ? {} : { ROOM_AGENT_ATTENTION_DIR: attentionDirectory }),
       ...(attentionVersion === undefined ? {} : { ROOM_AGENT_ATTENTION_VERSION: String(attentionVersion) }) }, stdio: ["pipe", "pipe", "pipe"]
   });
@@ -26,7 +29,9 @@ export async function openMcpTestClient(configDirectory, { attentionDirectory, a
       child.stdin.write(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n");
     });
   };
-  const initialized = await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "room-protocol-exercise", version: "1" } });
+  let initialized;
+  try { initialized = await request("initialize", { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "room-protocol-exercise", version: "1" } }); }
+  catch (error) { child.kill("SIGTERM"); await stopped; throw error; }
   notify("notifications/initialized");
   return { initialized, request, call: (name, args = {}) => request("tools/call", { name, arguments: args }),
     close: async () => { child.stdin.end(); await stopped; return { diagnostics }; } };
