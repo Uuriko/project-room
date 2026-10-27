@@ -137,6 +137,20 @@ function autolinkDueAt(store, now) {
   return now;
 }
 
+// The claim-prs job wakes for any of its three probes, so its next due
+// time is the EARLIEST finite probe time — not the first non-null one.
+// A ?? chain here let a future linked-PR poll suppress an immediate
+// autolink due time (and a past stale-sweep due time) behind it.
+// Non-finite probe results are ignored; all-null stays null.
+function earliestDueAt(...values) {
+  let earliest = null;
+  for (const value of values) {
+    if (!Number.isFinite(value)) continue;
+    if (earliest == null || value < earliest) earliest = value;
+  }
+  return earliest;
+}
+
 function backfillPending(store) {
   const row = read(store, "SELECT done FROM public_read_model_backfill WHERE id=1");
   if (!row) return true;
@@ -400,7 +414,7 @@ export const JOBS = Object.freeze([
       return claimDueAt(store, now) != null || autolinkDueAt(store, now) != null || staleSweepDueAt(store, now) != null;
     },
     disabledReason: () => "No open pull request or stale board sweep is waiting",
-    nextDueAt: (store, now) => claimDueAt(store, now) ?? autolinkDueAt(store, now) ?? staleSweepDueAt(store, now),
+    nextDueAt: (store, now) => earliestDueAt(claimDueAt(store, now), autolinkDueAt(store, now), staleSweepDueAt(store, now)),
     async run(store, ctx) {
       if (ctx.room?.refreshClaimPullRequests) return ctx.room.refreshClaimPullRequests();
       const out = await syncClaimPullRequests(store, { env: ctx.env, deadline: ctx.deadline });

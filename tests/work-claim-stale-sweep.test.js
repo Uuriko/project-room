@@ -225,3 +225,71 @@ test("a backlog drains one bounded batch per sweep interval under the tick", asy
   assert.equal(store.workClaims.list("commons").filter(item => item.state === "closed").length, STALE_SWEEP_BATCH + 5,
     "repeat ticks close nothing twice");
 });
+
+// claim-prs nextDue (consultation finding, 2026-10-26): the job's next due
+// time used to be claimDueAt ?? autolinkDueAt ?? staleSweepDueAt, so the
+// FIRST non-null probe won instead of the earliest. A future linked-PR poll
+// therefore suppressed an immediate autolink due time (and a past stale
+// sweep). The next due time is the earliest finite time across all three
+// probes; null when none of them is waiting.
+async function claimPrsStore(t, { claimPollAt = null, autolink = false, staleCreatedAt = null } = {}) {
+  const { store } = await roomStore(t);
+  if (staleCreatedAt != null) {
+    store.workClaims.configure("commons", { staleSweep: true });
+    store.workClaims.set("commons", createWork({ id: "stale" }, { now: staleCreatedAt, agentId: "alice" }));
+  }
+  if (claimPollAt != null) {
+    const linked = createWork({
+      id: "linked",
+      pullRequest: { url: "https://github.com/Uuriko/project-room/pull/1", nextPollAt: claimPollAt },
+    }, { now: NOW - DAY, agentId: "alice" });
+    store.workClaims.set("commons", claimWork(linked, "alice", { now: NOW - DAY, leaseHours: null }));
+  }
+  if (autolink) {
+    const unlinked = createWork({ id: "unlinked", repo: "Uuriko/project-room" }, { now: NOW - DAY, agentId: "alice" });
+    store.workClaims.set("commons", claimWork(unlinked, "alice", { now: NOW - DAY, leaseHours: null }));
+  }
+  return store;
+}
+
+const claimPrsNextDue = store => jobNextDue(jobByName("claim-prs"), store, NOW, undefined);
+
+test("claim-prs nextDue: a future claim poll does not suppress an immediate autolink due time", async t => {
+  const store = await claimPrsStore(t, { claimPollAt: NOW + DAY, autolink: true, staleCreatedAt: NOW - DAY });
+  assert.equal(claimPrsNextDue(store), NOW,
+    "autolink is due now; the future linked-PR poll and the future stale sweep must not delay it");
+});
+
+test("claim-prs nextDue: the claim poll wins when it is the earliest of the three", async t => {
+  const past = await claimPrsStore(t, { claimPollAt: NOW - 1000, autolink: true, staleCreatedAt: NOW - DAY });
+  assert.equal(claimPrsNextDue(past), NOW - 1000, "a past claim poll beats an immediate autolink");
+  const future = await claimPrsStore(t, { claimPollAt: NOW + 1000, staleCreatedAt: NOW - DAY });
+  assert.equal(claimPrsNextDue(future), NOW + 1000, "a near claim poll beats a far stale sweep");
+});
+
+test("claim-prs nextDue: the stale sweep wins when it is the earliest of the three", async t => {
+  const store = await claimPrsStore(t, { claimPollAt: NOW + DAY, autolink: true, staleCreatedAt: OLD });
+  assert.equal(claimPrsNextDue(store), NOW - DAY,
+    "the stale item's dormancy instant (OLD + STALE_UNCLAIMED_DAYS) is already past");
+});
+
+test("claim-prs nextDue: ties resolve to the shared due time", async t => {
+  const claimAutolink = await claimPrsStore(t, { claimPollAt: NOW, autolink: true });
+  assert.equal(claimPrsNextDue(claimAutolink), NOW, "claim poll tied with autolink");
+  const staleDue = NOW - DAY + STALE_UNCLAIMED_DAYS * DAY;
+  const claimStale = await claimPrsStore(t, { claimPollAt: staleDue, staleCreatedAt: NOW - DAY });
+  assert.equal(claimPrsNextDue(claimStale), staleDue, "claim poll tied with the stale sweep");
+  const autolinkStale = await claimPrsStore(t, { autolink: true, staleCreatedAt: NOW - STALE_UNCLAIMED_DAYS * DAY });
+  assert.equal(claimPrsNextDue(autolinkStale), NOW, "autolink tied with the stale sweep");
+});
+
+test("claim-prs nextDue: a single waiting probe supplies the due time, and none waiting stays null", async t => {
+  const claimOnly = await claimPrsStore(t, { claimPollAt: NOW + DAY });
+  assert.equal(claimPrsNextDue(claimOnly), NOW + DAY);
+  const autolinkOnly = await claimPrsStore(t, { autolink: true });
+  assert.equal(claimPrsNextDue(autolinkOnly), NOW);
+  const staleOnly = await claimPrsStore(t, { staleCreatedAt: NOW - DAY });
+  assert.equal(claimPrsNextDue(staleOnly), NOW - DAY + STALE_UNCLAIMED_DAYS * DAY);
+  const { store: empty } = await roomStore(t);
+  assert.equal(claimPrsNextDue(empty), null, "all three probes null stays null");
+});
