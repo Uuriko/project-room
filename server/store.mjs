@@ -49,6 +49,7 @@ import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from ".
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, syncMessageRows, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessage, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
+import { maybeAppendRoomEventOutbox, maybeAppendRoomSnapshotOutbox, outboxEnabledFromEnv } from "./directory-outbox.mjs";
 import { historyFloor as readHistoryFloor, messageInHistory, rowInHistory, indexMessages as indexHistoryMessages } from "./history-visibility.mjs"; // PRIV-2
 import { migrateRoomLifecycleV28, verifyRoomLifecycle, refuseArchivedWrite, createAccountRoom, accountRoomEntry, ACCOUNT_ROOM_SELECT, archivedAtOf } from "./room-lifecycle.mjs";
 import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema } from "./share-links.mjs";
@@ -1360,9 +1361,14 @@ class ProjectionCache {
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
-    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", workItemBoardBackfill = "auto" } = {}) {
+    verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", workItemBoardBackfill = "auto",
+    directoryOutbox = outboxEnabledFromEnv() } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    // Stage 0 directory outbox feed (server/directory-outbox.mjs): when on,
+    // room-writing transactions append their outbox entry in the same
+    // transaction. Default off — zero tax until D1 wiring lands.
+    this.directoryOutboxEnabled = directoryOutbox === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
     const coldStart = startColdStart();
     if (integrity !== "eager" && integrity !== "deferred") throw new Error("integrity must be eager or deferred");
@@ -3444,6 +3450,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, event.id, JSON.stringify(event));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
+    maybeAppendRoomEventOutbox(this, { roomId, sequence, event, state, projectionBytes: Buffer.byteLength(projection) });
     return sequence;
   }
   // Phase 1a/1b rollback: write every room back with full bodies and full
@@ -3546,6 +3553,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.db.prepare("INSERT INTO rooms(id,sequence,projection,archived_at) VALUES(?,?,?,?)").run(state.room.id, events.length, this.storedProjection(state.room.id, stored), archivedAtOf(stored));
       const insert = this.db.prepare("INSERT INTO events VALUES(?,?,?,?)");
       events.forEach((e, i) => insert.run(state.room.id, i + 1, e.id, JSON.stringify(e)));
+      // Stage 0: a new room enters the directory as one snapshot entry,
+      // in the same transaction as its journal.
+      maybeAppendRoomSnapshotOutbox(this, { roomId: state.room.id, sequence: events.length, state: stored });
       syncRoomPublication(this, { roomId: state.room.id, state: stored, previous: null, auth: null });
       return state.room.id;
     });
@@ -5984,6 +5994,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (bondEffect?.dm) this.bonds.sealDm(bondEffect.dm, incoming.id);
         this.db.prepare("INSERT INTO commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, command.id, fingerprint, sequence);
         this.db.prepare("UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?").run(sequence, projection, archivedAtOf(state), roomId);
+        // Stage 0: the outbox entry for this event, in this same
+        // transaction — it commits iff the event commits.
+        maybeAppendRoomEventOutbox(this, { roomId, sequence, event: incoming, state, projectionBytes: Buffer.byteLength(projection) });
         this._queueProjectionCache(roomId, sequence, state, projection);
         // Board is the claim authority the MCP tools share with /work-claims.
         // Same transaction as the projection event: decision #10's write-path

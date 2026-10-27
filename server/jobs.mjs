@@ -10,6 +10,7 @@ import { RETENTION_TABLES, runLiveStoreRetention } from "./retention-run.mjs";
 import { pruneAbuseRateBuckets } from "./abuse-rate-buckets.mjs";
 import { pruneOAuthProvider } from "./oauth-provider-store.mjs";
 import { backfillPublicReadModel } from "./public-read-model.mjs";
+import { directoryAdapterForEnv, drainOutbox, outboxPending } from "./directory-outbox.mjs";
 import { escrowEpochNextDueAt, progressEscrowEpochs } from "./bounty-epoch-keeper.mjs";
 import { patrolPending, runPatrolTick } from "./patrol.mjs";
 import { GmailSync } from "./gmail-sync.mjs";
@@ -485,6 +486,25 @@ export const JOBS = Object.freeze([
     async run(store, ctx) {
       if (ctx.room?.backfillPublicReadModel) return ctx.room.backfillPublicReadModel();
       return backfillPublicReadModel(store, { limit: 20, deadline: ctx.deadline });
+    }
+  }),
+  defineJob({
+    name: "directory-outbox",
+    cadenceMs: MINUTE_MS,
+    runtimes: Object.freeze(["worker", "node"]),
+    // Stage 0: drains the transactional outbox toward the D1 directory.
+    // Enabled only while entries wait, so an idle store never wakes for
+    // it. Until D1 exists the adapter is the unwired stub and the tick is
+    // a fail-safe no-op that reports the backlog (entries accumulate; the
+    // heartbeat stays healthy — a missing binding is configuration, not
+    // a per-tick failure).
+    enabled(_env, store) { return store ? outboxPending(store) : false; },
+    disabledReason: () => "No directory outbox entry is waiting",
+    // Due at the caller's `now` when entries wait (the patrol pattern):
+    // a fresh clock read here would slip past the arming computation.
+    nextDueAt: (store, now) => (store && outboxPending(store) ? now : null),
+    async run(store, ctx) {
+      return drainOutbox(store, { adapter: directoryAdapterForEnv(ctx.env), deadline: ctx.deadline });
     }
   }),
   defineJob({
