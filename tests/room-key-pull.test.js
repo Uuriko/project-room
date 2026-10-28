@@ -11,6 +11,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const script = fileURLToPath(new URL("../scripts/room-key-pull.mjs", import.meta.url));
 
@@ -51,12 +52,7 @@ test("room-key pull registers presence, returns a mention wake, and acks only th
   let at = Date.now();
   f.store.now = () => at;
   const identity = f.store.identities.create("Pull Seat");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId,
-    memberId: identity.identityId,
-    displayName: "Pull Seat",
-    permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: identity.identityId, displayName: "Pull Seat", permissions: ["accept_work"] });
   const roomKey = f.store.issueAccessKey("commons", identity.identityId);
   const origin = await startServer(t, f);
 
