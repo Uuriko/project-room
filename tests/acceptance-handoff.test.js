@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import {writeFileSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {createServer} from 'node:net';
+import {createAcceptanceFixture} from '../scripts/acceptance-fixture.mjs';
+import {createRoomServer} from '../server/http.mjs';
+const execute=promisify(execFile);
+
+test('acceptance handoff stores versioned room text through failed review and correction',async t=>{
+ const f=createAcceptanceFixture();
+ const reservation=createServer();
+ await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));
+ const port=reservation.address().port;
+ await new Promise(resolve=>reservation.close(resolve));
+ const server=createRoomServer({store:f.store,origin:`http://localhost:${port}`});
+ await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(port,'127.0.0.1',resolve);});
+ t.after(async()=>{server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+ const file=join(f.directory,'handoff-credentials.json');
+ writeFileSync(file,JSON.stringify({origin:`http://localhost:${server.address().port}`,keys:f.keys}),{mode:0o600});
+ const run=async phase=>JSON.parse((await execute(process.execPath,['scripts/acceptance-handoff.mjs',file,phase])).stdout);
+ const first=await run('first-review');
+ assert.equal(first.next.action,'revise');
+ const initial=structuredClone(f.store.room('commons').state.workItems['test-handoff'].receipt);
+ assert.ok(initial.nativeText);
+ assert.equal(initial.evidenceUrl,null);
+ const corrected=await run('correction');
+ assert.equal(corrected.next.action,'decide');
+ const work=f.store.room('commons').state.workItems['test-handoff'];
+ assert.ok(work.receipt.nativeText);
+ assert.notEqual(work.receipt.eventId,initial.eventId);
+ assert.notEqual(corrected.evidenceVersion,first.evidenceVersion);
+ assert.equal(work.verification.result,'pass');
+ assert.equal(work.verification.completionEventId,work.receipt.eventId);
+ assert.equal(work.decision,null);
+});
