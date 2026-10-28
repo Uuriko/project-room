@@ -140,6 +140,21 @@ export function memberPresence(member, { workItems, messages, now } = {}) {
   return "away";
 }
 
+// NEXT-6 sidebar roster: who is around now, and who waits behind one
+// disclosure. Never splits a small room, and never splits when no other
+// member shows a live signal (stale or not-yet-loaded presence), so a
+// member is never hidden for a bad reason. The viewer always counts as around.
+export const LIVE_PRESENCE = new Set(["working", "listening", "online"]);
+export function presenceGroups(roster, presenceOf, selfId, { splitMin = 7 } = {}) {
+  const around = member => member.id === selfId || LIVE_PRESENCE.has(presenceOf(member));
+  const split = roster.length >= splitMin && roster.some(member => member.id !== selfId && around(member));
+  return {
+    split,
+    around: split ? roster.filter(around) : roster.slice(),
+    others: split ? roster.filter(member => !around(member)) : []
+  };
+}
+
 // One-line “what they’re on”: current work title, else kind. Not a profile.
 export function memberOnLine(member, { workItems, now } = {}) {
   if (!member || member.active === false) return "";
