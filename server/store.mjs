@@ -1312,9 +1312,9 @@ const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 // maintained in the same transaction as each event append (see
 // _recordMemberActivity, fed by the projection-watch prepare wrapper) so
 // presence reads serve O(members) instead of two full event-table scans
-// per call. Purely additive (CREATE TABLE IF NOT EXISTS on store open
-// and lazily on first use), so the strict DDL-text verifySchema and
-// older databases are unaffected; registered in writer-fence
+// per call. Purely additive — the DDL is idempotent and runs on store
+// open and lazily on first use — so the strict DDL-text verifySchema
+// and older databases are unaffected; registered in writer-fence
 // lazyAdditiveTables, the purge registry, and room-shard-tables
 // (room-keyed). Values are the event `at` ISO strings, exactly as the
 // scans they replace grouped them.
