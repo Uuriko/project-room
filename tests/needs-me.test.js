@@ -8,6 +8,7 @@ import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 test('needs-me continuation preserves overflow DMs, mentions, rooms and tied land changes', t => {
   const store = new RoomStore(':memory:');
@@ -20,8 +21,8 @@ test('needs-me continuation preserves overflow DMs, mentions, rooms and tied lan
     const roomId = `pagination-${String(r).padStart(2, '0')}`;
     const owner = store.identities.create(`Owen ${r}`);
     rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Pagination', kind: 'personal' });
-    store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
-    store.identities.link(owner.secret, roomId, { identityId: bob.identityId, displayName: 'Bob', permissions: [] });
+    linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
+    linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
     setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
     for (let i = 0; i < (r === 0 ? 9 : 3); i++) {
       const id = `dm-${r}-${i}`;
@@ -93,8 +94,8 @@ test('needs-me room DMs honour deletions and edits', t => {
   const roomId = 'dm-current-state';
   const owner = store.identities.create('OwnerDm');
   rooms.create(owner.secret, { roomId, title: 'dm', purpose: 'x', kind: 'personal' });
-  store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
-  store.identities.link(owner.secret, roomId, { identityId: bob.identityId, displayName: 'Bob', permissions: [] });
+  linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
+  linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
   setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   const post = (id, body) => store.command(bob.secret, roomId, { id, type: 'message.posted', data: { messageId: id, body, toMemberId: ada.identityId } });
   post('dm-live', 'live dm body');
@@ -117,8 +118,8 @@ test('needs-me room_reply suggestions carry a stable requestId', t => {
   const roomId = 'rid-reqid';
   const owner = store.identities.create('OwnerRid');
   rooms.create(owner.secret, { roomId, title: 'rid', purpose: 'x', kind: 'personal' });
-  store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
-  store.identities.link(owner.secret, roomId, { identityId: bob.identityId, displayName: 'Bob', permissions: [] });
+  linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
+  linkWithProof(store, owner.secret, roomId, bob, { displayName: 'Bob', permissions: [] });
   setTier(store.db, roomId, bob.identityId, 't2_standard', { updatedBy: 'owner', nowMs: Date.now() });
   store.command(bob.secret, roomId, { id: 'm1', type: 'message.posted', data: { messageId: 'm1', body: '@Ada look here' } });
   const first = collectNeedsMe(store, ada.secret, {}).items.find(i => i.kind === 'mention');
@@ -144,7 +145,7 @@ test('needs-me clamps a room watermark that is above the room head', t => {
   const bob = store.identities.create('Bob');
   for (const roomId of ['busy', 'quiet']) {
     rooms.create(bob.secret, { roomId, title: roomId, purpose: 'Clamp', kind: 'personal' });
-    store.identities.link(bob.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+    linkWithProof(store, bob.secret, roomId, ada, { displayName: 'Ada', permissions: [] });
   }
   for (let i = 0; i < 30; i++) store.command(bob.secret, 'busy', { id: `c${i}`, type: 'message.posted', data: { messageId: `c${i}`, body: `chatter ${i}` } });
   store.command(bob.secret, 'busy', { id: 'busy-ask', type: 'message.posted', data: { messageId: 'busy-ask', body: '@Ada busy ask' } });
@@ -180,14 +181,14 @@ test('needs-me numeric floor does not hide a room joined after the cursor', t =>
   const ada = store.identities.create('Ada');
   const bob = store.identities.create('Bob');
   rooms.create(bob.secret, { roomId: 'busy', title: 'busy', purpose: 'Floor', kind: 'personal' });
-  store.identities.link(bob.secret, 'busy', { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  linkWithProof(store, bob.secret, 'busy', ada, { displayName: 'Ada', permissions: [] });
   for (let i = 0; i < 30; i++) store.command(bob.secret, 'busy', { id: `c${i}`, type: 'message.posted', data: { messageId: `c${i}`, body: `chatter ${i}` } });
   store.command(bob.secret, 'busy', { id: 'busy-ask', type: 'message.posted', data: { messageId: 'busy-ask', body: '@Ada busy ask' } });
   const seq = collectNeedsMe(store, ada.secret, {}).items.find(item => item.id === 'busy-ask').seq;
   let page = collectNeedsMe(store, ada.secret, { since: seq });
   assert.equal(page.hasMore, false);
   rooms.create(bob.secret, { roomId: 'late', title: 'late', purpose: 'Floor', kind: 'personal' });
-  store.identities.link(bob.secret, 'late', { identityId: ada.identityId, displayName: 'Ada', permissions: [] });
+  linkWithProof(store, bob.secret, 'late', ada, { displayName: 'Ada', permissions: [] });
   store.command(bob.secret, 'late', { id: 'late-ask', type: 'message.posted', data: { messageId: 'late-ask', body: '@Ada welcome, first ask' } });
   assert.ok(store.roomAuthority('late').sequence < seq, 'the new room head is below the old numeric since');
   page = collectNeedsMe(store, ada.secret, { since: JSON.parse(JSON.stringify(page.cursor)) });

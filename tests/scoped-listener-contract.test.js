@@ -26,6 +26,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { connectRoom } from '../client/agent-setup.mjs';
 import { readAgentConnection } from '../client/agent-connection.mjs';
 import { AgentWakeClient } from '../client/agent-wake.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(':memory:'), root = mkdtempSync(join(tmpdir(), 'scoped-contract-'));
@@ -49,7 +50,7 @@ async function fixture(t) {
   };
   const addMember = (name, roomId, memberId) => {
     const identity = store.identities.create(name);
-    store.identities.link(owners[roomId], roomId, { identityId: identity.identityId, memberId, displayName: name, permissions: [] });
+    linkWithProof(store, owners[roomId], roomId, identity, { memberId, displayName: name, permissions: [] });
     return identity;
   };
   return { store, owners, setup, connection, request, addMember, origin };
@@ -138,8 +139,7 @@ test('room-scoped activity does not advertise or suppress availability in anothe
     { hostId: 'legacy-host', mode: 'pull-only', cadenceSeconds: 60 })).status, 200);
   // The identity later joins annex. Annex observers must NOT see it as
   // wakeable from commons-scoped activity (was the pre-fix leak).
-  f.store.identities.link(f.owners.annex, 'annex',
-    { identityId: peer.identityId, memberId: 'annex-peer', displayName: 'Zaynab Haddad', permissions: [] });
+  linkWithProof(f.store, f.owners.annex, 'annex', peer, { memberId: 'annex-peer', displayName: 'Zaynab Haddad', permissions: [] });
   const annexObserver = f.addMember('Priya Nair', 'annex', 'annex-observer');
   const annexStatus = await f.request('/api/wake-status?roomId=annex', annexObserver.secret);
   assert.equal(annexStatus.status, 200);

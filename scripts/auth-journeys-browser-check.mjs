@@ -187,7 +187,7 @@ async function magicLinkReuse(t) {
   await desk.locator("#main").waitFor({ state: "visible" });
   const other = await f.open(DESK);
   await other.goto(f.origin);
-  const form = await openMagicSignin(other);
+  const form = await openMagicSignin(other, email);
   await form.locator('[name="email"]').fill(email);
   await form.locator('button[type="submit"]').click();
   await other.getByText(/check/i).first().waitFor();
@@ -202,6 +202,7 @@ async function magicLinkReuse(t) {
   await again.locator("#auth-panel").waitFor({ state: "visible" });
   assert.equal((await f.session(again)).authenticated, false, "a used link signs nobody in");
   await again.getByText(/not valid|expired|already used/i).first().waitFor();
+  assert.equal(await again.locator('[name="method"][value="email"]').count(), 0, "expired link does not unlock email recovery");
   return again;
 }
 
@@ -288,10 +289,10 @@ test("fresh / with mail unconfigured: the entry loads signin-options and offers 
   assert.equal(await page.locator('[data-email-method="magic"]:visible').count(), 0, "no email-link offer when the deployment cannot send mail");
 });
 
-test("fresh / with mail configured: the entry still offers the email link", async t => {
+test("fresh / with mail configured: recovery waits for a credential rejection", async t => {
   const { page, requests } = await freshEntryRecoveryOffers(t, true);
   assert.ok(requests.includes("/api/auth/signin-options"), "the lazy entry requests the deployment's sign-in options");
-  assert.equal(await page.locator('[data-email-method="magic"]:visible').count(), 1, "the email-link offer stays when mail is configured");
+  assert.equal(await page.locator('[data-email-method="magic"]:visible').count(), 0, "mail configuration alone does not expose recovery");
 });
 
 test("a failed workspace download after signup resumes the same account without repeating signup", { timeout: 45000 }, async t => {
