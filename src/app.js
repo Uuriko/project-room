@@ -2739,9 +2739,9 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const markUnreadHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="mark-unread" data-message-id="${esc(m.id)}" type="button" title="Mark unread (u)">Mark unread</button>` : "";
   const laterHtml = !m.deletedAt ? `<button class="message-to-work" data-message-action="save" data-message-id="${esc(m.id)}" type="button" aria-pressed="${savedMessageIds.has(m.id)}">${savedMessageIds.has(m.id) ? "Unsave" : "Save"}</button>` : "";
   const threadHtml = !currentThreadId && count ? `<button class="thread-link" data-message-action="thread" data-message-id="${esc(m.id)}" type="button">${count} ${count === 1 ? "reply" : "replies"} ↗</button>` : "";
-  const workHtml = !m.deletedAt && can("steer") && !(m.proposal && m.workItemId)
+  const workHtml = !m.deletedAt && !m.toMemberId && can("steer") && !(m.proposal && m.workItemId)
     ? `<button class="message-to-work" data-message-action="work" data-message-id="${esc(m.id)}" type="button">Make this work</button>` : "";
-  const decideHtml = !m.deletedAt && can("decide") && state.members[session.member.id]?.kind === "human"
+  const decideHtml = !m.deletedAt && !m.toMemberId && can("decide") && state.members[session.member.id]?.kind === "human"
     ? `<button class="message-to-work" data-message-action="decide" data-message-id="${esc(m.id)}" type="button">Record decision</button>` : "";
   // Own messages only: the author can edit or delete (the server also lets the owner delete; that stays out of this menu).
   const own = !m.deletedAt && m.authorId === session.member.id && !m.proposal;
@@ -5613,7 +5613,7 @@ let decisionSourceId = null;
 function openDecision(messageId) {
   if (!can("decide") || busy || state.members[session.member.id]?.kind !== "human") return;
   const message = conversation.byId.get(messageId);
-  if (!message) return;
+  if (!message || message.toMemberId) return;
   decisionSourceId = messageId;
   $("#decision-form").reset();
   $("#decision-source").textContent = `Source: ${name(message.authorId)}: ${message.deletedAt ? "Message deleted" : message.body.slice(0, 200)}`;
@@ -6221,6 +6221,9 @@ function syncWorkPolicy() {
   $("#work-policy-note").textContent = required.length ? `Room policy: ${required.join(" and ")} ${required.length > 1 ? "are" : "is"} required for every new outcome in this room. Only the room owner can change this.` : "";
 }
 function openWork(sourceId = null, reuseId = null) {
+  // The protocol can reference a private source, but this form copies its text.
+  // Never silently promote that text into a room-wide work title.
+  if (sourceId && state?.messages.find(message => message.id === sourceId)?.toMemberId) return;
   if (!can("steer") || busy) return;
   if (!$("#new-work-form").hidden) { $(workRetryLocked ? "#retry-work-button" : "#work-title-input").focus(); return; }
   let definition;
@@ -6231,6 +6234,7 @@ function openWork(sourceId = null, reuseId = null) {
   workFormOpener = { node: document.activeElement, key: document.activeElement?.dataset.focusKey };
   workFormEpoch++; setWorkRetry(false);
   $("#new-work-form").reset();
+  $("#work-audience").textContent = uiText("work.roomAudience");
   $("#new-work-form").hidden = false; workDraftId = `work-${crypto.randomUUID()}`;
   $("#work-options").open = false; $("#verifier-hint").hidden = true;
   $("#work-dialog").showModal();

@@ -186,7 +186,10 @@ for(const scenario of [
     assert.equal(await f.review.isChecked(),true);assert.equal(await page.locator('#assignee-select').inputValue(),'owner');
     await page.locator('#cancel-work-button').click();
     const card=page.locator(`[data-work-record-id="${saved.id}"]`);
-    await card.locator('.work-details > summary').click();await card.locator('[data-reuse-work]').click();
+    if (!await card.locator('.work-details').evaluate(node => node.open)) await card.locator('.work-details > summary').click();
+    const utilities = card.locator('.work-utilities');
+    if (await utilities.count() && !await utilities.evaluate(node => node.open)) await utilities.locator(':scope > summary').click();
+    await card.locator('[data-reuse-work]').click();
     await page.locator('#work-dialog').waitFor({state:'visible'});
     assert.equal(await page.locator('#work-title-input').inputValue(),saved.title);
     assert.equal(await page.locator('#assignee-select').inputValue(),'','reuse remains definition-only even in a solo room');

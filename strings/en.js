@@ -667,5 +667,6 @@ export default {
   "result.searchTitle": "Search results",
   "result.backToChat": "Back to chat",
   "result.empty": "No completed results yet.",
-  "rooms.createAction": "Create room"
+  "rooms.createAction": "Create room",
+  "work.roomAudience": "Visible to everyone in this room"
 };
