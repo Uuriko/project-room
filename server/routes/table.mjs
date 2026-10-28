@@ -27,6 +27,8 @@ import { ROOM_DIGEST_ROUTES } from "./room-digest.mjs";
 import { TYPING_ROUTES } from "./typing.mjs";
 import { WAKE_STATUS_ROUTES } from "./wake-status.mjs"; // plan-wake-live: wakeable / not-wakeable lists
 import { AGENT_PRESENCE_ROUTES } from "./agent-presence.mjs"; // Presence Gap 4: cross-room presence read
+import { DOOR_FUNNEL_ROUTES } from "./door-funnel.mjs"; // DOOR-FUNNEL-READ: public door funnel aggregates
+import { VERDICT_INBOX_ROUTES } from "./verdict-inbox.mjs"; // COMP-DEEP #1: sectioned verdict inbox
 import { SPEND_GRANT_ROUTES } from "./spend-grants.mjs"; // spend-primitive MVP
 import { SPEND_PRICING_ROUTES } from "./spend-pricing.mjs"; // spend-pricing kill switch
 import { CODE_DROP_ROUTES } from "./code-drops.mjs"; // room-native patch exchange
@@ -38,6 +40,7 @@ import { PAIRING_ROUTES } from "./pairing.mjs";
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
 export const ROUTE_SCOPES = Object.freeze(["worker", "public", "directory", "room"]);
 export const ROUTE_PARITY_NOTE = /^(?:mcp:[a-z][a-z0-9_]*(?:,[a-z][a-z0-9_]*)*|exempt:\S.{7,})$/;
+export const ROUTE_PUBLICATION_NOTE = /^(?:gate:public-visibility|open:\S.{7,})$/;
 export const ROUTE_METHODS = Object.freeze(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 
 // Every `type` name the route-table schema validator (schemaErrors in
@@ -62,7 +65,7 @@ function unknownSchemaTypes(schema, out) {
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
 export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...AGENT_ROOM_TOKEN_ROUTES, ...DEMO_ROUTES, ...DOWNLOAD_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PROJECT_MAP_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
-  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...PR_WEBHOOK_ROUTES, ...PAIRING_ROUTES, ...AGENT_INVITE_REDEEM_ROUTES]);
+  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...DOOR_FUNNEL_ROUTES, ...VERDICT_INBOX_ROUTES, ...PR_WEBHOOK_ROUTES, ...PAIRING_ROUTES, ...AGENT_INVITE_REDEEM_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];
@@ -88,6 +91,12 @@ export function assertRouteRow(row) {
   // thing; "exempt:<reason>" says why there is none. tests/route-parity-notes.test.js
   // requires it on every row not in scripts/route-parity-baseline.json.
   if (row.parity !== undefined && !ROUTE_PARITY_NOTE.test(String(row.parity))) problems.push("parity");
+  // #3674: publication declaration. "gate:public-visibility" says the public
+  // read passes through the one publication gate (server/public-visibility.mjs);
+  // "open:<reason>" says why the surface serves no gated member content.
+  // tests/route-publication.test.js requires it on every scope:"public" row;
+  // an undeclared public row is treated as closed there (fail-closed).
+  if (row.publication !== undefined && !ROUTE_PUBLICATION_NOTE.test(String(row.publication))) problems.push("publication");
   return problems;
 }
 

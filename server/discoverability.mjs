@@ -228,6 +228,7 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { requestBodies: { POST: SHARE_LINK_PREVIEW_BODY } }),
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe",
     { query: NEEDS_ME_QUERY }),
+  route("/api/verdict-inbox", ["GET"], "identity-secret", "Sectioned verdict inbox for this identity: needs your verdict, returned to you, waiting on a worker, and recently decided. An account session reads the same set with non-human rows omitted.", "getVerdictInbox"),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
     { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),
