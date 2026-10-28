@@ -13,6 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { claimAttentionFromEvents } from "../server/updates.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { buildOrient } from "../server/orient.mjs";
 
 function serve(t, roomId = "commons") {
@@ -115,9 +116,7 @@ test("a reply request is answered with linkage and then leaves the list", async 
 test("done retires the item from updates and needs-me, and a clarification brings it back", async t => {
   const { store, ownerKey, request } = serve(t);
   const identity = store.identities.create("Needs Reader");
-  store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, memberId: "reader", displayName: "Needs Reader", permissions: []
-  });
+  linkWithProof(store, ownerKey, "commons", identity, { memberId: "reader", displayName: "Needs Reader", permissions: [] });
   const { messageId } = ask(store, "commons", ownerKey, "reader", "please take this");
   const readerKey = store.issueAccessKey("commons", "reader");
   const open = await request("/api/needs-me", { token: identity.secret });
@@ -467,9 +466,7 @@ test("cross-room updates include only rooms the identity or account can access",
   const alphaOwner = store.issueAccessKey("alpha", "owner");
   const betaOwner = store.issueAccessKey("beta", "owner");
   const identity = store.identities.create("Alpha Reader");
-  store.identities.link(alphaOwner, "alpha", {
-    identityId: identity.identityId, memberId: "reader", displayName: "Alpha Reader", permissions: []
-  });
+  linkWithProof(store, alphaOwner, "alpha", identity, { memberId: "reader", displayName: "Alpha Reader", permissions: [] });
   const readerKey = store.issueAccessKey("alpha", "reader");
   store.command(alphaOwner, "alpha", { id: randomUUID(), type: T.MESSAGE_POSTED, data: {
     messageId: randomUUID(), body: "for the reader", toMemberId: "reader"

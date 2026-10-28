@@ -11,12 +11,13 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomAgentClient, RoomClientError } from "../client/room-agent.mjs";
 import { connectionDiagnostic } from "../client/agent-connection.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 test("a lost say response warns that the post may already be saved", async t => {
   const f = createAcceptanceFixture();
   f.store.roomFlood = { consume() {} };
   const ident = f.store.identities.create("Flaky agent");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: ident.identityId, permissions: ["accept_work"] });
+  linkWithProof(f.store, f.keys.owner, "commons", ident, { permissions: ["accept_work"] });
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(() => { server.closeAllConnections?.(); server.close(); });
