@@ -107,7 +107,7 @@ export function planTool(tool, { project, home, url, platform, claude }) {
     const path = join(home, ".copilot", "mcp-config.json");
     files.push({ path, contents: planJson(path, readOrNull(path), data => {
       data.mcpServers ??= {};
-      data.mcpServers[SERVER_NAME] = { ...serverEntry(url, { type: "http", header: envHeader() }), tools: ["*"] };
+      data.mcpServers[SERVER_NAME] = { ...serverEntry(url, { type: "http", header: claudeHeaderValue() }), tools: ["*"] };
     }) });
     next = "Copilot CLI reads ~/.copilot/mcp-config.json. Export " + SECRET_ENV + " from room token, then start copilot.";
   } else if (tool === "opencode") {
@@ -127,7 +127,7 @@ export function planTool(tool, { project, home, url, platform, claude }) {
     const path = join(home, ".commandcode", "mcp.json");
     files.push({ path, contents: planJson(path, readOrNull(path), data => {
       data.mcpServers ??= {};
-      data.mcpServers[SERVER_NAME] = { transport: "http", url, headers: { Authorization: envHeader() } };
+      data.mcpServers[SERVER_NAME] = { transport: "http", url, headers: { Authorization: claudeHeaderValue() } };
     }) });
     next = "Command Code reads ~/.commandcode/mcp.json. Export " + SECRET_ENV + " from room token, then start cmd.";
   } else if (tool === "generic") {

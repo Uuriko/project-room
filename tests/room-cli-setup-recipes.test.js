@@ -38,6 +38,16 @@ test("new host recipes write the hosted server entry and never embed a secret va
   assert.equal(oc.oauth, false);
   const gm = JSON.parse(planTool("gemini", { project: home, home, url: URL, platform: "linux", claude: null }).files[0].contents).mcpServers[SERVER_NAME];
   assert.equal(gm.headers.Authorization, "Bearer ${" + SECRET_ENV + "}");
+  // Copilot CLI and Command Code expand ${VAR} in http headers (docs: copilot-cli command reference, commandcode.ai/docs/mcp); ${env:VAR} would be sent literally.
+  for (const tool of ["copilot", "command-code"]) {
+    const s = JSON.parse(planTool(tool, { project: home, home, url: URL, platform: "linux", claude: null }).files[0].contents).mcpServers[SERVER_NAME];
+    assert.equal(s.headers.Authorization, "Bearer ${" + SECRET_ENV + "}", tool);
+  }
+  const cp = JSON.parse(planTool("copilot", { project: home, home, url: URL, platform: "linux", claude: null }).files[0].contents).mcpServers[SERVER_NAME];
+  assert.equal(cp.type, "http");
+  assert.deepEqual(cp.tools, ["*"]);
+  const cc = JSON.parse(planTool("command-code", { project: home, home, url: URL, platform: "linux", claude: null }).files[0].contents).mcpServers[SERVER_NAME];
+  assert.equal(cc.transport, "http");
   const grok = planTool("grok", { project: home, home, url: URL, platform: "linux", claude: null });
   assert.equal(grok.files[0].path, join(home, ".grok", "config.toml"));
   assert.match(grok.files[0].contents, new RegExp(`\\[mcp_servers\\.${SERVER_NAME}\\]`));
