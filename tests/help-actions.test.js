@@ -37,6 +37,22 @@ test("five thin offer actions preserve exact input and report offer revisions, n
   }
 });
 
+test("help actions derive an omitted requestId and use the current work revision", async () => {
+  const args = { workItemId: "work", offerId: "offer", expectedHelpRevision: 1, helpEventId: "invitation-event", plan: "Prepare two agenda items" };
+  assert.equal(validHelpArguments("room_offer_help", args), true);
+  const reads = [], sent = [];
+  const result = await submitHelpAction({
+    workContext: async workItemId => { reads.push(workItemId); return { work: { revision: 4 } }; },
+    command: async value => { sent.push(value); return receipt(value); }
+  }, identity, "room_offer_help", args);
+  assert.deepEqual(reads, ["work"]);
+  assert.equal(result.status, "recorded");
+  assert.match(sent[0].id, /^mcp-[a-f0-9]{64}$/);
+  assert.equal(result.requestId, sent[0].id);
+  assert.equal(sent[0].data.expectedRevision, 4);
+  assert.equal(validHelpArguments("room_offer_help", { ...args, requestId: "constructor" }), false);
+});
+
 test("offer descriptors reject unsupported fields, malformed text and implicit release acknowledgement", () => {
   for (const [name, args] of cases) {
     assert.equal(validHelpArguments(name, args), true);
@@ -45,7 +61,7 @@ test("offer descriptors reject unsupported fields, malformed text and implicit r
       v => v.expectedRevision = Number.MAX_SAFE_INTEGER, v => delete v.offerId]) {
       const invalid = structuredClone(args); change(invalid);
       assert.equal(validHelpArguments(name, invalid), false);
-      assert.throws(() => buildHelpCommand(name, invalid), { code: "invalid_help_action" });
+      assert.throws(() => buildHelpCommand(name, invalid), { code: invalid.requestId === "constructor" ? "missing_request_id" : "invalid_help_action" });
     }
     const field = name === "room_offer_help" ? "plan" : "reason";
     for (const value of [" ", "a".repeat(601), "\ud800", null]) assert.equal(validHelpArguments(name, { ...args, [field]: value }), false);
