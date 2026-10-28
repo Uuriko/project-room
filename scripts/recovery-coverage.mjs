@@ -52,6 +52,24 @@ export async function seedRecoveryCoverage(f) {
     VALUES ('recovery-public-agent', 'Recovery agent', '', '[]', ?, 1, 1, ?)`).run(identityId, at);
   linkWithProof(f.store, f.keys.owner, "commons", recoveryAgent, { permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });
+  // Seed the pairing tables (a98c987d) through the real pairing flow so the
+  // capture comparison and the cold-start budget cover pairs,
+  // pair_code_locks, agent_member_keys and room_join_policy with
+  // production-shaped rows, not empty sidecars. The owner records the room's
+  // join policy explicitly, a key-carrying agent pairs and is approved
+  // (admission binds its key), and one wrong code afterwards leaves the
+  // failure-journal row a real room accumulates. The wrong code runs last:
+  // a successful decision clears the lock row.
+  f.store.pairing.setPolicy(f.keys.owner, "commons", "approve");
+  const pairKey = generateKeyPair();
+  const pairStart = f.store.pairing.start({ roomId: "commons", displayName: "Recovery pair agent", publicKey: pairKey.publicKey });
+  f.store.pairing.decide(f.keys.owner, "commons", { pairId: pairStart.pairId, decision: "approve", profile: "contribute" });
+  try {
+    f.store.pairing.decide(f.keys.owner, "commons", { userCode: "ZZZZ-ZZZZ", decision: "deny" });
+    throw new Error("a wrong pair code was accepted");
+  } catch (error) {
+    if (error.code !== "not_found") throw error;
+  }
   f.store.agentHeartbeats.heartbeat({ agentId: identityId, hostId: "recovery-work-host", mode: "pull-only", workWakes: true });
   f.store.command(f.keys.owner, "commons", { id: "recovery-work-command", type: "work.proposed", data: { workItemId: "recovery-work",
     title: "Recovery work", definitionOfDone: "Recovered", mode: "read", accountableMemberId: identityId } });
