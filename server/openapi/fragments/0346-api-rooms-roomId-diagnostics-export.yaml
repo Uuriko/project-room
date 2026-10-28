@@ -1,0 +1,13 @@
+  /api/rooms/{roomId}/diagnostics-export:
+    get:
+      summary: Sanitized support-export bundle
+      description: >-
+        Room owner with `manage_members`, by room bearer key or signed-in
+        account session (the CLI uses the bearer). Whitelisted scalar fields
+        only; served as an attachment.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ format, exportedAt, service: { sourceRevision, buildId, mode }, room, diagnostics }" }
+        '403': { description: owner_required }
