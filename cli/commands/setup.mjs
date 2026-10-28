@@ -10,7 +10,11 @@ import { planJson, planMarked, unifiedDiff } from "../files.mjs";
 import { homeOf, loadConnection, readProject, safeName, writeProject } from "../paths.mjs";
 import { commandOnPath } from "../which.mjs";
 
-export const SETUP_TOOLS = Object.freeze(["claude-code", "codex", "cursor", "cline", "vscode", "aider", "generic"]);
+// Host config locations and shapes for gemini, copilot, opencode, grok and command-code follow the
+// per-agent setup recipes in reason-machines/reason-network (src/setup.rs), used under its MIT license:
+// Copyright (c) 2026 the tincan contributors. See THIRD_PARTY_NOTICES.md. Room registers its hosted
+// HTTP MCP server instead of a local stdio binary, and installs no hooks.
+export const SETUP_TOOLS = Object.freeze(["claude-code", "codex", "cursor", "cline", "vscode", "aider", "gemini", "copilot", "opencode", "grok", "command-code", "generic"]);
 
 function parse(argv) {
   const flags = { "dry-run": false };
@@ -91,6 +95,41 @@ export function planTool(tool, { project, home, url, platform, claude }) {
     files.push({ path: conf, contents: planMarked(readOrNull(conf), "read:\n  - .project-room/CONVENTIONS.md\n") });
     files.push({ path: conventions, contents: planMarked(readOrNull(conventions), AIDER_CONVENTIONS) });
     next = "Aider reads .project-room/CONVENTIONS.md. Aider has no MCP client, so this setup does not register a server. A process wrapper (room wrap -- aider) is not part of this command.";
+  } else if (tool === "gemini") {
+    const dir = process.env.GEMINI_CLI_HOME || join(home, ".gemini");
+    const path = join(dir, "settings.json");
+    files.push({ path, contents: planJson(path, readOrNull(path), data => {
+      data.mcpServers ??= {};
+      data.mcpServers[SERVER_NAME] = { httpUrl: url, headers: { Authorization: envHeader() } };
+    }) });
+    next = "Gemini CLI reads " + path + ". Export " + SECRET_ENV + " from room token, then start gemini.";
+  } else if (tool === "copilot") {
+    const path = join(home, ".copilot", "mcp-config.json");
+    files.push({ path, contents: planJson(path, readOrNull(path), data => {
+      data.mcpServers ??= {};
+      data.mcpServers[SERVER_NAME] = { ...serverEntry(url, { type: "http", header: envHeader() }), tools: ["*"] };
+    }) });
+    next = "Copilot CLI reads ~/.copilot/mcp-config.json. Export " + SECRET_ENV + " from room token, then start copilot.";
+  } else if (tool === "opencode") {
+    const path = join(home, ".config", "opencode", "opencode.json");
+    files.push({ path, contents: planJson(path, readOrNull(path), data => {
+      data.mcp ??= {};
+      data.mcp[SERVER_NAME] = { type: "remote", url, headers: { Authorization: envHeader() }, enabled: true };
+    }) });
+    next = "opencode reads ~/.config/opencode/opencode.json. Export " + SECRET_ENV + " from room token, then start opencode.";
+  } else if (tool === "grok") {
+    const dir = process.env.GROK_HOME || join(home, ".grok");
+    const path = join(dir, "config.toml");
+    const block = `[mcp_servers.${SERVER_NAME}]\nurl = ${JSON.stringify(url)}\nbearer_token_env_var = ${JSON.stringify(SECRET_ENV)}\nenabled = true\n`;
+    files.push({ path, contents: planMarked(readOrNull(path), block) });
+    next = "Grok CLI reads " + path + ". Export " + SECRET_ENV + " from room token, then start grok.";
+  } else if (tool === "command-code") {
+    const path = join(home, ".commandcode", "mcp.json");
+    files.push({ path, contents: planJson(path, readOrNull(path), data => {
+      data.mcpServers ??= {};
+      data.mcpServers[SERVER_NAME] = { transport: "http", url, headers: { Authorization: envHeader() } };
+    }) });
+    next = "Command Code reads ~/.commandcode/mcp.json. Export " + SECRET_ENV + " from room token, then start cmd.";
   } else if (tool === "generic") {
     next = renderedSnippet({ snippet: mcpUrl => ({ mcpServers: { [SERVER_NAME]: serverEntry(mcpUrl, { header: envHeader() }) } }) }, url)
       + "Set " + SECRET_ENV + " to the output of room token.\n";
