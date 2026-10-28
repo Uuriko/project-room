@@ -400,6 +400,15 @@
         "openWorldHint": false
       }
     },
+    "bounty_request_changes": {
+      "inputSchema": "f3332539d942d7d6",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
     "bounty_submit": {
       "inputSchema": "c603235bbd313975",
       "annotations": {
