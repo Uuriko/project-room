@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
-import { applyEvent } from "../src/events.js";
+import { applyEvent, replay } from "../src/events.js";
 import { confirmsReplyCommand } from "../src/reply-requests.js";
 import { confirmsAgentCommand } from "../client/work-actions.mjs";
 import { validateReplyRead } from "../client/reply-actions.mjs";
@@ -112,4 +112,29 @@ test("the client read validator accepts a stamped request and refuses a tampered
   const onOpen = f.store.replyRequests.selected(f.keys.agent, "commons", f.ask("agent", "owner").command.data.messageId);
   onOpen.request.answerCredential = "account_session";
   assert.throws(() => validateReplyRead(onOpen, { ...opts, args: { requestMessageId: onOpen.request.id } }), { code: "invalid_response" });
+});
+
+test("historical unstamped responses replay as before, with no inferred attribution", t => {
+  const f = fixture(t), q = f.ask("agent", "owner");
+  f.store.command(f.accountSession(), "commons", f.answer(q));
+  const history = f.store.db.prepare("SELECT body FROM events WHERE room_id='commons' ORDER BY sequence").all().map(row => JSON.parse(row.body));
+  const legacy = history.map(entry => {
+    if (!entry.data || !Object.hasOwn(entry.data, "answerCredential")) return entry;
+    const { answerCredential, ...data } = entry.data; return { ...entry, data };
+  });
+  assert.equal(legacy.filter(entry => entry.data?.responseToRequestId).length, 1);
+  const state = replay(legacy), request = state.replyRequests[q.command.data.messageId];
+  assert.equal(request.status, "answered");
+  assert.equal(request.terminalActorId, "owner");
+  assert.equal(Object.hasOwn(request, "answerCredential"), false, "an unstamped answer must not be read as attested");
+});
+
+test("the stamp is bound to the responding actor and the session it arrived on", t => {
+  const f = fixture(t), first = f.ask("agent", "owner"), second = f.ask("agent", "owner");
+  const viaSession = f.store.command(f.accountSession(), "commons", f.answer(first));
+  const viaKey = f.store.command(f.keys.owner, "commons", f.answer(second));
+  assert.equal(viaSession.event.actorId, "owner"); assert.equal(viaKey.event.actorId, "owner");
+  assert.deepEqual([viaSession.event.data.answerCredential, viaKey.event.data.answerCredential], ["account_session", "room_credential"]);
+  assert.equal(f.request(first).terminalEventId, viaSession.event.id);
+  assert.equal(f.request(second).terminalEventId, viaKey.event.id);
 });

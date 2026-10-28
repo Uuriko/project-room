@@ -2,10 +2,13 @@
 export const REPLY_CANCELLED = "reply_request.cancelled";
 export const REPLY_POLICY_VERSION = 1;
 export const MAX_REPLY_REQUESTS = 500;
-// Which credential closed a request, stamped by the server on a response (never
-// taken from the caller). "account_session" means a human member answered from a
-// signed-in account session; anything else (access key, identity secret, API key,
-// agent session) is "room_credential", since such a key may be held by software.
+// Which credential route closed a request, stamped by the server on a response
+// (never taken from the caller). "account_session": the response arrived on a
+// human member's signed-in account session. That attests the route the server
+// observed, not that a person composed it (browser automation can drive a
+// session), and it is never permission to execute anything. Anything else
+// (access key, identity secret, API key, agent session) is "room_credential".
+// Responses recorded before the stamp carry none; nothing is inferred for them.
 export const ANSWER_CREDENTIALS = Object.freeze(["account_session", "room_credential"]);
 export const REPLY_FIELDS = Object.freeze(["requestKind", "responseToRequestId", "expectedRequestRevision", "responseOutcome", "contextEventId", "contextSequence"]);
 const own = (value, key) => Object.hasOwn(value, key);
