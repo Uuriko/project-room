@@ -680,8 +680,17 @@ export default {
     // invite redeem hit the same handlers as origin (www /api/* is Webflow).
     if (isEdgeDoorUrl(request.url)) {
       const inbound = new URL(request.url);
-      const path = rewriteRoomApiPrefix(inbound.pathname) + inbound.search;
-      request = new Request(new URL(path, roomOrigin(env).origin), request);
+      const pathname = rewriteRoomApiPrefix(inbound.pathname);
+      const target = new URL(pathname + inbound.search, roomOrigin(env).origin);
+      // OAuth state is bound to a host-only account cookie. Start on the
+      // canonical callback host before creating either the slot or state;
+      // an internal rewrite would set the cookie on the public entry host.
+      if (request.method === 'GET' && pathname === '/api/auth/google/start') {
+        return finish(new Response(null, { status: 302, headers: {
+          Location: target.href, 'Cache-Control': 'no-store'
+        } }), 'worker');
+      }
+      request = new Request(target, request);
     } else if (EDGE_DOOR_HOSTS.includes(new URL(request.url).hostname)) {
       // The /room* route also catches /rooms, /roommates and similar lookalikes
       // (an exact pattern would drop /room?ref= query strings). Those are simply
