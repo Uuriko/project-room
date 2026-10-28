@@ -11,14 +11,14 @@ import { messageRepository } from "./message-repository.mjs";
 import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { nextWorkStep } from "../src/workflow.js";
-import { validId } from "../src/events.js";
+import { canInviteMembers, validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
   "request", "mention", "dm", "review_requested", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
-  "invite_pending", "access_request", "agent_joined"
+  "invite_pending", "access_request", "agent_joined", "pair_request"
 ]);
 const CLAIM_ATTENTION = Object.freeze({
   lease_expiring: "claim_lease_expiring",
@@ -335,6 +335,26 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
     } catch (error) {
       if (!tableMissing(error)) throw error;
       flags.invites = true;
+    }
+  }
+  if (canInviteMembers(state, memberId) && !needsMeOnly) {
+    try {
+      const rows = store.db.prepare(
+        `SELECT pair_id AS pairId, display_name AS name, created_at AS createdAt, duplicate_member_id AS duplicateMemberId
+         FROM pairs WHERE room_id=? AND status='pending' AND expires_at>?`
+      ).all(roomId, now);
+      for (const row of rows) {
+        const at = iso(row.createdAt);
+        items.push(draft({
+          kind: "pair_request", roomId, key: `pair|${row.pairId}`,
+          title: clip(row.duplicateMemberId ? `${row.name} may already be here` : `${row.name} asks to pair`),
+          actor: row.pairId, createdAt: at, updatedAt: at,
+          basis: row.pairId, sourceRef: { pairId: row.pairId },
+          next: { method: "POST", path: `/api/rooms/${encodeURIComponent(roomId)}/pairs/${encodeURIComponent(row.pairId)}/decide` }
+        }));
+      }
+    } catch (error) {
+      if (!tableMissing(error)) throw error;
     }
   }
   if (member.permissions?.includes("manage_members") && !needsMeOnly) {
