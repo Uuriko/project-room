@@ -1239,9 +1239,6 @@ export class AgentHeartbeats {
       // that promise runs through this shape.
       return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]) });
     }
-    if (hosts.length === 0) {
-      return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]) });
-    }
     let cadences = new Map();
     try {
       cadences = new Map(this.db.prepare(
@@ -1251,6 +1248,55 @@ export class AgentHeartbeats {
       if (!isMissingTable(error)) throw error;
       // Older database without the push table: every host reads the
       // default window (read-only never migrates).
+    }
+    return this._statusFromHosts(agentId, hosts, cadences, at);
+  }
+  // PRES: batched statusOf — the same per-identity derivation for a whole
+  // roster in a constant number of queries (hosts + cadences, chunked by
+  // the DO bind limit), so presence reads stop paying one statusOf (two
+  // queries) per agent member. Returns a Map keyed by agentId with exactly
+  // the statusOf() result for each id, including validation and the
+  // missing-table unregistered shape.
+  statusOfMany(agentIds) {
+    const ids = [...new Set(agentIds)];
+    for (const agentId of ids) checkAgentId(agentId);
+    const out = new Map();
+    if (!ids.length) return out;
+    const at = this.now();
+    const hostsByAgent = new Map(ids.map(id => [id, []]));
+    try {
+      for (const chunk of sqlChunks(ids)) {
+        const rows = this.db.prepare(
+          `SELECT * FROM agent_hosts WHERE agent_id IN (${sqlPlaceholders(chunk)}) ORDER BY agent_id, last_seen_at DESC`)
+          .all(...chunk);
+        for (const row of rows) hostsByAgent.get(row.agent_id)?.push(row);
+      }
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+      for (const id of ids) out.set(id, Object.freeze({ agentId: id, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]) }));
+      return out;
+    }
+    const cadencesByAgent = new Map();
+    try {
+      for (const chunk of sqlChunks(ids)) {
+        const rows = this.db.prepare(
+          `SELECT agent_id AS agentId, host_id AS hostId, cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id IN (${sqlPlaceholders(chunk)})`)
+          .all(...chunk);
+        for (const row of rows) {
+          let byHost = cadencesByAgent.get(row.agentId);
+          if (!byHost) cadencesByAgent.set(row.agentId, byHost = new Map());
+          byHost.set(row.hostId, row.cadenceSeconds);
+        }
+      }
+    } catch (error) {
+      if (!isMissingTable(error)) throw error;
+    }
+    for (const id of ids) out.set(id, this._statusFromHosts(id, hostsByAgent.get(id) ?? [], cadencesByAgent.get(id) ?? new Map(), at));
+    return out;
+  }
+  _statusFromHosts(agentId, hosts, cadences, at) {
+    if (hosts.length === 0) {
+      return Object.freeze({ agentId, status: "unregistered", lastSeenAt: null, hosts: Object.freeze([]) });
     }
     const withState = hosts.map(row => {
       // BUILD-HEARTBEAT-CADENCE: the stored value is read as the host's
