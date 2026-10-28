@@ -614,7 +614,8 @@ test.describe("room-machine bot", { concurrency: false }, () => {
     assert.equal(work.state, "blocked");
     assert.equal(lease.state, "unclaimed");
     const said = await bodies(room.origin, "commons", secret);
-    assert.equal(said.some(body => body.startsWith("Paused.")), true);
+    // The stop is local. A paused agent cannot post the note; that write is 423.
+    assert.equal(said.some(body => body.startsWith("Paused.")), false);
   });
 
   test("none and a text-only provider refuse before claiming a slot", async (t) => {

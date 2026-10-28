@@ -103,7 +103,7 @@ export function sanitizeFailureDetail(detail) {
   if (!detail || typeof detail !== "object") return null;
   const out = {};
   if (typeof detail.code === "string" && DETAIL_CODE.test(detail.code)) out.code = detail.code;
-  for (const key of ["subcheck", "errorClass", "recordClass"]) {
+  for (const key of ["subcheck", "errorClass", "recordClass", "reason", "component"]) {
     if (typeof detail[key] === "string" && DETAIL_TOKEN.test(detail[key])) out[key] = detail[key];
   }
   if (typeof detail.recordId === "string" && DETAIL_RECORD_ID.test(detail.recordId)) out.recordId = detail.recordId;
@@ -117,6 +117,10 @@ export function compactSummary(result) {
   for (const [key, value] of Object.entries(result)) {
     if (Object.keys(out).length >= MAX_SUMMARY_KEYS) break;
     if (!/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key)) continue;
+    if ((key === "blockReason" || key === "blockComponent") && typeof value === "string" && DETAIL_TOKEN.test(value)) {
+      out[key] = value;
+      continue;
+    }
     if (typeof value === 'boolean' || (typeof value === 'number' && Number.isFinite(value))) out[key] = value;
   }
   return Object.keys(out).length ? out : null;
@@ -278,6 +282,8 @@ export function jobHealthView(stored, now = Date.now(), env = null, store = null
       lastErrorSubcheck: record.lastFailure?.subcheck ?? null,
       lastErrorClass: record.lastFailure?.errorClass ?? null,
       lastErrorRecordClass: record.lastFailure?.recordClass ?? null,
+      lastErrorReason: record.lastFailure?.reason ?? null,
+      lastErrorComponent: record.lastFailure?.component ?? null,
       lastDurationMs: record.lastDurationMs ?? null,
       consecutiveFailures: record.consecutiveFailures ?? 0,
       lastSummary: record.lastSummary ?? null,
