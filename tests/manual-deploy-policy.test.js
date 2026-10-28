@@ -8,8 +8,11 @@ import { parse } from "yaml";
 
 const workflow = parse(readFileSync(new URL("../.github/workflows/deploy-prod.yml", import.meta.url), "utf8"));
 const gate = workflow.jobs.gate.steps.find(step => step.id === "gate").run;
-// Execute the workflow's actual policy shell, with real jq and fixture API data.
-const policy = gate.slice(gate.indexOf("for wf in test schema-gate; do"), gate.indexOf('if [ "$EVENT" != "workflow_dispatch" ]; then', gate.indexOf("for wf in test schema-gate; do")));
+// Execute hosted-result policy only. manual-deploy-schema.test.js executes the
+// complete gate and proves inline qualification is required before go=true.
+const inlineSchemaStart = gate.search(/if \[ "\$EVENT" = "workflow_dispatch" \]; then\s+git checkout/);
+assert.ok(inlineSchemaStart > 0, "inline qualification boundary must exist");
+const policy = gate.slice(gate.indexOf("for wf in test schema-gate; do"), inlineSchemaStart);
 function check(event, tests, schema) {
   const dir = mkdtempSync(join(tmpdir(), "room-deploy-policy-"));
   try {
@@ -39,11 +42,11 @@ for (const status of ["success", "failure", "cancelled", "in_progress", "missing
   });
 }
 for (const status of ["failure", "cancelled", "in_progress", "missing"]) {
-  test(`schema=${status} blocks manual and automatic deployments`, () => {
+  test(`schema=${status} requires inline manual qualification and blocks automatic deployment`, () => {
     const manual = check("workflow_dispatch", "failure", status);
-    assert.equal(manual.status, 1, manual.stderr);
-    assert.match(manual.stdout, /REFUSE:.*schema-gate/);
-    assert.doesNotMatch(manual.stdout, /ALLOW/);
+    assert.equal(manual.status, 0, manual.stderr);
+    assert.match(manual.stdout, /ALLOW/);
+    assert.ok(manual.summary.includes(`schema-gate on ${"a".repeat(40)}: ${status}`));
     const automatic = check("workflow_run", "success", status);
     assert.equal(automatic.status, 0, automatic.stderr);
     assert.match(automatic.stdout, /SKIP:.*schema-gate/);
