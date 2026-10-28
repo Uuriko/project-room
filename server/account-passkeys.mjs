@@ -17,7 +17,7 @@
 // a different process than the options call answers 401.
 
 import { createHash, randomBytes } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import {
   createRegistrationOptions, verifyRegistrationResponse, createAuthenticationOptions, verifyAuthenticationAssertion
 } from "../src/passkey-login.mjs";

@@ -139,7 +139,7 @@ test("stale-unclaimed sweep: a dormant poisoned row is named while the valid dor
   assert.match(skipped[0].error, REPO_ERROR);
 });
 
-test("backfill validates mapped rows: a URL repository is reported, never stored (#3465)", t => {
+test("backfill normalizes supported GitHub URL repositories into valid Board rows (#3465)", t => {
   const dir = mkdtempSync(join(tmpdir(), "claimprs-writer-"));
   const store = new RoomStore(join(dir, "room.sqlite"), { workItemBoardBackfill: "manual" });
   t.after(() => { try { store.close(); } catch {} rmSync(dir, { recursive: true, force: true }); });
@@ -159,7 +159,7 @@ test("backfill validates mapped rows: a URL repository is reported, never stored
     send(workerKey, `accept-${workItemId}`, "work.accepted", { workItemId, expectedRevision: revisionOf(workItemId) });
     send(workerKey, `claim-${workItemId}`, "claim.acquired", {
       workItemId, expectedRevision: revisionOf(workItemId),
-      repository, ref: "main", paths: ["server/**"], expiresAt: new Date(Date.now() + 2 * HOUR).toISOString()
+      repository, ref: "main", paths: [`server/${workItemId}/**`], expiresAt: new Date(Date.now() + 2 * HOUR).toISOString()
     });
   };
   drive("task-url", "https://github.com/Uuriko/project-room");
@@ -167,10 +167,8 @@ test("backfill validates mapped rows: a URL repository is reported, never stored
   // Stage the legacy state: board rows gone, backfill rebuilds from the log.
   store.db.prepare("DELETE FROM work_claims WHERE room_id='commons'").run();
   const report = store.backfillRoomWorkItemClaims("commons");
-  assert.equal(report.errors.length, 1);
-  assert.match(report.errors[0], /task-url/);
-  assert.match(report.errors[0], REPO_ERROR);
-  assert.equal(store.workClaims.get("commons", "task-url"), null, "the invalid row is not stored");
+  assert.deepEqual(report.errors, []);
+  assert.equal(store.workClaims.get("commons", "task-url")?.repo, "Uuriko/project-room");
   assert.equal(store.workClaims.get("commons", "task-ok")?.state, "claimed", "the valid row is stored");
-  assert.equal(report.created, 1);
+  assert.equal(report.created, 2);
 });

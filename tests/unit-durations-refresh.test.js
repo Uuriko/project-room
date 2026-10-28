@@ -86,6 +86,18 @@ test("refresh: measured values win, max across receipts, absent preserved, delet
   assert.equal(table[PROVENANCE_KEY].filesMeasured, 2);
 });
 
+test("refresh loads the single-job unit receipt", (t) => {
+  const fixture = makeTree(t, { files: ["tests/a.test.js"], milliseconds: {} });
+  writeReceipt(fixture.receiptsDir, "unit-all-attempt-1.json", {
+    runId: "7", revision: "def",
+    fileDurationsMs: { "tests/a.test.js": 2222 },
+  });
+  writeReceipt(fixture.receiptsDir, "notes.json", { fileDurationsMs: { "tests/a.test.js": 1 } });
+  const loaded = loadReceipts(fixture.receiptsDir);
+  assert.equal(loaded.length, 1);
+  assert.equal(loaded[0].fileDurationsMs["tests/a.test.js"], 2222);
+});
+
 test("refresh: CLI regeneration is idempotent (second run is a byte-identical no-op)", (t) => {
   const fixture = makeTree(t, {
     files: ["tests/a.test.js"],

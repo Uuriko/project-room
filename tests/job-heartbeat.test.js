@@ -71,9 +71,9 @@ test("every worker job has a heartbeat entry and its cadence", () => {
   assert.deepEqual(CRON_JOBS.map(job => job.name), [
     "gmail-sync", "channel-drain", "webhook-dispatch", "land-queue", "claim-prs",
     "retention", "integrity", "public-read-model", "public-work-reseed", "escrow-epochs", "room-backup", "patrol",
-    "store-growth"
+    "project-map", "store-growth"
   ]);
-  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 60, 60, 86400, 60, 3600]);
+  assert.deepEqual(CRON_JOBS.map(job => job.periodSeconds), [60, 60, 60, 60, 60, 3600, 3600, 60, 60, 60, 86400, 60, 60, 3600]);
 });
 
 test("runCronJobs runs one job at a time and yields between them", async () => {
@@ -411,20 +411,48 @@ test("channel drain: terminal journal rows alone keep the job enabled (the repor
   db.close();
 });
 
-test("scheduled() makes one safety-net call and fails the invocation when that call fails", async () => {
+test("scheduled() preserves slow-job attempts when the fast safety-net RPC fails", async () => {
   const { stub, calls } = roomStub({
     ensureJobAlarm: () => Promise.reject(new Error("cron jobs failed: land-queue"))
   });
   await assert.rejects(worker.scheduled({ cron: "*/30 * * * *" }, { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } }, { waitUntil() {} }),
-    /cron jobs failed: land-queue/);
-  assert.deepEqual(calls, ["ensureJobAlarm"]);
+    /Scheduled job RPC failed: fast jobs/);
+  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
 });
 
-test("scheduled() resolves after the safety-net call when the room is quiet", async () => {
+test("scheduled() checks each slow job separately after the fast safety-net call", async () => {
   const { stub, calls } = roomStub();
   const env = { ROOM_MAINTENANCE: "0", ROOM_GMAIL_ENABLED: "0", ROOM: { getByName: () => stub } };
   await worker.scheduled({ cron: "*/30 * * * *" }, env, { waitUntil() {} });
-  assert.deepEqual(calls, ["ensureJobAlarm"]);
+  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
+});
+
+test("a failed slow RPC does not prevent later jobs and uses a fresh stub", async () => {
+  const names = [];
+  let bindings = 0;
+  const { stub } = roomStub({ runSlowJob: name => {
+    names.push(name);
+    if (name === "integrity") throw new Error("simulated object reset");
+    return [];
+  } });
+  await assert.rejects(worker.scheduled({}, { ROOM: { getByName() { bindings++; return stub; } } }, {}), /RPC failed: integrity/);
+  assert.deepEqual(names, ["retention", "integrity", "room-backup", "store-growth"]);
+  assert.equal(bindings, 2);
+});
+
+test("concurrent heartbeat commits retain both jobs and recover after a failed put", async () => {
+  const { stub, self } = roomStub();
+  const outcome = job => [{ job, ok: true, at: 1234, durationMs: 0 }];
+  await Promise.all([stub.recordCronTick(outcome("retention")), stub.recordCronTick(outcome("integrity"))]);
+  const stored = self.ctx.storage.map.get(HEARTBEAT_STORAGE_KEY);
+  assert.equal(stored.retention.lastSuccessAt, 1234);
+  assert.equal(stored.integrity.lastSuccessAt, 1234);
+  const put = self.ctx.storage.put;
+  let fail = true;
+  self.ctx.storage.put = async (...args) => { if (fail) { fail = false; throw new Error("storage unavailable"); } return put(...args); };
+  const results = await Promise.allSettled([stub.recordCronTick(outcome("room-backup")), stub.recordCronTick(outcome("store-growth"))]);
+  assert.deepEqual(results.map(result => result.status), ["rejected", "fulfilled"]);
+  assert.equal(self.ctx.storage.map.get(HEARTBEAT_STORAGE_KEY)["store-growth"].lastSuccessAt, 1234);
 });
 
 test("gmail and channel drain stay disabled, not stale, when nothing is configured", () => {
