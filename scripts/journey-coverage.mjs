@@ -5,6 +5,9 @@
 // unit/browser evidence, any linked file that does not exist, and any
 // browser check that is not wired into npm run test:browser.
 import { existsSync, readFileSync } from "node:fs";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
+import { deriveBrowserSuites } from "./browser-suites.mjs";
 
 export function parseCoverageMap(markdown) {
   const m = /```json coverage-map\n([\s\S]*?)\n```/.exec(String(markdown));
@@ -21,6 +24,12 @@ export function parseCoverageMap(markdown) {
 // false-negatives ("scripts/check.mjs" matching "scripts/other-check.mjs").
 export function parseBrowserSuite(script) {
   return [...new Set(String(script || "").match(/scripts\/[A-Za-z0-9_.-]+\.mjs/g) ?? [])];
+}
+
+// The suites npm run test:browser actually executes. Membership comes from
+// disk (scripts/browser-suites.mjs), not from a hand-copied package.json list.
+export function wiredBrowserSuite() {
+  return deriveBrowserSuites(dirname(fileURLToPath(import.meta.url)));
 }
 
 export function checkCoverage(map, { exists = existsSync, browserSuite = [] } = {}) {
@@ -58,8 +67,7 @@ export function checkCoverage(map, { exists = existsSync, browserSuite = [] } = 
 
 function main() {
   const map = parseCoverageMap(readFileSync("docs/JOURNEY-COVERAGE-MAP.md", "utf8"));
-  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
-  const problems = checkCoverage(map, { browserSuite: parseBrowserSuite(pkg.scripts?.["test:browser"]) });
+  const problems = checkCoverage(map, { browserSuite: wiredBrowserSuite() });
   if (problems.length) {
     for (const p of problems) console.error(`journey-coverage: ${p}`);
     process.exit(1);
