@@ -4,6 +4,16 @@
 import { normalizePoll } from './polls.js';
 import { prepareReplyPost, recordReplyPost } from './reply-requests.js';
 
+// Receipt-card cost, kept only in its recorded shape: non-negative integer
+// cents or null, and a short model string or null. Anything else is dropped
+// so a malformed card never shows an invented number.
+const centsOrNull = v => (Number.isSafeInteger(v) && v >= 0 ? v : null);
+function receiptCost(cost) {
+  if (!cost || typeof cost !== "object" || Array.isArray(cost)) return null;
+  const model = typeof cost.model === "string" && cost.model.trim() && cost.model.length <= 100 ? cost.model : null;
+  return { spentCents: centsOrNull(cost.spentCents), capCents: centsOrNull(cost.capCents), model };
+}
+
 export function isRedactedBody(data) {
   return data?.redacted === true && data.body == null;
 }
@@ -76,7 +86,8 @@ export function createMessageReducers({ requireMember, knownMember, requireField
         closedBy: incoming.data.closedBy,
         deliveryMode: incoming.data.deliveryMode,
         evidence: incoming.data.evidence,
-        ...(incoming.data.pullRequestUrl ? { pullRequestUrl: incoming.data.pullRequestUrl } : {})
+        ...(incoming.data.pullRequestUrl ? { pullRequestUrl: incoming.data.pullRequestUrl } : {}),
+        ...(receiptCost(incoming.data.cost) ? { cost: receiptCost(incoming.data.cost) } : {})
       } : {}),
       ...(poll ? { kind: "poll", poll } : {})
     });
