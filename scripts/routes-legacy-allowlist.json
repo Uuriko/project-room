@@ -3111,6 +3111,38 @@
     },
     {
       "method": "GET",
+      "path": "/r/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/r/{id}.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}.json"
+    },
+    {
+      "method": "GET",
+      "path": "/r/{id}/proof"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}/proof"
+    },
+    {
+      "method": "GET",
+      "path": "/r/{id}/proof.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}/proof.json"
+    },
+    {
+      "method": "GET",
       "path": "/r/{id}/proof/og.png"
     },
     {
@@ -3124,6 +3156,22 @@
     {
       "method": "HEAD",
       "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}.json"
     },
     {
       "method": "GET",
@@ -3656,6 +3704,22 @@
     {
       "method": "HEAD",
       "path": "/templates.json"
+    },
+    {
+      "method": "GET",
+      "path": "/templates/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/templates/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/templates/{id}.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/templates/{id}.json"
     },
     {
       "method": "GET",
@@ -6745,6 +6809,38 @@
     },
     {
       "method": "GET",
+      "path": "/r/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/r/{id}.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}.json"
+    },
+    {
+      "method": "GET",
+      "path": "/r/{id}/proof"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}/proof"
+    },
+    {
+      "method": "GET",
+      "path": "/r/{id}/proof.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/r/{id}/proof.json"
+    },
+    {
+      "method": "GET",
       "path": "/r/{id}/proof/og.png"
     },
     {
@@ -6758,6 +6854,22 @@
     {
       "method": "HEAD",
       "path": "/receipts"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/receipts/{id}.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/receipts/{id}.json"
     },
     {
       "method": "GET",
@@ -7306,6 +7418,22 @@
     {
       "method": "HEAD",
       "path": "/templates.json"
+    },
+    {
+      "method": "GET",
+      "path": "/templates/{id}"
+    },
+    {
+      "method": "HEAD",
+      "path": "/templates/{id}"
+    },
+    {
+      "method": "GET",
+      "path": "/templates/{id}.json"
+    },
+    {
+      "method": "HEAD",
+      "path": "/templates/{id}.json"
     },
     {
       "method": "GET",
