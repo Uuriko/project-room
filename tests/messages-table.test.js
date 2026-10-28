@@ -542,9 +542,12 @@ test("archiving keeps every open question (more than the reader's 100-newest cap
 
 test("archiving keeps the answer of a question that is only kept as a reply ancestor of a recent message", t => {
   const f = fixture(t);
+  const now = Date.now();
+  f.store.now = () => now;
   const openFor = who => listOpenQuestions(f.store, who, "commons", { limit: 100 }).openQuestions.map(q => q.messageId);
   f.send(f.human, T.MESSAGE_POSTED, { messageId: "q", body: "is staging up?" });
   f.send(f.agent, T.MESSAGE_POSTED, { messageId: "ans", body: "yes", replyToId: "q" });
+  // Deliberately share the timestamp: canonical message order must keep k open.
   f.send(f.human, T.MESSAGE_POSTED, { messageId: "k", body: "thanks, what about prod?", replyToId: "q" });
   for (let i = 0; i < 6; i++) f.send(f.human, T.MESSAGE_POSTED, { messageId: `pad-${i}`, body: `pad ${i}` });
   for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;

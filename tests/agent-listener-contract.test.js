@@ -41,7 +41,10 @@ test('heartbeatWithListener passes cadenceSeconds through: omit preserves, expli
   const bare = heartbeatWithListener(store, auth, { hostId: 'host-e', mode: 'pull-only' });
   assert.equal(bare.host.cadenceSeconds, 900, 'a body without cadenceSeconds preserves the declaration');
   const cleared = heartbeatWithListener(store, auth, { hostId: 'host-e', mode: 'pull-only', cadenceSeconds: null });
-  assert.equal(cleared.host.cadenceSeconds, null, 'an explicit null clears the declaration');
+  // BUILD-HEARTBEAT-CADENCE: the pass-through still delivers the null
+  // untouched; the store reads it as "hint cleared" and assigns its
+  // default (120s) — the response reports the assignment.
+  assert.equal(cleared.host.cadenceSeconds, 120, 'an explicit null clears the hint; the server assigns its default');
 });
 
 test('identity-level roomless lease: first host acquires, a second host is told who holds it', t => {

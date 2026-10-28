@@ -20,18 +20,18 @@
 //    shape and the MCP tools list — none compares tool input schemas
 //    against OpenAPI request schemas parameter by parameter.
 // 4. No production seam: imports the already-exported tool registries and
-//    reads docs/openapi.yaml off disk. No new exports, flags, or wrappers.
+//    the fragment renderer. No new exports, flags, or wrappers.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import { renderOpenApi } from "../scripts/openapi-document.mjs";
 import {
   hostedMcpToolDefs,
   hostedRoomTools,
 } from "../server/mcp-hosted-tools.mjs";
 import { publicWorkMcpDefinitions } from "../server/mcp-public-work.mjs";
 
-const openapi = parse(readFileSync(new URL("../docs/openapi.yaml", import.meta.url), "utf8"));
+const openapi = parse(renderOpenApi());
 
 // ---------------------------------------------------------------------------
 // OpenAPI model
@@ -188,9 +188,9 @@ const ALLOW = {
     // "Same store call as POST /api/agent-heartbeats with { hostId, mode: \"pull-only\" }."
     fixed: { mode: "pull-only" },
     narrowed: {
-      // "Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear"
+      // "The cadence hint is cleared: this tool sends an explicit cadenceSeconds null, the documented clear"
       wakeUrl: "Clearing the wake URL is the point of the tool; the fixed mode pull-only forbids it route-side.",
-      cadenceSeconds: "'Cadence is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — the tool exposes no cadenceSeconds field; it hardcodes the clear.'",
+      cadenceSeconds: "'The cadence hint is cleared: this tool sends an explicit cadenceSeconds null, the documented clear — the tool exposes no cadenceSeconds field; it hardcodes the clear.'",
       pushNotification: "'An existing push subscription row is left in place' — the tool never sends one.",
       workWakes: "The pointer-only work-signal preference is owned by heartbeat_set; this fixed pull-only body omits it, and the route retains the current setting when it is omitted.",
     },

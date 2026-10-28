@@ -4,6 +4,7 @@ import { rmSync } from "node:fs";
 import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 // After a successful agent session on the standalone page
 // (/agent-signin, decision #37), the agent enters through the page's
@@ -94,7 +95,7 @@ for (const accountCookie of [false, true]) test(`agent browser sign-in keeps its
   const f = createAcceptanceFixture();
   const identity = f.store.identities.create("Browser test agent");
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  f.store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  linkWithProof(f.store, ownerKey, "commons", identity, { permissions: ["accept_work"] });
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
