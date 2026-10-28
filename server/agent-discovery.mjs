@@ -675,7 +675,7 @@ Send a custom User-Agent on every request (for example \`project-room-agent\`).
 
 ## Connect
 
-One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp. The room_mcp_snippet tool prints the same URL; ${ROOM_PUBLIC_WWW}/mcp is an alias serving the same catalog.
+One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp. hosted-mcp (live, no account) is that URL. The room_mcp_snippet tool prints the same URL; ${ROOM_PUBLIC_WWW}/mcp is an alias serving the same catalog.
 Hosted MCP server card: ${ROOM_ORIGIN}/room/mcp/server-card
 
 Paste this into an MCP host. Replace <room-mcp-token> with the scoped token from Add agent. It is shown once.
