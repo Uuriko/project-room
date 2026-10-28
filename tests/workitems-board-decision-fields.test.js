@@ -62,7 +62,17 @@ test("slice2 fate: a decision-gated item's row carries both fields in every mapp
 
   f.mutate(f.workerKey, "resolve", "work.blocker_resolved", "gated-1", { resolution: "go" });
   f.mutate(f.workerKey, "start-2", "work.started", "gated-1");
-  f.mutate(f.workerKey, "complete", "work.completed", "gated-1", { summary: "done", producerId: "worker", nextAction: "decide", signedEvidence: signEvidence() });
+  f.mutate(f.workerKey, "complete", "work.completed", "gated-1", { summary: "done", producerId: "worker", nextAction: "decide", evidenceVersion: `sha256:${"ab".repeat(32)}`, evidenceUrl: "https://example.com/delivery", signedEvidence: signEvidence() });
+  // Completed but not yet decided: the gate is still pending, so the row
+  // is "delivered", not "done" (the Step 0 fate pin) — with both fields
+  // still carried.
+  row = f.board("gated-1");
+  assert.equal(row.state, "delivered");
+  assert.equal(row.ownerDecisionRequired, true);
+  assert.equal(row.humanDecisionMakerId, "owner");
+
+  f.send(f.ownerKey, "rationale", "message.posted", { messageId: "rationale-gated-1", body: "Rationale: the delivery matches the brief." });
+  f.mutate(f.ownerKey, "decide", "owner.decision_recorded", "gated-1", { decision: "approved", completionEventId: f.item("gated-1").receipt.eventId, evidenceVersion: f.item("gated-1").receipt.evidenceVersion, reason: "decided", sourceMessageId: "rationale-gated-1" });
   row = f.board("gated-1");
   assert.equal(row.state, "done");
   assert.equal(row.ownerDecisionRequired, true);
