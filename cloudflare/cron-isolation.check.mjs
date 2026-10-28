@@ -56,3 +56,20 @@ test("bounded relief in Workerd archives a verified prefix without replaying the
     assert.equal(newestKept, true);
   } finally { await mf.dispose(); }
 });
+
+
+test("overlapping scheduler callers share execution through commit, recheck stale selections and retry failures", async () => {
+  for (const fail of [false, true]) {
+    const mf = await start();
+    try {
+      const response = await mf.dispatchFetch(`https://room.example.test/ownership${fail ? '?failure' : ''}`);
+      assert.equal(response.status, 200);
+      const result = await response.json();
+      assert.deepEqual(result.parked, { executions: 1, commits: 1 });
+      assert.equal(result.independent, true, 'independent job progresses while Gmail waits');
+      assert.equal(result.channelExecutions, 0, 'a stale selection cannot repeat completed work');
+      assert.equal(result.failures, fail ? 8 : 0);
+      assert.deepEqual(result.afterRetry, { executions: fail ? 2 : 1, commits: fail ? 2 : 1 });
+    } finally { await mf.dispose(); }
+  }
+});
