@@ -4,13 +4,19 @@ import { uiText } from "./strings.js";
 
 const FILTERS = [
   { id: "needs", label: "Needs me" },
+  { id: "requests", label: uiText("updates.requestsToMe") },
+  { id: "waiting", label: uiText("updates.waitingOnOthers") },
   { id: "mentions", label: "Mentions" },
   { id: "all", label: "All activity" }
 ];
 const ACTION_LABELS = { open: uiText("updates.open"), done: uiText("updates.legacyHandled"), clear: uiText("updates.dismiss") };
+export function updateMessageId(item) {
+  return ["request", "open_request"].includes(item.kind) ? item.sourceRef?.requestId : item.sourceRef?.messageId;
+}
+const requestDirection = filter => filter === "requests" ? "incoming" : filter === "waiting" ? "outgoing" : null;
 export function updateActions(item, pendingAction = null) {
   const actions = [];
-  if (item.sourceRef?.workItemId || item.sourceRef?.messageId) actions.push("open");
+  if (item.sourceRef?.workItemId || updateMessageId(item)) actions.push("open");
   if (item.state === "unread" || item.state === "read") actions.push("clear");
   // Preserve the exact retry for an uncertain action, including older clients.
   if (pendingAction && Object.hasOwn(ACTION_LABELS, pendingAction) && !actions.includes(pendingAction)) actions.push(pendingAction);
@@ -25,7 +31,7 @@ export function queryFor(filter) {
   return "state=actionable";
 }
 
-export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessage }) {
+export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessage, onOpenRequest, describeRequest }) {
   const topbar = host?.querySelector(".topbar-actions") ?? document.querySelector(".topbar-actions");
   const entry = document.createElement("button");
   entry.id = "topbar-updates";
@@ -162,7 +168,7 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     }
   }
   function paint() {
-    decisions.hidden = filter === "mentions";
+    decisions.hidden = filter === "mentions" || Boolean(requestDirection(filter));
     for (const button of tabs.querySelectorAll("[role=tab]")) {
       const on = button.dataset.updateFilter === filter;
       button.setAttribute("aria-selected", on ? "true" : "false");
@@ -183,7 +189,9 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       empty.className = "empty-note";
       empty.textContent = incomplete ? "No matching updates are loaded yet. Some sources are unavailable."
         : hasMore ? "No matching updates in the loaded pages yet."
-          : filter === "needs" ? "Nothing needs you." : "Nothing in this filter.";
+          : filter === "requests" ? uiText("updates.noRequestsToMe")
+            : filter === "waiting" ? uiText("updates.noWaiting")
+              : filter === "needs" ? "Nothing needs you." : "Nothing in this filter.";
       list.append(empty); paintPaging();
       return;
     }
@@ -205,6 +213,9 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
         title.setAttribute("aria-label", `${ACTION_LABELS.open} ${item.title || item.kind}`);
       }
       copy.append(title);
+      if (item.requestMeta) {
+        const meta = document.createElement("p"); meta.className = "form-hint"; meta.textContent = item.requestMeta; copy.append(meta);
+      }
       const actions = document.createElement("div");
       actions.className = "updates-actions";
       for (const name of availableActions) {
@@ -236,6 +247,19 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     loading = true; paintOperations(); paintPaging(); status.textContent = "Loading updates…";
     const partialSources = page => Object.values(page?.incompleteSources ?? {}).some(Boolean);
     const readWindow = async () => {
+      const direction = requestDirection(next);
+      if (direction) {
+        const page = await client.roomRead(`/reply-requests?direction=${direction}&status=open`);
+        if (!page || !current()) return null;
+        if (!Array.isArray(page.requests)) throw new Error(uiText("updates.requestReadFailed"));
+        const requests = page.requests.map(request => {
+          const description = describeRequest?.(request, direction) ?? {};
+          return { id: request.id, kind: "open_request", state: "open",
+            title: description.title || uiText("updates.replyRequest"), requestMeta: description.meta || "",
+            sourceRef: { requestId: request.id } };
+        });
+        return { items: requests, cursor: null, hasMore: false, incomplete: false, pages: 1, stalled: false, seen: new Set() };
+      }
       const merged = new Map(priorItems.map(item => [item.id, item]));
       const seen = append ? new Set(visitedCursors) : new Set();
       let after = startCursor, more = false, unavailable = append && incomplete;
@@ -290,6 +314,22 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     }
   }
   async function mark(item, action) {
+    if (item.kind === "open_request") {
+      if (action !== "open" || loading || !currentContext()) return;
+      const owned = owner, mine = ++interaction;
+      const current = () => owns(owned) && interaction === mine && dialog.open;
+      loading = true; paintOperations(); paintPaging();
+      try {
+        const opened = onOpenRequest ? await onOpenRequest(updateMessageId(item), capture(item.id), current)
+          : onOpenMessage?.(updateMessageId(item), capture(item.id));
+        if (!owns(owned) || interaction !== mine) return;
+        if (opened === false) { status.textContent = uiText("updates.requestUnavailable"); return; }
+        dialog.close();
+      } finally {
+        if (owns(owned) && interaction === mine) { loading = false; paintOperations(); paintPaging(); }
+      }
+      return;
+    }
     const owned = currentContext();
     if (!owned) return;
     let operation = operations.get(item.id);
@@ -355,10 +395,12 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       return;
     }
     if (action === "open") {
-      const workItemId = operation.item.sourceRef?.workItemId;
-      const messageId = operation.item.sourceRef?.messageId;
-      const opened = workItemId && onOpenWork ? onOpenWork(workItemId, origin)
+      const messageId = updateMessageId(operation.item);
+      const workItemId = operation.item.kind === "request" ? null : operation.item.sourceRef?.workItemId;
+      const opened = operation.item.kind === "request" && onOpenRequest ? await onOpenRequest(messageId, origin, current)
+        : workItemId && onOpenWork ? onOpenWork(workItemId, origin)
         : messageId && onOpenMessage ? onOpenMessage(messageId, origin) : null;
+      if (!owns(owned) || interaction !== mine) return;
       if (opened === false) { paintOperations(); status.textContent = "That source is no longer available in this room."; return; }
       dialog.close();
       if (opened !== true && messageId) {

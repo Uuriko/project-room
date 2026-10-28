@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { queryFor, validBasis, updateActions } from "../src/updates-ui.js";
+import { queryFor, validBasis, updateActions, updateMessageId } from "../src/updates-ui.js";
 
 test("notification actions dismiss attention without offering a second completion workflow", () => {
   const sourceRef = { messageId: "message" };
@@ -36,4 +36,17 @@ test("validBasis: accepts ub1_ plus 64 lowercase hex chars, nothing else", () =>
   assert.equal(validBasis(null), false);
   assert.equal(validBasis(undefined), false);
   assert.equal(validBasis(42), false);
+});
+
+
+test("formal requests open their conversation while other request IDs stay scoped", () => {
+  const formal = { kind: "request", state: "unread", sourceRef: { requestId: "ask", workItemId: "linked-work" } };
+  assert.equal(updateMessageId(formal), "ask");
+  assert.deepEqual(updateActions(formal), ["open", "clear"]);
+  assert.deepEqual(updateActions({ kind: "open_request", state: "open", sourceRef: { requestId: "ask" } }), ["open"]);
+  for (const kind of ["access_request", "invite_request"]) {
+    const item = { kind, state: "unread", sourceRef: { requestId: "not-a-message" } };
+    assert.equal(updateMessageId(item), undefined);
+    assert.deepEqual(updateActions(item), ["clear"]);
+  }
 });

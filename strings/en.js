@@ -668,5 +668,15 @@ export default {
   "result.backToChat": "Back to chat",
   "result.empty": "No completed results yet.",
   "rooms.createAction": "Create room",
-  "work.roomAudience": "Visible to everyone in this room"
+  "work.roomAudience": "Visible to everyone in this room",
+  "updates.requestsToMe": "Requests to me",
+  "updates.waitingOnOthers": "Waiting on others",
+  "updates.noRequestsToMe": "No open requests to you.",
+  "updates.noWaiting": "No replies outstanding.",
+  "updates.requestReadFailed": "Could not load open requests. Try again.",
+  "updates.replyRequest": "Reply request",
+  "updates.requestUnavailable": "This request is no longer available in this room.",
+  "updates.askedYou": "{name} asked you",
+  "updates.waitingFor": "Waiting for {name}",
+  "updates.requestMeta": "{relation} · {date}"
 };

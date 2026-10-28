@@ -81,8 +81,10 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   const { store, owner, agent, origin, page, errors, selectUpdatesFilter } = await setup(t, { now: () => ++time });
   const messageId = "updates-message-only", threadId = "updates-thread-root";
   store.command(owner, "commons", command(T.MESSAGE_POSTED, { messageId: threadId, body: "Starting review discussion." }));
+  // Thread-return coverage uses a public mention; a directed private message
+  // correctly opens its DM instead of inheriting this public thread.
   store.command(agent, "commons", command(T.MESSAGE_POSTED, {
-    messageId, body: "please confirm the empty-room plan", toMemberId: "owner", replyToId: threadId
+    messageId, body: "please confirm the empty-room plan @owner", replyToId: threadId
   }));
   await page.locator("#topbar-updates").click();
   await page.locator("#updates-dialog").waitFor({ state: "visible" });
@@ -93,7 +95,7 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
 
   await page.getByRole("tab", { name: "Needs me" }).focus();
   await page.keyboard.press("ArrowRight");
-  await page.waitForFunction(() => document.querySelector("[data-update-filter=mentions]")?.getAttribute("aria-selected") === "true");
+  await page.waitForFunction(() => document.querySelector("[data-update-filter=requests]")?.getAttribute("aria-selected") === "true");
   await page.keyboard.press("ArrowLeft");
   await page.waitForFunction(() => document.querySelector("[data-update-filter=needs]")?.getAttribute("aria-selected") === "true");
 
@@ -104,10 +106,10 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await page.reload();
   await page.locator("#main").waitFor({ state: "visible" });
   await page.locator("#thread-bar").waitFor({ state: "visible" });
-  assert.equal(await page.locator("#work-navigation-return").textContent(), "Back to room");
+  assert.equal(await page.locator("#work-navigation-return").isVisible(), false, "a reloaded thread has its own Back control without a duplicate record return");
   const replyDraft = "Keep this reply when I return to the room.";
   await page.locator("#message-input").fill(replyDraft);
-  await page.locator("#work-navigation-return").press("Enter");
+  await page.locator("#thread-back").press("Enter");
   await page.locator("#thread-bar").waitFor({ state: "hidden" });
   await page.locator(`[data-message-id="${threadId}"][data-message-action="reply"]`).click();
   await page.locator("#thread-bar").waitFor({ state: "visible" });
@@ -556,6 +558,9 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
 // retaining an ambiguous operation through dismissal, and accepting the wrong
 // receipt as success. Every projection and receipt comes from this real server;
 // routes only lose, delay, or corrupt delivery after a real commit. No UI seam.
+// The human UI exposes Open and Dismiss; legacy Done remains covered only by
+// real HTTP-seeded marks below. Dismiss changes private notification state,
+// never the shared work or reply-request completion state.
 function revisionJourney(f) {
   const { store, owner, agent, origin, page, selectUpdatesFilter } = f;
   const signEvidence = makeTestSigner(store);
@@ -614,7 +619,7 @@ function revisionJourney(f) {
     await page.waitForFunction(({ id, name }) => {
       const button = [...document.querySelectorAll(".updates-row")].find(row => row.dataset.updateId === id)
         ?.querySelector(`[data-update-action="${name}"]`);
-      return button?.textContent.startsWith("Retry ") && !button.disabled;
+      return button?.getAttribute("aria-label")?.startsWith("Retry ") && !button.disabled;
     }, { id, name });
     for (const other of ["open", "done", "clear"].filter(value => value !== name)) {
       assert.equal(await action(id, other).count() === 0 || await action(id, other).isDisabled(), true, "an unresolved operation cannot be replaced by another action on the row");
@@ -648,7 +653,7 @@ function revisionJourney(f) {
 test("Updates refuse a source revision changed after display without silently marking or navigating", { timeout: 120000 }, async t => {
   const f = revisionJourney(await setup(t));
   const { page, store } = f;
-  for (const name of ["open", "done", "clear"]) {
+  for (const name of ["open", "clear"]) {
     const shown = await f.makeReview(`stale-${name}`);
     await f.openUpdates();
     await f.action(shown.id, name).waitFor();
@@ -691,7 +696,7 @@ test("Updates refuse a source revision changed after display without silently ma
 test("Updates retry the original committed operation after held, lost, 503 and 429 responses across Close and Escape", { timeout: 120000 }, async t => {
   const f = revisionJourney(await setup(t));
   const { page, store, origin } = f;
-  for (const [name, transport, dismiss] of [["open", "held", "Close"], ["open", "lost", "Close"], ["done", 503, "Escape"], ["clear", 429, "Close"]]) {
+  for (const [name, transport, dismiss] of [["open", "held", "Close"], ["open", "lost", "Close"], ["clear", 503, "Escape"], ["clear", 429, "Close"]]) {
     const shown = await f.makeReview(`retry-${name}-${transport}`);
     await f.openUpdates();
     const delivered = [], commandsBefore = f.countCommands(), attemptsBefore = f.attempts.length;
@@ -772,7 +777,7 @@ test("Updates do not navigate or repaint for a receipt from a different request,
   const f = revisionJourney(await setup(t));
   const { page, store, origin } = f;
   const other = await f.makeReview("different-receipt-source");
-  for (const [name, field] of [["open", "request"], ["done", "item"], ["clear", "basis"]]) {
+  for (const [name, field] of [["open", "request"], ["clear", "item"], ["clear", "basis"]]) {
     const shown = await f.makeReview(`receipt-${field}`);
     await f.openUpdates();
     const destination = page.url(), commandsBefore = f.countCommands(), attemptsBefore = f.attempts.length;
@@ -816,10 +821,10 @@ test("Updates do not navigate or repaint for a receipt from a different request,
   assert.deepEqual(f.errors, []);
 });
 
-test("Updates retain a neutral retry when a lost Done or Clear removes the source from Needs me", { timeout: 120000 }, async t => {
+test("Updates retain a neutral retry when a lost Dismiss removes the notification from Needs me", { timeout: 120000 }, async t => {
   const f = revisionJourney(await setup(t));
   const { page, store, origin } = f;
-  for (const name of ["done", "clear"]) {
+  for (const name of ["clear"]) {
     const shown = await f.makeReview(`retry-missing-${name}`);
     await f.openUpdates("needs");
     const commandsBefore = f.countCommands(), attemptsBefore = f.attempts.length;
@@ -1252,12 +1257,12 @@ test("Updates replace duplicate ids with fresh authorized bases and show source 
   assert.equal(new Set(ids).size, 126);
   assert.equal(ids.filter(id => id === review.id).length, 1);
   await page.unroute(pattern, overlap);
-  const changedAction = f.responseFor(review.id, "done");
-  await f.action(review.id, "done").click();
+  const changedAction = f.responseFor(review.id, "clear");
+  await f.action(review.id, "clear").click();
   assert.equal((await changedAction).status(), 200);
   assert.equal(f.attempts.at(-1).body.expectedBasis, current.basisToken, "the single row acts on the fresh duplicate's basis");
   await page.waitForFunction(id => [...document.querySelectorAll(".updates-row")].find(row => row.dataset.updateId === id)
-    ?.dataset.updateState === "handled", review.id);
+    ?.dataset.updateState === "cleared", review.id);
   await page.locator("#updates-close").click();
 
   // The real projection reports an absent optional source as unknown. That
@@ -1480,42 +1485,42 @@ test("Updates preserve the exact uncertain operation and neutral recovery across
   await f.selectUpdatesFilter("Needs me", "needs");
   const needs = await f.readPages("actionable");
   await f.loadMore(needs.slice(0, 2).flatMap(value => value.items));
-  const doneUrl = origin + f.path(current.id, "done");
-  let doneDeliveries = 0;
-  const loseDone = async route => {
+  const dismissUrl = origin + f.path(current.id, "clear");
+  let dismissDeliveries = 0;
+  const loseDismiss = async route => {
     const response = await route.fetch();
     assert.equal(response.status(), 200);
-    return ++doneDeliveries === 1 ? route.abort("failed") : route.fulfill({ response });
+    return ++dismissDeliveries === 1 ? route.abort("failed") : route.fulfill({ response });
   };
-  await page.route(doneUrl, loseDone);
-  await f.action(current.id, "done").click();
-  await f.waitRetry(current.id, "done");
-  const doneAttempt = f.attempts.at(-1), doneMark = f.mark(current.id);
-  assert.equal(doneAttempt.body.expectedBasis, current.basisToken);
-  assert.notEqual(doneAttempt.body.requestId, original.body.requestId);
+  await page.route(dismissUrl, loseDismiss);
+  await f.action(current.id, "clear").click();
+  await f.waitRetry(current.id, "clear");
+  const dismissAttempt = f.attempts.at(-1), dismissMark = f.mark(current.id);
+  assert.equal(dismissAttempt.body.expectedBasis, current.basisToken);
+  assert.notEqual(dismissAttempt.body.requestId, original.body.requestId);
   await f.selectUpdatesFilter("Needs me", "needs");
-  await f.waitRetry(current.id, "done");
+  await f.waitRetry(current.id, "clear");
   assert.equal(await f.row(current.id).locator(".updates-copy strong").textContent(), "Earlier update action");
   assert.doesNotMatch(await f.row(current.id).innerText(), /Review older-paged-review/);
   assert.match(await page.locator("#updates-summary").textContent(), /\b100 loaded\b/);
   assert.equal(await page.locator(".updates-row").count(), 101, "the neutral recovery control is excluded from the loaded count");
   await f.more.click();
   await page.waitForFunction(() => /\b125 loaded\b/.test(document.querySelector("#updates-summary")?.textContent ?? ""));
-  await f.waitRetry(current.id, "done");
+  await f.waitRetry(current.id, "clear");
   assert.equal(await f.row(current.id).locator(".updates-copy strong").textContent(), "Earlier update action");
-  assert.equal(f.attempts.length, 3, "neither refresh nor Load more retries the uncertain Done");
+  assert.equal(f.attempts.length, 3, "neither refresh nor Load more retries the uncertain Dismiss");
   const sharedBeforeRetry = JSON.stringify(store.room("commons"));
-  const confirmed = f.responseFor(current.id, "done");
-  await f.action(current.id, "done").click();
+  const confirmed = f.responseFor(current.id, "clear");
+  await f.action(current.id, "clear").click();
   const response = await confirmed;
   assert.equal(response.status(), 200);
   assert.equal((await response.json()).duplicate, true);
   await f.row(current.id).waitFor({ state: "detached" });
-  assert.deepEqual(f.attempts.at(-1), doneAttempt);
+  assert.deepEqual(f.attempts.at(-1), dismissAttempt);
   assert.equal(f.countCommands(), commandsBefore + 2);
-  assert.deepEqual(f.mark(current.id), doneMark);
+  assert.deepEqual(f.mark(current.id), dismissMark);
   assert.equal(JSON.stringify(store.room("commons")), sharedBeforeRetry);
-  await page.unroute(doneUrl, loseDone);
+  await page.unroute(dismissUrl, loseDismiss);
   assert.deepEqual(f.errors, []);
 });
 
@@ -1531,6 +1536,7 @@ test("Updates refresh live without stealing focus and filter permission decision
   const first=page.getByRole('button',{name:'Open @owner live-first',exact:true});await first.waitFor();await first.focus();
   post('live-second');
   await page.getByRole('button',{name:'Open @owner live-second',exact:true}).waitFor();
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Open @owner live-first');
   assert.equal(await first.evaluate(n=>n===document.activeElement),true);
   await page.setViewportSize({width:390,height:844});
   store.command(owner,'commons',command(T.MEMBER_ADDED,{memberId:'applicant',displayName:'Applicant',kind:'human',permissions:[]}));

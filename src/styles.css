@@ -1717,7 +1717,7 @@ body:has(#main:not([hidden])) .site-footer { display: none; }
 /* Updates destination. Styles live here so the page content policy allows them. */
 #updates-dialog { width: min(40rem, calc(100vw - 1.5rem)); max-height: min(36rem, calc(100vh - 2rem)); }
 .updates-filters { display: flex; flex-wrap: wrap; gap: .4rem; margin: 0 0 .75rem; }
-.updates-filters button[aria-selected="true"] { background: var(--text); color: var(--bg); }
+.updates-filters .button[aria-selected="true"] { background: var(--text); color: var(--bg); }
 .updates-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
 .updates-row { display: flex; flex-wrap: wrap; gap: .5rem .75rem; align-items: center; justify-content: space-between; padding: .5rem 0; border-bottom: 1px solid var(--line); }
 .updates-copy { min-width: 0; flex: 1 1 12rem; }

@@ -779,6 +779,23 @@ const memberPermissionsUI = installMemberPermissions({ client, getState: () => s
 // One attention destination; historical palette names resolve here.
 // JDOT-COH-NAV begin
 updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), getContext: workNavigationContext,
+  describeRequest: (request, direction) => {
+    const message = state?.messages.find(entry => entry.id === request.id);
+    const counterpart = displayName(direction === "incoming" ? request.requesterId : request.recipientId);
+    const relation = uiText(direction === "incoming" ? "updates.askedYou" : "updates.waitingFor", { name: counterpart });
+    const date = new Date(request.createdAt);
+    return { title: message?.body ? clipGraphemes(message.body, 180) : relation,
+      meta: Number.isNaN(date.getTime()) ? relation : uiText("updates.requestMeta", { relation, date: date.toLocaleDateString() }) };
+  },
+  onOpenRequest: async (id, origin, current) => {
+    if (!current()) return false;
+    if (!conversation?.byId.has(id)) {
+      // Explicit navigation may need history omitted from the initial snapshot.
+      if (!await client.backfill()) await client.refresh(null, { fill: true });
+    }
+    if (!current()) return false;
+    return navigateWorkRecord("message", id, { type: "updates", updates: origin });
+  },
   onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin }),
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
