@@ -11,6 +11,7 @@ import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { createWork, claimWork, updateWork, recordReview, recordCi } from '../server/work-claims.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const WRITER = ['steer', 'accept_work', 'complete_work', 'verify'];
 
@@ -27,7 +28,7 @@ function setup(t) {
   const bob = store.identities.create('Bob');
   rooms.create(owner.secret, { roomId: 'board', title: 'board', purpose: 'Inbox v1', kind: 'personal' });
   for (const identity of [ada, bob]) {
-    store.identities.link(owner.secret, 'board', { identityId: identity.identityId, displayName: identity === ada ? 'Ada' : 'Bob', permissions: WRITER });
+    linkWithProof(store, owner.secret, 'board', identity, { displayName: identity === ada ? 'Ada' : 'Bob', permissions: WRITER });
   }
   const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?')
     .get(identity.identityId, 'board').m;
@@ -192,7 +193,7 @@ function pinnedSetup(t) {
   const bob = store.identities.create('Bob');
   rooms.create(owner.secret, { roomId: 'board', title: 'board', purpose: 'Inbox v1', kind: 'personal' });
   for (const identity of [ada, bob]) {
-    store.identities.link(owner.secret, 'board', { identityId: identity.identityId, displayName: identity === ada ? 'Ada' : 'Bob', permissions: WRITER });
+    linkWithProof(store, owner.secret, 'board', identity, { displayName: identity === ada ? 'Ada' : 'Bob', permissions: WRITER });
   }
   const memberOf = identity => store.db.prepare('SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?')
     .get(identity.identityId, 'board').m;

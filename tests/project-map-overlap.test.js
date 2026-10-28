@@ -13,6 +13,7 @@ import { searchActions } from "../server/mcp-action-search.mjs";
 import { readProjectMap } from "../server/project-map-store.mjs";
 import { PROJECT_MAP_ROUTES } from "../server/routes/project-map.mjs";
 import { boardHtml } from "../src/board-ui.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/duplicate-pr-pairs.json", import.meta.url), "utf8"));
 const helper = "export function helper() { return 1; }\n";
@@ -26,8 +27,8 @@ async function room(t, featureEnv) {
   const ada = store.identities.create("Ada");
   const bea = store.identities.create("Bea");
   for (const [identity, memberId, displayName] of [[ada, "ada", "Ada"], [bea, "bea", "Bea"]]) {
-    store.identities.link(ownerKey, "commons", {
-      identityId: identity.identityId, memberId, displayName, permissions: ["accept_work", "complete_work", ...(memberId === "ada" ? ["manage_claims"] : [])]
+    linkWithProof(store, ownerKey, "commons", identity, {
+      memberId, displayName, permissions: ["accept_work", "complete_work", ...(memberId === "ada" ? ["manage_claims"] : [])]
     });
   }
   setTier(store.db, "commons", "ada", "t2_standard", { updatedBy: "owner", nowMs: store.now() });
