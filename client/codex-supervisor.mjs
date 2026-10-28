@@ -64,6 +64,18 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
       try {
         const snapshot = await client.assistant(undefined, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
         owner.health("watching");
+        // The native journal is shared across receiving modes. A directed
+        // attempt with no saved outcome still owns this workspace; changing
+        // modes must not bypass its reconciliation requirement.
+        const directedUnknown = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='request_runs'").get()
+          && db.prepare("SELECT 1 FROM request_runs WHERE response IS NULL LIMIT 1").get();
+        const directedRuntimeUnknown = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='codex_runtime_attempts'").get()
+          && db.prepare("SELECT binding,state FROM codex_runtime_attempts WHERE state NOT IN ('completed','interrupted','failed')").all()
+            .some(row => JSON.parse(row.binding).kind !== "shared-assistant");
+        if (directedUnknown || directedRuntimeUnknown) {
+          state("recovery_pending", { code: "directed_request_reconciliation_required" });
+          await pause(pollMs); continue;
+        }
         if (connectOnStart && !rpc) {
           rpc = await connect(scopedCodexThreads(db, connection));
           state("protocol_qualified", { providerAuthentication: "unverified" });
@@ -78,7 +90,13 @@ export async function superviseCodexRoom({ connection, db, directory, connect, c
         const candidates = recovering.length ? recovering : assigned.filter(run => run.status === "queued" && !run.attemptId && !run.sourceDeleted);
         candidates.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)) || a.id.localeCompare(b.id));
         const run = candidates.find(row => (db.prepare("SELECT retry_at FROM codex_supervisor_retry WHERE scope=? AND run_id=?").get(scope, row.id)?.retry_at ?? 0) <= Date.now());
-        if (!run) { if (!candidates.length) state("watching_room"); await pause(pollMs); continue; }
+        if (!run) {
+          // A live authenticated runtime can still be unselected in its room.
+          // Report the missing setup without changing claims or owned recovery.
+          if (!candidates.length) state(snapshot.assistant?.coordinatorMemberId === connection.memberId
+            ? "watching_room" : "assistant_not_selected");
+          await pause(pollMs); continue;
+        }
         try {
           if (!rpc) { rpc = await connect(scopedCodexThreads(db, connection)); state("protocol_qualified", { providerAuthentication: "unverified" }); }
           if (controller.signal.aborted) break;

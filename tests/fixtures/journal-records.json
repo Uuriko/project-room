@@ -1,0 +1,1950 @@
+{
+  "capturedFrom": "server/*-journal.mjs",
+  "replay": {
+    "schemas": {
+      "channel": "\n  CREATE TABLE IF NOT EXISTS pending_channel_updates (\n    account_id TEXT NOT NULL, connection_id TEXT NOT NULL, update_id INTEGER NOT NULL,\n    received_at INTEGER NOT NULL, payload TEXT NOT NULL CHECK(json_valid(payload)),\n    status TEXT NOT NULL CHECK(status IN ('pending','imported','failed')),\n    attempts INTEGER NOT NULL CHECK(attempts >= 0), last_error TEXT, updated_at INTEGER NOT NULL,\n    PRIMARY KEY(account_id,connection_id,update_id),\n    FOREIGN KEY(account_id,connection_id) REFERENCES private_email_connections(account_id,id)\n  );\n  CREATE INDEX IF NOT EXISTS pending_channel_updates_status ON pending_channel_updates(account_id,connection_id,status,update_id);\n",
+      "spam": "\n  CREATE TABLE IF NOT EXISTS spam_quarantine (\n    id TEXT PRIMARY KEY, message_id TEXT NOT NULL, channel TEXT NOT NULL, connection_id TEXT,\n    account_id TEXT, source_id TEXT,\n    reason TEXT NOT NULL CHECK(json_valid(reason)),\n    score INTEGER NOT NULL CHECK(score >= 0 AND score <= 100),\n    quarantined_at INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('held','released','dismissed')),\n    reviewed_by TEXT, reviewed_at INTEGER, note TEXT, updated_at INTEGER NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS spam_quarantine_held ON spam_quarantine(status, quarantined_at);\n",
+      "jev": "\n  CREATE TABLE IF NOT EXISTS jev_shadow_decisions (\n    id TEXT PRIMARY KEY,\n    gate TEXT NOT NULL CHECK(gate IN ('admission','receipt')),\n    room_id TEXT NOT NULL,\n    identity_id TEXT,\n    subject TEXT,\n    ip_hash TEXT,\n    path TEXT NOT NULL,\n    score REAL NOT NULL CHECK(score >= 0 AND score <= 1),\n    decision TEXT NOT NULL,\n    escalate INTEGER NOT NULL CHECK(escalate IN (0,1)),\n    signals TEXT NOT NULL CHECK(json_valid(signals)),\n    recorded_at INTEGER NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS jev_shadow_by_room ON jev_shadow_decisions(room_id, recorded_at);\n  CREATE INDEX IF NOT EXISTS jev_shadow_velocity ON jev_shadow_decisions(recorded_at, identity_id, ip_hash);\n",
+      "sla": "\n  CREATE TABLE IF NOT EXISTS sla_breach_alerts (\n    id TEXT PRIMARY KEY,\n    account_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    channel TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    elapsed_ms INTEGER NOT NULL CHECK(elapsed_ms >= 0),\n    target_ms INTEGER NOT NULL CHECK(target_ms > 0),\n    awaiting_since TEXT NOT NULL,\n    deadline_at TEXT,\n    produced_at TEXT NOT NULL,\n    summary TEXT NOT NULL,\n    decision TEXT NOT NULL,\n    reason TEXT NOT NULL,\n    prefs_snapshot TEXT NOT NULL CHECK(json_valid(prefs_snapshot)),\n    notified_at INTEGER NOT NULL,\n    created_at INTEGER NOT NULL,\n    UNIQUE(account_id, thread_id, produced_at)\n  );\n  CREATE INDEX IF NOT EXISTS sla_breach_alerts_account ON sla_breach_alerts(account_id, notified_at);\n",
+      "membership": "\n  CREATE TABLE IF NOT EXISTS membership_delegation_journal (\n    sequence INTEGER PRIMARY KEY AUTOINCREMENT,\n    room_id TEXT NOT NULL,\n    identity_id TEXT NOT NULL,\n    action TEXT NOT NULL CHECK(action IN ('baseline_active','baseline_revoked','grant','revoke','revoke_effective')),\n    actor_id TEXT NOT NULL,\n    recorded_at INTEGER NOT NULL,\n    prior_active INTEGER NOT NULL CHECK(prior_active IN (0,1)),\n    next_active INTEGER NOT NULL CHECK(next_active IN (0,1)),\n    prior_hash TEXT NOT NULL,\n    hash TEXT NOT NULL\n  );\n  CREATE INDEX IF NOT EXISTS membership_delegation_journal_room ON membership_delegation_journal(room_id, sequence);\n  CREATE TABLE IF NOT EXISTS membership_delegation_pending (\n    sequence INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, identity_id TEXT NOT NULL,\n    prior_active INTEGER NOT NULL, next_active INTEGER NOT NULL, recorded_at INTEGER NOT NULL\n  );\n  CREATE TRIGGER IF NOT EXISTS membership_delegation_pending_insert AFTER INSERT ON membership_delegation_grants\n    BEGIN INSERT INTO membership_delegation_pending(room_id,identity_id,prior_active,next_active,recorded_at)\n      VALUES(NEW.room_id,NEW.identity_id,0,NEW.revoked_at IS NULL,NEW.granted_at); END;\n  CREATE TRIGGER IF NOT EXISTS membership_delegation_pending_update AFTER UPDATE OF revoked_at ON membership_delegation_grants\n    WHEN (OLD.revoked_at IS NULL) <> (NEW.revoked_at IS NULL)\n    BEGIN INSERT INTO membership_delegation_pending(room_id,identity_id,prior_active,next_active,recorded_at)\n      VALUES(NEW.room_id,NEW.identity_id,OLD.revoked_at IS NULL,NEW.revoked_at IS NULL,\n        CASE WHEN NEW.revoked_at IS NULL THEN NEW.granted_at ELSE NEW.revoked_at END); END;\n  CREATE TRIGGER IF NOT EXISTS membership_delegation_pending_delete BEFORE DELETE ON membership_delegation_grants\n    BEGIN SELECT RAISE(ABORT,'Membership delegation grant deletion requires operator reconciliation'); END;\n",
+      "invitation": "\n  CREATE TABLE membership_invitation_journal (\n    invitation_id TEXT NOT NULL REFERENCES membership_invitations(id),\n    sequence INTEGER NOT NULL CHECK(sequence>0),\n    body TEXT NOT NULL CHECK(json_valid(body)),\n    checksum TEXT NOT NULL CHECK(length(checksum)=64),\n    PRIMARY KEY(invitation_id,sequence)\n  );\n  CREATE TRIGGER membership_invitation_journal_no_update BEFORE UPDATE ON membership_invitation_journal\n    BEGIN SELECT RAISE(ABORT,'invitation journal is append-only'); END;\n  CREATE TRIGGER membership_invitation_journal_no_delete BEFORE DELETE ON membership_invitation_journal\n    BEGIN SELECT RAISE(ABORT,'invitation journal is append-only'); END;\n"
+    },
+    "channel": {
+      "schemaOk": true,
+      "recorded": {
+        "received": 2,
+        "accepted": 2,
+        "rejected": 1,
+        "pending": 1
+      },
+      "redelivered": {
+        "received": 2,
+        "accepted": 1,
+        "rejected": 0,
+        "pending": 2
+      },
+      "imported": 1,
+      "failed": {
+        "attempted": 1,
+        "exhausted": 1,
+        "error": "boom"
+      },
+      "pending": [],
+      "summary": {
+        "pending": 0,
+        "imported": 1,
+        "failed": 2
+      },
+      "verify": {
+        "pending": 0,
+        "imported": 1,
+        "failed": 2
+      },
+      "snapshot": {
+        "data": {
+          "pending_channel_updates": [
+            {
+              "account_id": "acct1",
+              "connection_id": "conn1",
+              "update_id": 7,
+              "received_at": 1700000000000,
+              "payload": "{\"update_id\":7,\"message\":{\"text\":\"hi\"}}",
+              "status": "failed",
+              "attempts": 5,
+              "last_error": "boom",
+              "updated_at": 1700000000000
+            },
+            {
+              "account_id": "acct1",
+              "connection_id": "conn1",
+              "update_id": 8,
+              "received_at": 1700000000000,
+              "payload": "{\"update_id\":8,\"message\":{\"text\":\"nope\"}}",
+              "status": "failed",
+              "attempts": 5,
+              "last_error": "unsupported_telegram_chat",
+              "updated_at": 1700000000000
+            },
+            {
+              "account_id": "acct1",
+              "connection_id": "conn1",
+              "update_id": 9,
+              "received_at": 1700000000000,
+              "payload": "{\"update_id\":9,\"message\":{\"text\":\"third\"}}",
+              "status": "imported",
+              "attempts": 0,
+              "last_error": null,
+              "updated_at": 1700000000000
+            }
+          ],
+          "private_email_connections": [
+            {
+              "account_id": "acct1",
+              "id": "conn1"
+            }
+          ]
+        },
+        "sequence": [],
+        "master": [
+          {
+            "type": "index",
+            "name": "pending_channel_updates_status",
+            "sql": "CREATE INDEX pending_channel_updates_status ON pending_channel_updates(account_id,connection_id,status,update_id)"
+          },
+          {
+            "type": "table",
+            "name": "pending_channel_updates",
+            "sql": "CREATE TABLE pending_channel_updates (\n    account_id TEXT NOT NULL, connection_id TEXT NOT NULL, update_id INTEGER NOT NULL,\n    received_at INTEGER NOT NULL, payload TEXT NOT NULL CHECK(json_valid(payload)),\n    status TEXT NOT NULL CHECK(status IN ('pending','imported','failed')),\n    attempts INTEGER NOT NULL CHECK(attempts >= 0), last_error TEXT, updated_at INTEGER NOT NULL,\n    PRIMARY KEY(account_id,connection_id,update_id),\n    FOREIGN KEY(account_id,connection_id) REFERENCES private_email_connections(account_id,id)\n  )"
+          },
+          {
+            "type": "table",
+            "name": "private_email_connections",
+            "sql": "CREATE TABLE private_email_connections (account_id TEXT NOT NULL, id TEXT NOT NULL, PRIMARY KEY(account_id, id))"
+          }
+        ]
+      }
+    },
+    "spam": {
+      "schemaOk": true,
+      "held": {
+        "id": "qz-1",
+        "messageId": "m1",
+        "channel": "telegram",
+        "connectionId": null,
+        "accountId": null,
+        "sourceId": null,
+        "reason": [
+          {
+            "key": "urgent",
+            "weight": 2,
+            "detail": "act now"
+          }
+        ],
+        "score": 80,
+        "quarantinedAt": 1700000000000,
+        "status": "held",
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "note": null,
+        "updatedAt": 1700000000000
+      },
+      "scoped": {
+        "id": "qz-2",
+        "messageId": "m2",
+        "channel": "email",
+        "connectionId": "c1",
+        "accountId": "acct1",
+        "sourceId": "src1",
+        "reason": [
+          {
+            "key": "urgent",
+            "weight": 2,
+            "detail": "act now"
+          }
+        ],
+        "score": 80,
+        "quarantinedAt": 1700000000001,
+        "status": "held",
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "note": null,
+        "updatedAt": 1700000000001
+      },
+      "released": {
+        "id": "qz-1",
+        "messageId": "m1",
+        "channel": "telegram",
+        "connectionId": null,
+        "accountId": null,
+        "sourceId": null,
+        "reason": [
+          {
+            "key": "urgent",
+            "weight": 2,
+            "detail": "act now"
+          }
+        ],
+        "score": 80,
+        "quarantinedAt": 1700000000000,
+        "status": "released",
+        "reviewedBy": "owner",
+        "reviewedAt": 1700000000010,
+        "note": "false positive",
+        "updatedAt": 1700000000010
+      },
+      "dismissed": {
+        "id": "qz-2",
+        "messageId": "m2",
+        "channel": "email",
+        "connectionId": "c1",
+        "accountId": "acct1",
+        "sourceId": "src1",
+        "reason": [
+          {
+            "key": "urgent",
+            "weight": 2,
+            "detail": "act now"
+          }
+        ],
+        "score": 80,
+        "quarantinedAt": 1700000000001,
+        "status": "dismissed",
+        "reviewedBy": "owner",
+        "reviewedAt": 1700000000010,
+        "note": null,
+        "updatedAt": 1700000000010
+      },
+      "plain": {
+        "id": "qz-3",
+        "messageId": "m3",
+        "channel": "sms",
+        "connectionId": null,
+        "accountId": null,
+        "sourceId": null,
+        "reason": [
+          {
+            "key": "urgent",
+            "weight": 2,
+            "detail": "act now"
+          }
+        ],
+        "score": 80,
+        "quarantinedAt": 1700000000010,
+        "status": "held",
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "note": null,
+        "updatedAt": 1700000000010
+      },
+      "counts": {
+        "held": 1,
+        "released": 1,
+        "dismissed": 1
+      },
+      "listHeld": [
+        {
+          "id": "qz-3",
+          "messageId": "m3",
+          "channel": "sms",
+          "connectionId": null,
+          "accountId": null,
+          "sourceId": null,
+          "reason": [
+            {
+              "key": "urgent",
+              "weight": 2,
+              "detail": "act now"
+            }
+          ],
+          "score": 80,
+          "quarantinedAt": 1700000000010,
+          "status": "held",
+          "reviewedBy": null,
+          "reviewedAt": null,
+          "note": null,
+          "updatedAt": 1700000000010
+        }
+      ],
+      "verify": {
+        "held": 1,
+        "released": 1,
+        "dismissed": 1
+      },
+      "snapshot": {
+        "data": {
+          "spam_quarantine": [
+            {
+              "id": "qz-1",
+              "message_id": "m1",
+              "channel": "telegram",
+              "connection_id": null,
+              "account_id": null,
+              "source_id": null,
+              "reason": "[{\"key\":\"urgent\",\"weight\":2,\"detail\":\"act now\"}]",
+              "score": 80,
+              "quarantined_at": 1700000000000,
+              "status": "released",
+              "reviewed_by": "owner",
+              "reviewed_at": 1700000000010,
+              "note": "false positive",
+              "updated_at": 1700000000010
+            },
+            {
+              "id": "qz-2",
+              "message_id": "m2",
+              "channel": "email",
+              "connection_id": "c1",
+              "account_id": "acct1",
+              "source_id": "src1",
+              "reason": "[{\"key\":\"urgent\",\"weight\":2,\"detail\":\"act now\"}]",
+              "score": 80,
+              "quarantined_at": 1700000000001,
+              "status": "dismissed",
+              "reviewed_by": "owner",
+              "reviewed_at": 1700000000010,
+              "note": null,
+              "updated_at": 1700000000010
+            },
+            {
+              "id": "qz-3",
+              "message_id": "m3",
+              "channel": "sms",
+              "connection_id": null,
+              "account_id": null,
+              "source_id": null,
+              "reason": "[{\"key\":\"urgent\",\"weight\":2,\"detail\":\"act now\"}]",
+              "score": 80,
+              "quarantined_at": 1700000000010,
+              "status": "held",
+              "reviewed_by": null,
+              "reviewed_at": null,
+              "note": null,
+              "updated_at": 1700000000010
+            }
+          ]
+        },
+        "sequence": [],
+        "master": [
+          {
+            "type": "index",
+            "name": "spam_quarantine_held",
+            "sql": "CREATE INDEX spam_quarantine_held ON spam_quarantine(status, quarantined_at)"
+          },
+          {
+            "type": "table",
+            "name": "spam_quarantine",
+            "sql": "CREATE TABLE spam_quarantine (\n    id TEXT PRIMARY KEY, message_id TEXT NOT NULL, channel TEXT NOT NULL, connection_id TEXT,\n    account_id TEXT, source_id TEXT,\n    reason TEXT NOT NULL CHECK(json_valid(reason)),\n    score INTEGER NOT NULL CHECK(score >= 0 AND score <= 100),\n    quarantined_at INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('held','released','dismissed')),\n    reviewed_by TEXT, reviewed_at INTEGER, note TEXT, updated_at INTEGER NOT NULL\n  )"
+          }
+        ]
+      }
+    },
+    "spamMigration": {
+      "schemaOk": true,
+      "row": {
+        "id": "qz-1",
+        "messageId": "old",
+        "channel": "email",
+        "connectionId": null,
+        "accountId": null,
+        "sourceId": null,
+        "reason": [
+          {
+            "key": "legacy",
+            "weight": 1,
+            "detail": "before columns"
+          }
+        ],
+        "score": 10,
+        "quarantinedAt": 1700000000000,
+        "status": "held",
+        "reviewedBy": null,
+        "reviewedAt": null,
+        "note": null,
+        "updatedAt": 1700000000000
+      },
+      "columns": [
+        "id",
+        "message_id",
+        "channel",
+        "connection_id",
+        "reason",
+        "score",
+        "quarantined_at",
+        "status",
+        "reviewed_by",
+        "reviewed_at",
+        "note",
+        "updated_at",
+        "account_id",
+        "source_id"
+      ]
+    },
+    "jev": {
+      "schemaOk": true,
+      "admission": {
+        "id": "jad-1",
+        "gate": "admission",
+        "roomId": "room-1",
+        "identityId": "ai_1",
+        "subject": null,
+        "ipHash": "h1",
+        "path": "join:invite",
+        "score": 0.5,
+        "decision": "review",
+        "escalate": false,
+        "signals": [
+          {
+            "key": "freshIdentity",
+            "weight": 0.5,
+            "value": 1,
+            "detail": "minted seconds ago"
+          }
+        ],
+        "recordedAt": 1700000000000
+      },
+      "receipt": {
+        "id": "jrd-1",
+        "gate": "receipt",
+        "roomId": "room-1",
+        "identityId": "ai_2",
+        "subject": "work-9",
+        "ipHash": null,
+        "path": "work-claim:done",
+        "score": 0.25,
+        "decision": "escalate",
+        "escalate": true,
+        "signals": [
+          {
+            "key": "evidence",
+            "weight": 1,
+            "value": 0,
+            "detail": "missing diff"
+          }
+        ],
+        "recordedAt": 1700000000001
+      },
+      "older": {
+        "id": "jad-2",
+        "gate": "admission",
+        "roomId": "room-1",
+        "identityId": "ai_1",
+        "subject": null,
+        "ipHash": "h9",
+        "path": "join:invite",
+        "score": 0.25,
+        "decision": "admit",
+        "escalate": false,
+        "signals": [],
+        "recordedAt": 1699996400000
+      },
+      "list": [
+        {
+          "id": "jrd-1",
+          "gate": "receipt",
+          "roomId": "room-1",
+          "identityId": "ai_2",
+          "subject": "work-9",
+          "ipHash": null,
+          "path": "work-claim:done",
+          "score": 0.25,
+          "decision": "escalate",
+          "escalate": true,
+          "signals": [
+            {
+              "key": "evidence",
+              "weight": 1,
+              "value": 0,
+              "detail": "missing diff"
+            }
+          ],
+          "recordedAt": 1700000000001
+        },
+        {
+          "id": "jad-1",
+          "gate": "admission",
+          "roomId": "room-1",
+          "identityId": "ai_1",
+          "subject": null,
+          "ipHash": "h1",
+          "path": "join:invite",
+          "score": 0.5,
+          "decision": "review",
+          "escalate": false,
+          "signals": [
+            {
+              "key": "freshIdentity",
+              "weight": 0.5,
+              "value": 1,
+              "detail": "minted seconds ago"
+            }
+          ],
+          "recordedAt": 1700000000000
+        },
+        {
+          "id": "jad-2",
+          "gate": "admission",
+          "roomId": "room-1",
+          "identityId": "ai_1",
+          "subject": null,
+          "ipHash": "h9",
+          "path": "join:invite",
+          "score": 0.25,
+          "decision": "admit",
+          "escalate": false,
+          "signals": [],
+          "recordedAt": 1699996400000
+        }
+      ],
+      "escalate": [
+        {
+          "id": "jrd-1",
+          "gate": "receipt",
+          "roomId": "room-1",
+          "identityId": "ai_2",
+          "subject": "work-9",
+          "ipHash": null,
+          "path": "work-claim:done",
+          "score": 0.25,
+          "decision": "escalate",
+          "escalate": true,
+          "signals": [
+            {
+              "key": "evidence",
+              "weight": 1,
+              "value": 0,
+              "detail": "missing diff"
+            }
+          ],
+          "recordedAt": 1700000000001
+        }
+      ],
+      "counts": {
+        "admission": 2,
+        "receipt": 1,
+        "escalate": 1
+      },
+      "recent": 1,
+      "verify": {
+        "admission": 2,
+        "receipt": 1,
+        "escalate": 1
+      },
+      "snapshot": {
+        "data": {
+          "jev_shadow_decisions": [
+            {
+              "id": "jad-1",
+              "gate": "admission",
+              "room_id": "room-1",
+              "identity_id": "ai_1",
+              "subject": null,
+              "ip_hash": "h1",
+              "path": "join:invite",
+              "score": 0.5,
+              "decision": "review",
+              "escalate": 0,
+              "signals": "[{\"key\":\"freshIdentity\",\"weight\":0.5,\"value\":1,\"detail\":\"minted seconds ago\"}]",
+              "recorded_at": 1700000000000
+            },
+            {
+              "id": "jrd-1",
+              "gate": "receipt",
+              "room_id": "room-1",
+              "identity_id": "ai_2",
+              "subject": "work-9",
+              "ip_hash": null,
+              "path": "work-claim:done",
+              "score": 0.25,
+              "decision": "escalate",
+              "escalate": 1,
+              "signals": "[{\"key\":\"evidence\",\"weight\":1,\"value\":0,\"detail\":\"missing diff\"}]",
+              "recorded_at": 1700000000001
+            },
+            {
+              "id": "jad-2",
+              "gate": "admission",
+              "room_id": "room-1",
+              "identity_id": "ai_1",
+              "subject": null,
+              "ip_hash": "h9",
+              "path": "join:invite",
+              "score": 0.25,
+              "decision": "admit",
+              "escalate": 0,
+              "signals": "[]",
+              "recorded_at": 1699996400000
+            }
+          ]
+        },
+        "sequence": [],
+        "master": [
+          {
+            "type": "index",
+            "name": "jev_shadow_by_room",
+            "sql": "CREATE INDEX jev_shadow_by_room ON jev_shadow_decisions(room_id, recorded_at)"
+          },
+          {
+            "type": "index",
+            "name": "jev_shadow_velocity",
+            "sql": "CREATE INDEX jev_shadow_velocity ON jev_shadow_decisions(recorded_at, identity_id, ip_hash)"
+          },
+          {
+            "type": "table",
+            "name": "jev_shadow_decisions",
+            "sql": "CREATE TABLE jev_shadow_decisions (\n    id TEXT PRIMARY KEY,\n    gate TEXT NOT NULL CHECK(gate IN ('admission','receipt')),\n    room_id TEXT NOT NULL,\n    identity_id TEXT,\n    subject TEXT,\n    ip_hash TEXT,\n    path TEXT NOT NULL,\n    score REAL NOT NULL CHECK(score >= 0 AND score <= 1),\n    decision TEXT NOT NULL,\n    escalate INTEGER NOT NULL CHECK(escalate IN (0,1)),\n    signals TEXT NOT NULL CHECK(json_valid(signals)),\n    recorded_at INTEGER NOT NULL\n  )"
+          }
+        ]
+      }
+    },
+    "sla": {
+      "first": {
+        "id": "sba-1",
+        "accountId": "acct1",
+        "threadId": "t1",
+        "channel": "email",
+        "kind": "reply",
+        "elapsedMs": 1000,
+        "targetMs": 500,
+        "awaitingSince": "2026-01-01T00:00:00.000Z",
+        "deadlineAt": "2026-01-01T00:01:00.000Z",
+        "producedAt": "2026-01-02T00:00:00.000Z",
+        "summary": "late",
+        "decision": "deliver",
+        "reason": "urgent",
+        "prefsSnapshot": {
+          "quiet": false,
+          "connections": [
+            "c1"
+          ]
+        },
+        "notifiedAt": 1700000000000,
+        "createdAt": 1700000000000
+      },
+      "again": {
+        "id": "sba-1",
+        "accountId": "acct1",
+        "threadId": "t1",
+        "channel": "email",
+        "kind": "reply",
+        "elapsedMs": 1000,
+        "targetMs": 500,
+        "awaitingSince": "2026-01-01T00:00:00.000Z",
+        "deadlineAt": "2026-01-01T00:01:00.000Z",
+        "producedAt": "2026-01-02T00:00:00.000Z",
+        "summary": "late",
+        "decision": "deliver",
+        "reason": "urgent",
+        "prefsSnapshot": {
+          "quiet": false,
+          "connections": [
+            "c1"
+          ]
+        },
+        "notifiedAt": 1700000000000,
+        "createdAt": 1700000000000
+      },
+      "second": {
+        "id": "sba-2",
+        "accountId": "acct1",
+        "threadId": "t2",
+        "channel": "email",
+        "kind": "reply",
+        "elapsedMs": 1000,
+        "targetMs": 500,
+        "awaitingSince": "2026-01-01T00:00:00.000Z",
+        "deadlineAt": "2026-01-01T00:01:00.000Z",
+        "producedAt": "2026-01-03T00:00:00.000Z",
+        "summary": "late",
+        "decision": "deliver",
+        "reason": "urgent",
+        "prefsSnapshot": {
+          "quiet": false,
+          "connections": [
+            "c1"
+          ]
+        },
+        "notifiedAt": 1700000000002,
+        "createdAt": 1700000000002
+      },
+      "list": [
+        {
+          "id": "sba-2",
+          "accountId": "acct1",
+          "threadId": "t2",
+          "channel": "email",
+          "kind": "reply",
+          "elapsedMs": 1000,
+          "targetMs": 500,
+          "awaitingSince": "2026-01-01T00:00:00.000Z",
+          "deadlineAt": "2026-01-01T00:01:00.000Z",
+          "producedAt": "2026-01-03T00:00:00.000Z",
+          "summary": "late",
+          "decision": "deliver",
+          "reason": "urgent",
+          "prefsSnapshot": {
+            "quiet": false,
+            "connections": [
+              "c1"
+            ]
+          },
+          "notifiedAt": 1700000000002,
+          "createdAt": 1700000000002
+        },
+        {
+          "id": "sba-1",
+          "accountId": "acct1",
+          "threadId": "t1",
+          "channel": "email",
+          "kind": "reply",
+          "elapsedMs": 1000,
+          "targetMs": 500,
+          "awaitingSince": "2026-01-01T00:00:00.000Z",
+          "deadlineAt": "2026-01-01T00:01:00.000Z",
+          "producedAt": "2026-01-02T00:00:00.000Z",
+          "summary": "late",
+          "decision": "deliver",
+          "reason": "urgent",
+          "prefsSnapshot": {
+            "quiet": false,
+            "connections": [
+              "c1"
+            ]
+          },
+          "notifiedAt": 1700000000000,
+          "createdAt": 1700000000000
+        }
+      ],
+      "snapshot": {
+        "data": {
+          "sla_breach_alerts": [
+            {
+              "id": "sba-1",
+              "account_id": "acct1",
+              "thread_id": "t1",
+              "channel": "email",
+              "kind": "reply",
+              "elapsed_ms": 1000,
+              "target_ms": 500,
+              "awaiting_since": "2026-01-01T00:00:00.000Z",
+              "deadline_at": "2026-01-01T00:01:00.000Z",
+              "produced_at": "2026-01-02T00:00:00.000Z",
+              "summary": "late",
+              "decision": "deliver",
+              "reason": "urgent",
+              "prefs_snapshot": "{\"quiet\":false,\"connections\":[\"c1\"]}",
+              "notified_at": 1700000000000,
+              "created_at": 1700000000000
+            },
+            {
+              "id": "sba-2",
+              "account_id": "acct1",
+              "thread_id": "t2",
+              "channel": "email",
+              "kind": "reply",
+              "elapsed_ms": 1000,
+              "target_ms": 500,
+              "awaiting_since": "2026-01-01T00:00:00.000Z",
+              "deadline_at": "2026-01-01T00:01:00.000Z",
+              "produced_at": "2026-01-03T00:00:00.000Z",
+              "summary": "late",
+              "decision": "deliver",
+              "reason": "urgent",
+              "prefs_snapshot": "{\"quiet\":false,\"connections\":[\"c1\"]}",
+              "notified_at": 1700000000002,
+              "created_at": 1700000000002
+            }
+          ]
+        },
+        "sequence": [],
+        "master": [
+          {
+            "type": "index",
+            "name": "sla_breach_alerts_account",
+            "sql": "CREATE INDEX sla_breach_alerts_account ON sla_breach_alerts(account_id, notified_at)"
+          },
+          {
+            "type": "table",
+            "name": "sla_breach_alerts",
+            "sql": "CREATE TABLE sla_breach_alerts (\n    id TEXT PRIMARY KEY,\n    account_id TEXT NOT NULL,\n    thread_id TEXT NOT NULL,\n    channel TEXT NOT NULL,\n    kind TEXT NOT NULL,\n    elapsed_ms INTEGER NOT NULL CHECK(elapsed_ms >= 0),\n    target_ms INTEGER NOT NULL CHECK(target_ms > 0),\n    awaiting_since TEXT NOT NULL,\n    deadline_at TEXT,\n    produced_at TEXT NOT NULL,\n    summary TEXT NOT NULL,\n    decision TEXT NOT NULL,\n    reason TEXT NOT NULL,\n    prefs_snapshot TEXT NOT NULL CHECK(json_valid(prefs_snapshot)),\n    notified_at INTEGER NOT NULL,\n    created_at INTEGER NOT NULL,\n    UNIQUE(account_id, thread_id, produced_at)\n  )"
+          }
+        ]
+      }
+    },
+    "membership": {
+      "grant": {
+        "sequence": 3,
+        "hash": "aaaac59de806ad06fd765191d4b89dece81802c6ee06d552b4eada171fccb81c"
+      },
+      "revoke": {
+        "sequence": 4,
+        "hash": "a8be633113d6fb9f406b60d90e7e6a35f57882d559743457e3f7d0d84d8a484d"
+      },
+      "rolled": 1,
+      "verify": {
+        "entries": 5,
+        "absent": false
+      },
+      "snapshot": {
+        "data": {
+          "membership_delegation_grants": [
+            {
+              "room_id": "commons",
+              "identity_id": "agent_1",
+              "granted_by": "owner",
+              "granted_at": 1700000000000,
+              "revoked_at": 1700000000030,
+              "added_invite_member": 0
+            },
+            {
+              "room_id": "commons",
+              "identity_id": "agent_2",
+              "granted_by": "owner",
+              "granted_at": 1700000000000,
+              "revoked_at": 1700000000010,
+              "added_invite_member": 0
+            },
+            {
+              "room_id": "commons",
+              "identity_id": "agent_3",
+              "granted_by": "owner",
+              "granted_at": 1700000000020,
+              "revoked_at": null,
+              "added_invite_member": 0
+            },
+            {
+              "room_id": "commons",
+              "identity_id": "agent_4",
+              "granted_by": "owner",
+              "granted_at": 1700000000040,
+              "revoked_at": null,
+              "added_invite_member": 0
+            }
+          ],
+          "membership_delegation_journal": [
+            {
+              "sequence": 1,
+              "room_id": "commons",
+              "identity_id": "agent_1",
+              "action": "baseline_active",
+              "actor_id": "legacy_unattributed",
+              "recorded_at": 1700000000000,
+              "prior_active": 0,
+              "next_active": 1,
+              "prior_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+              "hash": "c0cc97bb6a9d812db3d3981eb54393774e5d674992b6eca562db4d655dc6e2b9"
+            },
+            {
+              "sequence": 2,
+              "room_id": "commons",
+              "identity_id": "agent_2",
+              "action": "baseline_revoked",
+              "actor_id": "legacy_unattributed",
+              "recorded_at": 1700000000000,
+              "prior_active": 0,
+              "next_active": 0,
+              "prior_hash": "c0cc97bb6a9d812db3d3981eb54393774e5d674992b6eca562db4d655dc6e2b9",
+              "hash": "fd21d836cd4d8803ad0c22c48563de7d46d1447abcbdb214ab63f16cbe20a849"
+            },
+            {
+              "sequence": 3,
+              "room_id": "commons",
+              "identity_id": "agent_3",
+              "action": "grant",
+              "actor_id": "owner",
+              "recorded_at": 1700000000020,
+              "prior_active": 0,
+              "next_active": 1,
+              "prior_hash": "fd21d836cd4d8803ad0c22c48563de7d46d1447abcbdb214ab63f16cbe20a849",
+              "hash": "aaaac59de806ad06fd765191d4b89dece81802c6ee06d552b4eada171fccb81c"
+            },
+            {
+              "sequence": 4,
+              "room_id": "commons",
+              "identity_id": "agent_1",
+              "action": "revoke",
+              "actor_id": "owner",
+              "recorded_at": 1700000000030,
+              "prior_active": 1,
+              "next_active": 0,
+              "prior_hash": "aaaac59de806ad06fd765191d4b89dece81802c6ee06d552b4eada171fccb81c",
+              "hash": "a8be633113d6fb9f406b60d90e7e6a35f57882d559743457e3f7d0d84d8a484d"
+            },
+            {
+              "sequence": 5,
+              "room_id": "commons",
+              "identity_id": "agent_4",
+              "action": "baseline_active",
+              "actor_id": "rollback_unattributed",
+              "recorded_at": 1700000000040,
+              "prior_active": 0,
+              "next_active": 1,
+              "prior_hash": "a8be633113d6fb9f406b60d90e7e6a35f57882d559743457e3f7d0d84d8a484d",
+              "hash": "5894bd62447362d7d5410167d46d144575aea5ed1bd7052ce08bf24281f9253f"
+            }
+          ],
+          "membership_delegation_pending": []
+        },
+        "sequence": [
+          {
+            "name": "membership_delegation_journal",
+            "seq": 5
+          },
+          {
+            "name": "membership_delegation_pending",
+            "seq": 3
+          }
+        ],
+        "master": [
+          {
+            "type": "index",
+            "name": "membership_delegation_journal_room",
+            "sql": "CREATE INDEX membership_delegation_journal_room ON membership_delegation_journal(room_id, sequence)"
+          },
+          {
+            "type": "table",
+            "name": "membership_delegation_grants",
+            "sql": "CREATE TABLE membership_delegation_grants (\n    room_id TEXT NOT NULL, identity_id TEXT NOT NULL, granted_by TEXT NOT NULL, granted_at INTEGER NOT NULL,\n    revoked_at INTEGER, added_invite_member INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (room_id, identity_id)\n  )"
+          },
+          {
+            "type": "table",
+            "name": "membership_delegation_journal",
+            "sql": "CREATE TABLE membership_delegation_journal (\n    sequence INTEGER PRIMARY KEY AUTOINCREMENT,\n    room_id TEXT NOT NULL,\n    identity_id TEXT NOT NULL,\n    action TEXT NOT NULL CHECK(action IN ('baseline_active','baseline_revoked','grant','revoke','revoke_effective')),\n    actor_id TEXT NOT NULL,\n    recorded_at INTEGER NOT NULL,\n    prior_active INTEGER NOT NULL CHECK(prior_active IN (0,1)),\n    next_active INTEGER NOT NULL CHECK(next_active IN (0,1)),\n    prior_hash TEXT NOT NULL,\n    hash TEXT NOT NULL\n  )"
+          },
+          {
+            "type": "table",
+            "name": "membership_delegation_pending",
+            "sql": "CREATE TABLE membership_delegation_pending (\n    sequence INTEGER PRIMARY KEY AUTOINCREMENT, room_id TEXT NOT NULL, identity_id TEXT NOT NULL,\n    prior_active INTEGER NOT NULL, next_active INTEGER NOT NULL, recorded_at INTEGER NOT NULL\n  )"
+          },
+          {
+            "type": "trigger",
+            "name": "membership_delegation_pending_delete",
+            "sql": "CREATE TRIGGER membership_delegation_pending_delete BEFORE DELETE ON membership_delegation_grants\n    BEGIN SELECT RAISE(ABORT,'Membership delegation grant deletion requires operator reconciliation'); END"
+          },
+          {
+            "type": "trigger",
+            "name": "membership_delegation_pending_insert",
+            "sql": "CREATE TRIGGER membership_delegation_pending_insert AFTER INSERT ON membership_delegation_grants\n    BEGIN INSERT INTO membership_delegation_pending(room_id,identity_id,prior_active,next_active,recorded_at)\n      VALUES(NEW.room_id,NEW.identity_id,0,NEW.revoked_at IS NULL,NEW.granted_at); END"
+          },
+          {
+            "type": "trigger",
+            "name": "membership_delegation_pending_update",
+            "sql": "CREATE TRIGGER membership_delegation_pending_update AFTER UPDATE OF revoked_at ON membership_delegation_grants\n    WHEN (OLD.revoked_at IS NULL) <> (NEW.revoked_at IS NULL)\n    BEGIN INSERT INTO membership_delegation_pending(room_id,identity_id,prior_active,next_active,recorded_at)\n      VALUES(NEW.room_id,NEW.identity_id,OLD.revoked_at IS NULL,NEW.revoked_at IS NULL,\n        CASE WHEN NEW.revoked_at IS NULL THEN NEW.granted_at ELSE NEW.revoked_at END); END"
+          }
+        ]
+      }
+    },
+    "invitation": {
+      "entries": [
+        {
+          "invitation_id": "inv-pending",
+          "sequence": 1,
+          "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-pending\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"}],\"invitationId\":\"inv-pending\",\"kind\":\"issued\",\"previousHash\":null,\"record\":{\"accepted_at\":null,\"accepted_by_account_id\":null,\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-pending\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Pending\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"9aaabff8cafda599d48d8f0a5f4142655f942c35452cd3f1f77ae0288f39e9c4\",\"issue_request_id\":\"req-pending\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":null,\"redemption_id\":null,\"revision\":0,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"pending\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000000,\"sequence\":1,\"version\":1}",
+          "checksum": "96661ee349b96b2985237ff779705c311be84c4ad7e3bc29467fc69094dedd17"
+        },
+        {
+          "invitation_id": "inv-accept",
+          "sequence": 1,
+          "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-accept\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"}],\"invitationId\":\"inv-accept\",\"kind\":\"issued\",\"previousHash\":null,\"record\":{\"accepted_at\":null,\"accepted_by_account_id\":null,\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-accept\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Accepted\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"daf63e43c86f45754d2ffcad6e414c547f40f234e750fac0fa4b36544faeaaad\",\"issue_request_id\":\"req-accept\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":null,\"redemption_id\":null,\"revision\":0,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"pending\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000000,\"sequence\":1,\"version\":1}",
+          "checksum": "95fbd48d700080d5bbedb1cec57732f16b93f1a38d08366a533e97fea5b27d3e"
+        },
+        {
+          "invitation_id": "inv-accept",
+          "sequence": 2,
+          "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-accept\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"},{\"actor_account_id\":\"acct-target\",\"actor_auth_epoch\":5,\"actor_member_id\":\"member-target\",\"actor_session_revision\":6,\"at\":1700000060000,\"invitation_id\":\"inv-accept\",\"invitation_revision\":1,\"reason\":null,\"room_event_id\":\"joined1\",\"sequence\":2,\"type\":\"accepted\"}],\"invitationId\":\"inv-accept\",\"kind\":\"accepted\",\"previousHash\":\"95fbd48d700080d5bbedb1cec57732f16b93f1a38d08366a533e97fea5b27d3e\",\"record\":{\"accepted_at\":1700000060000,\"accepted_by_account_id\":\"acct-target\",\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-accept\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Accepted\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"daf63e43c86f45754d2ffcad6e414c547f40f234e750fac0fa4b36544faeaaad\",\"issue_request_id\":\"req-accept\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":\"joined1\",\"redemption_id\":\"b6bdc104-080f-4373-9c75-704c8fe4f002\",\"revision\":1,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"accepted\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000001,\"sequence\":2,\"version\":1}",
+          "checksum": "90bf0184a45058853ca6a9cf837dd634ee28bb2e60bf3c448cb9f0f2f764eb67"
+        },
+        {
+          "invitation_id": "inv-revoke",
+          "sequence": 1,
+          "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-revoke\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"}],\"invitationId\":\"inv-revoke\",\"kind\":\"issued\",\"previousHash\":null,\"record\":{\"accepted_at\":null,\"accepted_by_account_id\":null,\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-revoke\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Revoked\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"c7da3918cb2d38e7686808763468ede0fd9e3fafedf20b7a298026e9ff6262be\",\"issue_request_id\":\"req-revoke\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":null,\"redemption_id\":null,\"revision\":0,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"pending\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000000,\"sequence\":1,\"version\":1}",
+          "checksum": "ec61d238b0809eb9bdbdc8a493f85ae0c8eb384a70bc636925e17b99f727507d"
+        },
+        {
+          "invitation_id": "inv-revoke",
+          "sequence": 2,
+          "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-revoke\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"},{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000090000,\"invitation_id\":\"inv-revoke\",\"invitation_revision\":1,\"reason\":\"Offer withdrawn\",\"room_event_id\":null,\"sequence\":2,\"type\":\"revoked\"}],\"invitationId\":\"inv-revoke\",\"kind\":\"revoked\",\"previousHash\":\"ec61d238b0809eb9bdbdc8a493f85ae0c8eb384a70bc636925e17b99f727507d\",\"record\":{\"accepted_at\":null,\"accepted_by_account_id\":null,\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-revoke\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Revoked\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"c7da3918cb2d38e7686808763468ede0fd9e3fafedf20b7a298026e9ff6262be\",\"issue_request_id\":\"req-revoke\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":null,\"redemption_id\":null,\"revision\":1,\"revoke_reason\":\"Offer withdrawn\",\"revoked_at\":1700000090000,\"revoked_by_account_id\":\"acct-issuer\",\"revoked_by_member_id\":\"member-issuer\",\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"revoked\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000001,\"sequence\":2,\"version\":1}",
+          "checksum": "9393e629bc65bc43b22c59de72211b485377b915e3a96e183f58b5a214e10cb1"
+        },
+        {
+          "invitation_id": "inv-legacy",
+          "sequence": 1,
+          "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-legacy\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"},{\"actor_account_id\":\"acct-target\",\"actor_auth_epoch\":5,\"actor_member_id\":\"member-target\",\"actor_session_revision\":6,\"at\":1700000030000,\"invitation_id\":\"inv-legacy\",\"invitation_revision\":1,\"reason\":null,\"room_event_id\":\"joined-legacy\",\"sequence\":2,\"type\":\"accepted\"}],\"invitationId\":\"inv-legacy\",\"kind\":\"legacy-v4-baseline\",\"previousHash\":null,\"record\":{\"accepted_at\":1700000030000,\"accepted_by_account_id\":\"acct-target\",\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-legacy\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Legacy\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"94cfa69eea41cb6343e139c8213a20aaafd74cb8742c033324d9c7805edcefeb\",\"issue_request_id\":\"req-legacy\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":\"joined-legacy\",\"redemption_id\":\"b6bdc104-080f-4373-9c75-704c8fe4f002\",\"revision\":1,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"accepted\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000001,\"sequence\":1,\"version\":1}",
+          "checksum": "61b911aed69cbc216085050e0b350810e9be2644e2bd695cc8529c41f43d6562"
+        }
+      ],
+      "replay": {
+        "pending": {
+          "record": {
+            "accepted_at": null,
+            "accepted_by_account_id": null,
+            "created_at": 1700000000000,
+            "expires_at": 1700003600000,
+            "id": "inv-pending",
+            "intended_account_id": "acct-target",
+            "intended_display_name": "Pending",
+            "intended_member_id": "member-target",
+            "intended_permissions_json": "[\"accept_work\",\"complete_work\",\"verify\"]",
+            "intended_role": "member",
+            "issue_fingerprint": "9aaabff8cafda599d48d8f0a5f4142655f942c35452cd3f1f77ae0288f39e9c4",
+            "issue_request_id": "req-pending",
+            "issuer_account_auth_epoch": 2,
+            "issuer_account_id": "acct-issuer",
+            "issuer_member_id": "member-issuer",
+            "issuer_member_revision": 0,
+            "joined_event_id": null,
+            "redemption_id": null,
+            "revision": 0,
+            "revoke_reason": null,
+            "revoked_at": null,
+            "revoked_by_account_id": null,
+            "revoked_by_member_id": null,
+            "role_policy_version": 1,
+            "room_id": "room1",
+            "status": "pending",
+            "token_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+          },
+          "audits": [
+            {
+              "actor_account_id": "acct-issuer",
+              "actor_auth_epoch": 2,
+              "actor_member_id": "member-issuer",
+              "actor_session_revision": 4,
+              "at": 1700000000000,
+              "invitation_id": "inv-pending",
+              "invitation_revision": 0,
+              "reason": null,
+              "room_event_id": null,
+              "sequence": 1,
+              "type": "issued"
+            }
+          ],
+          "legacyBaseline": false,
+          "journalSequence": 1,
+          "checksum": "96661ee349b96b2985237ff779705c311be84c4ad7e3bc29467fc69094dedd17"
+        },
+        "accepted": {
+          "record": {
+            "accepted_at": 1700000060000,
+            "accepted_by_account_id": "acct-target",
+            "created_at": 1700000000000,
+            "expires_at": 1700003600000,
+            "id": "inv-accept",
+            "intended_account_id": "acct-target",
+            "intended_display_name": "Accepted",
+            "intended_member_id": "member-target",
+            "intended_permissions_json": "[\"accept_work\",\"complete_work\",\"verify\"]",
+            "intended_role": "member",
+            "issue_fingerprint": "daf63e43c86f45754d2ffcad6e414c547f40f234e750fac0fa4b36544faeaaad",
+            "issue_request_id": "req-accept",
+            "issuer_account_auth_epoch": 2,
+            "issuer_account_id": "acct-issuer",
+            "issuer_member_id": "member-issuer",
+            "issuer_member_revision": 0,
+            "joined_event_id": "joined1",
+            "redemption_id": "b6bdc104-080f-4373-9c75-704c8fe4f002",
+            "revision": 1,
+            "revoke_reason": null,
+            "revoked_at": null,
+            "revoked_by_account_id": null,
+            "revoked_by_member_id": null,
+            "role_policy_version": 1,
+            "room_id": "room1",
+            "status": "accepted",
+            "token_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+          },
+          "audits": [
+            {
+              "actor_account_id": "acct-issuer",
+              "actor_auth_epoch": 2,
+              "actor_member_id": "member-issuer",
+              "actor_session_revision": 4,
+              "at": 1700000000000,
+              "invitation_id": "inv-accept",
+              "invitation_revision": 0,
+              "reason": null,
+              "room_event_id": null,
+              "sequence": 1,
+              "type": "issued"
+            },
+            {
+              "actor_account_id": "acct-target",
+              "actor_auth_epoch": 5,
+              "actor_member_id": "member-target",
+              "actor_session_revision": 6,
+              "at": 1700000060000,
+              "invitation_id": "inv-accept",
+              "invitation_revision": 1,
+              "reason": null,
+              "room_event_id": "joined1",
+              "sequence": 2,
+              "type": "accepted"
+            }
+          ],
+          "legacyBaseline": false,
+          "journalSequence": 2,
+          "checksum": "90bf0184a45058853ca6a9cf837dd634ee28bb2e60bf3c448cb9f0f2f764eb67"
+        },
+        "revoked": {
+          "record": {
+            "accepted_at": null,
+            "accepted_by_account_id": null,
+            "created_at": 1700000000000,
+            "expires_at": 1700003600000,
+            "id": "inv-revoke",
+            "intended_account_id": "acct-target",
+            "intended_display_name": "Revoked",
+            "intended_member_id": "member-target",
+            "intended_permissions_json": "[\"accept_work\",\"complete_work\",\"verify\"]",
+            "intended_role": "member",
+            "issue_fingerprint": "c7da3918cb2d38e7686808763468ede0fd9e3fafedf20b7a298026e9ff6262be",
+            "issue_request_id": "req-revoke",
+            "issuer_account_auth_epoch": 2,
+            "issuer_account_id": "acct-issuer",
+            "issuer_member_id": "member-issuer",
+            "issuer_member_revision": 0,
+            "joined_event_id": null,
+            "redemption_id": null,
+            "revision": 1,
+            "revoke_reason": "Offer withdrawn",
+            "revoked_at": 1700000090000,
+            "revoked_by_account_id": "acct-issuer",
+            "revoked_by_member_id": "member-issuer",
+            "role_policy_version": 1,
+            "room_id": "room1",
+            "status": "revoked",
+            "token_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+          },
+          "audits": [
+            {
+              "actor_account_id": "acct-issuer",
+              "actor_auth_epoch": 2,
+              "actor_member_id": "member-issuer",
+              "actor_session_revision": 4,
+              "at": 1700000000000,
+              "invitation_id": "inv-revoke",
+              "invitation_revision": 0,
+              "reason": null,
+              "room_event_id": null,
+              "sequence": 1,
+              "type": "issued"
+            },
+            {
+              "actor_account_id": "acct-issuer",
+              "actor_auth_epoch": 2,
+              "actor_member_id": "member-issuer",
+              "actor_session_revision": 4,
+              "at": 1700000090000,
+              "invitation_id": "inv-revoke",
+              "invitation_revision": 1,
+              "reason": "Offer withdrawn",
+              "room_event_id": null,
+              "sequence": 2,
+              "type": "revoked"
+            }
+          ],
+          "legacyBaseline": false,
+          "journalSequence": 2,
+          "checksum": "9393e629bc65bc43b22c59de72211b485377b915e3a96e183f58b5a214e10cb1"
+        },
+        "legacy": {
+          "record": {
+            "accepted_at": 1700000030000,
+            "accepted_by_account_id": "acct-target",
+            "created_at": 1700000000000,
+            "expires_at": 1700003600000,
+            "id": "inv-legacy",
+            "intended_account_id": "acct-target",
+            "intended_display_name": "Legacy",
+            "intended_member_id": "member-target",
+            "intended_permissions_json": "[\"accept_work\",\"complete_work\",\"verify\"]",
+            "intended_role": "member",
+            "issue_fingerprint": "94cfa69eea41cb6343e139c8213a20aaafd74cb8742c033324d9c7805edcefeb",
+            "issue_request_id": "req-legacy",
+            "issuer_account_auth_epoch": 2,
+            "issuer_account_id": "acct-issuer",
+            "issuer_member_id": "member-issuer",
+            "issuer_member_revision": 0,
+            "joined_event_id": "joined-legacy",
+            "redemption_id": "b6bdc104-080f-4373-9c75-704c8fe4f002",
+            "revision": 1,
+            "revoke_reason": null,
+            "revoked_at": null,
+            "revoked_by_account_id": null,
+            "revoked_by_member_id": null,
+            "role_policy_version": 1,
+            "room_id": "room1",
+            "status": "accepted",
+            "token_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+          },
+          "audits": [
+            {
+              "actor_account_id": "acct-issuer",
+              "actor_auth_epoch": 2,
+              "actor_member_id": "member-issuer",
+              "actor_session_revision": 4,
+              "at": 1700000000000,
+              "invitation_id": "inv-legacy",
+              "invitation_revision": 0,
+              "reason": null,
+              "room_event_id": null,
+              "sequence": 1,
+              "type": "issued"
+            },
+            {
+              "actor_account_id": "acct-target",
+              "actor_auth_epoch": 5,
+              "actor_member_id": "member-target",
+              "actor_session_revision": 6,
+              "at": 1700000030000,
+              "invitation_id": "inv-legacy",
+              "invitation_revision": 1,
+              "reason": null,
+              "room_event_id": "joined-legacy",
+              "sequence": 2,
+              "type": "accepted"
+            }
+          ],
+          "legacyBaseline": true,
+          "journalSequence": 1,
+          "checksum": "61b911aed69cbc216085050e0b350810e9be2644e2bd695cc8529c41f43d6562"
+        }
+      },
+      "snapshot": {
+        "data": {
+          "membership_invitation_journal": [
+            {
+              "invitation_id": "inv-pending",
+              "sequence": 1,
+              "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-pending\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"}],\"invitationId\":\"inv-pending\",\"kind\":\"issued\",\"previousHash\":null,\"record\":{\"accepted_at\":null,\"accepted_by_account_id\":null,\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-pending\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Pending\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"9aaabff8cafda599d48d8f0a5f4142655f942c35452cd3f1f77ae0288f39e9c4\",\"issue_request_id\":\"req-pending\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":null,\"redemption_id\":null,\"revision\":0,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"pending\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000000,\"sequence\":1,\"version\":1}",
+              "checksum": "96661ee349b96b2985237ff779705c311be84c4ad7e3bc29467fc69094dedd17"
+            },
+            {
+              "invitation_id": "inv-accept",
+              "sequence": 1,
+              "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-accept\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"}],\"invitationId\":\"inv-accept\",\"kind\":\"issued\",\"previousHash\":null,\"record\":{\"accepted_at\":null,\"accepted_by_account_id\":null,\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-accept\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Accepted\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"daf63e43c86f45754d2ffcad6e414c547f40f234e750fac0fa4b36544faeaaad\",\"issue_request_id\":\"req-accept\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":null,\"redemption_id\":null,\"revision\":0,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"pending\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000000,\"sequence\":1,\"version\":1}",
+              "checksum": "95fbd48d700080d5bbedb1cec57732f16b93f1a38d08366a533e97fea5b27d3e"
+            },
+            {
+              "invitation_id": "inv-accept",
+              "sequence": 2,
+              "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-accept\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"},{\"actor_account_id\":\"acct-target\",\"actor_auth_epoch\":5,\"actor_member_id\":\"member-target\",\"actor_session_revision\":6,\"at\":1700000060000,\"invitation_id\":\"inv-accept\",\"invitation_revision\":1,\"reason\":null,\"room_event_id\":\"joined1\",\"sequence\":2,\"type\":\"accepted\"}],\"invitationId\":\"inv-accept\",\"kind\":\"accepted\",\"previousHash\":\"95fbd48d700080d5bbedb1cec57732f16b93f1a38d08366a533e97fea5b27d3e\",\"record\":{\"accepted_at\":1700000060000,\"accepted_by_account_id\":\"acct-target\",\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-accept\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Accepted\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"daf63e43c86f45754d2ffcad6e414c547f40f234e750fac0fa4b36544faeaaad\",\"issue_request_id\":\"req-accept\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":\"joined1\",\"redemption_id\":\"b6bdc104-080f-4373-9c75-704c8fe4f002\",\"revision\":1,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"accepted\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000001,\"sequence\":2,\"version\":1}",
+              "checksum": "90bf0184a45058853ca6a9cf837dd634ee28bb2e60bf3c448cb9f0f2f764eb67"
+            },
+            {
+              "invitation_id": "inv-revoke",
+              "sequence": 1,
+              "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-revoke\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"}],\"invitationId\":\"inv-revoke\",\"kind\":\"issued\",\"previousHash\":null,\"record\":{\"accepted_at\":null,\"accepted_by_account_id\":null,\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-revoke\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Revoked\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"c7da3918cb2d38e7686808763468ede0fd9e3fafedf20b7a298026e9ff6262be\",\"issue_request_id\":\"req-revoke\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":null,\"redemption_id\":null,\"revision\":0,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"pending\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000000,\"sequence\":1,\"version\":1}",
+              "checksum": "ec61d238b0809eb9bdbdc8a493f85ae0c8eb384a70bc636925e17b99f727507d"
+            },
+            {
+              "invitation_id": "inv-revoke",
+              "sequence": 2,
+              "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-revoke\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"},{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000090000,\"invitation_id\":\"inv-revoke\",\"invitation_revision\":1,\"reason\":\"Offer withdrawn\",\"room_event_id\":null,\"sequence\":2,\"type\":\"revoked\"}],\"invitationId\":\"inv-revoke\",\"kind\":\"revoked\",\"previousHash\":\"ec61d238b0809eb9bdbdc8a493f85ae0c8eb384a70bc636925e17b99f727507d\",\"record\":{\"accepted_at\":null,\"accepted_by_account_id\":null,\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-revoke\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Revoked\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"c7da3918cb2d38e7686808763468ede0fd9e3fafedf20b7a298026e9ff6262be\",\"issue_request_id\":\"req-revoke\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":null,\"redemption_id\":null,\"revision\":1,\"revoke_reason\":\"Offer withdrawn\",\"revoked_at\":1700000090000,\"revoked_by_account_id\":\"acct-issuer\",\"revoked_by_member_id\":\"member-issuer\",\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"revoked\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000001,\"sequence\":2,\"version\":1}",
+              "checksum": "9393e629bc65bc43b22c59de72211b485377b915e3a96e183f58b5a214e10cb1"
+            },
+            {
+              "invitation_id": "inv-legacy",
+              "sequence": 1,
+              "body": "{\"audits\":[{\"actor_account_id\":\"acct-issuer\",\"actor_auth_epoch\":2,\"actor_member_id\":\"member-issuer\",\"actor_session_revision\":4,\"at\":1700000000000,\"invitation_id\":\"inv-legacy\",\"invitation_revision\":0,\"reason\":null,\"room_event_id\":null,\"sequence\":1,\"type\":\"issued\"},{\"actor_account_id\":\"acct-target\",\"actor_auth_epoch\":5,\"actor_member_id\":\"member-target\",\"actor_session_revision\":6,\"at\":1700000030000,\"invitation_id\":\"inv-legacy\",\"invitation_revision\":1,\"reason\":null,\"room_event_id\":\"joined-legacy\",\"sequence\":2,\"type\":\"accepted\"}],\"invitationId\":\"inv-legacy\",\"kind\":\"legacy-v4-baseline\",\"previousHash\":null,\"record\":{\"accepted_at\":1700000030000,\"accepted_by_account_id\":\"acct-target\",\"created_at\":1700000000000,\"expires_at\":1700003600000,\"id\":\"inv-legacy\",\"intended_account_id\":\"acct-target\",\"intended_display_name\":\"Legacy\",\"intended_member_id\":\"member-target\",\"intended_permissions_json\":\"[\\\"accept_work\\\",\\\"complete_work\\\",\\\"verify\\\"]\",\"intended_role\":\"member\",\"issue_fingerprint\":\"94cfa69eea41cb6343e139c8213a20aaafd74cb8742c033324d9c7805edcefeb\",\"issue_request_id\":\"req-legacy\",\"issuer_account_auth_epoch\":2,\"issuer_account_id\":\"acct-issuer\",\"issuer_member_id\":\"member-issuer\",\"issuer_member_revision\":0,\"joined_event_id\":\"joined-legacy\",\"redemption_id\":\"b6bdc104-080f-4373-9c75-704c8fe4f002\",\"revision\":1,\"revoke_reason\":null,\"revoked_at\":null,\"revoked_by_account_id\":null,\"revoked_by_member_id\":null,\"role_policy_version\":1,\"room_id\":\"room1\",\"status\":\"accepted\",\"token_hash\":\"cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd\"},\"recordedAt\":1700000000001,\"sequence\":1,\"version\":1}",
+              "checksum": "61b911aed69cbc216085050e0b350810e9be2644e2bd695cc8529c41f43d6562"
+            }
+          ],
+          "membership_invitations": [
+            {
+              "id": "inv-pending"
+            },
+            {
+              "id": "inv-accept"
+            },
+            {
+              "id": "inv-revoke"
+            },
+            {
+              "id": "inv-legacy"
+            }
+          ]
+        },
+        "sequence": [],
+        "master": [
+          {
+            "type": "table",
+            "name": "membership_invitation_journal",
+            "sql": "CREATE TABLE membership_invitation_journal (\n    invitation_id TEXT NOT NULL REFERENCES membership_invitations(id),\n    sequence INTEGER NOT NULL CHECK(sequence>0),\n    body TEXT NOT NULL CHECK(json_valid(body)),\n    checksum TEXT NOT NULL CHECK(length(checksum)=64),\n    PRIMARY KEY(invitation_id,sequence)\n  )"
+          },
+          {
+            "type": "table",
+            "name": "membership_invitations",
+            "sql": "CREATE TABLE membership_invitations (id TEXT PRIMARY KEY)"
+          },
+          {
+            "type": "trigger",
+            "name": "membership_invitation_journal_no_delete",
+            "sql": "CREATE TRIGGER membership_invitation_journal_no_delete BEFORE DELETE ON membership_invitation_journal\n    BEGIN SELECT RAISE(ABORT,'invitation journal is append-only'); END"
+          },
+          {
+            "type": "trigger",
+            "name": "membership_invitation_journal_no_update",
+            "sql": "CREATE TRIGGER membership_invitation_journal_no_update BEFORE UPDATE ON membership_invitation_journal\n    BEGIN SELECT RAISE(ABORT,'invitation journal is append-only'); END"
+          }
+        ]
+      }
+    },
+    "graph": {
+      "attempts": [
+        "{\"id\":\"req1\",\"sourceId\":\"src1\",\"revision\":0,\"status\":\"reserved\",\"plan\":{\"sourceId\":\"src1\",\"requestId\":\"req1\",\"mode\":\"reply\",\"planVersion\":\"abababababababababababababababababababababababababababababababab\",\"sourceMessageId\":\"msg-source\",\"accountId\":\"acct1\",\"connection\":{\"provider\":\"microsoft-graph\",\"mailboxId\":\"box1\"}},\"providerDraftId\":null,\"createdAt\":1700000000000,\"updatedAt\":1700000000000,\"canSend\":false}",
+        "{\"id\":\"req1\",\"sourceId\":\"src1\",\"revision\":1,\"status\":\"creation_unconfirmed\",\"plan\":{\"sourceId\":\"src1\",\"requestId\":\"req1\",\"mode\":\"reply\",\"planVersion\":\"abababababababababababababababababababababababababababababababab\",\"sourceMessageId\":\"msg-source\",\"accountId\":\"acct1\",\"connection\":{\"provider\":\"microsoft-graph\",\"mailboxId\":\"box1\"}},\"providerDraftId\":null,\"createdAt\":1700000000000,\"updatedAt\":1700000000001,\"canSend\":false}",
+        "{\"id\":\"req1\",\"sourceId\":\"src1\",\"revision\":2,\"status\":\"created_unverified\",\"plan\":{\"sourceId\":\"src1\",\"requestId\":\"req1\",\"mode\":\"reply\",\"planVersion\":\"abababababababababababababababababababababababababababababababab\",\"sourceMessageId\":\"msg-source\",\"accountId\":\"acct1\",\"connection\":{\"provider\":\"microsoft-graph\",\"mailboxId\":\"box1\"}},\"providerDraftId\":\"draft-1\",\"createdAt\":1700000000000,\"updatedAt\":1700000000002,\"canSend\":false}",
+        "{\"id\":\"req1\",\"sourceId\":\"src1\",\"revision\":3,\"status\":\"draft_unavailable\",\"plan\":{\"sourceId\":\"src1\",\"requestId\":\"req1\",\"mode\":\"reply\",\"planVersion\":\"abababababababababababababababababababababababababababababababab\",\"sourceMessageId\":\"msg-source\",\"accountId\":\"acct1\",\"connection\":{\"provider\":\"microsoft-graph\",\"mailboxId\":\"box1\"}},\"providerDraftId\":\"draft-1\",\"createdAt\":1700000000000,\"updatedAt\":1700000000003,\"canSend\":false,\"observation\":{\"planVersion\":\"abababababababababababababababababababababababababababababababab\",\"providerDraftId\":\"draft-1\",\"canRetryCreate\":false,\"canSend\":false,\"status\":\"draft_unavailable\",\"differences\":[],\"reviewVersion\":null},\"review\":null}",
+        "{\"id\":\"req1\",\"sourceId\":\"src1\",\"revision\":1,\"status\":\"cancelled\",\"plan\":{\"sourceId\":\"src1\",\"requestId\":\"req1\",\"mode\":\"reply\",\"planVersion\":\"abababababababababababababababababababababababababababababababab\",\"sourceMessageId\":\"msg-source\",\"accountId\":\"acct1\",\"connection\":{\"provider\":\"microsoft-graph\",\"mailboxId\":\"box1\"}},\"providerDraftId\":null,\"createdAt\":1700000000000,\"updatedAt\":1700000000004,\"canSend\":false}"
+      ],
+      "updates": [
+        "{\"id\":\"ureq1\",\"sourceId\":\"src1\",\"attemptId\":\"req1\",\"revision\":0,\"status\":\"reserved\",\"proposal\":{\"requestId\":\"ureq1\",\"sourceId\":\"src1\",\"attemptId\":\"req1\",\"attemptRevision\":0,\"updateVersion\":\"abababababababababababababababababababababababababababababababab\",\"status\":\"update_proposed\",\"update\":{\"method\":\"PATCH\"}},\"observation\":null,\"dispatchedAt\":null,\"createdAt\":1700000000000,\"updatedAt\":1700000000000,\"canExecute\":false,\"canRetryUpdate\":false,\"canReview\":false,\"canSend\":false}",
+        "{\"id\":\"ureq1\",\"sourceId\":\"src1\",\"attemptId\":\"req1\",\"revision\":1,\"status\":\"update_unconfirmed\",\"proposal\":{\"requestId\":\"ureq1\",\"sourceId\":\"src1\",\"attemptId\":\"req1\",\"attemptRevision\":0,\"updateVersion\":\"abababababababababababababababababababababababababababababababab\",\"status\":\"update_proposed\",\"update\":{\"method\":\"PATCH\"}},\"observation\":null,\"dispatchedAt\":1700000000001,\"createdAt\":1700000000000,\"updatedAt\":1700000000001,\"canExecute\":false,\"canRetryUpdate\":false,\"canReview\":false,\"canSend\":false}",
+        "{\"id\":\"ureq3\",\"sourceId\":\"src1\",\"attemptId\":\"req1\",\"revision\":1,\"status\":\"cancelled\",\"proposal\":{\"requestId\":\"ureq3\",\"sourceId\":\"src1\",\"attemptId\":\"req1\",\"attemptRevision\":0,\"updateVersion\":\"abababababababababababababababababababababababababababababababab\",\"status\":\"update_proposed\",\"update\":{\"method\":\"PATCH\"}},\"observation\":null,\"dispatchedAt\":null,\"createdAt\":1700000000000,\"updatedAt\":1700000000002,\"canExecute\":false,\"canRetryUpdate\":false,\"canReview\":false,\"canSend\":false}"
+      ]
+    }
+  },
+  "reads": {
+    "channel": {
+      "verify": {
+        "pending": 0,
+        "imported": 1,
+        "failed": 2
+      },
+      "summary": {
+        "pending": 0,
+        "imported": 1,
+        "failed": 2
+      },
+      "pending": [],
+      "schemaOk": true
+    },
+    "spam": {
+      "verify": {
+        "held": 1,
+        "released": 1,
+        "dismissed": 1
+      },
+      "counts": {
+        "held": 1,
+        "released": 1,
+        "dismissed": 1
+      },
+      "held": [
+        {
+          "id": "qz-3",
+          "messageId": "m3",
+          "channel": "sms",
+          "connectionId": null,
+          "accountId": null,
+          "sourceId": null,
+          "reason": [
+            {
+              "key": "urgent",
+              "weight": 2,
+              "detail": "act now"
+            }
+          ],
+          "score": 80,
+          "quarantinedAt": 1700000000010,
+          "status": "held",
+          "reviewedBy": null,
+          "reviewedAt": null,
+          "note": null,
+          "updatedAt": 1700000000010
+        }
+      ],
+      "released": [
+        {
+          "id": "qz-1",
+          "messageId": "m1",
+          "channel": "telegram",
+          "connectionId": null,
+          "accountId": null,
+          "sourceId": null,
+          "reason": [
+            {
+              "key": "urgent",
+              "weight": 2,
+              "detail": "act now"
+            }
+          ],
+          "score": 80,
+          "quarantinedAt": 1700000000000,
+          "status": "released",
+          "reviewedBy": "owner",
+          "reviewedAt": 1700000000010,
+          "note": "false positive",
+          "updatedAt": 1700000000010
+        }
+      ],
+      "schemaOk": true
+    },
+    "jev": {
+      "verify": {
+        "admission": 2,
+        "receipt": 1,
+        "escalate": 1
+      },
+      "list": [
+        {
+          "id": "jrd-1",
+          "gate": "receipt",
+          "roomId": "room-1",
+          "identityId": "ai_2",
+          "subject": "work-9",
+          "ipHash": null,
+          "path": "work-claim:done",
+          "score": 0.25,
+          "decision": "escalate",
+          "escalate": true,
+          "signals": [
+            {
+              "key": "evidence",
+              "weight": 1,
+              "value": 0,
+              "detail": "missing diff"
+            }
+          ],
+          "recordedAt": 1700000000001
+        },
+        {
+          "id": "jad-1",
+          "gate": "admission",
+          "roomId": "room-1",
+          "identityId": "ai_1",
+          "subject": null,
+          "ipHash": "h1",
+          "path": "join:invite",
+          "score": 0.5,
+          "decision": "review",
+          "escalate": false,
+          "signals": [
+            {
+              "key": "freshIdentity",
+              "weight": 0.5,
+              "value": 1,
+              "detail": "minted seconds ago"
+            }
+          ],
+          "recordedAt": 1700000000000
+        },
+        {
+          "id": "jad-2",
+          "gate": "admission",
+          "roomId": "room-1",
+          "identityId": "ai_1",
+          "subject": null,
+          "ipHash": "h9",
+          "path": "join:invite",
+          "score": 0.25,
+          "decision": "admit",
+          "escalate": false,
+          "signals": [],
+          "recordedAt": 1699996400000
+        }
+      ],
+      "counts": {
+        "admission": 2,
+        "receipt": 1,
+        "escalate": 1
+      },
+      "recent": 1,
+      "schemaOk": true
+    },
+    "sla": {
+      "list": [
+        {
+          "id": "sba-2",
+          "accountId": "acct1",
+          "threadId": "t2",
+          "channel": "email",
+          "kind": "reply",
+          "elapsedMs": 1000,
+          "targetMs": 500,
+          "awaitingSince": "2026-01-01T00:00:00.000Z",
+          "deadlineAt": "2026-01-01T00:01:00.000Z",
+          "producedAt": "2026-01-03T00:00:00.000Z",
+          "summary": "late",
+          "decision": "deliver",
+          "reason": "urgent",
+          "prefsSnapshot": {
+            "quiet": false,
+            "connections": [
+              "c1"
+            ]
+          },
+          "notifiedAt": 1700000000002,
+          "createdAt": 1700000000002
+        },
+        {
+          "id": "sba-1",
+          "accountId": "acct1",
+          "threadId": "t1",
+          "channel": "email",
+          "kind": "reply",
+          "elapsedMs": 1000,
+          "targetMs": 500,
+          "awaitingSince": "2026-01-01T00:00:00.000Z",
+          "deadlineAt": "2026-01-01T00:01:00.000Z",
+          "producedAt": "2026-01-02T00:00:00.000Z",
+          "summary": "late",
+          "decision": "deliver",
+          "reason": "urgent",
+          "prefsSnapshot": {
+            "quiet": false,
+            "connections": [
+              "c1"
+            ]
+          },
+          "notifiedAt": 1700000000000,
+          "createdAt": 1700000000000
+        }
+      ],
+      "first": {
+        "id": "sba-1",
+        "accountId": "acct1",
+        "threadId": "t1",
+        "channel": "email",
+        "kind": "reply",
+        "elapsedMs": 1000,
+        "targetMs": 500,
+        "awaitingSince": "2026-01-01T00:00:00.000Z",
+        "deadlineAt": "2026-01-01T00:01:00.000Z",
+        "producedAt": "2026-01-02T00:00:00.000Z",
+        "summary": "late",
+        "decision": "deliver",
+        "reason": "urgent",
+        "prefsSnapshot": {
+          "quiet": false,
+          "connections": [
+            "c1"
+          ]
+        },
+        "notifiedAt": 1700000000000,
+        "createdAt": 1700000000000
+      }
+    },
+    "invitation": {
+      "pending": {
+        "record": {
+          "accepted_at": null,
+          "accepted_by_account_id": null,
+          "created_at": 1700000000000,
+          "expires_at": 1700003600000,
+          "id": "inv-pending",
+          "intended_account_id": "acct-target",
+          "intended_display_name": "Pending",
+          "intended_member_id": "member-target",
+          "intended_permissions_json": "[\"accept_work\",\"complete_work\",\"verify\"]",
+          "intended_role": "member",
+          "issue_fingerprint": "9aaabff8cafda599d48d8f0a5f4142655f942c35452cd3f1f77ae0288f39e9c4",
+          "issue_request_id": "req-pending",
+          "issuer_account_auth_epoch": 2,
+          "issuer_account_id": "acct-issuer",
+          "issuer_member_id": "member-issuer",
+          "issuer_member_revision": 0,
+          "joined_event_id": null,
+          "redemption_id": null,
+          "revision": 0,
+          "revoke_reason": null,
+          "revoked_at": null,
+          "revoked_by_account_id": null,
+          "revoked_by_member_id": null,
+          "role_policy_version": 1,
+          "room_id": "room1",
+          "status": "pending",
+          "token_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+        },
+        "audits": [
+          {
+            "actor_account_id": "acct-issuer",
+            "actor_auth_epoch": 2,
+            "actor_member_id": "member-issuer",
+            "actor_session_revision": 4,
+            "at": 1700000000000,
+            "invitation_id": "inv-pending",
+            "invitation_revision": 0,
+            "reason": null,
+            "room_event_id": null,
+            "sequence": 1,
+            "type": "issued"
+          }
+        ],
+        "legacyBaseline": false,
+        "journalSequence": 1,
+        "checksum": "96661ee349b96b2985237ff779705c311be84c4ad7e3bc29467fc69094dedd17"
+      },
+      "accepted": {
+        "record": {
+          "accepted_at": 1700000060000,
+          "accepted_by_account_id": "acct-target",
+          "created_at": 1700000000000,
+          "expires_at": 1700003600000,
+          "id": "inv-accept",
+          "intended_account_id": "acct-target",
+          "intended_display_name": "Accepted",
+          "intended_member_id": "member-target",
+          "intended_permissions_json": "[\"accept_work\",\"complete_work\",\"verify\"]",
+          "intended_role": "member",
+          "issue_fingerprint": "daf63e43c86f45754d2ffcad6e414c547f40f234e750fac0fa4b36544faeaaad",
+          "issue_request_id": "req-accept",
+          "issuer_account_auth_epoch": 2,
+          "issuer_account_id": "acct-issuer",
+          "issuer_member_id": "member-issuer",
+          "issuer_member_revision": 0,
+          "joined_event_id": "joined1",
+          "redemption_id": "b6bdc104-080f-4373-9c75-704c8fe4f002",
+          "revision": 1,
+          "revoke_reason": null,
+          "revoked_at": null,
+          "revoked_by_account_id": null,
+          "revoked_by_member_id": null,
+          "role_policy_version": 1,
+          "room_id": "room1",
+          "status": "accepted",
+          "token_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+        },
+        "audits": [
+          {
+            "actor_account_id": "acct-issuer",
+            "actor_auth_epoch": 2,
+            "actor_member_id": "member-issuer",
+            "actor_session_revision": 4,
+            "at": 1700000000000,
+            "invitation_id": "inv-accept",
+            "invitation_revision": 0,
+            "reason": null,
+            "room_event_id": null,
+            "sequence": 1,
+            "type": "issued"
+          },
+          {
+            "actor_account_id": "acct-target",
+            "actor_auth_epoch": 5,
+            "actor_member_id": "member-target",
+            "actor_session_revision": 6,
+            "at": 1700000060000,
+            "invitation_id": "inv-accept",
+            "invitation_revision": 1,
+            "reason": null,
+            "room_event_id": "joined1",
+            "sequence": 2,
+            "type": "accepted"
+          }
+        ],
+        "legacyBaseline": false,
+        "journalSequence": 2,
+        "checksum": "90bf0184a45058853ca6a9cf837dd634ee28bb2e60bf3c448cb9f0f2f764eb67"
+      },
+      "revoked": {
+        "record": {
+          "accepted_at": null,
+          "accepted_by_account_id": null,
+          "created_at": 1700000000000,
+          "expires_at": 1700003600000,
+          "id": "inv-revoke",
+          "intended_account_id": "acct-target",
+          "intended_display_name": "Revoked",
+          "intended_member_id": "member-target",
+          "intended_permissions_json": "[\"accept_work\",\"complete_work\",\"verify\"]",
+          "intended_role": "member",
+          "issue_fingerprint": "c7da3918cb2d38e7686808763468ede0fd9e3fafedf20b7a298026e9ff6262be",
+          "issue_request_id": "req-revoke",
+          "issuer_account_auth_epoch": 2,
+          "issuer_account_id": "acct-issuer",
+          "issuer_member_id": "member-issuer",
+          "issuer_member_revision": 0,
+          "joined_event_id": null,
+          "redemption_id": null,
+          "revision": 1,
+          "revoke_reason": "Offer withdrawn",
+          "revoked_at": 1700000090000,
+          "revoked_by_account_id": "acct-issuer",
+          "revoked_by_member_id": "member-issuer",
+          "role_policy_version": 1,
+          "room_id": "room1",
+          "status": "revoked",
+          "token_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+        },
+        "audits": [
+          {
+            "actor_account_id": "acct-issuer",
+            "actor_auth_epoch": 2,
+            "actor_member_id": "member-issuer",
+            "actor_session_revision": 4,
+            "at": 1700000000000,
+            "invitation_id": "inv-revoke",
+            "invitation_revision": 0,
+            "reason": null,
+            "room_event_id": null,
+            "sequence": 1,
+            "type": "issued"
+          },
+          {
+            "actor_account_id": "acct-issuer",
+            "actor_auth_epoch": 2,
+            "actor_member_id": "member-issuer",
+            "actor_session_revision": 4,
+            "at": 1700000090000,
+            "invitation_id": "inv-revoke",
+            "invitation_revision": 1,
+            "reason": "Offer withdrawn",
+            "room_event_id": null,
+            "sequence": 2,
+            "type": "revoked"
+          }
+        ],
+        "legacyBaseline": false,
+        "journalSequence": 2,
+        "checksum": "9393e629bc65bc43b22c59de72211b485377b915e3a96e183f58b5a214e10cb1"
+      },
+      "legacy": {
+        "record": {
+          "accepted_at": 1700000030000,
+          "accepted_by_account_id": "acct-target",
+          "created_at": 1700000000000,
+          "expires_at": 1700003600000,
+          "id": "inv-legacy",
+          "intended_account_id": "acct-target",
+          "intended_display_name": "Legacy",
+          "intended_member_id": "member-target",
+          "intended_permissions_json": "[\"accept_work\",\"complete_work\",\"verify\"]",
+          "intended_role": "member",
+          "issue_fingerprint": "94cfa69eea41cb6343e139c8213a20aaafd74cb8742c033324d9c7805edcefeb",
+          "issue_request_id": "req-legacy",
+          "issuer_account_auth_epoch": 2,
+          "issuer_account_id": "acct-issuer",
+          "issuer_member_id": "member-issuer",
+          "issuer_member_revision": 0,
+          "joined_event_id": "joined-legacy",
+          "redemption_id": "b6bdc104-080f-4373-9c75-704c8fe4f002",
+          "revision": 1,
+          "revoke_reason": null,
+          "revoked_at": null,
+          "revoked_by_account_id": null,
+          "revoked_by_member_id": null,
+          "role_policy_version": 1,
+          "room_id": "room1",
+          "status": "accepted",
+          "token_hash": "cdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd"
+        },
+        "audits": [
+          {
+            "actor_account_id": "acct-issuer",
+            "actor_auth_epoch": 2,
+            "actor_member_id": "member-issuer",
+            "actor_session_revision": 4,
+            "at": 1700000000000,
+            "invitation_id": "inv-legacy",
+            "invitation_revision": 0,
+            "reason": null,
+            "room_event_id": null,
+            "sequence": 1,
+            "type": "issued"
+          },
+          {
+            "actor_account_id": "acct-target",
+            "actor_auth_epoch": 5,
+            "actor_member_id": "member-target",
+            "actor_session_revision": 6,
+            "at": 1700000030000,
+            "invitation_id": "inv-legacy",
+            "invitation_revision": 1,
+            "reason": null,
+            "room_event_id": "joined-legacy",
+            "sequence": 2,
+            "type": "accepted"
+          }
+        ],
+        "legacyBaseline": true,
+        "journalSequence": 1,
+        "checksum": "61b911aed69cbc216085050e0b350810e9be2644e2bd695cc8529c41f43d6562"
+      }
+    },
+    "membership": {
+      "entries": 5,
+      "absent": false
+    },
+    "graph": [
+      {
+        "id": "req1",
+        "sourceId": "src1",
+        "revision": 0,
+        "status": "reserved",
+        "plan": {
+          "sourceId": "src1",
+          "requestId": "req1",
+          "mode": "reply",
+          "planVersion": "abababababababababababababababababababababababababababababababab",
+          "sourceMessageId": "msg-source",
+          "accountId": "acct1",
+          "connection": {
+            "provider": "microsoft-graph",
+            "mailboxId": "box1"
+          }
+        },
+        "providerDraftId": null,
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000000,
+        "canSend": false
+      },
+      {
+        "id": "req1",
+        "sourceId": "src1",
+        "revision": 1,
+        "status": "creation_unconfirmed",
+        "plan": {
+          "sourceId": "src1",
+          "requestId": "req1",
+          "mode": "reply",
+          "planVersion": "abababababababababababababababababababababababababababababababab",
+          "sourceMessageId": "msg-source",
+          "accountId": "acct1",
+          "connection": {
+            "provider": "microsoft-graph",
+            "mailboxId": "box1"
+          }
+        },
+        "providerDraftId": null,
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000001,
+        "canSend": false
+      },
+      {
+        "id": "req1",
+        "sourceId": "src1",
+        "revision": 2,
+        "status": "created_unverified",
+        "plan": {
+          "sourceId": "src1",
+          "requestId": "req1",
+          "mode": "reply",
+          "planVersion": "abababababababababababababababababababababababababababababababab",
+          "sourceMessageId": "msg-source",
+          "accountId": "acct1",
+          "connection": {
+            "provider": "microsoft-graph",
+            "mailboxId": "box1"
+          }
+        },
+        "providerDraftId": "draft-1",
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000002,
+        "canSend": false
+      },
+      {
+        "id": "req1",
+        "sourceId": "src1",
+        "revision": 3,
+        "status": "draft_unavailable",
+        "plan": {
+          "sourceId": "src1",
+          "requestId": "req1",
+          "mode": "reply",
+          "planVersion": "abababababababababababababababababababababababababababababababab",
+          "sourceMessageId": "msg-source",
+          "accountId": "acct1",
+          "connection": {
+            "provider": "microsoft-graph",
+            "mailboxId": "box1"
+          }
+        },
+        "providerDraftId": "draft-1",
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000003,
+        "canSend": false,
+        "observation": {
+          "planVersion": "abababababababababababababababababababababababababababababababab",
+          "providerDraftId": "draft-1",
+          "canRetryCreate": false,
+          "canSend": false,
+          "status": "draft_unavailable",
+          "differences": [],
+          "reviewVersion": null
+        },
+        "review": null
+      },
+      {
+        "id": "req1",
+        "sourceId": "src1",
+        "revision": 1,
+        "status": "cancelled",
+        "plan": {
+          "sourceId": "src1",
+          "requestId": "req1",
+          "mode": "reply",
+          "planVersion": "abababababababababababababababababababababababababababababababab",
+          "sourceMessageId": "msg-source",
+          "accountId": "acct1",
+          "connection": {
+            "provider": "microsoft-graph",
+            "mailboxId": "box1"
+          }
+        },
+        "providerDraftId": null,
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000004,
+        "canSend": false
+      },
+      {
+        "id": "ureq1",
+        "sourceId": "src1",
+        "attemptId": "req1",
+        "revision": 0,
+        "status": "reserved",
+        "proposal": {
+          "requestId": "ureq1",
+          "sourceId": "src1",
+          "attemptId": "req1",
+          "attemptRevision": 0,
+          "updateVersion": "abababababababababababababababababababababababababababababababab",
+          "status": "update_proposed",
+          "update": {
+            "method": "PATCH"
+          }
+        },
+        "observation": null,
+        "dispatchedAt": null,
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000000,
+        "canExecute": false,
+        "canRetryUpdate": false,
+        "canReview": false,
+        "canSend": false
+      },
+      {
+        "id": "ureq1",
+        "sourceId": "src1",
+        "attemptId": "req1",
+        "revision": 1,
+        "status": "update_unconfirmed",
+        "proposal": {
+          "requestId": "ureq1",
+          "sourceId": "src1",
+          "attemptId": "req1",
+          "attemptRevision": 0,
+          "updateVersion": "abababababababababababababababababababababababababababababababab",
+          "status": "update_proposed",
+          "update": {
+            "method": "PATCH"
+          }
+        },
+        "observation": null,
+        "dispatchedAt": 1700000000001,
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000001,
+        "canExecute": false,
+        "canRetryUpdate": false,
+        "canReview": false,
+        "canSend": false
+      },
+      {
+        "id": "ureq3",
+        "sourceId": "src1",
+        "attemptId": "req1",
+        "revision": 1,
+        "status": "cancelled",
+        "proposal": {
+          "requestId": "ureq3",
+          "sourceId": "src1",
+          "attemptId": "req1",
+          "attemptRevision": 0,
+          "updateVersion": "abababababababababababababababababababababababababababababababab",
+          "status": "update_proposed",
+          "update": {
+            "method": "PATCH"
+          }
+        },
+        "observation": null,
+        "dispatchedAt": null,
+        "createdAt": 1700000000000,
+        "updatedAt": 1700000000002,
+        "canExecute": false,
+        "canRetryUpdate": false,
+        "canReview": false,
+        "canSend": false
+      }
+    ]
+  }
+}

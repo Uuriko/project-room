@@ -1,0 +1,73 @@
+  /api/rooms/{roomId}/board/v2/mirror-map:
+    get:
+      summary: Mirror-map entries
+      deprecated: true
+      description: >
+        Without query params lists recorded (seq, issue, comment_id) mappings
+        (since_seq filters). With issue + comment_id resolves one mapping.
+        Retired. Every authenticated board/v2 route returns 410
+        board_v2_retired; next points at /api/rooms/{roomId}/work-claims.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: issue
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: comment_id
+          in: query
+          schema: { type: integer, minimum: 1 }
+        - name: since_seq
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
+        '200':
+          description: Mirror entry or entries
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/BoardV2MirrorEntry'
+                  - type: object
+                    required: [entries]
+                    properties:
+                      entries: { type: array, items: { $ref: '#/components/schemas/BoardV2MirrorEntry' } }
+        '404':
+          description: mirror_unknown
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    post:
+      summary: Record a mirror mapping
+      deprecated: true
+      description: Maps a board event seq to a GitHub issue comment id for migration. Retired. Every authenticated board/v2 route returns 410 board_v2_retired; use the work-claims board.
+      tags: [Board v2]
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [seq, issue, comment_id]
+              additionalProperties: false
+              properties:
+                seq: { type: integer, minimum: 1 }
+                issue: { type: integer, minimum: 1 }
+                comment_id: { type: integer, minimum: 1 }
+      responses:
+        '401': { description: unauthenticated }
+        '410': { description: board_v2_retired }
+        '201':
+          description: Mapping recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [watermark, seq, entry]
+                properties:
+                  watermark: { type: integer }
+                  seq: { type: integer }
+                  entry: { $ref: '#/components/schemas/BoardV2MirrorEntry' }

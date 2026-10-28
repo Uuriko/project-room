@@ -12,7 +12,7 @@
 // no code path to this table; see unfencedAdditiveTables). Never carries the
 // bot token or the webhook secret — counters and timestamps only.
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
