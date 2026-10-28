@@ -13,6 +13,7 @@ import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import {
   CORE_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
 } from "../src/room-mcp-join.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
@@ -157,7 +158,7 @@ test("room_needs_me and GET /api/needs-me list what changed across rooms", async
     roomId: "ada-east", title: "Ada east", purpose: "Needs me too", kind: "personal", displayName: "Ada"
   }).roomId;
   for (const roomId of [roomA, roomB]) {
-    store.identities.link(ada.secret, roomId, { identityId: bob.identityId, displayName: "Bob", permissions: [] });
+    linkWithProof(store, ada.secret, roomId, bob, { displayName: "Bob", permissions: [] });
     setTier(store.db, roomId, bob.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   const post = (secret, roomId, id, data) => store.command(secret, roomId, {
@@ -303,7 +304,7 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   const { origin, store, rooms } = await serve(t);
   const owner = store.identities.create("Requester"), recipient = store.identities.create("Responder");
   const room = rooms.create(owner.secret, { roomId: "core-requests", title: "Core requests", purpose: "Answer in context", kind: "personal", displayName: "Requester" });
-  store.identities.link(owner.secret, room.roomId, { identityId: recipient.identityId, displayName: "Responder", permissions: [] });
+  linkWithProof(store, owner.secret, room.roomId, recipient, { displayName: "Responder", permissions: [] });
   store.command(owner.secret, room.roomId, { id: "core-question", type: "message.posted", data: {
     messageId: "core-question", body: "Which result should we use?", toMemberId: recipient.identityId, requestKind: "reply"
   } });
@@ -340,7 +341,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   const roomId = rooms.create(owner.secret, {
     roomId: "focused-tools", title: "Focused tools", purpose: "Discover appropriate actions", kind: "personal"
   }).roomId;
-  store.identities.link(owner.secret, roomId, { identityId: reader.identityId, displayName: "Reader", permissions: [] });
+  linkWithProof(store, owner.secret, roomId, reader, { displayName: "Reader", permissions: [] });
   setTier(store.db, roomId, reader.identityId, "t1_readonly", { updatedBy: "owner", nowMs: Date.now() });
   const before = JSON.stringify(store.room(roomId).state);
   const review = await (await rpc(origin, "tools/list", { focus: "review" }, owner.secret)).json();
@@ -400,7 +401,7 @@ async function claimLinkFixture(t) {
   const fixture = await serve(t), { origin, store, rooms } = fixture;
   const owner = store.identities.create("Claim room owner"), writer = store.identities.create("Claim writer");
   const roomId = rooms.create(owner.secret, { roomId: "claim-links", title: "Claim links", purpose: "Append PR from hosted MCP", kind: "personal" }).roomId;
-  store.identities.link(owner.secret, roomId, { identityId: writer.identityId, displayName: "Claim writer", permissions: ["accept_work", "complete_work"] });
+  linkWithProof(store, owner.secret, roomId, writer, { displayName: "Claim writer", permissions: ["accept_work", "complete_work"] });
   setTier(store.db, roomId, writer.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
   const client = new RoomAgentClient({ origin, roomId, token: writer.secret });
   await client.workClaim("hosted-pr", { leaseHours: 6 });
@@ -491,8 +492,8 @@ test("hosted claim PR calls honor target-room tier, write profile and membership
   t.after(() => { store.workClaims.transaction = transaction; });
   denied = await call(origin, tool, args, writer.secret);
   assert.equal(removed, true);
-  assert.equal(denied.value.status, 401);
-  assert.equal(denied.value.code, "unauthenticated");
+  assert.equal(denied.value.status, 403);
+  assert.equal(denied.value.code, "no_access");
   assert.deepEqual(store.workClaims.get(roomId, claimed.id), claimed);
 });
 
@@ -503,7 +504,7 @@ test("a room-pinned API key defaults roomId and scopes room_needs_me", async t =
   const roomA = rooms.create(owner.secret, { roomId: "pin-a", title: "Pin A", purpose: "Pinned key", kind: "personal" }).roomId;
   const roomB = rooms.create(owner.secret, { roomId: "pin-b", title: "Pin B", purpose: "Other room", kind: "personal" }).roomId;
   for (const roomId of [roomA, roomB]) {
-    store.identities.link(owner.secret, roomId, { identityId: agent.identityId, displayName: "Pin agent", permissions: [] });
+    linkWithProof(store, owner.secret, roomId, agent, { displayName: "Pin agent", permissions: [] });
     setTier(store.db, roomId, agent.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
   }
   store.command(owner.secret, roomA, { id: "pin-mention-a", type: "message.posted", data: { messageId: "pin-mention-a", body: "@Pin agent in A" } });
@@ -535,7 +536,7 @@ test("hosted work writes derive requestId and use the current revision when omit
   const { origin, store, rooms } = await serve(t);
   const owner = store.identities.create("Work owner"), agent = store.identities.create("Work agent");
   const roomId = rooms.create(owner.secret, { roomId: "auto-work", title: "Auto work", purpose: "Revision defaults", kind: "personal" }).roomId;
-  store.identities.link(owner.secret, roomId, { identityId: agent.identityId, displayName: "Work agent", permissions: ["accept_work"] });
+  linkWithProof(store, owner.secret, roomId, agent, { displayName: "Work agent", permissions: ["accept_work"] });
   setTier(store.db, roomId, agent.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
   for (const workItemId of ["auto-start", "stale-start"]) {
     store.command(owner.secret, roomId, { id: `propose-${workItemId}`, type: "work.proposed", data: {
@@ -565,7 +566,7 @@ test("every lean tool is callable with required business fields after a fresh jo
   const { origin, store, rooms } = await serve(t);
   const owner = store.identities.create("Lean owner"), member = store.identities.create("Lean member"), newcomer = store.identities.create("Lean newcomer");
   const roomId = rooms.create(owner.secret, { roomId: "lean-room", title: "Lean room", purpose: "Lean contract", kind: "personal" }).roomId;
-  store.identities.link(owner.secret, roomId, { identityId: member.identityId, displayName: "Lean member", permissions: [] });
+  linkWithProof(store, owner.secret, roomId, member, { displayName: "Lean member", permissions: [] });
   setTier(store.db, roomId, member.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
   store.command(owner.secret, roomId, { id: "lean-request", type: "message.posted", data: {
     messageId: "lean-request", body: "Answer from the lean list", toMemberId: member.identityId, requestKind: "reply"
