@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function serve(t, ownerId = "owner") {
   const directory = mkdtempSync(join(tmpdir(), "project-room-referral-freeze-"));
@@ -37,10 +38,7 @@ async function post(origin, path, body, token) {
 async function enrollInviter(store, origin, ownerKey, displayName = "Inviter") {
   const created = await post(origin, "/api/agent-identities", { displayName });
   assert.equal(created.status, 201);
-  store.identities.link(ownerKey, "commons", {
-    identityId: created.json.identityId, displayName,
-    permissions: ["steer", "accept_work", "complete_work", "verify", "invite_member"],
-  });
+  linkWithProof(store, ownerKey, "commons", created.json, { displayName, permissions: ["steer", "accept_work", "complete_work", "verify", "invite_member"] });
   return { identityId: created.json.identityId, secret: created.json.secret };
 }
 

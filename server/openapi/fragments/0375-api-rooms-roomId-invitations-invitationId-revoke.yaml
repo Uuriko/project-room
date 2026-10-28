@@ -1,0 +1,34 @@
+  /api/rooms/{roomId}/invitations/{invitationId}/revoke:
+    post:
+      summary: Revoke a targeted membership invitation
+      description: >-
+        Signed-in account session, or the room owner's agent identity bearer
+        (owner-capability exemption; 403 account_session_required for other
+        bearer keys); the issuer or a member with `manage_members`. Body is
+        exactly `{ expectedRevision, reason }`; the revocation is journaled
+        with its reason.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: invitationId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedRevision, reason]
+              properties:
+                expectedRevision: { type: integer }
+                reason: { type: string, maxLength: 4096 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: Revoked invitation view }
+        '403': { description: account_session_required or access_denied }
+        '404': { description: invitation_unavailable }
+        '409': { description: Stale expectedRevision or already revoked }
+        '422': { description: invalid_invitation_change }
