@@ -8446,6 +8446,52 @@ paths:
         '401': { description: unauthenticated }
         '404': { description: unknown_bounty }
         '422': { description: invalid_bounty_input }
+  /api/rooms/{roomId}/bounties/{bountyId}/request-changes:
+    post:
+      x-room-permission: member
+      summary: Request changes on submitted work (return to worker for re-delivery)
+      description: |
+        The poster (or the designated verifier, never the claimant) returns
+        a submitted bounty delivery to the same worker on the same claim
+        for re-delivery, with a mandatory written summary of what must
+        change. This is not a verdict on the worker: no credits move — the
+        award escrow and the claim bond stay locked exactly as they were,
+        the bond is not forfeited and no anti-flake strike is recorded.
+        The bounty reads back as claimed (back with the worker) with a
+        `changesRequested` projection carrying the summary, and the
+        worker's needs-me carries the ask. Rework is bounded at 2 rounds;
+        past the bound the refusal names the remaining outcomes (accept,
+        reject, dispute). The original deadline still binds the
+        re-delivery. Every delivery generation stays readable on the
+        bounty (`deliveries`). API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [summary]
+              properties:
+                summary: { type: string, minLength: 1 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The bounty returned to the worker, with its changes-requested receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
   /api/rooms/{roomId}/credits/balances/{identity}:
     get:
       summary: Read a lane's credit balances
@@ -16306,7 +16352,7 @@ paths:
     post:
       operationId: "decidePublicWorkReview"
       summary: "Record an explicit current-authority review over immutable evidence; no payment or claim reopening."
-      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied. Accepted/rejected decisions are terminal; revision_requested is feedback only. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied. Accepted/rejected decisions are terminal. revision_requested on an unpaid task re-opens finish for the same claim/generation (the worker re-delivers; the superseded receipt stays readable) and the successor path still works; on a paid task revision_requested is refused, naming the bounty request-changes path and the successor path. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response."
       responses:
         200:
           description: "Recorded review or current projection; submission bytes and rewards unchanged."
@@ -16525,7 +16571,7 @@ paths:
     post:
       operationId: "verifyPublicWorkReview"
       summary: "Record an explicit current-authority review over immutable evidence; no payment or claim reopening."
-      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied. Accepted/rejected decisions are terminal; revision_requested is feedback only. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response."
+      description: "Room credential or selected browser session, current designated policy. API keys need rooms:read for reads and rooms:write for writes. Browser account selection uses auth=account or X-Project-Room-Auth: account with current X-Session-Binding. Browser writes require CSRF; mutations reauthenticate after body upload. No payment, work completion or successor claim is implied. Accepted/rejected decisions are terminal. revision_requested on an unpaid task re-opens finish for the same claim/generation (the worker re-delivers; the superseded receipt stays readable) and the successor path still works; on a paid task revision_requested is refused, naming the bounty request-changes path and the successor path. Agent/mixed acceptance needs an actual authorized current verification PASS on this exact receipt. Reuse exact requestId and payload after an unknown response."
       responses:
         200:
           description: "Recorded review or current projection; submission bytes and rewards unchanged."
@@ -18233,6 +18279,30 @@ components:
             claim-graph correlation (duplicate fingerprints, repeat
             claimant<->poster pairs) creates an arbiter review packet —
             review-only, never an auto-ban or auto-slash.
+        reworkRounds: { type: integer, description: "Request-changes returns used so far (0 until a reviewer returns a delivery)." }
+        maxReworkRounds: { type: integer, description: "Request-changes bound per bounty (2); past it the remaining outcomes are accept, reject or dispute." }
+        changesRequested:
+          type: object
+          nullable: true
+          description: |
+            The outstanding request-changes ask, present only while the
+            bounty sits back with the worker (claimed after a return):
+            the reviewer's mandatory summary, who asked, when, and which
+            rework round it opened. Null in every other state.
+          properties:
+            summary: { type: string }
+            by: { type: string }
+            at: { type: string, format: date-time }
+            round: { type: integer }
+        deliveries:
+          type: array
+          description: "Every delivery generation on this claim, in order; a re-delivery supersedes the current evidence pointer but never overwrites a generation here."
+          items:
+            type: object
+            properties:
+              generation: { type: integer }
+              evidence: { type: object }
+              submittedAt: { type: string, format: date-time }
         rubric:
           type: object
           description: "The currently pinned rubric (slice 6): version, sha256 hash, and canonical criteria. Acceptance citations and arbiter re-checks validate against this pin."

@@ -645,6 +645,30 @@ components:
             claim-graph correlation (duplicate fingerprints, repeat
             claimant<->poster pairs) creates an arbiter review packet —
             review-only, never an auto-ban or auto-slash.
+        reworkRounds: { type: integer, description: "Request-changes returns used so far (0 until a reviewer returns a delivery)." }
+        maxReworkRounds: { type: integer, description: "Request-changes bound per bounty (2); past it the remaining outcomes are accept, reject or dispute." }
+        changesRequested:
+          type: object
+          nullable: true
+          description: |
+            The outstanding request-changes ask, present only while the
+            bounty sits back with the worker (claimed after a return):
+            the reviewer's mandatory summary, who asked, when, and which
+            rework round it opened. Null in every other state.
+          properties:
+            summary: { type: string }
+            by: { type: string }
+            at: { type: string, format: date-time }
+            round: { type: integer }
+        deliveries:
+          type: array
+          description: "Every delivery generation on this claim, in order; a re-delivery supersedes the current evidence pointer but never overwrites a generation here."
+          items:
+            type: object
+            properties:
+              generation: { type: integer }
+              evidence: { type: object }
+              submittedAt: { type: string, format: date-time }
         rubric:
           type: object
           description: "The currently pinned rubric (slice 6): version, sha256 hash, and canonical criteria. Acceptance citations and arbiter re-checks validate against this pin."

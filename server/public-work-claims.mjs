@@ -2,7 +2,7 @@ import { decodeWorkClaimRow } from './work-claim-sqlite.mjs';
 import { validId } from '../src/events.js';
 import { createHash } from 'node:crypto';
 import { canonicalJson } from '../src/audit-receipts.mjs';
-import { createWork, claimWork, renewWork, updateWork, releaseExpired } from './work-claims.mjs';
+import { createWork, claimWork, renewWork, updateWork, releaseExpired, stampClaimHistory } from './work-claims.mjs';
 import { withPublicWorkClaimWriter } from './public-work-claim-fence.mjs';
 import { ServiceError } from './service-error.mjs';
 import { projectPublicWorkReceipt, publicWorkReceiptOutcome } from './public-read-model.mjs';
@@ -209,6 +209,27 @@ export class PublicWorkClaims {
     return offer;
   }
   settlementService() { return this.store.publicWorkSettlement ?? new PublicWorkSettlement(this.store); }
+  // The current delivery for a claim generation: the LATEST receipt, once
+  // re-delivery exists (request-changes) a generation can carry several.
+  latestReceiptRow(offerId, generation) {
+    return this.db.prepare('SELECT * FROM public_work_receipts WHERE offer_id=? AND generation=? ORDER BY created_at DESC, receipt_id DESC LIMIT 1')
+      .get(offerId, generation) ?? null;
+  }
+  // Request-changes (Option A): finish re-opens for a generation only when
+  // the current delivery's recorded review is revision_requested with the
+  // rework stamp (unpaid tasks only — the review module refuses the stamp
+  // on paid tasks, and the settlement link check here is the second lock).
+  reworkOpenFor(offerId, receiptRow) {
+    if (!receiptRow) return false;
+    if (this.settlementService().link(offerId)) return false;
+    if (!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_work_reviews'").get()) return false;
+    const row = this.db.prepare('SELECT state_json FROM public_work_reviews WHERE receipt_id=?').get(receiptRow.receipt_id);
+    if (!row) return false;
+    try {
+      const review = JSON.parse(row.state_json);
+      return review.state === 'revision_requested' && review.rework?.reopensFinish === true;
+    } catch { return false; }
+  }
   request(row, actorId, action, input, operation) {
     check(identifier(input.requestId), 'Invalid request ID');
     const encoded = canonicalJson({ action, ...input });
@@ -223,7 +244,9 @@ export class PublicWorkClaims {
   }
   packet(row, item, offer) {
     const live = releaseExpired([item], this.store.now())[0];
-    const receipt = this.db.prepare('SELECT receipt_id,identity_id,receipt_json FROM public_work_receipts WHERE offer_id=? AND generation=?').get(row.offer_id, row.generation);
+    // Latest delivery for the generation (a re-delivered generation
+    // carries its superseded receipts too; the packet names the current).
+    const receipt = this.db.prepare('SELECT receipt_id,identity_id,receipt_json FROM public_work_receipts WHERE offer_id=? AND generation=? ORDER BY created_at DESC, receipt_id DESC LIMIT 1').get(row.offer_id, row.generation);
     // #3546: submitted is the delivered state, not the end of the story —
     // once the named review accepts the submission, the receipt's state
     // becomes "verified" and the packet says so distinctly.
@@ -465,7 +488,13 @@ export class PublicWorkClaims {
     const row = this.task(offerId);
       const operation = () => {
         if (input.expectedTermsVersion !== row.terms_version) fail(409, 'stale_public_work', 'Task terms changed');
-        if (this.db.prepare('SELECT 1 FROM public_work_receipts WHERE offer_id=? AND generation=?').get(offerId, row.generation))
+        // One live delivery per claim generation — except a finish that
+        // answers a revision_requested rework stamp (request-changes,
+        // unpaid tasks), which supersedes the current delivery with a new
+        // receipt on the same claim/generation.
+        const priorReceipt = this.latestReceiptRow(offerId, row.generation);
+        const reworkOpen = action === 'finish' && this.reworkOpenFor(offerId, priorReceipt);
+        if (priorReceipt && !reworkOpen)
           fail(409, 'public_work_already_submitted', 'This task already has a submitted receipt');
         const offer = action === 'release' ? this.store.projectOffers.record(this.db.prepare('SELECT * FROM project_offers WHERE offer_id=?').get(offerId)) : this.offer(row);
         // Sweep the whole shared repository/ref namespace before collision checks.
@@ -510,6 +539,16 @@ export class PublicWorkClaims {
             fail(409, 'stale_public_claim', `Claim expired: the lease lapsed or the claim was released (generation ${input.generation} is no longer held)`);
           }
           if (item.owner !== identity.identityId) fail(403, 'public_work_not_owner', 'Only the claimant may change this lease');
+          if (action === 'finish' && reworkOpen && item.state === 'done') {
+            // The first finish collapsed this claim to done (terminal).
+            // A revision request re-opens the SAME claim for its owner:
+            // stamp the reopening into the claim history and return the
+            // item to in_progress so the ordinary finish path below runs
+            // unchanged (same generation, same lease record).
+            item = stampClaimHistory({ ...item, state: 'in_progress', files: JSON.parse(row.files_json) },
+              identity.identityId, { action: 'revision_reopened', note: 'Reviewer requested changes; finish re-opened for re-delivery', now: this.store.now() });
+            this.store.workClaims.set(row.namespace_key, item);
+          }
           if (action === 'renew') {
             // #3707: the per-claim renewal ceiling. Past it the lease is
             // not extended again — it lapses for real at its current
@@ -590,9 +629,19 @@ export class PublicWorkClaims {
           }
           const sha256 = hash(input.artifactText), bytes = Buffer.byteLength(input.artifactText, 'utf8');
           const deliveryDigest = hash(canonicalJson({ artifactSha256: sha256, checksReported: input.checksReported, criteriaAttestation }));
-          const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported }));
+          // Request-changes re-delivery: the delivery round distinguishes
+          // the new receipt from the superseded one (an identical-bytes
+          // re-delivery still mints a fresh receipt); round 1 keeps the
+          // historical id derivation untouched.
+          const deliveryRound = priorReceipt
+            ? this.db.prepare('SELECT count(*) AS n FROM public_work_receipts WHERE offer_id=? AND generation=?').get(offerId, row.generation).n + 1
+            : 1;
+          const receiptId = 'pwr_' + hash(canonicalJson({ offerId, identityId: identity.identityId, generation: row.generation, sha256, checksReported: input.checksReported,
+            ...(deliveryRound > 1 ? { deliveryRound } : {}) }));
           const receipt = { schema: 'public-work-receipt/1', receiptId, taskId: offerId, title: offer.title, termsVersion: row.terms_version,
-            namespaceId: row.namespace_key, generation: row.generation, identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
+            namespaceId: row.namespace_key, generation: row.generation, deliveryRound,
+            ...(priorReceipt ? { supersedesReceiptId: priorReceipt.receipt_id } : {}),
+            identityId: identity.identityId, agentName: identity.displayName, state: 'submitted',
             artifact: { sha256, bytes }, checksReported: input.checksReported, criteriaAttestation, deliveryDigest, executedChecks,
             // #3683: the system_checked label is earned by a check that
             // PASSED — a recorded failure is honest evidence on the

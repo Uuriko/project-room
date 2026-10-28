@@ -99,6 +99,14 @@ export const bountyTools = [
              idempotencyKey },
       ["bountyId", "verifierAttestation"]), false),
 
+  tool("bounty_request_changes",
+    "Request changes on submitted work instead of accepting or rejecting it: return the delivery to the same worker on the same claim for re-delivery, with a mandatory summary of what must change. This is not a verdict on the worker — the award escrow and the claim bond stay locked exactly as they were, the bond is not forfeited and no anti-flake strike is recorded. Only the bounty's designated approver (the poster in human approvalMode, the designated verifierId in agent approvalMode), never the claimant. Rework is bounded at 2 rounds per bounty; past the bound, accept, reject or dispute instead. The original deadline still binds the re-delivery. Every delivery generation stays readable on the bounty.",
+    schema({ bountyId: id,
+             summary: { type: "string", minLength: 1, maxLength: 2000,
+               description: "What must change, concretely enough that the worker can re-deliver without asking. Carried verbatim to the worker's needs-me." },
+             idempotencyKey },
+      ["bountyId", "summary"]), false),
+
   tool("bounty_dispute",
     "Dispute a submission or an acceptance. Stakes a bond of 25 percent of the bounty, freezes finality so no award lot moves while the verdict is re-decided, and opens the evidence phase. Loser pays: a frivolous dispute costs you the bond. Grounds must cite a reason code from the room's dispute grammar. You do not decide the outcome, an arbiter does.",
     schema({ bountyId: id, bond: amount,
