@@ -5,6 +5,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { normalizeGraphEmail } from '../server/graph-email.mjs';
 import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
@@ -54,7 +55,7 @@ export class HttpTestRoom extends ProjectRoom {
       this.store.initialize(initialRoom());
       const ownerKey = this.store.issueAccessKey('commons', 'owner');
       const identity = this.store.identities.create('Bounty observer');
-      this.store.identities.link(ownerKey, 'commons', { identityId: identity.identityId, permissions: [] });
+      linkWithProof(this.store, ownerKey, 'commons', identity, { permissions: [] });
       this.store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
         url: 'https://observer.example.test/hooks', events: ['*'] });
       return Response.json({ ownerKey });

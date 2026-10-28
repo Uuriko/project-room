@@ -47,10 +47,23 @@ export const KEEP = [
   "server/secret-scan.mjs",
   "server/spam-shadow-report.mjs",
   "src/seed.js",
+  // Per-kind journals. Callers use server/journal.mjs. These files stay so the
+  // captured-record fixture still has its oracle; the deletion PR removes them.
+  "server/channel-journal.mjs",
+  "server/graph-reply-journal.mjs",
+  "server/invitation-journal.mjs",
+  "server/jev-shadow-journal.mjs",
+  "server/membership-delegation-journal.mjs",
+  "server/sla-breach-journal.mjs",
+  "server/spam-quarantine-journal.mjs",
   // Build-time-only data module: imported by scripts/build-capabilities.mjs,
   // whose generated inventory is what the runtime reads. It lived in deploy/
   // (outside this checker's scope) until the 2026-10 move into server/.
   "server/push-notifications-supported.mjs",
+  // Pure checks. Wake, route, and MCP wiring waits on open PRs that already
+  // edit those files, and the runtime package list is one of them.
+  "server/repro-check.mjs",
+  "server/agent-audit.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
