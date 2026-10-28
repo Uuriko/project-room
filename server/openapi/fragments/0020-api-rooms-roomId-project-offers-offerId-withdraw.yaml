@@ -1,0 +1,18 @@
+  /api/rooms/{roomId}/project-offers/{offerId}/withdraw:
+    post:
+      summary: Manage owner-authored project offers
+      description: >-
+        Owner only. Body requestId and expectedRevision. Publish draft or withdraw published offer;
+        increments revision without changing immutable terms version. Replays are stable.
+        Stale revision returns 409; publication revalidates linked work and reviewer standing.
+        Publication requires owner-authored repositoryUrl or submissionUrl without credentials/query/fragment.
+      parameters:
+        - { name: roomId, in: path, required: true, schema: { type: string } }
+        - { name: offerId, in: path, required: true, schema: { type: string } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: Successful result }
+        '403': { description: Owner authorization required for private routes }
+        '404': { description: Record unavailable }
+        '409': { description: Stale state or changed retry input }
+        '422': { description: Invalid fields }

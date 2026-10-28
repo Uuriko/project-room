@@ -10,7 +10,10 @@ const declared = String(pkg.scripts?.["test:browser"] ?? "").trim();
 const script = declared.startsWith("node --test ")
   ? declared
   : (await import("./browser-suites.mjs")).resolveBrowserScript(declared);
-const result = verifyBrowserShards(browserPlan(script), receipts, {
+const plan = process.env.CI_BROWSER_SCOPE === "affected"
+  ? (await import("./ci-affected.mjs")).affectedBrowserFiles(process.env.BASE_SHA).plan
+  : browserPlan(script);
+const result = verifyBrowserShards(plan, receipts, {
   matrixResult: process.env.BROWSER_MATRIX_RESULT, revision: process.env.GITHUB_SHA,
   runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT,
 });
