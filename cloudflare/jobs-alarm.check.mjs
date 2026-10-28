@@ -194,3 +194,22 @@ test("channel drain: an orphaned inflight stamp keeps the stuck clock (#3927 R3)
     await mf.dispose();
   }
 });
+
+
+test("ordinary read burst coalesces alarm eligibility without changing responses", async () => {
+  const mf = await start();
+  const read = () => mf.dispatchFetch(origin + "/api/account-session", { headers: { "CF-Connecting-IP": "192.0.2.1" } });
+  try {
+    await (await read()).text(); await new Promise(resolve => setTimeout(resolve, 50));
+    await call(mf, "/probe/eligibility-count");
+    const replies = await Promise.all(Array.from({ length: 10 }, async () => {
+      const response = await read(); assert.equal(response.status, 200);
+      assert.equal((await response.json()).authenticated, false);
+    }));
+    assert.equal(replies.length, 10);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const { body } = await call(mf, "/probe/eligibility-count");
+    console.log(JSON.stringify({ readBurst: 10, eligibilityEvaluations: body.count }));
+    assert.ok(body.count > 0 && body.count <= 2, `ten reads must share bounded eligibility work, got ${body.count}`);
+  } finally { await mf.dispose(); }
+});
