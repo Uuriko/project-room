@@ -767,7 +767,13 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
     rate(`identity-link-code:${remoteAddress}`, 20);
     const auth = ownerAuth(req);
     if (auth.identityId !== identityId) reject(403, "cross_identity", "An identity can only mint link codes for itself");
-    return json(res, 201, store.identities.mintLinkCode(identityId, bearer(req)));
+    // SECURITY-FIX C2: the mint names the room the code enrolls into (and
+    // may pre-name the sponsor account); the code redeems only there.
+    const data = await body(req);
+    const shape = data && (exact(data, ["roomId"]) || exact(data, ["roomId", "sponsorAccountId"]));
+    if (!shape) reject(422, "invalid_link_code_request", "roomId, with optional sponsorAccountId, are the accepted fields");
+    return json(res, 201, store.identities.mintLinkCode(identityId, bearer(req),
+      { roomId: data.roomId, sponsorAccountId: data.sponsorAccountId }));
   });
 
   // ---- Agent public-key registry (integration map slice 9) ----
@@ -1033,7 +1039,11 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       if (immediate.pendingWakes.length > 0 || waitMs === 0) {
         // #3265: the poll door carries the heartbeat door's truncation
         // flag — a full page says whether more signals are waiting.
+        // BUILD-HEARTBEAT-CADENCE: it also carries the server-assigned
+        // cadenceSeconds — the poll is the contract door for pull-only
+        // seats that may never read a heartbeat response.
         return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: immediate.pendingWakes,
+          cadenceSeconds: immediate.cadenceSeconds,
           more: immediate.more === true, nextCursor: immediate.nextCursor ?? null, ...pausedField(auth.identityId),
           waitedMs: 0, timedOut: false, next: wakeNext(immediate.pendingWakes) });
       }
@@ -1055,6 +1065,7 @@ export function createAgentPluginRoutes({ store, json, reject, body, rate, beare
       const fresh = store.agentHeartbeats.notePoll({ agentId: current.identityId, roomId, hostId: waiterHostId, cursor });
       const timedOut = !woken && fresh.pendingWakes.length === 0;
       return json(res, 200, { agentId: auth.identityId, hostId: waiterHostId, pendingWakes: fresh.pendingWakes,
+        cadenceSeconds: fresh.cadenceSeconds,
         more: fresh.more === true, nextCursor: fresh.nextCursor ?? null, ...pausedField(auth.identityId),
         waitedMs: Date.now() - startedAt, timedOut, next: wakeNext(fresh.pendingWakes) });
     } finally {

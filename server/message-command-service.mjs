@@ -3,10 +3,24 @@
 // reference conflicts. Keep these phases separate so existing admission order
 // and error precedence remain stable during the writer migration.
 import { EVENT_TYPES as T } from '../src/events.js';
+import { classifyCommand } from './action-classes.mjs';
+import { createAgentPause } from './agent-pause.mjs';
 import { affectedMessageIds, captureMessageCertification, advanceMessageCertification, syncMessageRows, archivedMessageRow, archivedMessageCommandContext } from './messages-store.mjs';
 import { storedProjection } from './projection-at-rest.mjs';
 import { ServiceError } from './service-error.mjs';
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+
+// A paused non-human can still read, resume through POST /agent-pause (that
+// route is not a room command), and release a claim it holds. Every other
+// write stops here, whether the member paused itself or the owner did.
+// Humans stay on the opt-in HTTP pause gate.
+export function refusePausedAgentWrite(store, roomId, member, command) {
+  if (!member || member.kind === "human") return;
+  if (classifyCommand(command.type) === "observe") return;
+  if (command.type === T.CLAIM_RELEASED) return;
+  if (!createAgentPause(store.wakeQueue).isPaused(roomId, member.id)) return;
+  fail(423, "agent_paused", "This agent is paused. Writes resume when the pause is lifted.");
+}
 
 // Commands that name an existing message, and which field names it.
 const ARCHIVED_REF_FIELDS = Object.freeze({

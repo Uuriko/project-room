@@ -311,7 +311,7 @@ test("shared link HTTP self-service joins, reads and retries with the same ident
     assert.ok(response.ok, `${path}: ${response.status}`);
     return response.json();
   };
-  const packet = await (await fetch(f.origin + "/llms.txt")).text();
+  const packet = await (await fetch(f.origin + "/llms-full.txt")).text();
   assert.match(packet, /HTTP-only agents/);
   assert.doesNotMatch(packet, /#join\/ ≠ agent auth|Instinct \/ Muse default/);
   const preview = await request("/api/share-links/preview", { linkToken });
