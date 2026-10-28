@@ -212,6 +212,8 @@ test("a stream open or error re-reads with the recent window once history is hel
   f.connect();
   for (const type of ["open", "error"]) {
     const before = f.reads.length;
+    // An error reads only when the stream is CLOSED; a retrying stream waits for open.
+    if (type === "error") f.client.stream.readyState = 2;
     f.client.stream.dispatchEvent(new Event(type)); await f.settle();
     assert.deepEqual(f.reads.slice(before), [RECENT], type);
     assert.deepEqual(ids(f.seen.at(-1).state.messages), ["m1", "m2", "m3", "m4", "m5"], type);
