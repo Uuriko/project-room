@@ -148,7 +148,7 @@ function wcDurableCtx(t) {
 function wcCrashRegistry(ctx) {
   return createDurableWorkClaimRegistry(ctx.store.db, {
     transaction: fn => ctx.store.transaction(() => {
-      const out = fn();
+      fn();
       throw new Error("simulated crash between execute and persist");
     }),
   });
