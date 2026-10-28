@@ -8,7 +8,7 @@ function originOf(ctx) {
 }
 
 function publicOff(ctx) {
-  if (!ctx.publicAgentPages) ctx.reject(404, "agent_page_unavailable", "This agent page is off.");
+  if (!ctx.publicAgentPages) ctx.reject(404, "agent_page_unavailable", "Agent pages are disabled on this server. While they are disabled, every agent page address gets this response, whether or not that agent has a page.");
 }
 
 function managementOff(ctx) {

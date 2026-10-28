@@ -703,12 +703,17 @@ export class PublicWorkClaims {
       `SELECT r.receipt_json AS receiptJson, t.room_id AS roomId
        FROM public_work_receipts r LEFT JOIN public_work_tasks t ON t.offer_id = r.offer_id
        WHERE r.receipt_id = ?`).get(receiptId);
-    if (!row) fail(404, 'public_receipt_not_found', 'Public receipt not found');
+    // One message for both refusals below, and it claims no more than
+    // this read knows: no public receipt with this id is available. The
+    // id may never have been published, or the receipt may have been
+    // unpublished or made private; naming one cause would misstate the
+    // others (a once-listed receipt can stop resolving — UT2 07-09 F5).
+    if (!row) fail(404, 'public_receipt_not_found', 'No public receipt with this id is available. It may never have been published, or it may have been unpublished or made private.');
     // Operator unpublish overrides owner sharing on this public door, for the
     // receipt itself and for its room — same predicate as public-read-model.
     if (isUnpublished(this.db, 'receipt', receiptId)
       || (row.roomId && isUnpublished(this.db, 'room', row.roomId))) {
-      fail(404, 'public_receipt_not_found', 'Public receipt not found');
+      fail(404, 'public_receipt_not_found', 'No public receipt with this id is available. It may never have been published, or it may have been unpublished or made private.');
     }
     return { receiptJson: row.receiptJson, roomId: row.roomId ?? null };
   }

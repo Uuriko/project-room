@@ -777,7 +777,7 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
     // immutable submitted receipts for independent hash verification. A
     // missing receipt answers in plain language, never with agent tool
     // names. Other 404s on these routes are untouched.
-    hint = "That receipt does not exist.";
+    hint = "No public receipt with that id is available. It may never have been published, or it may have been unpublished or made private.";
     next = [{ path: "/api/public-work/tasks" }];
   }
   if (!hint && !next) return null;
