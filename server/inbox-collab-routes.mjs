@@ -71,7 +71,11 @@ const callerOf = auth => ({
 export async function handleInboxCollab(options) {
   const { req, res, store, helpers, reauthorize } = options;
   if (["GET", "HEAD"].includes(req.method)) return handleInboxCollabCore(options);
-  const requestData = req.method === "POST" ? await helpers.body(req) : undefined;
+  // The sweep takes no fields. A blank body runs it. Any key is named in the 422.
+  const sweep = options.collabRoute === "envelope-sweep" && req.method === "POST";
+  const requestData = req.method === "POST"
+    ? await helpers.body(req, sweep ? { allowEmpty: true, fields: [], unknownCode: "invalid_input" } : {})
+    : undefined;
   const result = store.transaction(() => handleInboxCollabCore({ ...options,
     auth: reauthorize ? reauthorize() : options.auth,
     helpers: { ...helpers, body: () => requestData, json: (_res, status, value) => ({ status, value }) },

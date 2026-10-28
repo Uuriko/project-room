@@ -1,6 +1,6 @@
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
-import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
+import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -44,7 +44,7 @@ import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA 
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
 import { ensureSpendGrantsSchema, registerTransactionRunner, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
-import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal } from "./invitation-journal.mjs";
+import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal, ChannelUpdateJournal, channelJournalSchema, SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns, JevShadowJournal, jevShadowSchema, SlaBreachAlertJournal, slaBreachAlertSchema, membershipDelegationJournalSchema, MembershipDelegationJournal } from "./journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
@@ -60,6 +60,7 @@ import { ShareLinks, shareLinkSchema, shareLinkCodeSchema, shareLinkAccessSchema
 import { DmConsents, dmConsentSchema } from "./dm-consents.mjs";
 import { Bonds, bondSchema, isPeerPrivateEvent, peerEventVisible } from "./bonds.mjs";
 import { PublicFace, roomPublicFaceSchema } from "./public-face.mjs";
+import { PublicAgentPages, agentPublicPageSchema } from "./public-agent-page.mjs";
 import { RoomDirectory, roomDirectorySchema } from "./room-directory.mjs";
 import { conflictingClaim } from "./claim-scopes.mjs";
 import { Reminders, reminderSchema } from "./reminders.mjs";
@@ -76,19 +77,15 @@ import { NextActions, nextActionsSchema } from "./next-actions.mjs"; // RC-2026-
 import { updatesSchema, projectRoomUpdates } from "./updates.mjs"; // Updates marks: private read/done/clear, additive.
 import { buildRoomDigest } from "./room-digest.mjs"; // C-06 room digest composition.
 import { roomAttention } from "./needs-me.mjs"; // C-06: per-room needs-me slice for the digest.
-import { ChannelUpdateJournal, channelJournalSchema } from "./channel-journal.mjs";
 import { DurableTelegramLiveStatus, telegramLiveStatusSchema } from "./channel-live-status.mjs";
-import { SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns } from "./spam-quarantine-journal.mjs";
-import { JevShadowJournal, jevShadowSchema } from "./jev-shadow-journal.mjs";
 import { QuarantineThreadSplits, quarantineThreadSplitSchema } from "./quarantine-thread-splits.mjs";
-import { SlaBreachAlertJournal, slaBreachAlertSchema } from "./sla-breach-journal.mjs";
 import { InboxCollabStore, inboxCollabSchema } from "./inbox-collab-store.mjs"; // Lane C inbox collaboration (task RC-2026-09-18-011).
 import { InboxHandoffJournal, inboxHandoffRoomSchema, inboxHandoffSchema } from "./inbox-handoff.mjs";
 import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mjs"; // RC-2026-09-19-062: typed handoff envelopes.
 import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
-import { membershipDelegationJournalSchema, MembershipDelegationJournal } from "./membership-delegation-journal.mjs";
+import { Pairing, pairingSchema } from "./pairing.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
 import { agentRoomSchema, ensureAgentRoomRequestIdColumn } from "./agent-rooms.mjs";
@@ -1112,7 +1109,7 @@ function agentWakeTargetIds(state, senderMemberId, data, db = null, roomId = "")
 export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@2"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
-  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@2"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
@@ -1137,7 +1134,7 @@ function roomSchemaStamp() {
     attentionSchema, workClaimSchema, nextActionsSchema, agentHeartbeatSchema, workWakeSchema,
     landQueueSchema, inboxAttachmentBytesSchema, membersDirectorySchema, channelJournalSchema,
     telegramLiveStatusSchema, spamQuarantineSchema, jevShadowSchema, dmConsentSchema, bondSchema,
-    roomPublicFaceSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
+    roomPublicFaceSchema, agentPublicPageSchema, roomDirectorySchema, guestInviteSchema, guestSelfServeSchema, guestInviteAuthoritySchema,
     webFetchSchema, webResearchSchema, mentionStateSchema, activitySchema, threadMutesSchema, squadSchema,
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
@@ -1420,6 +1417,7 @@ export class RoomStore {
     this.ownerDelegates = new OwnerDelegates(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
+    this.pairing = new Pairing(this);
     this.referralInvites = new ReferralInvites(this);
     this.referrals = new Referrals(this);
     this.accountLogins = new AccountLoginMethods(this);
@@ -1449,6 +1447,7 @@ export class RoomStore {
     this.codeDrops = new CodeDrops(this); // patches agents share in the room (server/code-drops.mjs).
     this.inboxAttachments = new InboxAttachmentBytes(this); // identity-scoped inbox attachment bytes (put, list, get, discard).
     this.publicFace = new PublicFace(this);
+    this.publicAgentPages = new PublicAgentPages(this);
     this.roomDirectory = new RoomDirectory(this);
     this.inbox = new Inbox(this, { stitch });
     this.email = new EmailImport(this);
@@ -1724,6 +1723,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
+      // CREATE IF NOT EXISTS does not add columns to a table that already
+      // exists. owner_equivalent records an owner-level invite (default 0).
+      // This runs before the writer fence is installed.
+      const inviteColumns = new Set(this.db.prepare("PRAGMA table_info(agent_invite_codes)").all().map(column => column.name));
+      if (!inviteColumns.has("owner_equivalent")) {
+        this.db.exec("ALTER TABLE agent_invite_codes ADD COLUMN owner_equivalent INTEGER NOT NULL DEFAULT 0");
+      }
       // Signed referral invites: purely additive (no data migration, no
       // fence impact); the ledger is written only by the mint/redeem paths
       // and holds no credential data (tokens are bearer strings, never
@@ -1807,6 +1813,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // also land on the room ledger as participant-visible events.
       this.db.exec(bondSchema);
       this.db.exec(roomPublicFaceSchema);
+      this.db.exec(agentPublicPageSchema);
       // #605: opt-in public room directory (owner toggles discoverability;
       // purely additive side table, no events, no projection impact).
       this.db.exec(roomDirectorySchema);
@@ -1958,6 +1965,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(accessRequestSchema);
+      this.db.exec(pairingSchema);
       // "Who referred you?" free text on access requests (referral
       // attribution): converge deployed databases that predate the column.
       {
@@ -4627,7 +4635,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         fail(403, "insufficient_scope", "This key is limited to its room");
       }
       const resolved = roomId ? this.identities.resolveIdentityLink(record.identityId, roomId) : null;
-      if (!resolved) fail(401, "unauthenticated", "API key identity has no access to this room");
+      if (!resolved) fail(403, "no_access", "This identity has no access to this room");
       return {
         account: null, member: resolved.member, roomId, identityId: resolved.identityId,
         credentialHash: hash(token), credentialScope: "room", kind: "api-key",
@@ -4636,8 +4644,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     }
     if (isIdentitySecret(token)) {
-      const resolved = this.identities.resolveIdentityAuth(token, roomId);
-      if (!resolved) fail(401, "unauthenticated", "Unknown identity or no access to this room");
+      const identity = this.identities.resolveGlobalIdentitySecret(token);
+      if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
+      const resolved = roomId ? this.identities.resolveIdentityLink(identity.identityId, roomId) : null;
+      if (!resolved) fail(403, "no_access", "This identity has no access to this room");
       // Owner delegates (server/owner-delegates.mjs): an active per-room
       // grant stamps a COPY of the member — never the shared authority
       // object — so the explicit delegate gates downstream can recognize
@@ -4804,7 +4814,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const visible = message => messageInHistory(message, floor)
             && (!message.toMemberId || message.authorId === auth.member.id || message.toMemberId === auth.member.id);
           messages = repository.recent(messageLimit, visible);
-          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countMetadata(visible)-messages.length,older:"conversation"};
+          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countViewerVisible(auth.member.id, floor)-messages.length,older:"conversation"};
           const pinned = repository.getMany((pins ?? []).map(pin=>pin.messageId));
           pins = (pins ?? []).filter(pin=>pinned.has(pin.messageId) && visible(pinned.get(pin.messageId)));
         } else {
@@ -6018,6 +6028,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
       }
+      // Exact replays of commands committed before the pause returned above.
+      refusePausedAgentWrite(this, roomId, auth.member, command);
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
       if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {

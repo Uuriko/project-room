@@ -23,6 +23,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { SKIPPED_RECHECK_MS } from "../server/agent-plugin-store.mjs";
 
 // Fake DNS so the dispatch-time SSRF guard re-validates without touching
@@ -47,8 +48,8 @@ function fixture(t) {
 function seatLinked(f, name) {
   const ownerKey = f.store.issueAccessKey(ROOM, "owner");
   const identity = f.store.identities.create(name);
-  f.store.identities.link(ownerKey, ROOM, {
-    identityId: identity.identityId, memberId: name, displayName: name, permissions: [],
+  linkWithProof(f.store, ownerKey, ROOM, identity, {
+    memberId: name, displayName: name, permissions: [],
   });
   return identity;
 }
@@ -66,6 +67,12 @@ function seatGuest(f, name) {
   f.store.db.prepare(`INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at)
     VALUES(?,?,?,?,?,?)`)
     .run(name, ROOM, identity.identityId, "contributor", `inv-${name}`, T0);
+  // A redeemed seat always holds an access credential (the redeem flow
+  // mints it, expiring with the invite TTL); the wake gates judge the
+  // seat by that credential, so the direct-insert seat carries one too.
+  f.store.db.prepare(`INSERT INTO credentials(hash, room_id, member_id, kind, parent_hash, expires_at, account_id, account_auth_epoch)
+    VALUES(?,?,?,'access',NULL,?,NULL,NULL)`)
+    .run(`cred-${name}`.padEnd(64, "0"), ROOM, name, T0 + 3_600_000);
   assert.equal(f.store.db.prepare(
     "SELECT COUNT(*) AS n FROM identity_links WHERE room_id=? AND identity_id=?")
     .get(ROOM, identity.identityId).n, 0, "trial seat has no identity_links row");
@@ -163,8 +170,8 @@ test("dispatch re-check stays fail-closed for an identity seated in neither tabl
   // Seat the identity (link) and drain once the deferral expires: the
   // same pending row is delivered — fail-closed never meant dropped.
   const ownerKey = f.store.issueAccessKey(ROOM, "owner");
-  f.store.identities.link(ownerKey, ROOM, {
-    identityId: stranger.identityId, memberId: "dispatch-late-seat", displayName: "dispatch-late-seat", permissions: [],
+  linkWithProof(f.store, ownerKey, ROOM, stranger, {
+    memberId: "dispatch-late-seat", displayName: "dispatch-late-seat", permissions: [],
   });
   const summary = await plugin.drainWebhookDeliveries({
     fetchImpl, now: T0 + SKIPPED_RECHECK_MS, dnsResolvers: publicDns,
