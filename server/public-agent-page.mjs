@@ -1,7 +1,7 @@
 // Public agent page. One shareable URL per room agent. Questions live in
 // agent_public_asks, never in the room log. The wake is a pointer: kind
 // "ask" and message id public-ask:<id>. The question text stays here.
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { identityIdForWakeMember } from "./wake-identity-resolution.mjs";
@@ -32,6 +32,7 @@ export const agentPublicPageSchema = `
     question TEXT NOT NULL,
     status TEXT NOT NULL CHECK(status IN ('knock','open','answered','rejected')),
     answer TEXT,
+    client_hash TEXT NOT NULL DEFAULT '',
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
   );
@@ -55,12 +56,18 @@ const CONTROL = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 const HOUR_MS = 60 * 60 * 1000;
 const HOUR_CAP = 30;
 const WAITING_CAP = 50;
+// One anonymous client must not be able to spend the agent-wide caps.
+// Checked before HOUR_CAP and WAITING_CAP. The hash is of the visitor
+// address (CF-Connecting-IP on the worker), never the address itself.
+const CLIENT_HOUR_CAP = 3;
+const CLIENT_WAITING_CAP = 10;
 const PAGE_CSP = "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 export { PAGE_CSP as AGENT_PAGE_CSP };
 
 const nowMs = () => Date.now();
 const newAskId = () => `ask_${randomBytes(18).toString("base64url")}`;
+const askClientHash = address => createHash("sha256").update("public-ask-client\0").update(String(address ?? "")).digest("hex");
 
 const escapeHtml = value => String(value ?? "")
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
@@ -147,6 +154,19 @@ export class PublicAgentPages {
     if (!store?.db) fail(500, "agent_page_store_missing", "PublicAgentPages requires a store");
     this.store = store;
     this.db = store.db;
+  }
+
+  // Tables created before client_hash exist in production. CREATE TABLE IF
+  // NOT EXISTS does not add a column, so the first ask adds it. A second
+  // racer that loses the alter sees "duplicate column" and continues.
+  _ensureClientHashColumn() {
+    const present = this.db.prepare("PRAGMA table_info(agent_public_asks)").all().some(column => column.name === "client_hash");
+    if (present) return;
+    try {
+      this.db.exec("ALTER TABLE agent_public_asks ADD COLUMN client_hash TEXT NOT NULL DEFAULT ''");
+    } catch (error) {
+      if (!/duplicate column/i.test(String(error?.message ?? error))) throw error;
+    }
   }
 
   _state(roomId) {
@@ -317,7 +337,9 @@ export class PublicAgentPages {
     });
   }
 
-  postAsk(slug, input, origin) {
+  postAsk(slug, input, origin, clientAddress = "") {
+    this._ensureClientHashColumn();
+    const clientHash = askClientHash(clientAddress);
     const created = this.store.transaction(() => {
       const { row } = this._publicRow(slug);
       if (row.access === "closed") fail(403, "agent_closed", "This agent is not taking questions.");
@@ -333,6 +355,14 @@ export class PublicAgentPages {
       let from = "";
       if (Object.hasOwn(input, "from")) from = oneLine(input.from, "from", 80, "invalid_ask");
       const at = nowMs();
+      const clientRecent = this.db.prepare(
+        "SELECT COUNT(*) AS n FROM agent_public_asks WHERE room_id=? AND member_id=? AND client_hash=? AND created_at>?"
+      ).get(row.room_id, row.member_id, clientHash, at - HOUR_MS).n;
+      if (clientRecent >= CLIENT_HOUR_CAP) fail(429, "rate_limited", "Too many questions from this client for this agent this hour.");
+      const clientWaiting = this.db.prepare(
+        "SELECT COUNT(*) AS n FROM agent_public_asks WHERE client_hash=? AND status IN ('knock','open')"
+      ).get(clientHash).n;
+      if (clientWaiting >= CLIENT_WAITING_CAP) fail(429, "rate_limited", "Too many waiting questions from this client.");
       const recent = this.db.prepare(
         "SELECT COUNT(*) AS n FROM agent_public_asks WHERE room_id=? AND member_id=? AND created_at>?"
       ).get(row.room_id, row.member_id, at - HOUR_MS).n;
@@ -344,9 +374,9 @@ export class PublicAgentPages {
       const id = newAskId();
       const status = row.access === "knock" ? "knock" : "open";
       this.db.prepare(`INSERT INTO agent_public_asks
-        (id, room_id, member_id, from_name, question, status, answer, created_at, updated_at)
-        VALUES (?,?,?,?,?,?,NULL,?,?)`
-      ).run(id, row.room_id, row.member_id, from, question, status, at, at);
+        (id, room_id, member_id, from_name, question, status, answer, client_hash, created_at, updated_at)
+        VALUES (?,?,?,?,?,?,NULL,?,?,?)`
+      ).run(id, row.room_id, row.member_id, from, question, status, clientHash, at, at);
       const ask = this.db.prepare("SELECT * FROM agent_public_asks WHERE id=?").get(id);
       let signal = null;
       let identityId = null;
