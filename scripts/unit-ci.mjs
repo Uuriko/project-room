@@ -12,6 +12,7 @@
 // Use worktree-local scratch by default; create explicit TMPDIR before children.
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { availableParallelism } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { unitPlan, parseShard } from "./unit-shards.mjs";
@@ -110,12 +111,28 @@ export function readJunitFileDurations(path, options = {}) {
 }
 
 /**
+ * File-level concurrency for the unit runner: 2x the CPU count.
+ *
+ * PERF-50 lane G4 measured the suite as timer-bound, not CPU-bound: summed
+ * testcase time is ~36x the suite wall (898s median for the hosted unit
+ * step), because most files spend their elapsed time waiting on real
+ * timers/poll intervals. Node's default `--test-concurrency` (= CPU count)
+ * therefore leaves half the useful file parallelism unused; oversubscribing
+ * 2x lets waiting files overlap without needing extra runner slots.
+ * `options.testConcurrency` overrides this for tests and local experiments.
+ */
+export function unitTestConcurrency(parallelism = availableParallelism()) {
+  const cores = Math.max(1, Math.floor(Number(parallelism)) || 1);
+  return cores * 2;
+}
+
+/**
  * Run test files with `node --test`, teeing the reporter stream to the console.
- * Returns { status, signal, failures, fileDurationsMs }: failing test names
- * parsed from the spec-reporter output (advisory — [] on success or when
- * nothing parsed), and per-file measured runtimes parsed from the junit
- * sidecar when `options.junitPath` is given ({} otherwise or when the
- * sidecar is missing/unparseable).
+ * Returns { status, signal, failures, fileDurationsMs, testConcurrency }:
+ * failing test names parsed from the spec-reporter output (advisory — [] on
+ * success or when nothing parsed), per-file measured runtimes parsed from
+ * the junit sidecar when `options.junitPath` is given ({} otherwise or when
+ * the sidecar is missing/unparseable), and the file concurrency used.
  *
  * The spec reporter stays on stdout exactly as before — an additional
  * junit reporter writes only to its sidecar file, so the stdout shape
@@ -129,7 +146,8 @@ export function runTestFiles(files, options = {}) {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   const junitPath = options.junitPath ?? null;
-  const args = ["--test"];
+  const testConcurrency = options.testConcurrency ?? unitTestConcurrency();
+  const args = ["--test", `--test-concurrency=${testConcurrency}`];
   if (junitPath) {
     mkdirSync(dirname(resolve(junitPath)), { recursive: true });
     rmSync(junitPath, { force: true });
@@ -158,7 +176,7 @@ export function runTestFiles(files, options = {}) {
   // the failures instead of pointing at the log.
   const failures = status === 0 ? [] : parseFailingTests(stdout);
   const fileDurationsMs = junitPath ? readJunitFileDurations(junitPath) : {};
-  return { status, signal: result.signal, failures, fileDurationsMs };
+  return { status, signal: result.signal, failures, fileDurationsMs, testConcurrency };
 }
 
 function selectUnitRun(argv, plan) {
