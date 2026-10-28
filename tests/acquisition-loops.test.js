@@ -16,6 +16,7 @@ import { listRoomTemplates } from "../server/templates.mjs";
 import { publicRef } from "../server/public-rooms.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { projectPublicWorkReceipt } from "../server/public-read-model.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const SECRET_MESSAGE = "secret-message-body";
 const SECRET_NAME = "secret-member-name";
@@ -144,6 +145,25 @@ test("template start is idempotent, carries ref, and the gallery is indexable", 
   assert.match(detail.text, /Start this room/);
   assert.match(detail.text, /ref=Ada/);
   assert.match(detail.text, /og:image" content="https:\/\/room\.trydemigod\.com\/og\/home\.png"/);
+  // An unknown slug that still matches the template route is a missing page.
+  // Browsers get the styled HTML 404; the .json twin and non-HTML clients keep JSON.
+  const missing = await raw(origin, "/templates/no-such-template", { headers: { Accept: "text/html,application/xhtml+xml" } });
+  assert.equal(missing.status, 404);
+  assert.match(missing.headers.get("content-type"), /^text\/html/);
+  assert.equal(missing.headers.get("x-robots-tag"), "noindex");
+  assert.match(missing.text, /<h1>Page not found<\/h1>/);
+  assert.doesNotMatch(missing.text, /"error"/);
+  const missingHead = await raw(origin, "/templates/no-such-template", { method: "HEAD", headers: { Accept: "text/html" } });
+  assert.equal(missingHead.status, 404);
+  assert.match(missingHead.headers.get("content-type"), /^text\/html/);
+  assert.equal(missingHead.text, "");
+  const missingJson = await raw(origin, "/templates/no-such-template.json", { headers: { Accept: "text/html" } });
+  assert.equal(missingJson.status, 404);
+  assert.match(missingJson.headers.get("content-type"), /^application\/json/);
+  assert.equal(JSON.parse(missingJson.text).error.code, "not_found");
+  const missingClient = await raw(origin, "/templates/no-such-template");
+  assert.equal(missingClient.status, 404);
+  assert.match(missingClient.headers.get("content-type"), /^application\/json/);
   const anonymous = await raw(origin, "/api/account-rooms/from-template", { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   assert.equal(anonymous.status, 422);
   assert.equal(JSON.parse(anonymous.text).error.code, "session_binding_required");
@@ -193,9 +213,9 @@ test("the agent directory lists only opted-in cards and counts public rooms", as
   store.command(ownerKey, "alpha", { id: "publish-page", type: "room.public_page_set", data: { enabled: true } });
   const visible = store.identities.create("Visible Directory Agent");
   const hidden = store.identities.create("Hidden Directory Agent");
-  const publish = (identityId, agentId, name, visibility) => {
+  const publish = (identityId, agentId, name, visibility, extra = {}) => {
     const keys = generateKeyPair();
-    const card = { name, description: `${name} writes checklists.`, capabilities: ["steer"], skills: ["checklists"], version: "1.0.0" };
+    const card = { name, description: extra.description ?? `${name} writes checklists.`, capabilities: ["steer"], skills: extra.skills ?? ["checklists"], version: "1.0.0" };
     store.agentPlugin.publishCard({
       identityId, agentId, card, visibility,
       publicKey: keys.publicKey,
@@ -204,7 +224,15 @@ test("the agent directory lists only opted-in cards and counts public rooms", as
   };
   publish(visible.identityId, "visible-agent", "Visible Agent", "public");
   publish(hidden.identityId, "hidden-agent", "Hidden Agent Card", "private");
-  store.identities.link(ownerKey, "alpha", { identityId: visible.identityId, displayName: "hidden-link-name", permissions: ["accept_work"] });
+  publish(visible.identityId, "qa-runner", "QA Runner", "public");
+  publish(visible.identityId, "dogfood-bot", "Dogfood Bot", "public");
+  publish(visible.identityId, "test-helper", "Helper", "public");
+  publish(visible.identityId, "notes-agent", "Notes", "public", {
+    description: "Writes checklists. id_sample ai_sample",
+    skills: ["checklists", "id_skill"],
+  });
+  publish(visible.identityId, "named-id", "id_person", "public");
+  linkWithProof(store, ownerKey, "alpha", visible, { displayName: "hidden-link-name", permissions: ["accept_work"] });
   const receiptId = `pwr_${"ab".repeat(16)}`;
   const counted = { schema: "public-work-receipt/1", receiptId, namespaceId: "alpha", identityId: visible.identityId, title: "Counted receipt", createdAt: "2026-10-01T00:00:00.000Z" };
   store.db.prepare("INSERT INTO public_work_receipts VALUES (?,?,?,?,?,?,?,?,?,?)").run(
@@ -219,6 +247,17 @@ test("the agent directory lists only opted-in cards and counts public rooms", as
   assert.match(page.text, /start=invite-agent&amp;agent=visible-agent&amp;ref=Ada/);
   assert.match(page.text, /1 public receipt/);
   assert.match(page.text, /1 public room/);
+  assert.match(page.text, /<ul class="tags"><li>checklists<\/li><\/ul>/);
+  assert.match(page.text, /<a class="try" href="\/demo\?ref=Ada">Try in a qa room<\/a>/);
+  assert.equal(page.text.includes("QA Runner"), false);
+  assert.equal(page.text.includes("Dogfood Bot"), false);
+  assert.equal(page.text.includes("test-helper"), false);
+  assert.equal(page.text.includes(">Helper<"), false);
+  assert.equal(page.text.includes("id_sample"), false);
+  assert.equal(page.text.includes("ai_sample"), false);
+  assert.equal(page.text.includes("id_skill"), false);
+  assert.equal(page.text.includes("id_person"), false);
+  assert.match(page.text, /Writes checklists\./);
   assert.equal(page.text.includes("Hidden Agent Card"), false);
   assert.equal(page.text.includes("hidden-link-name"), false);
   assert.equal(page.text.includes(visible.identityId), false);

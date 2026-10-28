@@ -20,10 +20,10 @@ import { createRoomServer } from "../server/http.mjs";
 
 const ONBOARDING_DOC_URL = "https://github.com/Uuriko/project-room/blob/main/docs/HUMAN-ONBOARDING.md";
 
-async function serve(t) {
+async function serve(t, options = {}) {
   const directory = mkdtempSync(join(tmpdir(), "room-human-onboarding-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ store, ...options });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams();
@@ -47,25 +47,32 @@ test("GET / keeps product education out of the minimal sign-in entry", async t =
   assert.ok(!/href="(?:\/about|\/agents\.json|[^"]*#join-agent)/.test(auth), "education stays outside sign-in");
 });
 
-test("GET / offers GitHub sign-in beside Google on the front door", async t => {
+test("GET / leaves GitHub sign-in out until GitHub is configured", async t => {
   const origin = await serve(t);
   const response = await fetch(`${origin}/`);
   assert.equal(response.status, 200);
   const html = await response.text();
   const auth = html.match(/<section id="auth-panel"[\s\S]*?<\/section>/)[0];
-  const google = auth.indexOf('id="google-signin"');
-  const github = auth.indexOf('id="github-signin"');
+  assert.match(auth, /id="google-signin"/);
+  assert.equal(auth.includes('id="github-signin"'), false, "an unconfigured server must not ship the GitHub anchor");
+  assert.equal(auth.includes("Continue with GitHub"), false);
+  // The source file still carries the anchor. Serving strips it.
+  const source = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  assert.match(source, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start" hidden>/);
+  const configured = await serve(t, { githubAuth: { clientId: "fixture-client", clientSecret: "fixture-secret" } });
+  const shown = await (await fetch(`${configured}/`)).text();
+  const shownAuth = shown.match(/<section id="auth-panel"[\s\S]*?<\/section>/)[0];
+  const google = shownAuth.indexOf('id="google-signin"');
+  const github = shownAuth.indexOf('id="github-signin"');
   assert.ok(google >= 0, "the panel still leads with the Google button");
-  assert.ok(github > google, "GitHub sits beside Google inside the sign-in methods");
-  assert.match(auth, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start">/);
-  assert.match(auth, /Continue with GitHub/);
-  // Parity with Google: the pending-invite stash runs before the OAuth
-  // navigation (app.js), and the welcome view hides the button — the toggle
-  // lives in the shared sign-in navigation controller (src/signin-navigation.js)
-  // since the #3068 entry split; app.js's syncSigninView delegates to it.
+  assert.ok(github > google, "GitHub sits beside Google when the provider is configured");
+  assert.match(shownAuth, /<a id="github-signin" class="button secondary" href="\/api\/auth\/github\/start" hidden>/);
+  assert.match(shownAuth, /Continue with GitHub/);
+  assert.equal(shown.includes("fixture-secret"), false);
+  // The click still stashes a pending invite. app.js null-checks the anchor.
+  // A stripped anchor must not throw during view sync; that contract lives
+  // in tests/signin-provider-visibility.test.js.
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  const navigation = readFileSync(new URL("../src/signin-navigation.js", import.meta.url), "utf8");
-  assert.match(navigation, /\$\("#github-signin"\)\.hidden = view === "welcome";/);
   const stash = app.match(/githubButton\.addEventListener\("click", stashInviteForOAuth\)/);
   assert.ok(stash, "GitHub anchor stashes a pending invite like Google does");
 });

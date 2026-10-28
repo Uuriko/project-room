@@ -4,11 +4,11 @@
 // on every step, so a verified fact never reads the same as a guess.
 //
 // Pure module: no database, no network, no clock. Validation raises
-// ServiceError (422) from ./store.mjs so the same codes read in unit tests
+// ServiceError (422) from ./service-error.mjs so the same codes read in unit tests
 // and through the journal/store layer. Unknown keys and unknown epistemic
 // labels are rejected, never silently accepted — an unlabeled step is the
 // failure mode this contract exists to kill.
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const check = (condition, code, message) => { if (!condition) fail(422, code, message); };

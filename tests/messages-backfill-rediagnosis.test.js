@@ -96,19 +96,21 @@ test("an in-place repair clears the park on the cadence, with no head movement",
   const head = store.db.prepare("SELECT sequence FROM rooms WHERE id='aaa'").get().sequence;
 
   const first = store.backfillMessages({ limit: 1000 });
-  assert.deepEqual(first.blocked, [{
+  assert.deepEqual(first.quarantined, [{
     roomId: "aaa", sequence: poisonSeq, eventId: "ev-standin", error: "Invalid messageId", fresh: true
   }]);
+  assert.deepEqual(first.blocked, []);
 
   repairInPlace(store, "aaa", "ev-standin", "bad id@x", "repaired");
   const tooSoon = store.backfillMessages({ limit: 1000 });
-  assert.equal(tooSoon.blocked.length, 1, "the repair alone does not clear the park; the cadence gates the re-diagnosis");
-  assert.equal(tooSoon.blocked[0].fresh, false);
-  assert.equal(rows(store, "aaa").length, 0);
+  assert.equal(tooSoon.quarantined.length, 1, "the repair alone does not clear the quarantine; the cadence gates the re-diagnosis");
+  assert.equal(tooSoon.quarantined[0].fresh, false);
+  assert.ok(rows(store, "aaa").some(row => row.message_id === "bad id@x"), "the serving copy stands until the cadence replays the repair");
 
   ageOut(store, "aaa");
   const cleared = store.backfillMessages({ limit: 1000 });
-  assert.deepEqual(cleared.blocked, [], "the due re-diagnosis replays the repaired log cleanly and clears the park");
+  assert.deepEqual(cleared.blocked, [], "the due re-diagnosis replays the repaired log cleanly and clears the quarantine");
+  assert.deepEqual(cleared.quarantined, []);
   assert.deepEqual(rows(store, "aaa").map(row => row.message_id), ["repaired", "tail"],
     "the room rejoins the sweep and backfills in the same call");
   assert.equal(store.db.prepare("SELECT sequence FROM rooms WHERE id='aaa'").get().sequence, head,
@@ -128,13 +130,13 @@ test("a still-poisoned room is re-diagnosed at most once per interval", t => {
 
   ageOut(store, "aaa");
   const result = store.backfillMessages({ limit: 1000 });
-  assert.equal(result.blocked[0].fresh, false, "an unchanged diagnosis is not re-surfaced as fresh");
+  assert.equal(result.quarantined[0].fresh, false, "an unchanged diagnosis is not re-surfaced as fresh");
   const rediagnosed = blockRow(store, "aaa");
   assert.ok(rediagnosed.last_diagnosed_at > 1, "the periodic attempt is recorded");
   for (const field of ["sequence", "event_id", "error", "head_seq", "blocked_at"]) {
     assert.equal(rediagnosed[field], parked[field], `the standing accusation is untouched: ${field}`);
   }
-  assert.equal(rows(store, "aaa").length, 0);
+  assert.ok(rows(store, "aaa").length > 0, "the room kept filling around the quarantined event");
 
   store.backfillMessages({ limit: 1000 });
   assert.deepEqual(blockRow(store, "aaa"), rediagnosed,
@@ -176,15 +178,15 @@ test("re-diagnosis advances the standing accusation to the next poison", t => {
   assert.throws(() => replay(bodies), /Invalid messageId/, "fixture guard: the seeded log rejects raw replay");
 
   const first = store.backfillMessages({ limit: 1000 });
-  assert.equal(first.blocked[0].eventId, "ev-p1", "the park names the first poison");
+  assert.equal(first.quarantined[0].eventId, "ev-p1", "the quarantine names the first poison");
 
   repairInPlace(store, "multi", "ev-p1", "bad id@x", "repaired-first");
   ageOut(store, "multi");
   const advanced = store.backfillMessages({ limit: 1000 });
-  assert.deepEqual(advanced.blocked, [{
+  assert.deepEqual(advanced.quarantined, [{
     roomId: "multi", sequence: blockRow(store, "multi").sequence, eventId: "ev-p2", error: "Invalid messageId", fresh: true
   }], "with the first poison repaired in place, re-diagnosis discovers and names the second");
-  assert.equal(rows(store, "multi").length, 0, "still parked: nothing partial is written");
+  assert.equal(advanced.blocked.length, 0);
 
   repairInPlace(store, "multi", "ev-p2", "bad id@y", "repaired-second");
   ageOut(store, "multi");
@@ -204,12 +206,13 @@ test("a room parked during a call is stamped once, at the park, and surfaced onc
   // later call; the observable pin is that its stamp is exactly the park's
   // own stamp and the next call leaves the row untouched.
   const first = store.backfillMessages({ limit: 1000 });
-  assert.deepEqual(first.failed.map(failure => failure.roomId), ["aaa"], "the fresh failure is reported exactly once");
+  assert.deepEqual(first.failed, [], "a quarantined event is not a room failure");
+  assert.equal(first.quarantined[0].roomId, "aaa");
   const parked = blockRow(store, "aaa");
   assert.equal(parked.last_diagnosed_at, parked.blocked_at, "stamped once, by the park itself");
   const second = store.backfillMessages({ limit: 1000 });
   assert.equal(second.failed.length, 0);
-  assert.equal(second.blocked[0].fresh, false);
+  assert.equal(second.quarantined[0].fresh, false);
   assert.deepEqual(blockRow(store, "aaa"), parked, "the next call does not re-diagnose the just-parked room");
 });
 
@@ -244,9 +247,10 @@ test("the deferred backfill step's failure record clears after a cadence repair"
   store.runIntegrityBackfillStep(Date.now() + 5000);
   assert.deepEqual(
     store.integrityFailures().filter(row => row.step === "messages_backfill").map(row => row.recordId),
-    ["aaa"], "the standing block is recorded as a durable named failure");
-  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get().n, 1,
-    "the parked count the health contract reads is 1 while parked");
+    [], "a quarantined event is not recorded as a room failure");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks WHERE skipped=0").get().n, 0,
+    "the parked count the health contract reads stays 0");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM messages_backfill_blocks").get().n, 1);
 
   repairInPlace(store, "aaa", "ev-standin", "bad id@x", "repaired");
   ageOut(store, "aaa");
