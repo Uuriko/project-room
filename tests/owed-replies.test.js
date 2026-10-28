@@ -13,6 +13,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T, PERMISSIONS, event } from "../src/events.js";
 import { listOwedReplies } from "../server/updates.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const AGENT_PERMISSIONS = ["accept_work", "complete_work"];
 
@@ -33,9 +34,7 @@ function addIdentityAgent(store, roomId, token, memberId, displayName, permissio
   const secret = `pri_${memberId}${"s".repeat(43 - memberId.length)}`;
   assert.match(secret, /^pri_[A-Za-z0-9_-]{43}$/);
   const identity = store.identities.create(displayName, { secret });
-  store.identities.link(token, roomId, {
-    identityId: identity.identityId, memberId, displayName, permissions
-  });
+  linkWithProof(store, token, roomId, { identityId: identity.identityId, secret }, { memberId, displayName, permissions });
   return { secret, identityId: identity.identityId, memberKey: store.issueAccessKey(roomId, memberId) };
 }
 
@@ -194,9 +193,7 @@ test("an open handoff addressed to the viewer is owed; closing it removes it", a
         identityId: identity.identityId, permissions: [...PERMISSIONS] } })
   ]);
   const bossKey = store.issueAccessKey("commons", "boss");
-  store.identities.link(bossKey, "commons", {
-    identityId: identity.identityId, memberId: "boss", displayName: "Boss Agent", permissions: [...PERMISSIONS]
-  });
+  linkWithProof(store, bossKey, "commons", { identityId: identity.identityId, secret }, { memberId: "boss", displayName: "Boss Agent", permissions: [...PERMISSIONS] });
   store.command(bossKey, "commons", { id: randomUUID(), type: T.WORK_PROPOSED, data: {
     workItemId: "wi-1", title: "Handoff fixture", definitionOfDone: "done",
     accountableMemberId: "boss"

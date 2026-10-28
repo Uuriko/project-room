@@ -21,6 +21,7 @@ async function openBoard(page) {
 }
 
 const shots = process.env.ROOM_TEST_SCREENSHOT_DIR || "test-results/board";
+const browserLaunch = { headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) };
 
 function github() {
   const body = JSON.stringify({ sha: "c".repeat(40) });
@@ -30,6 +31,17 @@ function github() {
     headers: { get: () => null },
     text: async () => body,
     json: async () => JSON.parse(body)
+  });
+}
+
+// Opening the board refreshes claims, status and config together with the
+// room page. That fan-out is wider than the production bursts, so this
+// fixture keeps the previous 600-read and 60-write windows. Production
+// callers stay on the bursts.
+function boardServer(store) {
+  return createRoomServer({
+    store, streamInterval: 40, fetchPullRequest: github(),
+    credentialReadBurst: 600, credentialWriteBurst: 60,
   });
 }
 
@@ -65,7 +77,7 @@ test("Board route cleanup drains a held callback and preserves the original fail
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(() => browser.close());
   const page = await browser.newPage();
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -129,7 +141,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   mkdirSync(shots, { recursive: true });
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const errors = [];
@@ -141,7 +153,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     rmSync(fixture.directory, { recursive: true, force: true });
     assert.deepEqual(errors, []);
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
@@ -497,7 +509,7 @@ function seedClaim(store, item) {
 test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 240000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const errors = [];
@@ -526,7 +538,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     { id: "old-completion", title: "Earlier completed prerequisite", state: "done", owner: "owner",
       updatedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() }
   ]) seedClaim(fixture.store, { state: "unclaimed", updatedAt, ...item });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
@@ -764,10 +776,10 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     data: { memberId: "pr-reviewer", displayName: "PR reviewer", kind: "human", permissions: ["verify"] }
   });
   const reviewerKey = fixture.store.issueAccessKey("commons", "pr-reviewer");
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   const errors = [];
   t.after(async () => {
     await browser.close(); server.closeStreams(); server.closeAllConnections();
@@ -964,10 +976,10 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
   for (let index = 0; index < 201; index += 1) {
     seedClaim(fixture.store, { id: `retirement-${index}`, title: `Retirement fixture ${index}`, state: "done", owner: "owner", updatedAt });
   }
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => {
     await browser.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
@@ -1085,7 +1097,7 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
 
 test("first board open requests at most two list pages when most claims are old", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const recent = new Date().toISOString();
@@ -1098,7 +1110,7 @@ test("first board open requests at most two list pages when most claims are old"
     fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true });
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(8000);
@@ -1126,7 +1138,7 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
   const reader = fixture.store.issueAccessKey("commons", "reader");
   seedClaim(fixture.store, { id: "reader-held", title: "Previously held work", state: "claimed", owner: "reader",
     claimedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 3600000).toISOString() });
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   t.after(async () => {
@@ -1135,7 +1147,7 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
     fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true });
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(8000);
@@ -1156,7 +1168,7 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
 // first read repaints, and "Done" is announced over the stale lease.
 test("held Board reads keep Save cap focus and announce Done only after fresh claims", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   t.after(async () => {
@@ -1165,7 +1177,7 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
     fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true });
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
   page.setDefaultTimeout(8000);
@@ -1243,7 +1255,7 @@ test("held Board reads keep Save cap focus and announce Done only after fresh cl
 // when the recorded opener is removed while the board is open.
 test("board close returns focus to the opener, else the conversation title", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   t.after(async () => {
@@ -1252,7 +1264,7 @@ test("board close returns focus to the opener, else the conversation title", { t
     fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true });
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(8000);
@@ -1301,7 +1313,7 @@ test("board close returns focus to the opener, else the conversation title", { t
 
 test("criteria delivery, send-back, redelivery and owner verification work from the board", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   t.after(async () => {
@@ -1309,7 +1321,7 @@ test("criteria delivery, send-back, redelivery and owner verification work from 
     await new Promise(resolve => server.close(resolve));
     fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(() => browser.close());
   const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
   page.setDefaultTimeout(8000);
