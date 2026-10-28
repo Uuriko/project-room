@@ -111,16 +111,25 @@ test("L1: the thread route runs through the shared room funnel", async t => {
 test("L1: thread reads share the per-credential read rate limit", async t => {
   const { request, ownerKey, post } = await serve(t);
   const root = post("root");
-  let limited = null;
-  for (let index = 0; index < 601 && limited === null; index += 1) {
-    const res = await request(`/api/rooms/commons/messages/${root}/thread`, { token: ownerKey });
-    if (res.status === 429) limited = { index, retryAfter: res.headers.get("retry-after"), body: await res.json() };
+  // Sixty thread reads stay inside the read burst on their own. Twenty
+  // event reads in the same burst push the shared bucket over 70.
+  const responses = await Promise.all([
+    ...Array.from({ length: 60 }, () => request(`/api/rooms/commons/messages/${root}/thread`, { token: ownerKey })),
+    ...Array.from({ length: 20 }, () => request("/api/rooms/commons/events", { token: ownerKey })),
+  ]);
+  const limited = [];
+  for (const res of responses) {
+    if (res.status === 429) limited.push(res);
     else { assert.equal(res.status, 200); await res.text().catch(() => {}); }
   }
-  assert.ok(limited, "the 601st thread read within a minute is rate limited");
-  assert.equal(limited.index, 600);
-  assert.equal(limited.body.error.code, "rate_limited");
-  assert.equal(limited.retryAfter, "60");
+  assert.ok(responses.some(res => res.status === 200), "the burst still serves reads");
+  assert.ok(limited.length > 0, "thread reads and event reads share one read burst");
+  for (const res of limited) {
+    assert.equal((await res.json()).error.code, "rate_limited");
+    assert.equal(res.headers.get("x-ratelimit-limit"), "70");
+    assert.equal(res.headers.get("x-ratelimit-bucket"), "read");
+    assert.ok(Number(res.headers.get("retry-after")) >= 1);
+  }
 });
 
 test("L2: agent-invite list, create and revoke honour the session-binding fence", async t => {

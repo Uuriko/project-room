@@ -8,14 +8,15 @@ import { randomUUID } from 'node:crypto';
 import { RoomStore } from '../server/store.mjs';
 import { backupRoom } from '../server/backup.mjs';
 import { createRecoveryFixture } from '../scripts/recovery-fixture.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
 import { compareRecoveryCaptures } from '../scripts/compare-recovery.mjs';
 
 async function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), 'room-capture-comparison-'));
   const f = createRecoveryFixture(join(directory, 'source.sqlite'));
   t.after(() => { f.store.close(); rmSync(directory, { recursive: true, force: true }); });
-  const { identityId } = f.store.identities.create("Comparison agent");
-  f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
+  const agent = f.store.identities.create("Comparison agent");
+  linkWithProof(f.store, f.keys.owner, "commons", agent, { permissions: ["steer"] });
   const capture = async () => (await backupRoom(f.filename, directory)).filename;
   return { ...f, directory, older: await capture(), capture };
 }
