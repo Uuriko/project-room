@@ -9,16 +9,21 @@
 // Push, schedule, and workflow_dispatch are not pull requests: both suites
 // stay enabled so the main tip still runs the full test matrix.
 //
-// Outputs (GITHUB_OUTPUT): browser=true|false, eval=true|false, and
-// coverage=true|false.
+// Outputs (GITHUB_OUTPUT): browser=true|false, eval=true|false,
+// coverage=true|false, and docs_only=true|false. docs_only is true only when
+// every changed path is markdown or under docs/. The test workflow uses that
+// to keep the required check names reporting success without running the
+// suites. An empty diff is not docs-only.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, globSync, readFileSync } from "node:fs";
-import { dirname, resolve, basename, relative } from "node:path";
+import { dirname, resolve, basename, relative, join } from "node:path";
+import { deriveBrowserSuites } from "./browser-suites.mjs";
 import { fileURLToPath } from "node:url";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
-// Keep in sync with the `on.pull_request.paths` list in qa2-agent-eval.yml.
+// qa2-agent-eval.yml no longer runs on pull requests. These patterns remain
+// the classifier's definition of an eval-relevant diff.
 const EVAL_PATTERNS = [
   "server/**",
   "src/**",
@@ -45,6 +50,7 @@ const BROWSER_EXACT = new Set([
   "package.json",
   "package-lock.json",
   "scripts/browser-ci.mjs",
+  "scripts/browser-suites.mjs",
   "scripts/browser-shards.mjs",
   "scripts/browser-shards-check.mjs",
   "scripts/browser-ci-durations.json",
@@ -76,9 +82,17 @@ function matchesAny(file, patterns) {
   return patterns.some(pattern => globToRegExp(pattern).test(file));
 }
 
+// Workflow paths-ignore equivalents: `**/*.md` and `docs/**`.
+export function isDocsPath(file) {
+  return file.startsWith("docs/") || file.endsWith(".md");
+}
+
+function docsOnly(files) {
+  return files.length > 0 && files.every(isDocsPath);
+}
+
 function browserSuitePaths() {
-  const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
-  return String(pkg.scripts?.["test:browser"] ?? "").split(/\s+/).filter(path => path.startsWith("scripts/"));
+  return deriveBrowserSuites(join(root, "scripts"));
 }
 
 // The browser checks do not only load the files named in the test:browser
@@ -170,7 +184,7 @@ export function classifyChanges(files, suite = browserSuitePaths()) {
     return deps.has(file);
   });
   const evalSuite = files.some(file => matchesAny(file, EVAL_PATTERNS));
-  return { browser, eval: evalSuite, coverage: coverageRelevant(files) };
+  return { browser, eval: evalSuite, coverage: coverageRelevant(files), docsOnly: docsOnly(files) };
 }
 
 // The per-module coverage ratchet (test.yml `coverage` job) measures line
@@ -282,6 +296,7 @@ function main() {
     setOutput("browser", "true");
     setOutput("eval", "true");
     setOutput("coverage", "true");
+    setOutput("docs_only", "false");
     console.log(`ci-changes: event ${process.env.EVENT_NAME || "(unset)"} runs the full suites`);
     return;
   }
@@ -293,6 +308,7 @@ function main() {
   setOutput("browser", result.browser ? "true" : "false");
   setOutput("eval", result.eval ? "true" : "false");
   setOutput("coverage", result.coverage ? "true" : "false");
+  setOutput("docs_only", result.docsOnly ? "true" : "false");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

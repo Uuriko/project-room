@@ -1,4 +1,5 @@
 import { canAdministerRoom } from './room-administration.js';
+import { escapeHtml } from "./html-escape.js";
 // Spend-pricing kill-switch UI (jill-spend-pricing-killswitch, audit item 10).
 //
 // The administrator-only POST /api/rooms/:id/spend-pricing route existed with no UI
@@ -10,14 +11,6 @@ import { canAdministerRoom } from './room-administration.js';
 // The current enabled flag comes from the SSE-carried projection
 // (state.room.spendPricing, default enabled when absent) — no extra GET is
 // needed. The flip is a two-step arm/confirm so it cannot be hit by accident.
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll("\"", "&quot;");
-}
-
 // Retain the exported name for existing callers; authority is shared with the server.
 export function isSpendPricingOwner({ session, state } = {}) {
   const memberId = session?.member?.id;

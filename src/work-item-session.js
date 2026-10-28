@@ -112,6 +112,16 @@ export function validateAttemptEnvironment(value) {
   return value;
 }
 
+// The model a run used, as the worker declares it at start. Optional and
+// unverified: a receipt shows it as declared, and an absent model reads as
+// unknown, never as a guess.
+export function validateAttemptModel(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !value.trim() || value.length > 100 || /[\u0000-\u001f]/.test(value))
+    throw new Error("Model is a string of 1-100 printable characters");
+  return value.trim();
+}
+
 export function validateAttemptOutputs(value) {
   if (value === undefined || value === null) return null;
   // Legacy session stops carried outputs as one free-text string; replay keeps it.
@@ -136,6 +146,7 @@ export function attemptLedger(item) {
       startedAt: a.startedAt,
       inputRevision: Number.isSafeInteger(a.inputRevision) ? a.inputRevision : null,
       environment: typeof a.environment === "string" ? a.environment : null,
+      ...(typeof a.model === "string" ? { model: a.model } : {}),
       limits: a.limits && typeof a.limits === "object" && !Array.isArray(a.limits) ? Object.freeze({ ...a.limits }) : null,
       endedAt: typeof a.endedAt === "string" ? a.endedAt : null,
       outcome: a.outcome === "done" || a.outcome === "failed" ? a.outcome : null,
@@ -275,6 +286,7 @@ export function attemptReceipts(item) {
     outputs: a.outputs, // exact references; null = missing artifacts
     usageCents: a.usageCents ?? null, // measured at close; null = unknown
     estimateCents: a.limits?.maxSpendCents ?? null, // the estimate, kept apart from measurement
+    ...(a.model ? { model: a.model } : {}), // declared at start; absent = unknown
     successClaim: a.outcome !== "done" ? "not-claimed"
       : (Array.isArray(a.outputs) && a.outputs.length > 0 && Number.isSafeInteger(a.usageCents) ? "verified" : "unverified")
   })));
@@ -410,6 +422,7 @@ export function applySessionFields(item, incoming) {
       throw new Error(`Invalid session retry: attempt ${attempts} exceeds the attempt budget of ${budget.maxAttempts}`);
     }
     const environment = validateAttemptEnvironment(incoming.data?.environment);
+    const model = validateAttemptModel(incoming.data?.model);
     item.status = SESSION_STATUSES.PROCESSING;
     item.stop_requested_at = null;
     item.heartbeat_at = at;
@@ -423,7 +436,7 @@ export function applySessionFields(item, incoming) {
     item.suspended_by = null;
     (Array.isArray(item.attempts) ? item.attempts : (item.attempts = [])).push({
       attempt: attempts, performer: incoming.actorId, startedAt: at, inputRevision: item.revision,
-      environment, limits: budget, endedAt: null, outcome: null, outputs: null });
+      environment, ...(model ? { model } : {}), limits: budget, endedAt: null, outcome: null, outputs: null });
     // #603: claiming (set_status: processing) automatically moves the work
     // item to accepted. The lifecycle and session ladders are unified.
     if (item.state === "proposed") item.state = "accepted";
