@@ -19,7 +19,9 @@ test("the public set is enumerated live from the table, not a pinned list", () =
   // A new public route grows this set and must declare (next test); a
   // vanished one should make this line be revisited, not silently pass.
   assert.deepEqual(publicRoutes.map(r => r.id).sort(), [
-    "demo-get", "demo-head", "public-front-door-get", "public-front-door-head",
+    "demo-get", "demo-head", "download-get", "download-head",
+    "public-agent-ask", "public-agent-card", "public-agent-page", "public-agent-poll",
+    "public-front-door-get", "public-front-door-head",
   ]);
   for (const r of publicRoutes) assert.ok(isPublishable(r, ROUTE_PUBLICATION_NOTE), `${r.id} is public but not publishable under its declaration`);
 });
