@@ -32,8 +32,10 @@ import { retiredNeedsMeKeys } from "./updates.mjs";
 import { mayWriteWorkClaims } from "./work-claim-routes.mjs";
 import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
-import { claimIdle } from "./agent-fleet.mjs";
+import { claimIdle, CLAIM_IDLE_MS } from "./agent-fleet.mjs";
 import { identityRoomSeats } from "./membership-resolution.mjs";
+import { workClaimBoardVersion } from "./work-claim-sqlite.mjs";
+import { BOND_TTL_MS } from "./bonds.mjs";
 import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
 
 const MAX_ROOMS = 40;
@@ -400,12 +402,48 @@ export function roomAttention(store, roomId, memberId, identityId, after) {
 // is unclaimed with no owner. The derivation is pure — stored rows change
 // only when a real sweep runs — and a derivation failure falls back to
 // the raw rows rather than blanking the inbox.
-function claimBoardOf(store, roomId) {
+// The instants at which a room's derived board can change with no write at
+// all, recorded into `sink` (epoch ms) for the memo's validity horizon:
+// a lease lapsing (releaseExpired flips the claim to unclaimed), a held
+// claim going idle (claimIdle at touched + CLAIM_IDLE_MS), and the
+// minute-rounded displays (minutesLeft is a ceil, idleMinutes a round, so
+// each flips on its own phase, not on wall-minute boundaries).
+function noteBoardFlips(items, nowMs, sink) {
+  for (const item of items ?? []) {
+    if (!item) continue;
+    const lease = Date.parse(item.leaseExpiresAt ?? "");
+    if (Number.isFinite(lease) && lease > nowMs) {
+      sink.push(lease);
+      // minutesLeft = ceil((lease - now) / 60000) next drops when the
+      // remaining time crosses the next lower whole-minute boundary.
+      sink.push(lease - (Math.ceil((lease - nowMs) / 60000) - 1) * 60000);
+    }
+    const updated = Date.parse(claimUpdatedAt(item) ?? item.claimedAt ?? "");
+    if (Number.isFinite(updated) && updated <= nowMs) {
+      const ageMinutes = (nowMs - updated) / 60000;
+      sink.push(updated + (Math.floor(ageMinutes + 0.5) + 0.5) * 60000);
+    }
+    if (MY_ACTIVE_STATES.has(item.state)) {
+      const touched = Math.max(
+        Date.parse(claimUpdatedAt(item) ?? "") || 0,
+        Date.parse(item.leaseStartAt ?? "") || 0,
+        Date.parse(item.claimedAt ?? "") || 0);
+      if (touched > 0 && touched + CLAIM_IDLE_MS > nowMs) sink.push(touched + CLAIM_IDLE_MS);
+    }
+  }
+}
+
+function claimBoardOf(store, roomId, flipSink = null) {
   let list = null;
   try { list = store.workClaims?.list(roomId) ?? []; } catch { return null; }
   if (!list) return null;
-  try { return releaseExpired(list, typeof store.now === "function" ? store.now() : Date.now()); }
-  catch { return list; }
+  let derived = list;
+  try { derived = releaseExpired(list, typeof store.now === "function" ? store.now() : Date.now()); }
+  catch { derived = list; }
+  if (flipSink) {
+    noteBoardFlips(derived, typeof store.now === "function" ? store.now() : Date.now(), flipSink);
+  }
+  return derived;
 }
 
 // The cursor acknowledges discovery, not completion. Only advance through
@@ -628,7 +666,10 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
-export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null } = {}) {
+// Identity resolution for the needs-me read, shared by the computation and
+// the memo wrapper (which needs the identityId to build its key). Throws
+// exactly the errors the computation has always thrown, in the same order.
+function resolveNeedsMeIdentity(store, secret) {
   let identity = null;
   let allowedRooms = null;
   if (typeof secret === "string" && secret.startsWith("rak_")) {
@@ -643,7 +684,16 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     identity = store.identities.resolveGlobalIdentitySecret(secret);
   }
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
+  return { identity, allowedRooms };
+}
+
+function collectNeedsMeFresh(store, secret, { since, roomId: scopedRoom = null } = {}) {
+  const { identity, allowedRooms } = resolveNeedsMeIdentity(store, secret);
   const parsed = parseNeedsMeSince(since);
+  // Instants (epoch ms) at which this result can change with no write at
+  // all; the memo wrapper turns the earliest into the entry's horizon.
+  const flipSink = [];
+  const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   if (scopedRoom !== null && (typeof scopedRoom !== "string" || !scopedRoom))
     fail(422, "invalid_room", "roomId must be a non-empty string");
   if (scopedRoom !== null && allowedRooms && !allowedRooms.includes(scopedRoom))
@@ -668,6 +718,10 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
   const land = { ...parsed.land };
   const landIds = { ...parsed.landIds };
   const pendingBonds = store.bonds.pendingProposalsFor(identity.identityId);
+  // A pending proposal leaves the read when its TTL lapses, with no write.
+  for (const bond of pendingBonds) {
+    if (typeof bond?.at === "number" && bond.at + BOND_TTL_MS > nowMs) flipSink.push(bond.at + BOND_TTL_MS);
+  }
   const openWork = [];
   const reviewAsks = [];
   const myWork = [];
@@ -685,7 +739,7 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     // One summary per room this page walks (at most MAX_ROOMS), none dropped.
     // One claim-board read for the three work sections below; they used to
     // each re-list and re-decode the whole board (see claimBoardOf).
-    const claims = claimBoardOf(store, link.roomId);
+    const claims = claimBoardOf(store, link.roomId, flipSink);
     const open = openWorkOf(store, link.roomId, link.memberId, authority, claims);
     if (open) openWork.push(open);
     const asks = reviewAsksOf(store, link.roomId, link.memberId, authority, claims);
@@ -705,6 +759,13 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     let candidates = [];
     if (authority.sequence > after) {
       const state = store.room(link.roomId).state;
+      // nextWorkStep's handoff addressing reads work-item claim liveness
+      // against the clock; a lapsing work-item claim can re-address a
+      // handoff with no write.
+      for (const item of Object.values(state.workItems ?? {})) {
+        const expires = Date.parse(item?.claim?.expiresAt ?? "");
+        if (Number.isFinite(expires) && expires > nowMs) flipSink.push(expires);
+      }
       const kinds = [
         mentionsOf(store, link.roomId, link.memberId, after, through),
         roomDmsOf(store, link.roomId, link.memberId, after, state),
@@ -759,5 +820,147 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore });
+  const value = stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore });
+  // The horizon is the earliest modelled no-write flip, outer-bounded at a
+  // day so an unmodelled time channel can never serve more than a day stale
+  // (in practice every flip above lands minutes-to-days sooner).
+  const validUntilMs = Math.min(nowMs + 24 * 3600000, ...flipSink);
+  return { value, validUntilMs };
+}
+
+// ---------------------------------------------------------------------------
+// Memoisation (PERF-50 E2-b). room_needs_me is the prescribed polling read
+// and its cost is recomputation: at 10 rooms × 40 claims a caught-up repeat
+// poll measured ~55 ms, ~52 ms of it listing + lease-deriving every room's
+// claim board. A repeat whose inputs have not changed is served from this
+// per-store memo with byte-identical output.
+//
+// The key is the room-set version, NOT the room sequence alone — several
+// inputs do not advance any room's sequence, and serving them stale would
+// be a correctness defect, not a perf win:
+//   - work-claim registry writes (CI records, reviews, claims) append no
+//     room event → the registry's exact board-version counter;
+//   - land-queue changes ride updated_at, not the sequence → an aggregate
+//     over the caller's rows per room (land writers always stamp
+//     updated_at from the live clock);
+//   - bond proposal state and wake-pause rows live in side tables →
+//     aggregates over the identity's rows;
+//   - seats, room sequence and archived flags → the seat signature plus a
+//     per-room (sequence, archived_at) vector.
+// Time-derived output (lease liveness, idle, minute displays, bond TTL) is
+// handled by the validity horizon the computation records on a miss: a hit
+// is served only while store.now() is before it. Errors are never cached;
+// auth and cursor validation run before any hit can serve, with the same
+// errors in the same order as the computation itself. Values are cloned on
+// store and on serve so a caller mutating a result cannot poison the memo.
+const needsMeMemos = new WeakMap();
+const NEEDS_ME_MEMO_LIMIT = 128;
+
+// Probe statements are prepared once per db (the store's own ??= pattern):
+// a memo hit must cost less than the recomputation it replaces, and a fresh
+// prepare per probe per hit measurably eats the win.
+const needsMeProbeStmts = new WeakMap();
+function probeStmts(db, roomCount) {
+  let perDb = needsMeProbeStmts.get(db);
+  if (!perDb) { perDb = { roomsByCount: new Map() }; needsMeProbeStmts.set(db, perDb); }
+  if (!perDb.flag) {
+    perDb.flag = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?");
+    // The side-table probes prepare lazily on first use: preparing against
+    // a table a legacy store does not carry throws, and the key builder
+    // only reaches for a probe after its table flag reads present.
+    const lazy = sql => () => {
+      if (!perDb[`stmt:${sql}`]) perDb[`stmt:${sql}`] = db.prepare(sql);
+      return perDb[`stmt:${sql}`];
+    };
+    perDb.landStmt = lazy(
+      `SELECT COUNT(*) AS c, COALESCE(MAX(updated_at),0) AS mx, COALESCE(SUM(updated_at),0) AS sm,
+              COALESCE(SUM(LENGTH(title)),0) AS lt, COALESCE(SUM(LENGTH(checks_state)),0) AS lc
+       FROM land_queue WHERE room_id=? AND claimant_member_id=?`);
+    perDb.bondsStmt = lazy(
+      `SELECT COUNT(*) AS c, COALESCE(MAX(proposed_at),0) AS mp, COALESCE(MAX(accepted_at),0) AS ma,
+              COALESCE(MAX(revoked_at),0) AS mr, COALESCE(SUM(state='proposed'),0) AS sp
+       FROM agent_bonds WHERE agent_a=? OR agent_b=?`);
+    perDb.pauseStmt = lazy(
+      `SELECT COUNT(*) AS c, COALESCE(MAX(p.paused_at),0) AS mp
+       FROM wake_queue_pause p JOIN identity_links l ON l.room_id=p.room_id AND l.member_id=p.member_id
+       WHERE l.identity_id=?`);
+  }
+  if (!perDb.roomsByCount.has(roomCount)) {
+    perDb.roomsByCount.set(roomCount, db.prepare(
+      `SELECT id, sequence, archived_at AS archivedAt FROM rooms WHERE id IN (${Array.from({ length: roomCount }, () => "?").join(",")})`));
+  }
+  return perDb;
+}
+
+function tableFlag(stmts, name) {
+  try { return stmts.flag.get(name) ? "1" : "0"; }
+  catch { return "?"; }
+}
+
+function needsMeVersionKey(store, identity, allowedRooms, scopedRoom, parsed, seats) {
+  const db = store.db;
+  const seatSig = seats.map(seat => `${seat.roomId}:${seat.memberId}:${seat.seat}`).join(",");
+  const roomIds = [...new Set(seats.map(seat => seat.roomId))];
+  const stmts = probeStmts(db, roomIds.length);
+  let roomSig = "";
+  if (roomIds.length) {
+    const rows = stmts.roomsByCount.get(roomIds.length).all(...roomIds);
+    const byId = new Map(rows.map(row => [row.id, row]));
+    roomSig = roomIds.map(id => {
+      const row = byId.get(id);
+      return row ? `${row.sequence}:${row.archivedAt ?? ""}` : "gone";
+    }).join(",");
+  }
+  const claimsSig = roomIds.map(id => workClaimBoardVersion(db, id)).join(",");
+  let landSig = tableFlag(stmts, "land_queue");
+  if (landSig === "1") {
+    landSig += ":" + seats.map(seat => {
+      const row = stmts.landStmt().get(seat.roomId, seat.memberId);
+      return `${row.c},${row.mx},${row.sm},${row.lt},${row.lc}`;
+    }).join(";");
+  }
+  let bondsSig = tableFlag(stmts, "agent_bonds");
+  if (bondsSig === "1") {
+    const row = stmts.bondsStmt().get(identity.identityId, identity.identityId);
+    bondsSig += `:${row.c},${row.mp},${row.ma},${row.mr},${row.sp}`;
+  }
+  let pauseSig = tableFlag(stmts, "wake_queue_pause");
+  if (pauseSig === "1") {
+    const row = stmts.pauseStmt().get(identity.identityId);
+    pauseSig += `:${row.c},${row.mp}`;
+  }
+  return [
+    identity.identityId,
+    allowedRooms ? allowedRooms.join(",") : "*",
+    scopedRoom ?? "",
+    JSON.stringify(parsed),
+    seatSig, roomSig, claimsSig, landSig, bondsSig, pauseSig
+  ].join("|");
+}
+
+export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null } = {}) {
+  if (!store?.db || typeof store.db.prepare !== "function") {
+    return collectNeedsMeFresh(store, secret, { since, roomId: scopedRoom }).value;
+  }
+  const { identity, allowedRooms } = resolveNeedsMeIdentity(store, secret);
+  const parsed = parseNeedsMeSince(since);
+  if (scopedRoom !== null && (typeof scopedRoom !== "string" || !scopedRoom))
+    fail(422, "invalid_room", "roomId must be a non-empty string");
+  if (scopedRoom !== null && allowedRooms && !allowedRooms.includes(scopedRoom))
+    fail(403, "insufficient_scope", "This key is limited to its room");
+  const seats = identityRoomSeats(store.db, identity.identityId, {});
+  const key = needsMeVersionKey(store, identity, allowedRooms, scopedRoom, parsed, seats);
+  let memo = needsMeMemos.get(store);
+  if (!memo) { memo = new Map(); needsMeMemos.set(store, memo); }
+  const nowMs = typeof store.now === "function" ? store.now() : Date.now();
+  const hit = memo.get(key);
+  if (hit && nowMs < hit.validUntilMs) {
+    try { return structuredClone(hit.value); } catch { /* uncloneable: recompute below */ }
+  }
+  const { value, validUntilMs } = collectNeedsMeFresh(store, secret, { since, roomId: scopedRoom });
+  try {
+    memo.set(key, { value: structuredClone(value), validUntilMs });
+    while (memo.size > NEEDS_ME_MEMO_LIMIT) memo.delete(memo.keys().next().value);
+  } catch { /* uncloneable result: serve it uncached */ }
+  return value;
 }
