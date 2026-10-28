@@ -1,4 +1,6 @@
+import { messageRepository } from "./message-repository.mjs";
 import { sessionWatermark } from "./read-cursor.mjs";
+import { stampNeedsMe } from "./content-trust.mjs";
 // Cross-room "what needs me" for one identity.
 //
 // One read replaces listing rooms and then opening each inbox. Items are
@@ -61,12 +63,15 @@ const clip = text => {
 // the whole Board to learn what a listed claim is about. Source order: the
 // first acceptance criterion (what "done" looks like), else the newest
 // history note (create / finish / review notes ride the claim's history).
-const claimSnippet = claim => {
+export const claimSnippet = claim => {
   const criteria = Array.isArray(claim?.acceptanceCriteria) ? claim.acceptanceCriteria : [];
   const criterion = criteria.find(entry => typeof entry === "string" && entry.trim());
   if (criterion) return clip(criterion);
   const history = Array.isArray(claim?.history) ? claim.history : [];
   for (let index = history.length - 1; index >= 0; index -= 1) {
+    // Machine receipts (retention_ack's "retention-ack seen=1 …") are not
+    // a human summary; skip them so the snippet never shows internal keys.
+    if (history[index]?.action === "retention_ack") continue;
     const note = history[index]?.note;
     if (typeof note === "string" && note.trim()) return clip(note);
   }
@@ -213,9 +218,9 @@ function roomDmsOf(store, roomId, memberId, after, state) {
   // not surface at all (its logged body is already scrubbed, so it showed
   // as an empty item inviting a reply to a tombstone), and an edited DM
   // must show its current body, not the pre-edit text. Messages missing
-  // from the projection (e.g. archived out of it) fall back to the logged
-  // body, as deriveNotifications does.
-  const currentById = new Map((state?.messages ?? []).map(message => [message.id, message]));
+  // from the working set are resolved through normalized archived records.
+  // Only genuinely absent legacy records fall back to the logged body.
+  const currentById = messageRepository(store, roomId, state);
   const items = [];
   // Scan in batches: a deleted DM must not consume one of the
   // MAX_PER_KIND + 1 slots, or the caller's overflow check (kind length >
@@ -346,6 +351,38 @@ function mentionHorizon(store, roomId, memberId, after, through) {
     if (/no such table/i.test(error?.message ?? "")) return through;
     throw error;
   }
+}
+
+// The per-room attention slice of collectNeedsMe, exported for the room
+// digest (server/room-digest.mjs): the same kinds, the same 140-char clip,
+// the same horizon and retired-mark rules, restricted to seq > after in one
+// room. Items keep the collectNeedsMe shape ({ kind, roomId, seq, id,
+// summary, next }); the digest strips `next` when it composes its rows.
+export function roomAttention(store, roomId, memberId, identityId, after) {
+  const authority = store.roomAuthority(roomId);
+  const member = authority.members?.[memberId];
+  if (!member || member.active === false) return [];
+  if (!(authority.sequence > after)) return [];
+  const state = store.room(roomId).state;
+  let through = mentionHorizon(store, roomId, memberId, after, sessionWatermark(after, authority.sequence));
+  const pendingBonds = identityId ? store.bonds.pendingProposalsFor(identityId) : [];
+  const kinds = [
+    mentionsOf(store, roomId, memberId, after, through),
+    roomDmsOf(store, roomId, memberId, after, state),
+    peerDmsOf(store, roomId, identityId, after),
+    bondRequestsOf(store, roomId, pendingBonds, after),
+    directAsksOf(store, roomId, memberId, after, state),
+    handoffsOf(store, roomId, memberId, after, state)
+  ];
+  const candidates = [];
+  for (const kind of kinds) {
+    if (kind.length > MAX_PER_KIND) through = Math.min(through, kind[MAX_PER_KIND].seq - 1);
+    for (const item of kind) push(candidates, item);
+  }
+  const retired = retiredNeedsMeKeys(store, roomId, memberId);
+  return candidates
+    .filter(item => item.seq <= through && !retired.has(`${item.kind}:${item.id}`))
+    .sort((a, b) => a.seq - b.seq);
 }
 
 // One read of the claim board, shared by a room's work sections. Each used
@@ -591,7 +628,7 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
-export function collectNeedsMe(store, secret, { since } = {}) {
+export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null } = {}) {
   let identity = null;
   let allowedRooms = null;
   if (typeof secret === "string" && secret.startsWith("rak_")) {
@@ -607,13 +644,17 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   }
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
   const parsed = parseNeedsMeSince(since);
+  if (scopedRoom !== null && (typeof scopedRoom !== "string" || !scopedRoom))
+    fail(422, "invalid_room", "roomId must be a non-empty string");
+  if (scopedRoom !== null && allowedRooms && !allowedRooms.includes(scopedRoom))
+    fail(403, "insufficient_scope", "This key is limited to its room");
   // Seats come from the shared resolver (#3882): identity_links plus
   // guest_members trial seats — a guest seat's room belongs in the inbox
   // with the same membership truth as everywhere else. archivedAt rides
   // from the rooms row; a seat whose room row is gone reads as archived
   // (the old INNER JOIN dropped it the same way).
   const seats = identityRoomSeats(store.db, identity.identityId,
-    { after: parsed.roomAfter ?? "", limit: MAX_ROOMS + 1 });
+    { after: scopedRoom === null ? parsed.roomAfter ?? "" : "", limit: MAX_ROOMS + 1 });
   const roomRows = seats.length ? store.db.prepare(
     `SELECT id, archived_at AS archivedAt FROM rooms WHERE id IN (${seats.map(() => "?").join(",")})`
   ).all(...seats.map(seat => seat.roomId)) : [];
@@ -621,7 +662,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const links = seats.map(seat => ({
     ...seat,
     archivedAt: archivedByRoom.has(seat.roomId) ? archivedByRoom.get(seat.roomId) : 1
-  }));
+  })).filter(link => scopedRoom === null || link.roomId === scopedRoom);
   const items = [];
   const rooms = { ...parsed.rooms };
   const land = { ...parsed.land };
@@ -633,7 +674,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const myClaims = [];
   const actionsNeeded = [];
   let roomAfter = parsed.roomAfter ?? "";
-  let hasMore = links.length > MAX_ROOMS;
+  let hasMore = scopedRoom === null && links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
     if (allowedRooms && !allowedRooms.includes(link.roomId)) { roomAfter = link.roomId; continue; }
     if (link.archivedAt) { roomAfter = link.roomId; continue; }
@@ -712,10 +753,11 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // R327-1 (r6): tell a paused agent it is paused. Items stay readable (this
   // is a read surface) but carry paused:true; `paused` names each paused room
   // and who holds the pause.
-  const pausedRooms = store.agentHeartbeats?.pausedRoomsOf?.(identity.identityId)?.filter(p => !allowedRooms || allowedRooms.includes(p.roomId)) ?? [];
+  const pausedRooms = store.agentHeartbeats?.pausedRoomsOf?.(identity.identityId)?.filter(p =>
+    (!allowedRooms || allowedRooms.includes(p.roomId)) && (scopedRoom === null || p.roomId === scopedRoom)) ?? [];
   if (pausedRooms.length) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };
   }
-  return { identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore, untrusted: true };
+  return stampNeedsMe({ identityId: identity.identityId, items, ...(pausedRooms.length ? { paused: pausedRooms } : {}), ...(openWork.length ? { openWork } : {}), ...(reviewAsks.length ? { reviewAsks } : {}), ...(myWork.length ? { myWork } : {}), ...(myClaims.length ? { myClaims } : {}), ...(actionsNeeded.length ? { actionsNeeded } : {}), cursor, hasMore });
 }

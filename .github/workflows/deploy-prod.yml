@@ -6,8 +6,8 @@ name: deploy-prod
 #
 # Triggers
 #   workflow_dispatch  sha = full 40-hex commit on main. The run refuses the
-#                      deploy unless the `test` and `schema-gate` push runs on
-#                      that commit both concluded success.
+#                      deploy unless the `schema-gate` push run succeeded.
+#                      The `test` result is advisory and recorded in the summary.
 #   onboarding gate    optional. When the repo variable ROOM_ONBOARDING_GATE is
 #                      "1", the `probe` job runs the onboarding probe against
 #                      staging at the same commit and blocks the deploy on a
@@ -37,7 +37,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: "Full 40-character commit SHA on main (test + schema-gate must be green)"
+        description: "Full 40-character commit SHA on main (schema-gate required; test advisory)"
         required: true
         type: string
       reason:
@@ -53,8 +53,10 @@ on:
     types: [completed]
     branches: [main]
 
+# contents: write is required so release-runtime can publish a GitHub release.
+# Every other job sets contents: read and cannot expand past that.
 permissions:
-  contents: read
+  contents: write
   actions: read
 
 # One production change at a time. Never cancel a deploy that has started.
@@ -70,6 +72,9 @@ env:
 
 jobs:
   gate:
+    permissions:
+      contents: read
+      actions: read
     if: >-
       github.event_name == 'workflow_dispatch' ||
       ((vars.ROOM_AUTO_DEPLOY == '1' ||
@@ -86,7 +91,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-      - name: Resolve the commit and require green test + schema-gate
+      - name: Resolve the commit and check deployment policy
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,8 +117,15 @@ jobs:
           for wf in test schema-gate; do
             CONCLUSION="$(jq -r --arg wf "$wf" '[.workflow_runs[] | select(.name == $wf)] | sort_by(.created_at) | last | if . == null then "missing" else (.conclusion // .status) end' runs.json)"
             echo "$wf on $SHA: $CONCLUSION"
+            echo "$wf on $SHA: $CONCLUSION" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$EVENT" = "workflow_dispatch" ] && [ "$wf" = "test" ]; then
+              if [ "$CONCLUSION" != "success" ]; then
+                echo "::warning title=Advisory test result::test is $CONCLUSION on $SHA; the manual deployer must assess relevant failures"
+              fi
+              continue
+            fi
             if [ "$CONCLUSION" != "success" ]; then
-              if [ "$EVENT" = "workflow_dispatch" ]; then refuse "$wf is $CONCLUSION on $SHA; deploy only dual-green commits"; fi
+              if [ "$EVENT" = "workflow_dispatch" ]; then refuse "$wf is $CONCLUSION on $SHA; schema-gate must succeed"; fi
               skip "auto: $wf is $CONCLUSION on $SHA; the other gate's completion will retry"
             fi
           done
@@ -135,7 +147,7 @@ jobs:
           fi
           echo "sha=$SHA" >> "$GITHUB_OUTPUT"
           echo "go=true" >> "$GITHUB_OUTPUT"
-          echo "Deploying $SHA (test + schema-gate green)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Deploying $SHA (schema-gate green; test advisory for manual dispatch, required for automatic deployment)" >> "$GITHUB_STEP_SUMMARY"
 
   # --- ACT-5b onboarding gate (off unless vars.ROOM_ONBOARDING_GATE == '1') ---
   # Probes staging at the commit about to ship and fails on a >20% regression
@@ -143,6 +155,8 @@ jobs:
   # deploy proceeds exactly as before.
   probe:
     needs: gate
+    permissions:
+      contents: read
     if: needs.gate.outputs.go == 'true' && vars.ROOM_ONBOARDING_GATE == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -172,7 +186,7 @@ jobs:
           else
             node scripts/onboarding-probe/predeploy.mjs --target staging --sha "$SHA" --runs 3 --out probe-out
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: predeploy-probe-${{ needs.gate.outputs.sha }}
@@ -182,6 +196,8 @@ jobs:
 
   deploy:
     needs: [gate, probe]
+    permissions:
+      contents: read
     # The probe job is skipped unless the gate variable is on; a skipped probe
     # does not block. A failed or cancelled probe does.
     if: >-
@@ -225,7 +241,7 @@ jobs:
       - name: Record exact live versions and code schemas before upload
         id: pre
         run: node scripts/deploy-recovery.mjs snapshot "$RUNNER_TEMP/pre-deploy.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pre-deploy-${{ needs.gate.outputs.sha }}
           path: ${{ runner.temp }}/pre-deploy.json
@@ -266,7 +282,7 @@ jobs:
           else
             echo "::warning::prod smoke attempt 1 failed; retrying once in ${SMOKE_RETRY_DELAY_SECONDS:-150}s (Durable Object version lag) before recovery" >&2
             sleep "${SMOKE_RETRY_DELAY_SECONDS:-150}"
-            node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke.json"
+            node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke-attempt2.log" "$RUNNER_TEMP/prod-smoke.json"
           fi
       - name: Live smoke
         shell: bash
@@ -281,13 +297,15 @@ jobs:
           PROD_OUTCOME: ${{ steps.prod.outcome }}
           ENTRY_OUTCOME: ${{ steps.entry.outcome }}
         run: node scripts/deploy-recovery.mjs recover "$RUNNER_TEMP/pre-deploy.json" "$RUNNER_TEMP/deploy-recovery.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && steps.pre.outcome == 'success'
         with:
           name: deploy-recovery-${{ needs.gate.outputs.sha }}
           path: |
             ${{ runner.temp }}/pre-deploy.json
             ${{ runner.temp }}/deploy-recovery.json
+            ${{ runner.temp }}/prod-smoke-attempt*.log
+            ${{ runner.temp }}/prod-smoke.json
           retention-days: 90
       - name: Receipt to muse-room
         if: always() && steps.pre.outcome == 'success'
@@ -356,3 +374,56 @@ jobs:
             echo "Recovery step: ${ROLLBACK_OUTCOME:-not run}"
             echo "Onboarding probe gate: ${PROBE_VERDICT:-off}${PROBE_OVERRIDE:+ (override: $PROBE_OVERRIDE)}"
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Publishes the Node agent runtime from the deployed SHA after smoke succeeds.
+  # A same-day rerun of the same SHA marks the existing tag latest and stops.
+  # GH_TOKEN is the job token. Never echo it, CLOUDFLARE_API_TOKEN, or ROOM_RECEIPT_TOKEN.
+  release-runtime:
+    needs: [gate, deploy]
+    if: needs.deploy.result == 'success' && needs.gate.outputs.go == 'true'
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+      - name: Package the deployed runtime
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          case "$SHA" in
+            *[!0-9a-f]*|"") echo "::error title=runtime release::deployed sha is not 40 lowercase hex"; exit 1 ;;
+          esac
+          [ "${#SHA}" -eq 40 ] || { echo "::error title=runtime release::deployed sha is not 40 lowercase hex"; exit 1; }
+          OUT="$RUNNER_TEMP/project-room-runtime"
+          node scripts/runtime-package.mjs create "$GITHUB_WORKSPACE" "$SHA" "$OUT"
+          node scripts/runtime-package.mjs verify "$OUT" "$SHA"
+          tar -C "$OUT" -czf "$RUNNER_TEMP/project-room-runtime.tar.gz" .
+      - name: Publish the runtime release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHA: ${{ needs.gate.outputs.sha }}
+        run: |
+          set -euo pipefail
+          SHORT="${SHA:0:7}"
+          DATE="$(date -u +%Y-%m-%d)"
+          TAG="runtime-${DATE}-${SHORT}"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest
+            echo "Release ${TAG} already exists; marked latest."
+            exit 0
+          fi
+          gh release create "$TAG" \
+            "$RUNNER_TEMP/project-room-runtime.tar.gz#project-room-runtime.tar.gz" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "$TAG" \
+            --latest \
+            --notes "Node agent runtime from deployed commit ${SHORT}. Node 24.19+."

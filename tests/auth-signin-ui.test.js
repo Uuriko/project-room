@@ -91,10 +91,11 @@ test("primary entry exposes password sign-in and contextual recovery", async () 
   assert.doesNotMatch(container.innerHTML, /passkey|GitHub|name="code"/i);
   await container.listeners.click[0](clickOnDataset("forgot-password"));
   assert.match(container.innerHTML, /data-signin-form="reset-request"/);
-  assert.match(container.innerHTML, /data-email-method="magic"/);
+  assert.doesNotMatch(container.innerHTML, /data-email-method="magic"/);
 });
 test("email-link alternative is available within recovery without an extra options menu", async () => {
-  const { container } = mount({ "/api/auth/magic/request": { status: "sent" } });
+  const { container, ui, client } = mount({ "/api/auth/magic/request": { status: "sent" } });
+  await offerRecovery(ui, container, client);
   assert.match(container.innerHTML, /data-signin-form="password"/);
   assert.doesNotMatch(container.innerHTML, /signin-more|data-email-method="magic"/);
   await container.listeners.click[0](clickOnDataset("forgot-password"));
@@ -105,10 +106,11 @@ test("email-link alternative is available within recovery without an extra optio
   await container.listeners.click[0](clickOnDataset("email-method", { emailMethod: "magic" }));
   assert.match(container.innerHTML, /data-signin-form="password"/);
   assert.doesNotMatch(container.innerHTML, /data-signin-form="magic-request"/);
-  assert.match(container.innerHTML, /Leave it blank/, "the merged form teaches the blank-password link path");
+  assert.match(container.innerHTML, /name="method" value="email"/, "the merged form teaches the blank-password link path");
 });
 test("unconfigured delivery stays visible after pending state clears", async () => {
-  const { container, ui } = mount({ "/api/auth/magic/request": { status: "unavailable", message: "Delivery unavailable" } });
+  const { container, ui, client } = mount({ "/api/auth/magic/request": { status: "unavailable", message: "Delivery unavailable" } });
+  await offerRecovery(ui, container, client);
   await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   assert.equal(ui.canLeave(), true);
   assert.equal(container.status.textContent, "Delivery unavailable");
@@ -116,7 +118,7 @@ test("unconfigured delivery stays visible after pending state clears", async () 
 });
 test("delivered email offers verification code only after explicit selection", async () => {
   const { container, client, signins, ui } = mount({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": { authenticated: true, account: { id: "a" } } });
-  ui.showMagic();
+  await offerRecovery(ui, container, client);
   await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   assert.match(container.innerHTML, /Check m@example.invalid/);
   assert.doesNotMatch(container.innerHTML, /name="code"/);
@@ -128,12 +130,20 @@ test("delivered email offers verification code only after explicit selection", a
 test("email request carries the host's invitation destination without authenticating", async () => {
   const client = stubClient({ "/api/auth/magic/request": { status: "sent" } }); let signed = 0;
   const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onMagicLinkRequest: () => "/#invite/synthetic" });
-  const container = fakeContainer(); ui.mount(container);
+  const container = fakeContainer(); ui.mount(container); await offerRecovery(ui, container, client);
   await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   assert.equal(client.calls[0].data.returnTo, "/#invite/synthetic"); assert.equal(signed, 0);
 });
-async function readyCode(ui, container) {
-  ui.showMagic();
+async function offerRecovery(ui, container, client) {
+  ui.showPassword();
+  const request = client.request;
+  client.request = async () => { throw Object.assign(new Error("Invalid email or password"), { status: 401, code: "invalid_credentials" }); };
+  try { await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "wrong-password" })); }
+  finally { client.request = request; }
+  assert.match(container.innerHTML, /name="method" value="email"/);
+}
+async function readyCode(ui, container, client) {
+  await offerRecovery(ui, container, client);
   await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   await container.listeners.click[0](clickOnDataset("magic-manual-code"));
 }
@@ -141,7 +151,7 @@ test("pending authentication prevents leaving until its actual result", async ()
   let release; const pending = new Promise(resolve => release = resolve); const lifecycle = [];
   const client = stubClient({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": () => pending });
   const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, onBusyChange: value => lifecycle.push(value) });
-  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container); lifecycle.length = 0;
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client); lifecycle.length = 0;
   const submission = container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
   await Promise.resolve();
   assert.equal(ui.canLeave(), false); assert.equal(ui.closeEmail(), false);
@@ -149,9 +159,9 @@ test("pending authentication prevents leaving until its actual result", async ()
   assert.deepEqual(lifecycle, [true, false]); assert.equal(ui.canLeave(), true);
 });
 test("declining authentication causes no consume request or pending lifecycle", async () => {
-  const client = stubClient({ "/api/auth/magic/request": { status: "sent" } }); const lifecycle = [];
-  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, beforeSignIn: () => false, onBusyChange: value => lifecycle.push(value) });
-  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container); lifecycle.length = 0;
+  const client = stubClient({ "/api/auth/magic/request": { status: "sent" } }); const lifecycle = []; let allow = true;
+  const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, beforeSignIn: () => allow, onBusyChange: value => lifecycle.push(value) });
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client); lifecycle.length = 0; allow = false;
   await container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
   assert.equal(client.calls.length, 1); assert.deepEqual(lifecycle, []);
 });
@@ -159,7 +169,7 @@ test("lost consume result fences only the identity that issued it", async () => 
   const client = stubClient({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": { throw: { message: "Connection lost" } } });
   let fenced = 0, signed = 0;
   const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onSignInUncertain: () => fenced++ });
-  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client);
   await container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
   assert.equal(client.session, null); assert.equal(fenced, 1); assert.equal(signed, 0);
 });
@@ -167,7 +177,7 @@ test("late consume cannot complete or clear a replacement identity", async () =>
   let release; const pending = new Promise(resolve => release = resolve);
   const client = stubClient({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/magic/consume": () => pending }); let signed = 0, fenced = 0;
   const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onSignInUncertain: () => fenced++ });
-  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client);
   const submission = container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
   const replacement = { authenticated: true, account: { id: "new" } }; client.generation++; client.session = replacement;
@@ -179,7 +189,7 @@ test("different-account rejection offers an explicit switch without logging out 
   client.request = async path => { if (path.endsWith("request")) return { status: "sent" }; throw Object.assign(new Error("Different account"), { status: 409, code: "magic_account_mismatch" }); };
   client.logout = async () => { logouts++; };
   const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, onAccountSwitch: () => false });
-  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client);
   await container.listeners.submit[0](submitForm("magic-code", { code: "code" }));
   assert.match(container.innerHTML, /data-magic-switch/);
   await container.listeners.click[0](clickOnDataset("magic-switch")); assert.equal(logouts, 0);
@@ -195,7 +205,7 @@ test("confirmed different-account switch logs out once and retries the unburned 
   };
   client.logout = async () => { logouts++; client.generation++; client.session = { authenticated: false, sessionRevision: 2 }; return client.session; };
   const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onAccountSwitch: () => true, onSignInUncertain: () => reconciled++ });
-  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+  const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client);
   await container.listeners.submit[0](submitForm("magic-code", { code: "same-unburned-code" }));
   await container.listeners.click[0](clickOnDataset("magic-switch"));
   assert.equal(logouts, 1); assert.equal(reconciled, 1); assert.equal(consumes, 2); assert.equal(signed, 1);
@@ -218,7 +228,8 @@ test("contextual password login and creation use the guarded authentication rout
   assert.doesNotMatch(container.innerHTML, /p@example.invalid/);
 });
 test("merged form: a blank password asks for an email link, a filled one logs in (#3341)", async () => {
-  const { container, client, signins } = mount({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/password/login": { authenticated: true, account: { id: "a" } } });
+  const { container, client, signins, ui } = mount({ "/api/auth/magic/request": { status: "sent" }, "/api/auth/password/login": { authenticated: true, account: { id: "a" } } });
+  await offerRecovery(ui, container, client);
   // Blank password -> link request; the password route is never called.
   await container.listeners.submit[0](submitForm("password", { email: "m@example.invalid", password: "" }));
   assert.equal(client.calls[0].path, "/api/auth/magic/request");
@@ -232,13 +243,15 @@ test("merged form: a blank password asks for an email link, a filled one logs in
   assert.equal(signins.length, 1);
 });
 test("merged form: password is optional only when mail can send a link (#3341)", async () => {
-  const { container } = mount();
+  const { container, ui, client } = mount();
+  assert.match(container.innerHTML, /name="password"[^>]*required/);
+  await offerRecovery(ui, container, client);
   assert.doesNotMatch(container.innerHTML, /name="password"[^>]*required/, "no required attribute while a link fallback exists");
-  assert.match(container.innerHTML, /Leave it blank/);
+  assert.match(container.innerHTML, /name="method" value="email"/);
   const unconfigured = mountWithOptions({ providers: { mail: { configured: false } } });
   await flushOptions();
   assert.match(unconfigured.container.innerHTML, /name="password"[^>]*required/, "password is required when no link can be sent");
-  assert.doesNotMatch(unconfigured.container.innerHTML, /Leave it blank/);
+  assert.doesNotMatch(unconfigured.container.innerHTML, /name="method" value="email"/);
 });
 test("declining password authentication sends no request", async () => {
   const client = stubClient(); const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => {}, beforeSignIn: () => false });
@@ -254,7 +267,7 @@ for (const view of [{}, { authenticated: true, account: { id: "" } }, { session:
     const old = { authenticated: true, account: { id: "old" }, sessionRevision: 1 }; client.session = old; client.generation = 4;
     let fenced = 0, signed = 0;
     const ui = createAuthSigninUI({ accountClient: client, ensureAccountSession: async () => {}, onSignedIn: () => signed++, onSignInUncertain: () => fenced++ });
-    const container = fakeContainer(); ui.mount(container); await readyCode(ui, container);
+    const container = fakeContainer(); ui.mount(container); await readyCode(ui, container, client);
     await container.listeners.submit[0](submitForm("magic-code", { code: "real-issued-code" }));
     assert.equal(client.session, null); assert.equal(client.generation, 5); assert.equal(fenced, 1); assert.equal(signed, 0);
     assert.match(container.status.textContent, /didn.t complete/);
@@ -379,7 +392,8 @@ test("unconfigured mail hides the email-link offers and coerces magic entries to
 });
 
 test("configured mail keeps the email-link offers (#3341)", async () => {
-  const { container } = mountWithOptions({ providers: { mail: { configured: true } } });
+  const { container, ui, client } = mountWithOptions({ providers: { mail: { configured: true } } });
+  await offerRecovery(ui, container, client);
   await flushOptions();
   await container.listeners.click[0](clickOnDataset("forgot-password"));
   assert.match(container.innerHTML, /data-email-method="magic"/);
@@ -416,4 +430,51 @@ test("a failed capability load never reports providers to the host (F1 fail-open
   ui.mount(fakeContainer());
   await flushOptions();
   assert.equal(seen.length, 0, "no answer means the anchors keep the historical behavior");
+});
+
+test("explicit email sign-in ignores a filled password without authenticating", async () => {
+  const { container, client, signins, ui } = mount({ "/api/auth/magic/request": { status: "sent" } });
+  await offerRecovery(ui, container, client);
+  const event = submitForm("password", { email: "m@example.invalid", password: "synthetic-password" });
+  event.submitter = { value: "email" };
+  await container.listeners.submit[0](event);
+  assert.deepEqual(client.calls.map(call => call.path), ["/api/auth/magic/request"]);
+  assert.equal(signins.length, 0);
+});
+
+for (const [status, code, offered] of [[401, "invalid_credentials", true], [429, "rate_limited", false], [503, "unavailable", false], [undefined, undefined, false], [401, "account_session_required", false]]) {
+  test(`password recovery is conditional on uniform credential rejection: ${status}/${code}`, async () => {
+    const { client, container, ui } = mount({ "/api/auth/password/login": () => { throw Object.assign(new Error("Sign-in failed"), { status, code }); } });
+    assert.doesNotMatch(container.innerHTML, /name="method" value="email"/);
+    assert.match(container.innerHTML, /name="password"[^>]*required/);
+    await container.listeners.submit[0](submitForm("password", { email: "unknown@example.invalid", password: "wrong-password" }));
+    assert.equal(container.innerHTML.includes('name="method" value="email"'), offered);
+    assert.equal(client.calls.some(call => call.path === "/api/auth/magic/request"), false);
+    ui.clear();
+    assert.doesNotMatch(container.innerHTML, /name="method" value="email"/);
+  });
+}
+test("blank initial password never silently sends email", async () => {
+  const { client, container } = mount();
+  await container.listeners.submit[0](submitForm("password", { email: "unknown@example.invalid", password: "" }));
+  assert.deepEqual(client.calls, []);
+});
+test("obsolete credential rejection cannot offer recovery for a replacement session", async () => {
+  let reject;
+  const reply = new Promise((_, fail) => { reject = fail; });
+  const { client, container } = mount({ "/api/auth/password/login": () => reply });
+  const flight = container.listeners.submit[0](submitForm("password", { email: "old@example.invalid", password: "wrong-password" }));
+  while (!client.calls.length) await Promise.resolve();
+  client.generation++; client.session = { authenticated: true, account: { id: "new" } };
+  reject(Object.assign(new Error("Invalid email or password"), { status: 401, code: "invalid_credentials" }));
+  await flight;
+  assert.doesNotMatch(container.innerHTML, /name="method" value="email"/);
+});
+
+test("expired emailed-link entry and reload do not unlock recovery", () => {
+  const { ui, container } = mount();
+  ui.showMagic();
+  assert.doesNotMatch(container.innerHTML, /name="method" value="email"/);
+  ui.showView("magic-request");
+  assert.doesNotMatch(container.innerHTML, /name="method" value="email"/);
 });

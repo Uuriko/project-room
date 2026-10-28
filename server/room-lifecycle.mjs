@@ -38,7 +38,7 @@ const hasArchivedColumn = db => /\barchived_at\b/.test(db.prepare("SELECT sql FR
 export function migrateRoomLifecycleV28(store) {
   store.transaction(() => {
     if (!hasArchivedColumn(store.db)) store.db.exec("ALTER TABLE rooms ADD COLUMN archived_at TEXT");
-    store.db.prepare("UPDATE rooms SET archived_at=json_extract(projection,'$.room.archivedAt') WHERE archived_at IS NOT json_extract(projection,'$.room.archivedAt')").run();
+    store.db.prepare("UPDATE rooms SET archived_at=json_extract(projection,'$.room.archivedAt') WHERE json_valid(projection) AND archived_at IS NOT json_extract(projection,'$.room.archivedAt')").run();
   });
 }
 
@@ -46,7 +46,10 @@ export function migrateRoomLifecycleV28(store) {
 // and agrees with every projection. Read-only never migrates or repairs.
 export function verifyRoomLifecycle(store) {
   if (!hasArchivedColumn(store.db)) throw new Error("Room lifecycle schema requires operator reconciliation");
-  if (store.db.prepare("SELECT 1 FROM rooms WHERE archived_at IS NOT json_extract(projection,'$.room.archivedAt') LIMIT 1").get()) {
+  // #4126: a room whose projection is unreadable is quarantined at boot and
+  // named in the quarantine record; it cannot agree or disagree here, so it
+  // is excluded instead of throwing malformed JSON over the whole boot.
+  if (store.db.prepare("SELECT 1 FROM rooms WHERE json_valid(projection) AND archived_at IS NOT json_extract(projection,'$.room.archivedAt') LIMIT 1").get()) {
     throw new Error("Room lifecycle requires operator reconciliation");
   }
 }

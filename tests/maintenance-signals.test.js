@@ -36,7 +36,7 @@ test("paused service: version 200 without storage; health, ready, reads, writes 
   assert.equal(parsed.status, "paused"); assert.equal(parsed.mode, "maintenance");
   const head = await call(port, "/api/version", "HEAD", host); assert.equal(head.status, 200); assert.equal(head.body, "");
   for (const [path, method, body] of [["/api/health", "GET"], ["/api/ready", "GET"], ["/api/rooms/commons/events?after=0", "GET"],
-    ["/api/rooms/commons/orient", "GET"], ["/api/version", "POST", "{}"], ["/api/rooms/commons/commands", "POST", "{}"], ["/api/session", "POST", "{}"]]) {
+    ["/api/rooms/commons/activation-pack", "GET"], ["/api/version", "POST", "{}"], ["/api/rooms/commons/commands", "POST", "{}"], ["/api/session", "POST", "{}"]]) {
     const r = await call(port, path, method, host, body);
     assert.equal(r.status, 503, `${method} ${path}`); assert.equal(r.headers["retry-after"], "60"); assert.equal(r.headers["set-cookie"], undefined);
   }

@@ -1,0 +1,21 @@
+  /api/rooms/{roomId}/messages/{messageId}/thread:
+    get:
+      summary: Threaded replies
+      description: Root message plus its reply tree. Deleted messages appear as tombstones.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: messageId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Thread tree
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  thread: { type: object }
