@@ -5,7 +5,7 @@
 // whether this hook event is a pause and what is new since the cursor.
 
 const PAUSE_EVENTS = new Set(["stop", "subagentstop", "agent-turn-complete", "turn-complete", "sessionend", "idle"]);
-const SECRET = /\b(pri|rak|ghp|gho|ghs|sk)[_-][A-Za-z0-9_-]{8,}|\bRM-[A-Z0-9]{6,}\b/g;
+const REDACT_PATTERN = /\b(pri|rak|ghp|gho|ghs|sk)[_-][A-Za-z0-9_-]{8,}|\bRM-[A-Z0-9]{6,}\b/g;
 
 export function isPauseEvent(payload) {
   if (!payload || typeof payload !== "object") return false;
@@ -13,7 +13,7 @@ export function isPauseEvent(payload) {
   return typeof name === "string" && PAUSE_EVENTS.has(name.toLowerCase());
 }
 
-const line = text => String(text ?? "").replace(SECRET, "[redacted]").replace(/\s+/g, " ").trim().slice(0, 160);
+const line = text => String(text ?? "").replace(REDACT_PATTERN, "[redacted]").replace(/\s+/g, " ").trim().slice(0, 160);
 
 export function pauseDigest(inbox, { after = 0 } = {}) {
   const box = inbox && typeof inbox === "object" ? inbox : {};
