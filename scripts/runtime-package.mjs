@@ -343,6 +343,7 @@ optional.push("src/join-watchdog.js"); // Join page loader watchdog (public asse
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
 optional.push("server/pairing.mjs", "server/routes/pairing.mjs", "src/pairing-ui.js"); // device-code pairing, reconnect-by-key, and member merge (imported by server/store.mjs, server/routes/table.mjs, and src/app.js)
+optional.push("server/routes/agent-invite-redeem.mjs"); // agent invite redeem and fetch-only availability (imported by server/routes/table.mjs)
 optional.push("server/member-permission-requests.mjs", "server/routes/member-permissions.mjs"); // reviewed member permissions and their RT aliases
 optional.push("server/agent-fleet.mjs", "server/routes/agents.mjs"); // CP-AGENTS-1: fleet read model and its RT route (imported by server/routes/table.mjs and server/orient.mjs)
 optional.push("server/work-wants.mjs", "server/routes/wants-work.mjs"); // BOARD-WAKE-2: ready-work preference and its RT route (imported by server/store.mjs, server/work-claim-routes.mjs and server/routes/table.mjs)

@@ -1310,7 +1310,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         gmail, channelWebhooks, telegram, telegramStatus,
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
-        publicAgentPages,
+        publicAgentPages, jevShadowAdmission,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
@@ -3365,49 +3365,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
-      // Agent invite codes: redemption is unauthenticated (the code is the
-      // bearer credential); issuance is owner-only per room.
-      if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
-        rate(`invite-redeem:${remoteAddress}`, 20);
-        const data = await body(req);
-        // Colony round-2 (musespark-explorer, 2026-10-06): the static 422 here
-        // blamed the caller for sending *less* when the body carried an *extra*
-        // field — a recovery trap for a cold client. Port the access-request
-        // diagnoseArguments pattern so the 422 names the offending field.
-        const diagnosis = diagnoseArguments({
-          required: ["code", "displayName"],
-          properties: { code: { type: "string" }, displayName: { type: "string" }, requestId: { type: "string" } },
-          additionalProperties: false,
-        }, data);
-        if (diagnosis) {
-          const parts = [];
-          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
-          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
-          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName} with an optional requestId.`);
-        }
-        // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept
-        // requestId makes an uncertain retry safe — the retry replays the
-        // journaled redemption instead of 409ing on the burned code.
-        let requestId = null;
-        if (data.requestId !== undefined) {
-          if (!validId(data.requestId)) reject(422, "invalid_invite", "Send a valid request id for retry-safe redemption.");
-          requestId = data.requestId;
-        }
-        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req), requestId });
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
-        // score the join, journal the would-be decision, admit anyway.
-        jevShadowAdmission("agent-invite:redeem", { roomId: redeemedInvite.roomId, identityId: redeemedInvite.identityId,
-          displayName: redeemedInvite.displayName ?? data.displayName, card: null });
-        return json(res, 201, redeemedInvite);
-      }
-      if (url.pathname === "/api/agent-invites/redeem" && req.method === "GET") {
-        rate(`invite-redeem:${remoteAddress}`, 20);
-        return json(res, 200, store.invites.availability(url.searchParams.get("code") ?? ""));
-      }
-      if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
-        reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, POST" });
-      }
+      // Agent invite redeem (POST) and its fetch-only availability read (GET)
+      // are served from the route table: "/api/agent-invites/redeem"
       // Signed referral invites: the owner, or a member who can invite, mints
       // a bearer token and carries it out-of-band — the server never sends it.
       // Redemption is unauthenticated (the token is the credential) and
