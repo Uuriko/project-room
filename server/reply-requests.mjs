@@ -1,11 +1,11 @@
 import { messageRepository } from "./message-repository.mjs";
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
-import { validId, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+import { validId, MAX_MESSAGE_BODY_CHARS, ownMember } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
 
@@ -39,8 +39,66 @@ function decode(token, kind, binding) {
 
 // Every read is authenticated and anchored in the same storage transaction. The
 // local notice acknowledgement, history checkpoint and human read cursor are separate.
+export const ASK_OWNER_MAX_CHARS = 2000;
+const askMessageId = (memberId, requestId) => `ask-${createHash("sha256").update(`${memberId}:${requestId}`).digest("hex").slice(0, 40)}`;
+
 export class ReplyRequests {
   constructor(store) { this.store = store; }
+  // ask_owner (reason-take-3): an agent asks its own accountable human one
+  // question. It is an ordinary reply request, opened in one call that returns
+  // at once; the agent reads the outcome later (askOwnerStatus, needs-me, wake).
+  // One open question to the owner at a time. A retry with the same requestId
+  // returns the same request. Answers carry the server's answerCredential stamp,
+  // which attests the credential route, never permission to execute anything.
+  askOwner(token, roomId, { question, requestId } = {}) {
+    if (typeof question !== "string" || !question.trim() || question !== question.trim() || question.length > ASK_OWNER_MAX_CHARS)
+      fail("invalid_question", `Ask one trimmed question of 1 to ${ASK_OWNER_MAX_CHARS} characters`);
+    if (!validId(requestId)) fail("invalid_request_id", "requestId is your retry key: letters, digits, _ . : - (up to 128)");
+    return this.store.transaction(() => {
+      const auth = this.store.authenticate(token, roomId), state = this.store.room(roomId).state, me = auth.member;
+      if (me.kind !== "agent") fail("ask_owner_agents_only", "Only agent members ask their owner; people can send a request directly", 403);
+      const ownerId = ownMember(state.members, me.id)?.accountableHumanId, owner = ownerId ? ownMember(state.members, ownerId) : null;
+      if (!owner || owner.active === false || owner.kind !== "human" || ownerId === me.id)
+        fail("owner_unavailable", "This agent has no active human owner in this room. Ask the room owner to set one; nothing was sent", 409);
+      const messageId = askMessageId(me.id, requestId), requests = state.replyRequests ?? {};
+      if (Object.hasOwn(requests, messageId)) return this.askOwnerView(state, requests[messageId], roomId, { duplicate: true });
+      const pending = Object.values(requests).find(request => request.status === "open" && request.requesterId === me.id && request.recipientId === ownerId);
+      if (pending) throw Object.assign(new Error(`Your earlier question to your owner is still open (${pending.id}). Read its outcome, or cancel it, before asking another`),
+        { code: "ask_pending", status: 409, requestMessageId: pending.id });
+      this.store.command(token, roomId, { id: requestId, type: "message.posted",
+        data: { messageId, body: question, toMemberId: ownerId, requestKind: "reply" } });
+      const after = this.store.room(roomId).state;
+      return this.askOwnerView(after, after.replyRequests[messageId], roomId, { duplicate: false });
+    });
+  }
+  askOwnerStatus(token, roomId, requestMessageId) {
+    if (!validId(requestMessageId)) fail("invalid_reply_selection", "Choose one request");
+    return this.store.readTransaction(() => {
+      const auth = this.store.authenticate(token, roomId), state = this.store.room(roomId).state;
+      const request = Object.hasOwn(state.replyRequests ?? {}, requestMessageId) ? state.replyRequests[requestMessageId] : null;
+      if (!request || ![request.requesterId, request.recipientId].includes(auth.member.id)) fail("reply_request_not_found", "Request not found in this Room", 404);
+      return this.askOwnerView(state, request, roomId, { duplicate: null });
+    });
+  }
+  askOwnerView(state, request, roomId, { duplicate }) {
+    const outcome = request.status === "open" ? "unanswered" : request.status;
+    let note = null;
+    if (request.status === "cancelled") note = request.reason;
+    else if (request.responseMessageId) {
+      const message = messageRepository(this.store, roomId, state).getMany([request.responseMessageId]).get(request.responseMessageId);
+      note = typeof message?.body === "string" ? message.body : null;
+    }
+    const by = request.terminalActorId ? ownMember(state.members, request.terminalActorId) : null;
+    const path = `/api/rooms/${encodeURIComponent(roomId)}`;
+    return { contractVersion: 1, roomId, requestMessageId: request.id, ownerId: request.recipientId, outcome, note,
+      answeredBy: by ? { memberId: by.id, kind: by.kind } : null,
+      // null for an open request or an answer recorded before the stamp existed.
+      answerCredential: request.answerCredential ?? null,
+      ...(duplicate === null ? {} : { duplicate }),
+      next: { status: { method: "GET", path: `${path}/ask-owner?requestMessageId=${encodeURIComponent(request.id)}` },
+        context: { method: "GET", path: `${path}/reply-context?requestMessageId=${encodeURIComponent(request.id)}` } },
+      meaning: "outcome says whether your owner answered, declined or cancelled. It is not approval to execute anything." };
+  }
   read(token, roomId, expectedSessionBinding, fn) {
     return this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, expectedSessionBinding), room = this.store.room(roomId);

@@ -1,0 +1,51 @@
+  /api/rooms/{roomId}/ask-owner:
+    post:
+      summary: Ask your owner one question (agents)
+      x-room-permission: member
+      description: |
+        An agent member asks its accountable human one question. This opens an
+        ordinary reply request addressed to that person and returns at once
+        with its id; it never waits for the answer. Read the outcome later with
+        GET on this path, needs-me, or a wake. One open question to the owner
+        at a time; `requestId` is your retry key, and a retry with the same key
+        returns the same request (200). The outcome is answered, declined,
+        cancelled or unanswered. It is not approval to execute anything.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [question, requestId]
+              additionalProperties: false
+              properties:
+                question: { type: string, minLength: 1, maxLength: 2000, description: One trimmed question }
+                requestId: { type: string, description: "Retry key: letters, digits, underscore, dot, colon or hyphen, up to 128" }
+      responses:
+        '201': { description: Question sent; outcome is unanswered }
+        '200': { description: Same requestId retried; the existing request }
+        '401': { description: unauthenticated }
+        '403': { description: ask_owner_agents_only (people send a request directly) }
+        '409': { description: "ask_pending (an earlier question to the owner is open; requestMessageId names it) or owner_unavailable (no active human owner; nothing was sent)" }
+        '422': { description: invalid_question, invalid_request_id or invalid_body }
+    get:
+      summary: Read the outcome of a question to your owner
+      description: |
+        Returns outcome (answered, declined, cancelled or unanswered), the
+        owner's note, who answered, and answerCredential: account_session when
+        the answer arrived on the owner's signed-in account session,
+        room_credential for any other credential, null while unanswered or for
+        answers recorded before the stamp. Readable by the two parties only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: requestMessageId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: Current outcome }
+        '401': { description: unauthenticated }
+        '404': { description: reply_request_not_found }
+        '422': { description: invalid_reply_selection }
