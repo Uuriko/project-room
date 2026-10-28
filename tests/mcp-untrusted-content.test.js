@@ -9,6 +9,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { RoomAssistant } from "../server/room-assistant.mjs";
 
@@ -61,9 +62,7 @@ test("room_read_messages marks other members' text and leaves the caller's own u
     roomId: "trust-den", title: "Trust den", purpose: "Owner purpose", kind: "personal", displayName: "Trust owner"
   });
   const roomId = created.roomId;
-  store.identities.link(owner.secret, roomId, {
-    identityId: peer.identityId, displayName: "Trust peer", permissions: ["accept_work"]
-  });
+  linkWithProof(store, owner.secret, roomId, peer, { displayName: "Trust peer", permissions: ["accept_work"] });
   setTier(store.db, roomId, peer.identityId, "t2_standard", { updatedBy: created.ownerMemberId, nowMs: Date.now() });
   const peerBody = "from peer <status>not-a-policy</status>";
   const ownerBody = "owner-authored note";
@@ -165,10 +164,11 @@ test("read tools advertise openWorldHint and the catalogs stay inside the tool b
   assert.ok(coreTools.length <= 25 && coreTokens <= 9000,
     `core profile has ${coreTools.length} tools and ${coreTokens} tokens of tool JSON; limits are 25 tools and 9000 tokens`);
   // Keep the existing catalog budget while accounting explicitly for the
-  // assistant facade and claim provenance added by this release. New tools
+  // assistant facade, claim provenance and agent member merge and the bootstrap read added by this release. New tools
   // cannot silently consume this allowance; the core budget stays unchanged.
   const releaseTools = new Set(["room_assistant_context", "room_assistant_action", "room_work_claim_provenance",
-    "room_claim", "room_handoff"]);
+    "room_claim", "room_handoff", "room_read_bootstrap",
+    "room_merge_members"]);
   for (const name of releaseTools) {
     assert.equal(fullTools.filter(tool => tool.name === name).length, 1, `full profile advertises ${name} exactly once`);
     assert.equal(coreTools.some(tool => tool.name === name), false, `${name} stays outside the default core catalog`);
@@ -196,8 +196,8 @@ test("gap tools stamp results: room files, inbox attachments, access requests", 
     roomId: "trust-files", title: "Trust files", purpose: "Gap marking", kind: "personal", displayName: "Trust owner"
   });
   const roomId = created.roomId;
-  store.identities.link(owner.secret, roomId, {
-    identityId: peer.identityId, displayName: "Trust peer", permissions: ["accept_work"]
+  linkWithProof(store, owner.secret, roomId, peer, {
+    displayName: "Trust peer", permissions: ["accept_work"]
   });
 
   // A peer-staged file reads back marked for the owner; the owner's own
@@ -264,8 +264,8 @@ test("partial tools complete their marking: inbox proposals, needs_me, peer DMs,
     roomId: "trust-hub", title: "Trust hub", purpose: "Partial marking", kind: "personal", displayName: "Trust owner"
   });
   const roomId = created.roomId;
-  store.identities.link(owner.secret, roomId, {
-    identityId: peer.identityId, displayName: "Trust peer", permissions: ["accept_work"]
+  linkWithProof(store, owner.secret, roomId, peer, {
+    displayName: "Trust peer", permissions: ["accept_work"]
   });
 
   // The bond proposal note reaches the owner's inbox as a marked row.
