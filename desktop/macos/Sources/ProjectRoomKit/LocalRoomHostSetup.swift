@@ -25,10 +25,11 @@ public enum LocalRoomHostSetup {
 
     public struct Selection {
         public let node, script, codex, workspace, profile, connection: URL
+        public let allowedRequesterIds: [String]?
         public let allowWrites: Bool
-        public init(node: URL, script: URL, codex: URL, workspace: URL, profile: URL, connection: URL, allowWrites: Bool) {
+        public init(node: URL, script: URL, codex: URL, workspace: URL, profile: URL, connection: URL, allowWrites: Bool, allowedRequesterIds: [String]? = nil) {
             self.node = node; self.script = script; self.codex = codex
-            self.workspace = workspace; self.profile = profile; self.connection = connection; self.allowWrites = allowWrites
+            self.workspace = workspace; self.profile = profile; self.connection = connection; self.allowWrites = allowWrites; self.allowedRequesterIds = allowedRequesterIds
         }
     }
     private static func privateItem(_ url: URL, directory: Bool) throws {
@@ -39,6 +40,7 @@ public enum LocalRoomHostSetup {
         else { throw LocalToolFailure("setup_private_folder_required") }
     }
     public static func save(_ selection: Selection, directory: URL) throws -> URL {
+        try RoomHostManifest.validateRequesterIds(selection.allowedRequesterIds)
         let fm = FileManager.default
         let workspace = selection.workspace.resolvingSymlinksInPath().standardizedFileURL
         let profile = selection.profile.resolvingSymlinksInPath().standardizedFileURL
@@ -78,7 +80,7 @@ public enum LocalRoomHostSetup {
                 "cwd": workspace.path, "codexHome": profile.path,
                 "policy": ["approvalPolicy": "never", "sandbox": selection.allowWrites ? "workspace-write" : "read-only"]], options: [.sortedKeys]), runtime)
             let manifest = RoomHostManifest(version: 1, node: selection.node.path, script: selection.script.path,
-                runtimeConfig: runtime.path, roomConnection: selection.connection.path)
+                runtimeConfig: runtime.path, roomConnection: selection.connection.path, allowedRequesterIds: selection.allowedRequesterIds)
             let url = owned.appendingPathComponent("host.json")
             try write(JSONEncoder().encode(manifest), url)
             _ = try RoomHostManifest.read(url)

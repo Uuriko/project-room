@@ -26,7 +26,7 @@ import { recordWakeEvent, wakeAccounting } from "./wake-metrics.mjs";
 import { sqlChunks, sqlPlaceholders } from "./sql-binds.mjs";
 
 const MODES = Object.freeze(["wakeable", "pull-only"]);
-const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land"]);
+const WAKE_KINDS = Object.freeze(["mention", "dm", "bond", "assignment", "land", "ask"]);
 const STATUSES = Object.freeze(["online", "offline", "unregistered"]);
 // RC-2026-09-24-203: the default reachability window is 180s (was 60s).
 // Per host the window is max(180s, cadenceSeconds * 1.5).
@@ -79,7 +79,7 @@ export const agentHeartbeatSchema = `
   CREATE INDEX IF NOT EXISTS agent_hosts_seen ON agent_hosts(agent_id, last_seen_at);
   CREATE TABLE IF NOT EXISTS agent_wake_signals (
     signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
-    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land')),
+    kind TEXT NOT NULL CHECK(kind IN ('mention','dm','bond','assignment','land','ask')),
     room_id TEXT, message_id TEXT,
     created_at INTEGER NOT NULL, delivered_at INTEGER
   );
@@ -259,13 +259,20 @@ const claimWakeOf = messageId => {
   if (parts.length < 3 || parts[1].length === 0 || parts[2].length === 0) return null;
   return { workClaim: parts[1], reason: parts[2] };
 };
+const publicAskOf = messageId => {
+  if (typeof messageId !== "string") return null;
+  const match = /^public-ask:(ask_[A-Za-z0-9_-]{8,80})$/.exec(messageId);
+  return match ? match[1] : null;
+};
 const signalView = row => {
   const claim = claimWakeOf(row.message_id);
+  const publicAsk = publicAskOf(row.message_id);
   return Object.freeze({
     signalId: row.signal_id, agentId: row.agent_id, kind: row.kind,
     roomId: row.room_id, messageId: row.message_id,
     createdAt: row.created_at, deliveredAt: row.delivered_at,
     ...(claim ? { workClaim: claim.workClaim, reason: claim.reason } : {}),
+    ...(publicAsk ? { publicAsk } : {}),
     // The explicit ack copy rides the journaled pending-wake signal too.
     ackHint: WAKE_ACK_HINT,
   });
@@ -1011,8 +1018,8 @@ export class AgentHeartbeats {
     return Object.freeze({ released: dropped.changes > 0 });
   }
 
-  // Enqueue a wake signal for an agent (mention, DM, bond, assignment, or
-  // land update — WAKE_KINDS). Coalesced on
+  // Enqueue a wake signal for an agent (mention, DM, bond, assignment,
+  // land update, or public ask — WAKE_KINDS). Coalesced on
   // (agent_id, room_id, message_id) — issue #2913: message ids repeat
   // across rooms, so the same message wakes an agent once per room.
   enqueueWake({ agentId, kind, roomId = null, messageId }) {
