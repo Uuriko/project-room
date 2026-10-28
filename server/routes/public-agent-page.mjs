@@ -82,7 +82,7 @@ export async function publicAgentAsk(ctx) {
   ctx.rate(`public-ask:${ctx.remoteAddress}`, 10);
   const input = await ctx.body(ctx.req);
   ctx.res.setHeader("X-Robots-Tag", "noindex, nofollow");
-  return ctx.json(ctx.res, 202, ctx.store.publicAgentPages.postAsk(ctx.params.slug, input, originOf(ctx)));
+  return ctx.json(ctx.res, 202, ctx.store.publicAgentPages.postAsk(ctx.params.slug, input, originOf(ctx), ctx.remoteAddress));
 }
 
 export async function publicAgentPoll(ctx) {
