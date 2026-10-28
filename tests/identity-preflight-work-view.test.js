@@ -4,6 +4,7 @@ import { RoomAgentClient } from '../client/room-agent.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 const config = { origin: 'https://room.example', roomId: 'commons', memberId: 'agent', token: 'pri_' + 'a'.repeat(43) };
 const packet = () => ({ snapshotView: 'work', snapshotVersion: 1, roomId: 'commons', sequence: 0,
   viewerId: 'agent', viewerAccountId: null, viewerAuthEpoch: null, viewerSessionBinding: null, viewerSessionRevision: null,
@@ -47,7 +48,7 @@ test('projection, principal, account scope, active membership and delegated auth
 test('actual server rechecks identity revocation and API-key scope using bounded work-view response', async t => {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom());
   const owner = store.issueAccessKey('commons','owner'), identity = store.identities.create('Fixture agent');
-  store.identities.link(owner,'commons',{identityId:identity.identityId,memberId:'agent',displayName:'Fixture agent',permissions:[]});
+  linkWithProof(store, owner, 'commons', identity, { memberId:'agent',displayName:'Fixture agent',permissions:[]});
   const server = createRoomServer({store}); await new Promise(resolve => server.listen(0,'127.0.0.1',resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
   const origin = `http://127.0.0.1:${server.address().port}`, reads = [];
