@@ -844,7 +844,9 @@ function collectNeedsMeFresh(store, secret, { since, roomId: scopedRoom = null }
 //     over the caller's rows per room (land writers always stamp
 //     updated_at from the live clock);
 //   - bond proposal state and wake-pause rows live in side tables →
-//     aggregates over the identity's rows;
+//     aggregates over the identity's rows (the wake-pause signature also
+//     folds in the wake_queue_pause_by holder rows: a governor hardening
+//     a pause writes only there, and the output's heldBy derives from it);
 //   - seats, room sequence and archived flags → the seat signature plus a
 //     per-room (sequence, archived_at) vector.
 // Time-derived output (lease liveness, idle, minute displays, bond TTL) is
@@ -884,6 +886,11 @@ function probeStmts(db, roomCount) {
       `SELECT COUNT(*) AS c, COALESCE(MAX(p.paused_at),0) AS mp
        FROM wake_queue_pause p JOIN identity_links l ON l.room_id=p.room_id AND l.member_id=p.member_id
        WHERE l.identity_id=?`);
+    perDb.pauseByStmt = lazy(
+      `SELECT COUNT(*) AS c, COALESCE(GROUP_CONCAT(entry, ','), '') AS sig
+       FROM (SELECT b.room_id || '/' || b.member_id || '=' || COALESCE(b.paused_role,'') || ':' || COALESCE(b.paused_by,'') AS entry
+             FROM wake_queue_pause_by b JOIN identity_links l ON l.room_id=b.room_id AND l.member_id=b.member_id
+             WHERE l.identity_id=? ORDER BY b.room_id, b.member_id)`);
   }
   if (!perDb.roomsByCount.has(roomCount)) {
     perDb.roomsByCount.set(roomCount, db.prepare(
@@ -928,6 +935,18 @@ function needsMeVersionKey(store, identity, allowedRooms, scopedRoom, parsed, se
   if (pauseSig === "1") {
     const row = stmts.pauseStmt().get(identity.identityId);
     pauseSig += `:${row.c},${row.mp}`;
+    // The output's heldBy/resume derive from wake_queue_pause_by, and a
+    // governor hardening an already-paused member upserts ONLY that table
+    // (no pause-row write, no room event, no claim write), so the pause
+    // aggregate above cannot see it. Fold the by-rows (holder + role, in
+    // room/member order) into the signature, with the same table-presence
+    // flag stance as the pause table itself.
+    const byFlag = tableFlag(stmts, "wake_queue_pause_by");
+    pauseSig += `|by${byFlag}`;
+    if (byFlag === "1") {
+      const by = stmts.pauseByStmt().get(identity.identityId);
+      pauseSig += `:${by.c}:${by.sig}`;
+    }
   }
   return [
     identity.identityId,

@@ -48,6 +48,16 @@ const decodeItem = text => {
 // board state (needs-me's memo) key on this counter: unlike an updated_at
 // aggregate it cannot collide when two writes land inside one millisecond
 // or a rewrite preserves a row's length.
+//
+// Single-writer assumption (explicit, NM-CURE disposition of the memo
+// critic's Defect 2): this counter is process-local — a WeakMap keyed by
+// the db handle. A writer reaching the same SQLite file through a
+// different db handle or a second process cannot bump THIS process's
+// counter, so a reader memoised on it here would not see that write.
+// Production serving is single-store — one RoomStore owns the registry
+// and every registry write path goes through its set/delete/configure —
+// which is what makes the counter exact today. A future multi-process
+// writer would need a durable in-table version, not this counter.
 const boardVersions = new WeakMap();
 export function workClaimBoardVersion(db, roomId) {
   return boardVersions.get(db)?.get(roomId) ?? 0;

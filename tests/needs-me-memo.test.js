@@ -11,6 +11,7 @@
 // (b) is the load-bearing half.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { collectNeedsMe } from "../server/needs-me.mjs";
@@ -28,8 +29,10 @@ function setup(t) {
   const rooms = new AgentRooms(store);
   const ada = store.identities.create("Ada");
   const bob = store.identities.create("Bob");
+  const owners = {};
   for (const roomId of ["alpha", "beta"]) {
     const owner = store.identities.create(`Owen ${roomId}`);
+    owners[roomId] = owner;
     rooms.create(owner.secret, { roomId, title: roomId, purpose: "memo", kind: "personal" });
     linkWithProof(store, owner.secret, roomId, ada, { displayName: "Ada", permissions: WRITER });
     linkWithProof(store, owner.secret, roomId, bob, { displayName: "Bob", permissions: WRITER });
@@ -60,7 +63,7 @@ function setup(t) {
     store.workClaims.set(roomId, item);
     return item;
   };
-  return { store, clock, ada, bob, adaAlpha, bobAlpha, call, repeatIsStable, putClaim,
+  return { store, clock, ada, bob, owners, adaAlpha, bobAlpha, call, repeatIsStable, putClaim,
     listCalls: () => listCalls };
 }
 
@@ -187,4 +190,37 @@ test("memo: a pure clock advance across a bond expiry is never served stale", t 
   page = call();
   assert.equal(page.items.some(entry => entry.kind === "bond_request"), false,
     "the expired proposal is no longer served");
+});
+
+test("memo: a governor hardening a self-pause invalidates — heldBy flips from self to owner", t => {
+  const { store, ada, adaAlpha, owners, call, repeatIsStable } = setup(t);
+  const seqOf = roomId => store.db.prepare("SELECT sequence FROM rooms WHERE id=?").get(roomId).sequence;
+  const pauseAgg = () => store.db.prepare(
+    "SELECT COUNT(*) AS c, COALESCE(MAX(paused_at),0) AS mp FROM wake_queue_pause").get();
+
+  // Ada pauses herself: a self-held pause, self-resumable. The second poll
+  // inside repeatIsStable is served from the memo.
+  store.wakeQueue.pause(ada.secret, "alpha", { requestId: randomUUID(), reason: "own maintenance" });
+  let page = repeatIsStable();
+  assert.equal(page.paused?.find(row => row.roomId === "alpha")?.heldBy, "self", "self-pause reads self-held");
+  assert.equal(page.paused?.find(row => row.roomId === "alpha")?.resume, "wake_resume lifts your own pause");
+
+  // The room owner (a governor) pauses Ada too: this HARDENS the existing
+  // pause. wake-queue upserts ONLY wake_queue_pause_by — the pause row,
+  // the room sequence and the claim board all stay exactly as they were.
+  const seqBefore = seqOf("alpha");
+  const aggBefore = pauseAgg();
+  store.wakeQueue.pause(owners.alpha.secret, "alpha", { requestId: randomUUID(), reason: "room freeze" }, null, { memberId: adaAlpha });
+  assert.equal(seqOf("alpha"), seqBefore, "fixture: hardening appends no room event");
+  assert.deepEqual(pauseAgg(), aggBefore, "fixture: hardening leaves the pause aggregate unchanged");
+  // Ground truth, read directly: the pause is owner-held now.
+  assert.equal(store.agentHeartbeats.pausedRoomsOf(ada.identityId).find(row => row.roomId === "alpha")?.heldBy, "owner",
+    "fixture: the direct read shows the hardened holder");
+
+  // The next poll must show the hardening, not the memoised self-held row.
+  page = call();
+  assert.equal(page.paused?.find(row => row.roomId === "alpha")?.heldBy, "owner", "hardened pause reads owner-held");
+  assert.equal(page.paused?.find(row => row.roomId === "alpha")?.resume, "only the room owner or a member manager can resume",
+    "hardened pause carries the owner-resume text");
+  repeatIsStable();
 });
