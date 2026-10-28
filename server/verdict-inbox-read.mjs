@@ -5,43 +5,19 @@
 // already authorised, and injects Lane B's CD-06 follow records
 // (Contract F) when that provider is present on the store.
 //
-// Contract F consumption: CD-06 (Lane B) was to ship claimFollowTotals +
+// Contract F consumption: CD-06 (Lane B) shipped claimFollowTotals +
 // listClaimFollows in server/claim-follows.mjs — per-member totals
 // { followedClaims, unreadClaims, unreadEvents, mentions } and per-claim
 // follow records { claimId, roomId, policy, unreadCount, mentionCount }.
-// That module never landed, so the import is OPTIONAL (cure for the
-// settle-pass-19 RED, 2026-10-27): a static import of an absent module
-// killed every surface that loads this one. When the module is absent
-// the generic store-surface probe below remains the fallback for
-// alternate wirings; if neither answers, follow reads as null — never
-// as invented zeroes.
+// CD-06's claim-follows.mjs is not on this tree (the follow-records PR
+// was archived). A store-surface probe is the only follow source here;
+// if it does not answer, follow reads as null — never as invented zeroes.
 import { buildVerdictInbox } from "./verdict-inbox.mjs";
 import { ownMember } from "../src/events.js";
-
-let claimFollowTotals = null;
-let listClaimFollows = null;
-try {
-  ({ claimFollowTotals, listClaimFollows } = await import("./claim-follows.mjs"));
-} catch { /* CD-06 module absent: follow reads stay null */ }
 
 const MAX_ROOMS = 40;
 
 function followForRoom(store, roomId, memberId) {
-  if (claimFollowTotals && listClaimFollows) try {
-    const totals = claimFollowTotals(store.db, { roomId, memberId });
-    if (totals && typeof totals === "object") {
-      const claims = listClaimFollows(store.db, { roomId, memberId })
-        .filter(row => row && typeof row.claimId === "string")
-        .map(row => ({
-          claimId: row.claimId,
-          roomId: typeof row.roomId === "string" ? row.roomId : roomId,
-          ...(row.policy ? { policy: row.policy } : {}),
-          ...(Number.isSafeInteger(row.unreadCount) ? { unreadCount: row.unreadCount } : {}),
-          ...(Number.isSafeInteger(row.mentionCount) ? { mentionCount: row.mentionCount } : {}),
-        }));
-      return { totals, claims };
-    }
-  } catch { /* fall through to the generic probe */ }
   const providers = [store.followRecords, store.claimFollows, store.follows].filter(Boolean);
   for (const provider of providers) {
     try {
@@ -99,6 +75,28 @@ export function collectVerdictInbox(store, { memberByRoom, surface = "human", no
     } catch (error) {
       roomErrors.push({ roomId, error: typeof error?.code === "string" ? error.code : "room_read_failed" });
     }
+  }
+  if (rooms.length === 0) {
+    const sections = Object.freeze({
+      needsYourVerdict: Object.freeze([]),
+      returnedToYou: Object.freeze([]),
+      waitingOnWorker: Object.freeze([]),
+      recentlyDecided: Object.freeze([]),
+    });
+    return Object.freeze({
+      contractVersion: 1,
+      generatedAt: new Date(nowMs).toISOString(),
+      viewerId: null,
+      surface: surface === "agent" ? "agent" : "human",
+      sections,
+      totals: Object.freeze({
+        needsYourVerdict: 0, returnedToYou: 0, waitingOnWorker: 0, recentlyDecided: 0,
+        total: 0, attentionTuples: 0, followedChanges: 0, mentions: 0,
+      }),
+      follow: null,
+      following: Object.freeze([]),
+      roomErrors: Object.freeze(roomErrors),
+    });
   }
   const inbox = buildVerdictInbox({ rooms, nowMs, surface });
   return Object.freeze({ ...inbox, roomErrors: Object.freeze(roomErrors) });

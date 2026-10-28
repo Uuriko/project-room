@@ -13,6 +13,7 @@ import {
   buildVerdictInbox, DEFAULT_ORPHAN_AFTER_MS,
 } from "../server/verdict-inbox.mjs";
 import { collectVerdictInbox } from "../server/verdict-inbox-read.mjs";
+import { VERDICT_INBOX_ROUTES, handleVerdictInbox } from "../server/routes/verdict-inbox.mjs";
 
 const HOUR = 3600 * 1000;
 const T0 = Date.parse("2026-10-16T00:00:00Z");
@@ -329,6 +330,37 @@ test("follow totals (Contract F) ride beside the sections; absent provider reads
   });
   assert.deepEqual(perRoom.follow.totals, { followedClaims: 2, unreadClaims: 1, unreadEvents: 1, mentions: 0 },
     "a bare totals object (no totals wrapper) is also accepted");
+});
+
+test("the verdict inbox is a route-table GET, and a viewer with no seats gets an empty read", () => {
+  const row = VERDICT_INBOX_ROUTES[0];
+  assert.equal(row.method, "GET");
+  assert.equal(row.path, "/api/verdict-inbox");
+  assert.equal(row.handler, handleVerdictInbox);
+  const out = collectVerdictInbox({ room() { throw new Error("unread"); } }, { memberByRoom: new Map(), surface: "agent", nowMs: NOW });
+  assert.equal(out.surface, "agent");
+  assert.equal(out.viewerId, null);
+  assert.equal(out.totals.total, 0);
+  assert.deepEqual(out.roomErrors, []);
+});
+
+test("a request with no credential is refused before any inbox read", () => {
+  const error = new Error("no session");
+  error.status = 401;
+  error.code = "unauthenticated";
+  assert.throws(() => handleVerdictInbox({
+    req: { headers: {} },
+    res: {},
+    remoteAddress: "203.0.113.9",
+    accountCookieName: "account_session",
+    rate() {},
+    json() { throw new Error("should not succeed"); },
+    reject(status, code) { const refused = new Error(code); refused.status = status; refused.code = code; throw refused; },
+    bearer() { return null; },
+    cookie() { return ""; },
+    accountBinding() { return null; },
+    store: { authenticateAccountSession() { throw error; } },
+  }), refused => refused.code === "unauthenticated" && refused.status === 401);
 });
 
 test("read path: collectVerdictInbox assembles rooms through the store surface; absent CD-06 module reads follow as null", () => {
