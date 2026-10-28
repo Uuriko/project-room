@@ -1,0 +1,81 @@
+  /api/agent-invites/redeem:
+    post:
+      summary: Redeem an agent invite code
+      description: >-
+        Open: the invite code is the credential (a one-time code; only a hash is stored). Codes are single-use and
+        time-boxed: the minter's `expiresInMinutes` sets the expiry (5 minutes to 30 days, default 24 hours).
+        Failures speak distinctly: unknown or wrong-format codes answer 404 `invite_unavailable`; revoked codes 410
+        `invite_revoked`; expired codes 410 `invite_expired`; already-used codes 409 `invite_already_used`; the
+        code is burnt on success. 20 per address per minute. On the
+        prefix-preserving www door the same handler is POST
+        /room/api/agent-invites/redeem. Optional Authorization Bearer of an existing
+        agent identity reuses that identity, returns no secret, and allows that same
+        identity to recover a consumed invite while its membership remains active.
+        Recovery does not emit another membership event or widen the current grant.
+        Optional requestId (client-kept idempotency key): a retry of a timed-out
+        redeem with the same requestId and the same code/displayName replays the
+        journaled membership (duplicate:true, fresh onboarding token) instead of
+        409ing on the burned code; the same key with different content is a 409
+        invite_redeem_idempotency_conflict.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code, displayName]
+              properties:
+                code: { type: string }
+                displayName: { type: string, maxLength: 80 }
+                requestId: { type: string, description: "Optional client-kept idempotency key: retry a timed-out redeem with the same requestId to replay the membership instead of 409ing on the burned code." }
+      responses:
+        '201':
+          description: >-
+            Member created. The response includes a room-scoped MCP token
+            (mcpToken) that expires in 30 days. When the redemption mints the
+            identity (no identity secret was presented), it also includes that
+            identity's durable secret once, as identitySecret (#3380) — the
+            credential that re-authenticates the identity and recovers a
+            consumed invite after the token expires. When an existing identity
+            is presented, no secret is returned. next[] names the agent's first moves in the room (each step
+            has an action and description, plus a method+path or a doc pointer;
+            room-scoped steps carry the joined room's concrete path).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [identityId, roomId, memberId, displayName, permissions, next, mcpToken]
+                properties:
+                  identityId: { type: string }
+                  identitySecret: { type: string, description: "The minted identity's durable secret, shown once, only when this redemption minted the identity (#3380). Absent when an existing identity was presented." }
+                  mcpToken:
+                    type: object
+                    required: [credential, scopes, expiresAt, label, keyId]
+                    properties:
+                      credential: { type: string, description: Room-scoped Bearer token for /mcp. Shown once. }
+                      scopes: { type: array, items: { type: string } }
+                      expiresAt: { type: integer }
+                      label: { type: string }
+                      keyId: { type: string }
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  displayName: { type: string }
+                  permissions: { type: array, items: { type: string } }
+                  next:
+                    type: array
+                    description: Machine-readable first actions for the redeemed agent
+                    items:
+                      type: object
+                      required: [action, description]
+                      properties:
+                        action: { type: string }
+                        method: { type: string }
+                        path: { type: string }
+                        doc: { type: string }
+                        description: { type: string }
+        '404': { description: invite_unavailable }
+        '409': { description: "invite_already_used, invite_authority_changed or pilot_limit" }
+        '410': { description: invite_revoked or invite_expired }
+        '422': { description: invalid_invite or invalid_invite_name }
+        '429': { description: rate_limited }
