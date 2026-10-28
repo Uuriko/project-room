@@ -186,7 +186,7 @@ jobs:
           else
             node scripts/onboarding-probe/predeploy.mjs --target staging --sha "$SHA" --runs 3 --out probe-out
           fi
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: predeploy-probe-${{ needs.gate.outputs.sha }}
@@ -241,7 +241,7 @@ jobs:
       - name: Record exact live versions and code schemas before upload
         id: pre
         run: node scripts/deploy-recovery.mjs snapshot "$RUNNER_TEMP/pre-deploy.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: pre-deploy-${{ needs.gate.outputs.sha }}
           path: ${{ runner.temp }}/pre-deploy.json
@@ -282,7 +282,7 @@ jobs:
           else
             echo "::warning::prod smoke attempt 1 failed; retrying once in ${SMOKE_RETRY_DELAY_SECONDS:-150}s (Durable Object version lag) before recovery" >&2
             sleep "${SMOKE_RETRY_DELAY_SECONDS:-150}"
-            node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke.json"
+            node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke-attempt2.log" "$RUNNER_TEMP/prod-smoke.json"
           fi
       - name: Live smoke
         shell: bash
@@ -297,13 +297,15 @@ jobs:
           PROD_OUTCOME: ${{ steps.prod.outcome }}
           ENTRY_OUTCOME: ${{ steps.entry.outcome }}
         run: node scripts/deploy-recovery.mjs recover "$RUNNER_TEMP/pre-deploy.json" "$RUNNER_TEMP/deploy-recovery.json"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && steps.pre.outcome == 'success'
         with:
           name: deploy-recovery-${{ needs.gate.outputs.sha }}
           path: |
             ${{ runner.temp }}/pre-deploy.json
             ${{ runner.temp }}/deploy-recovery.json
+            ${{ runner.temp }}/prod-smoke-attempt*.log
+            ${{ runner.temp }}/prod-smoke.json
           retention-days: 90
       - name: Receipt to muse-room
         if: always() && steps.pre.outcome == 'success'
