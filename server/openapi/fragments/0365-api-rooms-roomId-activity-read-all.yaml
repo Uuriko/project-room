@@ -1,0 +1,19 @@
+  /api/rooms/{roomId}/activity-read-all:
+    post:
+      summary: Mark all activity events read
+      description: >-
+        Marks every unread activity event read for the caller, optionally
+        filtered by type. Body: `{ type? }`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string, enum: [mention, reply, thread_reply, reaction] }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, viewerId, marked }" }

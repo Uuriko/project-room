@@ -28,6 +28,7 @@ import { readAgentConnection, saveAgentConnection } from '../client/agent-connec
 import { RoomAgentClient } from '../client/room-agent.mjs';
 import { openSetupJournal, atomicPrivateJson } from '../client/setup-journal.mjs';
 import { AgentWakeClient } from '../client/agent-wake.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(':memory:'), root = mkdtempSync(join(tmpdir(), 'scoped-contract-'));
@@ -51,7 +52,7 @@ async function fixture(t) {
   };
   const addMember = (name, roomId, memberId) => {
     const identity = store.identities.create(name);
-    store.identities.link(owners[roomId], roomId, { identityId: identity.identityId, memberId, displayName: name, permissions: [] });
+    linkWithProof(store, owners[roomId], roomId, identity, { memberId, displayName: name, permissions: [] });
     return identity;
   };
   return { store, owners, setup, connection, request, addMember, origin, root, invite };

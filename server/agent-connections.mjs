@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { EVENT_TYPES as T, validId, ownMember } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { LINK_CODE_RE } from "./agent-identities.mjs";
 import { isCatalogAgentType } from "../src/room-roster.js";
 
@@ -239,7 +239,8 @@ export class AgentConnections {
       // so a disconnected identity can't keep acting through the bond
       // surface; the removed identity is echoed on the receipt for audit.
       if (action === "create" && request.identityId) {
-        this.store.identities.consumeLinkCode(request.identityId, identityLinkCode);
+        this.store.identities.consumeLinkCode(request.identityId, identityLinkCode,
+          { roomId, sponsorAccountId: auth.account.id });
         const identity = this.store.identities.get(request.identityId);
         if (!identity) fail(404, "identity_not_found", "No such agent identity");
         const plugin = this.store.agentPlugin;

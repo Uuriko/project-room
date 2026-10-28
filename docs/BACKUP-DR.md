@@ -16,7 +16,11 @@ honestly cannot survive yet.
   there is no second backup target. Enabling R2 (account action, then the
   `ROOM_BACKUPS` binding in BACKUPS.md) is the standing fix.
 - **Operator export works.** `GET /api/operator/export` streams the same
-  NDJSON when `ROOM_BACKUP_TOKEN` is configured on the owning script.
+  NDJSON when `ROOM_EXPORT_TOKEN` is configured on the owning script.
+  TM-2 split the backup credential: the restore doors below answer only
+  to `ROOM_RESTORE_TOKEN` (unset outside a restore incident, so they
+  answer 404 in normal operation), and the retired `ROOM_BACKUP_TOKEN`
+  opens nothing. See BACKUPS.md, "Split backup credentials".
 - **Restore paths:**
   - *File replay (the working route today):* `scripts/replay-room-export.mjs`
     loads an export into a **new** Node sqlite store. Rehearsed end-to-end on
@@ -30,8 +34,8 @@ honestly cannot survive yet.
   - *KV-native restore (the #3409 fix; deployed to production in revision
     `7ca2e955` on 2026-10-16):*
     `POST /api/operator/restore-from-backup` restores the daily backup
-    already stored in the `ROOM_BACKUPS_KV` namespace — same operator token
-    and fail-closed posture, no size cap: the manifest and parts are pulled
+    already stored in the `ROOM_BACKUPS_KV` namespace — same restore token
+    (`ROOM_RESTORE_TOKEN`) and fail-closed posture, no size cap: the manifest and parts are pulled
     and verified (per-part and whole-backup sha256) one at a time and
     replayed in bounded batches, and the same trailer, foreign-key,
     watermark, recovery, and invitation audits must pass before the restore
@@ -94,16 +98,18 @@ remains the route that needs no Cloudflare runtime.
 
 ## What a restore recovers — and what it destroys
 
-The NDJSON export hashes every secret column (sha256). A restore recovers
-**data**, never working credentials:
+The NDJSON export sanitizes named raw secret columns. It preserves already-hashed
+credential verifiers, so **existing credentials may still authenticate after restore**.
+Restoring data does not rotate credentials or fence delayed pre-restore requests:
 
 1. Every sanitized secret cell (webhook secrets, push key material and
    tokens, join tokens, verifiers, encrypted payloads — the exact list is
    `EXPORT_SECRET_COLUMNS` in `server/room-export.mjs`) is substituted on
    restore — NULL, or an empty string where the column is NOT NULL — never
    the export's sha256 placeholder as a live value. The restore result's
-   `sanitizedCells` counts every substitution per table and column. **All
-   of them must be re-issued** after a restore before agents can act again.
+   `sanitizedCells` counts every substitution per table and column. Replace
+   these secrets to restore affected integrations. This does not invalidate
+   credentials whose stored hashes were preserved.
 2. A restore resurrects authority exactly as it was **at backup time**.
    Anything revoked between the backup and the loss (keys, share links,
    memberships, delegations) comes back looking current. The operator must
@@ -115,20 +121,24 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
 ## Restore runbook (operator)
 
 1. Obtain the NDJSON: reassemble the day's KV parts per the manifest in
-   BACKUPS.md, or `GET /api/operator/export` with the operator token.
+   BACKUPS.md, or `GET /api/operator/export` with the export token.
+   For a DO-native restore, first arm the restore token for the incident
+   (`wrangler secret put ROOM_RESTORE_TOKEN --env production` on the
+   owning script) and delete it again when the restore completes.
 2. Replay into a new store. From the nightly KV copy,
    `node scripts/restore-room-backup.mjs --kv <YYYY-MM-DD> --to <new sqlite path>`
    checks each part's sha256 and the whole file's sha256 against the manifest
    before replaying; from a saved export file, use the same script with
    `--from <export>` (or `scripts/replay-room-export.mjs` directly).
    A failed replay leaves the destination unpromoted.
-3. Re-issue every credential, and re-apply post-backup revocations (see
+3. Keep access closed while revoking and re-issuing credentials, replacing
+   sanitized secrets, and re-applying post-backup revocations (see
    above). Treat the restored room as authoritative **as of `backedUpAt`**.
 
 (The request-body endpoint runbook applies only to exports under the 64 MiB
 cap: confirm the DO store is empty — the endpoints refuse a non-empty store
 with 409 — then POST the NDJSON with
-`Authorization: Bearer <ROOM_BACKUP_TOKEN>`. For the current over-cap
+`Authorization: Bearer <ROOM_RESTORE_TOKEN>`. For the current over-cap
 backup, use the KV-native endpoint above with the backup's key instead.)
 
 ## Corrupt-projection maintenance procedure (operator)
