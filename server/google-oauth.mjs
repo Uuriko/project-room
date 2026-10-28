@@ -34,6 +34,17 @@ export function googlePostLoginPage(href) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
 }
 
+// The provider's cross-site return cannot carry the Strict account cookie.
+// Commit a same-origin document before asking for the bound session. This page
+// does not consume state or exchange a code; completion still verifies both.
+export function googleCallbackResumePage(callbackUrl) {
+  const url = new URL(callbackUrl);
+  if (url.pathname !== GOOGLE_CALLBACK_PATH || url.search.length > 16384) fail('google_callback_invalid');
+  url.searchParams.set('room_oauth_resume', '1');
+  const href = (url.pathname + url.search).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll("'", '&#39;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${href}"><title>Completing sign-in</title></head><body><p>Completing sign-in…</p><p><a href="${href}">Continue</a></p></body></html>`;
+}
+
 export function googleConfig(env = {}, origin) {
   const clientId = env.ROOM_GOOGLE_CLIENT_ID;
   const clientSecret = env.ROOM_GOOGLE_CLIENT_SECRET;

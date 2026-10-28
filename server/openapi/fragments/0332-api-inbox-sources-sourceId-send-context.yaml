@@ -1,0 +1,15 @@
+  /api/inbox/sources/{sourceId}/send-context:
+    get:
+      summary: What a send from this source would use
+      description: >-
+        Account-session read. 409 channel_sending_unavailable when the
+        source's channel cannot send. `simulationAvailable` is true only on a
+        loopback service started with the synthetic transport.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '422': { description: session_binding_required }
+        '200': { description: Send context plus simulationAvailable }
+        '409': { description: channel_sending_unavailable }

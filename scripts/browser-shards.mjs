@@ -10,14 +10,21 @@ export function parseShard(value) {
   }
   return { index: Number(match[1]), total: SHARD_COUNT };
 }
-export function browserPlan(script) {
+export function browserPlan(script, options = {}) {
   const words = String(script ?? "").trim().split(/\s+/);
   if (words[0] !== "node" || words[1] !== "--test") throw new Error('test:browser must start with "node --test"');
   if (words.some(word => word.startsWith("--test-reporter"))) throw new Error("test:browser already sets --test-reporter");
   const flags = words.slice(2).filter(word => word.startsWith("--"));
-  const files = words.slice(2).filter(word => !word.startsWith("--"));
-  if (flags.some(flag => !/^--test-concurrency=[1-9]\d*$/.test(flag)) || !files.length || files.some(file => !/^scripts\/[\w./-]+\.mjs$/.test(file)) || new Set(files).size !== files.length) {
+  const declared = words.slice(2).filter(word => !word.startsWith("--"));
+  if (flags.some(flag => !/^--test-concurrency=[1-9]\d*$/.test(flag)) || !declared.length || declared.some(file => !/^scripts\/[\w./-]+\.mjs$/.test(file)) || new Set(declared).size !== declared.length) {
     throw new Error("Browser suite must contain explicit unique scripts/*.mjs paths and only --test-concurrency=N");
+  }
+  const allow = options.only ? new Set(options.only) : null;
+  const files = allow ? declared.filter(file => allow.has(file)) : declared;
+  if (!files.length) {
+    const shards = Array.from({ length: SHARD_COUNT }, (_, i) => ({ index: i + 1, files: [], estimatedMs: 0 }));
+    const planHash = createHash("sha256").update(JSON.stringify({ script, shards })).digest("hex");
+    return { flags, files, shards, planHash };
   }
   const shards = Array.from({ length: SHARD_COUNT }, (_, i) => ({ index: i + 1, files: [], estimatedMs: 0 }));
   const estimate = file => Number.isFinite(timings[file]) && timings[file] > 0 ? timings[file] : 10000;
@@ -111,7 +118,10 @@ export function verifyBrowserShards(plan, receipts, { matrixResult, revision, ru
   if (latest.size !== SHARD_COUNT) throw new Error("Missing or duplicate browser shard receipts");
   for (const shard of plan.shards) {
     const receipt = latest.get(shard.index);
-    if (receipt.total !== SHARD_COUNT || receipt.status !== 0 || receipt.signal !== null || receipt.planHash !== plan.planHash || receipt.revision !== revision || receipt.runId !== runId || JSON.stringify(receipt.files) !== JSON.stringify(shard.files) || !shard.files.length) {
+    const filesMatch = JSON.stringify(receipt.files) === JSON.stringify(shard.files);
+    // An affected pull request may leave a shard empty. The full suite's plan
+    // never does; tests/browser-shards.test.js keeps that bar.
+    if (receipt.total !== SHARD_COUNT || receipt.status !== 0 || receipt.signal !== null || receipt.planHash !== plan.planHash || receipt.revision !== revision || receipt.runId !== runId || !filesMatch) {
       throw new Error(`Browser shard ${shard.index} has missing, failed, stale or mismatched evidence`);
     }
   }

@@ -151,3 +151,17 @@ test("browser receipt attempts are positive bounded integers and conflicting dup
   assert.deepEqual(verifyBrowserShards(plan, [...good, { ...good[0], runAttempt: "2" }], ident), { scripts: plan.files.length, shards: SHARD_COUNT });
   assert.throws(() => verifyBrowserShards(plan, [...good, { ...good[0], runAttempt: "2", status: 1 }], ident), /mismatched evidence/);
 });
+
+test("an affected plan may leave a shard empty when its receipt lists the same files", () => {
+  const script = canonicalBrowserScript();
+  const plan = browserPlan(script, { only: browserPlan(script).files.slice(0, 2) });
+  assert.ok(plan.shards.some(shard => shard.files.length === 0));
+  const identity = { matrixResult: "success", revision: "rev", runId: "run", runAttempt: "1" };
+  const receipts = plan.shards.map(shard => ({
+    index: shard.index, total: 6, files: shard.files, planHash: plan.planHash,
+    status: 0, signal: null, revision: "rev", runId: "run", runAttempt: "1",
+  }));
+  assert.equal(verifyBrowserShards(plan, receipts, identity).shards, 6);
+  receipts[0] = { ...receipts[0], files: ["scripts/not-in-the-plan.mjs"] };
+  assert.throws(() => verifyBrowserShards(plan, receipts, identity), /mismatched evidence/);
+});
