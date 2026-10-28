@@ -2892,8 +2892,9 @@ export class BountyEscrow {
   //   proposed  -> now >= deadlineMs, and any snooze has lapsed
   //                (snoozedUntilMs null or now >= snoozedUntilMs);
   //   accepted  -> challengeEndsMs set and now >= challengeEndsMs;
-  //   submitted -> now >= deadlineMs (not in closeEpoch's SELECT, but the
-  //                pass acts on it, so the predicate stays exact);
+  //   submitted -> now >= deadlineMs (in closeEpoch's SELECT since the
+  //                guardian census F1 fix; the pass free-miss-refunds it,
+  //                so the predicate stays exact);
   //   funded / claimed -> now >= deadlineMs;
   //   disputed  -> disputeId set and no recorded resolution, and the
   //                dispute record is terminal (resolved/withdrawn: the

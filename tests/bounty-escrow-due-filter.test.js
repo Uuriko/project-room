@@ -18,10 +18,10 @@
 //   approved: sweep runs unconditionally                        table + T-b
 //   proposed: now >= deadline, snooze lapsed (null or <= now)   table + T-a
 //   accepted: challengeEnds set, now >= challengeEnds           table + T-b
-//   submitted: now >= deadline (not in closeEpoch's SELECT;     table
-//     the pass acts on it via finalizeBounty, so the predicate
-//     must stay exact — T-e pins that closeEpoch leaves it be
-//     because of the SELECT, not because of the filter)
+//   submitted: now >= deadline (in closeEpoch's SELECT since   table
+//     the guardian census F1 fix; the pass free-miss-refunds it,
+//     so the predicate must stay exact — T-e pins that closeEpoch
+//     still reaches it, unchanged by the filter)
 //   funded / claimed: now >= deadline                           table + T-a
 //   disputed: disputeId set, no resolution, and dispute record  table + T-c
 //     terminal (resolved/withdrawn), or open past the 14-day
@@ -248,7 +248,17 @@ test("T-d: a nothing-due epoch over many open bounties opens zero isolated trans
   expectConserved(escrow);
 });
 
-test("T-e: closeEpoch does not reach submitted bounties (its SELECT scope, not the filter)", () => {
+test("T-e: closeEpoch reaches submitted bounties (its SELECT includes 'submitted'; the filter must not narrow it)", () => {
+  // Cure note (settle-pass-19 RED, FINISH-100 P1, 2026-10-27): this test
+  // originally asserted the opposite — that closeEpoch's SELECT never
+  // included 'submitted'. That premise is false in the code: the SELECT
+  // has included 'submitted' since the guardian census F1 fix
+  // (2026-10-18), whose comment in closeEpoch records that a snapshot
+  // missing 'submitted' left past-deadline submitted bounties counted due
+  // every tick while no keeper action could ever touch them. The
+  // due-filter's obligation is the reverse of the original assertion:
+  // stay exact, so the epoch still free-miss-refunds a submitted bounty
+  // past its deadline.
   const { escrow, counter } = makeWorld();
   const bounty = post(escrow, { deadline: isoFuture(3600_000) });
   escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
@@ -256,8 +266,8 @@ test("T-e: closeEpoch does not reach submitted bounties (its SELECT scope, not t
   escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
     evidence: { evidenceUrl: "https://example.com/pr/1", summary: "did the thing" } });
   assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "submitted");
-  tick(2 * 3600_000); // deadline passes: _keeperPass WOULD refund it...
-  // ...and the predicate says so (it must stay exact for finalizeBounty):
+  tick(2 * 3600_000); // deadline passes: _keeperPass refunds it (free-miss)...
+  // ...and the predicate says so (it must stay exact for closeEpoch too):
   const row = escrow.getBounty(ROOM, bounty.bountyId);
   assert.equal(escrow._keeperDue(
     { state: "submitted", deadlineMs: nowMs - 1, snoozedUntilMs: null, challengeEndsMs: null,
@@ -265,10 +275,11 @@ test("T-e: closeEpoch does not reach submitted bounties (its SELECT scope, not t
   assert.equal(row.state, "submitted");
   counter.isolated = 0;
   const { summary } = escrow.closeEpoch(ROOM);
-  assert.deepEqual(summary.refunded, [], "closeEpoch's SELECT never included 'submitted' — unchanged by the filter");
-  assert.equal(counter.isolated, 0);
-  // finalizeBounty (the door that does reach it) still settles it.
-  const fin = escrow.finalizeBounty(ROOM, bounty.bountyId);
-  assert.equal(fin.action, "refunded");
+  assert.deepEqual(summary.refunded, [bounty.bountyId],
+    "closeEpoch's SELECT includes 'submitted' — the filter leaves that reach unchanged");
+  assert.equal(counter.isolated, 1, "the due submitted bounty opened exactly one isolated transaction");
+  assert.equal(escrow.getBounty(ROOM, bounty.bountyId).state, "refunded");
+  // finalizeBounty afterwards has nothing left to settle.
+  assert.throws(() => escrow.finalizeBounty(ROOM, bounty.bountyId), /nothing to finalize/);
   expectConserved(escrow);
 });
