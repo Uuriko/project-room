@@ -31,8 +31,9 @@
                 properties:
                   roomId: { type: string }
                   roomTitle: { type: string }
-                  permissions: { type: array, items: { type: string } }
-                  profile: { type: string, description: "chat, contribute, review, collaborate or custom" }
+                  permissions: { type: array, items: { type: string }, description: "Full granted set. An owner-equivalent invite lists every delegable permission." }
+                  profile: { type: string, description: "chat, contribute, review, collaborate, owner, or custom" }
+                  ownerEquivalent: { type: boolean, description: "True when the code grants owner-level permissions. Preview does not consume the code." }
                   expiresAt: { type: integer }
                   inviterDisplayName: { type: string, nullable: true, description: "Display name of the invite minter, or null when unavailable" }
         '404': { description: invite_unavailable }
