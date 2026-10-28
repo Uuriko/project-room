@@ -120,14 +120,20 @@ function seedReceipts({ db, raw }, from, to) {
   db.exec("COMMIT");
 }
 
-// S2 — directory write path (bench1b): half the corpus names agent-a.
+// S2 — directory write path (bench1b): half the corpus credits agent-a.
+// Directory counts are identity-keyed on the current base (ATLAS-PUBLIC
+// P-1): syncDirectoryCard counts receipts by the credited identity ids in
+// agent_ids_json, never by agents_json display names, so the fixture
+// seeds the identity column the projection would have written — a row
+// with names only reads as credited to nobody, by design.
 function seedDirectory({ db, raw }, from, to) {
   const insReceipt = raw(`INSERT INTO public_receipts
-    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href)
-    VALUES (?, ?, 'work-claim', 'commons', 'commons', 'Commons', ?, '["human-b"]', NULL, NULL, '{}', ?, 'x')`);
+    (id, title, source, origin_room_id, room_id, room_title, agents_json, humans_json, pull_request, merged_at, hashes_json, at, start_href, agent_ids_json)
+    VALUES (?, ?, 'work-claim', 'commons', 'commons', 'Commons', ?, '["human-b"]', NULL, NULL, '{}', ?, 'x', ?)`);
   db.exec("BEGIN");
   for (let i = from; i < to; i++) {
-    insReceipt.run(`wcr_${i}`, `Work ${i}`, i % 2 ? '["agent-a"]' : '["someone-else"]', new Date(1700000000000 + i * 1000).toISOString());
+    const agent = i % 2 ? "agent-a" : "someone-else";
+    insReceipt.run(`wcr_${i}`, `Work ${i}`, `["${agent}"]`, new Date(1700000000000 + i * 1000).toISOString(), `["${agent}"]`);
   }
   db.exec("COMMIT");
 }
@@ -263,7 +269,11 @@ export function runPerfBudgets({ small = false } = {}) {
       const sync = counter.measure(() => syncDirectoryCard(ctx.store, "agent-a"));
       readings.push({ surface: "syncDirectoryCard(agent-a) [write path]", shape: "S2", size, ...pick(sync), result: "ok" });
       const entry = counter.raw("SELECT receipt_count FROM public_directory_entries WHERE agent_id='agent-a'").get();
-      const expected = counter.raw("SELECT COUNT(*) AS n FROM public_receipts WHERE agents_json LIKE '%agent-a%'").get().n;
+      // Independent count under the same identity-keyed definition the
+      // product documents (credited identity ids, not display names):
+      // a separate SQL path (json_each over agent_ids_json), not the
+      // directory counter's own query.
+      const expected = counter.raw("SELECT COUNT(*) AS n FROM public_receipts WHERE EXISTS (SELECT 1 FROM json_each(COALESCE(public_receipts.agent_ids_json, '[]')) WHERE value = 'agent-a')").get().n;
       check(`S2 directory count parity at ${size}`, entry?.receipt_count === expected, `card=${entry?.receipt_count} independent=${expected}`);
     }
     ctx.store.close();
