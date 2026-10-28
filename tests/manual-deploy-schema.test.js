@@ -79,3 +79,16 @@ test("automatic deployment still requires both hosted gates and never invokes in
   const r = f.run({ event: "workflow_run", sha: f.tip, conclusions: { test: "success", "schema-gate": "success" } });
   assert.equal(r.status, 0, r.stderr); assert.match(r.output, /go=true/); assert.equal(r.trace, "");
 });
+
+test("qualified SHA is the only upload checkout and the gate has no deployment secrets", () => {
+  const gate = workflow.jobs.gate;
+  const setup = gate.steps.find(step => step.uses?.startsWith("actions/setup-node@"));
+  assert.equal(setup.with["node-version"], 24);
+  assert.match(script, /set -euo pipefail/);
+  assert.doesNotMatch(JSON.stringify(gate), /CLOUDFLARE_API_TOKEN|ROOM_AGENT_CARD_SIGNING_KEY/);
+  const deploy = workflow.jobs.deploy;
+  assert.ok(deploy.needs.includes("gate"));
+  assert.match(deploy.if, /needs\.gate\.outputs\.go == 'true'/);
+  assert.equal(deploy.steps.find(step => step.uses?.startsWith("actions/checkout@")).with.ref, "${{ needs.gate.outputs.sha }}");
+  assert.equal(deploy.env.SHA, "${{ needs.gate.outputs.sha }}");
+});
