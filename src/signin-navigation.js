@@ -33,7 +33,6 @@ export function createSigninNavigation({ getUI, active }) {
     };
     paintAnchor("google");
     paintAnchor("github");
-    $("#terms-notice").hidden = view === "welcome";
   }
   function withReplay(value, action) {
     replay = value;
