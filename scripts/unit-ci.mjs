@@ -8,7 +8,9 @@
 //
 // Usage: node scripts/unit-ci.mjs --shard=1/3   (run from the repo root)
 //        node scripts/unit-ci.mjs --all         (every discovered file, one job)
+//        node scripts/unit-ci.mjs --affected --base=<sha>
 // Use worktree-local scratch by default; create explicit TMPDIR before children.
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -179,12 +181,33 @@ function selectUnitRun(argv, plan) {
       receiptFields: shard,
     };
   }
-  throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3 | --all");
+  throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3 | --all | --affected --base=<sha>");
 }
 
-function main() {
+async function selectAffectedRun(argv) {
+  if (argv.length !== 2 || argv[0] !== "--affected" || !argv[1].startsWith("--base=") || !argv[1].slice("--base=".length)) {
+    throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3 | --all | --affected --base=<sha>");
+  }
+  const { affectedUnitFiles } = await import("./ci-affected.mjs");
+  const files = affectedUnitFiles(argv[1].slice("--base=".length)).files;
+  return {
+    label: "affected",
+    files,
+    receiptName: attempt => `unit-affected-attempt-${attempt}.json`,
+    junitName: attempt => `unit-junit-affected-attempt-${attempt}.xml`,
+    receiptFields: {},
+    planHash: createHash("sha256").update(files.join("\n")).digest("hex"),
+  };
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
   const plan = unitPlan();
-  const selected = selectUnitRun(process.argv.slice(2), plan);
+  const selected = argv[0] === "--affected" ? await selectAffectedRun(argv) : selectUnitRun(argv, plan);
+  if (existsSync("server/openapi/fragments")) {
+    const { writeOpenApi } = await import("./openapi-document.mjs");
+    writeOpenApi();
+  }
   // Fresh checkouts do not contain ignored .tmp/. Initialize before both
   // dependency preflight and test children, matching scripts/test-env.sh.
   const worktreeScratch = resolve(".tmp");
@@ -211,7 +234,7 @@ function main() {
       {
         ...selected.receiptFields,
         files,
-        planHash: plan.planHash,
+        planHash: selected.planHash ?? plan.planHash,
         status,
         signal,
         failures,

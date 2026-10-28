@@ -1,0 +1,27 @@
+  /api/inbox/simulation:
+    post:
+      summary: Drive the synthetic send transport (local only)
+      description: >-
+        Account-session write (CSRF; 60 per account per minute). Available
+        only to loopback clients (403 inbox_simulation_local_only) of a
+        service started with the synthetic transport (409
+        inbox_simulation_unavailable). Body is exactly `{ action: dispatch |
+        reconcile, sourceId, sendId }` for an existing sample send.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, sourceId, sendId]
+              properties:
+                action: { type: string, enum: [dispatch, reconcile] }
+                sourceId: { type: string }
+                sendId: { type: string }
+      responses:
+        '200': { description: "{ ...sends view, simulationAvailable: true, send }" }
+        '403': { description: inbox_simulation_local_only or csrf_denied }
+        '409': { description: inbox_simulation_unavailable }
+        '422': { description: invalid_inbox_send }

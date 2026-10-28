@@ -73,7 +73,11 @@ if (contrast.status !== 0) process.exit(contrast.status || 1);
 const tokensCss = spawnSync(process.execPath, ["scripts/sync-design-tokens-css.mjs", "--check"], { stdio: "inherit" });
 if (tokensCss.status !== 0) process.exit(tokensCss.status || 1);
 // CI runs the root suite in the dedicated unit job; local check runs it here.
+// The MCP/OpenAPI drift test reads the rendered document. Affected unit
+// selection can skip it, so the contract job runs it here.
 if (process.env.CI) {
+  const drift = spawnSync(process.execPath, ["--test", "tests/mcp-openapi-drift.test.js"], { stdio: "inherit" });
+  if (drift.status !== 0) process.exit(drift.status ?? 1);
   console.log("check: skipping node --test in CI (covered by test jobs)");
   process.exit(0);
 }

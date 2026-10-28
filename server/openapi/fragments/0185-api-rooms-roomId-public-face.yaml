@@ -1,0 +1,61 @@
+  /api/rooms/{roomId}/public-face:
+    get:
+      summary: Public-face status (owner)
+      description: >-
+        Room owner only. Whether the opt-in public read-only face is enabled
+        and which code is live. Members and the public never see this; the
+        public reads at /p/{code} and /api/public/rooms/{code} without a
+        credential.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Face status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  enabled: { type: boolean }
+                  publicCode: { type: [string, 'null'] }
+                  createdAt: { type: [integer, 'null'] }
+                  rotatedAt: { type: [integer, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: owner_only
+    post:
+      summary: Toggle the public face (owner)
+      description: >-
+        Room owner only. Exactly { enabled }. Enabling mints the unguessable
+        pub1.* code; disabling invalidates it immediately (the code is never
+        reused).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        '200':
+          description: New face status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  enabled: { type: boolean }
+                  publicCode: { type: [string, 'null'] }
+        '401':
+          description: unauthenticated
+        '403':
+          description: owner_only
+        '422':
+          $ref: '#/components/responses/InvalidInput'

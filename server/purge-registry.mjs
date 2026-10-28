@@ -21,6 +21,7 @@ function freezeVia(via) {
 }
 
 const ROWS = [
+  ...["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"].map(table => ({ table, key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } })),
   { table: "mention_observations", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   { table: "share_link_join_redemptions", key: "account_id", action: "retain", reason: "Immutable link-redemption journal prevents cross-account replay; retained alongside share_link_joins", match: { account: ["account_id"] } },
 
@@ -1910,7 +1911,11 @@ const ROWS = [
   { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
-  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  { table: "pairs", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "pair_code_locks", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "agent_member_keys", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "room_join_policy", key: "room_id", action: "delete", match: { room: ["room_id"] } }
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({
