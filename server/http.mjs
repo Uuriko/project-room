@@ -1222,7 +1222,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       };
       const inboundPath = url.pathname;
       if (isRoomMcpPath(inboundPath) || isRoomMcpPath(rewriteRoomApiPrefix(inboundPath))) {
-        rate(`mcp-join:${remoteAddress}`, 60);
+        // PERF-50 E2-a: the door cap used to be keyed by client address
+        // alone (mcp-join, 60/min), so every identity behind one egress
+        // address shared a single budget — 10 agents on one host got
+        // 6 calls/min each. A presented bearer now gets its own bucket,
+        // keyed by the bearer hash (the credential itself never enters
+        // the rate map): 300/min per identity. Authenticated traffic
+        // still counts against a per-address backstop (600/min), so
+        // rotating identities behind one address cannot exceed the
+        // aggregate ceiling. Anonymous join traffic has no identity to
+        // key on and keeps the original 60/min per-address bucket.
+        const mcpBearer = typeof req.headers.authorization === "string"
+          ? /^bearer\s+(.+)$/i.exec(req.headers.authorization.trim())?.[1]?.trim()
+          : undefined;
+        if (mcpBearer) {
+          rate(`mcp-addr:${remoteAddress}`, 600);
+          rate(`mcp:${rateHash(mcpBearer)}`, 300);
+        } else {
+          rate(`mcp-join:${remoteAddress}`, 60);
+        }
         if (req.method === "POST") {
           // Join traffic stays on the small JSON cap. A live identity secret
           // may stage one room file (base64, at most attachmentLimits.fileBytes).
