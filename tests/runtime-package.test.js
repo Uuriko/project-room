@@ -31,9 +31,12 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
   // Decision #36 drift guard: the generated-pages exclusion in the package
   // contract names exactly the docs/agents/*.html entries of the asset list —
   // a new agent page joins the exclusion (and the CF build) by being listed,
-  // and a renamed one cannot silently fall out of it.
+  // and a renamed one cannot silently fall out of it. faq.html (#3976) is
+  // generated under the same rule from docs/FAQ.md, so it is the one
+  // non-agent entry the set must also name while it is a public asset.
   assert.deepEqual([...generatedAgentPages].sort(),
-    publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path)).sort());
+    [...publicAssets.filter(path => /^docs\/agents\/[^/]+\.html$/.test(path)),
+      ...(publicAssets.includes("faq.html") ? ["faq.html"] : [])].sort());
   // The package must contain exactly the allowlisted files that exist at this commit.
   // The allowlist (scripts/runtime-package.mjs) is the single source of truth;
   // the import-closure test below guarantees it covers every imported module,
