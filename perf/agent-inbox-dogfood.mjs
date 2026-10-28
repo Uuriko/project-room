@@ -26,7 +26,8 @@ const ada = store.identities.create("Ada");
 const peers = ["Bob", "Cyd", "Dee", "Eli", "Fay", "Gil", "Hal", "Ivy", "Jay", "Kim", "Lou", "Mel"].map(name => store.identities.create(name));
 rooms.create(owner.secret, { roomId: "board", title: "board", purpose: "dogfood", kind: "personal" });
 for (const [identity, name] of [[ada, "Ada"], ...peers.map((p, i) => [p, ["Bob", "Cyd", "Dee", "Eli", "Fay", "Gil", "Hal", "Ivy", "Jay", "Kim", "Lou", "Mel"][i]])]) {
-  store.identities.link(owner.secret, "board", { identityId: identity.identityId, displayName: name, permissions: WRITER });
+  const { linkCode } = store.identities.mintLinkCode(identity.identityId, identity.secret, { roomId: "board" });
+  store.identities.link(owner.secret, "board", { identityId: identity.identityId, displayName: name, permissions: WRITER, identityLinkCode: linkCode });
   setTier(store.db, "board", identity.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 }
 const memberOf = identity => store.db.prepare("SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?")

@@ -7,11 +7,12 @@ import { createRoomServer } from '../server/http.mjs';
 import { RoomAgentClient } from '../client/room-agent.mjs';
 import { readWorkSelection } from '../client/work-preparation.mjs';
 import { textVersion } from '../server/text-results.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function setup(t) {
   const f = createAcceptanceFixture();
   const outsider = f.store.identities.create('Unrelated review reader');
-  f.store.identities.link(f.keys.owner, 'commons', { identityId: outsider.identityId, displayName: 'Unrelated review reader', permissions: [] });
+  linkWithProof(f.store, f.keys.owner, 'commons', outsider, { displayName: 'Unrelated review reader', permissions: [] });
   f.keys.outsider = outsider.secret;
   const server = createRoomServer({ store: f.store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
