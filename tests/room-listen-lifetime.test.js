@@ -8,6 +8,7 @@ import { AgentRooms } from '../server/agent-rooms.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { listen } from '../scripts/room-listen.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function receiver(t) {
   const directory = mkdtempSync(join(tmpdir(), 'room-poll-lifetime-'));
@@ -15,7 +16,7 @@ async function receiver(t) {
   const owner = store.identities.create('Lifetime owner');
   const agent = store.identities.create('Lifetime receiver');
   new AgentRooms(store).create(owner.secret, { roomId: 'lifetime-room', title: 'Lifetime', purpose: 'Synthetic receiving regression' });
-  store.identities.link(owner.secret, 'lifetime-room', { identityId: agent.identityId, memberId: 'receiver', displayName: 'Receiver', permissions: [] });
+  linkWithProof(store, owner.secret, 'lifetime-room', agent, { memberId: 'receiver', displayName: 'Receiver', permissions: [] });
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => {

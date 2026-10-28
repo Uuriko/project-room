@@ -9,6 +9,7 @@
 import { randomUUID } from "node:crypto";
 import { EVENT_TYPES as T } from "../../src/events.js";
 import { makeTestSigner } from "../../scripts/helpers/signed-evidence.mjs";
+import { linkWithProof } from "../helpers/link-with-proof.mjs";
 
 const ROOM = "commons";
 
@@ -18,12 +19,14 @@ export function mintIdentity(f, name = `invariant-agent-${randomUUID().slice(0, 
 }
 
 // Link an identity into the fixture room with the given permissions.
-// Returns the receipt plus the freshly issued owner access key —
-// issuing a new key REVOKES f.keys.owner, so use the returned key for
-// any later owner commands in the same scenario.
-export function linkToRoom(f, identityId, permissions = ["accept_work"]) {
+// Takes the identity OBJECT (from mintIdentity) — a direct link needs
+// holder proof (#942), so the helper mints a link code from the secret
+// and goes through the real gate. Returns the receipt plus the freshly
+// issued owner access key — issuing a new key REVOKES f.keys.owner, so
+// use the returned key for any later owner commands in the same scenario.
+export function linkToRoom(f, identity, permissions = ["accept_work"]) {
   const ownerKey = f.store.issueAccessKey(ROOM, "owner");
-  const link = f.store.identities.link(ownerKey, ROOM, { identityId, permissions });
+  const link = linkWithProof(f.store, ownerKey, ROOM, identity, { permissions });
   return { link, ownerKey };
 }
 

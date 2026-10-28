@@ -8,6 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { HOSTED_ROOM_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_TOOLS, MCP_TOOL_NAME_RE } from "../src/room-mcp-join.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
@@ -75,12 +76,8 @@ test("Bearer pri_ exposes room tools and keeps command receipts", async t => {
     roomId: "mcp-den", title: "MCP den", purpose: "Hosted MCP room tools", kind: "personal", displayName: "MCP owner"
   });
   // #962 M3: bond.propose resolves only a peer linked into this room.
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "MCP peer", permissions: []
-  });
-  const linked = store.identities.link(owner.secret, created.roomId, {
-    identityId: stranger.identityId, displayName: "MCP stranger", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "MCP peer", permissions: [] });
+  const linked = linkWithProof(store, owner.secret, created.roomId, stranger, { displayName: "MCP stranger", permissions: [] });
   assert.equal(linked.memberId, stranger.identityId);
   // #953: new agent members default to t1_readonly; peer and stranger need write access for MCP replies/bonds
   setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
@@ -289,12 +286,8 @@ test("bond accept decline revoke and peer DM require the identity bearer and cal
   const created = rooms.create(owner.secret, {
     roomId: "bond-den", title: "Bond den", purpose: "Hosted bond tools", kind: "personal", displayName: "Bond owner"
   });
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Bond peer", permissions: []
-  });
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: stranger.identityId, displayName: "Bond stranger", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "Bond peer", permissions: [] });
+  linkWithProof(store, owner.secret, created.roomId, stranger, { displayName: "Bond stranger", permissions: [] });
   // #953: new agent members default to t1_readonly; peer and stranger need write access for bond actions
   setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   setTier(store.db, created.roomId, stranger.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
