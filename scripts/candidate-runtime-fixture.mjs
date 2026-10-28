@@ -38,6 +38,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('client/help-actions.mjs');
   paths.add('server/action-classes.mjs');
   paths.add('server/inbox.mjs');
+  paths.add('server/inbox-search.mjs'); // FTS5 inbox search engine (imported by server/inbox.mjs)
   paths.add('server/inbox-stitch.mjs'); paths.add('server/inbox-stitch-store.mjs'); // Task #19 (imported by server/inbox.mjs)
   paths.add('server/boot-config.mjs'); // RC-2026-09-27-2732 (imported by server.mjs)
   paths.add('server/inbox-outbox.mjs'); paths.add('server/inbox-transport.mjs'); paths.add('server/version.mjs');

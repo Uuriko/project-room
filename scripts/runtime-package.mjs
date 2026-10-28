@@ -108,7 +108,7 @@ optional.push("client/begin-work.mjs"); // selected-work Begin (imported by clie
 optional.push("client/bounty-tools.mjs"); // bounty tool surface (imported by server/mcp-full-profile.mjs; pure, no imports of its own)
 optional.push("client/trust-tools.mjs"); // trust tool surface (imported by server/mcp-full-profile.mjs; pure, no imports of its own)
 optional.push("server/inbox.mjs");
-optional.push("server/inbox-search.mjs"); // full-text search index (imported by server/inbox.mjs; pure, no imports of its own)
+optional.push("server/inbox-search.mjs"); // FTS5 full-text search engine (imported by server/inbox.mjs; node:sqlite FTS5 with a legacy inverted-index fallback)
 optional.push("server/inbox-threads.mjs"); // thread builder (imported by server/inbox.mjs; pure, no imports of its own)
 optional.push("server/inbox-stitch.mjs"); // stitch key derivation + scoring (imported by server/inbox.mjs and server.mjs; pure)
 optional.push("server/inbox-stitch-store.mjs"); // hash-only stitch graph (imported by server/inbox.mjs; pure persistence, no imports beyond inbox-stitch.mjs)
