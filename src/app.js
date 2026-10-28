@@ -2925,8 +2925,11 @@ function setRequestMode(mode, initial = {}) {
   saveComposer(); assistantDraft = null; requestMode = mode;
   const key = composerKey();
   if (!drafts.entries.has(key)) drafts.save(key, { body: "", toMemberId: mode.requesterId ?? "", replyToId: mode.requestMessageId ?? currentThreadId, ...initial, pending: null, mode, threadId: currentThreadId });
-  else drafts.save(key, { mode, ...(!drafts.get(key).pending && Object.hasOwn(initial, "toMemberId")
-    ? { toMemberId: initial.toMemberId } : {}) });
+  else {
+    const saved = drafts.get(key);
+    const empty = !saved.pending && !saved.body.trim() && !(saved.files?.length);
+    drafts.save(key, { mode, ...(empty && initial.toMemberId ? { toMemberId: initial.toMemberId } : {}) });
+  }
   restoreComposer(drafts.get(key));
   syncRequestComposer(); renderComposerError(); persistDrafts();
   $("#message-input").focus();

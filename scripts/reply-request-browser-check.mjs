@@ -301,18 +301,26 @@ test("host answer survives closing the requester and returning in an independent
 
 for (const width of [1280, 390]) test(`promoted reply request retains selected agent and keeps separate draft text at ${width}px`, { timeout: 30000 }, async t => {
   const f = await setup(t, { width, height: 900 }), owner = await f.login("owner");
+  await owner.evaluate(theme => document.documentElement.dataset.theme = theme, width === 390 ? "light" : "dark");
   await input(owner).fill("Ordinary message draft");
   await owner.locator("#message-to-select").selectOption("producer");
-  await openComposerOptions(owner); await owner.locator("#request-reply").click();
+  const promoted = owner.locator("#composer-toolbar #request-reply");
+  await promoted.waitFor({ state: "visible" });
+  await promoted.focus(); await owner.keyboard.press("Enter");
   assert.equal(await owner.locator("#message-to-select").inputValue(), "producer");
+  await owner.locator("#request-exit").click();
+  await owner.locator("#message-to-select").selectOption("reviewer");
+  await openComposerOptions(owner); await owner.locator("#request-reply").click();
+  assert.equal(await owner.locator("#message-to-select").inputValue(), "reviewer", "empty request takes the selected recipient");
+  await owner.locator("#message-to-select").selectOption("producer");
   await input(owner).fill("Saved request body");
   await owner.locator("#request-exit").click();
   assert.equal(await input(owner).inputValue(), "Ordinary message draft");
   await owner.locator("#message-to-select").selectOption("reviewer");
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
-  assert.equal(await owner.locator("#message-to-select").inputValue(), "reviewer");
+  assert.equal(await owner.locator("#message-to-select").inputValue(), "producer", "saved text keeps its original recipient");
   assert.equal(await input(owner).inputValue(), "Saved request body");
   await input(owner).press("Enter"); await saved(owner);
-  assert.equal(Object.values(f.state().replyRequests).at(-1).recipientId, "reviewer");
+  assert.equal(Object.values(f.state().replyRequests).at(-1).recipientId, "producer");
   assert.deepEqual(f.errors, []);
 });
