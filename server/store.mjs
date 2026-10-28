@@ -1,6 +1,6 @@
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
-import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
+import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { invalidateEditedAssistantInput } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
@@ -85,6 +85,7 @@ import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mj
 import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
+import { Pairing, pairingSchema } from "./pairing.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
 import { agentRoomSchema, ensureAgentRoomRequestIdColumn } from "./agent-rooms.mjs";
@@ -1108,7 +1109,7 @@ function agentWakeTargetIds(state, senderMemberId, data, db = null, roomId = "")
 export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@2"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
-  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@2"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
@@ -1427,6 +1428,7 @@ export class RoomStore {
     this.ownerDelegates = new OwnerDelegates(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
+    this.pairing = new Pairing(this);
     this.referralInvites = new ReferralInvites(this);
     this.referrals = new Referrals(this);
     this.accountLogins = new AccountLoginMethods(this);
@@ -1974,6 +1976,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(accessRequestSchema);
+      this.db.exec(pairingSchema);
       // "Who referred you?" free text on access requests (referral
       // attribution): converge deployed databases that predate the column.
       {
@@ -4659,7 +4662,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         fail(403, "insufficient_scope", "This key is limited to its room");
       }
       const resolved = roomId ? this.identities.resolveIdentityLink(record.identityId, roomId) : null;
-      if (!resolved) fail(401, "unauthenticated", "API key identity has no access to this room");
+      if (!resolved) fail(403, "no_access", "This identity has no access to this room");
       return {
         account: null, member: resolved.member, roomId, identityId: resolved.identityId,
         credentialHash: hash(token), credentialScope: "room", kind: "api-key",
@@ -4668,8 +4671,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     }
     if (isIdentitySecret(token)) {
-      const resolved = this.identities.resolveIdentityAuth(token, roomId);
-      if (!resolved) fail(401, "unauthenticated", "Unknown identity or no access to this room");
+      const identity = this.identities.resolveGlobalIdentitySecret(token);
+      if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
+      const resolved = roomId ? this.identities.resolveIdentityLink(identity.identityId, roomId) : null;
+      if (!resolved) fail(403, "no_access", "This identity has no access to this room");
       // Owner delegates (server/owner-delegates.mjs): an active per-room
       // grant stamps a COPY of the member — never the shared authority
       // object — so the explicit delegate gates downstream can recognize
@@ -6050,6 +6055,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
       }
+      // Exact replays of commands committed before the pause returned above.
+      refusePausedAgentWrite(this, roomId, auth.member, command);
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
       if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {
