@@ -129,7 +129,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "b6ba328aa685578c",
+      "inputSchema": "5c34080fd41f983c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -806,7 +806,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "b6ba328aa685578c",
+      "inputSchema": "5c34080fd41f983c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -958,6 +958,15 @@
         "openWorldHint": false
       }
     },
+    "room_merge_members": {
+      "inputSchema": "d4341a4572f425c3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_needs_me": {
       "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
@@ -1014,6 +1023,15 @@
     },
     "room_read_board": {
       "inputSchema": "7dac81175f92cec4",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    "room_read_bootstrap": {
+      "inputSchema": "9c4dedb9bd1af453",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1337,7 +1355,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "ed89908778def46f",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2344,7 +2362,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "ed89908778def46f",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2528,7 +2546,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "b6ba328aa685578c",
+      "inputSchema": "5c34080fd41f983c",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

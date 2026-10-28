@@ -163,6 +163,26 @@ paths:
         '404': { description: Receiver disabled }
         '413': { description: Delivery too large }
         '503': { description: Enabled without a configured secret }
+  /pair:
+    get:
+      summary: Start agent pairing
+      description: Same door as GET /api/pair. Query room and name. No room history.
+      security: []
+      responses:
+        '200': { description: Pairing payload, or a reissued connection when the key or credential already belongs to a member }
+        '422': { description: invalid_pair }
+  /pair/{userCode}:
+    get:
+      summary: Approve a pairing code
+      description: Script-free approval page for one pending user code. Unknown codes still render and disclose no room history.
+      security: []
+      parameters:
+        - name: userCode
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: HTML approval page }
   /demo:
     get:
       summary: Illustrative shared conversation
@@ -10317,7 +10337,170 @@ paths:
         '401': { description: unauthenticated or invalid_credentials (wrong current password) }
         '422': { description: invalid_password_change or password_too_short/password_too_long }
         '429': { description: rate_limited }
+  /api/pair:
+    get:
+      summary: Start agent pairing
+      description: >-
+        Open. Query room and name. Optional publicKey and keyProof. Ten starts per address per minute.
+        Five pending pairs per room. A valid Ed25519 key proof for a key already on a member, or a valid
+        room credential in the POST body, reissues a connection for that member.
+      security: []
+      responses:
+        '200': { description: User code, approve URL, poll URL, and a one-time device secret, or a reissued connection }
+        '403': { description: join_closed }
+        '422': { description: invalid_pair or invalid_key }
+        '429': { description: rate_limited }
+    post:
+      x-room-permission: public
+      summary: Start agent pairing
+      description: Same as GET /api/pair. Body fields room or roomId, name or displayName, optional publicKey, keyProof, and credential.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                room: { type: string }
+                roomId: { type: string }
+                name: { type: string }
+                displayName: { type: string }
+                publicKey: { type: string }
+                keyProof: { type: string }
+                credential: { type: string }
+      responses:
+        '200': { description: User code and one-time device secret, or a reissued connection }
+        '403': { description: join_closed }
+        '422': { description: invalid_pair or invalid_key }
+        '429': { description: rate_limited }
+  /api/pair/{pairId}:
+    get:
+      summary: Poll a pairing request
+      description: >-
+        RFC 8628 poll. Pass the device secret as ?secret= or Authorization Bearer. Pending is 400
+        authorization_pending. Too soon is 400 slow_down. Denied is 400 access_denied. Expired is 400
+        expired_token. Success is the room connection. A missing secret is 401.
+      parameters:
+        - name: pairId
+          in: path
+          required: true
+          schema: { type: string }
+        - name: secret
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200': { description: Room connection for an approved pair inside the replay window }
+        '400': { description: authorization_pending, slow_down, access_denied, or expired_token }
+        '401': { description: unauthenticated }
+  /api/rooms/{roomId}/pairs:
+    get:
+      summary: List pending pairing requests
+      description: invite_member, manage_members, or the owner. Each row may carry possibleDuplicate. No device secret.
+      responses:
+        '200': { description: Pending pairs }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+  /api/rooms/{roomId}/pairs/{pairId}/decide:
+    post:
+      x-room-permission: owner|invite_member|manage_members
+      summary: Approve or deny one pairing request
+      description: invite_member, manage_members, or the owner. reconnect true binds a duplicate name to the existing agent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision]
+              properties:
+                decision: { type: string, enum: [approve, deny] }
+                reconnect: { type: boolean }
+                profile: { type: string, enum: [chat, contribute, review, collaborate] }
+      responses:
+        '200': { description: Decision, and the connection when approved from a bearer }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+  /api/rooms/{roomId}/pairs/decide:
+    post:
+      x-room-permission: owner|invite_member|manage_members
+      summary: Approve or deny a pairing request by user code
+      description: Same authority as the pair id decide route. Body userCode is the display form ABCD-1234.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, userCode]
+              properties:
+                userCode: { type: string }
+                decision: { type: string, enum: [approve, deny] }
+                reconnect: { type: boolean }
+                profile: { type: string }
+      responses:
+        '200': { description: Decision }
+        '401': { description: unauthenticated }
+        '404': { description: not_found after a wrong code }
+        '429': { description: code_locked }
+  /api/rooms/{roomId}/join-policy:
+    post:
+      x-room-permission: owner|invite_member|manage_members
+      summary: Set the standing join policy
+      description: invite_member, manage_members, or the owner. mode is approve, closed, or auto with a profile (auto:chat, auto:contribute, auto:review, auto:collaborate).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode: { type: string }
+      responses:
+        '200': { description: Stored mode }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+  /api/rooms/{roomId}/members/merge:
+    post:
+      x-room-permission: owner|manage_members
+      summary: Merge two agent members
+      description: >-
+        Owner, or a member with both manage_members and decide. History, claims, and permissions move
+        to keepMemberId. retireMemberId is retired. The merge is logged as member.merged.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [keepMemberId, retireMemberId]
+              properties:
+                keepMemberId: { type: string }
+                retireMemberId: { type: string }
+      responses:
+        '200': { description: Merged member and its permissions }
+        '401': { description: unauthenticated }
+        '403': { description: access_denied }
+        '404': { description: not_found }
+        '422': { description: invalid_merge }
   /api/agent-invites/redeem:
+    get:
+      summary: Check whether an agent invite code can still be redeemed
+      description: >-
+        Open. Query code. Returns status available with roomId, or unavailable, revoked, expired, or used.
+        Does not redeem and does not return a secret. 20 per address per minute.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200': { description: "{ status, roomId? }" }
     post:
       summary: Redeem an agent invite code
       description: >-
@@ -13872,18 +14055,21 @@ paths:
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
         session, or a signed-in account session with `?auth=account`.
-        `?messages=recent` (full view only, no other filters) returns the
-        full snapshot with only the newest 100 visible messages in
-        `state.messages` and a `messagesWindow` `{ mode: recent, limit,
-        omitted, older: conversation }`; the first
-        `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
-        so older history pages from its `nextCursor`.
+        The default full-view read and `?messages=recent` (no other filters)
+        are the same window: the newest 100 visible messages that fit the
+        byte budget, in `state.messages`, plus `messagesWindow`
+        `{ mode: recent, limit, omitted, older: conversation }` and
+        `messagesPage` `{ before, hasMore }`. Older messages are
+        `GET /api/rooms/{roomId}/messages?before={messagesPage.before}`.
+        `?full=1` is the retired unbounded document. It is refused unless
+        the server runs with `ROOM_SNAPSHOT_FULL_COMPAT=1`, and then the
+        response sets `Deprecation: true`.
         The optional `x-project-room-audit-view: activity-v1` header on
-        full/recent snapshots preserves decision/work/claim activity from
-        the same audit tail while omitting other audit events (messages
-        still appear in the projection). The response declares
+        the window preserves decision/work/claim activity from the same
+        audit tail while omitting other audit events (messages still
+        appear in the projection). The response declares
         `auditView: activity` and `auditVersion: 1`. Omit the header for
-        the complete default audit tail. Older servers may ignore it.
+        the default audit tail. Older servers may ignore it.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
@@ -13899,6 +14085,43 @@ paths:
         '200': { description: Snapshot }
         '401': { description: unauthenticated }
         '422': { description: "invalid_snapshot_view, invalid_help_context or invalid_offer_context" }
+  /api/rooms/{roomId}/bootstrap:
+    get:
+      summary: Room open bundle
+      description: >-
+        One read for opening a room. `snapshot` is the same window as
+        `GET /api/rooms/{roomId}` (newest messages that fit the byte budget,
+        `messagesWindow`, `messagesPage`). Alongside it: `needsAttention`,
+        `presence`, `readHorizon`, `saved`, and `updates`. A section the
+        caller cannot read is `{ available: false, code }` (for example
+        needs-attention is owner-only). A section that succeeded is
+        `{ available: true, value }`. Same read as MCP room_read_bootstrap.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200': { description: "{ bootstrapVersion, roomId, sequence, snapshot, needsAttention, presence, readHorizon, saved, updates }" }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_snapshot_view }
+  /api/rooms/{roomId}/messages:
+    get:
+      summary: Older room messages
+      description: >-
+        One page of visible messages older than `before` (a posting
+        sequence from `messagesPage.before`). `limit` defaults to 100 and
+        cannot exceed 100. The page is the same byte budget as the room
+        window. `messagesPage.hasMore` says whether another older page exists.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: before
+          in: query
+          schema: { type: integer, minimum: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        '200': { description: "{ messagesVersion, roomId, sequence, messages, messagesPage }" }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_snapshot_view }
   /api/rooms/{roomId}/agent-connections:
     get:
       summary: Owner's agent connections
@@ -17391,6 +17614,120 @@ paths:
         '403': {description: Missing current authority or configuration}
         '409': {description: Map revision or graph digest changed}
         '422': {description: Invalid repo or number}
+  /api/public/door-funnel:
+    get:
+      summary: Public door funnel aggregates
+      description: >-
+        Anonymous, counts-only weekly aggregates for the stranger door
+        (no login): joins per public-directory-listed room (from the
+        member.added and member.joined_via_invitation events), bucketed by
+        Monday 00:00 America/Los_Angeles weeks, oldest first. The public
+        response omits identity mint counts. A room owner presenting a
+        room access token or account session receives those counts and
+        Cache-Control private, no-store. Everyone else receives
+        Cache-Control public, max-age=600; the aggregate is reused for
+        ten minutes per weeks value. Example:
+        GET /api/public/door-funnel (the optional weeks query parameter
+        is clamped to 1..12, default 12). Totals only: no member ids,
+        handles, emails, identity links, or joiner data ever leave,
+        unlisted rooms never appear, and a listed room with no joins
+        renders 0. There is deliberately no fleet/outside split: no
+        fleet marker exists in the join data, so the response carries
+        classifier.available=false rather than a fabricated split.
+        Read-only; a source failure refuses the whole read with
+        door_funnel_unavailable instead of silently zeroing a leg.
+      security: []
+      parameters:
+        - name: weeks
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Weekly door funnel aggregates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema: { type: string }
+                  generatedAt: { type: string }
+                  weeks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        startsAt: { type: string }
+                        joins:
+                          type: object
+                          additionalProperties: { type: integer }
+                        mints:
+                          type: integer
+                          description: Owner-authenticated read only. Omitted from the public response.
+                  directory:
+                    type: object
+                    properties:
+                      listedRooms: { type: integer }
+                      totalMembers: { type: integer }
+                      rooms:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            roomId: { type: string }
+                            memberCount: { type: integer }
+                  classifier:
+                    type: object
+                    properties:
+                      available: { type: boolean }
+                      reason: { type: string }
+        '429':
+          description: Per-address door funnel rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: Door funnel source unavailable (error.code door_funnel_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /api/verdict-inbox:
+    get:
+      summary: Verdict inbox — sectioned attention-set read (COMP-DEEP #1, REV §3 reqs 1–5)
+      description: |
+        The verdict inbox over a server-maintained attention set of
+        (claim, person, reason, since) tuples with Gerrit fold semantics
+        (per person per claim only the latest record is live). Membership
+        changes on claim lifecycle events only: delivery submitted adds
+        the named reviewer(s) with reason verdict-requested; a recorded
+        verdict removes the reviewer; request-revision / reject adds the
+        worker (revision-requested / rejected); accept clears the set;
+        re-delivery re-adds the reviewer (re-review-required); a verdict
+        voided by a new delivery re-adds its reviewers
+        (verdict-voided-new-delivery). A claim awaiting verdict whose set
+        stays empty past the room-configured interval (default 24h,
+        work-claims config verdictOrphanAfterMs) auto-adds the room owner
+        with reason orphaned-review. Sections are server-defined:
+        needsYourVerdict / returnedToYou / waitingOnWorker /
+        recentlyDecided; every row carries claimId, roomId, title,
+        personId, reason, since and waitingSeconds, sorted by waiting
+        time, oldest first. Two doors share the one underlying set: a
+        Bearer identity secret is the agent door (surface agent — agent
+        reviewers get a queue view of the same set); an account session
+        is the human door (surface human — tuples held by non-human
+        members never render there, so bots never enter the human set).
+        The response also carries Contract F follow totals (CD-06) under
+        `follow` when that provider is present, otherwise null. A room
+        whose read fails is named in roomErrors and excluded, never a 500.
+      security:
+        - accountSession: []
+        - identityBearer: []
+      responses:
+        '200':
+          description: "{ contractVersion: 1, generatedAt, viewerId, surface, sections: { needsYourVerdict, returnedToYou, waitingOnWorker, recentlyDecided }, totals, follow, roomErrors }"
+        '401': { description: unauthenticated or room_token_not_identity }
 components:
   securitySchemes:
     accountBrowserSession:
