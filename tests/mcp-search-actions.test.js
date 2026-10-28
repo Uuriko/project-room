@@ -48,7 +48,7 @@ const size = tools => JSON.stringify(tools).length;
 test("lean is opt-in: default core and full lists are unchanged, lean is short and much smaller", () => {
   const core = listedMcpTools("core"), full = listedMcpTools("full"), lean = listedMcpTools("lean");
   assert.equal(core.length, 22, "default core is unchanged until the flip is agreed");
-  assert.equal(full.length, 118, "full includes room_member_profile");
+  assert.equal(full.length, 121, "full includes room_member_profile, room_claim, room_handoff and room_map");
   assert.ok(!core.some(tool => tool.name === "room_search_actions"), "meta tools are not added to core");
   const names = lean.map(tool => tool.name);
   for (const name of LEAN_MCP_TOOLS) assert.ok(names.includes(name), `lean lists ${name}`);
@@ -71,6 +71,13 @@ test("search finds long-tail tools with their exact schema and REST route", () =
   const withRest = searchActions("squads list").matches.find(match => match.name === "squads_list");
   assert.match(withRest.rest, /^GET \/api\/rooms\/:roomId\/squads/);
   assert.deepEqual(searchActions("zzzz qqqq").matches, []);
+});
+
+test("plain claim and handoff words rank the canonical tools above long-tail lookalikes", () => {
+  for (const query of ["claim work", "take this task", "claim", "hand off", "handoff", "I'm stuck", "release claim", "renew claim"]) {
+    const expected = /hand|stuck/.test(query) ? "room_handoff" : "room_claim";
+    assert.equal(searchActions(query).matches[0].name, expected, query);
+  }
 });
 
 test("run_action refuses itself, search, join and public-work tools, and unknown names", () => {

@@ -118,7 +118,12 @@ export const EVENT_TYPES = Object.freeze({
   ROOM_STARTER_SEEDED: "room.starter_seeded",
   // Agent join profile. Self-description, not authority: member.revision
   // stays put. Absent joinProfile means the defaults.
-  MEMBER_PROFILE_SET: "member.profile_set"
+  MEMBER_PROFILE_SET: "member.profile_set",
+  // Owner-equivalent invite mint. agent_invite_codes stays the source of
+  // truth; this event is the room log of who minted it. The handler
+  // validates the envelope and records nothing in the projection. Replay
+  // does not re-check that the actor is still the owner.
+  AGENT_INVITE_MINTED: "agent_invite.minted"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -419,12 +424,14 @@ export const AGENT_AUTONOMY_PERMISSIONS = Object.freeze(["steer", "accept_work",
 // invite_member holders may mint these without holding them; they cannot
 // grant manage_members/decide/invite_member via invite-code.
 export const AGENT_INVITE_SAFE_PERMISSIONS = AGENT_AUTONOMY_PERMISSIONS;
-// Permissions no invitation mechanism may ever confer, whichever door the
-// invitation comes through: membership administration, decisions, and
-// inviting stay with members who hold them directly, never with whoever
-// redeems an invite. The agent-invite door refuses them at mint
-// (server/agent-invites.mjs) and the share-link grant is capped by the same
-// set (server/share-links.mjs, #3549) — one definition, every door.
+// Permissions ordinary invitations must not confer: membership
+// administration, decisions, and inviting. Share links and ordinary agent
+// invites refuse them (server/share-links.mjs, server/agent-invites.mjs,
+// #3549). The one exception is an owner-equivalent agent invite
+// (ownerEquivalent: true), which only the room's owner member can mint,
+// including when that owner is an agent. It grants these bits to a
+// co-owner-level member and does not transfer the owner seat. Co-owners
+// cannot mint another one.
 export const NEVER_GRANT = Object.freeze(["manage_members", "decide", "invite_member"]);
 export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
 
@@ -728,7 +735,8 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
     [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
     [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded,
-    [EVENT_TYPES.MEMBER_PROFILE_SET]: setMemberProfile
+    [EVENT_TYPES.MEMBER_PROFILE_SET]: setMemberProfile,
+    [EVENT_TYPES.AGENT_INVITE_MINTED]: recordAgentInviteMinted
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -1487,6 +1495,19 @@ function recordLandUpdate(state, incoming) {
 export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed"]);
 const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 
+// Owner-equivalent invite mint. The invite table is the source of truth.
+// Validates the minter was a member and the public handle shape, and
+// records nothing in the projection. Does not require the actor to still
+// be the owner: ownership can move after the mint, and replay must keep
+// the historical record.
+function recordAgentInviteMinted(state, incoming) {
+  knownMember(state, incoming.actorId);
+  if (typeof incoming.data.inviteId !== "string" || !/^[a-f0-9]{8}$/.test(incoming.data.inviteId)) {
+    throw new Error("Invalid inviteId");
+  }
+  if (incoming.data.ownerEquivalent !== true) throw new Error("Invalid ownerEquivalent");
+}
+
 // Thin receipt: validated, never copied into the projection.
 function recordStarterSeeded(state, incoming) {
   requireFields(incoming.data, ["templateSlug", "intentKind"]);
@@ -1564,7 +1585,10 @@ function recordReferral(state, incoming) {
 function recordDecision(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requirePermission(state, incoming.actorId, "decide");
-  if (actor.kind !== "human") throw new Error("Only a human member may record a decision");
+  // Humans record decisions. An agent can too only when the owner empowered
+  // them (delegatedAdmin), which is how an owner-equivalent invite lands.
+  // An ordinary agent cannot, even if a stale projection still lists the bit.
+  if (actor.kind !== "human" && actor.delegatedAdmin !== true) throw new Error("Only a human member may record a decision");
   requireFields(incoming.data, ["sourceMessageId", "statement"]);
   requirePublicDecisionSource(state, incoming.data.sourceMessageId);
   const statement = String(incoming.data.statement);

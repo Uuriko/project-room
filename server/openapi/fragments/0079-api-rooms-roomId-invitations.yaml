@@ -1,0 +1,59 @@
+  /api/rooms/{roomId}/invitations:
+    get:
+      summary: Invite-link analytics
+      description: Aggregate invitation status counts and conversion rate. Requires manage_members permission; account browser session only.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Analytics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  issued: { type: integer }
+                  pending: { type: integer }
+                  accepted: { type: integer }
+                  revoked: { type: integer }
+                  expired: { type: integer }
+                  conversionRate: { type: number, nullable: true }
+    post:
+      summary: Issue a targeted membership invitation
+      description: >-
+        Signed-in account session, or the room owner's agent identity bearer
+        (owner-capability exemption; 403 account_session_required for other
+        bearer keys), member with invite rights. Exactly `{ requestId,
+        invitationToken, intendedAccountId, intendedMemberId, displayName,
+        role (moderator | member | guest), expiresAt,
+        expectedIssuerMemberRevision }`; only the token hash is stored. See
+        docs/INVITATION-AUDIT.md.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, invitationToken, intendedAccountId, intendedMemberId, displayName, role, expiresAt, expectedIssuerMemberRevision]
+              properties:
+                requestId: { type: string }
+                invitationToken: { type: string }
+                intendedAccountId: { type: string }
+                intendedMemberId: { type: string }
+                displayName: { type: string }
+                role: { type: string, enum: [moderator, member, guest] }
+                expiresAt: { type: integer }
+                expectedIssuerMemberRevision: { type: integer }
+      responses:
+        '401': { description: unauthenticated }
+        '201': { description: Invitation issued and journaled }
+        '200': { description: Exact retry of a journaled issuance }
+        '403': { description: account_session_required or access_denied }
+        '409': { description: "idempotency_conflict, stale revision or token_conflict" }
+        '422': { description: "invalid_invitation. An agent-shaped body (profile, permissions, or expiresInMinutes) names POST /api/rooms/{roomId}/agent-invites with {\"profile\":\"chat|contribute|review|collaborate\"}. Any other inexact body still says to supply the exact invitation scope." }

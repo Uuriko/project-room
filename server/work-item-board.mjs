@@ -26,7 +26,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // second run writes nothing.
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
 import { ownMember } from "../src/events.js";
 import { effectiveOpenClaimLimit } from "../src/agent-join-profile.js";
 
@@ -562,7 +562,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
       ...(existing?.pullRequests ?? []),
     ].map(pull => [pull.url, pull])).values()].slice(0, MAX_PULLS),
     updatedAt: isoOrNull(item.updatedAt) ?? isoOrNull(item.createdAt) ?? iso(nowMs),
-    repo: claimForScope ? (claimForScope.repository ?? null) : null,
+    repo: claimForScope ? (normalizeClaimRepository(claimForScope.repository) ?? null) : null,
     branch: claimForScope ? (claimForScope.ref ?? null) : null,
     chain: chain.slice(-MAX_CHAIN),
     supersededBy: item.state === "superseded" && typeof item.supersededBy === "string" ? boardClaimId(item.supersededBy) : null,

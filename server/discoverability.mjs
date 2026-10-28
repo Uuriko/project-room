@@ -140,6 +140,9 @@ const ROOM_EVENTS_QUERY = Object.freeze([
   queryParam("compact", { type: "string", enum: ["1", "0", "true", "false"] }, { description: "1 or true drops envelope fields a poller does not act on." }),
   queryParam("tail", { type: "integer", minimum: 1, maximum: 200 }, { description: "Newest N events, sent alone. Combining tail with other event filters is 422." }),
 ]);
+const NEEDS_ME_QUERY = Object.freeze([
+  queryParam("roomId", { type: "string" }, { description: "Optional. Scope the read to one room." }),
+]);
 const ROOM_SEARCH_QUERY = Object.freeze([
   queryParam("q", { type: "string", minLength: 1, maxLength: 80 }, { required: true, description: "Substring to match. Required." }),
   queryParam("kind", { type: "string", enum: ["all", "messages", "work", "pinned"], default: "all" }),
@@ -215,7 +218,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { requestBodies: { POST: SHARE_LINK_JOIN_BODY } }),
   route("/api/share-links/preview", ["POST"], "none", "Preview a shared invite link (room title and access description only); the link token is the credential.", "previewShareLink",
     { requestBodies: { POST: SHARE_LINK_PREVIEW_BODY } }),
-  route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
+  route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe",
+    { query: NEEDS_ME_QUERY }),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
     { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),
@@ -812,6 +816,14 @@ export const nextActionsForRoomCreate = roomId => {
     Object.freeze({ action: "finish-work", transport: "http", method: "POST", path: starterUpdate,
       body: Object.freeze({ state: "done", deliveryMode: "result", note: "<what you did>" }),
       description: "Close the starter task with a result note. The starter is claimed until you start it: run start-work ({\"state\":\"in_progress\"}) first if you have not — claimed cannot move straight to done." }),
+    Object.freeze({ action: "claim-work", transport: "mcp", tool: "room_claim", path: "/mcp",
+      arguments: Object.freeze({ action: "take", requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+        repository: "<owner/repo>", ref: "<branch>", paths: Object.freeze(["<path>"]), expiresAt: "<ISO date-time>" }),
+      description: "Projected work items: claim the task assigned to you with room_claim action=take. The starter above is already claimed; use start-work for it." }),
+    Object.freeze({ action: "handoff-work", transport: "mcp", tool: "room_handoff", path: "/mcp",
+      arguments: Object.freeze({ requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+        doneSummary: "<what is done against the definition of done>", nextAction: "<exact next step>", limitReason: "<why you stopped>" }),
+      description: "If you cannot finish a projected task you claimed, return it to the Board with room_handoff. It does not close or reassign the work." }),
     Object.freeze({ action: "create-task", transport: "http", method: "POST", path: `${room}/work-claims`,
       body: Object.freeze({ id: "<id>", title: "<title>" }),
       description: "Add another board task: POST { id, title }." }),
@@ -827,6 +839,14 @@ export const nextActionsForInviteRedeem = roomId => {
       description: "Orient: list the room's members, who is online, and who is holding which work sessions." }),
     Object.freeze({ action: "room_check_access", transport: "mcp", tool: "room_check_access", path: "/room/mcp",
       description: "Verify what this identity can access in the room via the hosted MCP tool room_check_access." }),
+    Object.freeze({ action: "claim-work", transport: "mcp", tool: "room_claim", path: "/mcp",
+      arguments: Object.freeze({ action: "take", requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+        repository: "<owner/repo>", ref: "<branch>", paths: Object.freeze(["<path>"]), expiresAt: "<ISO date-time>" }),
+      description: "Projected work items: claim the task assigned to you with room_claim action=take. Board session claims stay on the work-session route." }),
+    Object.freeze({ action: "handoff-work", transport: "mcp", tool: "room_handoff", path: "/mcp",
+      arguments: Object.freeze({ requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+        doneSummary: "<what is done against the definition of done>", nextAction: "<exact next step>", limitReason: "<why you stopped>" }),
+      description: "If you cannot finish a projected task you claimed, return it to the Board with room_handoff. It does not close or reassign the work." }),
   ]);
 };
 
