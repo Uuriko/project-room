@@ -345,6 +345,19 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// Room-open reads no first-paint element needs run this long after the first
+// snapshot, so the single room object serves the room read, the session and
+// the member's first action before them. Skipped if the room changed.
+const SETTLED_READ_DELAY_MS = 1200;
+let settledReadsTimer = null;
+function afterRoomSettles(roomId, run) {
+  clearTimeout(settledReadsTimer);
+  const generation = client.generation;
+  settledReadsTimer = setTimeout(() => {
+    settledReadsTimer = null;
+    if (client.generation === generation && state?.room?.id === roomId && session) run();
+  }, SETTLED_READ_DELAY_MS);
+}
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -501,12 +514,17 @@ const client = new RoomClient({
       const accountId = accountClient.session?.account?.id ?? session?.account?.id;
       if (accountId) rememberMemberRoom(accountId, roomId, undefined, state.room?.title);
       if (session?.member?.id) rememberMemberRoom(session.member.id, roomId, undefined, state.room?.title);
-      void refreshRoomFiles();
-      void refreshDmConsents();
-      void refreshFriendBonds();
-      void refreshSavedIds();
+      // The scroll anchor shapes the first paint. The remaining room-open reads
+      // feed panels and badges, so they wait for the startup burst to drain.
+      // DM consent gates what a member may send, so it stays immediate.
       void applyHorizonAnchor();
-      void refreshMutedThreads();
+      void refreshDmConsents();
+      afterRoomSettles(roomId, () => {
+        void refreshRoomFiles();
+        void refreshFriendBonds();
+        void refreshSavedIds();
+        void refreshMutedThreads();
+      });
     }
     instructionsUI?.sync();
     resultCopyUI?.sync();
