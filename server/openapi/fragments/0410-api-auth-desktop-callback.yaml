@@ -1,0 +1,7 @@
+  /api/auth/desktop/callback:
+    get:
+      summary: Return a bounded authorization code to the Mac authentication session
+      security: []
+      responses:
+        '302': { description: Fixed projectroom auth callback with state and code or denial }
+        '422': { description: Invalid callback }
