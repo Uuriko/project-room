@@ -4811,7 +4811,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const visible = message => messageInHistory(message, floor)
             && (!message.toMemberId || message.authorId === auth.member.id || message.toMemberId === auth.member.id);
           messages = repository.recent(messageLimit, visible);
-          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countMetadata(visible)-messages.length,older:"conversation"};
+          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countViewerVisible(auth.member.id, floor)-messages.length,older:"conversation"};
           const pinned = repository.getMany((pins ?? []).map(pin=>pin.messageId));
           pins = (pins ?? []).filter(pin=>pinned.has(pin.messageId) && visible(pinned.get(pin.messageId)));
         } else {

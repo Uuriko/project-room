@@ -1022,7 +1022,11 @@ export class RoomClient {
     stream.addEventListener("error", () => {
       if (!ownsStream()) return;
       this.onStatus("Reconnecting · displayed history may be stale");
-      refreshStream(null, { revalidate: true });
+      // While the browser retries on its own (CONNECTING) the "open" handler
+      // revalidates once it is back, so a read here only adds load to a room
+      // that is already struggling. A CLOSED stream (HTTP refusal) still reads
+      // now: that read is how an ended session is noticed.
+      if (stream.readyState === 2) refreshStream(null, { revalidate: true });
       // Native retry handles CONNECTING, but HTTP refusals leave EventSource CLOSED.
       // Replace only that stream, with backoff and the same session ownership.
       if (ownsStream() && stream.readyState === 2 && !this.streamRetry) {
