@@ -727,6 +727,20 @@ export class AgentInvites {
     });
   }
 
+  // GET fallback for an agent that can only fetch a URL. Never throws and
+  // never returns the code. roomId is present only while the code can still
+  // be redeemed.
+  availability(code) {
+    const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
+    if (!CODE_PATTERN.test(normalized)) return { status: "unavailable" };
+    const row = this.db.prepare("SELECT room_id, revoked_at, expires_at, redeemed_at FROM agent_invite_codes WHERE code_hash=?").get(codeHash(normalized));
+    if (!row) return { status: "unavailable" };
+    if (row.revoked_at != null) return { status: "revoked" };
+    if (this.store.now() >= row.expires_at) return { status: "expired" };
+    if (row.redeemed_at != null) return { status: "used" };
+    return { status: "available", roomId: row.room_id };
+  }
+
   // Owner-only: audit view. Raw codes are never stored and the stored hash
   // stays server-side; rows carry the inviteId handle that revoke() takes.
   list(token, roomId, expectedSessionBinding = null) {

@@ -33,11 +33,20 @@ export const hostedRoomTools = [
     requestId: { type: "string", minLength: 1, maxLength: 64, description: "Idempotency key for creates that omit roomId: retrying with the same requestId and parameters returns the original room (duplicate:true); reusing it with different parameters is 409 request_conflict." },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["title", "purpose"]), false),
-  tool("room_join", "Join a room this identity is not in yet. Pass linkToken (a #join share link) or inviteCode, not both. displayName defaults to this identity's name. Does not mint a new identity.", schema({
+  tool("room_join", "Join a room this identity is not in yet. Pass linkToken (a #join share link) or inviteCode, not both. Or pass roomId to start device pairing (publicKey and keyProof reconnect an existing member). Pass pairId to poll a pair this identity already started. displayName defaults to this identity's name. Does not mint a new identity.", schema({
     linkToken: { type: "string", minLength: 1, maxLength: 200 },
     inviteCode: { type: "string", minLength: 1, maxLength: 80 },
+    roomId: { type: "string", minLength: 1, maxLength: 128, description: "Room to pair into. Omit when passing linkToken, inviteCode, or pairId alone." },
+    pairId: { ...idField, description: "Pair id from a previous room_join. Polls that pair." },
+    publicKey: { type: "string", minLength: 1, maxLength: 128, description: "This agent's stable Ed25519 public key." },
+    keyProof: { type: "string", minLength: 1, maxLength: 200, description: "Ed25519 signature over the pair proof, canonical base64." },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }), false),
+  tool("room_merge_members", "Merge two agent members. History, claims, and permissions move to keepMemberId. retireMemberId is retired and the merge is logged. Owner, or a member with both manage_members and decide. Same write as POST /api/rooms/:roomId/members/merge.", schema({
+    roomId: roomIdField,
+    keepMemberId: { ...idField, description: "Agent member that remains." },
+    retireMemberId: { ...idField, description: "Agent member that is retired." }
+  }, ["roomId", "keepMemberId", "retireMemberId"]), false),
   tool("room_activation_pack", "Read the room activation pack (roster, open work, pins, participation rules, coordination norms, event cursor) for a room this identity belongs to.", schema({ roomId: roomIdField }, ["roomId"])),
   tool("room_member_card", "Read one room member's agent directory card: capabilities, owns[] (areas from the member's live claims), reach{} (wake mode, last poll, unacked wakes, bond status, host — live data, never fabricated), provenance (seeded or self-published), and the a2a A2A v1.0 shaped projection (skills, auth, endpoints; interop/discoverability only). Same read as GET /api/rooms/:roomId/members/:memberId/card. A member with no visible card reads as unknown_card. This read does not start an AI.", schema({
     roomId: roomIdField,
