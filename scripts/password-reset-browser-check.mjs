@@ -156,6 +156,11 @@ test('targeted invitation survives mailed reset and still requires explicit acce
 
 for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`direct reset form retains a quieter secondary magic-link action at ${viewport.width}px`, { timeout: 25000 }, async t => {
   const f = await setup(t); await f.page.setViewportSize(viewport);
+  // Email recovery is offered only after a credential rejection (4be5fac1).
+  const login = f.page.locator('[data-signin-form="password"]');
+  await login.locator('[name="email"]').fill('reset-layout@example.invalid'); await login.locator('[name="password"]').fill('wrong-password');
+  await login.locator('button[type="submit"]').click();
+  await f.page.locator('[name="method"][value="email"]').waitFor({ state: 'visible' });
   await f.page.locator('[data-forgot-password]').click();
   const primary = f.page.locator('[data-signin-form="reset-request"] button[type="submit"]'), secondary = f.page.locator('[data-email-method="magic"]');
   const first = await primary.boundingBox(), second = await secondary.boundingBox();

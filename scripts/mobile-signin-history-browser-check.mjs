@@ -36,6 +36,11 @@ test("mobile email taps and browser Back/Forward retain the room and fence a pen
   const passwordForm = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await passwordForm.waitFor({ state: "visible" });
   assert.equal(await page.locator("#email-signin").count(), 0);
+  // Email recovery is offered only after a credential rejection (4be5fac1).
+  await passwordForm.locator('[name="email"]').fill('mobile-navigation@example.invalid');
+  await passwordForm.locator('[name="password"]').fill('wrong-password');
+  await passwordForm.locator('button[type="submit"]').tap();
+  await page.locator('[name="method"][value="email"]').waitFor({ state: "visible" });
   await page.evaluate(() => { window.historyEvents = 0; addEventListener("popstate", () => { window.historyEvents++; }); });
   await page.locator("[data-forgot-password]").tap();
   await page.locator('[data-signin-form="reset-request"]').waitFor({ state: "visible" });
