@@ -1,0 +1,19 @@
+  /api/inbox/sources/{sourceId}/share-context:
+    get:
+      summary: Audience for sharing a source into a room
+      description: >-
+        Account-session read. `roomId` (exactly one) names a room the account
+        is a member of; the response carries the `audienceVersion` a
+        `source.share` or `source.excerpt` command must echo.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: roomId
+          in: query
+          required: true
+          schema: { type: string }
+      responses:
+        '200': { description: "{ contractVersion, viewer, sourceId, sourceRevision, roomId, roomTitle, audienceVersion, audience, members }" }
+        '403': { description: Not a member of the room }
+        '422': { description: invalid_room }

@@ -72,31 +72,31 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(DISCOVERY_PATHS.includes("/room/mcp"), false);
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(text.includes("lobby.getdasha.com"), false); // dead door, never advertised
-  assert.match(text, /Humans: open this invite link/);
-  assert.match(text, /https:\/\/room\.trydemigod\.com\/#join\//);
-  assert.match(text, /#room\/\{roomId\} is not an invite/);
-  assert.match(text, /Agent invite code \/ redeem-invite is labeled below/);
-  assert.match(text, /packet \(live, no account\)/);
-  assert.match(text, /paste-prompt \(live, no account\)/);
-  assert.match(text, /GET \/join\.txt/);
-  assert.match(text, /guest-agent-link \(live, owner-issued\)/);
-  assert.match(text, /agent-room-create \(live, no account\)/);
-  assert.match(text, /bootstrap-agent-room/);
-  assert.match(text, /cli, not a live HTTP POST/);
-  assert.match(text, /no POST \/api\/bootstrap-agent-room/);
-  assert.match(text, /\/room\/api\/agent-identities/);
-  assert.match(text, /\/room\/api\/agent-rooms/);
-  assert.match(text, /\/room\/api\/agent-invites\/redeem/);
-  assert.match(text, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
-  assert.match(text, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
+  assert.match(full, /Humans: open this invite link/);
+  assert.match(full, /https:\/\/room\.trydemigod\.com\/#join\//);
+  assert.match(full, /#room\/\{roomId\} is not an invite/);
+  assert.match(full, /Agent invite code \/ redeem-invite is labeled below/);
+  assert.match(full, /packet \(live, no account\)/);
+  assert.match(full, /paste-prompt \(live, no account\)/);
+  assert.match(full, /GET \/join\.txt/);
+  assert.match(full, /guest-agent-link \(live, owner-issued\)/);
+  assert.match(full, /agent-room-create \(live, no account\)/);
+  assert.match(full, /bootstrap-agent-room/);
+  assert.match(full, /cli, not a live HTTP POST/);
+  assert.match(full, /no POST \/api\/bootstrap-agent-room/);
+  assert.match(full, /\/room\/api\/agent-identities/);
+  assert.match(full, /\/room\/api\/agent-rooms/);
+  assert.match(full, /\/room\/api\/agent-invites\/redeem/);
+  assert.match(full, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
+  assert.match(full, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
   assert.equal(card.endpoints.invite_mint, `${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`);
-  assert.match(text, /hosted-mcp \(live, no account\)/);
+  assert.match(full, /hosted-mcp \(live, no account\)/);
   assert.match(text, /https:\/\/room\.trydemigod\.com\/mcp/);
-  assert.doesNotMatch(text, /human-join-code \(live\)/);
-  assert.match(text, /www.getdasha.com \(no \/room path\)/);
+  assert.doesNotMatch(full, /human-join-code \(live\)/);
+  assert.match(full, /www.getdasha.com \(no \/room path\)/);
   assert.match(text, /room_check_access/);
   assert.match(text, /orient/);
-  assert.match(text, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(full, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(full, /queued \/ processing \/ active/);
   assert.match(full, /Compute is a separate/);
   assert.match(text, /\/kits\.txt/);
@@ -125,17 +125,17 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.match(AFTER_PASTE_SECTION, /POST \/api\/share-links\/join-agent/);
   assert.match(AFTER_PASTE_SECTION, /GET \/api\/rooms\/ROOM_ID\/activation-pack/);
   assert.doesNotMatch(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth|Waiting for Paste AI draft/);
-  for (const packet of [text, full]) {
-    const joinAt = packet.indexOf("## Join\n");
-    const afterAt = packet.indexOf(AFTER_PASTE_SECTION);
-    const routesAt = packet.indexOf("## Routes\n");
-    assert.ok(joinAt >= 0, "Join present");
-    assert.ok(afterAt > joinAt, "After paste follows Join");
-    assert.ok(routesAt > afterAt, "Routes follow After paste");
-    assert.equal(packet.includes(AFTER_PASTE_SECTION), true);
-    assert.match(packet, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
-    assert.match(packet, /#room\/\{roomId\} is not an invite/);
-  }
+  const joinAt = full.indexOf("## Join\n");
+  const afterAt = full.indexOf(AFTER_PASTE_SECTION);
+  const routesAt = full.indexOf("## Routes\n");
+  assert.ok(joinAt >= 0, "Join present");
+  assert.ok(afterAt > joinAt, "After paste follows Join");
+  assert.ok(routesAt > afterAt, "Routes follow After paste");
+  assert.equal(full.includes(AFTER_PASTE_SECTION), true);
+  assert.match(full, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
+  assert.match(full, /#room\/\{roomId\} is not an invite/);
+  assert.match(text, /\[Full agent packet\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
+  assert.equal(text.includes(AFTER_PASTE_SECTION), false, "the short index points at the full packet instead of embedding After paste");
   assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
   assert.equal(kitsTxt().includes("## After paste"), false);
   const packetSkill = agentCard().skills.find(row => row.id === "packet");
@@ -150,7 +150,7 @@ test("both packets disclose the trial-seat mint requirement where they teach gue
   // the packet into a 403 whose advice looped back at them. The disclosure
   // rides the same sentence that presents the door, in both packets, and
   // in the JOIN_TIERS summary agents read first.
-  for (const packet of [llmsTxt(), llmsFullTxt()]) {
+  for (const packet of [llmsFullTxt()]) {
     const line = packet.split("\n").find(l => l.startsWith("- guest-agent-link"));
     assert.ok(line, "guest-agent-link join line present");
     assert.match(line, /signed-in account session/);
@@ -667,16 +667,23 @@ test("anonymous MCP catalog is seven tools (four join + two public-work + identi
 });
 
 test("front-door packets scope the query-parameter rule and name the MCP catalogs distinctly (#3634)", () => {
+  // Cure adaptation (merge vs main aaa74906): main restructured llms.txt into
+  // a short index — operational detail (Routes, catalogs) lives only in
+  // llms-full.txt, and llms.txt must stay under 5 KB. So the positive
+  // query-param / 11-tool assertions pin llms-full.txt, while llms.txt is
+  // pinned on the negatives (no wrong text survives) plus its Start-here
+  // naming of the no-credential catalog.
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
     assert.ok(!packet.includes("- query params - unknown query parameters are silently ignored"), `${label}: query-param rule must be scoped per endpoint family, not a blanket silently-ignored`);
-    assert.ok(packet.includes("- query params - there is no single global rule"), `${label}: query-param bullet must state the per-family rule`);
-    assert.ok(packet.includes("GET /api/public-work/tasks accepts exactly limit, after, and claimable"), `${label}: the strict public-work list rule must be stated`);
-    assert.ok(packet.includes("On endpoints without strict query validation, unknown query parameters are silently ignored"), `${label}: the lenient family must be stated as the scoped case`);
     assert.ok(!packet.includes("four documents"), `${label}: the outside catalog's four are join tools, not documents`);
     assert.ok(!packet.includes("about 22"), `${label}: the member core total is exact (22), never about`);
-    assert.ok(packet.includes("public-work catalog by default: 11 tools - the seven public-work tools plus the four join tools"), `${label}: the outside catalog must be named with its exact 11-tool total`);
     assert.ok(packet.includes("no-credential catalog"), `${label}: the anonymous catalog must be named distinctly from the outside seven`);
   }
+  const full = llmsFullTxt();
+  assert.ok(full.includes("- query params - there is no single global rule"), "llms-full.txt: query-param bullet must state the per-family rule");
+  assert.ok(full.includes("GET /api/public-work/tasks accepts exactly limit, after, and claimable"), "llms-full.txt: the strict public-work list rule must be stated");
+  assert.ok(full.includes("On endpoints without strict query validation, unknown query parameters are silently ignored"), "llms-full.txt: the lenient family must be stated as the scoped case");
+  assert.ok(full.includes("public-work catalog by default: 11 tools - the seven public-work tools plus the four join tools"), "llms-full.txt: the outside catalog must be named with its exact 11-tool total");
 });
 
 test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
@@ -697,10 +704,10 @@ test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D
   assert.match(text, /One canonical MCP URL: paste https:\/\/room\.trydemigod\.com\/mcp/);
 });
 
-test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
-  const text = llmsTxt();
-  // The short packet must name the board endpoints so an agent can
-  // coordinate machine work without reading the full packet or openapi.
+test("llms-full.txt documents the work-claims REST contract (issue #1529)", () => {
+  const text = llmsFullTxt();
+  // The full packet names the board endpoints so an agent can
+  // coordinate machine work without reading openapi. The short index points there.
   assert.match(text, /^## Work-claim board$/m);
   const section = text.slice(text.indexOf("## Work-claim board"));
   assert.match(section, /GET \/api\/rooms\/{roomId}\/work-claims/);
@@ -735,8 +742,8 @@ test("every packet wake-poll mention teaches heartbeat-first with hostId (#3022)
       assert.ok(line.includes("agent_not_registered"), `${name}: Board-wakes line names the 404 before any heartbeat`);
     }
   }
-  const wakesLines = llmsTxt().split("\n").filter(l => l.includes("Board wakes"));
-  assert.equal(wakesLines.length, 2, "llms.txt keeps exactly its two Board-wakes paragraphs");
+  const wakesLines = llmsFullTxt().split("\n").filter(l => l.includes("Board wakes"));
+  assert.equal(wakesLines.length, 2, "llms-full.txt keeps exactly its two Board-wakes paragraphs");
 });
 
 // The packet golden path (PUBLIC_WORK_SECTION, shared by llms.txt and
@@ -750,10 +757,11 @@ test("packet golden path carries no stale termsVersion/generation literals", () 
     assert.ok(!text.includes("\"termsVersion\":3"), `${name}: no termsVersion 3 literal`);
     assert.ok(!text.includes("\"expectedTermsVersion\":3"), `${name}: finish example sends no literal expectedTermsVersion`);
     assert.ok(!text.includes("\"generation\":8"), `${name}: no generation 8 literal`);
-    assert.ok(text.includes("\"expectedTermsVersion\":TERMS_VERSION"), `${name}: finish example uses the TERMS_VERSION placeholder`);
-    assert.ok(text.includes("\"generation\":GENERATION"), `${name}: finish example uses the GENERATION placeholder`);
-    assert.match(text, /copy both, never invent them/, `${name}: finish example says to copy both values from the claim response`);
   }
+  const full = llmsFullTxt();
+  assert.ok(full.includes("\"expectedTermsVersion\":TERMS_VERSION"), "llms-full.txt finish example uses the TERMS_VERSION placeholder");
+  assert.ok(full.includes("\"generation\":GENERATION"), "llms-full.txt finish example uses the GENERATION placeholder");
+  assert.match(full, /copy both, never invent them/, "llms-full.txt finish example says to copy both values from the claim response");
 });
 
 // Canonical MCP origin (John's decision, 2026-10-13): room.trydemigod.com/mcp.
@@ -808,7 +816,7 @@ test("discovery surfaces name only one 'one' guide", () => {
 });
 
 test("llms packets describe /openapi.json as the curated machine surface, not every route", () => {
-  for (const [name, text] of [["llms.txt", llmsTxt()], ["skill.md", skillMd()]]) {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["skill.md", skillMd()]]) {
     assert.ok(!text.includes("Every route is in"), `${name}: no 'Every route is in' overclaim`);
     assert.ok(!text.includes("(every route)"), `${name}: no '(every route)' overclaim`);
     assert.match(text, /curated machine[ -]surface/, `${name}: states the actual coverage rule`);
