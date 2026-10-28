@@ -7,7 +7,10 @@
 // the `unit` merge gate can fail closed on stale or partial evidence.
 //
 // Usage: node scripts/unit-ci.mjs --shard=1/3   (run from the repo root)
+//        node scripts/unit-ci.mjs --all         (every discovered file, one job)
+//        node scripts/unit-ci.mjs --affected --base=<sha>
 // Use worktree-local scratch by default; create explicit TMPDIR before children.
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -169,12 +172,53 @@ export function receiptFailures(failures) {
   return failures.filter((f) => !FIXTURE_FAILURE_NAMES.has(f));
 }
 
-function main() {
-  const argv = process.argv.slice(2);
-  if (argv.length !== 1 || !argv[0].startsWith("--shard=")) {
-    throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3");
+function selectUnitRun(argv, plan) {
+  if (argv.length === 1 && argv[0] === "--all") {
+    return {
+      label: "all",
+      files: plan.files,
+      receiptName: attempt => `unit-all-attempt-${attempt}.json`,
+      junitName: attempt => `unit-junit-all-attempt-${attempt}.xml`,
+      receiptFields: {},
+    };
   }
-  const shard = parseShard(argv[0].slice("--shard=".length));
+  if (argv.length === 1 && argv[0].startsWith("--shard=")) {
+    const shard = parseShard(argv[0].slice("--shard=".length));
+    return {
+      label: `shard ${shard.index}/${shard.total}`,
+      files: plan.shards[shard.index - 1].files,
+      receiptName: attempt => `unit-shard-${shard.index}-of-${shard.total}-attempt-${attempt}.json`,
+      junitName: attempt => `unit-junit-${shard.index}-of-${shard.total}-attempt-${attempt}.xml`,
+      receiptFields: shard,
+    };
+  }
+  throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3 | --all | --affected --base=<sha>");
+}
+
+async function selectAffectedRun(argv) {
+  if (argv.length !== 2 || argv[0] !== "--affected" || !argv[1].startsWith("--base=") || !argv[1].slice("--base=".length)) {
+    throw new Error("Usage: node scripts/unit-ci.mjs --shard=1/3 | --all | --affected --base=<sha>");
+  }
+  const { affectedUnitFiles } = await import("./ci-affected.mjs");
+  const files = affectedUnitFiles(argv[1].slice("--base=".length)).files;
+  return {
+    label: "affected",
+    files,
+    receiptName: attempt => `unit-affected-attempt-${attempt}.json`,
+    junitName: attempt => `unit-junit-affected-attempt-${attempt}.xml`,
+    receiptFields: {},
+    planHash: createHash("sha256").update(files.join("\n")).digest("hex"),
+  };
+}
+
+async function main() {
+  const argv = process.argv.slice(2);
+  const plan = unitPlan();
+  const selected = argv[0] === "--affected" ? await selectAffectedRun(argv) : selectUnitRun(argv, plan);
+  if (existsSync("server/openapi/fragments")) {
+    const { writeOpenApi } = await import("./openapi-document.mjs");
+    writeOpenApi();
+  }
   // Fresh checkouts do not contain ignored .tmp/. Initialize before both
   // dependency preflight and test children, matching scripts/test-env.sh.
   const worktreeScratch = resolve(".tmp");
@@ -185,30 +229,30 @@ function main() {
   const preflight = spawnSync(process.execPath, ["scripts/check-deps.mjs"], { stdio: "inherit" });
   if (preflight.error) throw preflight.error;
   if (preflight.status !== 0) process.exit(preflight.status ?? 1);
-  const plan = unitPlan();
-  const files = plan.shards[shard.index - 1].files;
-  if (!files.length) throw new Error("Refusing an empty unit shard");
+  const files = selected.files;
+  if (!files.length) throw new Error("Refusing an empty unit run");
   const attempt = process.env.GITHUB_RUN_ATTEMPT ?? "local";
-  const receiptPath = `test-results/unit-shard-${shard.index}-of-${shard.total}-attempt-${attempt}.json`;
+  const receiptPath = `test-results/${selected.receiptName(attempt)}`;
   mkdirSync(dirname(receiptPath), { recursive: true });
   rmSync(receiptPath, { force: true });
-  console.log(`unit-ci: shard ${shard.index}/${shard.total}, ${files.length} test files`);
-  const junitPath = `test-results/unit-junit-${shard.index}-of-${shard.total}-attempt-${attempt}.xml`;
+  console.log(`unit-ci: ${selected.label}, ${files.length} test files`);
+  const junitPath = `test-results/${selected.junitName(attempt)}`;
   const started = Date.now();
   const { status, signal, failures, fileDurationsMs } = runTestFiles(files, { junitPath });
   writeFileSync(
     receiptPath,
     JSON.stringify(
       {
-        ...shard,
+        ...selected.receiptFields,
         files,
-        planHash: plan.planHash,
+        planHash: selected.planHash ?? plan.planHash,
         status,
         signal,
         failures: receiptFailures(failures),
         // Per-file measured runtimes from this actual hosted run (junit
         // sidecar). Backward compatible: older receipts omit this field
-        // and verifyUnitShards does not require it.
+        // and verifyUnitShards does not require it. The single-job receipt
+        // (unit-all-*.json) feeds scripts/refresh-unit-ci-durations.mjs.
         fileDurationsMs,
         revision: process.env.GITHUB_SHA ?? "local",
         runId: process.env.GITHUB_RUN_ID ?? "local",
@@ -219,7 +263,7 @@ function main() {
       2
     ) + "\n"
   );
-  console.log(`unit-ci: shard ${shard.index}/${shard.total} exit ${status} in ${Math.round((Date.now() - started) / 1000)}s`);
+  console.log(`unit-ci: ${selected.label} exit ${status} in ${Math.round((Date.now() - started) / 1000)}s`);
   process.exit(status);
 }
 

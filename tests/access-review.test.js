@@ -18,6 +18,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { accessReviewReport, assembleAccessReview, renderAccessReview, ACCESS_REVIEW_FORMAT } from "../server/access-review.mjs";
 import { GUEST_AGENT_TOKEN_PREFIX, GUEST_AGENT_KIND, GUEST_AGENT_PERMISSIONS, guestAgentMemberId } from "../server/guest-agent-links.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const execFileAsync = promisify(execFile);
 const checkout = fileURLToPath(new URL("..", import.meta.url));
@@ -62,7 +63,7 @@ async function fixture(t) {
     displayName: "Helper", access: "contribute", keyHash, expiresAt: now + 86400000, expectedOwnerRevision: 0 }, ownerSession.session.sessionBinding);
   // Multi-room agent identity linked into the room.
   const identity = store.identities.create("Roaming agent");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  linkWithProof(store, ownerKey, "commons", identity, { permissions: ["accept_work"] });
   // Guest agent (2 h credential), seeded as legacy data. The v0 mint door
   // was cut in #3216, but guests minted before the cut live out their
   // credentials and the review must keep surfacing them, so the fixture
@@ -147,7 +148,7 @@ test("owner account session reads the full review; removed members are absent", 
   const [pending] = report.pendingInvites;
   assert.equal(pending.inviteId, f.invite.inviteId);
   assert.match(pending.inviteId, /^[a-f0-9]{8}$/, "the handle is the short inviteId, not a full hash");
-  assert.deepEqual(pending, { inviteId: f.invite.inviteId, displayName: "Scribe", permissions: f.invite.permissions, inviterMemberId: "owner",
+  assert.deepEqual(pending, { inviteId: f.invite.inviteId, displayName: "Scribe", permissions: f.invite.permissions, ownerEquivalent: false, inviterMemberId: "owner",
     createdAt: new Date(f.invite.createdAt).toISOString(), expiresAt: new Date(f.invite.expiresAt).toISOString(), status: "active" });
   assert.equal(Date.parse(pending.expiresAt) - Date.parse(pending.createdAt), 3600000);
   assert.ok(!JSON.stringify(report).includes(f.revokedInvite.inviteId), "a revoked invite code is not pending");
@@ -267,15 +268,20 @@ test("the script prints the route's report from the store file and from a runnin
 
 test("the review shares the per-credential read allowance with sibling room reads", async t => {
   const f = await fixture(t);
-  for (let i = 0; i < 600; i += 100) {
-    const statuses = await Promise.all(Array.from({ length: 100 }, () => f.get("/api/rooms/commons/presence", f.bearer(f.ownerKey)).then(r => r.status)));
-    assert.ok(statuses.every(status => status === 200), `batch ${i}: ${statuses.join(",")}`);
+  // Sixty presence reads stay inside the read burst on their own. Twenty
+  // access-review reads in the same burst push the shared bucket over 70.
+  const responses = await Promise.all([
+    ...Array.from({ length: 60 }, () => f.get("/api/rooms/commons/presence", f.bearer(f.ownerKey))),
+    ...Array.from({ length: 20 }, () => f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey))),
+  ]);
+  const limited = responses.filter(response => response.status === 429);
+  assert.ok(responses.some(response => response.status === 200), "the burst still serves reads");
+  assert.ok(limited.length > 0, "presence and access-review share one read burst");
+  for (const response of limited) {
+    assert.equal(response.json.error.code, "rate_limited");
+    assert.equal(response.headers.get("x-ratelimit-limit"), "70");
+    assert.equal(response.headers.get("x-ratelimit-bucket"), "read");
   }
-  const limited = await f.get("/api/rooms/commons/access-review", f.bearer(f.ownerKey));
-  assert.equal(limited.status, 429);
-  assert.equal(limited.json.error.code, "rate_limited");
-  assert.equal(limited.headers.get("x-ratelimit-limit"), "600");
-  assert.equal(limited.headers.get("retry-after"), "60");
 });
 
 test("the review command records one revoke that removes both administration stores", async t => {
