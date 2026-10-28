@@ -329,6 +329,14 @@ const REGISTRY_FIXTURES = [
       assert.match(nextTextOf(ax), /agent-invites/);
       assert.doesNotMatch(`${ax.hint} ${nextTextOf(ax)}`, /Ask the owner to mint/);
     }],
+  ["horizon_conflict", { httpStatus: 409 }, ax => {
+    assert.match(nextTextOf(ax), /Discard a stale automatic advance/);
+    assert.match(nextTextOf(ax), /Never silently rebase/);
+  }],
+  ["horizon_precondition_required", { httpStatus: 428 }, ax => {
+    assert.match(nextTextOf(ax), /expectedRevision/);
+    assert.match(nextTextOf(ax), /Do not fall back/);
+  }],
   ["proof_required", { httpStatus: 428, message: "Identity mint proof required" },
     ax => {
       assert.match(ax.hint, /SHA-256/);
@@ -340,7 +348,7 @@ test("registry-migrated codes: shipped envelope equals the registry resolution (
   assert.ok(ERROR_REGISTRY && typeof ERROR_REGISTRY === "object", "ERROR_REGISTRY must be exported from src/agent-error.mjs");
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
-  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
+  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "horizon_conflict", "horizon_precondition_required", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
     "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
     "the migrated set is the joining-path set; growing it is a deliberate edit here too");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {

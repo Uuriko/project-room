@@ -165,7 +165,7 @@ import {
   assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
-import { activitySchema, recordActivityEvents, journalActivityFanoutFailure, retryActivityFanoutFailures } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
+import { ensureReadHorizonSchema, activitySchema, recordActivityEvents, journalActivityFanoutFailure, retryActivityFanoutFailures } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
 import { AgentInvites, agentInviteSchema } from "./agent-invites.mjs";
 import { ReferralInvites, referralInviteSchema } from "./referral-invites.mjs";
 import { ThreadMutes, threadMutesSchema } from "./thread-mutes.mjs"; // Per-thread mutes: private side table, additive.
@@ -1116,7 +1116,8 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
-  [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
+  [ensureAttachmentSchema, "ensureAttachmentSchema@1"],
+  [ensureReadHorizonSchema, "ensureReadHorizonSchema@2"]
 ];
 
 // Hash of the DDL this process knows how to apply. A stored match means
@@ -1141,7 +1142,7 @@ function roomSchemaStamp() {
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
-    accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
+    accessRequestSchema, pairingSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
@@ -1868,6 +1869,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // EXISTS is idempotent, no schema version bump, intentionally outside
       // the writer fence.
       this.db.exec(activitySchema);
+      ensureReadHorizonSchema(this.db);
       // Per-thread mutes. Purely additive side table (no events, no
       // projection impact): IF NOT EXISTS is idempotent, no schema version
       // bump, intentionally outside the writer fence. DDL matches the

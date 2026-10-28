@@ -1,14 +1,21 @@
 // Updates destination. Needs me, Mentions, and All activity.
 // The badge counts actionable items only. Opening a row marks it read.
-// Done and Clear are the handled and dismissed marks. Keyboard reachable,
-// and the rows stay usable at 390px.
+import { uiText } from "./strings.js";
 
 const FILTERS = [
   { id: "needs", label: "Needs me" },
   { id: "mentions", label: "Mentions" },
   { id: "all", label: "All activity" }
 ];
-const ACTION_LABELS = { open: "Open", done: "Handled for me", clear: "Clear" };
+const ACTION_LABELS = { open: uiText("updates.open"), done: uiText("updates.legacyHandled"), clear: uiText("updates.dismiss") };
+export function updateActions(item, pendingAction = null) {
+  const actions = [];
+  if (item.sourceRef?.workItemId || item.sourceRef?.messageId) actions.push("open");
+  if (item.state === "unread" || item.state === "read") actions.push("clear");
+  // Preserve the exact retry for an uncertain action, including older clients.
+  if (pendingAction && Object.hasOwn(ACTION_LABELS, pendingAction) && !actions.includes(pendingAction)) actions.push(pendingAction);
+  return actions;
+}
 export const validBasis = value => typeof value === "string" && /^ub1_[a-f0-9]{64}$/.test(value);
 const PALETTE = { "catch-up": "needs", activity: "all", mentions: "mentions" };
 
@@ -29,7 +36,15 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
   const badge = document.createElement("span");
   badge.id = "updates-count";
   badge.className = "count-chip";
-  entry.append("Updates ", badge);
+  entry.title = uiText("updates.title");
+  const label = document.createElement("span");
+  label.className = "updates-entry-label";
+  label.textContent = uiText("updates.title");
+  const icon = document.createElement("span");
+  icon.className = "updates-entry-icon";
+  icon.setAttribute("aria-hidden", "true");
+  icon.innerHTML = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10 21h4"/></svg>';
+  entry.append(icon, label, badge);
   topbar?.prepend(entry);
 
   const dialog = document.createElement("dialog");
@@ -139,7 +154,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       for (const button of row.querySelectorAll("[data-update-action]")) {
         const action = button.dataset.updateAction;
         const label = `${operation?.action === action ? (operation.busy ? "Checking " : "Retry ") : ""}${ACTION_LABELS[action]}`;
-        button.textContent = label;
+        const title = items.find(item => item.id === row.dataset.updateId)?.title || "update";
+        button.textContent = button.classList.contains("updates-open-title") ? title : label;
         button.setAttribute("aria-label", `${label} ${items.find(item => item.id === row.dataset.updateId)?.title || "update"}`);
         button.disabled = loading || (!!operation && (operation.action !== action || (operation.busy && action !== "open")));
       }
@@ -178,24 +194,33 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       row.dataset.updateState = item.state;
       const copy = document.createElement("div");
       copy.className = "updates-copy";
-      const title = document.createElement("strong");
+      const availableActions = updateActions(item, operations.get(item.id)?.action);
+      const titleOpensSource = availableActions.includes("open") && item.kind !== "pending_action";
+      const title = document.createElement(titleOpensSource ? "button" : "strong");
       title.textContent = item.title || item.kind;
+      if (titleOpensSource) {
+        title.type = "button";
+        title.className = "updates-open-title";
+        title.dataset.updateAction = "open";
+        title.setAttribute("aria-label", `${ACTION_LABELS.open} ${item.title || item.kind}`);
+      }
       copy.append(title);
       const actions = document.createElement("div");
       actions.className = "updates-actions";
-      for (const [name, label] of Object.entries(ACTION_LABELS)) {
-        // Owner decisions are below this list; do not offer an Open action
-        // unless this row has a supported work or conversation destination.
-        if (name === "open" && !item.sourceRef?.workItemId && !item.sourceRef?.messageId && operations.get(item.id)?.action !== "open") continue;
+      for (const name of availableActions) {
+        if (name === "open" && titleOpensSource) continue;
+        const label = ACTION_LABELS[name];
         const button = document.createElement("button");
         button.type = "button";
         button.className = name === "open" ? "button secondary" : "button ghost";
         button.dataset.updateAction = name;
         button.textContent = label;
+        if (name === "clear") button.title = uiText("updates.dismissHelp");
         button.setAttribute("aria-label", `${label} ${item.title || item.kind}`);
         actions.append(button);
       }
-      row.append(copy, actions);
+      row.append(copy);
+      if (actions.childElementCount) row.append(actions);
       list.append(row);
     }
     paintOperations(); paintPaging();
@@ -286,6 +311,8 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
     const origin = capture(item.id, action);
     const path = action === "open" ? "read" : action;
     const current = () => mine === interaction && owns(owned) && dialog.open;
+    const focused = document.activeElement;
+    const returnFocus = focused?.closest?.("[data-update-id]")?.dataset.updateId === item.id;
     operation.busy = true; paintOperations(); status.textContent = "";
     let result;
     try {
@@ -342,6 +369,9 @@ export function mountUpdates({ client, host, getContext, onOpenWork, onOpenMessa
       return;
     }
     await load();
+    if (current() && returnFocus && (document.activeElement === document.body || document.activeElement === dialog)) {
+      tabs.querySelector('[aria-selected="true"]')?.focus();
+    }
   }
   function open(next = "needs") {
     if (!currentContext()) return;

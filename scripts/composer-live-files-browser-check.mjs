@@ -40,7 +40,7 @@ test("composer: live file chips for other members, autosize", { timeout: 60000 }
     await page.locator("#main").waitFor({ state: "visible" });
     return page;
   };
-  const ownerPage = await open(owner), mayaPage = await open(maya);
+  const ownerPage = await open(owner), mayaPage = await open(maya), secondOwnerPage = await open(owner);
   const input = ownerPage.locator("#message-input");
 
   // 12680: eight pasted lines grow the composer instead of hiding six of them.
@@ -57,6 +57,9 @@ test("composer: live file chips for other members, autosize", { timeout: 60000 }
   await input.fill("with a file");
   await ownerPage.locator('#message-form button[type="submit"]').click();
   await mayaPage.locator('#message-list [data-download-file]', { hasText: "notes.txt" }).waitFor({ state: "visible", timeout: 10000 });
+
+  // A second session of the same account must refresh too, without a reload.
+  await secondOwnerPage.locator('#message-list [data-download-file]', { hasText: "notes.txt" }).waitFor({ state: "visible", timeout: 10000 });
 
   // A blocked file type reads as plain copy.
   await ownerPage.locator("#composer-file").setInputFiles({ name: "tool.exe", mimeType: "application/octet-stream", buffer: Buffer.from("MZ") });

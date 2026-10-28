@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Real browser + local HTTP service; all identities, messages, and keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -139,7 +140,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await focusedReply.evaluate(e => e === window.retainedControl && e === document.activeElement), true);
 
     // Search lands at the original reply, including when it was hidden in a thread.
-    await page.locator("#topbar-search-toggle").click();
+    await clickChrome(page, "#topbar-search-toggle");
     await page.locator("#message-search").fill("paperback edition");
     await page.locator(`#search-list [data-open-message="${posted[0].id}"]`).click();
     assert.equal(await page.locator("#thread-bar").isVisible(), true);
@@ -186,7 +187,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     // removed, but the unsent draft is preserved for re-authentication.
     await input.fill("Clear this private draft on revocation");
     if (await page.locator("#search-form").evaluate(node => node.hidden)) {
-      await page.locator("#topbar-search-toggle").click();
+      await clickChrome(page, "#topbar-search-toggle");
     }
     await page.locator("#message-search").fill("paperback");
     const rotated = store.issueAccessKey("commons", "owner");

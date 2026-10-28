@@ -107,7 +107,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await clickChrome(page, "#invite-people-button");
   await page.locator("#share-link-dialog").waitFor({ state: "visible" });
   assert.equal(await page.locator("#growth-agent-code").isVisible(), false, "no competing code setup action");
-  await page.locator("#share-link-create").click();
+  await clickChrome(page, "#share-link-create");
   await page.locator("#share-link-result").waitFor({ state: "visible" });
   const invitation = await page.locator("#share-link-url").inputValue();
   assert.match(invitation, /^https?:\/\/[^/]+\/(?:join\/|#join\/)/, "one invitation link for people and agents");

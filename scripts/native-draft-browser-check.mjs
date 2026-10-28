@@ -1,3 +1,4 @@
+import { fillResultSummary } from "./room-chrome.mjs";
 // Scripted people and MCP reviewer, isolated local data. No model or provider use.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -77,7 +78,7 @@ for (const touch of [false, true]) test("selected helper to reviewed native resu
   await owner.page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, body);
   assert.equal(await owner.page.locator('[name="producerId"]').inputValue(), "", "Producer is not inferred from author or selection");
   await owner.page.locator('[name="producerId"]').selectOption("guest");
-  await owner.page.locator('#action-fields [name="summary"]').fill("A short welcome with a first step and reviewer");
+  await fillResultSummary(owner.page, "A short welcome with a first step and reviewer");
   await owner.page.locator('#action-fields [name="nextAction"]').fill("Check the exact text");
   await owner.page.screenshot({ path: prefix + "-adopt.png" });
   await owner.page.locator("#action-form button[type=submit]").click(); await owner.page.locator("#action-dialog").waitFor({ state: "hidden" });
@@ -156,7 +157,7 @@ for (const touch of [false, true]) test("draft feedback and revised result " + (
     await owner.page.locator('[data-message-action="result"][data-message-id="' + message.id + '"]').click();
     await owner.page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, message.body);
     await owner.page.locator('[name="producerId"]').selectOption("guest");
-    await owner.page.locator('#action-fields [name="summary"]').fill("Contributor guide"); await owner.page.locator('#action-fields [name="nextAction"]').fill("Review");
+    await fillResultSummary(owner.page, "Contributor guide"); await owner.page.locator('#action-fields [name="nextAction"]').fill("Review");
     await owner.page.locator("#action-form button[type=submit]").click(); await owner.page.locator("#action-dialog").waitFor({ state: "hidden" });
   };
   const review = async requestId => {

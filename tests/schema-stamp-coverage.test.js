@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore, ADDITIVE_SCHEMA_ENSURES } from "../server/store.mjs";
 import { createHash } from "node:crypto";
+import { initialRoom } from "../server/bootstrap.mjs";
 import { authorizeSpend, SpendGrantError } from "../server/spend-grants.mjs";
 
 const NOW = Date.parse("2026-10-05T20:00:00Z");
@@ -73,7 +74,8 @@ const SOURCE_PINS = {
   "ensureSpendGrantsSchema@3": "0f3f6dab2ae7d25b",
   "ensureAccountProfileSchema@1": "3fb6bfb33febc621",
   "ensureVerifiedEmailSchema@1": "a8321ba9d34e6ad4",
-  "ensureAttachmentSchema@1": "3189ca5ebea7bf33"
+  "ensureAttachmentSchema@1": "3189ca5ebea7bf33",
+  "ensureReadHorizonSchema@2": "d9157492851a95c0"
 };
 
 test("each additive ensure helper's source is pinned to its stamp label", () => {
@@ -150,4 +152,27 @@ test("a room stamped by the pre-receipts deploy converges the rotation-receipts 
         .run("ai_probe", "req-1", "h", null, null, NOW);
     } finally { woken.close(); }
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+// Exact fingerprint written before pairingSchema entered the stamp (PR #5131).
+const PRE_PAIRING_STAMP='0e07788df04ff46088e6a4021586f24381f5e21c316e0343611d6df25fd6abe1';
+const PAIRING_TABLES=['pairs','pair_code_locks','agent_member_keys','room_join_policy'];
+test('pre-pairing stamp converges missing tables and supports the first real policy write',()=>{
+ const dir=mkdtempSync(join(tmpdir(),'pairing-upgrade-proof-'));
+ try {
+  const filename=join(dir,'room.sqlite');
+  const first=new RoomStore(filename);
+  first.initialize(initialRoom('commons'));
+  const token=first.issueAccessKey('commons','owner');
+  for(const table of PAIRING_TABLES)first.db.exec(`DROP TABLE ${table}`);
+  first.db.prepare('UPDATE room_schema_stamp SET stamp=? WHERE singleton=1').run(PRE_PAIRING_STAMP);
+  first.close();
+  const woken=new RoomStore(filename,{integrity:'deferred'});
+  try {
+   for(const table of PAIRING_TABLES)assert.ok(woken.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table),table);
+   assert.notEqual(woken.db.prepare('SELECT stamp FROM room_schema_stamp WHERE singleton=1').get().stamp,PRE_PAIRING_STAMP);
+   assert.equal(woken.pairing.setPolicy(token,'commons','closed').mode,'closed');
+   assert.equal(woken.pairing.policy('commons').mode,'closed');
+  } finally {woken.close();}
+ } finally {rmSync(dir,{recursive:true,force:true});}
 });

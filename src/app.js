@@ -3,6 +3,8 @@ import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
 import { uiText } from "./strings.js";
+import { directDraftKey, directDraftPeer, directMessagePeer, conversationThreadMessages, historyConfirmsMessage, reconcileConfirmedMessageDraft } from "./conversation.js";
+import { ReadPositionOrder } from "./read-position-order.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
@@ -55,11 +57,11 @@ import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendin
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
 import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
-import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, composerAudiencePickerVisible, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
+import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
 import { installHumanPush } from "./human-push.js";
-import { chatSuggestions, ASK_AGENT_AFTER_MS } from "./chat-suggestions.js";
+import { chatSuggestions } from "./chat-suggestions.js";
 import { paintClaimChat } from "./board-ui.js";
 import { installHumanExperience } from "./human-experience.js";
 import { createSpendPricingKillSwitch } from "./spend-pricing-ui.js";
@@ -355,6 +357,8 @@ let navigationBoardEpoch = 0;
 // JDOT-COH-NAV end
 // Phase 2 channels: the visible channel; persisted per room, defaults to the main channel.
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
+let activeDirectMemberId = null;
+let requestRecipientPicker = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
 let actionEpoch = 0;
@@ -371,8 +375,8 @@ let pendingHashReveal = null;
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
-const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : assistantDraft ? `assistant:${assistantDraft.runId}` : currentThreadId ?? channelDraftKey(activeChannelId);
-const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : assistantDraft ? `assistant:${assistantDraft.runId}` : currentThreadId ?? (activeDirectMemberId ? directDraftKey(activeDirectMemberId) : channelDraftKey(activeChannelId));
+const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : activeDirectMemberId ? directDraftKey(activeDirectMemberId) : `room:${activeChannelId}`;
 // The room timeline renders only its newest TIMELINE_WINDOW root messages; the
 // "Show earlier messages" control adds another page. A room with thousands of
 // messages otherwise builds thousands of rows (and layout reads over them) on
@@ -456,6 +460,7 @@ const client = new RoomClient({
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
     if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
+    if (presenceBoundary || session?.member?.id !== identity.member.id) clearDirectPicker();
     if (presenceBoundary) stopPresencePoll();
     const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
     state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
@@ -520,11 +525,14 @@ const client = new RoomClient({
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
+        activeDirectMemberId = saved.directMemberId ?? directMessagePeer(conversation.byId.get(saved.threadId), session.member.id);
         if (state.channels?.[saved.channelId] && !state.channels[saved.channelId].archivedAt) activeChannelId = saved.channelId;
         syncChannelChrome();
         const draft = drafts.get(saved.activeKey);
         requestMode = draft.mode ?? null;
+        if (!requestMode && draft.toMemberId) activeDirectMemberId = draft.toMemberId;
         restoreComposer(draft);
+        syncChannelChrome();
         updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
       }
       if (!location.hash) restoreResultSelection();
@@ -537,6 +545,7 @@ const client = new RoomClient({
   onTyping(typists) { renderTyping(typists); },
   onAccessEnded() {
     closeRoomActions(false);
+    clearDirectPicker();
     const hadRoom = Boolean(state);
     const endedContext = accessEndContext;
     accessEndContext = null;
@@ -600,6 +609,7 @@ const client = new RoomClient({
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
+    if (!sessionExpired) activeDirectMemberId = null;
     if (!sessionExpired) {
       drafts = new ConversationDrafts();
       $("#message-input").value = "";
@@ -671,7 +681,7 @@ const client = new RoomClient({
     const openingAcceptedRoom = endedContext === "accepted-room-switch";
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
-    setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
+    setFormStatus($("#auth-error"), pendingSignout || openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
       : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
         : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
@@ -764,9 +774,9 @@ updatesUi = mountUpdates({ client, host: document.querySelector(".room-main"), g
   onOpenWork: (id, origin) => navigateWorkRecord("work", id, { type: "updates", updates: origin }),
   onOpenMessage: (id, origin) => navigateWorkRecord("message", id, { type: "updates", updates: origin }) });
 // JDOT-COH-NAV end
-portableWorkUI = installPortableWork({ client, getState: () => state, onSaved: messageId => {
+portableWorkUI = installPortableWork({ client, getState: () => state, onMessageSending: id => locallyOwnedMessageIds.add(id), onSaved: messageId => {
   const visible = conversation?.byId.has(messageId);
-  if (visible) revealMessage(messageId);
+  if (visible) navigateWorkRecord("message", messageId);
   notice(visible ? "Draft posted. Work status is unchanged." : "Draft posted. Refresh to view it. Work status is unchanged.");
 } });
 resultCopyUI = installResultCopy({ client, getState: () => state });
@@ -1373,10 +1383,11 @@ function renderDirectoryCard(card) {
 }
 const humanize = value => String(value).replaceAll("_", " ").replaceAll(".", " ");
 const memberLabel = id => id == null ? "Unassigned" : state.members[id] ? ["", state.members[id].displayName, " (", id, ")"].join('') : `Unknown member (${id})`;
-// Keep ordinary conversation readable; exact IDs remain in details and decision
-// controls. Duplicate names retain the full ID so attribution stays unambiguous.
+// Human attribution uses unique names; details and agent controls keep IDs.
+// Duplicate names retain the full ID so attribution stays unambiguous.
 let displayNames = createMemberDisplayNames({});
 const displayName = id => displayNames(id);
+const actionMemberLabel = id => session?.member?.kind === "human" ? displayName(id) : memberLabel(id);
 const name = displayName; // Ordinary summaries use the same duplicate-aware attribution as authors.
 const can = capability => state?.members[session?.member.id]?.permissions.includes(capability);
 const sameSession = (generation, roomId, memberId) => generation === client.generation && state
@@ -1414,7 +1425,9 @@ function accountRoomCreateFailure(error) {
     : error?.status === 429 ? "Too many rooms just now. Try again in a minute."
       : error?.status === 422 ? "Check the room name, purpose and your name." : "Couldn’t create the room. Try again.";
 }
+const fieldValidationFeedback = new WeakMap();
 function setFormStatus(status, text, error = false) {
+  fieldValidationFeedback.delete(status);
   if (status.textContent === text && status.classList.contains("visible") === Boolean(text)
     && status.classList.contains("error") === (Boolean(text) && error)) return;
   status.textContent = text;
@@ -1430,6 +1443,13 @@ function autosizeComposer() {
   if (input.value) input.style.height = `${input.scrollHeight + input.offsetHeight - input.clientHeight}px`;
   else input.style.removeProperty("height");
 }
+let composerMeasuredWidth = 0;
+new ResizeObserver(entries => {
+  const width = entries[0]?.contentRect.width ?? 0;
+  if (!width || width === composerMeasuredWidth) return;
+  composerMeasuredWidth = width;
+  autosizeComposer();
+}).observe($("#message-input"));
 function renderComposerLength() {
   const input = $("#message-input"), over = composerOverLimit();
   const limit = new Intl.NumberFormat("en-US").format(MAX_MESSAGE_BODY_CHARS);
@@ -1439,9 +1459,14 @@ function renderComposerLength() {
   const status = $("#message-length-status");
   status.hidden = !over; setFormStatus(status, message, over);
 }
+function directRecipientUnavailable() {
+  if (!activeDirectMemberId || requestMode || pendingMessage || !state) return false;
+  const member = state.members[activeDirectMemberId];
+  return !member || member.active === false || member.identityRevoked === true;
+}
 function renderComposerError() {
   renderComposerLength();
-  const text = drafts.get(composerKey()).error;
+  const text = directRecipientUnavailable() ? uiText("direct.recipientUnavailable") : drafts.get(composerKey()).error;
   const status = $("#composer-status");
   if (status.textContent !== text) status.textContent = text;
   status.classList.toggle("visible", Boolean(text));
@@ -1621,15 +1646,7 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
 function syncComposerChrome() {
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
-  // bu-09: the audience picker is the broadcast-vs-DM control and stays
-  // visible whenever there is someone to address. Hiding it until a
-  // recipient was already chosen made room-chat DMs undiscoverable — the
-  // hidden control was the only way to start one.
-  if (bar) bar.hidden = !composerAudiencePickerVisible({
-    members: state?.members ? Object.values(state.members) : [],
-    selfId: session?.member?.id,
-    requestMode: Boolean(requestMode),
-  });
+  if (bar) bar.hidden = true;
   const note = $("#audience-note");
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
@@ -1639,7 +1656,8 @@ function syncComposerChrome() {
     // surprise. No row / pending / approved needs no callout.
     const audience = composerAudienceNote(state?.members, to);
     if (audience) {
-      note.textContent = audience;
+      note.textContent = requestMode ? uiText("request.privateDraft") : uiText("direct.private");
+      note.title = audience;
       const consent = dmConsentPeerSummary(dmConsents, state.members, session?.member?.id, to);
       if (consent && consent.outgoing === "blocked") {
         note.textContent += " They aren't accepting DMs from you.";
@@ -1900,12 +1918,17 @@ function syncWorkForm() {
   selectOptions("#assignee-select", assignable, "Choose assignee");
   const waiting = active.filter(member => member.kind === "agent" && !assignable.includes(member));
   if ($("#assignee-hint")) {
-    $("#assignee-hint").hidden = waiting.length === 0;
+    $("#assignee-hint").hidden = assignable.length > 0 || waiting.length === 0;
     $("#assignee-hint").textContent = waiting.length ? `${waiting.map(m => m.displayName).join(", ")} can't take work yet. Change that in People.` : "";
   }
   const reviewers = active.filter(member => member.permissions.includes("verify") && member.id !== $("#assignee-select").value);
   selectOptions("#verifier-select", reviewers, "Choose reviewer");
   $("#reviewer-unavailable").hidden = !reviewing || !$("#assignee-select").value || reviewers.length > 0;
+  const otherAssignee = assignable.some(member => member.id !== $("#assignee-select").value);
+  const reviewerHelp = roomPolicy(state).requireIndependentReview
+    ? otherAssignee ? "work.reviewRequiredReassign" : can("manage_members") ? "work.reviewRequiredAdd" : "work.reviewRequiredAsk"
+    : otherAssignee ? "work.reviewOptionalReassign" : "work.reviewOptionalAdd";
+  $("#reviewer-unavailable-text").textContent = uiText(reviewerHelp);
   $("#verifier-field").hidden = !reviewing;
   $("#verifier-select").disabled = !reviewing;
   $("#verifier-select").required = reviewing;
@@ -2014,9 +2037,19 @@ function renderContent(selector, html) {
 function render() {
   ownerOffersUI.sync();
   conversation = conversationIndex(state.messages);
+  if (!busy && pendingMessage && !humanExperience.hasSubmission(pendingMessage.command)) {
+    const reconciled = reconcileConfirmedMessageDraft(drafts.get(composerKey()), state.messages, session.member.id);
+    if (reconciled) {
+      drafts.save(composerKey(), reconciled);
+      pendingMessage = null;
+      if ($("#message-input").value !== reconciled.body) { $("#message-input").value = reconciled.body; autosizeComposer(); }
+      persistDrafts();
+    }
+  }
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   // R350-n1: a seat whose identity signed out for good can't read a direct message.
   selectOptions("#message-to-select", active.filter(m => m.identityRevoked !== true), "Everyone");
+  if ($("#new-direct-dialog").open) renderDirectPeople();
   syncWorkForm();
   syncActionForm();
   syncChatSuggestions();
@@ -2219,6 +2252,7 @@ $("#event-list").addEventListener("click", event => {
 // their proposal message (the main channel when there is none).
 function channelStorageKey() { return `pr-channel:${activeChannelRoomId ?? "none"}`; }
 function restoreActiveChannel() {
+  activeDirectMemberId = null;
   activeChannelId = DEFAULT_CHANNEL_ID;
   try {
     const saved = localStorage.getItem(channelStorageKey());
@@ -2229,20 +2263,23 @@ function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
 function setActiveChannel(id) {
   if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
-  if (next === activeChannelId && !currentThreadId && !requestMode && !assistantDraft) return;
+  if (next === activeChannelId && !activeDirectMemberId && !currentThreadId && !requestMode && !assistantDraft) return;
   saveComposer();
   viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null;
   currentThreadId = null; assistantDraft = null;
+  activeDirectMemberId = null;
   activeChannelId = next;
   try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
   restoreComposer(drafts.get(composerKey()));
+  $("#message-delivery").hidden = true;
   $("#also-send-to-channel").checked = false;
   syncChannelChrome(); updateReply(); syncRequestComposer(); renderComposerError();
   renderMessages(); persistDrafts();
 }
 
 function syncChannelChrome() {
+  $("#main").classList.toggle("direct-conversation", Boolean(activeDirectMemberId));
   // If the active channel was archived elsewhere, fall back to the main channel.
   if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt
     && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading")) {
@@ -2250,17 +2287,17 @@ function syncChannelChrome() {
     return;
   }
   const name = activeChannel()?.name ?? DEFAULT_CHANNEL_ID;
-  setText("#conversation-title", `# ${name}`);
+  setText("#conversation-title", activeDirectMemberId ? displayName(activeDirectMemberId) : `# ${name}`);
   const input = $("#message-input");
-  if (input) input.placeholder = `Message #${name}`;
-  renderChannels();
+  if (input) input.placeholder = activeDirectMemberId ? uiText("direct.compose", { name: displayName(activeDirectMemberId) }) : `Message #${name}`;
+  renderChannels(); renderDirectMessages();
 }
 function renderChannels() {
   const list = $("#channel-list");
   if (!list || !state) return;
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
   const html = channelList(state).filter(c => !c.archivedAt).map(c => {
-    const active = c.id === activeChannelId;
+    const active = !activeDirectMemberId && c.id === activeChannelId;
     const manage = ownerView && c.id !== DEFAULT_CHANNEL_ID
       ? `<button type="button" class="icon-button channel-manage" data-channel-manage="${esc(c.id)}" aria-label="Channel settings, ${esc(c.name)}" title="Channel settings">⋯</button>` : "";
     return `<li class="channel-row"><button type="button" class="channel${active ? " is-active" : ""}" data-channel="${esc(c.id)}"${active ? ' aria-current="page"' : ""}><span aria-hidden="true">#</span><span class="channel-name">${esc(c.name)}</span></button>${manage}</li>`;
@@ -2272,55 +2309,171 @@ function renderChannels() {
   list.innerHTML = html; list._html = html;
   if (focused) list.querySelector(`[data-channel="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
 }
-// One-tap replies and a task nudge under the latest message in view
-// (src/chat-suggestions.js). Plain chat stays the default; structure is one tap away.
+function visibleConversationMessages() {
+  if (!conversation) return [];
+  const self = session?.member?.id;
+  if (currentThreadId) return conversationThreadMessages(conversation, currentThreadId, self, activeDirectMemberId);
+  const messages = activeDirectMemberId ? [...conversation.byId.values()] : conversation.roots;
+  return messages.filter(message => activeDirectMemberId
+    ? directMessagePeer(message, self) === activeDirectMemberId
+    : !message.toMemberId && (currentThreadId || messageChannelId(message) === activeChannelId));
+}
+function openDirectMessage(memberId) {
+  if (!state?.members[memberId] || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return false;
+  saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
+  requestEpoch++; requestReading = false; requestMode = null; assistantDraft = null;
+  currentThreadId = null; activeDirectMemberId = memberId;
+  activeChannelId = DEFAULT_CHANNEL_ID;
+  restoreComposer(drafts.get(composerKey()));
+  $("#message-delivery").hidden = true;
+  $("#also-send-to-channel").checked = false;
+  syncChannelChrome(); updateReply(); syncRequestComposer(); renderMessages(); renderComposerError(); persistDrafts();
+  $("#message-input").focus();
+  return true;
+}
+function renderDirectMessages() {
+  const list = $("#direct-message-list");
+  if (!state || !list) return;
+  const peers = new Set(state.messages.map(message => directMessagePeer(message, session?.member?.id)).filter(Boolean));
+  for (const [key, draft] of drafts.entries) if (directDraftPeer(key) && (draft.body.trim() || draft.files?.length || draft.pending)) peers.add(directDraftPeer(key));
+  if (activeDirectMemberId) peers.add(activeDirectMemberId);
+  const ids = [...peers].filter(id => state.members[id]);
+  const signature = JSON.stringify([activeDirectMemberId, ids.map(id => [id, displayName(id)])]);
+  if (list.dataset.signature === signature) return;
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset.directMember : null;
+  list.replaceChildren(...ids.map(id => directPersonRow(id, id === activeDirectMemberId)));
+  list.dataset.signature = signature;
+  if (focused) list.querySelector(`[data-direct-member="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+}
+function directPersonRow(id, active = false) {
+  const row = document.createElement("li"), button = document.createElement("button");
+  button.type = "button"; button.className = active ? "channel is-active" : "channel";
+  button.dataset.directMember = id; button.textContent = displayName(id);
+  if (active) button.setAttribute("aria-current", "page");
+  row.append(button); return row;
+}
+function clearDirectPicker() {
+  requestRecipientPicker = null;
+  $("#new-direct-dialog")?.close();
+  $("#new-direct-people")?.replaceChildren();
+  if ($("#new-direct-people")) delete $("#new-direct-people").dataset.signature;
+  if ($("#new-direct-search")) $("#new-direct-search").value = "";
+  const list = $("#direct-message-list");
+  if (list) { list.replaceChildren(); delete list.dataset.signature; }
+}
+function canChooseRequestRecipient() {
+  return Boolean(state && session && requestMode?.kind === "request" && !requestMode.followUpRequestId
+    && !pendingMessage && !busy && !requestReading && !isRoomArchived(state) && !activeChannel()?.archivedAt);
+}
+function availableRequestRecipient(id) {
+  const member = state?.members[id];
+  return Boolean(member && id !== session?.member.id && member.active !== false && !member.identityRevoked);
+}
+function openRequestRecipientPicker() {
+  if (!canChooseRequestRecipient()) return;
+  // A selection belongs to this exact draft and session, never a later composer.
+  requestRecipientPicker = { mode: requestMode, drafts, key: composerKey(), generation: client.generation };
+  setText("#new-direct-title", uiText("request.chooseRecipient"));
+  $("#new-direct-search").value = ""; renderDirectPeople();
+  $("#new-direct-dialog").showModal(); $("#new-direct-search").focus();
+}
+$("#request-recipient").addEventListener("click", openRequestRecipientPicker);
+$("#new-direct-dialog").addEventListener("close", () => {
+  // A queued close from an old room must not clear a newly opened picker.
+  if (!$("#new-direct-dialog").open) requestRecipientPicker = null;
+});
+function renderDirectPeople() {
+  const query = $("#new-direct-search").value.trim().toLocaleLowerCase();
+  const members = Object.values(state?.members ?? {}).filter(member => member.id !== session?.member?.id
+    && member.active !== false && !member.identityRevoked && displayName(member.id).toLocaleLowerCase().includes(query));
+  const list = $("#new-direct-people");
+  const signature = JSON.stringify([query, members.map(member => [member.id, displayName(member.id)])]);
+  if (list.dataset.signature === signature) return;
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset.directMember : null;
+  list.replaceChildren(...members.map(member => directPersonRow(member.id)));
+  list.dataset.signature = signature;
+  if (!members.length) { const empty = document.createElement("li"); empty.className = "empty-note"; empty.textContent = uiText("direct.noMatches"); list.append(empty); }
+  if (focused) (list.querySelector(`[data-direct-member="${CSS.escape(focused)}"]`) ?? $("#new-direct-search")).focus();
+}
+$("#new-direct-message").addEventListener("click", () => {
+  requestRecipientPicker = null;
+  setText("#new-direct-title", uiText("direct.newMessage"));
+  $("#new-direct-search").value = ""; renderDirectPeople();
+  $("#new-direct-dialog").showModal(); $("#new-direct-search").focus();
+});
+$("#new-direct-close").addEventListener("click", () => $("#new-direct-dialog").close());
+$("#new-direct-search").addEventListener("input", renderDirectPeople);
+$("#new-direct-dialog").addEventListener("keydown", event => {
+  if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey
+    || !["ArrowDown", "ArrowUp"].includes(event.key)) return;
+  const search = $("#new-direct-search");
+  const choices = [...$("#new-direct-people").querySelectorAll("[data-direct-member]")];
+  const index = choices.indexOf(event.target);
+  if (event.target !== search && index < 0) return;
+  if (!choices.length) return;
+  event.preventDefault();
+  const next = event.target === search ? (event.key === "ArrowDown" ? choices[0] : choices.at(-1))
+    : event.key === "ArrowUp" ? (choices[index - 1] ?? search) : (choices[index + 1] ?? choices[index]);
+  next.focus();
+});
+for (const selector of ["#direct-message-list", "#new-direct-people"]) $(selector).addEventListener("click", event => {
+  const button = event.target.closest("[data-direct-member]");
+  if (!button) return;
+  if (selector === "#new-direct-people" && !availableRequestRecipient(button.dataset.directMember)) {
+    renderDirectPeople(); return;
+  }
+  if (selector === "#new-direct-people" && requestRecipientPicker) {
+    const ticket = requestRecipientPicker, memberId = button.dataset.directMember;
+    if (!canChooseRequestRecipient() || ticket.mode !== requestMode || ticket.drafts !== drafts
+      || ticket.key !== composerKey() || ticket.generation !== client.generation) {
+      $("#new-direct-dialog").close(); return;
+    }
+    if (!availableRequestRecipient(memberId)) { renderDirectPeople(); return; }
+    $("#message-to-select").value = memberId;
+    saveComposer(); setComposerError(""); syncRequestComposer(); syncChatSuggestions();
+    $("#new-direct-dialog").close(); $("#message-input").focus(); return;
+  }
+  if (openDirectMessage(button.dataset.directMember)) {
+    leaveRecordDestination();
+    $("#new-direct-dialog").close();
+    if ($("#sidebar-toggle").getAttribute("aria-expanded") === "true") $("#sidebar-toggle").click();
+    $("#message-input").focus();
+  }
+});
+// Sender-authored choices prepare a reply; ordinary prose adds no controls.
 const dismissedSuggestions = new Set();
-let askAgentTimer = null;
 function syncChatSuggestions() {
   const box = $("#chat-suggestions");
   if (!box) return;
-  const messages = !state || !session ? [] : currentThreadId ? conversation.threads.get(currentThreadId) || []
-    : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const messages = !state || !session ? [] : visibleConversationMessages();
   const latest = messages.at(-1);
-  // "Ask @Agent" is for the channel view: a thread already has its own replies.
-  const ask = latest && !currentThreadId
-    ? { members: state.members, replyCount: (conversation.threads.get(latest.id)?.length ?? 1) - 1, now: Date.now() } : null;
-  const offer = latest && !isRoomArchived(state) && !activeChannel()?.archivedAt
-    ? chatSuggestions(latest, { viewerId: session.member.id, canCreateWork: can("steer"), dismissed: dismissedSuggestions, ask }) : null;
-  // A question can cross the wait while nothing else changes, so check again then.
-  clearTimeout(askAgentTimer);
-  const waitLeft = ask && !offer?.agent ? Date.parse(latest.createdAt) + ASK_AGENT_AFTER_MS - ask.now : NaN;
-  if (waitLeft > 0) askAgentTimer = setTimeout(syncChatSuggestions, waitLeft + 50);
+  const answered = latest && state.messages.some(message => message.replyToId === latest.id
+    && message.authorId === session.member.id && !message.deletedAt);
+  const offer = latest && !answered && !requestMode && !assistantDraft && !$("#message-input").value.trim()
+    && !isRoomArchived(state) && !activeChannel()?.archivedAt
+    ? chatSuggestions(latest, { viewerId: session.member.id, recipientId: $("#message-to-select").value, dismissed: dismissedSuggestions }) : null;
   const signature = offer ? JSON.stringify(offer) : "";
   if (box.dataset.signature === signature) return;
   box.dataset.signature = signature;
   box.hidden = !offer;
   if (!offer) { box.replaceChildren(); return; }
-  box.innerHTML = offer.choices.map(choice => `<button type="button" class="suggestion-chip" data-suggest-reply="${esc(choice)}">${esc(choice)}</button>`).join("")
-    + (offer.task ? `<button type="button" class="suggestion-chip suggestion-task" data-suggest-task="${esc(offer.messageId)}">Make this a task</button>` : "")
-    + (offer.agent ? `<button type="button" class="suggestion-chip suggestion-agent" data-suggest-agent="${esc(offer.agent.name)}" data-suggest-agent-for="${esc(offer.messageId)}">Ask @${esc(offer.agent.name)}</button>` : "")
+  box.innerHTML = offer.choices.map(choice => `<button type="button" class="suggestion-chip" data-suggest-reply="${esc(choice)}" data-suggest-source="${esc(offer.messageId)}">${esc(choice)}</button>`).join("")
     + `<button type="button" class="suggestion-dismiss" data-suggest-dismiss="${esc(offer.messageId)}" aria-label="Hide suggestions" title="Hide">×</button>`;
 }
 $("#chat-suggestions")?.addEventListener("click", e => {
-  const reply = e.target.closest("[data-suggest-reply]"), task = e.target.closest("[data-suggest-task]"), dismiss = e.target.closest("[data-suggest-dismiss]");
+  const reply = e.target.closest("[data-suggest-reply]"), dismiss = e.target.closest("[data-suggest-dismiss]");
   if (dismiss) { dismissedSuggestions.add(dismiss.dataset.suggestDismiss); syncChatSuggestions(); $("#message-input").focus(); return; }
-  if (task) { dismissedSuggestions.add(task.dataset.suggestTask); syncChatSuggestions(); openWork(task.dataset.suggestTask); return; }
-  const agent = e.target.closest("[data-suggest-agent]");
-  if (agent) {
-    // Prefill the mention only; the person writes the rest and sends it.
-    const input = $("#message-input");
-    if (!input.value.trim()) { input.value = `@${agent.dataset.suggestAgent} `; input.dispatchEvent(new Event("input", { bubbles: true })); }
-    dismissedSuggestions.add(agent.dataset.suggestAgentFor); syncChatSuggestions();
-    input.focus(); input.setSelectionRange(input.value.length, input.value.length);
-    return;
-  }
   if (!reply || busy || !state) return;
   const input = $("#message-input");
-  // A chip only fills a message the person hasn't started, then sends it
-  // through the normal composer (same retry and ownership rules).
   if (input.value.trim()) { input.focus(); return; }
+  const source = conversation.byId.get(reply.dataset.suggestSource);
+  const offered = chatSuggestions(source, { viewerId: session.member.id, recipientId: $("#message-to-select").value, dismissed: dismissedSuggestions });
+  if (requestMode || assistantDraft || !offered?.choices.includes(reply.dataset.suggestReply)) { syncChatSuggestions(); return; }
+  dismissedSuggestions.add(source.id);
+  replyToId = source.id;
   input.value = reply.dataset.suggestReply;
-  $("#message-form").requestSubmit();
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.focus(); input.setSelectionRange(input.value.length, input.value.length);
 });
 // Typing indicators: ephemeral, driven by synthetic `typing` SSE events.
 // The server expires beats after 10s, so a missing update clears itself;
@@ -2340,7 +2493,7 @@ function renderTyping(typists) {
   el.hidden = false;
 }
 function renderMessages() {
-  const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+  const list = $("#message-list"), view = conversationViewKey();
   const sameView = list.dataset.view === view;
   if (!sameView) syncChatSuggestions();
   // The read-horizon anchor is recomputed when the view changes (room vs
@@ -2348,16 +2501,16 @@ function renderMessages() {
   // fetches and re-renders.
   if (view !== lastHorizonView && state) {
     lastHorizonView = view;
-    const threadKey = currentThreadId ?? "";
-    const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
-    if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
+    const { cacheKey } = readPositionScope();
+    const messages = visibleConversationMessages();
+    if (horizonCache.has(cacheKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(cacheKey));
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
   // Lazy history: a reply whose thread root is older than the held window
   // indexes as a root; it stays in its (unloaded) thread, as it would with
   // full history, instead of posing as a top-level message.
   const owesHistory = client.owesHistory;
-  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId && !(owesHistory && m.replyToId));
+  const allMessages = visibleConversationMessages().filter(message => currentThreadId || activeDirectMemberId || !(owesHistory && message.replyToId));
   if (owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
   const showPager = !currentThreadId && owesHistory;
   const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
@@ -2398,16 +2551,20 @@ function renderMessages() {
   if (sameView && nearBottom && newCount > 0) scheduleHorizonAdvance();
   const pendingOutgoingId = pendingMessage?.command?.data?.messageId || pendingMessage?.command?.id;
   const announceCount = newMessages.filter(message => message.id !== pendingOutgoingId && !locallyOwnedMessageIds.has(message.id) && !isMutedBy(state, session?.member?.id, message.authorId)).length;
-  newMessages.forEach(message => locallyOwnedMessageIds.delete(message.id));
-  if (arrivalsNeedFileRefresh(newMessages, session?.member?.id)) scheduleRoomFilesRefresh();
+  if (arrivalsNeedFileRefresh(newMessages, locallyOwnedMessageIds)) scheduleRoomFilesRefresh();
+  // An optimistic row may disappear after a lost response and return later as
+  // confirmed history. Keep its local ownership until that confirmed arrival.
+  newMessages.filter(message => !message.pendingSend).forEach(message => locallyOwnedMessageIds.delete(message.id));
   $("#thread-bar").hidden = !currentThreadId;
+  syncWorkReturnControl();
   syncThreadMuteButton();
   syncAlsoSend();
-  $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
+  $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : activeDirectMemberId ? uiText("direct.compose", { name: displayName(activeDirectMemberId) }) : "Message the room";
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
     $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
-    setText("#thread-context", `${messages.length - 1} ${messages.length === 2 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
+    const replyCount = messages.filter(message => message.id !== currentThreadId).length;
+    setText("#thread-context", `${replyCount} ${replyCount === 1 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
@@ -2426,7 +2583,7 @@ function renderMessages() {
   // messages, and hiding older cards would make that work unreachable from the
   // timeline (the crowded reconnect gate pins all 81 cards). Cards older than the
   // first shown message simply render above it, after the pager.
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
+  const workEntries = currentThreadId || activeDirectMemberId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
   const ordered = [];
   // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
   const mentionable = state ? Object.values(state.members) : [];
@@ -2524,8 +2681,7 @@ function renderMessages() {
     merged.push(ordered[index]);
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
-  const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet.</li>`;
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -2536,6 +2692,7 @@ function renderMessages() {
   if (!sameView) {
     list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0;
     if (viewPositions.has(view)) timelinePin.clear(); else timelinePin.set(view, list);
+    scheduleHorizonAdvance();
   } else if ((nearBottom || ownArrival) && !focused) {
     if (pinOnly && !ownArrival) { stickPinnedTimeline(list); if (newCount > 0) scheduleHorizonAdvance(); }
     else { list.scrollTop = list.scrollHeight; timelinePin.set(view, list); }
@@ -2578,7 +2735,7 @@ function draftFeedbackHTML(message) {
   if (!message.proposal) return "";
   const feedback = draftFeedback(state.workItems[message.workItemId], message);
   const label = feedback?.label ?? "Draft";
-return `<p class="form-hint"><a class="source-link draft-state" href="${esc(workHref(message.workItemId))}" data-open-work="${esc(message.workItemId)}">${esc(label)}</a> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
+return `<p class="form-hint"><span class="draft-state">${esc(label)}</span> · based on revision ${esc(message.proposal.basisRevision)}${message.proposal.basisRevision < message.proposal.submittedAtRevision ? " · older work" : ""} · authorship unverified · <button type="button" class="message-to-work" data-portable-work="${esc(message.workItemId)}" data-portable-mode="draft" data-portable-original="${esc(message.id)}" data-focus-key="refine:${esc(message.id)}">Refine draft</button></p>${feedback?.reason ? `<details><summary>Feedback</summary><p>${esc(feedback.reason)}</p></details>` : ""}`;
 }
 // UI calming #2: per-message actions collapse to Reply + replies-count inline;
 // Save as result, Pin, Make this work, Record decision and
@@ -2608,7 +2765,7 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const deleteHtml = own ? `<button class="message-to-work" data-message-action="delete" data-message-id="${esc(m.id)}" type="button">Delete message</button>` : "";
   const overflow = [saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
   const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
-  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
+  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${session.member.kind === "human" && !document.body.classList.contains("human-advanced") ? "" : doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
 }
 function messageFileChips(messageId) {
   const files = roomFilesByMessage.get(messageId) ?? [];
@@ -2789,7 +2946,7 @@ function messageContent(m, cluster = {}, unreadStart = false, members = Object.v
     : "";
   const linked = Object.values(state.workItems).filter(i => i.sourceMessageId === m.id || i.id === m.workItemId);
   const parent = conversation.byId.get(m.replyToId);
-  const count = (conversation.threads.get(m.id)?.length || 1) - 1;
+  const count = conversationThreadMessages(conversation, m.id, session.member.id, activeDirectMemberId).filter(message => message.id !== m.id).length;
   const groupedTime = cluster.grouped
     ? `<time class="grouped-time" datetime="${esc(m.createdAt)}">${esc(time(m.createdAt))}</time>`
     : "";
@@ -2883,7 +3040,7 @@ function restoreComposer(draft) {
     select.add(new Option("Previous recipient unavailable", draft.toMemberId));
     select.options[select.options.length - 1].disabled = true;
   }
-  select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+  select.value = draft.toMemberId || activeDirectMemberId || ""; replyToId = draft.replyToId; pendingMessage = draft.pending;
   syncComposerChrome();
   autosizeComposer();
 }
@@ -2936,19 +3093,17 @@ function syncRequestComposer() {
   const mode = requestMode, active = Boolean(mode) || requestReading;
   $("#request-mode-bar").hidden = !active;
   const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
-  const members = state?.members;
-  const recipient = members && Object.hasOwn(members, recipientId) ? members[recipientId] : null;
-  const agentTarget = !active && recipientId !== session?.member.id && recipient?.active !== false && recipient?.kind === "agent";
-  const requestHost = agentTarget ? $("#composer-toolbar") : $("#composer-options .composer-options-panel");
+  const requestHost = $("#composer-options .composer-options-panel");
   if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
-  requestButton.hidden = !state || active;
+  requestButton.hidden = !state || active || !recipientId || recipientId === session?.member.id;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
   const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
   const work = mode?.resultEventId && state?.workItems[mode.workItemId];
   const subject = work ? work.title + (work.receipt?.eventId !== mode.resultEventId ? " · Earlier result" : "")
     : request ? (conversation?.byId.get(request.id)?.deletedAt ? "Message deleted" : (conversation?.byId.get(request.id)?.body ?? "").slice(0, 80)) : "";
-  setText("#request-mode-label", requestReading ? "Reading request…" : [label, subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
+  setText("#request-mode-label", requestReading ? "Reading request…" : [label, work ? (work.receipt?.eventId !== mode.resultEventId ? "Earlier result" : "") : subject, pendingMessage ? "Retry original" : changed ? "Context changed" : ""].filter(Boolean).join(" · "));
+  $("#request-mode-label").title = subject;
   $("#request-refresh").hidden = !request || !changed || Boolean(pendingMessage) || requestReading || request.status !== "open";
   $("#request-exit").disabled = busy;
   const input = $("#message-input"), select = $("#message-to-select"), send = $("#message-form button[type=submit]");
@@ -2956,13 +3111,18 @@ function syncRequestComposer() {
   input.readOnly = Boolean(mode && pendingMessage);
   input.disabled = busy || requestReading || archived;
   select.disabled = busy || requestReading || Boolean(assistantDraft) || Boolean(mode && (mode.kind !== "request" || mode.followUpRequestId || pendingMessage));
-  select.required = mode?.kind === "request";
-  select.setCustomValidity(mode?.kind === "request" && (!select.value || select.value === session?.member.id) ? "Choose another participant." : "");
-  renderComposerLength();
-  send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
+  // Hidden controls cannot explain invalid input or receive validation focus.
+  select.required = false;
+  select.setCustomValidity("");
+  const recipient = $("#request-recipient");
+  recipient.hidden = mode?.kind !== "request";
+  recipient.disabled = !canChooseRequestRecipient();
+  recipient.textContent = recipientId ? uiText("request.privateRecipient", { name: displayName(recipientId) }) : uiText("request.chooseRecipient");
+  renderComposerError();
+  send.disabled = busy || requestReading || archived || directRecipientUnavailable() || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
-  input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
+  input.placeholder = archived ? "This room is archived." : !mode && activeDirectMemberId ? uiText("direct.compose", { name: displayName(activeDirectMemberId) }) : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
   syncComposerChrome();
 }
@@ -3029,7 +3189,7 @@ composerOptions.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
   if (!composerOptions.contains(event.target)) composerOptions.open = false;
 });
-$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }, { toMemberId: $("#message-to-select").value }); });
 document.addEventListener("click", event => {
   const resume = event.target.closest("[data-resume-credit]");
   if (resume && state && !busy && !requestReading) {
@@ -3061,12 +3221,13 @@ function switchThread(threadId, focusComposer = false) {
   requestEpoch++; requestReading = false;
   if (threadId !== currentThreadId || requestMode || assistantDraft) {
     saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
+    if (threadId) activeDirectMemberId = directMessagePeer(conversation.byId.get(threadId), session.member.id) ?? activeDirectMemberId;
     currentThreadId = threadId; requestMode = null; assistantDraft = null;
     restoreComposer(drafts.get(composerKey()));
     // "Also send to channel" is per-send, off by default in every thread.
     $("#also-send-to-channel").checked = false;
   }
-  updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
+  syncChannelChrome(); updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
   persistDrafts();
   if (leavingResultQuestion) renderReturnBrief();
   if (focusComposer) $("#message-input").focus();
@@ -3080,8 +3241,12 @@ function revealMessage(id) {
   if ($("#later-dialog")?.open) $("#later-dialog").close();
   workspaceUI?.showRooms();
   const message = conversation.byId.get(id);
-  if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
-  switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+  const peer = directMessagePeer(message, session.member.id);
+  if (peer) openDirectMessage(peer);
+  else {
+    if (activeDirectMemberId || messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
+    switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+  }
   expandTimelineTo(id);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
@@ -3157,11 +3322,14 @@ function currentWorkOrigin(id = activeWorkNavigation) {
   const origin = workNavigationOrigins.get(id);
   return origin?.context === workNavigationContext() ? origin : null;
 }
+function threadOwnsRecordReturn() {
+  return Boolean(currentThreadId && !currentWorkOrigin() && location.hash.startsWith("#pr-record/message/"));
+}
 function syncWorkReturnControl() {
   const button = $("#work-navigation-return");
   const origin = currentWorkOrigin();
   button.disabled = false;
-  button.hidden = !workNavigationContext() || !/^#pr-record\/(work|message)\//.test(location.hash);
+  button.hidden = !workNavigationContext() || threadOwnsRecordReturn() || !/^#pr-record\/(work|message)\//.test(location.hash);
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
 }
 function clearWorkNavigation() {
@@ -3169,6 +3337,15 @@ function clearWorkNavigation() {
   workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
   const button = $("#work-navigation-return");
   if (button) { button.hidden = true; button.disabled = false; }
+}
+function leaveRecordDestination() {
+  if (!/^#pr-record\/(work|message)\//.test(location.hash)) return;
+  // An explicit conversation choice ends this record visit. Retain older
+  // origin tickets for browser Back, but never replay this stale URL on refresh.
+  updatesUi?.cancelPending(); navigationBoardEpoch++; workNavigationEpoch++;
+  activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
+  history.replaceState(workHistoryState(), "", location.pathname + location.search + "#pr-view/rooms");
+  syncWorkReturnControl();
 }
 function captureWorkOrigin(extra = {}) {
   saveComposer();
@@ -3184,6 +3361,7 @@ function captureWorkOrigin(extra = {}) {
     windowScroll: [window.scrollX, window.scrollY], focus,
     focusKey: focus?.dataset?.focusKey ?? null,
     searchWorkId: focus?.closest?.("#search-results") ? focus.dataset.openWork : null,
+    searchCollapsed,
     messageId: focus?.closest?.("[data-message-record-id]")?.dataset.messageRecordId ?? null,
     messageWorkId: focus?.closest?.("[data-open-work]")?.dataset.openWork ?? null,
     claimId: focus?.closest?.("[data-claim-id]")?.dataset.claimId ?? null,
@@ -3201,11 +3379,18 @@ function sameWorkOrigin(a, b) {
   const key = value => value.focusKey || value.searchWorkId || (value.messageId && `${value.messageId}|${value.messageWorkId}`);
   return key(a) ? key(a) === key(b) : a.focus === b.focus;
 }
+function collapseWorkOriginSearch(origin = currentWorkOrigin()) {
+  if (!origin?.searchWorkId || !narrowSearch.matches) return;
+  searchCollapsed = true;
+  $("#search-results").hidden = true;
+}
 function showWorkDestination(kind, id, presentation = "focus") {
   workNavigationEpoch++; updatesUi?.close();
   if ($("#board-dialog").open) $("#board-dialog").close();
   if (kind === "work" && presentation === "drafts") { revealDrafts(id); activeWorkNavigationId = id; }
   else if (kind === "work") revealWork(id, presentation === "details"); else revealMessage(id);
+  collapseWorkOriginSearch();
+  if (kind === "work" && currentWorkOrigin()?.searchWorkId && narrowSearch.matches) focusRecord(workRecord(id));
   syncWorkReturnControl();
 }
 // #3795: open the board on one claim's record — the destination behind
@@ -3327,6 +3512,10 @@ async function restoreWorkOrigin(ticket) {
       const section = priorOrigin.presentation === "drafts" ? card.querySelector(".work-drafts") : card.querySelector(".work-details");
       if (section) section.open = (priorOrigin.presentation === "drafts" ? origin.workDraftsOpen : origin.workDetailsOpen)
         ?? priorOrigin.presentation !== "focus";
+      if (section?.open && priorOrigin.presentation === "drafts") {
+        const parentDetails = section.parentElement.closest("details");
+        if (parentDetails) parentDetails.open = true;
+      }
       activeWorkNavigationId = id;
     }
   }
@@ -3345,6 +3534,7 @@ async function restoreWorkOrigin(ticket) {
     const columns = $("#work-board .board-columns"); if (columns) columns.scrollLeft = origin.boardColumnsScroll;
   }
   if (epoch !== workNavigationEpoch || !currentWorkOrigin(ticket)) return;
+  if (origin.searchWorkId) { searchCollapsed = origin.searchCollapsed; renderSearch(); }
   window.scrollTo(...origin.windowScroll);
   if (origin.type !== "updates") {
     const usable = node => node?.isConnected && !node.closest("[hidden]") && node.getClientRects().length > 0;
@@ -3385,6 +3575,7 @@ function replayWorkNavigation() {
   if (returning) { void restoreWorkOrigin(back); return true; }
   if (targetOrigin && targetOrigin.targetUrl === location.href) {
     activeWorkNavigation = target; workNavigationEpoch++; updatesUi?.close();
+    collapseWorkOriginSearch(targetOrigin);
     // A claim record's destination keeps the board open; every other
     // record destination starts with it closed.
     if (!targetOrigin.targetClaimId && $("#board-dialog").open) $("#board-dialog").close();
@@ -3411,6 +3602,8 @@ function revealDrafts(id) {
   if (!card) return;
   const choices = card.querySelector('.work-drafts');
   if (!choices) { revealWork(id); return; }
+  const parentDetails = choices.parentElement.closest("details");
+  if (parentDetails) parentDetails.open = true;
   choices.open = true;
   const summary = choices.querySelector('summary');
   summary.focus({ preventScroll: true });
@@ -3617,16 +3810,16 @@ function claimStateLabel(i, now = Date.now()) {
   if (i.claim?.status === "released") return "released";
   return "expired";
 }
-function receiptCard(i) {
+function receiptCard(i, labelMember = memberLabel) {
   if (!i.receipt) return "";
   const receipt = i.receipt;
   const earlier = [...drafts.entries].filter(([, draft]) => draft.mode?.resultEventId && draft.mode.workItemId === i.id
     && draft.mode.resultEventId !== receipt.eventId && (draft.body.trim() || draft.pending) && validReplyDraft(draft.mode, state));
   const resume = earlier.map(([key], index) => `<button type="button" class="button ghost" data-resume-credit="${esc(key)}"
     data-focus-key="resume-credit:${esc(key)}"${busy ? " disabled" : ""}>Continue earlier question${earlier.length > 1 ? " " + (index + 1) : ""}</button>`).join("");
-  const reporter = receipt.reportedById ? memberLabel(receipt.reportedById) : "Unknown reporter";
+  const reporter = receipt.reportedById ? labelMember(receipt.reportedById) : "Unknown reporter";
   const producer = receipt.producerAttribution === "reported" && receipt.producerId
-    ? memberLabel(receipt.producerId)
+    ? labelMember(receipt.producerId)
     : receipt.producerAttribution === "external-reported" ? `${receipt.externalProducer} · outside room, reported`
       : "Unknown — no producer was reported";
   let verification = "<p>No verification recorded.</p>";
@@ -3637,7 +3830,7 @@ function receiptCard(i) {
     const independence = result === "PASS" && i.independentVerificationRequired
       ? ` · ${confirmed ? "independence confirmed" : "independence not confirmed"}`
       : "";
-    verification = `<p><strong>${esc(resultLabel)}</strong> reported by ${esc(memberLabel(i.verification.verifierId))}${independence}: ${esc(i.verification.summary)}</p>`;
+    verification = `<p><strong>${esc(resultLabel)}</strong> reported by ${esc(labelMember(i.verification.verifierId))}${independence}: ${esc(i.verification.summary)}</p>`;
   }
   return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer noopener" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}${receipt.producerAttribution !== "reported" ? `<button type="button" class="button ghost" data-ask-credit="${esc(i.id)}" data-result-event="${esc(receipt.eventId)}" data-focus-key="ask-credit:${esc(i.id)}"${busy ? " disabled" : ""}>Ask about credit</button>` : ""}${resume}</div>`;
 }
@@ -3709,33 +3902,43 @@ function workCard(i, now, drafts, messages = []) {
   const loops = coordinationLoops(i, messages);
   const loopNotice = loops.length ? `<p class="loop-warning" data-loop-kind="${esc(loops[0].kind)}"><strong>Possible coordination loop.</strong> ${esc(loops[0].label)}</p>` : "";
   const nextFor = next.memberId ? ` for ${esc(name(next.memberId))}` : "";
-  const quietNext = session.member.kind === "human" && !document.body.classList.contains("human-advanced") && ["in_progress", "complete"].includes(next.action);
+  const quietFace = session.member.kind === "human" && !document.body.classList.contains("human-advanced");
+  const workMemberLabel = quietFace ? displayName : memberLabel;
+  const ownNextAction = next.memberId === session.member.id && workActions(i, state.members[session.member.id], now).some(([action]) => action === next.action);
+  const quietNext = quietFace && (["in_progress", "complete"].includes(next.action) || ownNextAction || next.action === "accept" && next.memberId === i.accountableMemberId);
   const nextLine = `<p ${quietNext ? "hidden" : ""} class="work-next-step" data-next-step="${esc(next.action)}"><strong>Next${nextFor}:</strong> ${esc(status.next)}</p>`;
-  const source = i.sourceMessageId ? `<a class="source-link" href="${esc(recordHref("message", i.sourceMessageId))}" data-open-message="${esc(i.sourceMessageId)}" data-focus-key="work-source:${esc(i.id)}">From this conversation</a>` : "";
+  const source = i.sourceMessageId ? uiText("human.workSourceHtml", { href: esc(recordHref("message", i.sourceMessageId)), messageId: esc(i.sourceMessageId), workId: esc(i.id) }) : "";
   const continuity = terminalWork(i) ? null : workContinuity(i, now);
   const recovery = continuity?.needsAttention ? `<section class="work-recovery" aria-label="Worker progress"><strong>${esc(continuity.label)}</strong><p>${esc(continuity.next)}</p><button type="button" class="text-button" data-portable-work="${esc(i.id)}" data-portable-progress="true" data-focus-key="work-resume:${esc(i.id)}">Continue with saved context</button></section>` : "";
   const handoff = i.handoff?.open ? `<section class="blocker" data-work-handoff="${esc(i.id)}" aria-label="Work handoff"><strong>Handoff</strong><p>${esc(i.handoff.doneSummary)}</p><p><strong>Next:</strong> ${esc(i.handoff.nextAction)}</p><details><summary>Why work paused</summary><p>${esc(i.handoff.limitReason)}</p>${i.handoff.haltAll ? "<p>A stop was requested. External process state is unknown.</p>" : ""}</details></section>` : "";
-  const blocker = i.blocker ? `<div class="blocker"><strong>Blocked</strong><p>${esc(i.blocker.reason)}</p><p>${esc(i.blocker.nextAction)}</p></div>` : "";
+  const blocker = i.blocker ? uiText("human.workBlockerHtml", { reason: esc(i.blocker.reason), next: esc(i.blocker.nextAction) }) : "";
   const currentBlocker = i.state === S.BLOCKED && i.blocker ? `<div class="blocker"><p>${esc(i.blocker.reason)}</p></div>` : "";
   const decision = i.decision ? `<div class="decision"><strong>${esc(humanize(i.decision.decision))}</strong><p>${esc(i.decision.reason)}</p></div>` : "";
-  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}${claimOverlapCount(i) ? ` · <span class="claim-overlap">Overlaps ${claimOverlapCount(i)}</span>` : ""}</summary><p>${esc(memberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p>${claimOverlapHtml(i)}<p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
-  const checks = `<div><dt>Verifier</dt><dd>${i.independentVerificationRequired ? esc(memberLabel(i.verifierMemberId)) : "Not required"}</dd></div><div><dt>Decision</dt><dd>${i.ownerDecisionRequired ? esc(memberLabel(i.humanDecisionMakerId)) : "Not required"}</dd></div>`;
+  const claim = i.claim ? `<details class="claim"><summary data-focus-key="work-claim:${esc(i.id)}">Recorded scope · ${esc(claimStateLabel(i, now))}${claimOverlapCount(i) ? ` · <span class="claim-overlap">Overlaps ${claimOverlapCount(i)}</span>` : ""}</summary><p>${esc(workMemberLabel(i.claim.holderId))}</p><p>${esc(i.claim.repository)}:${esc(i.claim.ref)}</p><p>${esc(i.claim.paths.join(", "))}</p>${claimOverlapHtml(i)}<p>Expires ${esc(new Date(i.claim.expiresAt).toLocaleString())}. External activity is not measured.</p>${actions(i, true, now)}</details>` : "";
+  const checks = uiText("human.workChecksHtml", { verifier: i.independentVerificationRequired ? esc(workMemberLabel(i.verifierMemberId)) : esc(uiText("human.workNotRequired")), decision: i.ownerDecisionRequired ? esc(workMemberLabel(i.humanDecisionMakerId)) : esc(uiText("human.workNotRequired")) });
   const updated = `<p class="form-hint">Last recorded update: ${esc(new Date(i.updatedAt).toLocaleString())}. Live execution is not measured.</p>`;
   const attempts = attemptLedger(i);
   const receipts = attemptReceipts(i);
   // G7: silence is never termination - a stale-heartbeat run is labeled
   // unresponsive with process state unknown, never "stopped".
   const unresponsiveRun = cancellationState(i, { nowMs: Date.now() }).unresponsive;
-  const attemptsLine = attempts.length ? `<p class="form-hint" data-attempt-ledger="${esc(i.id)}">Attempts: ${attempts.map((a, ix) => `#${a.attempt} ${esc(memberLabel(a.performer))} · ${a.outcome ?? (unresponsiveRun ? "unresponsive - process state unknown" : "running")}${a.environment ? ` · ${esc(a.environment)}` : ""}${receipts[ix]?.successClaim === "unverified" ? " · unverified (missing outputs or measured usage)" : ""}`).join(" · ")}</p>` : "";
+  const attemptsLine = attempts.length ? `<p class="form-hint" data-attempt-ledger="${esc(i.id)}">Attempts: ${attempts.map((a, ix) => `#${a.attempt} ${esc(workMemberLabel(a.performer))} · ${a.outcome ?? (unresponsiveRun ? "unresponsive - process state unknown" : "running")}${a.environment ? ` · ${esc(a.environment)}` : ""}${receipts[ix]?.successClaim === "unverified" ? " · unverified (missing outputs or measured usage)" : ""}`).join(" · ")}</p>` : "";
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>
-`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(memberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...(draft.body ?? "")].slice(0, 100).join(""))}${[...(draft.body ?? "")].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
+`<p><a class="source-link" href="${esc(recordHref("message", draft.id))}" data-open-message="${esc(draft.id)}" data-focus-key="work-draft-message:${esc(draft.id)}">${esc(workMemberLabel(draft.authorId))} · ${esc(draftFeedback(i, draft)?.label ?? "Draft")}<br><span class="form-hint">${esc([...(draft.body ?? "")].slice(0, 100).join(""))}${[...(draft.body ?? "")].length > 100 ? "…" : ""}</span></a></p>`).join("")}</details>` : "";
   const staleBasis = latestDraft?.proposal && latestDraft.proposal.basisRevision < i.revision ? latestDraft.proposal.basisRevision : null;
+  const selectedLatestDraft = latestDraft && i.receipt?.nativeText?.messageId === latestDraft.id;
   // F3: a stale-basis draft gets a derived read-time explanation of what changed; never a block.
-  const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
-  const draftLink = i.receipt?.nativeText ? `<button class="source-link" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + alternatives : alternatives || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
-  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${quietNext ? `<p class="work-accountable">${esc(uiText("human.workOwner", { name: memberLabel(i.accountableMemberId) }))}</p>` : ""}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary><span class="mode">${esc(i.mode)} · revision ${i.revision}</span><p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts"><div><dt>Accountable</dt><dd>${esc(memberLabel(i.accountableMemberId))}</dd></div>${checks}</dl>${updated}${attemptsLine}${receiptCard(i)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${shareDraftButton(i)}${reuse}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button><button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button></div>${accessPreviewHtml(i)}${handoffEnvelopeSection(i)}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
+  const changesToggle = staleBasis === null ? "" : `<button type="button" class="button ghost" data-work-changes="${esc(i.id)}" data-basis="${staleBasis}" aria-expanded="false" data-focus-key="work-changes:${esc(i.id)}">What changed since revision ${staleBasis}</button><div class="work-changes-list" data-changes-list="${esc(i.id)}" hidden></div>`;
+  const draftLink = i.receipt?.nativeText ? `<button class="${quietFace ? "button secondary" : "source-link"}" type="button" data-read-result="${esc(i.id)}" data-focus-key="work-native-result:${esc(i.id)}">View result</button>` + (quietFace ? "" : alternatives) : (quietFace ? "" : alternatives) || (latestDraft ? `<a class="source-link" href="${esc(recordHref("message", latestDraft.id))}" data-open-message="${esc(latestDraft.id)}" data-focus-key="work-draft:${esc(i.id)}">View latest draft</a>` : "");
+  const recordMeta = uiText("human.workRevisionHtml", { mode: esc(i.mode), revision: i.revision });
+  const utilities = `${reuse}${terminalWork(i) ? "" : `<button type="button" class="button ghost" data-reminder-work="${esc(i.id)}" data-focus-key="work-reminder:${esc(i.id)}">Remind me</button>`}<button type="button" class="button ghost" data-access-preview="${esc(i.id)}" data-focus-key="work-access:${esc(i.id)}" aria-expanded="${accessPreviews.has(i.id) ? "true" : "false"}"${accessPreviews.has(i.id) ? ` aria-controls="${workDomId(i.id)}-access"` : ""}>What this agent can access</button>`;
+  const detailBody = `${quietFace ? source + alternatives : ""}${quietFace ? "" : recordMeta}<p class="definition">${esc(i.definitionOfDone)}</p><dl class="work-facts">${quietFace ? "" : `<div><dt>Accountable</dt><dd>${esc(workMemberLabel(i.accountableMemberId))}</dd></div>`}${checks}</dl>${quietFace ? "" : updated + attemptsLine}${receiptCard(i, workMemberLabel)}${i.state === S.BLOCKED ? "" : blocker}${decision}${claim}<div class="portable-actions">${i.receipt && quietFace ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}${shareDraftButton(i)}${help?.canPublish && help.help?.status !== "open" ? helpButton(i, "help", "Ask for help") : ""}<button type="button" class="button secondary" data-portable-work="${esc(i.id)}" data-focus-key="work-ai:${esc(i.id)}">Use my AI</button></div>${quietFace ? `<details class="work-utilities"><summary data-focus-key="work-utilities:${esc(i.id)}">${esc(uiText("human.workMoreActions"))}</summary><div class="portable-actions">${utilities}</div><details class="work-record-details"><summary data-focus-key="work-record:${esc(i.id)}">${esc(uiText("human.workRecordDetails"))}</summary>${recordMeta}${updated}${attemptsLine}${selectedLatestDraft ? changesToggle : ""}</details>${accessPreviewHtml(i)}</details>` : `${utilities}`}${quietFace ? "" : accessPreviewHtml(i)}${handoffEnvelopeSection(i)}`;
+  if (quietFace) return `<article id="${workDomId(i.id)}" class="work-card work-card-quiet" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}">
+    <details class="work-details"><summary class="work-title-summary" data-focus-key="work-details:${esc(i.id)}"><h3>${esc(i.title)}</h3><span class="state state-${status.tone}">${esc(status.label)}</span><span class="work-assignee">${esc(uiText("human.workOwner", { name: workMemberLabel(i.accountableMemberId) }))}</span></summary><div class="work-detail-body">${detailBody}</div></details>
+    ${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink ? `<div class="portable-actions">${draftLink}</div>` : ""}${selectedLatestDraft ? "" : changesToggle}${helpCard(i, help)}<div class="work-actions">${actions(i, false, now)}</div></article>`;
+  return `<article id="${workDomId(i.id)}" class="work-card" tabindex="-1" data-work-record-id="${esc(i.id)}" data-disclosure-host="${esc(i.id)}" data-focus-key="work:${esc(i.id)}"><div class="work-card-header"><span class="state state-${status.tone}">${esc(status.label)}</span></div><h3>${esc(i.title)}</h3>${source}${nextLine}${currentBlocker}${recovery}${handoff}${loopNotice}${draftLink || i.receipt ? `<div class="portable-actions">${draftLink}${i.receipt ? `<button type="button" class="button secondary" data-copy-result="${esc(i.id)}" data-focus-key="work-copy-result:${esc(i.id)}">Copy summary</button>` : ""}</div>` : ""}${changesToggle}${helpCard(i, help)}<details class="work-details"><summary data-focus-key="work-details:${esc(i.id)}">${i.receipt ? "Evidence & details" : "Details"}</summary>${detailBody}</details><div class="work-actions">${actions(i, false, now)}</div></article>`;
 }
 // Quiet Focus A4: a failed send reports beside the composer that holds the draft,
 // not only in the page-level status area; the Send button is the retry and the
@@ -4069,6 +4272,7 @@ const replyToSharedResult = createResultFeedback({
   }
 });
 const humanExperience = installHumanExperience({ getState: () => state, getSession: () => session, client, notice,
+  onMessageSending: id => locallyOwnedMessageIds.add(id),
   getConversation: () => ({ channelId: activeChannelId, threadId: currentThreadId, rootOf: id => conversation?.rootById.get(id) }),
   replyToResult: replyToSharedResult,
   openWork: id => revealWork(id), openMessage: id => revealMessage(id), onSubmitted: confirmSharedSubmission,
@@ -4179,8 +4383,6 @@ $("#signout-button").addEventListener("click", async () => {
       if (state) $("#signout-button").disabled = false;
       else {
         configureAuthPanel();
-        const ended = "Session ended; private drafts were cleared.";
-        if ($("#auth-error").textContent !== ended) setFormStatus($("#auth-error"), ended, true);
         if (!$("#invitation-dialog").open) queueMicrotask(() => focusSignin());
       }
     }
@@ -4247,8 +4449,12 @@ $("#message-form").addEventListener("submit", e => {
   if (isRoomArchived(state)) { setComposerError("This room is archived and read only."); return; }
   if (activeChannel()?.archivedAt) { setComposerError("This channel is archived."); return; }
   if (composerOverLimit()) { renderComposerLength(); return; }
+  if (directRecipientUnavailable()) { renderComposerError(); return; }
   if (requestMode) {
     if (composerFiles.length) { setComposerError(uiText("composer.file.requestMode")); return; }
+    if (requestMode.kind === "request" && !pendingMessage && !availableRequestRecipient($("#message-to-select").value)) {
+      setComposerError(uiText("request.recipientRequired")); openRequestRecipientPicker(); return;
+    }
     submitRequest(e.currentTarget); return;
   }
   const content = { body: $("#message-input").value.trim(), toMemberId: $("#message-to-select").value || null, replyToId, channelId: activeChannelId };
@@ -4287,7 +4493,11 @@ $("#message-form").addEventListener("submit", e => {
       await client.send(sendingCommand);
     } catch (error) {
       if (generation !== client.generation || !state) return;
-      throw mapDmConsentRefusal(sendingCommand, error) ?? error;
+      // A lost response can race a read-confirmed copy arriving over the stream.
+      // Only the same ordinary message proves success; shared work has other steps.
+      const confirmed = !sharedRequest && retryUnconfirmed(error)
+        && historyConfirmsMessage(state.messages, sendingCommand, session.member.id);
+      if (!confirmed) throw mapDmConsentRefusal(sendingCommand, error) ?? error;
     }
     if (generation !== client.generation || !state) return;
     if (!ownsSendingDraft()) return;
@@ -4298,8 +4508,8 @@ $("#message-form").addEventListener("submit", e => {
     delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
     const link = document.createElement("a");
     link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
-    delivery.append(link, document.createTextNode(uiText("composer.deliveryNotExecution")));
-    delivery.hidden = false;
+    delivery.append(link);
+    delivery.hidden = visible && visibleConversationMessages().some(message => message.id === savedMessageId);
     await commitComposerFiles(data.messageId);
     if (!ownsSendingDraft()) return;
     if (generation !== client.generation || !state) return;
@@ -4346,6 +4556,14 @@ $("#message-input")?.addEventListener("paste", event => {
 // Channel creation and management: any member can create a channel; only the
 // room owner renames or archives. Archive is a two-click arm, never a native dialog.
 let channelDialogMode = null, channelArchiveArmed = false;
+function renderChannelSaveAction() {
+  const mode = channelDialogMode;
+  if (!mode) return;
+  const retry = mode.uncertain && mode.pendingName === $("#channel-name-input").value.trim();
+  $("#channel-save-button").textContent = retry ? uiText("channel.retry")
+    : mode.mode === "create" ? "Create channel" : "Rename channel";
+}
+$("#channel-name-input").addEventListener("input", renderChannelSaveAction);
 function openChannelDialog(mode, channelId = null) {
   if (!state) return;
   channelDialogMode = { mode, channelId };
@@ -4362,13 +4580,14 @@ function openChannelDialog(mode, channelId = null) {
   $("#channel-name-input").focus();
   $("#channel-name-input").select();
 }
-async function waitForChannel(id, timeoutMs = 8000) {
+async function waitForChannel(id, timeoutMs = 8000, current = () => true) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
+    if (!current()) return false;
     if (state?.channels?.[id] && !state.channels[id].archivedAt) return true;
     await new Promise(resolve => setTimeout(resolve, 150));
   }
-  return Boolean(state?.channels?.[id]);
+  return current() && Boolean(state?.channels?.[id] && !state.channels[id].archivedAt);
 }
 $("#create-channel-button").addEventListener("click", () => openChannelDialog("create"));
 $("#channel-dialog-close").addEventListener("click", () => $("#channel-dialog").close());
@@ -4378,6 +4597,8 @@ $("#channel-list").addEventListener("click", e => {
   const button = e.target.closest("[data-channel]");
   if (!button) return;
   setActiveChannel(button.dataset.channel);
+  if (!busy && !requestReading && !composerFiles.some(file => file.status === "uploading")
+    && activeChannelId === button.dataset.channel && !activeDirectMemberId && !currentThreadId && !requestMode) leaveRecordDestination();
   // On a phone the drawer closes once this click finishes dispatching (the
   // document listener below) and takes the button with it: land on the
   // channel heading instead of <body>.
@@ -4390,25 +4611,62 @@ $("#channel-form").addEventListener("submit", async e => {
   e.preventDefault();
   const mode = channelDialogMode;
   const name = $("#channel-name-input").value.trim();
-  if (!mode || !name || !state) return;
+  if (!mode || !name || !state || !session || busy) return;
   const status = $("#channel-form-status");
-  setFormStatus(status, mode.mode === "create" ? "Creating…" : "Saving…");
-  try {
-    const pending = mode.mode === "create"
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
+  const ownsDialog = () => sameSession(generation, roomId, memberId)
+    && channelDialogMode === mode && $("#channel-dialog").open;
+  let savedChannelId = null;
+  await submit($("#channel-form"), async current => {
+    setFormStatus(status, mode.mode === "create" ? "Creating…" : "Saving…");
+    // An unchanged retry must reconcile the original command, including its
+    // generated channel id, rather than fail as a second "name taken" create.
+    const pending = mode.pendingName === name && mode.pending ? mode.pending : mode.mode === "create"
       ? draftCommand(null, T.CHANNEL_CREATED, { channelId: crypto.randomUUID(), name })
       : draftCommand(null, T.CHANNEL_RENAMED, { channelId: mode.channelId, name });
+    if (mode.pending !== pending) mode.uncertain = false;
+    mode.pending = pending; mode.pendingName = name;
     const newChannelId = pending.command.data.channelId;
-    await client.send(pending.command);
-    $("#channel-dialog").close();
+    try { await client.send(pending.command); }
+    catch (error) {
+      if (!current() || !ownsDialog()) return;
+      mode.uncertain = retryUnconfirmed(error, mode.uncertain === true);
+      if (!mode.uncertain) mode.pending = null;
+      throw error;
+    }
+    if (!current() || !ownsDialog()) return;
     if (mode.mode === "create") {
-      if (newChannelId && await waitForChannel(newChannelId)) setActiveChannel(newChannelId);
-      notice(`Channel #${name} created.`);
-    } else notice("Channel renamed.");
-  } catch (error) { setFormStatus(status, `${error.message}`, true); }
+      if (!await waitForChannel(newChannelId, 8000, () => current() && ownsDialog())) {
+        if (current() && ownsDialog()) {
+          mode.uncertain = true;
+          throw new Error(uiText("channel.creationUnconfirmed"));
+        }
+        return;
+      }
+      if (!current() || !ownsDialog()) return;
+      savedChannelId = newChannelId;
+    }
+    $("#channel-dialog").close();
+    if (mode.mode !== "create") notice("Channel renamed.");
+  });
+  if (ownsDialog()) {
+    renderChannelSaveAction();
+    if (status.classList.contains("error") && document.activeElement === document.body) {
+      $("#channel-save-button").focus({ preventScroll: true });
+    }
+  }
+  if (savedChannelId && sameSession(generation, roomId, memberId) && channelDialogMode === mode) {
+    setActiveChannel(savedChannelId);
+    if (activeChannelId === savedChannelId && !activeDirectMemberId && !currentThreadId) {
+      $("#main").classList.remove("sidebar-open");
+      $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+      $("#message-input").focus({ preventScroll: true });
+    } else notice(`Channel #${name} created.`);
+  }
 });
 $("#channel-archive-button").addEventListener("click", async e => {
   const mode = channelDialogMode;
-  if (!mode || mode.mode !== "manage" || !mode.channelId || !state) return;
+  if (!mode || mode.mode !== "manage" || !mode.channelId || !state || !session || busy) return;
   const button = e.currentTarget;
   if (!channelArchiveArmed) {
     channelArchiveArmed = true;
@@ -4416,15 +4674,28 @@ $("#channel-archive-button").addEventListener("click", async e => {
     setFormStatus($("#channel-form-status"), "Archived channels stay searchable but accept no new messages.");
     return;
   }
-  setFormStatus($("#channel-form-status"), "Archiving…");
-  try {
-    await client.send(draftCommand(null, T.CHANNEL_ARCHIVED, { channelId: mode.channelId }).command);
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
+  const ownsDialog = () => sameSession(generation, roomId, memberId)
+    && channelDialogMode === mode && $("#channel-dialog").open;
+  let archived = false;
+  await submit($("#channel-form"), async current => {
+    setFormStatus($("#channel-form-status"), "Archiving…");
+    try { await client.send(draftCommand(null, T.CHANNEL_ARCHIVED, { channelId: mode.channelId }).command); }
+    catch (error) {
+      if (!current() || !ownsDialog()) return;
+      channelArchiveArmed = false; button.textContent = "Archive channel";
+      throw error;
+    }
+    if (!current() || !ownsDialog()) return;
     $("#channel-dialog").close();
+    archived = true;
+  });
+  if (archived && sameSession(generation, roomId, memberId) && channelDialogMode === mode) {
     if (activeChannelId === mode.channelId) setActiveChannel(DEFAULT_CHANNEL_ID);
+    $("#main").classList.remove("sidebar-open");
+    $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+    $("#conversation-title").focus({ preventScroll: true });
     notice("Channel archived.");
-  } catch (error) {
-    setFormStatus($("#channel-form-status"), `${error.message}`, true);
-    channelArchiveArmed = false; button.textContent = "Archive channel";
   }
 });
 function submitRequest(form) {
@@ -4442,6 +4713,7 @@ function submitRequest(form) {
   } catch (error) { setComposerError(error.message); return; }
   saveComposer();
   const command = pendingMessage.command;
+  let savedMessageId = null;
   submit(form, async () => {
     try {
       if (command.data.messageId) locallyOwnedMessageIds.add(command.data.messageId);
@@ -4453,6 +4725,7 @@ function submitRequest(form) {
       restoreComposer(drafts.get(composerKey())); updateReply(); persistDrafts();
       if (mode.resultEventId) renderReturnBrief();
       notice(mode.kind === "request" ? "Request saved." : mode.kind === "cancelled" ? "Request cancelled." : "Reply saved.");
+      savedMessageId = command.data.messageId ?? null;
     } catch (error) {
       if (generation !== client.generation || session !== identity || !state) return;
       // draftRefused: only a refusal issued after the exact-operation lookup
@@ -4465,15 +4738,22 @@ function submitRequest(form) {
       if (consentRefusal) throw consentRefusal;
       throw error;
     }
-  }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." });
+  }, { failureHint: "Draft kept. Retry the original, or refresh context after a refusal." }).then(() => {
+    // Navigation needs submission controls released. Only a confirmed receipt
+    // may move the user to the delivered message; uncertain sends keep the draft.
+    if (savedMessageId && generation === client.generation && session === identity && state) {
+      revealMessage(savedMessageId);
+      leaveRecordDestination();
+    }
+  });
 }
 // The menu lifting click listener is no longer needed (content-visibility
 // removed from .message). The menu positions correctly without it.
 // Widen the root-timeline window so the message with this id is rendered.
 function expandTimelineTo(id) {
   if (currentThreadId) return;
-  const view = `room:${activeChannelId}`;
-  const roots = conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const view = conversationViewKey();
+  const roots = visibleConversationMessages();
   const current = timelineWindow.get(view) ?? TIMELINE_WINDOW, next = windowToInclude(roots, id, current);
   if (next > current) {
     timelineWindow.set(view, next);
@@ -4484,7 +4764,7 @@ function expandTimelineTo(id) {
 $("#message-list").addEventListener("click", e => {
   if (e.target.closest("[data-timeline-earlier]")) {
     if (client.loadHistory()) return; // older history first; it renders on arrival
-    const view = `room:${activeChannelId}`;
+    const view = conversationViewKey();
     timelineWindow.set(view, (timelineWindow.get(view) ?? TIMELINE_WINDOW) + TIMELINE_WINDOW);
     timelineRevealing = true;
     renderMessages();
@@ -4492,8 +4772,6 @@ $("#message-list").addEventListener("click", e => {
   }
   const file = e.target.closest("[data-download-file]");
   if (file) { void downloadMessageFile(file.dataset.downloadFile, file.dataset.fileMessage); return; }
-  if (e.target.closest("[data-empty-write]")) { $("#message-input").focus(); return; }
-  if (e.target.closest("[data-empty-invite]")) { $("#invite-people-button")?.click(); return; }
   const chip = e.target.closest("[data-mention-id]");
   if (chip && state) { applyMentionMember(state.members[chip.dataset.mentionId]); return; }
   const button = e.target.closest("[data-message-id]"); if (!button || !state || busy) return;
@@ -4558,7 +4836,11 @@ $("#reply-mention").addEventListener("click", () => {
   } else applyMentionMember(author);
   updateReply();
 });
-$("#thread-back").addEventListener("click", () => switchThread(null));
+$("#thread-back").addEventListener("click", () => {
+  if (!state || busy || composerFiles.some(file => file.status === "uploading")) return;
+  if (threadOwnsRecordReturn()) returnToCurrentRoom();
+  else switchThread(null);
+});
 // Per-thread mutes: a private per-member row on the server (thread_mutes).
 // Muting suppresses the thread's activity from the notification/unread feed;
 // unmuting restores it on the next read. The server resolves any message id
@@ -4666,8 +4948,8 @@ function applyMentionMember(member) {
   hideMentions(); saveComposer(); syncRequestComposer();
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
-$("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
-$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
+$("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); syncChatSuggestions(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
+$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); syncChatSuggestions(); });
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
@@ -5067,7 +5349,7 @@ function chooseRoomChannel(id) {
   }
   const blocked = roomDestinationBlockedReason();
   if (blocked) { refuseRoomDestination(blocked); return; }
-  setActiveChannel(id); closeRoomActions(false);
+  setActiveChannel(id); leaveRecordDestination(); closeRoomActions(false);
   $("#main").classList.remove("sidebar-open"); $("#sidebar-toggle").setAttribute("aria-expanded", "false");
   $("#conversation-title").focus({ preventScroll: true });
 }
@@ -5942,10 +6224,7 @@ function syncWorkPolicy() {
     box.disabled = required;
   }
   const required = [policy.requireIndependentReview && "independent review", policy.requireOwnerDecision && "owner approval"].filter(Boolean);
-  // The "turn off review" escape does not exist under policy; say so and drop the settings shortcut.
-  $("#reviewer-unavailable-text").textContent = policy.requireIndependentReview
-    ? "No independent reviewer available. Room policy requires review: change the owner, or ask the room owner to add a reviewer."
-    : "No independent reviewer available. Change the owner or turn off review.";
+  // Room policy cannot be bypassed in the work form.
   $("#review-settings-button").hidden = policy.requireIndependentReview;
   $("#work-policy-note").hidden = required.length === 0;
   $("#work-policy-note").textContent = required.length ? `Room policy: ${required.join(" and ")} ${required.length > 1 ? "are" : "is"} required for every new outcome in this room. Only the room owner can change this.` : "";
@@ -5974,6 +6253,7 @@ function openWork(sourceId = null, reuseId = null) {
     $("#work-done-input").value = definition.definitionOfDone;
   }
   $("#work-reuse-hint").hidden = !definition;
+  $("#work-recipe-field").open = false;
   const recipeSelect = $("#work-recipe-select");
   if (definition || sourceId) $("#work-recipe-field").hidden = true;
   else {
@@ -6047,12 +6327,8 @@ $("#review-settings-button").addEventListener("click", () => {
 $("#cancel-work-button").addEventListener("click", () => closeWorkForm());
 $("#work-dialog").addEventListener("cancel", event => { event.preventDefault(); if (!busy) closeWorkForm(); });
 $("#new-work-form").addEventListener("change", syncWorkForm);
-// Create-work trap guard: verification is required by default but the verifier
-// select starts empty, so native validation swallowed the Create click with
-// no surfaced error (the requirement controls sit in the collapsed Options
-// group). Respond instead of ignoring: open Options so the requirement is
-// visible, name what is missing next to the select, and focus it. Defaults
-// are unchanged and no verifier is picked for the user.
+// Keep missing-reviewer feedback beside the visible field without opening
+// unrelated policy settings. No reviewer is selected on the user's behalf.
 $("#create-work-button").addEventListener("click", e => {
   const verifier = $("#verifier-select");
   if (!$("#require-verification").checked || verifier.value) return;
@@ -6063,7 +6339,6 @@ $("#create-work-button").addEventListener("click", e => {
     .find(el => !el.disabled && typeof el.checkValidity === "function" && !el.checkValidity());
   if (firstInvalid && firstInvalid !== verifier) return;
   e.preventDefault();
-  $("#work-options").open = true;
   $("#verifier-hint").textContent = uiText("human.workChooseVerifier");
   $("#verifier-hint").hidden = false;
   $("#verifier-select").focus();
@@ -6076,11 +6351,28 @@ for (const [formSelector, statusSelector] of [["#new-work-form", "#new-work-stat
   const form = $(formSelector); if (!form) continue;
   form.addEventListener("invalid", event => {
     const field = event.target;
-    const label = field.closest("label")?.textContent?.trim().replace(/\s+/g, " ").slice(0, 60)
-      || field.getAttribute?.("aria-label") || field.name || "A required field";
-    const status = $(statusSelector); if (status) setFormStatus(status, uiText("human.requiredField", { fragmentA: label }), true);
+    if (field !== form.querySelector("input:invalid, select:invalid, textarea:invalid")) return;
+    const labelledBy = (field.getAttribute?.("aria-labelledby") || "").split(/\s+/).filter(Boolean)
+      .map(id => document.getElementById(id)?.textContent?.trim()).filter(Boolean).join(" ");
+    const wrapper = field.closest("label");
+    const label = (labelledBy || field.getAttribute?.("aria-label")
+      || wrapper?.querySelector(":scope > span")?.textContent || wrapper?.textContent
+      || field.name || "A required field").trim().replace(/\s+/g, " ").replace(/\s*\(required\)$/i, "").slice(0, 60);
+    const message = field.validity?.customError
+      ? field.validationMessage : uiText("human.requiredField", { fragmentA: label });
+    const status = $(statusSelector);
+    if (status) {
+      setFormStatus(status, message, true);
+      fieldValidationFeedback.set(status, field);
+    }
     const details = field.closest("details"); if (details && !details.open) details.open = true;
   }, true);
+  const clearResolvedFieldError = () => {
+    const status = $(statusSelector), field = status && fieldValidationFeedback.get(status);
+    if (field?.validity.valid) setFormStatus(status, "");
+  };
+  form.addEventListener("input", clearResolvedFieldError);
+  form.addEventListener("change", clearResolvedFieldError);
 }
 $("#new-work-form").addEventListener("submit", e => { e.preventDefault(); sendWorkProposal(); });
 $("#retry-work-button").addEventListener("click", () => { if (workRetryLocked) sendWorkProposal(); });
@@ -6112,32 +6404,37 @@ document.addEventListener("click", async e => {
 });
 document.addEventListener("click", async e => {
   const button = e.target.closest("[data-work-changes]");
-  if (!button || !state) return;
+  if (!button || !state || button.getAttribute("aria-busy") === "true") return;
   const list = document.querySelector(`[data-changes-list="${CSS.escape(button.dataset.workChanges)}"]`);
   if (!list) return;
-  if (!list.hidden) { list.hidden = true; return; }
-  button.disabled = true;
+  if (!list.hidden) { list.hidden = true; button.setAttribute("aria-expanded", "false"); return; }
+  const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
+  const owns = () => sameSession(generation, roomId, memberId) && button.isConnected && list.isConnected;
+  button.setAttribute("aria-disabled", "true"); button.setAttribute("aria-busy", "true");
   try {
     const history = await client.request(client.path(`/work-changes?workItemId=${encodeURIComponent(button.dataset.workChanges)}&since=${encodeURIComponent(button.dataset.basis)}`));
+    if (!owns()) return;
     list.innerHTML = history.changes.length
       ? `<ul>${history.changes.map(change => `<li><strong>r${esc(String(change.revision))}</strong> ${esc(changeDescription(change))}${change.actorId ? ` · ${esc(memberLabel(change.actorId))}` : ""}${change.at ? ` · ${esc(new Date(change.at).toLocaleString())}` : ""}</li>`).join("")}</ul>`
       : `<p class="form-hint">No recorded changes after that revision.</p>`;
-    list.hidden = false;
+    list.hidden = false; button.setAttribute("aria-expanded", "true");
   } catch (error) {
+    if (!owns()) return;
     list.innerHTML = `<p class="form-hint">Changes could not be loaded; try again.</p>`;
-    list.hidden = false;
+    list.hidden = false; button.setAttribute("aria-expanded", "true");
   } finally {
-    button.disabled = false;
+    button.removeAttribute("aria-disabled"); button.removeAttribute("aria-busy");
   }
 });
-function sendWorkProposal() {
+async function sendWorkProposal() {
   if (!state || busy || !workDraftId) return;
   const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
   const data = { workItemId: workDraftId, title: $("#work-title-input").value, definitionOfDone: $("#work-done-input").value, accountableMemberId: $("#assignee-select").value, verifierMemberId: independentVerificationRequired ? $("#verifier-select").value : null, independentVerificationRequired, ownerDecisionRequired, humanDecisionMakerId: ownerDecisionRequired ? state.room.ownerId : null, mode: $("#work-mode-select").value, sourceMessageId: $("#source-message-id").value || null };
   if (!workRetryLocked) pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
   const entry = pendingWork;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  submit($("#new-work-form"), async current => {
+  let confirmed = false;
+  await submit($("#new-work-form"), async current => {
     try {
       const receipt = await client.send(entry.command);
       if (!current() || !sameSession(generation, roomId, memberId)) return;
@@ -6148,16 +6445,36 @@ function sendWorkProposal() {
       throw error;
     }
     setWorkRetry(false);
-    closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
+    closeWorkForm();
+    confirmed = true;
   }, { failureHint: "Your work proposal was kept; try again." });
+  if (!confirmed || !sameSession(generation, roomId, memberId)) return;
+  const id = entry.command.data.workItemId;
+  // Navigation is guarded while submitting. Wait for its controls to release,
+  // then use the existing destination/return path if this channel lacks the card.
+  if (!workRecord(id)) navigateWorkRecord("work", id);
+  const created = workRecord(id);
+  if (created && created.getClientRects().length) {
+    created.scrollIntoView({ block: "nearest" });
+    (created.querySelector(".work-title-summary") || created).focus({ preventScroll: true });
+  } else notice("Work created. Awaiting acceptance.");
 }
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
 const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
+function producerOptionLabel(id) {
+  const member = state.members[id];
+  if (id === session.member.id) return uiText("work.producedBySelf", { name: actionMemberLabel(id) });
+  return `${actionMemberLabel(id)}${member ? ` · ${kindLabel(member.kind)}${member.active === false ? " · access revoked" : ""}` : ""}`;
+}
+function actionTextOrigin(text) {
+  const proposal = text.proposal;
+  return uiText(proposal ? "work.postedDraftBy" : "work.postedBy", { name: actionMemberLabel(text.postedById), revision: proposal?.basisRevision });
+}
 function producerField() {
   const members = Object.values(state.members).sort((a, b) => a.displayName.localeCompare(b.displayName));
   const self = members.find(member => member.id === session.member.id);
-  const selfOption = self ? `<option value="${esc(self.id)}">I produced this — ${esc(memberLabel(self.id))}</option>` : "";
-  const otherOptions = members.filter(member => member.id !== session.member.id).map(member => `<option value="${esc(member.id)}">${esc(memberLabel(member.id))} · ${esc(kindLabel(member.kind))}${member.active === false ? " · access revoked" : ""}</option>`).join("");
+  const selfOption = self ? `<option value="${esc(self.id)}">${esc(producerOptionLabel(self.id))}</option>` : "";
+  const otherOptions = members.filter(member => member.id !== session.member.id).map(member => `<option value="${esc(member.id)}">${esc(producerOptionLabel(member.id))}</option>`).join("");
   return `<label>Produced by<select name="producerId" required aria-describedby="producer-attribution-help"><option value="">Choose producer</option>${selfOption}<option value="__external__">Outside person or AI</option><option value="__unknown__">Unknown / not reported</option>${otherOptions}</select></label><label id="external-producer-field" hidden>Credit<input name="externalProducer" maxlength="160" disabled autocomplete="off" placeholder="Person, team or AI"></label><p id="producer-attribution-help" class="form-hint">You submit this result. Credit its producer, or choose Unknown.</p>`;
 }
 const actionSpecs = {
@@ -6300,7 +6617,14 @@ function openWorkAction(item, action, draftMessageId = null, offerId = null) {
     pendingAction.accountableRevision = state.members[item.accountableMemberId]?.revision;
   }
   if (isOfferAction(action)) pinOffer(pendingAction, item, offerId);
-  $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? area("summary", "Summary") + area("nextAction", "Next step") : fields) : fields;
+  const resultSummary = draftMessageId && session.member.kind === "human"
+    ? uiText("work.customizeSummaryHtml") : area("summary", "Summary");
+  $("#action-fields").innerHTML = action === "complete" ? producerField() + (draftMessageId ? (session.member.kind === "human" ? area("nextAction", "Next step") + resultSummary : resultSummary + area("nextAction", "Next step")) : fields) : fields;
+  if ($("#result-summary-customization")) {
+    const entry = pendingAction;
+    $("#action-fields [name=summary]").addEventListener("input", () => { entry.summaryCustomized = true; });
+    $("#action-fields [name=summary]").addEventListener("invalid", () => { $("#result-summary-customization").open = true; });
+  }
   if (pendingAction.publishRationale) {
     $("#action-fields [name=sourceMessageId]").closest("label").remove();
     $("#action-fields").insertAdjacentHTML("beforeend", uiText("human.decisionRationaleNotice"));
@@ -6342,7 +6666,7 @@ function renderActionContext(item, action) {
   const review = action === "decide" && matchesReceipt(item.verification, item.receipt) ? item.verification : null;
   $("#decision-review").hidden = !review; $("#decision-review").open = false;
   setText("#decision-review-label", review ? `${review.independenceConfirmed ? "Independent check" : "Evidence check"} · ${review.result === "pass" ? "Pass" : "Finding"}` : "");
-  setText("#decision-review-by", review ? memberLabel(review.verifierId) : "");
+  setText("#decision-review-by", review ? actionMemberLabel(review.verifierId) : "");
   setText("#decision-review-text", review?.summary ?? "");
   setText("#decision-review-version", review ? `Evidence ${review.evidenceVersion}` : "");
   $("#action-title").textContent = action === "block" && item.state === S.COMPLETED ? "Reopen for rework"
@@ -6382,8 +6706,14 @@ function loadActionText(item, action) {
     entry.text = value.result.text;
     if (!entry.draftMessageId) loadResultComparison(item.id, item.receipt.nativeText.previousCompletionEventId, entry.text, $("#action-result-diff"), owns);
     $("#action-text-body").textContent = entry.text.body;
-    const proposal = entry.text.proposal;
-    $("#action-text-origin").textContent = `Posted by ${memberLabel(entry.text.postedById)}${proposal ? ` · draft based on revision ${proposal.basisRevision} · authorship unverified` : ""}`;
+    const summaryDetails = $("#result-summary-customization");
+    if (summaryDetails && !entry.summaryInitialized) {
+      const summary = summaryDetails.querySelector("textarea");
+      if (!entry.summaryCustomized && entry.text.body.length <= summary.maxLength) summary.value = entry.text.body;
+      summaryDetails.open ||= !summary.value.trim();
+      entry.summaryInitialized = true;
+    }
+    $("#action-text-origin").textContent = actionTextOrigin(entry.text);
     if (value.current.workRevision !== entry.revision) { entry.needsReview = true; entry.error = "Work changed. Review current work before saving."; }
     syncActionForm();
     // NR-B: the exact text lands asynchronously and can push the focused
@@ -6438,6 +6768,13 @@ function syncActionForm() {
     clearResultComparison($("#action-result-diff"));
   }
   if (busy) return;
+  if (entry.text && !entry.text.withdrawnAt) setText("#action-text-origin", actionTextOrigin(entry.text));
+  for (const option of $("#action-fields [name=producerId]")?.options ?? []) {
+    if (option.value && !["__external__", "__unknown__"].includes(option.value)) {
+      const label = producerOptionLabel(option.value);
+      if (option.textContent !== label) option.textContent = label;
+    }
+  }
   const changed = actionChanged(entry);
   const available = actionAvailable(entry), save = $("#action-form button[type='submit']");
   for (const field of $("#action-fields").querySelectorAll("input,textarea,select")) field.disabled = entry.uncertain;
@@ -6447,11 +6784,12 @@ function syncActionForm() {
     $("#action-fields").querySelector("#producer-attribution-help").textContent = external ? "Reported credit only. No access or verified identity."
       : "You submit this result. Credit its producer, or choose Unknown.";
   }
-  save.textContent = entry.uncertain ? "Retry original save" : offerLabels[entry.action] ?? (entry.action === "help" ? "Publish request" : entry.action === "end-help" ? "End request" : "Save record");
+  const resultActionLabel = { complete: "work.saveResult", verify: "work.recordCheck", decide: "work.recordDecision" }[entry.action];
+  save.textContent = entry.uncertain ? "Retry original save" : resultActionLabel ? uiText(resultActionLabel) : offerLabels[entry.action] ?? (entry.action === "help" ? "Publish request" : entry.action === "end-help" ? "End request" : "Save record");
   const saveFocused = document.activeElement === save;
   save.disabled = !entry.uncertain && (changed || entry.needsReview || !available || entry.textRequired && !entry.text);
   if (saveFocused && save.disabled) $("#cancel-action").focus({ preventScroll: true });
-  $("#cancel-action").textContent = entry.uncertain ? "Close" : "Cancel";
+  $("#cancel-action").textContent = entry.uncertain || entry.draftMessageId ? "Close" : "Cancel";
   $("#refresh-action").hidden = entry.uncertain || !(changed || entry.needsReview || !available);
   $("#refresh-action").disabled = false;
   const text = entry.uncertain ? "Save not confirmed. Retry the original before making changes."
@@ -6596,6 +6934,7 @@ $("#action-form").addEventListener("submit", e => {
     const owns = () => current() && pendingAction === entry && actionEpoch === epoch && sameSession(generation, roomId, memberId);
     try {
       if (entry.rationale && !entry.rationale.confirmed) {
+        locallyOwnedMessageIds.add(entry.rationale.command.data.messageId);
         const receipt = await client.send(entry.rationale.command);
         if (!owns()) return;
         if (!await confirmsWorkAction(receipt, entry.rationale.command, roomId, memberId)) throw new Error(uiText("human.decisionReceiptUnknown"));
@@ -6836,6 +7175,11 @@ let activityBadgeTimer = null, activityBadgeAt = 0, attentionBadgesBusy = false;
 let horizonAnchorId = null; // first message after the read horizon; the "New messages" divider rides on it
 let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
 let horizonAdvanceTimer = null;
+let horizonOrder = new ReadPositionOrder();
+function readPositionScope() {
+  const threadId = currentThreadId ?? "", peerMemberId = currentThreadId ? null : activeDirectMemberId;
+  return { threadId, peerMemberId, cacheKey: peerMemberId ? directDraftKey(peerMemberId) : threadId };
+}
 function nearBottomOfList() {
   const list = $("#message-list");
   if (!list || !state) return false;
@@ -6851,14 +7195,20 @@ function scheduleHorizonAdvance() {
 }
 async function advanceHorizon() {
   if (!state || !session || !client.session || !nearBottomOfList()) return;
-  const threadKey = currentThreadId ?? "";
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const messages = visibleConversationMessages();
   const latest = messages.length ? messages[messages.length - 1].id : null;
-  if (!latest || horizonCache.get(threadKey) === latest) return;
+  if (!latest || horizonCache.get(cacheKey) === latest) return;
+  const operation = horizonOrder.write(cacheKey, () => {
+    if (generation !== client.generation) return;
+    return client.setReadHorizon(threadId, latest, peerMemberId);
+  });
   try {
-    await client.setReadHorizon(threadKey, latest);
-    if (!state) return;
-    horizonCache.set(threadKey, latest);
+    await operation.result;
+    if (!state || generation !== client.generation || !operation.current()) return;
+    horizonCache.set(cacheKey, latest);
+    if (view !== conversationViewKey()) return;
     horizonAnchorId = null; // everything in view is read; the divider clears
     renderMessages();
   } catch { /* best-effort; the next scroll retries */ }
@@ -6872,6 +7222,7 @@ function resetAttention() {
   setText("#later-status", "");
   savedMessageIds = new Set(); savedIdsBusy = false;
   horizonAnchorId = null; horizonCache = new Map(); lastHorizonView = null;
+  horizonOrder = new ReadPositionOrder();
   clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
   for (const dialog of ["#later-dialog"]) { const node = $(dialog); if (node?.open) node.close(); }
 }
@@ -6931,29 +7282,46 @@ async function applyHorizonAnchor() {
   // Room-level horizon ("" thread) anchors the "New messages" divider on room
   // open and after mark-unread; the thread view anchors on its own horizon.
   if (!state || !session) return;
-  const threadKey = currentThreadId ?? "";
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const operation = horizonOrder.read(cacheKey, () => {
+    if (generation !== client.generation) return;
+    return client.readHorizon(threadId, peerMemberId);
+  });
   try {
-    const horizon = await client.readHorizon(threadKey);
+    const horizon = await operation.result;
+    if (!state || generation !== client.generation || !operation.current()) return;
     const lastRead = horizon?.lastReadMessageId ?? null;
-    horizonCache.set(threadKey, lastRead);
-    const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+    horizonCache.set(cacheKey, lastRead);
+    if (view !== conversationViewKey()) return;
+    const messages = visibleConversationMessages();
     horizonAnchorId = horizonAnchorFor(messages, lastRead);
-  } catch { horizonAnchorId = null; }
-  if (state) renderMessages();
+  } catch { if (generation !== client.generation || view !== conversationViewKey() || !operation.current()) return; horizonAnchorId = null; }
+  if (state && generation === client.generation && view === conversationViewKey()) renderMessages();
 }
 async function markMessageUnread(messageId) {
   if (!state || !session || !conversation.byId.has(messageId)) return;
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const messages = visibleConversationMessages();
   const index = messages.findIndex(m => m.id === messageId);
   if (index < 0) { notice("That message isn't in this view.", true); return; }
   const previous = index > 0 ? messages[index - 1].id : null;
+  const operation = horizonOrder.write(cacheKey, () => {
+    if (generation !== client.generation) return;
+    return client.setReadHorizon(threadId, previous, peerMemberId);
+  });
   try {
-    await client.setReadHorizon(currentThreadId ?? "", previous);
-    horizonCache.set(currentThreadId ?? "", previous);
+    await operation.result;
+    if (!state || generation !== client.generation || !operation.current()) return;
+    horizonCache.set(cacheKey, previous);
+    if (view !== conversationViewKey()) return;
     horizonAnchorId = messageId;
     renderMessages();
     notice(index === 0 ? "Marked everything unread." : "Marked unread from here.");
   } catch (error) {
+    if (!state || generation !== client.generation || view !== conversationViewKey() || !operation.current()) return;
     notice(`Couldn't mark unread: ${error.message}`, true);
   }
 }
@@ -7995,7 +8363,13 @@ const ready = (async () => {
   // JDOT-COH-NAV begin
   chooseRoomAction = id => { if (id === "board") { const opener = roomActionsContext?.opener; closeRoomActions(false); openBoard(opener); return; } priorChoose(id); };
   // JDOT-COH-NAV end
-  const paintChat = () => { if (state) paintClaimChat(state, $("#message-list")); };
+  const paintChat = () => {
+    // Claim bookkeeping belongs in the operator view. Human work cards already
+    // carry the outcome; unrelated room activity must never decorate a DM.
+    const operatorView = session?.member?.kind === "agent" || document.body.classList.contains("human-advanced");
+    const visible = operatorView && !currentThreadId && !activeDirectMemberId && activeChannelId === DEFAULT_CHANNEL_ID;
+    paintClaimChat(state, $("#message-list"), { visible });
+  };
   const priorRender = render;
   render = () => { if (!state) { board.reset(); return; } priorRender(); board.sync(); };
   const priorMessages = renderMessages;

@@ -4,9 +4,32 @@
 export function installRoomLayout() {
   const get = selector => document.querySelector(selector);
   const main = get('#main');
+  const accountHome = document.createElement('div');
+  accountHome.id = 'sidebar-account';
+  get('#room-sidebar').append(accountHome);
+  const accountLabel = document.createElement('span');
+  accountLabel.className = 'sidebar-account-label';
+  accountLabel.textContent = get('#session-menu-button').title;
+  get('#session-menu-button').append(accountLabel);
+  const search = get('#topbar-search-toggle'), searchAnchor = document.createComment('search-home');
+  search.before(searchAnchor);
+  const searchLabel = document.createElement('span');
+  searchLabel.className = 'compact-search-label';
+  searchLabel.textContent = search.getAttribute('aria-label');
+  search.append(searchLabel);
+  const narrow = matchMedia('(max-width: 520px)');
+  const syncSearch = () => {
+    const focused = document.activeElement === search;
+    search.classList.toggle('topbar-button', narrow.matches);
+    if (narrow.matches) get('.room-more-actions').prepend(search);
+    else searchAnchor.after(search);
+    if (focused) (narrow.matches && !get('#room-more').open ? get('#room-more > summary') : search).focus({ preventScroll: true });
+  };
+  narrow.addEventListener('change', syncSearch);
+  syncSearch();
   const entries = [
     ['#workspace-nav', '#sidebar-workspace'],
-    ['#session-menu', '.room-topbar .topbar-actions'],
+    ['#session-menu', '#sidebar-account'],
     ['#invite-people-button', '#sidebar-invite']
   ].map(([selector, destination]) => {
     const node = get(selector), anchor = document.createComment(`home:${node.id}`);

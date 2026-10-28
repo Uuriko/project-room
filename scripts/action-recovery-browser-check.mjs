@@ -207,7 +207,7 @@ test("a valid action receipt remains saved when its follow-up snapshot fails", {
   await f.open(); await f.fill(); await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
   await page.getByText("Record saved.", { exact: true }).waitFor(); assert.equal(f.item().state, "completed");
   assert.equal(await page.locator("#resume-action").isVisible(), false);
-  failSnapshot = false; await clickChrome(page, "#refresh-button"); await f.card.getByText("Awaiting verification", { exact: true }).waitFor();
+  failSnapshot = false; await clickChrome(page, "#refresh-button"); await f.card.getByText("Awaiting review", { exact: true }).waitFor();
 });
 
 test("stale refusal with no live updates provides an owned refresh before rebasing", { timeout: 30000 }, async t => {

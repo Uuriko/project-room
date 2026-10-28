@@ -8,7 +8,7 @@ const browserType = browserEngine === 'webkit' ? webkit : chromium;
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed } from './room-chrome.mjs';
+import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed, openDirectConversation } from "./room-chrome.mjs";
 import { signInFixture } from './auth-signin.mjs';
 
 
@@ -146,6 +146,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   assert.equal(await owner.locator('#human-share-result textarea').inputValue(),humanResultBody);
   // A committed draft with a lost response is a different case: retry the
   // same immutable command, even if transport confirmation is unavailable.
+  const announcementBeforeDraft = await owner.locator("#conversation-announcement").textContent();
   const draftCommands = [], draftPending = deferredResultResponse(), releaseDraft = deferredResultResponse();
   await owner.route('**/api/rooms/commons/commands',async route=>{
     const command=route.request().postDataJSON();
@@ -176,12 +177,15 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   assert.equal(draftCommands.length,2); assert.deepEqual(draftCommands[1],draftCommands[0]);
   assert.equal(draftCommands[0].data.basisRevision,4);
   assert.equal(f.store.room('commons').state.messages.filter(m=>m.body===humanResultBody).length,1);
+  assert.equal(await owner.locator("#conversation-announcement").textContent(), announcementBeforeDraft, "local draft confirmation and retry do not announce incoming mail");
   assert.equal(await owner.locator('#action-fields [name=signedEvidence]').count(),0);
   await owner.locator('#action-fields [name=producerId]').selectOption('owner');
-  await owner.locator('#action-fields [name=summary]').fill('Simple human result');
+  assert.equal(await owner.locator('#result-summary-customization').getAttribute('open'), null);
+  assert.equal(await owner.locator('#action-fields [name=summary]').inputValue(), humanResultBody);
   await owner.locator('#action-fields [name=nextAction]').fill('Discuss together');
   await owner.locator('#action-form button[type=submit]').click(); await owner.locator('#action-dialog').waitFor({state:'hidden'});
   assert.ok(f.store.room('commons').state.workItems['human-result-task'].receipt.nativeText);
+  assert.equal(f.store.room('commons').state.workItems['human-result-task'].receipt.summary, humanResultBody);
   // An invocation committed on the server but its response was lost. Reload + exact retry
   // must recover one run, while keeping the already-posted prompt in the transcript.
   await owner.route('**/api/rooms/commons/assistant', async route => {
@@ -391,7 +395,7 @@ test('a closed result editor cannot mutate its replacement after a delayed respo
       assert.equal(await page.locator('#human-share-result textarea').isEnabled(),true,'an obsolete failure must not lock the current draft');
       assert.equal(await page.locator('#human-share-error').textContent(),'','an obsolete failure must not replace the current error');
       assert.equal(await page.locator('#human-share-refresh').isVisible(),false);
-      assert.equal(await page.locator('#human-share-result button[type=submit]').textContent(),'Review result');
+      assert.equal(await page.locator('#human-share-result button[type=submit]').textContent(),'Post draft');
       assert.equal(await page.locator('#human-share-result button[type=submit]').isDisabled(),Boolean(current),'an obsolete completion must not unlock a newer pending send');
       assert.equal(await page.locator('#action-dialog').isVisible(),false,'an obsolete success must not select its result');
       if (current) {
@@ -713,9 +717,8 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#assistant-runs [data-assistant-message="shared-ask"]').click();
     await page.locator('#message-input').fill('Keep the existing design thread draft.');
     if (width === 390) {
-      await page.locator('#composer-options > summary').click();
-      await page.locator('#message-to-select').selectOption('producer');
-      await page.locator('#composer-options > summary').click();
+      await openDirectConversation(page, 'producer');
+      await page.locator('#message-input').fill('Keep this separate private draft.');
     }
     await openSettings(page); await page.locator('#advanced-room-tools > summary').click();
     await page.locator('#human-advanced').check(); await closeSettings(page);
@@ -751,8 +754,13 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     assert.equal(added.replyToId, 'shared-ask');
     assert.equal(added.toMemberId, null);
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep the existing design thread draft.');
-    assert.equal(await page.locator('#message-to-select').inputValue(), width === 390 ? 'producer' : '');
+    assert.equal(await page.locator('#message-to-select').inputValue(), '', 'the restored public thread stays public');
     assert.equal(await page.locator('#reply-bar').isVisible(), false, 'the restored thread draft still replies to its original root');
+    if (width === 390) {
+      await openDirectConversation(page, 'producer');
+      assert.equal(await page.locator('#message-input').inputValue(), 'Keep this separate private draft.');
+      assert.equal(await page.locator('#message-to-select').inputValue(), 'producer');
+    }
     if (width < 700) await page.locator('#sidebar-toggle').click();
     await page.locator('#channel-list [data-channel="general"]').click();
     await ensureSidebarClosed(page);

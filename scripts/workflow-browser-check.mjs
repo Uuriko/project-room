@@ -115,7 +115,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
         assert.equal(await card.locator(".state").getAttribute("class"), `state state-${tone}`);
         assert.equal((await agent("owner").orient()).work.find(work => work.id === id).next.action, step);
       };
-      await status(needsReview ? "verify" : needsDecision ? "decide" : "complete", needsReview ? "Awaiting verification" : needsDecision ? "Awaiting decision" : "Completed", needsReview || needsDecision ? "pending" : "completed");
+      await status(needsReview ? "verify" : needsDecision ? "decide" : "complete", needsReview ? "Awaiting review" : needsDecision ? "Awaiting decision" : "Completed", needsReview || needsDecision ? "pending" : "completed");
       const evidence = () => ({ completionEventId: item().receipt.eventId, evidenceVersion: item().receipt.evidenceVersion });
       if (needsReview) {
         await mutate("reviewer", T.VERIFICATION_RECORDED, { ...evidence(), result: "pass", summary: "Checked this exact finding." });

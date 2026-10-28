@@ -14,29 +14,32 @@
 // 4. No production seam for tests: tests import the script's exported
 //    functions (used by the CLI's own --extract/--check modes) and spawn the
 //    real CLI for the ratchet check.
-import { test } from "node:test";
+import { test, after } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync, renameSync, rmSync, mkdtempSync } from "node:fs";
+import { readFileSync, writeFileSync, renameSync, rmSync, mkdtempSync, cpSync, mkdirSync, readdirSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { join } from "node:path";
-import {
-  extractLiterals,
-  looksLikeProse,
-  checkSource,
-  runExtraction,
-  summarize,
-  scannableRels,
-  checkScopeConsistency,
-  findUnpinnedFiles,
-  growthAllowance,
-  RULES,
-} from "../scripts/i18n-harness.mjs";
-
-const root = fileURLToPath(new URL("..", import.meta.url));
+// These tests deliberately corrupt baselines and scope files. Keep all mutations
+// in a private Git repository: other test processes inspect the real checkout.
+const sourceRoot = fileURLToPath(new URL("..", import.meta.url));
+const root = realpathSync(mkdtempSync(join(tmpdir(), "room-i18n-fixture-")));
+after(() => rmSync(root, { recursive: true, force: true }));
+for (const name of ["src", "server", "strings"]) cpSync(join(sourceRoot, name), join(root, name), { recursive: true });
+for (const name of readdirSync(sourceRoot).filter(name => name.endsWith(".html"))) cpSync(join(sourceRoot, name), join(root, name));
+mkdirSync(join(root, "scripts"));
 const harness = join(root, "scripts", "i18n-harness.mjs");
+cpSync(join(sourceRoot, "scripts", "i18n-harness.mjs"), harness);
 const baselinePath = join(root, "strings", "i18n-baseline.json");
+git(["init", "--quiet"]);
+git(["add", "."]);
+git(["-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "--quiet", "-m", "Current i18n scan fixture"]);
+git(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+const {
+  extractLiterals, looksLikeProse, checkSource, runExtraction, summarize,
+  scannableRels, checkScopeConsistency, findUnpinnedFiles, growthAllowance, RULES,
+} = await import(pathToFileURL(harness).href);
 
 test("extractLiterals finds quoted strings and counts template interpolations", () => {
   const lits = extractLiterals(`const a = "hello world"; const b = 'x'; const t = \`Hi \${name}, you have \${n} items\`;`);

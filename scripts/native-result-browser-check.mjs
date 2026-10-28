@@ -8,7 +8,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { textVersion } from "../server/text-results.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { clickChrome, messageAction } from "./room-chrome.mjs";
+import { clickChrome, messageAction, fillResultSummary } from "./room-chrome.mjs";
 
 // Hosted runners stall hard enough that the page-wide 8s default kills waits
 // whose product leg is ~1s on an unloaded box. Waits on an async round trip
@@ -68,7 +68,7 @@ async function setup(t, { mobile = false, review = false, viewport = null, body 
   const textReady = async () => { await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, body); };
   const fill = async () => {
     if (review) { await page.locator("#action-fields [name=result]").selectOption("pass"); await page.locator("#action-fields [name=summary]").fill("Checked the stored text and next step"); }
-    else { await page.locator("#action-fields [name=producerId]").selectOption("owner"); await page.locator("#action-fields [name=summary]").fill("A quiet room"); await page.locator("#action-fields [name=nextAction]").fill("Review exact text"); }
+    else { await page.locator("#action-fields [name=producerId]").selectOption("owner"); await fillResultSummary(page, "A quiet room"); await page.locator("#action-fields [name=nextAction]").fill("Review exact text"); }
   };
   const capture = async name => { mkdirSync("test-results", { recursive: true }); await page.screenshot({ path: `test-results/native-result-${name}.png` }); };
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); });

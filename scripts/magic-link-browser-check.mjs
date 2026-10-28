@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Magic-link one-tap sign-in: loading /?magic=<code>&email=<addr> in a fresh
 // browser context must sign the visitor straight in with zero typing.
 // Regression test for RC-2026-09-19-066: the auto-redeem ran synchronously
@@ -64,7 +65,7 @@ test("magic link: fresh visit with ?magic= signs straight in", { timeout: 60000 
   await page.waitForURL(/[?&]room=personal-/);
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator('#account-setup-dialog').isVisible(), false, 'optional setup never interrupts the direct email-link return');
-  await page.locator("#session-menu-button").click();
+  await clickChrome(page, "#session-menu-button");
   const label = page.locator("#identity-label");
   await label.waitFor({ state: "visible" });
   assert.notEqual((await label.textContent()).trim(), "");

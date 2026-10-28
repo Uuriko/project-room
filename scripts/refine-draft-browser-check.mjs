@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, fillResultSummary } from "./room-chrome.mjs";
 // Simulated people in isolated rooms, including real browser failure recovery.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -69,6 +69,7 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   const refinements = state().messages.filter(message => message.replyToId === "source-a");
   assert.equal(refinements.length, 1); const refined = refinements[0];
   assert.equal(refined.body, artifact); assert.equal(refined.proposal.attribution, "manual-unverified");
+  assert.equal(new URL(page.url()).hash, `#pr-record/message/${encodeURIComponent(refined.id)}`, "posted refinement owns the visible record URL");
   assert.deepEqual(state().workItems[workId], prior);
   assert.equal(state().messages.find(message => message.id === "source-a").body, original);
   const resultMenu = page.locator(`[data-message-record-id="${refined.id}"] details.message-more`);
@@ -76,7 +77,7 @@ for (const mobile of [false, true]) test(`refine draft ${mobile ? "mobile" : "de
   await page.locator('[data-message-action="result"][data-message-id="' + refined.id + '"]').click();
   await page.waitForFunction(body => document.querySelector("#action-text-body").textContent === body, artifact);
   await page.locator('[name="producerId"]').selectOption("__unknown__");
-  await page.locator('#action-fields [name="summary"]').fill("Welcome artifact, notes retained in the original.");
+  await fillResultSummary(page, "Welcome artifact, notes retained in the original.");
   await page.locator('#action-fields [name="nextAction"]').fill("Identify producer, then review this exact revision.");
   await page.locator("#action-form button[type=submit]").click(); await page.locator("#action-dialog").waitFor({ state: "hidden" });
   assert.equal(state().workItems[workId].receipt.evidenceVersion, textVersion(artifact));

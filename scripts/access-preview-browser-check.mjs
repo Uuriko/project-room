@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Simulated human journeys against disposable first-party data, not human research.
 // C2: the read-only "what this agent can access" preview on a work card.
 import test from "node:test";
@@ -212,7 +213,7 @@ test("late owner attention page cannot return after signing in as a different me
   });
   await page.locator("#attention-next").click(); await held;
   await page.locator("#updates-close").click();
-  await page.locator("#session-menu-button").click();
+  await clickChrome(page, "#session-menu-button");
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixtureInPlace(page, f.store, f.keys.guest);

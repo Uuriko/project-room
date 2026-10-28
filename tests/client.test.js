@@ -270,7 +270,10 @@ test("connected UI hooks exist and demo controls are not exposed", () => {
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
   const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
   assert.equal(new Set(ids).size, ids.length);
-  for (const match of app.matchAll(/\$\("#([a-z-]+)"\)/g)) assert.ok(ids.includes(match[1]), `Missing UI hook ${match[1]}`);
+  const strings = JSON.parse(readFileSync(new URL("../strings/en.json", import.meta.url), "utf8"));
+  const dynamicIds = [...app.matchAll(/uiText\("([^"]+)"/g)].flatMap(match =>
+    [...(strings[match[1]] ?? "").matchAll(/id="([^"]+)"/g)].map(id => id[1]));
+  for (const match of app.matchAll(/\$\("#([a-z-]+)"\)/g)) assert.ok(ids.includes(match[1]) || dynamicIds.includes(match[1]), `Missing UI hook ${match[1]}`);
   assert.doesNotMatch(app, /from "\.\/(seed|storage)\.js"/);
   assert.doesNotMatch(html, /actor-select|reset-button|4 here now|Simulate actor/);
   assert.match(html, /id="main"[^>]*hidden/);

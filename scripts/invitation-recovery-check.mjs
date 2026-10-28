@@ -52,7 +52,7 @@ async function ownerPage(page, origin, fixture) {
 }
 
 async function createLink(page) {
-  await page.locator('#share-link-create').click();
+  await clickChrome(page, "#share-link-create");
   await page.locator('#share-link-result').waitFor({ state: 'visible' });
   return page.locator('#share-link-url').getAttribute('data-link-id');
 }

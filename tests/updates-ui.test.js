@@ -1,6 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { queryFor, validBasis } from "../src/updates-ui.js";
+import { queryFor, validBasis, updateActions } from "../src/updates-ui.js";
+
+test("notification actions dismiss attention without offering a second completion workflow", () => {
+  const sourceRef = { messageId: "message" };
+  for (const state of ["unread", "read"]) assert.deepEqual(updateActions({ state, sourceRef }), ["open", "clear"]);
+  for (const state of ["handled", "cleared", "answered"]) assert.deepEqual(updateActions({ state, sourceRef }), ["open"]);
+  assert.deepEqual(updateActions({ state: "unread" }), ["clear"]);
+});
+
+test("uncertain actions remain retryable even when the item is no longer actionable", () => {
+  for (const action of ["open", "done", "clear"]) assert.deepEqual(updateActions({ state: "unconfirmed" }, action), [action]);
+  assert.deepEqual(updateActions({ state: "read", sourceRef: { workItemId: "work" } }, "clear"), ["open", "clear"]);
+  assert.deepEqual(updateActions({ state: "unconfirmed" }, "invalid"), []);
+});
 
 test("queryFor: each filter issues its documented updates query", () => {
   assert.equal(queryFor("needs"), "state=actionable");

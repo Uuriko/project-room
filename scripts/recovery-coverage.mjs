@@ -10,6 +10,7 @@ import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { issueGrant } from "../server/grants.mjs";
 import { appendOperatorAction } from "../server/operator-actions.mjs";
 import { RoomAssistant } from "../server/room-assistant.mjs";
+import { getReadHorizon, setReadHorizon } from "../server/activity.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 export async function seedRecoveryCoverage(f) {
@@ -52,6 +53,24 @@ export async function seedRecoveryCoverage(f) {
     VALUES ('recovery-public-agent', 'Recovery agent', '', '[]', ?, 1, 1, ?)`).run(identityId, at);
   linkWithProof(f.store, f.keys.owner, "commons", recoveryAgent, { permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });
+  // Seed the pairing tables (a98c987d) through the real pairing flow so the
+  // capture comparison and the cold-start budget cover pairs,
+  // pair_code_locks, agent_member_keys and room_join_policy with
+  // production-shaped rows, not empty sidecars. The owner records the room's
+  // join policy explicitly, a key-carrying agent pairs and is approved
+  // (admission binds its key), and one wrong code afterwards leaves the
+  // failure-journal row a real room accumulates. The wrong code runs last:
+  // a successful decision clears the lock row.
+  f.store.pairing.setPolicy(f.keys.owner, "commons", "approve");
+  const pairKey = generateKeyPair();
+  const pairStart = f.store.pairing.start({ roomId: "commons", displayName: "Recovery pair agent", publicKey: pairKey.publicKey });
+  f.store.pairing.decide(f.keys.owner, "commons", { pairId: pairStart.pairId, decision: "approve", profile: "contribute" });
+  try {
+    f.store.pairing.decide(f.keys.owner, "commons", { userCode: "ZZZZ-ZZZZ", decision: "deny" });
+    throw new Error("a wrong pair code was accepted");
+  } catch (error) {
+    if (error.code !== "not_found") throw error;
+  }
   f.store.agentHeartbeats.heartbeat({ agentId: identityId, hostId: "recovery-work-host", mode: "pull-only", workWakes: true });
   f.store.command(f.keys.owner, "commons", { id: "recovery-work-command", type: "work.proposed", data: { workItemId: "recovery-work",
     title: "Recovery work", definitionOfDone: "Recovered", mode: "read", accountableMemberId: identityId } });
@@ -315,9 +334,14 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO activity_fanout_failures(room_id,event_id,command_type,actor_id,payload,error,created_at,recovered_at)
     VALUES('commons','recovery-reported','message.posted','agent','{}','synthetic fan-out failure',?,NULL)`)
     .run(f.now());
-  f.store.db.prepare(`INSERT INTO read_horizons(room_id,member_id,thread_id,last_read_message_id,updated_at)
-    VALUES('commons','owner','','recovery-reported',?)`)
-    .run(f.now());
+  // Exercise a protected read position so recovery compares the revision and
+  // retry receipt too, rather than only the legacy nullable columns.
+  const readPosition = getReadHorizon(f.store, f.keys.owner, "commons");
+  setReadHorizon(f.store, f.keys.owner, "commons", {
+    lastReadMessageId: "recovery-reported",
+    expectedRevision: readPosition.revision,
+    requestId: "recovery-read-position"
+  });
   f.store.db.prepare(`INSERT INTO saved_messages(room_id,member_id,message_id,saved_at)
     VALUES('commons','owner','recovery-reported',?)`)
     .run(f.now());

@@ -9,7 +9,7 @@ import { chromium } from "playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
-import { openSettings, closeSettings, ensureSidebarClosed } from "./room-chrome.mjs";
+import { ensureSidebarClosed } from "./room-chrome.mjs";
 
 async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store, streamInterval: 40 });
@@ -35,14 +35,9 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
-  // A single-thread human room keeps channel controls under Advanced.
-  // Exercise that actual choice, then the existing channel-management journey.
+  // Channels are primary navigation in the human room, including a room
+  // with only general. On phones they live in the normal navigation drawer.
   await page.waitForFunction(() => document.body.classList.contains("human-experience"));
-  assert.equal(await page.locator('#channel-list [data-channel]').first().isVisible(), false);
-  await openSettings(page);
-  await page.locator('#advanced-room-tools > summary').click();
-  await page.locator('#human-advanced').check();
-  await closeSettings(page);
   if (viewport.width < 700) await page.locator("#sidebar-toggle").click();
   await page.locator('#channel-list [data-channel]').first().waitFor({ state: "visible" });
   const post = async body => {
@@ -85,6 +80,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#channel-save-button").click();
     await page.locator("#conversation-title", { hasText: "# design" }).waitFor({ state: "visible" });
     assert.deepEqual(await names(), ["general", "design"]);
+    assert.equal(await page.locator("#main.sidebar-open").count(), 0, "creation opens the conversation rather than leaving its drawer over it");
+    assert.equal(await page.locator("#message-input").evaluate(node => node === document.activeElement), true, "ready to write the first message");
 
     // Messages stay in their channel.
     await f.post("design mockup v2");
@@ -182,3 +179,193 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       "the main channel has no manage control");
   });
 }
+
+test("a delayed channel response cannot close a replacement dialog", { timeout: 30000 }, async t => {
+  const { page } = await setup(t);
+  let release, held;
+  const gate = new Promise(resolve => { release = resolve; });
+  const waiting = new Promise(resolve => { held = resolve; });
+  t.after(() => release());
+  await page.route("**/rooms/commons/commands", async route => {
+    const response = await route.fetch();
+    held(); await gate;
+    await route.fulfill({ response });
+  });
+  await page.locator("#create-channel-button").click();
+  await page.locator("#channel-name-input").fill("delayed-channel");
+  await page.locator("#channel-save-button").click();
+  await waiting;
+  assert.equal(await page.locator("#channel-save-button").isDisabled(), true);
+  await page.locator("#channel-dialog-close").click();
+  await page.locator("#create-channel-button").click();
+  assert.equal(await page.locator("#channel-name-input").isDisabled(), true);
+  release();
+  await page.waitForFunction(() => document.querySelector("#channel-form").getAttribute("aria-busy") !== "true");
+  assert.equal(await page.locator("#channel-dialog").isVisible(), true);
+  assert.equal(await page.locator("#channel-name-input").inputValue(), "");
+  await page.locator("#channel-name-input").fill("replacement-draft");
+  assert.equal(await page.locator("#conversation-title").textContent(), "# general");
+  assert.equal(await page.locator("#channel-form-status").textContent(), "");
+});
+
+test("a delayed archive cannot close a newer channel dialog", { timeout: 30000 }, async t => {
+  const f = await setup(t), { page } = f;
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "channel.created", data: { channelId: "archive-late", name: "archive-late" } });
+  await page.locator('[data-channel-manage="archive-late"]').waitFor();
+  let release, held;
+  const gate = new Promise(resolve => { release = resolve; });
+  const waiting = new Promise(resolve => { held = resolve; });
+  t.after(() => release());
+  await page.route("**/rooms/commons/commands", async route => {
+    const response = await route.fetch(); held(); await gate;
+    await route.fulfill({ response });
+  });
+  await page.locator('[data-channel-manage="archive-late"]').click();
+  await page.locator("#channel-archive-button").click();
+  await page.locator("#channel-archive-button").click();
+  await waiting;
+  assert.equal(await page.locator("#channel-archive-button").isDisabled(), true);
+  await page.locator("#channel-dialog-close").click();
+  await page.locator("#create-channel-button").click();
+  release();
+  await page.waitForFunction(() => document.querySelector("#channel-form").getAttribute("aria-busy") !== "true");
+  assert.equal(await page.locator("#channel-dialog").isVisible(), true);
+  assert.equal(await page.locator("#channel-dialog-title").textContent(), "New channel");
+  assert.equal(await page.locator("#channel-name-input").inputValue(), "");
+  assert.equal(await page.locator("#channel-form-status").textContent(), "");
+});
+
+test("unchanged channel retry reconciles a committed response loss", { timeout: 30000 }, async t => {
+  const f = await setup(t), { page } = f;
+  const commands = []; let drop = true;
+  await page.route("**/rooms/commons/commands", async route => {
+    commands.push(route.request().postDataJSON());
+    const response = await route.fetch();
+    if (drop) await route.abort("failed"); else await route.fulfill({ response });
+  });
+  await page.locator("#create-channel-button").click();
+  await page.locator("#channel-name-input").fill("retry-channel");
+  await page.locator("#channel-save-button").click();
+  await page.locator("#channel-form-status.error").waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.id === "channel-save-button");
+  assert.equal(await page.locator("#channel-save-button").textContent(), "Retry");
+  await page.locator("#channel-name-input").fill("different-name");
+  assert.equal(await page.locator("#channel-save-button").textContent(), "Create channel");
+  await page.locator("#channel-name-input").fill("retry-channel");
+  assert.equal(await page.locator("#channel-save-button").textContent(), "Retry");
+  drop = false;
+  await page.locator("#channel-save-button").click();
+  await page.locator("#channel-dialog").waitFor({ state: "hidden" });
+  assert.ok(commands.length >= 2);
+  assert.ok(commands.every(command => JSON.stringify(command) === JSON.stringify(commands[0])), "all retries retain the exact command");
+  assert.equal(Object.values(f.store.room("commons").state.channels).filter(channel => channel.name === "retry-channel").length, 1);
+  assert.equal(await page.locator("#conversation-title").textContent(), "# retry-channel");
+});
+
+test("private conversation picker supports search and arrow-key selection", { timeout: 30000 }, async t => {
+  const { page } = await setup(t);
+  await page.locator("#new-direct-message").click();
+  const search = page.locator("#new-direct-search");
+  await search.fill("Test reviewer");
+  await search.press("ArrowDown");
+  await page.waitForFunction(() => document.activeElement?.dataset.directMember === "reviewer");
+  await page.keyboard.press("ArrowUp");
+  assert.equal(await search.evaluate(node => node === document.activeElement), true);
+  await search.fill("no-such-person");
+  await search.press("ArrowDown");
+  assert.equal(await search.evaluate(node => node === document.activeElement), true);
+  await search.fill("Test reviewer");
+  await search.press("ArrowDown");
+  await page.keyboard.press("Enter");
+  await page.locator("#new-direct-dialog").waitFor({ state: "hidden" });
+  assert.equal(await page.locator("#message-input").evaluate(node => node === document.activeElement), true);
+  assert.match(await page.locator("#conversation-title").textContent(), /Test reviewer/);
+});
+
+test("private sends preserve room drafts and do not enter the public timeline", { timeout: 30000 }, async t => {
+  const { page, store } = await setup(t);
+  await page.locator("#message-input").fill("Keep this public draft");
+  await page.locator("#new-direct-message").click();
+  await page.locator("#new-direct-search").fill("Test reviewer");
+  await page.locator("#new-direct-search").press("ArrowDown");
+  await page.keyboard.press("Enter");
+  assert.equal(await page.locator("#message-input").inputValue(), "");
+  await page.locator("#message-input").fill("Keep this private draft");
+  await page.locator('#channel-list [data-channel="general"]').click();
+  assert.equal(await page.locator("#message-input").inputValue(), "Keep this public draft");
+  await page.locator('#direct-message-list [data-direct-member="reviewer"]').click();
+  assert.equal(await page.locator("#message-input").inputValue(), "Keep this private draft");
+  await page.locator('#message-form button[type="submit"]').click();
+  await page.locator("#message-list .message-body", { hasText: "Keep this private draft" }).waitFor({ state: "visible" });
+  const sent = store.room("commons").state.messages.filter(message => message.body === "Keep this private draft");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].toMemberId, "reviewer");
+  await page.locator('#channel-list [data-channel="general"]').click();
+  assert.equal(await page.locator("#message-input").inputValue(), "Keep this public draft");
+  assert.equal(await page.locator("#message-list .message-body", { hasText: "Keep this private draft" }).count(), 0);
+});
+
+test("open recipient picker updates membership without losing keyboard context", { timeout: 30000 }, async t => {
+  const f = await setup(t), { page } = f;
+  await page.locator("#new-direct-message").click();
+  await page.locator("#new-direct-search").fill("Test reviewer");
+  await page.locator("#new-direct-search").press("ArrowDown");
+  const member = f.store.room("commons").state.members.reviewer;
+  f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "member.access_changed",
+    data: { memberId: "reviewer", expectedMemberRevision: member.revision ?? 0, permissions: member.permissions, active: false } });
+  await page.locator('#new-direct-people [data-direct-member="reviewer"]').waitFor({ state: "detached" });
+  assert.equal(await page.locator("#new-direct-search").inputValue(), "Test reviewer");
+  assert.equal(await page.locator("#new-direct-search").evaluate(node => node === document.activeElement), true);
+  assert.match(await page.locator("#new-direct-people").textContent(), /No matching/);
+  assert.equal(await page.locator("#new-direct-dialog").evaluate(node => node.open), true);
+});
+
+test("recipient removal keeps a private draft editable without offering a new send", { timeout: 30000 }, async t => {
+  const f = await setup(t), { page } = f;
+  await page.locator("#new-direct-message").click();
+  await page.locator('#new-direct-people [data-direct-member="reviewer"]').click();
+  await page.locator("#message-input").fill("Keep this private draft on removal");
+  const changeAccess = active => {
+    const member = f.store.room("commons").state.members.reviewer;
+    f.store.command(f.keys.owner, "commons", { id: crypto.randomUUID(), type: "member.access_changed",
+      data: { memberId: "reviewer", expectedMemberRevision: member.revision ?? 0, permissions: member.permissions, active } });
+  };
+  changeAccess(false);
+  await page.waitForFunction(() => document.querySelector('#message-form button[type="submit"]').disabled);
+  assert.equal(await page.locator("#message-input").isEnabled(), true);
+  assert.equal(await page.locator("#message-input").inputValue(), "Keep this private draft on removal");
+  assert.match(await page.locator("#composer-status").textContent(), /no longer has access/);
+  await page.locator("#message-input").press("Enter");
+  assert.equal(f.store.room("commons").state.messages.some(message => message.body === "Keep this private draft on removal"), false);
+  changeAccess(true);
+  await page.waitForFunction(() => !document.querySelector('#message-form button[type="submit"]').disabled);
+  assert.equal(await page.locator("#composer-status").textContent(), "");
+  assert.equal(await page.locator("#message-to-select").inputValue(), "reviewer");
+});
+
+test("composer expands wrapped drafts when the window narrows", { timeout: 30000 }, async t => {
+  const { page } = await setup(t);
+  const draft = "Keep the entire draft readable when the window changes width and this sentence wraps onto several lines.";
+  await page.locator("#message-input").fill(draft);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForFunction(() => { const input = document.querySelector('#message-input'); return input.scrollHeight <= input.clientHeight + 1; });
+  assert.equal(await page.locator("#message-input").inputValue(), draft);
+});
+
+test("a lost send response uses matching confirmed history instead of asking for retry", { timeout: 30000 }, async t => {
+  const f = await setup(t), { page } = f;
+  await page.locator("#new-direct-message").click();
+  await page.locator('#new-direct-people [data-direct-member="reviewer"]').click();
+  await page.route("**/rooms/commons/commands", async route => {
+    await route.fetch();
+    await page.locator("#message-list .message-body", { hasText: "Confirmed despite lost response" }).waitFor({ state: "visible" });
+    await route.abort("failed");
+  });
+  await page.locator("#message-input").fill("Confirmed despite lost response");
+  await page.locator('#message-form button[type="submit"]').click();
+  await page.waitForFunction(() => document.querySelector('#message-input').value === '');
+  assert.equal(await page.locator("#composer-status").textContent(), "");
+  const sent = f.store.room("commons").state.messages.filter(message => message.body === "Confirmed despite lost response");
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].toMemberId, "reviewer");
+});

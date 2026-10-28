@@ -47,6 +47,8 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
   await page.locator("#new-work-form").waitFor({ state: "visible" });
   const field = page.locator("#work-recipe-field"), select = page.locator("#work-recipe-select");
   assert.equal(await field.isVisible(), true);
+  assert.equal(await field.evaluate(node => node.open), false);
+  await field.locator("summary").click();
   const options = await select.locator("option").evaluateAll(nodes => nodes.map(n => ({ value: n.value, label: n.textContent })));
   assert.equal(options[0].value, ""); assert.equal(options[0].label, "Blank outcome");
   assert.equal(options.length, 4, "blank plus three distinct recorded definitions");
@@ -77,6 +79,7 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
   // The new item joins the recipe list on the next blank open.
   await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#new-work-form").waitFor({ state: "visible" });
+  await field.locator("summary").click();
   const reopened = await select.locator("option").evaluateAll(nodes => nodes.map(n => n.value));
   assert.equal(reopened.includes(fresh.id), true);
   assert.equal(reopened.includes("recipe-newer"), false, "identical definitions stay collapsed behind the newest occurrence");
@@ -91,6 +94,7 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
   await page.keyboard.press("Escape"); await page.locator("#new-work-form").waitFor({ state: "hidden" });
   mkdirSync("test-results", { recursive: true });
   await openComposerOptions(page); await page.locator("#new-work-button").click(); await page.locator("#new-work-form").waitFor({ state: "visible" });
+  await field.locator("summary").click();
   await select.selectOption("recipe-duplicate");
   await page.screenshot({ path: "test-results/recipes-desktop.png", fullPage: true });
   assert.deepEqual(f.errors, []);
@@ -103,6 +107,7 @@ test("recipes mobile: picker stays inside the dialog without horizontal overflow
   await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#new-work-form").waitFor({ state: "visible" });
   assert.equal(await page.locator("#work-recipe-field").isVisible(), true);
+  await page.locator("#work-recipe-field > summary").click();
   await page.locator("#work-recipe-select").selectOption("recipe-newer");
   assert.equal(await page.locator("#work-title-input").inputValue(), "Provider digest");
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);

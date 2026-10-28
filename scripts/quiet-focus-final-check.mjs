@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Quiet Focus final causal proofs (Codex 5557784549): post-connect stream loss
 // transition, and measurable reflow at 390px and 200%-zoom-equivalent CSS width.
 import test from "node:test";
@@ -37,7 +38,7 @@ test("post-connect loss: Connected first, established stream killed, reconnect b
   const status = page.locator("#connection-status");
   // 1. observe the exact Connected label first
   await page.waitForFunction(() => document.querySelector("#connection-status").textContent === "Connected", null, { timeout: 10000 });
-  await page.locator('#session-menu-button').click();
+  await clickChrome(page, "#session-menu-button");
   await page.locator("#connection-details > summary").click();
   assert.match(await page.locator("#connection-explanation").textContent(), /no peer read or processing receipt/);
   await page.locator("#connection-details > summary").click();

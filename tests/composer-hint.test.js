@@ -1,7 +1,5 @@
-// #1607: the message composer must visibly tell a human what to do next.
-// The send pattern (Enter to send / Shift+Enter for a new line, tap-to-send
-// on touch) was documented only in a `title` tooltip — invisible on touch.
-// A stranger must be able to discover it from visible markup.
+// Send remains an explicit control. Keyboard instructions stay available to
+// assistive technology and through the input tooltip without a permanent footer.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, readFileSync } from "node:fs";
@@ -25,13 +23,14 @@ async function serve(t) {
   return `http://127.0.0.1:${server.address().port}`;
 }
 
-test("composer has a visible, plain-language send hint (not tooltip-only)", async t => {
+test("composer keeps accessible keyboard help and an explicit Send control without a persistent footer", async t => {
   const origin = await serve(t);
   const home = await (await fetch(`${origin}/`)).text();
   const hint = home.match(/<p[^>]*id="composer-hint"[^>]*>([\s\S]*?)<\/p>/);
-  assert.ok(hint, "expected a visible #composer-hint element in the composer markup");
+  assert.ok(hint, "expected accessible keyboard instructions");
   const tag = hint[0].slice(0, hint[0].indexOf(">") + 1);
-  assert.doesNotMatch(tag, /\bsr-only\b/, "#composer-hint must be visible, not screen-reader-only");
+  assert.match(tag, /\bsr-only\b/, "keyboard help does not add a permanent visual footer");
+  assert.match(home, /type="submit"[^>]*aria-label="Send"/, "a labeled Send control remains available on touch and desktop");
   assert.doesNotMatch(tag, /\bhidden\b/, "#composer-hint must not be hidden by default");
   assert.match(hint[1], /Enter to send/i, "#composer-hint states how to send in plain language");
   assert.match(hint[1], /Shift \+ Enter|new line/i, "#composer-hint states how to make a new line");

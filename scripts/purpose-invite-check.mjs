@@ -43,12 +43,13 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await signInFixture(inviter, f.keys.owner);
   await inviter.locator("#main").waitFor({ state: "visible" });
   await clickChrome(inviter, "#invite-people-button");
+  await inviter.locator("#share-custom-summary").click();
   const purpose = inviter.locator("#share-link-purpose");
   await purpose.waitFor();
   const options = await purpose.locator("option").allTextContents();
   assert.ok(options.some(text => text.includes("Test: prepare an agenda")), `purpose picker lists the open question, got: ${options.join(" | ")}`);
   await purpose.selectOption("test-handoff");
-  await inviter.locator("#share-link-create").click();
+  await clickChrome(inviter, "#share-link-create");
   await inviter.locator("#share-link-result").waitFor({ state: "visible" });
   const url = await inviter.locator("#share-link-url").inputValue();
   assert.ok(url.endsWith("/work/test-handoff"), `link carries the purpose fragment: ${url}`);

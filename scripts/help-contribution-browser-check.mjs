@@ -1,4 +1,4 @@
-import { clickChrome, messageAction } from "./room-chrome.mjs";
+import { clickChrome, messageAction, fillResultSummary } from "./room-chrome.mjs";
 // Simulated accountable human, actual scripted MCP helper and reviewer. No models.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -237,7 +237,7 @@ for (const multiple of [false, true]) for (const touch of [false, true]) test(`$
   await messageAction(page, draft.messageId, "result");
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
   await page.locator('#action-fields [name=producerId]').selectOption('producer');
-  await page.locator('#action-fields [name=summary]').fill('A two-step contributor guide');
+  await fillResultSummary(page, 'A two-step contributor guide');
   await page.locator('#action-fields [name=nextAction]').fill('Independently check the exact text.');
   assert.equal(await page.locator('#action-dialog').evaluate(node => node.scrollWidth <= node.clientWidth), true);
   await page.screenshot({ path: `${prefix}-adopt.png` });

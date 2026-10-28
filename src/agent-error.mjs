@@ -37,6 +37,34 @@ const BOND_DM_DATA_SHAPES = {
 // migrates surface by surface under the tracking issue filed with this PR.
 // ---------------------------------------------------------------------------
 export const ERROR_REGISTRY = {
+  horizon_precondition_required: {
+    "status": "action_required",
+    "hint": uiText("readPosition.preconditionHint"),
+    "next": [
+      {
+        "command": uiText("readPosition.preconditionRecovery")
+      }
+    ],
+    "catalog": {
+      "http": 428,
+      "retry": "refresh",
+      "recovery": uiText("readPosition.preconditionRecovery")
+    }
+  },
+  horizon_conflict: {
+    "status": "action_required",
+    "hint": uiText("readPosition.conflictHint"),
+    "next": [
+      {
+        "command": uiText("readPosition.conflictRecovery")
+      }
+    ],
+    "catalog": {
+      "http": 409,
+      "retry": "reconcile",
+      "recovery": uiText("readPosition.conflictRecovery")
+    }
+  },
   // Operator archive: refuse unsafe requests with an explicit recovery.
   invalid_archive_request: {
     "status": "action_required",

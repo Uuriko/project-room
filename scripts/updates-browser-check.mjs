@@ -121,9 +121,9 @@ test("Updates navigation keeps review, draft and return context at 1280px and 39
   await selectUpdatesFilter("Needs me", "needs");
   await page.locator(".updates-row").waitFor();
   assert.equal(await page.locator(".updates-row").getAttribute("data-update-state"), "read");
-  await page.locator('.updates-row [data-update-action="done"]').click();
-  await selectUpdatesFilter("Needs me", "needs");
+  await page.locator('.updates-row [data-update-action="clear"]').press("Enter");
   await page.getByText("Nothing needs you.").waitFor();
+  assert.equal(await page.evaluate(() => document.activeElement?.dataset.updateFilter), "needs", "dismissing the focused row returns focus to its filter");
   assert.equal(await page.locator("#updates-count").textContent(), "");
 
   await page.setViewportSize({ width: 390, height: 844 });

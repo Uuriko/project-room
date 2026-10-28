@@ -28,6 +28,14 @@ export async function ensureSidebarClosed(page) {
   await page.waitForFunction(() => !document.querySelector("#main").classList.contains("sidebar-open"));
 }
 
+export async function openDirectConversation(page, memberId) {
+  await ensureSidebarOpen(page);
+  await page.locator("#new-direct-message").click();
+  await page.locator(`#new-direct-people [data-direct-member="${memberId}"]`).click();
+  await page.locator("#new-direct-dialog").waitFor({ state: "hidden" });
+  await ensureSidebarClosed(page);
+}
+
 export async function ensurePeopleOpen(page) {
   await ensureSidebarOpen(page);
   const panel = page.locator("#people-panel");
@@ -93,7 +101,7 @@ export async function closeSettings(page) {
 
 export async function openSearch(page) {
   const form = page.locator("#search-form");
-  if (await form.isHidden()) await page.locator("#topbar-search-toggle").click();
+  if (await form.isHidden()) await clickChrome(page, "#topbar-search-toggle");
   await form.waitFor({ state: "visible" });
 }
 
@@ -113,12 +121,24 @@ export async function openMemberProfile(page, memberId) {
 export async function clickChrome(page, selector) {
   if (selector === "#choose-room") selector = "#nav-rooms";
   const control = page.locator(selector);
+  if (selector === "#share-link-create" && !(await control.isVisible())) await page.locator("#share-custom-summary").click();
+  if (selector === "#session-menu-button" && await page.locator('#main').isVisible()) await ensureSidebarOpen(page);
+  if (selector === "#topbar-search-toggle") {
+    await ensureSidebarClosed(page);
+    if (!(await control.isVisible())) {
+      const more = page.locator('#room-more');
+      if (!(await more.evaluate(node => node.open))) await more.locator(':scope > summary').click();
+    }
+  }
   if (selector === "#topbar-catchup" && !(await control.isVisible())) {
     await ensureSidebarClosed(page);
     await page.locator("#topbar-updates").click();
   }
   if (['#signout-button', '#account-settings-button', '#refresh-button', '#clear-session-menu'].includes(selector)) {
-    if (!(await control.isVisible())) await page.locator('#session-menu-button').click();
+    if (!(await control.isVisible())) {
+      if (await page.locator('#main').isVisible()) await ensureSidebarOpen(page);
+      await page.locator('#session-menu-button').click();
+    }
   }
   if (['#topbar-later', '#topbar-settings', '#room-actions-open'].includes(selector)) {
     await ensureSidebarClosed(page);
@@ -197,4 +217,13 @@ export async function messageAction(page, id, action, { attempts = 5 } = {}) {
       return;
     } catch (failure) { if (attempt >= attempts) throw failure; }
   }
+}
+
+// Native human results reuse the displayed text unless a custom summary is needed.
+export async function fillResultSummary(page, text) {
+  const field = page.locator('#action-fields [name=summary]');
+  if (!await field.isVisible() && await page.locator('#result-summary-customization').count()) {
+    await page.locator('#result-summary-customization > summary').click();
+  }
+  await field.fill(text);
 }

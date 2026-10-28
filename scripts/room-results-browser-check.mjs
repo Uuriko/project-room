@@ -55,7 +55,7 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/") && !new URL(request.url()).pathname.endsWith("/typing")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);
-  const open = async () => { await ensureSidebarClosed(p); if (await p.locator("#search-form").isHidden()) await p.locator("#topbar-search-toggle").click(); await p.locator("#message-search").fill("has:result"); };
+  const open = async () => { await ensureSidebarClosed(p); if (await p.locator("#search-form").isHidden()) await clickChrome(p, "#topbar-search-toggle"); await p.locator("#message-search").fill("has:result"); };
   const read = () => row(privateResult ? "private-result" : "native-result").locator("[data-read-result]").click();
   const ready = () => p.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   const capture = async name => {
@@ -273,6 +273,29 @@ test("creating new work from the composer requires explicit confirmed submission
   await p.locator("#work-dialog").waitFor({ state: "hidden" });
   await p.locator('#message-list [data-work-timeline]').first().waitFor();
   assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up on the result" && item.state === "proposed"));
+  assert.match(await p.locator(":focus").textContent(), /Follow up on the result/);
+  assert.equal(await p.locator("#status").evaluate(node => node.classList.contains("visible")), false, "the created card confirms success without covering the composer");
+});
+
+test("phone work creation reveals its destination and returns to the channel draft", { timeout: 30000 }, async t => {
+  const f = await setup(t, { mobile: true, expectedWrites: 2 }), p = f.p;
+  await clickChrome(p, "#create-channel-button");
+  await p.locator("#channel-name-input").fill("creation-origin");
+  await p.locator("#channel-save-button").click();
+  await p.locator("#channel-dialog").waitFor({ state: "hidden" });
+  await ensureSidebarClosed(p);
+  await p.locator("#message-input").fill("Keep this channel draft");
+  await openComposerOptions(p); await p.locator("#new-work-button").click();
+  await p.locator("#work-title-input").fill("Cross-channel creation");
+  await p.locator("#work-done-input").fill("The created work is reachable.");
+  await p.locator("#assignee-select").selectOption("producer");
+  await p.locator("#verifier-select").selectOption("reviewer");
+  await p.locator("#create-work-button").click();
+  await p.locator("#work-navigation-return").waitFor({ state: "visible" });
+  assert.match(await p.locator(":focus").textContent(), /Cross-channel creation/);
+  await p.locator("#work-navigation-return").click();
+  await p.waitForFunction(() => document.querySelector("#conversation-title").textContent.includes("creation-origin"));
+  assert.equal(await p.locator("#message-input").inputValue(), "Keep this channel draft");
 });
 
 test("creating work without choosing a verifier responds instead of silently doing nothing", { timeout: 30000 }, async t => {
@@ -280,7 +303,12 @@ test("creating work without choosing a verifier responds instead of silently doi
   await openComposerOptions(p); await p.locator("#new-work-button").click();
   await p.locator("#work-title-input").fill("Follow up without a verifier");
   await p.locator("#work-done-input").fill("One clear next action.");
+  await p.locator("#create-work-button").press("Enter");
+  assert.match(await p.locator("#new-work-status").textContent(), /^Assignee is required/);
+  assert.equal(await p.locator("#assignee-select").evaluate(node => node === document.activeElement), true);
+  assert.doesNotMatch(await p.locator("#new-work-status").textContent(), /Reviewer|Choose assignee|producer/);
   await p.locator("#assignee-select").selectOption("producer");
+  assert.equal(await p.locator("#new-work-status").textContent(), "", "correcting the named field clears its stale error");
   // Verification is required by default and the verifier select starts empty.
   // The happy-path test above always selects a verifier first, which is why
   // it never hit this trap: Create used to swallow the click with no request
@@ -289,11 +317,10 @@ test("creating work without choosing a verifier responds instead of silently doi
   assert.equal(await p.locator("#verifier-select").inputValue(), "");
   assert.equal(await p.locator("#work-options").evaluate(node => node.open), false);
   await p.locator("#create-work-button").click();
-  // The dialog must respond: still open, Options expanded so the requirement
-  // is visible, the verifier select focused, and a plain hint naming what is
-  // missing. Nothing is created and no write is made.
+  // The dialog keeps unrelated settings closed, focuses the visible reviewer
+  // field, and names what is missing. Nothing is created and no write is made.
   assert.equal(await p.locator("#work-dialog").isVisible(), true);
-  assert.equal(await p.locator("#work-options").evaluate(node => node.open), true);
+  assert.equal(await p.locator("#work-options").evaluate(node => node.open), false, "missing reviewer does not expand unrelated settings");
   assert.equal(await p.locator("#verifier-select").evaluate(node => node === document.activeElement), true);
   assert.equal(await p.locator("#verifier-hint").isVisible(), true);
   assert.match(await p.locator("#verifier-hint").textContent(), /Choose who verifies this work/);
@@ -301,6 +328,7 @@ test("creating work without choosing a verifier responds instead of silently doi
   // Choosing a verifier clears the hint and Create succeeds.
   await p.locator("#verifier-select").selectOption("reviewer");
   assert.equal(await p.locator("#verifier-hint").isVisible(), false);
+  assert.equal(await p.locator("#new-work-status").textContent(), "");
   await p.locator("#create-work-button").click();
   await p.locator("#work-dialog").waitFor({ state: "hidden" });
   assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up without a verifier" && item.state === "proposed"));

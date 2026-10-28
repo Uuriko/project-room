@@ -2476,7 +2476,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
-        else if (path === "src/styles.css") res.setHeader("Cache-Control", "public, max-age=3600");
+        // This URL is not content-hashed; fresh markup must not use an hour-old stylesheet.
+        else if (path === "src/styles.css") res.setHeader("Cache-Control", "no-cache");
         else if (shell) res.setHeader("Cache-Control", "public, max-age=60");
         // The front door keeps the GitHub anchor in source. Omit it from the
         // served bytes unless this server was given a GitHub auth config.
@@ -4846,9 +4847,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (route === "read-horizon" && req.method === "GET") {
         const params = url.searchParams;
-        if ([...params.keys()].some(key => !["threadId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_horizon", "Choose an optional threadId");
+        if ([...params.keys()].some(key => !["threadId", "peerMemberId", "auth"].includes(key) || params.getAll(key).length !== 1)) reject(422, "invalid_horizon", "Choose an optional thread or private conversation");
         return json(res, 200, getReadHorizon(store, selected.token, roomId, {
-          ...(params.has("threadId") ? { threadId: params.get("threadId") } : {})
+          ...(params.has("threadId") ? { threadId: params.get("threadId") } : {}),
+          ...(params.has("peerMemberId") ? { peerMemberId: params.get("peerMemberId") } : {})
         }, fence));
       }
       if (route === "read-horizon" && req.method === "POST") {

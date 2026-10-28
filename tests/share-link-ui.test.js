@@ -716,3 +716,94 @@ test("a dead invite link asks for a fresh one and offers sign-in", async () => {
     assert.equal(dom.node("#join-link-scope").textContent.includes("incomplete"), false);
   } finally { dom.uninstall(); }
 });
+
+for (const outcome of ['success', 'failure', 'already loaded']) test(`default-invite ${outcome} preserves the confirmed custom link`, async () => {
+  const dom = guestJoinDom(); dom.install();
+  let settleKit, created;
+  const member = { id: 'owner', kind: 'human', revision: 1, permissions: ['manage_members'] };
+  const session = { roomId: 'commons', member };
+  const client = { session, generation: 0, ownsAccountSession: () => true, path: suffix => suffix,
+    async request(path, options) {
+      if (path === '/referrals') return new Promise((resolve, reject) => {
+        settleKit = () => outcome !== 'failure' ? resolve({ invite: { token: 'o'.repeat(43), status: 'active', message: 'Join via {url}' } }) : reject(new Error('late failure'));
+      });
+      if (path === '/share-links' && options?.method === 'POST') {
+        created = options.data.linkToken;
+        return { link: { id: 'custom', status: 'active', access: 'member', expiresAt: options.data.expiresAt } };
+      }
+      return { links: [] };
+    } };
+  let ui;
+  try {
+    ui = installShareLinks({ client, accountClient: {}, getState: () => ({ room: { id: 'commons', ownerId: 'owner' }, members: { owner: member } }), getSession: () => session, openRoom() {} });
+    dom.node('#share-link-expiry').value = '24'; dom.node('#share-link-limit').value = '2';
+    const opening = dom.node('#invite-people-button').handlers.click();
+    assert.equal(typeof settleKit, 'function');
+    if (outcome === 'already loaded') { settleKit(); await opening; assert.match(dom.node('#growth-invite-message').value, /Join via/); }
+    await dom.node('#share-link-form').handlers.submit({ preventDefault() {} });
+    const expected = `http://localhost:52331/#join/${created}`;
+    assert.equal(dom.node('#growth-invite-url').value, expected);
+    assert.equal(dom.node('#growth-kit-controls').hidden, false);
+    assert.equal(dom.node('#growth-copy-link').disabled, false);
+    assert.equal(dom.node('#growth-copy-agent').disabled, false);
+    assert.equal(dom.node('#growth-copy-message').disabled, true);
+    assert.equal(dom.node('#growth-invite-message').value, '');
+    assert.equal(dom.node('#growth-kit').hidden, true, 'custom result hides the duplicate default-link panel');
+    assert.equal(dom.node('#share-custom').hidden, true);
+    ui.sync();
+    assert.equal(dom.node('#share-custom').hidden, true, 'snapshot sync cannot restore the creation form over a result');
+    const status = dom.node('#growth-kit-status').textContent;
+    settleKit(); await opening;
+    assert.equal(dom.node('#growth-invite-url').value, expected);
+    assert.equal(dom.node('#growth-kit-status').textContent, status);
+    assert.equal(dom.node('#share-link-url').value, expected);
+    member.revision++; ui.sync();
+    assert.equal(dom.node('#growth-invite-url').value, '', 'invalidated custom URL is removed from every field');
+    assert.equal(dom.node('#growth-kit-controls').hidden, true);
+    assert.equal(dom.node('#growth-copy-link').disabled, true);
+    assert.equal(dom.node('#growth-copy-agent').disabled, true);
+  } finally { ui?.resetManagement(); dom.uninstall(); }
+});
+
+for (const timing of ['loaded', 'pending']) for (const change of ['session', 'generation', 'inactive']) test(`${timing} member invitation closes and clears its link after ${change} changes`, async () => {
+  const dom = guestJoinDom(); dom.install();
+  const member = { id: 'guest', kind: 'human', active: true, permissions: [] };
+  let session = { roomId: 'commons', member }, release;
+  const client = { session, generation: 0, ownsAccountSession: () => true, path: suffix => suffix,
+    async request() {
+      if (timing === 'pending') await new Promise(resolve => { release = resolve; });
+      return { invite: { token: 'g'.repeat(43), status: 'active', message: 'Join {url}' } };
+    } };
+  let ui;
+  try {
+    ui = installShareLinks({ client, accountClient: {}, getState: () => ({ room: { id: session.roomId }, members: { guest: member } }), getSession: () => session, openRoom() {} });
+    const opening = dom.node('#invite-people-button').handlers.click();
+    if (timing === 'loaded') await opening;
+    assert.equal(dom.node('#share-custom').hidden, true, 'ordinary members do not receive custom creation');
+    if (timing === 'loaded') assert.match(dom.node('#growth-invite-url').value, /#join/);
+    if (change === 'session') { session = { ...session, roomId: 'other' }; client.session = session; }
+    else if (change === 'generation') client.generation++;
+    else member.active = false;
+    ui.sync();
+    assert.equal(dom.node('#share-link-dialog').open, false);
+    if (release) { release(); await opening; }
+    assert.equal(dom.node('#growth-invite-url').value, '');
+    assert.equal(dom.node('#growth-invite-message').value, '');
+    assert.equal(dom.node('#growth-kit-controls').hidden, true);
+    assert.equal(dom.node('#growth-copy-link').disabled, true);
+  } finally { ui?.resetManagement(); dom.uninstall(); }
+});
+
+for (const target of ['#invite-people-button', '#sidebar-toggle', '#conversation-title', null]) test(`closing invitations restores visible focus: ${target ?? 'signed out'}`, () => {
+  const dom = guestJoinDom(); dom.install();
+  const member = { id: 'owner', kind: 'human', permissions: ['manage_members'] };
+  const session = { roomId: 'commons', member };
+  const client = { session, generation: 0, ownsAccountSession: () => true };
+  let ui;
+  try {
+    ui = installShareLinks({ client, accountClient: {}, getState: () => ({ members: { owner: member } }), getSession: () => session, openRoom() {} });
+    for (const selector of ['#invite-people-button', '#sidebar-toggle', '#conversation-title']) dom.node(selector).checkVisibility = () => selector === target;
+    dom.node('#share-link-dialog').handlers.close();
+    assert.equal(dom.focused(), target, 'hidden controls must not capture focus, including during sign-out');
+  } finally { ui?.resetManagement(); dom.uninstall(); }
+});

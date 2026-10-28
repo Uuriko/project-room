@@ -43,7 +43,7 @@ export function soloUnaddressed({ body, replyToId, members, messages, selfId, as
   const source = replyToId ? (messages ?? []).find(m => m.id === replyToId) : null;
   return !source || source.authorId === selfId || source.authorId === assistantId;
 }
-export function installHumanExperience({ getState, getSession, getConversation, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, refreshTranscript, onSubmitted, replyToResult }) {
+export function installHumanExperience({ getState, getSession, getConversation, client, notice, openWork, openMessage, startContribution, getContribution, endContribution, selectResult, onMessageSending, refreshTranscript, onSubmitted, replyToResult }) {
   const $ = selector => document.querySelector(selector);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
   const human = () => getSession()?.member?.kind === 'human';
@@ -72,7 +72,8 @@ export function installHumanExperience({ getState, getSession, getConversation, 
   const ask = document.createElement('button'); ask.type = 'button'; ask.id = 'assistant-context'; ask.className = 'button ghost'; ask.hidden = true;
   ask.title = uiText('human.cancelContribution');
   const composerActions = document.createElement('div'); composerActions.className = 'human-composer-actions';
-  composerActions.append($('#composer-attach'), $('#composer-options'), ask); $('.composer-row').append(composerActions);
+  composerActions.append($('#composer-attach'), $('#composer-options'), ask);
+  $('.composer-row > button[type="submit"]').before(composerActions);
   ask.addEventListener('click', () => { contribution = null; endContribution?.(); paint(); $('#message-input').focus(); });
   const assistantSettings = document.createElement('div');
   assistantSettings.append(section.querySelector('.assistant-heading'));
@@ -329,7 +330,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       if (!item || item.supersededBy) { $('#human-share-error').textContent = uiText("human.copy.018"); return; }
       entry.revision = item.revision; entry.command = null; entry.rejected = false;
       resultDialog.querySelector('textarea').disabled = false;
-      const submit = resultDialog.querySelector('[type=submit]'); submit.disabled = false; submit.textContent = 'Review result'; review.hidden = true;
+      const submit = resultDialog.querySelector('[type=submit]'); submit.disabled = false; submit.textContent = uiText("human.postDraft"); review.hidden = true;
       $('#human-share-error').textContent = uiText("human.copy.019", { fragmentA: item.title });
       resultDialog.querySelector('textarea').focus();
     } catch (failure) { if (stamp === key() && resultEntry === entry) $('#human-share-error').textContent = failure.message; }
@@ -342,6 +343,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     entry.command ??= { id: crypto.randomUUID(), type: 'message.posted', data: { messageId: crypto.randomUUID(), workItemId: entry.workId,
       packetId: crypto.randomUUID(), basisRevision: entry.revision, body } };
     try {
+      onMessageSending?.(entry.command.data.messageId);
       await client.send(entry.command); if (stamp !== key() || resultEntry !== entry) return;
       const messageId = entry.command.data.messageId; resultEntry = null; resultDialog.close(); selectResult(entry.workId, messageId);
     } catch (failure) {
@@ -352,7 +354,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
         : uiText("human.copy.021", { fragmentA: failure.message });
       resultDialog.querySelector('textarea').disabled = true;
       $('#human-share-refresh').hidden = !entry.rejected;
-      button.textContent = entry.rejected ? 'Review result' : uiText("human.copy.022");
+      button.textContent = entry.rejected ? uiText("human.postDraft") : uiText("human.copy.022");
     } finally { if (stamp === key() && resultEntry === entry) button.disabled = Boolean(entry.rejected); }
   };
   $('#human-existing-drafts').onclick = event => {
@@ -370,7 +372,6 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       section.hidden = !active; ask.hidden = !active || !contribution; advanced.hidden = !active; assistantSettings.hidden = !active; activity.hidden = !active;
       if (active) {
         for (const button of document.querySelectorAll('[data-action="complete"]')) { button.textContent = 'Share result'; const parent = button.closest('.work-actions'); if (parent && button.parentNode !== parent) parent.insertBefore(button, parent.querySelector('.work-more')); }
-        $('#work-options-summary').textContent = $('#require-verification').checked ? 'Advanced options' : uiText('human.workNoReview');
       }
       if (!active) { projection = null; operation = null; rejectedOperation = null; configureOperation = null; contribution = null; boundary = ''; $('#assistant-runs').replaceChildren(); delete $('#assistant-runs')._html; if (setup.open) setup.close(); if (dialog.open) dialog.close(); if (resultDialog.open) resultDialog.close(); resultEntry = null; document.body.classList.remove('human-advanced'); return; }
       if (boundary !== key()) {
@@ -425,7 +426,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       if (!resultEntry?.command || resultEntry.workId !== item.id || resultEntry.boundary !== key()) {
         resultEntry = { workId: item.id, revision: item.revision, boundary: key(), command: null };
         resultDialog.querySelector('form').reset(); resultDialog.querySelector('textarea').disabled = false;
-        resultDialog.querySelector('[type=submit]').textContent = 'Review result'; resultDialog.querySelector('[type=submit]').disabled = false; $('#human-share-refresh').hidden = true; $('#human-share-error').textContent = '';
+        resultDialog.querySelector('[type=submit]').textContent = uiText("human.postDraft"); resultDialog.querySelector('[type=submit]').disabled = false; $('#human-share-refresh').hidden = true; $('#human-share-error').textContent = '';
       }
       const drafts = getState().messages.filter(m => m.workItemId === item.id && !m.deletedAt && !m.toMemberId);
       $('#human-existing-drafts').innerHTML = drafts.map(m => ["<button type=\"button\" class=\"text-button\" data-result-draft=\"", esc(m.id), "\">", esc(m.body.slice(0,100)), "</button>"].join('')).join('') || uiText("human.copy.024");

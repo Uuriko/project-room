@@ -36,6 +36,24 @@ function assertPolicy(headers, path) {
   assert.equal(headers.get("cross-origin-opener-policy"), "same-origin", path);
 }
 
+test("the app read-position module is served as JavaScript", async t => {
+  const origin = await serve(t);
+  const response = await fetch(`${origin}/src/read-position-order.js`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type"), /javascript/);
+  assert.match(await response.text(), /export class ReadPositionOrder/);
+});
+
+test("the unversioned app stylesheet revalidates before reuse", async t => {
+  const origin = await serve(t);
+  for (const method of ["GET", "HEAD"]) {
+    const response = await fetch(`${origin}/src/styles.css`, { method });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("cache-control"), "no-cache");
+    assert.match(response.headers.get("content-type"), /text\/css/);
+  }
+});
+
 test("app and API responses send policy headers, the manifest type, and security.txt only with a contact", async t => {
   delete process.env.ROOM_SECURITY_CONTACT;
   const origin = await serve(t);

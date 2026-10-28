@@ -153,7 +153,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   let joined = null, previewRoomId = null, previewRoomTitle = null;
   let joinAttempted = false, joinLanded = false, suppressJoinHash = false;
   let managementSession = null, managementGeneration = null, currentLink = null, expiryTimer = null, copyRevision = 0, copying = false;
-  let kitOnly = false, kitLoadVersion = 0;
+  let kitOnly = false, kitLoadVersion = 0, kitContext = null;
   const manager = $("#share-link-dialog"), joinDialog = $("#join-link-dialog");
   const status = text => setShareLinkStatus($("#share-link-status"), text);
   const listStatus = text => setShareLinkStatus($("#share-management-status"), text);
@@ -273,17 +273,22 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   function updateCopyControls() {
     $("#share-link-copy").disabled = copying || !currentLink;
+    if ($("#share-link-copy-agent")) $("#share-link-copy-agent").disabled = copying || !currentLink;
     $("#share-note-copy").disabled = copying || !currentLink || !$("#share-note-text").value.trim()
       || !$("#share-note-preview").value;
   }
   function clearResult(message = "") {
     const heldFocus = $("#share-link-result").contains(document.activeElement);
+    const hadCustomLink = Boolean(currentLink);
     copyRevision++; currentLink = null; clearTimeout(expiryTimer); expiryTimer = null;
+    if (hadCustomLink) renderKit(null);
     $("#share-link-url").value = ""; delete $("#share-link-url").dataset.linkId;
     $("#share-note-text").value = ""; $("#share-note-preview").value = "";
     $("#share-note").open = false; $("#share-note-result").hidden = true;
     $("#share-purpose-note").hidden = true;
     $("#share-link-result").hidden = true; $("#share-link-form").hidden = false;
+    applyKitChrome();
+    if (heldFocus && $("#share-custom")) $("#share-custom").open = true;
     status(message); updateCopyControls();
     if (heldFocus && manager.open && ownsManagement()) $("#share-link-create").focus();
   }
@@ -330,6 +335,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function applyKitChrome() {
     const form = $("#share-link-form");
     const management = $("#share-management");
+    const custom = $("#share-custom");
+    if (custom) custom.hidden = kitOnly || Boolean(currentLink);
+    const kit = $("#growth-kit");
+    if (kit) kit.hidden = Boolean(currentLink) || (!kitOnly && Boolean(custom?.open));
     if (management) management.hidden = kitOnly;
     if (!form) return;
     // A shown admin result owns the form. Snapshot sync must not put the form
@@ -341,6 +350,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   function renderKit(data) {
     const invite = data?.invite;
     const url = invite?.token && (!invite.status || invite.status === "active") ? humanJoinShareUrl(invite.token) : "";
+    const controls = $("#growth-kit-controls");
+    if (controls) controls.hidden = !url;
+    const intro = $("#share-link-intro");
+    if (intro) intro.hidden = kitOnly && !url;
     const message = invite?.message && url ? String(invite.message).replaceAll("{url}", url) : "";
     const urlField = $("#growth-invite-url");
     if (urlField) urlField.value = url;
@@ -361,6 +374,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       : !url ? uiText(kitOnly ? "entry.invite.unavailable" : "entry.invite.createFirst") : "");
   }
   async function loadKit() {
+    if (currentLink) return;
     const owned = getSession(), generation = client.generation, version = ++kitLoadVersion;
     const roomId = owned?.roomId || getState()?.room?.id;
     if (!roomId || typeof client?.request !== "function" || typeof client?.path !== "function") return;
@@ -390,6 +404,10 @@ export function installShareLinks({ client, accountClient, getState, getSession,
   }
   function ensureGrowthChrome() {
     if (typeof document.createElement !== "function") return;
+    const copyAgent = $("#share-link-copy-agent");
+    if (copyAgent) copyAgent.textContent = uiText("entry.invite.copyAgent");
+    const customSummary = $("#share-custom-summary");
+    if (customSummary) customSummary.textContent = uiText("entry.invite.custom");
     const title = $("#share-link-title");
     if (title) title.textContent = "Invite";
     const intro = $("#share-link-intro");
@@ -424,15 +442,22 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     applyKitChrome();
     if (manager.open && kitOnly) {
       const current = member();
-      if (!current || current.active === false) { kitOnly = false; manager.close(); return; }
+      const session = getSession();
+      if (!current || current.active === false || !kitContext || kitContext.session !== session
+        || session !== client.session || kitContext.generation !== client.generation
+        || kitContext.roomId !== (session?.roomId || getState()?.room?.id)
+        || kitContext.memberId !== session?.member?.id) { resetManagement(); return; }
     } else if (manager.open && !ownsManagement()) resetManagement();
     else checkResult();
     if (joinDialog.open) updateSwitchWarning();
   }
   function resetManagement() {
     kitLoadVersion++; managementVersion++; listVersion++; pendingCreate = null;
+    kitContext = null;
+    renderKit(null);
     managementSession = null; managementGeneration = null; clearResult();
     $("#share-settings").open = false; $("#share-management").open = false;
+    if ($("#share-custom")) $("#share-custom").open = false;
     $("#share-link-list").replaceChildren(); status(""); listStatus("");
     creationBusy(false); updateLimits();
     if (manager.open) manager.close();
@@ -496,6 +521,9 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     kitOnly = !admin;
     if (!admin) {
       if (!inRoom()) return;
+      const session = getSession();
+      kitContext = { session, generation: client.generation,
+        roomId: session?.roomId || getState()?.room?.id, memberId: session?.member?.id };
       applyKitChrome();
       refreshAgentCode();
       manager.showModal();
@@ -515,15 +543,24 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     const accessLabel = $("#share-link-access-label"), access = $("#share-link-access");
     if (accessLabel) accessLabel.hidden = getState()?.room?.ownerId !== getSession()?.member?.id;
     if (access) access.value = "guest";
-    manager.showModal(); $("#share-link-create").focus();
+    manager.showModal(); $("#share-link-close").focus();
     // Link-list feedback never owns the newer creation/clipboard status.
     await Promise.all([list(version, generation).catch(() => {}), loadKit()]);
   });
+  $("#share-custom")?.addEventListener("toggle", applyKitChrome);
   $("#share-link-close").addEventListener("click", () => { if (!creating) manager.close(); });
   manager.addEventListener("cancel", event => { if (creating) event.preventDefault(); });
-  manager.addEventListener("close", () => { resetManagement(); if (!$("#invite-people-button").hidden) $("#invite-people-button").focus(); });
+  manager.addEventListener("close", () => {
+    resetManagement();
+    // Resizing can hide the sidebar opener; sign-out can hide every room control.
+    const target = [$("#invite-people-button"), $("#sidebar-toggle"), $("#conversation-title")]
+      .find(node => node && !node.hidden && (node.checkVisibility?.() ?? true));
+    target?.focus({ preventScroll: true });
+  });
   $("#share-link-another").addEventListener("click", () => {
-    clearResult(); $("#share-link-create").focus();
+    clearResult();
+    if ($("#share-custom")) $("#share-custom").open = true;
+    $("#share-link-create").focus();
   });
   $("#share-link-form").addEventListener("input", () => { pendingCreate = null; updateLimits(); });
   $("#share-link-form").addEventListener("invalid", event => {
@@ -560,12 +597,17 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       // a pre-existing (guest) link after a create — the only URL many
       // inviters ever copied. The created link is the link the current
       // settings describe, so it is the URL every field here shows.
+      // The confirmed custom link owns this dialog; older kit reads cannot
+      // restore a different token, stale message, or obsolete load error.
+      kitLoadVersion++;
+      renderKit({ invite: { token: request.linkToken, status: "active" } });
       const growthUrl = $("#growth-invite-url");
       if (growthUrl) growthUrl.value = inviteUrl;
       const growthStatus = $("#growth-kit-status");
       if (growthStatus) growthStatus.textContent = uiText("share.linkCreated", { fragmentA: result.link.access === "co_admin" ? "Co-admin" : result.link.access === "member" ? "Member" : "Guest" });
       $("#share-link-result").hidden = false;
       $("#share-link-form").hidden = true;
+      applyKitChrome();
       expiryTimer = setTimeout(checkResult, Math.max(0, currentLink.expiresAt - Date.now()));
       expiryTimer.unref?.();
       updateCopyControls();
@@ -595,7 +637,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     updateCopyControls();
   });
   $("#share-note").addEventListener("toggle", () => { copyRevision++; if (currentLink) status(""); });
-  async function copy(withNote) {
+  async function copy(withNote, forAgent = false) {
     sync();
     const version = managementVersion, generation = client.generation;
     if (copying || !managementCurrent(version, generation) || !checkResult()) return;
@@ -606,7 +648,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
       && field.value === value && (!withNote || ($("#share-note").open && !$("#share-note-result").hidden));
     copying = true; updateCopyControls();
     status(withNote ? "Copying invitation…" : "Copying link…");
-    try { await navigator.clipboard.writeText(value); if (currentResult()) status(withNote ? "Invitation copied." : "Link copied."); }
+    try { await navigator.clipboard.writeText(forAgent ? uiText("entry.invite.agentInstructions", { url: value }) : value); if (currentResult()) status(forAgent ? uiText("entry.invite.agentCopied") : withNote ? "Invitation copied." : "Link copied."); }
     catch {
       if (currentResult()) {
         if ([document.body, focus].includes(document.activeElement)) { field.focus(); field.select(); }
@@ -615,6 +657,7 @@ export function installShareLinks({ client, accountClient, getState, getSession,
     } finally { copying = false; sync(); updateCopyControls(); }
   }
   $("#share-link-copy").addEventListener("click", () => copy(false));
+  $("#share-link-copy-agent")?.addEventListener("click", () => copy(false, true));
   $("#share-note-copy").addEventListener("click", () => copy(true));
   async function open(fragment, { afterSignIn = false } = {}) {
     if (!afterSignIn && !canLeaveAccountSignin()) { joinStatus("Finish signing in before opening another invitation."); return; }

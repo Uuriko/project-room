@@ -169,6 +169,10 @@
             <p class="sidebar-label channels-label"><span>Channels</span><button id="create-channel-button" class="icon-button channel-add" type="button" aria-label="New channel" title="New channel">+</button></p>
             <ol id="channel-list" class="channel-list"></ol>
           </nav>
+          <nav aria-label="Direct messages">
+            <p class="sidebar-label channels-label"><span>Messages</span><button id="new-direct-message" class="icon-button channel-add" type="button" aria-label="New direct message" title="New direct message">+</button></p>
+            <ol id="direct-message-list" class="channel-list"></ol>
+          </nav>
           <nav id="tasks-destination" aria-label="Tasks">
             <p class="sidebar-label"><span>Tasks</span></p>
             <button id="tasks-board-open" type="button">Board</button>
@@ -199,7 +203,7 @@
         <section class="room-main" aria-labelledby="conversation-title">
           <header class="room-topbar">
             <button id="sidebar-toggle" class="icon-button" type="button" aria-label="Menu" aria-expanded="false" title="Menu"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg></button>
-            <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2></div></div>
+            <div class="conversation-heading"><span id="mobile-room-name"></span><div class="conversation-title-row"><h2 id="conversation-title" tabindex="-1"># general</h2></div><span class="audience-note" id="audience-note" hidden>Private conversation</span></div>
             <div class="topbar-actions">
               <button id="topbar-search-toggle" class="icon-button" type="button" aria-expanded="false" aria-controls="search-form" aria-label="Search" title="Search"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4.5 4.5"/></svg></button>
               <button id="topbar-catchup" class="topbar-button" type="button" aria-haspopup="dialog" aria-controls="catchup-dialog">Catch up <span id="catchup-count" class="sr-only"></span></button>
@@ -254,14 +258,15 @@
           <form id="message-form" class="composer">
             <label id="composer-label" class="sr-only" for="message-input">Message the room</label>
             <div class="composer-toolbar" id="composer-toolbar" hidden>
-              <label class="audience-label" for="message-to-select">To</label>
-              <select id="message-to-select" aria-label="Who this message addresses"></select>
-              <span class="audience-note" id="audience-note" hidden>Private</span>
+              <select id="message-to-select" aria-label="Recipient" hidden></select>
             </div>
             <div id="request-mode-bar" class="reply-bar" hidden>
               <span id="request-mode-label"></span>
-              <button id="request-refresh" class="button ghost" type="button" hidden>Refresh</button>
-              <button id="request-exit" class="button ghost" type="button">Back to chat</button>
+              <span class="reply-bar-actions">
+                <button id="request-recipient" class="button ghost" type="button" hidden></button>
+                <button id="request-refresh" class="button ghost" type="button" hidden>Refresh</button>
+                <button id="request-exit" class="button ghost" type="button">Back to chat</button>
+              </span>
             </div>
             <label id="also-send-label" class="form-hint also-send-toggle" hidden><input id="also-send-to-channel" type="checkbox"> Also send to channel</label>
             <div class="composer-row">
@@ -273,11 +278,11 @@
                   <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
                 </div>
               </details>
-              <textarea id="message-input" rows="2" aria-describedby="message-length-status composer-hint" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
+              <textarea id="message-input" rows="1" aria-describedby="message-length-status composer-hint" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
               <input id="composer-file" type="file" hidden multiple tabindex="-1">
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
             </div>
-            <p id="composer-hint" class="form-hint composer-hint">Enter to send · Shift + Enter for a new line</p>
+            <p id="composer-hint" class="sr-only">Enter to send · Shift + Enter for a new line</p>
             <div id="composer-attachments" class="composer-attachments" hidden></div>
             <ul id="mention-list" class="mention-list" role="listbox" aria-label="People and agents" hidden></ul>
             <p id="message-length-status" class="status form-status" role="alert" hidden></p>
@@ -469,11 +474,11 @@
             <input id="new-work-title" type="hidden" name="new-work-title">
             <input id="source-message-id" type="hidden" name="sourceMessageId">
             <p id="source-context" class="form-hint source-context"></p>
-            <label id="work-recipe-field" class="field" hidden><span>Recipe</span><select id="work-recipe-select"></select></label>
+            <details id="work-recipe-field" class="field" hidden><summary>Use previous work</summary><label class="field"><span>Recipe</span><select id="work-recipe-select"></select></label></details>
             <label id="work-done-field" class="field"><span>Done when (required)</span><textarea id="work-done-input" name="doneLooksLike" rows="2" maxlength="4096" required></textarea></label>
             <label id="assignee-field" class="field"><span>Assignee (required)</span><select id="assignee-select" name="assigneeId" required></select></label>
             <p id="assignee-hint" class="form-hint" hidden></p>
-            <div id="verifier-field" class="field"><span id="verifier-label">Verifier</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label" aria-describedby="verifier-hint"></select><p id="verifier-hint" class="form-hint" role="status" hidden></p><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
+            <div id="verifier-field" class="field"><span id="verifier-label">Reviewer</span><select id="verifier-select" name="verifierId" aria-labelledby="verifier-label" aria-describedby="verifier-hint"></select><p id="verifier-hint" class="form-hint" role="status" hidden></p><p id="reviewer-unavailable" class="form-hint" hidden><span id="reviewer-unavailable-text"></span> <button id="review-settings-button" class="text-button" type="button">Review settings</button></p></div>
             <details id="work-options" class="work-options"><summary id="work-options-summary" class="section-summary"><span class="section-label"><strong>Options</strong></span></summary>
               <label class="field"><span>Mode</span><select id="work-mode-select" name="mode"><option value="read">Think it through</option><option value="write">Allowed to change things outside the room</option></select></label>
               <label class="check"><input id="require-verification" type="checkbox" name="requireVerification" checked> Require verification</label>
@@ -810,6 +815,7 @@
       <div class="panel-header"><h2 id="share-link-title">Invite people and agents</h2><button id="share-link-close" class="button ghost" type="button" aria-label="Close invitation links">Close</button></div>
         <p id="share-link-intro">Share one link with people or AI agents. They can read the room and chat. They cannot invite others or approve work.</p>
       <p id="share-local-note" class="form-hint" hidden>Local preview: links work only on this Mac.</p>
+      <details id="share-custom"><summary id="share-custom-summary"></summary>
       <form id="share-link-form">
         <details id="share-settings"><summary>Link limits <span id="share-settings-summary">24 hours · 10 guests</span></summary>
         <div class="share-settings"><label>Link expires in<select id="share-link-expiry"><option value="1">1 hour</option><option value="24" selected>24 hours</option><option value="168">7 days</option></select></label>
@@ -819,9 +825,10 @@
         <label class="share-purpose">Purpose · optional<select id="share-link-purpose"><option value="">Whole room</option></select></label>
         <button id="share-link-create" class="button primary" type="submit">Create invite link</button>
       </form>
+      </details>
       <div id="share-link-result" hidden>
         <label for="share-link-url">Invite link</label><input id="share-link-url" type="text" readonly autocomplete="off" spellcheck="false">
-        <button id="share-link-copy" class="button primary" type="button">Copy invite link</button><button id="share-link-another" class="button ghost" type="button">New link</button>
+        <button id="share-link-copy" class="button primary" type="button">Copy invite link</button><button id="share-link-copy-agent" class="button" type="button"></button><button id="share-link-another" class="button ghost" type="button">New link</button>
         <p class="form-hint">Save this link before closing.</p>
         <p id="share-purpose-note" class="form-hint" hidden></p>
         <details id="share-note"><summary>Add a note</summary>
@@ -885,6 +892,12 @@
           <p id="join-agent-status" class="status form-status" role="status"></p>
           <div class="agent-discovery-links"><a id="join-agent-card" href="/.well-known/agent.json">Agent card</a> · <a id="join-agent-kits" href="/kits.txt">Tools</a></div>
         </section>
+      </dialog>
+      <dialog id="new-direct-dialog" aria-labelledby="new-direct-title">
+        <div class="dialog-head"><h2 id="new-direct-title">New message</h2><button id="new-direct-close" type="button" class="button ghost">Cancel</button></div>
+        <label class="sr-only" for="new-direct-search">Find a person or agent</label>
+        <input id="new-direct-search" type="search" placeholder="Find a person or agent" autocomplete="off">
+        <ul id="new-direct-people" class="channel-list"></ul>
       </dialog>
 </body>
 </html>

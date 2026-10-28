@@ -50,13 +50,13 @@ for (const touch of [false, true]) {
     await signInFixture(owner, ownerKey);
     await owner.locator('#main').waitFor({ state: 'visible' });
     assert.equal(await owner.getByRole('button', { name: 'Got it', exact: true }).count(), 0, 'chat opens without a redundant tutorial dismissal');
-    const firstMessage = owner.getByRole('button', { name: 'Write the first one', exact: true });
-    await firstMessage.focus(); await owner.keyboard.press('Enter');
+    assert.equal(await owner.getByRole('button', { name: 'Write the first one', exact: true }).count(), 0, 'the visible composer is the single writing entry');
+    await owner.getByRole('textbox', { name: 'Message the room', exact: true }).focus();
     assert.equal(await owner.evaluate(() => document.activeElement.id), 'message-input');
     await owner.locator('#message-input').fill('Keep this first draft');
     await owner.screenshot({ path: `test-results/first-minute-quiet-${touch ? 'touch' : 'desktop'}.png` });
     await clickChrome(owner, "#invite-people-button");
-    await owner.locator('#share-link-create').click();
+    await clickChrome(owner, "#share-link-create");
     await owner.locator('#share-link-result').waitFor({ state: 'visible' });
     const invitation = await owner.locator('#share-link-url').inputValue();
     await owner.locator('#share-link-close').click();

@@ -166,3 +166,69 @@ From the Oct 9 QA and first-run click-through. Each item has a filter rule.
 
 If a product decision changes, update this file in the same PR as the change,
 and name who decided. Don't let a stale direction stand.
+
+### Human work cards
+
+Keep the work title and its state together. The collapsed face prioritizes the
+current result and the next permitted action. Blockers, recovery, and handoff
+requirements remain visible; never hide them to achieve a quieter screenshot.
+Provenance, earlier drafts, copying, and supporting evidence belong in the existing
+details disclosure. Completed work does not repeat its assignee outside those
+details. Keep all controls reachable by keyboard, and preserve the explicit
+approval dialog and exact result evidence. Agent and advanced views retain their
+detailed workflow presentation.
+
+Before placing or hiding an element, justify its existence: which distinct user
+decision or action does it support, and is that need already met? Delete redundant
+representations rather than creating a larger overflow menu. For example, human
+message links retain navigation to their work item but do not repeat its current
+Done badge on every historical draft. A work item completing does not mean each
+earlier draft was accepted. The work card and exact-result review own that status.
+
+Apply this existence test to product functions themselves, before interface design.
+A capability must justify its distinct contribution to shared work; existing code
+and previous plans do not establish its value. Consider removing or combining
+functions, with explicit treatment of saved data, permissions and recovery.
+
+### Conversation choices
+
+Retire inferred yes/no answers, task-conversion nudges and timed agent-picking
+suggestions. Ordinary prose is conversation, not an instruction to add controls.
+Explicit sender-written Options/Choices remain useful for requesting a bounded
+answer. Selecting one prepares an editable reply with its source; Send stays an
+explicit action. Do not show choices across different public/private audiences or
+over an existing draft. Creating work and addressing agents remain explicit actions.
+Private messaging must retain its audience boundary; the current recipient picker
+is an implementation to replace, not a product requirement. Mentions are not a
+substitute for private conversations.
+
+### Familiar interaction before custom interaction
+
+For every human-facing function and interaction, first justify its existence,
+then identify a named product with the same or a closely related interaction.
+Compare the complete behavior, including navigation, keyboard use, draft recovery,
+permissions, and failure states, not just the visual treatment. Familiarity is a
+default, not proof of quality: a custom pattern needs a concrete user benefit and
+evidence that the familiar alternative cannot serve it. Novelty alone earns nothing.
+
+Private messaging should follow Slack and Discord's conversation model: open a
+person or an existing direct conversation, see its participants and private history,
+then compose within that stable audience. Do not make users repeatedly choose
+between public and private delivery inside the room composer. Scope drafts and
+retries to the conversation; switching destinations must not silently move text,
+attachments, or pending sends. Keep server-side recipient permissions authoritative.
+
+References: Slack Help, "Understand direct messages"; Discord Help,
+"Group Chat and Calls".
+This direction is the user's product decision; replacing the current picker requires
+the complete conversation path, not simply hiding the existing control.
+
+### Notification actions do not complete work
+
+Updates offers Open and Dismiss for attention items. Dismiss removes only the
+viewer's current notification from Needs me; the source message, assignment,
+review and approval keep their own state. All activity retains the notification.
+Do not add a parallel human completion action to the notification row. Existing
+handled marks and uncertain retries remain supported for compatibility. A new
+source revision can require attention again. This follows the separation between
+inbox management and issue actions in Linear's Inbox documentation.

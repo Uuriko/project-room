@@ -89,6 +89,7 @@
   "src/project-offers-ui.js",
   "src/push-ask.js",
   "src/pwa-install.js",
+  "src/read-position-order.js",
   "src/reminder-time.js",
   "src/reminders.js",
   "src/reply-requests.js",

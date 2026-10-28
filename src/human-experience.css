@@ -5,8 +5,10 @@
 .human-experience:not(.human-advanced) .work-begin-limit,
 .human-experience:not(.human-advanced) .member-avatar.agent ~ div .member-status,
 .human-experience:not(.human-advanced) #invite-agents-button { display: none; }
-.human-single-conversation:not(.human-advanced) #room-sidebar nav[aria-label="Channels"] { display: none; }
 .human-composer-actions { display: contents; }
+.human-experience .composer-row { position: relative; }
+.human-experience .composer-options { position: static; }
+.human-experience .composer-options-panel { width: min(18rem, 100%); }
 .human-experience .human-composer-actions { display: flex; flex-wrap: wrap; min-width: 0; align-items: center; gap: .5rem; grid-column: 1; grid-row: 2; }
 #assistant-context { font-size: var(--text-sm); white-space: nowrap; }
 #room-assistant { margin: .25rem 1rem; padding: .25rem 0; }
@@ -47,6 +49,8 @@
 .assistant-face-status[data-face-status="not_picked_up"], .assistant-face-status[data-face-status="host_paused"], .assistant-face-status[data-face-status="stalled"] { color: var(--amber); }
 #assistant-face .assistant-face-actions > .text-button { margin-right: .6rem; margin-block: .2rem; }
 
+#request-mode-bar .reply-bar-actions { flex-wrap: wrap; flex-shrink: 1; min-width: 0; }
+#request-mode-bar #request-recipient { min-width: 0; max-width: 100%; overflow-wrap: anywhere; white-space: normal; }
 @media (max-width: 600px) {
   .human-experience .human-composer-actions { order: 1; flex: 1 1 0; }
   .human-experience .composer-row > button[type="submit"] { order: 2; }

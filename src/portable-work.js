@@ -6,7 +6,7 @@ import { EVENT_TYPES as T } from "./events.js";
 import { sendsOnEnter } from "./conversation.js";
 import { workStatus, confirmsWorkReturn } from "./workflow.js";
 
-export function installPortableWork({ client, getState, onSaved }) {
+export function installPortableWork({ client, getState, onSaved, onMessageSending }) {
   const $ = id => document.getElementById(id);
   const dialog = $("portable-dialog");
   const drafts = new Map(); // Private memory only; cleared on identity loss.
@@ -153,6 +153,7 @@ export function installPortableWork({ client, getState, onSaved }) {
     const command = pending.command, focus = document.activeElement;
     saving = true; controls(); status("Saving…");
     try {
+      onMessageSending?.(command.data.messageId);
       const receipt = await client.send(command);
       if (!owns(ticket)) return;
       if (!confirmsWorkReturn(receipt, command, ticket.session.roomId, ticket.session.member.id)) throw new Error("Draft receipt could not be confirmed");

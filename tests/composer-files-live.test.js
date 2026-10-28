@@ -2,10 +2,15 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { arrivalsNeedFileRefresh, attachFailureCopy, ROOM_FILE_REFRESH_DELAYS_MS } from "../src/composer-files.js";
 
-test("someone else's arrival refreshes room files; only your own does not", () => {
-  assert.equal(arrivalsNeedFileRefresh([{ authorId: "me" }], "me"), false);
-  assert.equal(arrivalsNeedFileRefresh([{ authorId: "me" }, { authorId: "friend" }], "me"), true);
-  assert.equal(arrivalsNeedFileRefresh([], "me"), false);
+test("file refresh distinguishes local sends from other sessions of the same account", () => {
+  const local = new Set(["local-send"]);
+  assert.equal(arrivalsNeedFileRefresh([{ id: "local-send", authorId: "me" }], local), false);
+  assert.equal(arrivalsNeedFileRefresh([{ id: "other-session", authorId: "me" }], local), true);
+  assert.equal(arrivalsNeedFileRefresh([{ id: "friend-send", authorId: "friend" }], local), true);
+  assert.equal(arrivalsNeedFileRefresh([{ id: "local-send" }, { id: "other-session" }], local), true);
+  assert.equal(arrivalsNeedFileRefresh([], local), false);
+  assert.equal(arrivalsNeedFileRefresh(null, local), false);
+  assert.equal(arrivalsNeedFileRefresh([{ id: "arrival" }]), true);
   assert.ok(ROOM_FILE_REFRESH_DELAYS_MS.length >= 2 && ROOM_FILE_REFRESH_DELAYS_MS[0] < ROOM_FILE_REFRESH_DELAYS_MS[1]);
 });
 

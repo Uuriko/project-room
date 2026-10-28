@@ -1,3 +1,4 @@
+import { createHash, randomUUID } from "node:crypto";
 import { messageRepository } from "./message-repository.mjs";
 // Personal attention surfaces: activity feed, read horizons, saved messages,
 // thread mutes. Write-time fan-out for mention/reply/thread_reply
@@ -86,6 +87,26 @@ export const activitySchema = `
 // this template literal ending in a SQL statement — Workers SQLite exec()
 // rejects a string whose trailing chunk after the final semicolon contains
 // no statement (e.g. a trailing -- comment).
+
+// Existing deployments retain their marker and timestamp; the revision is
+// independent of wall-clock time. Protected scopes reject legacy writes.
+export function ensureReadHorizonSchema(db) {
+  const columns = new Set(db.prepare("PRAGMA table_info(read_horizons)").all().map(row => row.name));
+  for (const name of ["revision", "last_request_id", "last_request_fingerprint"]) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE read_horizons ADD COLUMN ${name} TEXT`);
+  }
+  // Older binaries update marker/timestamp without touching revision. Fence
+  // their existing UPSERT at the database boundary once a scope is protected.
+  db.exec(`CREATE TRIGGER IF NOT EXISTS read_horizon_revision_update BEFORE UPDATE ON read_horizons
+    WHEN OLD.revision IS NOT NULL AND (NEW.revision IS NULL OR NEW.revision=OLD.revision)
+    BEGIN SELECT RAISE(ABORT,'read-position revision must change'); END;`);
+}
+function horizonRevision(roomId, memberId, key, row) {
+  return row?.revision ?? createHash("sha256").update(JSON.stringify([
+    "read-horizon-initial", roomId, memberId, key,
+    row?.last_read_message_id ?? null, row?.updated_at ?? null,
+  ])).digest("hex");
+}
 
 // A DM message is visible only to its author and its recipient.
 // A message from the projection, else its current record from the messages table
@@ -421,27 +442,52 @@ export function markActivityReadAll(store, token, roomId, data = {}, expectedSes
 
 // --- read horizons ------------------------------------------------------------
 
+function horizonScope(params) {
+  const threadId = params?.threadId ?? "";
+  const peerMemberId = params?.peerMemberId;
+  if (typeof threadId !== "string" || threadId.length > 384 || threadId.startsWith('["direct",')) {
+    fail(422, "invalid_horizon", "threadId must be a short thread identifier");
+  }
+  if (peerMemberId !== undefined && (threadId || typeof peerMemberId !== "string" || !peerMemberId.trim() || peerMemberId.length > 100)) {
+    fail(422, "invalid_horizon", "Choose a thread or a private conversation");
+  }
+  return { threadId, peerMemberId, key: peerMemberId === undefined ? threadId : JSON.stringify(["direct", peerMemberId]) };
+}
+function inPrivateConversation(message, viewerId, peerMemberId) {
+  return Boolean(message && (message.authorId === viewerId && message.toMemberId === peerMemberId
+    || message.authorId === peerMemberId && message.toMemberId === viewerId));
+}
+
 export function getReadHorizon(store, token, roomId, params = {}, expectedSessionBinding = null) {
   const auth = authed(store, token, roomId, expectedSessionBinding);
   const member = auth.member;
-  const threadId = params?.threadId ?? "";
-  if (typeof threadId !== "string" || threadId.length > 384) fail(422, "invalid_horizon", "threadId must be a short string");
+  const { threadId, peerMemberId, key } = horizonScope(params);
   return store.readTransaction(() => {
     const row = store.db.prepare(
-      "SELECT last_read_message_id FROM read_horizons WHERE room_id=? AND member_id=? AND thread_id=?")
-      .get(roomId, member.id, threadId);
-    return { ...viewerEnvelope(auth, roomId), threadId, lastReadMessageId: row?.last_read_message_id ?? null };
+      "SELECT * FROM read_horizons WHERE room_id=? AND member_id=? AND thread_id=?")
+      .get(roomId, member.id, key);
+    let lastReadMessageId = row?.last_read_message_id ?? null;
+    if (peerMemberId !== undefined && lastReadMessageId !== null) {
+      const message = messageOrArchived(store, roomId, lastReadMessageId);
+      if (!inPrivateConversation(message, member.id, peerMemberId)
+        || !messageInHistory(message, store.historyFloor(roomId, member.id))) lastReadMessageId = null;
+    }
+    return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId, revision: horizonRevision(roomId, member.id, key, row) };
   });
 }
 
 export function setReadHorizon(store, token, roomId, data, expectedSessionBinding = null) {
   if (!data || typeof data !== "object" || Array.isArray(data)) fail(422, "invalid_horizon", "Supply threadId and lastReadMessageId");
   const keys = Object.keys(data);
-  if (!keys.includes("lastReadMessageId") || keys.some(key => !["threadId", "lastReadMessageId"].includes(key))) {
+  if (!keys.includes("lastReadMessageId") || keys.some(key => !["threadId", "peerMemberId", "lastReadMessageId", "expectedRevision", "requestId"].includes(key))) {
     fail(422, "invalid_horizon", "Supply lastReadMessageId; threadId is optional");
   }
-  const threadId = data.threadId ?? "";
-  if (typeof threadId !== "string" || threadId.length > 384) fail(422, "invalid_horizon", "threadId must be a short string");
+  const guarded = data.expectedRevision !== undefined || data.requestId !== undefined;
+  if (guarded && (typeof data.expectedRevision !== "string" || !/^[a-f0-9]{64}$/.test(data.expectedRevision)
+    || typeof data.requestId !== "string" || !/^[a-zA-Z0-9_-]{1,100}$/.test(data.requestId))) {
+    fail(422, "invalid_horizon", "Supply a read-position revision and stable request ID");
+  }
+  const { threadId, peerMemberId, key } = horizonScope(data);
   const lastReadMessageId = data.lastReadMessageId;
   if (lastReadMessageId !== null && (typeof lastReadMessageId !== "string" || !lastReadMessageId.trim() || lastReadMessageId.length > 384)) {
     fail(422, "invalid_horizon", "lastReadMessageId must be a message id or null");
@@ -456,13 +502,29 @@ export function setReadHorizon(store, token, roomId, data, expectedSessionBindin
       if (!message || !dmVisible(message, member.id) || !messageInHistory(message, store.historyFloor(roomId, member.id))) {
         fail(404, "message_not_found", "No such message in this room");
       }
+      if (peerMemberId !== undefined && !inPrivateConversation(message, member.id, peerMemberId)) {
+        fail(404, "message_not_found", "No such message in this conversation");
+      }
+    }
+    const row = store.db.prepare("SELECT * FROM read_horizons WHERE room_id=? AND member_id=? AND thread_id=?").get(roomId, member.id, key);
+    const fingerprint = guarded ? JSON.stringify([data.expectedRevision, lastReadMessageId]) : null;
+    if (guarded && row?.last_request_id === data.requestId) {
+      if (row.last_request_fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Read-position request ID was reused with different content");
+      return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId, revision: row.revision, replayed: true };
+    }
+    if (!guarded && row?.revision) fail(428, "horizon_precondition_required", "Refresh this conversation before changing its read position");
+    if (guarded && data.expectedRevision !== horizonRevision(roomId, member.id, key, row)) {
+      fail(409, "horizon_conflict", "The read position changed. Reopen this conversation and try again");
     }
     const now = store.now();
+    const revision = guarded ? createHash("sha256").update(JSON.stringify([roomId, member.id, key, randomUUID()])).digest("hex") : null;
     store.db.prepare(
-      `INSERT INTO read_horizons (room_id,member_id,thread_id,last_read_message_id,updated_at) VALUES(?,?,?,?,?)
-       ON CONFLICT(room_id,member_id,thread_id) DO UPDATE SET last_read_message_id=excluded.last_read_message_id, updated_at=excluded.updated_at`)
-      .run(roomId, member.id, threadId, lastReadMessageId, now);
-    return { ...viewerEnvelope(auth, roomId), threadId, lastReadMessageId };
+      `INSERT INTO read_horizons (room_id,member_id,thread_id,last_read_message_id,updated_at,revision,last_request_id,last_request_fingerprint) VALUES(?,?,?,?,?,?,?,?)
+       ON CONFLICT(room_id,member_id,thread_id) DO UPDATE SET last_read_message_id=excluded.last_read_message_id, updated_at=excluded.updated_at,
+       revision=excluded.revision,last_request_id=excluded.last_request_id,last_request_fingerprint=excluded.last_request_fingerprint`)
+      .run(roomId, member.id, key, lastReadMessageId, now, revision, data.requestId ?? null, fingerprint);
+    return { ...viewerEnvelope(auth, roomId), threadId, ...(peerMemberId === undefined ? {} : { peerMemberId }), lastReadMessageId,
+      revision: revision ?? horizonRevision(roomId, member.id, key, { last_read_message_id: lastReadMessageId, updated_at: now }) };
   });
 }
 
@@ -527,4 +589,3 @@ export function setSaved(store, token, roomId, data, expectedSessionBinding = nu
     return { ...viewerEnvelope(auth, roomId), messageId: data.messageId, saved: data.saved };
   });
 }
-

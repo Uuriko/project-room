@@ -9,6 +9,29 @@ export function sendsOnEnter(event, touchKeyboard = false) {
     && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
 }
 
+// History may confirm a send whose HTTP response was lost. Optimistic rows and
+// unrelated messages cannot resolve that uncertainty, even when their text matches.
+export function historyConfirmsMessage(messages, command, authorId) {
+  const data = command.data, id = data.messageId || command.id;
+  return messages.some(message => !message.pendingSend && !message.deletedAt && !message.redacted
+    && message.id === id && message.authorId === authorId && message.body === data.body
+    && (message.toMemberId || null) === (data.toMemberId || null)
+    && (message.replyToId || null) === (data.replyToId || null)
+    && (message.channelId ?? "general") === (data.channelId ?? "general"));
+}
+
+export function reconcileConfirmedMessageDraft(draft, messages, authorId) {
+  const command = draft.pending?.command;
+  if (!command || command.type !== "message.posted" || draft.mode || draft.assistantDraft || draft.files?.length
+    || !historyConfirmsMessage(messages, command, authorId)) return null;
+  const data = command.data;
+  const unchanged = draft.body.trim() === data.body
+    && (draft.toMemberId || null) === (data.toMemberId || null)
+    && (draft.replyToId || null) === (data.replyToId || null)
+    && (draft.channelId ?? "general") === (data.channelId ?? "general");
+  return { ...draft, body: unchanged ? "" : draft.body, pending: null, error: "" };
+}
+
 export function escapeChatAction({ dialogOpen = false, mentionOpen = false, replyOpen = false, inThread = false } = {}) {
   if (dialogOpen) return null;
   if (mentionOpen) return "hide-mentions";
@@ -401,6 +424,13 @@ export function conversationIndex(messages) {
   return { byId, rootById, threads, roots };
 }
 
+// A private reply can cite a public result without becoming a public reply.
+// Use the same audience filter for the thread view and its entry-point count.
+export function conversationThreadMessages(index, rootId, viewerId, peerId = null) {
+  return (index?.threads.get(rootId) ?? []).filter(message => peerId
+    ? directMessagePeer(message, viewerId) === peerId : !message.toMemberId);
+}
+
 export function parseSearchQuery(query) {
   const raw = String(query ?? "").trim().slice(0, 200);
   const match = /^(?:mentions:me|to:me|@me)(?:\s+(.*))?$/i.exec(raw);
@@ -452,6 +482,19 @@ export function shouldPreserveDrafts({ leavingPage, pendingSignout, endedContext
 export function channelDraftKey(channelId = "general") {
   return channelId === "general" ? null : JSON.stringify(["channel", channelId]);
 }
+export function directDraftKey(memberId) { return JSON.stringify(["direct", memberId]); }
+export function directDraftPeer(key) {
+  try {
+    const value = JSON.parse(key);
+    return Array.isArray(value) && value.length === 2 && value[0] === "direct"
+      && typeof value[1] === "string" && value[1] ? value[1] : null;
+  } catch { return null; }
+}
+export function directMessagePeer(message, viewerId) {
+  if (!message?.toMemberId || !viewerId) return null;
+  if (message.authorId === viewerId) return message.toMemberId;
+  return message.toMemberId === viewerId ? message.authorId : null;
+}
 function isChannelDraftKey(key) {
   try { const value = JSON.parse(key); return Array.isArray(value) && value.length === 2 && value[0] === "channel" && typeof value[1] === "string"; }
   catch { return false; }
@@ -459,7 +502,7 @@ function isChannelDraftKey(key) {
 export class ConversationDrafts {
   constructor() { this.entries = new Map(); }
   get(threadId = null) {
-    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: "", replyToId: isChannelDraftKey(threadId) ? null : threadId, pending: null, error: "" });
+    if (!this.entries.has(threadId)) this.entries.set(threadId, { body: "", toMemberId: directDraftPeer(threadId) ?? "", replyToId: isChannelDraftKey(threadId) || directDraftPeer(threadId) ? null : threadId, pending: null, error: "" });
     return this.entries.get(threadId);
   }
   save(threadId, values) { Object.assign(this.get(threadId), values); }
@@ -567,14 +610,16 @@ export class DraftRecovery {
           assistantDraft = { action: input.action, runId: input.runId, sourceMessageId: source.id,
             expectedRevision: input.expectedRevision, ...(input.action === 'contribute' ? { conflict: input.conflict } : {}) };
         }
+        const directPeer = directDraftPeer(id);
+        if (directPeer && d.toMemberId !== directPeer) continue;
         const channelRoot = id === null || isChannelDraftKey(id);
-        const draftId = channelRoot ? channelDraftKey(channelId ?? "general") : id;
-        if (isChannelDraftKey(id) && id !== draftId) continue;
+        const draftId = channelRoot ? (d.toMemberId ? directDraftKey(d.toMemberId) : channelDraftKey(channelId ?? "general")) : id;
+        if (isChannelDraftKey(id) && id !== channelDraftKey(channelId ?? "general")) continue;
         if (channelId && channelId !== "general" && !state.channels?.[channelId]) continue;
-        if (!channelRoot && !assistantDraft && !index.threads.has(id)) continue;
+        if (!channelRoot && !directPeer && !assistantDraft && !index.threads.has(id)) continue;
         if (typeof d.body !== "string" || typeof d.toMemberId !== "string") continue;
         if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
-        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && !assistantDraft && index.rootById.get(d.replyToId) !== id
+        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && !directPeer && !assistantDraft && index.rootById.get(d.replyToId) !== id
           || channelRoot && (index.byId.get(d.replyToId).channelId ?? "general") !== (channelId ?? "general"))) continue;
         // The current client has separate command and message identities. Preserve
         // both, then recompute the entire permitted payload before accepting a retry.
@@ -603,11 +648,35 @@ export class DraftRecovery {
           activeKey = root.id;
         }
       }
+      // An empty DM is still a navigation choice. Restore only its destination,
+      // never a rejected draft or retained operation.
+      const emptyPeer = directDraftPeer(saved.activeKey);
+      if (activeKey === null && saved.threadId === null && emptyPeer
+        && saved.activeKey === directDraftKey(emptyPeer)
+        && !saved.entries.some(([id, draft]) => id === saved.activeKey
+          || (id === null || isChannelDraftKey(id) || directDraftPeer(id)) && draft?.toMemberId === emptyPeer)
+        && Object.hasOwn(state.members ?? {}, emptyPeer)
+        && state.members[emptyPeer].active !== false && !state.members[emptyPeer].identityRevoked) {
+        activeKey = saved.activeKey;
+        drafts.get(activeKey);
+      }
+      // Empty channels have the same navigation lifetime as empty DMs.
+      if (activeKey === null && saved.threadId === null && isChannelDraftKey(saved.activeKey)
+        && !saved.entries.some(([id]) => id === saved.activeKey)) {
+        const channelId = JSON.parse(saved.activeKey)[1];
+        if (saved.activeKey === channelDraftKey(channelId) && Object.hasOwn(state.channels ?? {}, channelId)
+          && !saved.entries.some(([id, draft]) => (id === null || isChannelDraftKey(id)) && draft?.channelId === channelId)
+          && !state.channels[channelId].archivedAt) {
+          activeKey = saved.activeKey;
+          drafts.save(activeKey, { channelId });
+        }
+      }
       const active = drafts.entries.get(activeKey);
       if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
       const selected = drafts.entries.get(activeKey);
       return { drafts, activeKey, channelId: selected?.channelId ?? "general",
-        threadId: selected?.assistantDraft ? index.rootById.get(selected.assistantDraft.sourceMessageId) : selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) ? null : activeKey };
+        directMemberId: directDraftPeer(activeKey),
+        threadId: selected?.assistantDraft ? index.rootById.get(selected.assistantDraft.sourceMessageId) : selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) || directDraftPeer(activeKey) ? null : activeKey };
     } catch { this.clear(); return null; }
   }
 }

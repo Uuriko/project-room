@@ -182,10 +182,10 @@ export function collapseClaimUpdates(events) {
   return groups;
 }
 
-export function paintClaimChat(state, list) {
+export function paintClaimChat(state, list, { visible = true } = {}) {
   if (!list) return;
   list.querySelectorAll("[data-claim-update]").forEach(node => node.remove());
-  if (!state) return;
+  if (!state || !visible) return;
   const groups = collapseClaimUpdates(state.eventLog);
   if (!groups.length) return;
   // One pass over the room's messages: a find() per rendered message was

@@ -47,13 +47,16 @@ test("work changes: stale-basis drafts explain what changed, current drafts stay
   // The basis is pinned on the toggle and the explanation starts hidden.
   assert.equal(await toggle.getAttribute("data-basis"), "0");
   assert.equal(await card.locator('[data-changes-list]').isVisible(), false);
-  await toggle.click();
+  await toggle.press("Enter");
   const list = card.locator('[data-changes-list]');
   await list.waitFor({ state: "visible" });
   assert.match(await list.innerText(), /r1 Accepted · Test producer/);
+  assert.equal(await toggle.getAttribute("aria-expanded"), "true");
+  assert.equal(await toggle.evaluate(node => node === document.activeElement), true, "loading history preserves keyboard focus");
   // Toggling again collapses; the card's own actions were never blocked.
   await toggle.click();
   assert.equal(await list.isVisible(), false);
+  assert.equal(await toggle.getAttribute("aria-expanded"), "false");
   await toggle.click();
   await list.waitFor({ state: "visible" });
   // Current-basis work shows no prompt at all.

@@ -40,7 +40,7 @@ async function setup(t, touch = false) {
   return { fixture, origin, page, errors, requests };
 }
 async function create(page) {
-  await page.locator('#share-link-create').click();
+  await clickChrome(page, "#share-link-create");
   await page.locator('#share-link-result').waitFor({ state: 'visible' });
   return page.locator('#share-link-url').inputValue();
 }

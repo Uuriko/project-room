@@ -239,11 +239,9 @@ test("Add agent markup lists the four roster names", () => {
   assert.doesNotMatch(app, /How to open Inbox/);
   assert.match(app, /#auth-title.*PROJECT ROOM/);
   assert.match(app, /Open room/);
-  assert.match(app, /data-empty-write/);
   assert.match(app, /No completed results yet/);
   assert.match(html, /id="mention-list"/);
   assert.match(html, />Add agent</);
-  assert.match(app, /data-empty-invite/);
   assert.match(app, /presence-heading/);
   assert.match(app, /member-status/);
   assert.match(app, /member-profile/);

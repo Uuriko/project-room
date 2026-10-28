@@ -33,7 +33,7 @@ for (const touch of [false, true]) {
     await page.locator('#main').waitFor({ state: 'visible' });
     await page.waitForFunction(() => document.querySelector('#connection-status').textContent === 'Connected');
     assert.equal(await page.locator('#connection-details').evaluate(el => el.open), false);
-    await page.locator('#session-menu-button').click();
+    await clickChrome(page, "#session-menu-button");
     await page.locator('#connection-details > summary').click();
     assert.match(await page.locator('#connection-explanation').textContent(), /no peer read or processing receipt/);
     await page.locator('#connection-details > summary').click();
@@ -56,13 +56,14 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator('#share-settings').evaluate(el => el.open), false);
     assert.equal(await page.locator('#share-management').evaluate(el => el.open), false);
     assert.equal(await page.locator('#share-settings-summary').textContent(), '24 hours · 10 guests');
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'share-link-create');
+    assert.equal(await page.evaluate(() => document.activeElement.id), 'share-link-close');
     mkdirSync('test-results', { recursive: true });
     await page.screenshot({ path: `test-results/quiet-invite-${touch ? 'touch' : 'desktop'}-start.png` });
+    await page.locator('#share-custom-summary').click();
     await page.locator('#share-settings > summary').click();
     await page.locator('#share-link-limit').fill('0');
     await page.locator('#share-settings > summary').click();
-    await page.locator('#share-link-create').click();
+    await clickChrome(page, "#share-link-create");
     assert.equal(await page.locator('#share-settings').evaluate(el => el.open), true, 'invalid hidden field is revealed');
     assert.equal(await page.evaluate(() => document.activeElement.id), 'share-link-limit');
     assert.equal(creates.length, 0);
@@ -70,12 +71,12 @@ for (const touch of [false, true]) {
     await page.locator('#share-link-expiry').selectOption('1');
     assert.equal(await page.locator('#share-settings-summary').textContent(), '1 hour · 3 guests');
     await page.locator('#share-settings > summary').click();
-    await page.locator('#share-link-create').click();
+    await clickChrome(page, "#share-link-create");
     await page.waitForFunction(() => document.querySelector('#share-link-status').textContent.includes('could not confirm the result'));
     assert.equal(await page.locator('#share-link-limit').isDisabled(), false);
     // Opening limits alone must not create a different retry request.
     await page.locator('#share-settings > summary').click(); await page.locator('#share-settings > summary').click();
-    await page.locator('#share-link-create').click();
+    await clickChrome(page, "#share-link-create");
     await page.locator('#share-link-result').waitFor({ state: 'visible' });
     assert.deepEqual(creates[1], creates[0]);
     assert.equal(creates[0].maxJoins, 3);
@@ -162,7 +163,7 @@ test('the Invite dialog still opens when the creator-only Access control is miss
   await page.evaluate(() => document.querySelector('#share-link-access-label').remove());
   await clickChrome(page, '#invite-people-button');
   await page.locator('#share-link-dialog').waitFor({ state: 'visible' });
-  assert.equal(await page.locator('#share-link-create').evaluate(node => node === document.activeElement), true, 'focus lands on Create');
+  assert.equal(await page.locator('#share-link-close').evaluate(node => node === document.activeElement), true, 'focus lands on the visible Close control');
   assert.deepEqual(errors, [], 'opening the dialog throws nothing');
 });
 

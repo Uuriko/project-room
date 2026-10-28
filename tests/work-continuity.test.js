@@ -1,12 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { workStatus } from "../src/work-status.js";
-import { ConversationDrafts, channelDraftKey, DraftRecovery } from "../src/conversation.js";
+import { ConversationDrafts, channelDraftKey, directDraftKey, DraftRecovery } from "../src/conversation.js";
 import { draftCommand } from "../src/client.js";
 
 test("recorded completion stays pending until the current evidence passes its gates", () => {
   const item = { state: "completed", accountableMemberId: "a", verifierMemberId: "v", humanDecisionMakerId: "h", independentVerificationRequired: true, ownerDecisionRequired: true, receipt: { eventId: "new", evidenceVersion: "v2", producerAttribution: "reported", producerId: "a" } };
-  assert.equal(workStatus(item).label, "Awaiting verification");
+  assert.equal(workStatus(item).label, "Awaiting review");
   item.verification = { result: "pass", completionEventId: "old", evidenceVersion: "v1" };
   assert.equal(workStatus(item).owner, "v");
   item.verification = { result: "pass", completionEventId: "new", evidenceVersion: "v2", verifierId: "v", independenceConfirmed: true };
@@ -31,7 +31,7 @@ test("status and terminality preserve producer independence across the client in
   assert.equal(terminalWork(item), false);
   assert.equal(workStatus(item).label, "Reviewer conflict");
   item.receipt.producerId = "a";
-  assert.equal(workStatus(item).label, "Awaiting verification");
+  assert.equal(workStatus(item).label, "Awaiting review");
   item.verification.independenceConfirmed = true;
   item.verification.verifierId = "other";
   assert.equal(terminalWork(item), false, "a different verifier cannot satisfy the assigned review");
@@ -154,4 +154,90 @@ test("empty thread navigation is scoped and never revives rejected drafts", () =
   assert.equal(f.recovery.read("scope", f.state).threadId, null);
   save();
   assert.equal(f.recovery.read("other-session", f.state), null);
+});
+
+
+test("empty direct conversation survives refresh without inventing a send", () => {
+  const f = fixture(), drafts = new ConversationDrafts(), key = directDraftKey("a");
+  drafts.get(key);
+  f.recovery.write("scope", drafts, null, key);
+  const restored = f.recovery.read("scope", f.state);
+  assert.equal(restored.activeKey, key);
+  assert.equal(restored.directMemberId, "a");
+  assert.equal(restored.threadId, null);
+  assert.deepEqual(restored.drafts.get(key), { body: "", toMemberId: "a", replyToId: null, pending: null, error: "" });
+  for (const change of [
+    state => { delete state.members.a; },
+    state => { state.members.a.active = false; },
+    state => { state.members.a.identityRevoked = true; },
+  ]) {
+    const state = structuredClone(f.state); change(state);
+    assert.equal(f.recovery.read("scope", state).directMemberId, null);
+  }
+  f.advance();
+  assert.equal(f.recovery.read("scope", f.state), null);
+  f.recovery.write("scope", drafts, null, key);
+  assert.equal(f.recovery.read("other-account-or-room", f.state), null);
+});
+
+test("empty DM navigation cannot revive rejected draft entries or malformed destinations", () => {
+  const f = fixture(), key = directDraftKey("a");
+  f.recovery.write("scope", new ConversationDrafts(), null, key);
+  const original = JSON.parse(f.memory.get(f.recovery.key));
+  for (const change of [
+    saved => { saved.entries = [[key, { body: "Private draft", toMemberId: "missing", replyToId: null }]]; },
+    saved => { saved.entries = [[directDraftKey("other"), { body: "Rejected private draft", toMemberId: "a", replyToId: null }]]; },
+    saved => { saved.threadId = "thread"; },
+    saved => { saved.activeKey = '["direct", "a"]'; },
+    saved => { saved.activeKey = '["direct", ""]'; },
+    saved => { saved.activeKey = "invalid"; },
+    saved => { saved.activeKey = directDraftKey("toString"); },
+  ]) {
+    const saved = structuredClone(original); change(saved);
+    f.memory.set(f.recovery.key, JSON.stringify(saved));
+    const restored = f.recovery.read("scope", f.state);
+    assert.equal(restored.directMemberId, null);
+    assert.equal(restored.drafts.entries.has(key), false);
+  }
+});
+
+test("empty channel selection survives refresh without replacing other drafts", () => {
+  const f = fixture(), drafts = new ConversationDrafts(), key = channelDraftKey("design");
+  f.state.channels = { design: { id: "design" } };
+  drafts.save(null, { body: "Keep general draft", toMemberId: "", replyToId: null, channelId: "general" });
+  f.recovery.write("scope", drafts, null, key);
+  const restored = f.recovery.read("scope", f.state);
+  assert.equal(restored.activeKey, key);
+  assert.equal(restored.channelId, "design");
+  assert.equal(restored.threadId, null);
+  assert.equal(restored.directMemberId, null);
+  assert.equal(restored.drafts.get(null).body, "Keep general draft");
+  assert.deepEqual(restored.drafts.get(key), { body: "", toMemberId: "", replyToId: null, pending: null, error: "", channelId: "design" });
+});
+
+test("empty channel recovery rejects missing, archived, malformed and rejected destinations", () => {
+  const f = fixture(), key = channelDraftKey("design");
+  f.state.channels = { design: { id: "design" } };
+  f.recovery.write("scope", new ConversationDrafts(), null, key);
+  const original = JSON.parse(f.memory.get(f.recovery.key));
+  for (const change of [
+    (saved, state) => { delete state.channels.design; },
+    (saved, state) => { state.channels.design.archivedAt = "now"; },
+    saved => { saved.activeKey = '["channel", "design"]'; },
+    saved => { saved.activeKey = channelDraftKey("toString"); },
+    saved => { saved.threadId = "thread"; },
+    saved => { saved.entries = [[key, { body: "Rejected private text", toMemberId: "missing", replyToId: null, channelId: "design" }]]; },
+  ]) {
+    const saved = structuredClone(original), state = structuredClone(f.state);
+    change(saved, state);
+    f.memory.set(f.recovery.key, JSON.stringify(saved));
+    const restored = f.recovery.read("scope", state);
+    assert.equal(restored.channelId, "general");
+    assert.equal(restored.drafts.entries.has(key), false);
+  }
+  f.recovery.write("scope", new ConversationDrafts(), null, key);
+  f.advance();
+  assert.equal(f.recovery.read("scope", f.state), null);
+  f.recovery.write("scope", new ConversationDrafts(), null, key);
+  assert.equal(f.recovery.read("other-room-or-account", f.state), null);
 });

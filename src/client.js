@@ -1051,11 +1051,19 @@ export class RoomClient {
   markActivityReadAll(type = null) {
     return this.roomWrite("/activity-read-all", type ? { type } : {});
   }
-  readHorizon(threadId = "") {
+  readHorizon(threadId = "", peerMemberId = null) {
+    if (peerMemberId !== null) return this.roomRead(`/read-horizon?peerMemberId=${encodeURIComponent(peerMemberId)}`);
     return this.roomRead(threadId ? `/read-horizon?threadId=${encodeURIComponent(threadId)}` : "/read-horizon");
   }
-  setReadHorizon(threadId, lastReadMessageId) {
-    return this.roomWrite("/read-horizon", { threadId: threadId ?? "", lastReadMessageId });
+  async setReadHorizon(threadId, lastReadMessageId, peerMemberId = null) {
+    const generation = this.generation, session = this.session;
+    const horizon = await this.readHorizon(threadId, peerMemberId);
+    if (generation !== this.generation || session !== this.session) return null;
+    if (typeof horizon?.revision !== "string") throw new Error(uiText("readPosition.refresh"));
+    // Never rebase and retry a conflicted automatic intent. roomWrite retains
+    // this exact payload for its transport attempt; a later user action is new.
+    return this.roomWrite("/read-horizon", { ...(peerMemberId === null ? { threadId: threadId ?? "" } : { peerMemberId }), lastReadMessageId,
+      expectedRevision: horizon.revision, requestId: crypto.randomUUID() });
   }
   savedList() {
     return this.roomRead("/saved");

@@ -175,7 +175,7 @@ for (const width of [1280, 390]) test(`Profile opens directly from chat and save
   await page.evaluate(() => { window.profileClicks = []; document.addEventListener('click', event => {
     const button = event.target.closest('button'); if (button) window.profileClicks.push(button.id || button.textContent.trim());
   }); });
-  await page.locator('#session-menu-button').click();
+  await clickChrome(page, "#session-menu-button");
   assert.equal(await page.locator('#account-profile-button').isVisible(), true, 'account menu exposes a direct profile entry');
   await page.locator('#account-profile-button').click();
   const dialog = page.locator('#account-profile-dialog');
@@ -187,14 +187,14 @@ for (const width of [1280, 390]) test(`Profile opens directly from chat and save
   assert.equal((await saved).status(), 200);
   await dialog.waitFor({ state: 'hidden' });
   assert.equal(f.store.accountProfile(account.account.id).displayName, 'Ada "/><script>window.profileXss=1</script>');
-  assert.deepEqual(await page.evaluate(() => window.profileClicks), ['session-menu-button', 'account-profile-button', 'Save']);
+  assert.deepEqual(await page.evaluate(() => window.profileClicks), [...(width === 390 ? ['sidebar-toggle'] : []), 'session-menu-button', 'account-profile-button', 'Save']);
   assert.equal(await page.locator('#main').isVisible(), true);
   assert.equal(page.url(), roomUrl);
   assert.equal(await page.locator('#message-input').inputValue(), 'Keep this unsent draft');
   assert.equal(await page.locator('#identity-label').textContent(), roomIdentity);
   await page.waitForFunction(() => document.activeElement === document.querySelector('#session-menu-button'));
   assert.equal(await page.locator('#session-menu-button').evaluate(el => el === document.activeElement), true);
-  await page.locator('#session-menu-button').click();
+  await clickChrome(page, "#session-menu-button");
   await page.locator('#account-profile-button').click();
   await dialog.locator('[name="displayName"]').waitFor();
   assert.equal(await dialog.locator('[name="displayName"]').inputValue(), 'Ada "/><script>window.profileXss=1</script>', 'saved untrusted text is escaped when editing again');
@@ -228,7 +228,7 @@ for (const method of ['GET', 'POST']) test(`Profile ignores a held ${method} res
     const response = await route.fetch(); captured(response.status());
     await held; await route.fulfill({ response });
   });
-  await page.locator('#session-menu-button').click();
+  await clickChrome(page, "#session-menu-button");
   await page.locator('#account-profile-button').click();
   if (method === 'POST') {
     const form = page.locator('#account-profile-dialog form');
@@ -245,7 +245,7 @@ for (const method of ['GET', 'POST']) test(`Profile ignores a held ${method} res
   await login.locator('[name="password"]').fill('synthetic-next-password');
   await login.locator('button[type="submit"]').click();
   await page.locator('#auth-panel').waitFor({ state: 'hidden' });
-  await page.locator('#session-menu-button').click();
+  await clickChrome(page, "#session-menu-button");
   await page.locator('#account-profile-button').click();
   const current = page.locator('#account-profile-dialog [name="displayName"]');
   await current.waitFor(); assert.equal(await current.inputValue(), 'Next private account name');

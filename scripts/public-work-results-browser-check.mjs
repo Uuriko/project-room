@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 // Real HTTP submission/review and private owner UI; no live identities or mail.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -84,7 +85,7 @@ test('logout clears private result notes and a held results response cannot rest
   const f = await setup(t); await open(f); await row(f).locator('[data-review-feedback]').fill('Private draft feedback'); let release, observed;
   const held = new Promise(resolve => { release = resolve; }), captured = new Promise(resolve => { observed = resolve; }); t.after(() => release());
   await f.page.route('**/public-work/results?*', async route => { const response = await route.fetch(); observed(); await held; await route.fulfill({ response }); });
-  await f.page.locator('#owner-results-refresh').click(); await captured; await f.page.locator('#owner-offers-close').click(); f.page.on('dialog', dialog => dialog.accept()); await f.page.locator('#session-menu-button').click(); await f.page.locator('#signout-button').click(); await f.page.locator('#auth-panel').waitFor({ state: 'visible' });
+  await f.page.locator('#owner-results-refresh').click(); await captured; await f.page.locator('#owner-offers-close').click(); f.page.on('dialog', dialog => dialog.accept()); await clickChrome(f.page, "#session-menu-button"); await f.page.locator('#signout-button').click(); await f.page.locator('#auth-panel').waitFor({ state: 'visible' });
   const delivered = f.page.waitForEvent('requestfinished', request => request.url().includes('/public-work/results?')); release(); await delivered; await f.page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await f.page.locator('#owner-results-list').textContent(), ''); assert.equal(await f.page.locator('#owner-offers-open').isVisible(), false);
 });

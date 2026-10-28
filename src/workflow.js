@@ -154,7 +154,7 @@ export function workStatus(item, now = Date.now()) {
     superseded: "Replaced", triaged_handoff: "Handoff open", accept: "Awaiting acceptance", start: "Accepted", claim: "Scope needed",
     in_progress: "Working · reported", revise: "Blocked", unknown: "Needs reconciliation",
     provide_evidence: "Evidence missing", establish_provenance: "Producer unknown",
-    resolve_independence: "Reviewer conflict", verify: "Awaiting verification",
+    resolve_independence: "Reviewer conflict", verify: "Awaiting review",
     decide: "Awaiting decision", complete: "Completed"
   };
   return { label: next.action === "establish_provenance" && item.receipt?.producerAttribution === "external-reported" ? "Outside credit" : labels[next.action], tone: next.action === "complete" ? "completed" : next.action === "revise" ? "blocked" : "pending", next: item.state === S.BLOCKED

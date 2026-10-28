@@ -1,3 +1,4 @@
+import { clickChrome } from "./room-chrome.mjs";
 import { openMagicSignin } from "./signin-browser-journey.mjs";
 // Welcome, sign-out, and return-to-room checks for a new human account.
 import test from "node:test";
@@ -172,7 +173,7 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   });
   await fileButton.click();
   await captured;
-  await page.locator("#session-menu-button").click();
+  await clickChrome(page, "#session-menu-button");
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   const staleRead = page.waitForResponse(response => new URL(response.url()).pathname.endsWith(`/files/${fileId}`));
@@ -186,7 +187,7 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   await page.locator("#main").waitFor({ state: "visible" });
   assert.equal(await page.locator("#inbox-panel").isVisible(), false);
 
-  await page.locator("#session-menu-button").click();
+  await clickChrome(page, "#session-menu-button");
   await page.locator("#signout-button").click();
   await page.locator("#auth-panel").waitFor({ state: "visible" });
   await page.goto(origin + "/?room=stranger-room");

@@ -53,3 +53,16 @@ test("one paint reads the message list a bounded number of times, not once per r
   paintClaimChat(state, fakeDom(plain.map(message => message.id)));
   assert.ok(reads <= 2 * count, `read ${reads} message slots for ${count} messages`);
 });
+
+test("leaving the operator conversation removes claim lines without touching messages or reading the event log", t => {
+  withDocument(t);
+  const list = fakeDom(["private-message"]);
+  const state = { messages: [], members: {}, eventLog: [claimEvent("card", 15)] };
+  paintClaimChat(state, list);
+  assert.equal(list.children.length, 2);
+  const hiddenState = { get eventLog() { throw new Error("unrelated activity should not be read"); } };
+  paintClaimChat(hiddenState, list, { visible: false });
+  assert.deepEqual(list.children.map(node => node.dataset.messageRecordId), ["private-message"]);
+  paintClaimChat(null, list, { visible: false });
+  assert.equal(list.children.length, 1);
+});

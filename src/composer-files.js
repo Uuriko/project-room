@@ -61,9 +61,9 @@ export function attachFailureCopy(error) {
 }
 
 // Files commit onto a message after it posts, and the commit appends no room
-// event, so another member's client reads the file list again shortly after
-// their message arrives, then once more to cover a slow commit.
+// event, so clients refresh after arrivals they did not send locally, including
+// another session of the same account. Retry once to cover a slow commit.
 export const ROOM_FILE_REFRESH_DELAYS_MS = Object.freeze([1200, 5000]);
-export function arrivalsNeedFileRefresh(newMessages, selfId) {
-  return (newMessages || []).some(message => message && message.authorId !== selfId);
+export function arrivalsNeedFileRefresh(newMessages, locallyOwnedMessageIds = new Set()) {
+  return (newMessages || []).some(message => message && !locallyOwnedMessageIds.has(message.id));
 }
