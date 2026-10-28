@@ -36,6 +36,8 @@ test("new host recipes write the hosted server entry and never embed a secret va
   const oc = JSON.parse(planTool("opencode", { project: home, home, url: URL, platform: "linux", claude: null }).files[0].contents).mcp[SERVER_NAME];
   assert.equal(oc.headers.Authorization, `Bearer {env:${SECRET_ENV}}`);
   assert.equal(oc.oauth, false);
+  const gm = JSON.parse(planTool("gemini", { project: home, home, url: URL, platform: "linux", claude: null }).files[0].contents).mcpServers[SERVER_NAME];
+  assert.equal(gm.headers.Authorization, "Bearer ${" + SECRET_ENV + "}");
   const grok = planTool("grok", { project: home, home, url: URL, platform: "linux", claude: null });
   assert.equal(grok.files[0].path, join(home, ".grok", "config.toml"));
   assert.match(grok.files[0].contents, new RegExp(`\\[mcp_servers\\.${SERVER_NAME}\\]`));

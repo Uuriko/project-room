@@ -100,7 +100,7 @@ export function planTool(tool, { project, home, url, platform, claude }) {
     const path = join(dir, "settings.json");
     files.push({ path, contents: planJson(path, readOrNull(path), data => {
       data.mcpServers ??= {};
-      data.mcpServers[SERVER_NAME] = { httpUrl: url, headers: { Authorization: envHeader() } };
+      data.mcpServers[SERVER_NAME] = { httpUrl: url, headers: { Authorization: "Bearer ${" + SECRET_ENV + "}" } };
     }) });
     next = "Gemini CLI reads " + path + ". Export " + SECRET_ENV + " from room token, then start gemini.";
   } else if (tool === "copilot") {
