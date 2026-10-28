@@ -6,26 +6,26 @@
     3677
   ],
   "sources": {
-    "routeTableRows": 141,
-    "legacyRoutes": 880,
-    "openapiOperations": 538,
-    "mcpTools": 121,
+    "routeTableRows": 158,
+    "legacyRoutes": 879,
+    "openapiOperations": 554,
+    "mcpTools": 123,
     "unifyRStreams": 4
   },
   "counts": {
-    "rows": 1145,
-    "httpRows": 1020,
-    "mutatingHttpRows": 340,
-    "mcpToolRows": 121,
-    "mutatingMcpToolRows": 76,
+    "rows": 1163,
+    "httpRows": 1036,
+    "mutatingHttpRows": 346,
+    "mcpToolRows": 123,
+    "mutatingMcpToolRows": 77,
     "streamRows": 4,
-    "walkFiles": 32,
+    "walkFiles": 34,
     "runOnceAdopters": [
       "server/attention.mjs",
       "server/buyer-signoff.mjs"
     ],
-    "keySurfaceFiles": 23,
-    "nextCursorFiles": 31
+    "keySurfaceFiles": 24,
+    "nextCursorFiles": 33
   },
   "rows": [
     {
@@ -1710,6 +1710,36 @@
       }
     },
     {
+      "surface": "GET /api/agent-invites/redeem",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/agent-invites/redeem",
+      "tool": null,
+      "routeId": "agent-invite-availability",
+      "module": "server/routes/agent-invite-redeem.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "body:requestId",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "none",
+        "journalStore": "undeclared",
+        "runOnceClass": "hand-rolled",
+        "moneyFlag": false,
+        "existingTest": "tests/route-publication.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "public",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
       "surface": "GET /api/agent-keys",
       "kind": "http",
       "method": "GET",
@@ -3266,6 +3296,66 @@
       }
     },
     {
+      "surface": "GET /api/pair",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/pair",
+      "tool": null,
+      "routeId": "pair-start-get",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "none",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/route-publication.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "public",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
+      "surface": "GET /api/pair/{pairId}",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/pair/{pairId}",
+      "tool": null,
+      "routeId": "pair-poll",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "none",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/route-publication.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "public",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
       "surface": "GET /api/project-offers",
       "kind": "http",
       "method": "GET",
@@ -3641,7 +3731,7 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": null
+        "existingTest": "tests/route-publication.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -3671,7 +3761,37 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": null
+        "existingTest": "tests/route-publication.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "public",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
+      "surface": "GET /api/public/door-funnel",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/public/door-funnel",
+      "tool": null,
+      "routeId": "public.door-funnel",
+      "module": "server/routes/door-funnel.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "none",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/door-funnel.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -3701,7 +3821,7 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": "tests/front-door-routes.test.js"
+        "existingTest": "tests/route-publication.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -8993,6 +9113,36 @@
       }
     },
     {
+      "surface": "GET /api/rooms/{roomId}/bootstrap",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/rooms/{roomId}/bootstrap",
+      "tool": null,
+      "routeId": "room-bootstrap",
+      "module": "server/routes/room-window.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "room",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/room-speed-read.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "room",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
       "surface": "GET /api/rooms/{roomId}/code",
       "kind": "http",
       "method": "GET",
@@ -9433,6 +9583,66 @@
         "runOnceClass": "none",
         "moneyFlag": false,
         "existingTest": "tests/board-wake-ready-work.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "room",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
+      "surface": "GET /api/rooms/{roomId}/messages",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/rooms/{roomId}/messages",
+      "tool": null,
+      "routeId": "room-messages",
+      "module": "server/routes/room-window.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "room",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/messages-backfill-blocks.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "room",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
+      "surface": "GET /api/rooms/{roomId}/pairs",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/rooms/{roomId}/pairs",
+      "tool": null,
+      "routeId": "pair-list",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "room",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": null
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -9953,6 +10163,36 @@
       }
     },
     {
+      "surface": "GET /api/verdict-inbox",
+      "kind": "http",
+      "method": "GET",
+      "path": "/api/verdict-inbox",
+      "tool": null,
+      "routeId": "verdict-inbox",
+      "module": "server/routes/verdict-inbox.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "bearer",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/verdict-inbox.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "worker",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
       "surface": "GET /api/version",
       "kind": "http",
       "method": "GET",
@@ -10149,7 +10389,7 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": "tests/analytics-map.test.js"
+        "existingTest": "tests/route-publication.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -10179,7 +10419,7 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": "tests/ci-action-pinning.test.js"
+        "existingTest": "tests/route-publication.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -10768,6 +11008,66 @@
         "capBehaviour": "undeclared",
         "ackSemantics": "undeclared",
         "signer": "signed (module-declared)"
+      }
+    },
+    {
+      "surface": "GET /pair",
+      "kind": "http",
+      "method": "GET",
+      "path": "/pair",
+      "tool": null,
+      "routeId": "pair-page-get",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "none",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/route-publication.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "public",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
+      "surface": "GET /pair/{userCode}",
+      "kind": "http",
+      "method": "GET",
+      "path": "/pair/{userCode}",
+      "tool": null,
+      "routeId": "pair-phone",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "none",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/route-publication.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "public",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
       }
     },
     {
@@ -14317,7 +14617,7 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": "tests/front-door-routes.test.js"
+        "existingTest": "tests/route-publication.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -17545,7 +17845,7 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": "tests/analytics-map.test.js"
+        "existingTest": "tests/route-publication.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -17575,7 +17875,7 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": "tests/ci-action-pinning.test.js"
+        "existingTest": "tests/route-publication.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -23210,6 +23510,41 @@
       }
     },
     {
+      "surface": "mcp:room_merge_members",
+      "kind": "mcp-tool",
+      "method": null,
+      "path": null,
+      "tool": "room_merge_members",
+      "routeId": null,
+      "module": null,
+      "sources": [
+        "mcp-catalog"
+      ],
+      "mutating": true,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "undeclared",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": null
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "undeclared",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      },
+      "mcpAnnotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
       "surface": "mcp:room_needs_me",
       "kind": "mcp-tool",
       "method": null,
@@ -23425,6 +23760,41 @@
       "method": null,
       "path": null,
       "tool": "room_read_board",
+      "routeId": null,
+      "module": null,
+      "sources": [
+        "mcp-catalog"
+      ],
+      "mutating": false,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "undeclared",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": null
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "undeclared",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      },
+      "mcpAnnotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "surface": "mcp:room_read_bootstrap",
+      "kind": "mcp-tool",
+      "method": null,
+      "path": null,
+      "tool": "room_read_bootstrap",
       "routeId": null,
       "module": null,
       "sources": [
@@ -26024,28 +26394,28 @@
       "method": "POST",
       "path": "/api/agent-invites/redeem",
       "tool": null,
-      "routeId": null,
-      "module": "server/http.mjs",
+      "routeId": "agent-invite-redeem",
+      "module": "server/routes/agent-invite-redeem.mjs",
       "sources": [
-        "legacy-http",
+        "route-table",
         "openapi"
       ],
       "mutating": true,
       "idempotency": {
         "keyPlacement": "body:requestId",
         "scopeDerivation": "undeclared",
-        "actorBinding": "open",
+        "actorBinding": "none",
         "journalStore": "undeclared",
         "runOnceClass": "hand-rolled",
         "moneyFlag": false,
-        "existingTest": null
+        "existingTest": "tests/agent-invite-redeem-routes.test.js"
       },
       "walk": {
-        "cursorShape": "declared-in-module (nextCursor)",
-        "scopeBinding": "undeclared",
+        "cursorShape": "none-declared",
+        "scopeBinding": "public",
         "capBehaviour": "undeclared",
         "ackSemantics": "undeclared",
-        "signer": "signed (module-declared)"
+        "signer": "none-declared"
       }
     },
     {
@@ -26136,6 +26506,36 @@
         "capBehaviour": "undeclared",
         "ackSemantics": "undeclared",
         "signer": "signed (module-declared)"
+      }
+    },
+    {
+      "surface": "POST /api/agent-rooms/{roomId}/token/rotate",
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/agent-rooms/{roomId}/token/rotate",
+      "tool": null,
+      "routeId": "agent-room-token.rotate",
+      "module": "server/routes/agent-room-token.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": true,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "bearer",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/agent-room-token-route.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "room",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
       }
     },
     {
@@ -27909,6 +28309,36 @@
       }
     },
     {
+      "surface": "POST /api/pair",
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/pair",
+      "tool": null,
+      "routeId": "pair-start-post",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": true,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "none",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": "tests/route-publication.test.js"
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "public",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
       "surface": "POST /api/public-work/match",
       "kind": "http",
       "method": "POST",
@@ -28194,7 +28624,7 @@
         "journalStore": "undeclared",
         "runOnceClass": "none",
         "moneyFlag": false,
-        "existingTest": null
+        "existingTest": "tests/route-publication.test.js"
       },
       "walk": {
         "cursorShape": "none-declared",
@@ -32816,6 +33246,36 @@
       }
     },
     {
+      "surface": "POST /api/rooms/{roomId}/join-policy",
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/rooms/{roomId}/join-policy",
+      "tool": null,
+      "routeId": "pair-join-policy",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": true,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "room",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": null
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "room",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
       "surface": "POST /api/rooms/{roomId}/map",
       "kind": "http",
       "method": "POST",
@@ -32894,6 +33354,96 @@
         "actorBinding": "room",
         "journalStore": "undeclared",
         "runOnceClass": "hand-rolled",
+        "moneyFlag": false,
+        "existingTest": null
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "room",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
+      "surface": "POST /api/rooms/{roomId}/members/merge",
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/rooms/{roomId}/members/merge",
+      "tool": null,
+      "routeId": "members-merge",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": true,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "room",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": null
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "room",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
+      "surface": "POST /api/rooms/{roomId}/pairs/{pairId}/decide",
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/rooms/{roomId}/pairs/{pairId}/decide",
+      "tool": null,
+      "routeId": "pair-decide",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": true,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "room",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
+        "moneyFlag": false,
+        "existingTest": null
+      },
+      "walk": {
+        "cursorShape": "none-declared",
+        "scopeBinding": "room",
+        "capBehaviour": "undeclared",
+        "ackSemantics": "undeclared",
+        "signer": "none-declared"
+      }
+    },
+    {
+      "surface": "POST /api/rooms/{roomId}/pairs/decide",
+      "kind": "http",
+      "method": "POST",
+      "path": "/api/rooms/{roomId}/pairs/decide",
+      "tool": null,
+      "routeId": "pair-decide-code",
+      "module": "server/routes/pairing.mjs",
+      "sources": [
+        "route-table",
+        "openapi"
+      ],
+      "mutating": true,
+      "idempotency": {
+        "keyPlacement": "none-declared",
+        "scopeDerivation": "undeclared",
+        "actorBinding": "room",
+        "journalStore": "undeclared",
+        "runOnceClass": "none",
         "moneyFlag": false,
         "existingTest": null
       },
@@ -34501,6 +35051,17 @@
   ],
   "walkFiles": [
     {
+      "surface": "walk-file:server/agent-audit.mjs",
+      "module": "server/agent-audit.mjs",
+      "cursorShape": "compound-opaque (encode/decodeCursor)",
+      "scopeBinding": "undeclared",
+      "capBehaviour": "undeclared",
+      "ackSemantics": "undeclared",
+      "signer": "none-declared",
+      "importsReadCursor": false,
+      "definesCursorCodec": true
+    },
+    {
       "surface": "walk-file:server/agent-discovery.mjs",
       "module": "server/agent-discovery.mjs",
       "cursorShape": "declared-in-module (nextCursor)",
@@ -34635,6 +35196,17 @@
     {
       "surface": "walk-file:server/discoverability.mjs",
       "module": "server/discoverability.mjs",
+      "cursorShape": "declared-in-module (nextCursor)",
+      "scopeBinding": "undeclared",
+      "capBehaviour": "undeclared",
+      "ackSemantics": "undeclared",
+      "signer": "none-declared",
+      "importsReadCursor": false,
+      "definesCursorCodec": false
+    },
+    {
+      "surface": "walk-file:server/door-funnel.mjs",
+      "module": "server/door-funnel.mjs",
       "cursorShape": "declared-in-module (nextCursor)",
       "scopeBinding": "undeclared",
       "capBehaviour": "undeclared",
@@ -34965,6 +35537,17 @@
       "importsReadCursor": false
     },
     {
+      "module": "server/agent-audit.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": true,
+      "definesCursorCodec": true,
+      "importsReadCursor": false
+    },
+    {
       "module": "server/agent-card-key.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
@@ -35109,6 +35692,17 @@
     },
     {
       "module": "server/agent-listener-contract.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/agent-pause.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
       "mentionsRequestId": false,
@@ -36028,6 +36622,17 @@
       "importsRunOnce": false,
       "mentionsRequestReplays": false,
       "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/door-funnel.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": true,
       "definesCursorCodec": false,
       "importsReadCursor": false
     },
@@ -37484,6 +38089,17 @@
       "importsReadCursor": false
     },
     {
+      "module": "server/pairing.mjs",
+      "mentionsIdempotency": true,
+      "mentionsKeySurface": true,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
       "module": "server/patrol.mjs",
       "mentionsIdempotency": true,
       "mentionsKeySurface": true,
@@ -37902,6 +38518,17 @@
       "importsReadCursor": false
     },
     {
+      "module": "server/repro-check.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
       "module": "server/reputation.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
@@ -38035,6 +38662,17 @@
     },
     {
       "module": "server/room-attachment-bytes.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/room-bootstrap.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
       "mentionsRequestId": false,
@@ -38232,7 +38870,29 @@
       "importsReadCursor": false
     },
     {
+      "module": "server/routes/agent-invite-redeem.mjs",
+      "mentionsIdempotency": true,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": true,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
       "module": "server/routes/agent-presence.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/routes/agent-room-token.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
       "mentionsRequestId": false,
@@ -38320,6 +38980,17 @@
       "importsReadCursor": false
     },
     {
+      "module": "server/routes/door-funnel.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
       "module": "server/routes/front-door.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
@@ -38357,6 +39028,17 @@
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
       "mentionsRequestId": true,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/routes/pairing.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
       "importsRunOnce": false,
       "mentionsRequestReplays": false,
       "mentionsNextCursor": false,
@@ -38409,6 +39091,17 @@
     },
     {
       "module": "server/routes/room-digest.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/routes/room-window.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
       "mentionsRequestId": false,
@@ -38475,6 +39168,17 @@
     },
     {
       "module": "server/routes/typing.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/routes/verdict-inbox.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
       "mentionsRequestId": false,
@@ -38640,6 +39344,17 @@
     },
     {
       "module": "server/sleeper-wake.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/snapshot-window.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
       "mentionsRequestId": false,
@@ -38904,6 +39619,28 @@
     },
     {
       "module": "server/vendor/gmail-html-sanitizer.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/verdict-inbox-read.mjs",
+      "mentionsIdempotency": false,
+      "mentionsKeySurface": false,
+      "mentionsRequestId": false,
+      "importsRunOnce": false,
+      "mentionsRequestReplays": false,
+      "mentionsNextCursor": false,
+      "definesCursorCodec": false,
+      "importsReadCursor": false
+    },
+    {
+      "module": "server/verdict-inbox.mjs",
       "mentionsIdempotency": false,
       "mentionsKeySurface": false,
       "mentionsRequestId": false,
