@@ -13,6 +13,7 @@ import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { RoomStore } from '../server/store.mjs';
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 const roomId = 'qualify-room';
 const messageId = 'qualify-question';
@@ -22,7 +23,7 @@ async function qualify() {
   const owner = store.identities.create('Qualify owner');
   const agent = store.identities.create('Qualify receiver');
   new AgentRooms(store).create(owner.secret, { roomId, title: 'Qualify', purpose: 'Synthetic receive qualification' });
-  store.identities.link(owner.secret, roomId, { identityId: agent.identityId, memberId: 'receiver', displayName: 'Receiver', permissions: [] });
+  linkWithProof(store, owner.secret, roomId, agent, { memberId: 'receiver', displayName: 'Receiver', permissions: [] });
   store.dmConsents.request(roomId, owner.identityId, 'receiver', 'Synthetic request');
   store.dmConsents.decide(roomId, 'receiver', owner.identityId, 'approve');
   store.dmConsents.request(roomId, 'receiver', owner.identityId, 'Synthetic reply');

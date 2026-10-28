@@ -107,7 +107,7 @@ const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credi
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
 export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
 export const MAX_CREDITS = 1000000;
-const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
+export const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
 const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
 
 // Journal kinds eligible for an Ed25519-signed, externally verifiable
@@ -134,7 +134,7 @@ export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in
 // AI verifier lane judges against the pinned rubric. Chosen at post time,
 // pinned at fund time, immutable after.
 export const APPROVAL_MODES = Object.freeze(["human", "agent"]);
-function stateGroup(state) {
+export function stateGroup(state) {
   switch (state) {
     case "proposed": return "proposed";
     case "funded": return "funded";
