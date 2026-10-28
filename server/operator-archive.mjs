@@ -93,7 +93,9 @@ function certifyAtHead(store, roomId, deadline, eventCap = CATCH_UP_EVENT_CAP) {
 }
 
 export function operatorArchive(store, input, requestId = null, { clock = () => Date.now(), eventCap = CATCH_UP_EVENT_CAP } = {}) {
-  if (!Number.isInteger(eventCap) || eventCap < 1) throw new TypeError("eventCap must be a positive integer");
+  // Automatic relief may have already spent its cooperative catch-up budget.
+  // Zero still requires certification; it only disables more synchronous replay.
+  if (!Number.isInteger(eventCap) || eventCap < 0) throw new TypeError("eventCap must be a non-negative integer");
   if (store?.readOnly) fail(409, "read_only", "This store is read-only");
   const request = parse(input);
   const { roomId, keepNewest, dryRun, reason, expect, belowCursor } = request;

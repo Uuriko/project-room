@@ -528,3 +528,173 @@ test("operator status names the parked room the public health surface cannot", (
     assert.ok(row.error.length > 0 && row.error.length <= 240);
   } finally { store.close(); }
 });
+
+test('large idempotency look-back stays within Workers SQL binding limits', () => {
+  const store = openStore();
+  store.roomFlood={consume(){}};
+  try {
+    post(store, 'prior-key', 'Prior batch');
+    const prior = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.data.messageId')=?").get('alpha','prior-key');
+    const key = JSON.parse(prior.body).idempotencyKey;
+    store.patrolTick();
+    for(let i=0;i<120;i++)post(store,`large-${i}`,'Next batch');
+    const row=store.db.prepare("SELECT id,body FROM events WHERE room_id=? AND json_extract(body,'$.data.messageId')=?").get('alpha','large-119');
+    const event=JSON.parse(row.body);event.idempotencyKey=key;
+    store.db.prepare('UPDATE events SET body=? WHERE id=?').run(JSON.stringify(event),row.id);
+    const prepare=store.db.prepare.bind(store.db);
+    let lookbacks=0;
+    store.db.prepare=sql=>{
+      const statement=prepare(sql);
+      if(sql.includes("AS k") && sql.includes('FROM events')) {
+        lookbacks++;
+        const all=statement.all.bind(statement);
+        statement.all=(...args)=>{assert.ok(args.length<=100,'Workers SQL parameter ceiling');return all(...args);};
+      }
+      return statement;
+    };
+    const result=store.patrolTick();
+    assert.equal(result.errors,undefined);
+    assert.ok(lookbacks>0);
+    assert.ok(store.patrolFindings().some(f=>f.code==='idempotency_duplicate' || f.kind==='idempotency_duplicate'));
+  } finally { store.close(); }
+});
+
+// The PR-outcome settle (settlePullRequest, server/claim-coordination.mjs)
+// is a designed state-mover the verb lifecycle does not govern: when a
+// live claim's pull request merges it completes in place (state done,
+// deliveryMode "merged", a pr_merged history stamp — never a state:done
+// stamp); when the pull closes unmerged it releases like a holder
+// release. Patrol used to file every merge settle from a live state as
+// claim_legality/illegal_transition and every settled claim again as
+// receipt_linkage/done_stamp_count {stamps: 0} (production specimen:
+// muse-room seq 18850, claim codex-admin-friction-1024). These fixtures
+// drive the settle the way claim-pr-sync does — registry row settled in
+// place with settlePullRequest's own output shape, then the settle
+// event receipts it — and pin both legs.
+const SETTLE_URL = "https://github.com/Uuriko/project-room/pull/4583";
+function settleMerged(store, item, atMs, roomId = "alpha") {
+  const settled = {
+    ...item,
+    state: "done",
+    deliveryMode: "merged",
+    pullRequest: { url: SETTLE_URL, outcome: "merged", syncedAt: new Date(atMs).toISOString(), nextPollAt: null, rateLimitedUntil: null },
+    history: [...(item.history ?? []),
+      { at: new Date(atMs).toISOString(), agentId: item.owner ?? "system", action: "pr_merged", note: `pull request merged: ${SETTLE_URL}` }]
+  };
+  return driveClaim(store, settled, "pr_merged", atMs, roomId);
+}
+function settleClosed(store, item, atMs, roomId = "alpha") {
+  const settled = {
+    ...item,
+    state: "unclaimed",
+    owner: null,
+    leaseStartAt: null,
+    leaseExpiresAt: null,
+    files: [],
+    fileBlocks: {},
+    attestations: [],
+    reviews: [],
+    pullRequest: { url: SETTLE_URL, outcome: "closed", syncedAt: new Date(atMs).toISOString(), nextPollAt: null, rateLimitedUntil: null },
+    history: [...(item.history ?? []),
+      { at: new Date(atMs).toISOString(), agentId: item.owner ?? "system", action: "pr_closed", note: `pull request closed: ${SETTLE_URL}` }]
+  };
+  return driveClaim(store, settled, "pr_closed", atMs, roomId);
+}
+function claimedOnly(store, id, roomId = "alpha") {
+  const now = Date.now();
+  let item = createWork({ id, title: `Task ${id}` }, { now, agentId: "owner" });
+  driveClaim(store, item, "created", now, roomId);
+  item = claimWork(item, "owner", { now: now + 1 });
+  driveClaim(store, item, "claimed", now + 1, roomId);
+  return { item, now };
+}
+
+test("settle: a merge settle from claimed files nothing", () => {
+  const store = openStore();
+  try {
+    const { item, now } = claimedOnly(store, "task-settle-claimed");
+    settleMerged(store, item, now + 10);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+test("settle: a merge settle from in_progress files nothing", () => {
+  const store = openStore();
+  try {
+    const { item, now } = honestClaim(store, "task-settle-progress");
+    settleMerged(store, item, now + 10);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+test("settle: a close settle from blocked releases to unclaimed and files nothing", () => {
+  const store = openStore();
+  try {
+    const { item, now } = honestClaim(store, "task-settle-closed");
+    const blocked = updateWork(item, "owner", { state: "blocked", now: now + 3 });
+    driveClaim(store, blocked, "state_changed", now + 3);
+    settleClosed(store, blocked, now + 10);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+test("a verb-shaped claimed -> done still files illegal_transition", () => {
+  const store = openStore();
+  try {
+    const { item, now } = claimedOnly(store, "task-verb-done");
+    // The forgery the settle gate must not bless: the claim jumps
+    // claimed -> done under a verb action (state_changed), skipping
+    // delivered entirely, with a matching registry row and the verb
+    // finish's own state:done stamp. Only the settle's pr_merged /
+    // pr_closed actions may move a live claim to done / unclaimed
+    // outside the lifecycle.
+    const forged = {
+      ...item,
+      state: "done",
+      history: [...(item.history ?? []),
+        { at: new Date(now + 10).toISOString(), agentId: "owner", action: "state:done", note: "forged verb finish" }]
+    };
+    driveClaim(store, forged, "state_changed", now + 10);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 1);
+    const findings = store.patrolFindings();
+    assert.equal(findings.length, 1);
+    assert.equal(findings[0].invariant, "claim_legality");
+    assert.equal(findings[0].kind, "illegal_transition");
+    assert.equal(findings[0].subject_id, "task-verb-done");
+    assert.deepEqual(findings[0].detail, { from: "claimed", to: "done", action: "state_changed" });
+  } finally { store.close(); }
+});
+
+test("settle: the seq-18850 history replays clean (created, claimed, pr_linked, pr_merged)", () => {
+  const store = openStore();
+  try {
+    // The production specimen's exact shape: the claim was created,
+    // claimed, linked to its pull request and settled by the merge —
+    // never started, never finished by verb. Its history carries a
+    // retention_ack and a pr_linked stamp before the pr_merged stamp,
+    // and no state:done stamp anywhere.
+    const { item, now } = claimedOnly(store, "task-18850-shape");
+    const linked = {
+      ...item,
+      pullRequest: { url: SETTLE_URL, outcome: null, syncedAt: new Date(now + 5).toISOString(), nextPollAt: null, rateLimitedUntil: null },
+      history: [...(item.history ?? []),
+        { at: new Date(now + 1).toISOString(), agentId: "owner", action: "retention_ack", note: "retention acknowledged" },
+        { at: new Date(now + 5).toISOString(), agentId: "owner", action: "pr_linked", note: `pull request linked: ${SETTLE_URL}` }]
+    };
+    store.workClaims.set("alpha", linked);
+    settleMerged(store, linked, now + 10);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+    const again = store.patrolTick();
+    assert.equal(again.fresh, 0, "a steady-state tick does not re-file the settle");
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});

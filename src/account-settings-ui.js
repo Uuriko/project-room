@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html-escape.js";
 import { uiText } from "./strings.js";
 // Account settings UI (slice 7, RC-2026-09-17-016).
 //
@@ -8,14 +9,9 @@ import { uiText } from "./strings.js";
 // through an AccountClient with event delegation.
 //
 // Pure helpers exported for tests:
-//   escapeHtml, methodLabel, methodDetail, formatMethodDate,
+//   methodLabel, methodDetail, formatMethodDate,
 //   base64urlToBytes, bytesToBase64url, toRegistrationPublicKey,
 //   toRegistrationResponse, settingsHtml
-
-const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;" };
-export function escapeHtml(value) {
-  return String(value ?? "").replace(/[&<>"']/g, char => HTML_ESCAPES[char]);
-}
 
 export function methodLabel(method) {
   if (method?.type === "oauth") {

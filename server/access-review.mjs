@@ -7,7 +7,7 @@
 // and in what state, and when each member last acted. Assembly is a pure read over the store; the HTTP route
 // and the CLI print the same object. No token, secret or hash is ever
 // selected — the report is meant to be pasted into a review ticket.
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { ownMember } from "../src/events.js";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
@@ -109,8 +109,8 @@ export function assembleAccessReview(store, roomId) {
   // record, like an expired link). Only the hash-free inviteId handle that
   // revoke() takes is selected — never the code or its stored hash.
   const pendingInvites = db.prepare("SELECT * FROM agent_invite_codes WHERE room_id=? AND redeemed_at IS NULL AND revoked_at IS NULL ORDER BY created_at DESC,code_hash").all(roomId).map(row => {
-    const { inviteId, displayName, permissions, createdBy, createdAt, expiresAt, status } = store.invites.view(row, now);
-    return { inviteId, displayName, permissions, inviterMemberId: createdBy, createdAt: iso(createdAt), expiresAt: iso(expiresAt), status };
+    const { inviteId, displayName, permissions, createdBy, createdAt, expiresAt, status, ownerEquivalent } = store.invites.view(row, now);
+    return { inviteId, displayName, permissions, ownerEquivalent, inviterMemberId: createdBy, createdAt: iso(createdAt), expiresAt: iso(expiresAt), status };
   });
   const agentIdentities = db.prepare(`SELECT l.identity_id AS identityId, l.member_id AS memberId, l.linked_at AS linkedAt,
       i.display_name AS displayName FROM identity_links l JOIN agent_identities i ON i.identity_id=l.identity_id
@@ -157,7 +157,7 @@ export function renderAccessReview(report) {
   lines.push(`Share links (${report.shareLinks.length}):`);
   for (const l of report.shareLinks) lines.push(`  ${l.id}  ${l.status}  joins ${l.joins}/${l.maxJoins} (${l.remainingJoins} remaining)  issued by ${l.issuerMemberId}  expires ${l.expiresAt}`);
   lines.push(`Pending agent invites (${report.pendingInvites.length}):`);
-  for (const i of report.pendingInvites) lines.push(`  ${i.inviteId}  ${i.displayName ?? "(unnamed)"}  ${i.status}  grants: ${grants(i.permissions)}  issued by ${i.inviterMemberId}  created ${i.createdAt}  expires ${i.expiresAt}`);
+  for (const i of report.pendingInvites) lines.push(`  ${i.inviteId}  ${i.displayName ?? "(unnamed)"}  ${i.status}  grants: ${grants(i.permissions)}  issued by ${i.inviterMemberId}  created ${i.createdAt}  expires ${i.expiresAt}${i.ownerEquivalent ? "  owner-level" : ""}`);
   lines.push(`Membership delegations (${report.membershipDelegations?.length ?? 0}):`);
   for (const grant of report.membershipDelegations ?? []) lines.push(`  ${grant.identityId}  member ${grant.memberId ?? "unlinked"}  granted by ${grant.grantedBy}  at ${when(grant.grantedAt)}  paths: ${grants(grant.authorityPaths)}${grant.dualGrantHazard ? "  [DUAL-GRANT HAZARD]" : ""}`);
   lines.push(`Membership decision journal (${report.counts.delegationDecisions}; showing ${report.delegationDecisions.length} newest${report.delegationDecisionsTruncated ? ", truncated" : ""}):`);
