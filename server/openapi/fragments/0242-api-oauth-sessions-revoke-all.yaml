@@ -1,0 +1,25 @@
+  /api/oauth/sessions/revoke-all:
+    post:
+      summary: Kill every OAuth session for the account
+      description: |
+        F-02. Account-session write (X-CSRF-Token, Origin, X-Session-Binding),
+        30 per minute per address. Revokes all refresh-token families and
+        access tokens the account holds, across every OAuth client, effective
+        immediately — the consent screen's "revoke access at any time" promise
+        made real. Answers { revoked } with the number of tokens killed.
+      security:
+        - accountSession: []
+      responses:
+        '200':
+          description: "{ revoked }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: integer, description: "Tokens newly revoked across all of the account's sessions" }
+        '401': { description: unauthenticated }
+        '403': { description: csrf_denied }
+        '422': { description: session_binding_required }
+        '429': { description: rate_limited }
