@@ -3538,13 +3538,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const hasRows = this.db.prepare("SELECT 1 FROM member_activity WHERE room_id=? LIMIT 1").get(roomId);
       if (!hasRows) this._backfillMemberActivity(roomId);
       if (typeof bodyJson !== "string") return;
-      let event;
-      try { event = JSON.parse(bodyJson); } catch { return; }
-      if (!event || typeof event.at !== "string" || !event.at) return;
-      if (typeof event.actorId === "string" && event.actorId)
-        this._upsertMemberActivity(roomId, event.actorId, event.at, null);
-      if (event.type === "member.added" && typeof event.data?.memberId === "string" && event.data.memberId)
-        this._upsertMemberActivity(roomId, event.data.memberId, null, event.at);
+      let parsedEvent;
+      try { parsedEvent = JSON.parse(bodyJson); } catch { return; }
+      if (!parsedEvent || typeof parsedEvent.at !== "string" || !parsedEvent.at) return;
+      if (typeof parsedEvent.actorId === "string" && parsedEvent.actorId)
+        this._upsertMemberActivity(roomId, parsedEvent.actorId, parsedEvent.at, null);
+      if (parsedEvent.type === "member.added" && typeof parsedEvent.data?.memberId === "string" && parsedEvent.data.memberId)
+        this._upsertMemberActivity(roomId, parsedEvent.data.memberId, null, parsedEvent.at);
     } catch { /* presence falls back to the legacy scans for unmaterialised rooms */ }
   }
   // History replacement (importEvents) invalidates the room's derived
