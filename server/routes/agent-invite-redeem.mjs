@@ -48,6 +48,6 @@ function inviteAvailability(ctx) {
 }
 
 export const AGENT_INVITE_REDEEM_ROUTES = Object.freeze([
-  Object.freeze({ id: "agent-invite-redeem", method: "POST", path: "/api/agent-invites/redeem", auth: "none", capability: null, scope: "public", handler: redeemInvite, parity: "exempt:invite code redemption", schema: { body: object, response: object }, events: ["member.added"] }),
-  Object.freeze({ id: "agent-invite-availability", method: "GET", path: "/api/agent-invites/redeem", auth: "none", capability: null, scope: "public", handler: inviteAvailability, parity: "exempt:fetch-only invite availability", schema: { query: object, response: object }, events: [] })
+  Object.freeze({ id: "agent-invite-redeem", publication: "open:invite redemption by one-time code, no room content", method: "POST", path: "/api/agent-invites/redeem", auth: "none", capability: null, scope: "public", handler: redeemInvite, parity: "exempt:invite code redemption", schema: { body: object, response: object }, events: ["member.added"] }),
+  Object.freeze({ id: "agent-invite-availability", publication: "open:invite availability probe by code, no room content", method: "GET", path: "/api/agent-invites/redeem", auth: "none", capability: null, scope: "public", handler: inviteAvailability, parity: "exempt:fetch-only invite availability", schema: { query: object, response: object }, events: [] })
 ]);
