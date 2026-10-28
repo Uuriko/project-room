@@ -8,6 +8,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const startServer = async (t, f) => {
   const server = createRoomServer({ store: f.store });
@@ -32,16 +33,16 @@ const errorCode = async res => (await res.json()).error?.code;
 
 // Link an identity into the fixture room so the room-scoped auth path
 // (RoomStore#authenticate -> resolveIdentityAuth) is exercised too.
-function linkToCommons(f, identityId) {
+function linkToCommons(f, identity) {
   const ownerKey = f.store.issueAccessKey("commons", "owner");
-  return f.store.identities.link(ownerKey, "commons", { identityId, permissions: ["accept_work"] });
+  return linkWithProof(f.store, ownerKey, "commons", identity, { permissions: ["accept_work"] });
 }
 
 test("rotate issues a new secret once; the old secret 401s on every pri_ auth path", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Rotating agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
   const path = id => `/api/agent-identities/${id}/rotate`;
 
   const res = await post(origin, path(agent.identityId), { confirm: true }, agent.secret);
@@ -81,7 +82,7 @@ test("revoke kills every auth path and keeps the identity row for audit", async 
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Revoked agent");
-  linkToCommons(f, agent.identityId);
+  linkToCommons(f, agent);
   const path = id => `/api/agent-identities/${id}/revoke`;
 
   const res = await post(origin, path(agent.identityId), { confirm: true }, agent.secret);
@@ -228,6 +229,23 @@ test("authorization scheme is case-insensitive per RFC 7235 (QA 2026-10-03 P1-3)
   }
   // A non-bearer scheme still 401s.
   assert.equal(await errorCode(await postWithScheme("Basic", "abc")), "unauthenticated");
+});
+
+test("a known identity without room access is 403 no_access; an unknown secret stays 401", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Outside reader");
+  const denied = await get(origin, "/api/rooms/commons/events", agent.secret);
+  assert.equal(denied.status, 403);
+  const deniedBody = await denied.json();
+  assert.equal(deniedBody.error.code, "no_access");
+  assert.equal(deniedBody.error.message, "This identity has no access to this room");
+  const missing = await get(origin, "/api/rooms/no-such-room/events", agent.secret);
+  assert.equal(missing.status, 403);
+  assert.equal((await missing.json()).error.message, deniedBody.error.message);
+  const unknown = await get(origin, "/api/rooms/commons/events", `pri_${"a".repeat(43)}`);
+  assert.equal(unknown.status, 401);
+  assert.equal((await unknown.json()).error.code, "unauthenticated");
 });
 
 test("revoked_at column is backfilled on pre-existing identity tables", async t => {

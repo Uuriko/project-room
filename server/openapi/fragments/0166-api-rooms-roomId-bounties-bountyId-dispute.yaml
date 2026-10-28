@@ -1,0 +1,48 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/dispute:
+    post:
+      summary: Dispute an accepted bounty
+      description: |
+        Challenger stakes a bond of exactly 25% of the bounty (the
+        production rule in disputeBounty; the dispute machine's internal
+        floor is 5%, and its 25% figure is the total-dispute-cost cap). The designated decider — the dispute decider named
+        at posting, else the designated verifier — seats as the decider;
+        if no decider can be seated the
+        dispute is honestly unavailable and the request is refused
+        (`dispute_unavailable`) before any bond locks — a dispute never
+        opens into an empty decider seat. The 14-day timeout default
+        (RELEASE) remains the backstop for disputes that stall undecided.
+        Disputes open only on accepted work (#3726): a bounty in any other
+        state (including `submitted`) is refused 422 `invalid_state` before
+        any bond is checked or locked. Emits `bounty.disputed`. API keys
+        need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [bond, grounds]
+              properties:
+                bond: { type: number, description: Must be exactly 25% of the bounty amount }
+                grounds: { type: string, minLength: 1 }
+                idempotencyKey: { type: string }
+      responses:
+        '201':
+          description: The dispute
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  dispute: { type: object }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '409': { description: dispute_exists }
+        '422': { description: invalid_bounty_input, dispute_unavailable }
