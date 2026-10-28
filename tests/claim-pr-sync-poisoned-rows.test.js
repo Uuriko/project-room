@@ -214,48 +214,61 @@ function syncSetup(t) {
   return { store, drive, boardActions };
 }
 
+// Cure note (settle-pass-19 RED, FINISH-100 P1, 2026-10-27): the door
+// tests below were authored against a base where claim admission passed
+// these shapes through to the sync. On the composed head, live admission
+// (claim-scopes, reached from RoomStore.command's conflict check) has
+// moved up front: a public HTTPS GitHub URL is normalised to its
+// canonical owner/name and admitted, and every other poisoned shape is
+// refused at the door before it can reach the projection or the sync.
+// The tests now pin THAT behaviour at the door, and the sync guard this
+// PR adds remains the defence for legacy/replayed projections — pinned
+// by the direct tests at the end of this file, which bypass the door.
+
+test("sync door: a claim carrying a public HTTPS GitHub URL repository is normalised and stored canonically", t => {
+  const { store, drive, boardActions } = syncSetup(t);
+  drive("task-sync-url", { repository: "https://github.com/Uuriko/project-room" });
+  assert.equal(store.room("commons").state.workItems["task-sync-url"].claim.repository, "https://github.com/Uuriko/project-room",
+    "the projection keeps the claim as made; normalisation happens in the mapping");
+  const card = store.workClaims.get("commons", "task-sync-url");
+  assert.equal(card.state, "claimed");
+  assert.equal(card.repo, "Uuriko/project-room", "the stored row carries the canonical repository, never the raw URL");
+  assert.deepEqual(boardActions("task-sync-url"), ["created", "claimed"]);
+});
+
 for (const [label, repository] of [
-  ["full URL", "https://github.com/Uuriko/project-room"],
   ["ssh form", "git@github.com:Uuriko/project-room.git"],
   ["space in name", "Uuriko/project room"],
   ["201 chars", "a".repeat(201)],
   ["tilde path", "~/project-room"]
 ]) {
-  test(`sync door: a claim carrying a poisoned repository is never stored (${label})`, t => {
+  test(`sync door: the claim door refuses a poisoned repository before it reaches the sync (${label})`, t => {
     const { store, drive, boardActions } = syncSetup(t);
-    drive("task-sync-poison", { repository });
-    // The claim itself is recorded in the projection (the sync's rejection
-    // is board-side only, exactly like the backfill's) ...
-    assert.equal(store.room("commons").state.workItems["task-sync-poison"].claim.repository, repository);
-    // ... but the poisoned mapped row is NOT stored over the valid
-    // unclaimed card the accept step wrote: no claimed card, no repo, and
-    // no "claimed" board event.
+    assert.throws(() => drive("task-sync-poison", { repository }),
+      /repository name of at most 200 letters, numbers, dots, underscores, slashes or hyphens, or a public HTTPS GitHub repository URL/);
+    // The refused claim never enters the projection, and the unclaimed
+    // card the accept step wrote is untouched: no claimed card, no repo,
+    // and no "claimed" board event.
+    assert.equal(store.room("commons").state.workItems["task-sync-poison"].claim, null);
     const card = store.workClaims.get("commons", "task-sync-poison");
     assert.equal(card.state, "unclaimed");
     assert.equal(card.repo, null);
     assert.equal(card.owner, null);
     assert.deepEqual(boardActions("task-sync-poison"), ["created"]);
-    // Parity with the backfill door: the same room's backfill names the
-    // row as an error and still does not store it.
-    const report = store.backfillRoomWorkItemClaims("commons");
-    assert.equal(report.errors.length, 1);
-    assert.match(report.errors[0], /task-sync-poison/);
-    assert.match(report.errors[0], REPO_ERROR);
-    assert.equal(store.workClaims.get("commons", "task-sync-poison").state, "unclaimed");
-    assert.equal(store.workClaims.get("commons", "task-sync-poison").repo, null);
   });
 }
 
-test("sync door: a poisoned claim does not block a valid sibling in the same room", t => {
+test("sync door: a refused claim does not block a valid sibling in the same room", t => {
   const { store, drive, boardActions } = syncSetup(t);
-  drive("task-sync-url", { repository: "https://github.com/Uuriko/project-room" });
+  assert.throws(() => drive("task-sync-poison", { repository: "Uuriko/project room" }),
+    /repository name of at most 200/);
   drive("task-sync-ok", { repository: "Uuriko/project-room" });
   const ok = store.workClaims.get("commons", "task-sync-ok");
   assert.equal(ok.state, "claimed", "the valid sibling's row is stored by the sync");
   assert.equal(ok.repo, "Uuriko/project-room");
   assert.deepEqual(boardActions("task-sync-ok"), ["created", "claimed"]);
-  assert.equal(store.workClaims.get("commons", "task-sync-url").repo, null);
-  assert.equal(store.workClaims.get("commons", "task-sync-url").state, "unclaimed");
+  assert.equal(store.workClaims.get("commons", "task-sync-poison").repo, null);
+  assert.equal(store.workClaims.get("commons", "task-sync-poison").state, "unclaimed");
 });
 
 for (const [label, ref] of [
@@ -263,15 +276,14 @@ for (const [label, ref] of [
   ["colon", "feat:main"],
   ["201 chars", "b".repeat(201)]
 ]) {
-  test(`sync door: a claim carrying a poisoned ref (branch) is never stored (${label})`, t => {
+  test(`sync door: the claim door refuses a poisoned ref (branch) before it reaches the sync (${label})`, t => {
     const { store, drive } = syncSetup(t);
-    drive("task-sync-branch", { repository: "Uuriko/project-room", ref });
+    assert.throws(() => drive("task-sync-branch", { repository: "Uuriko/project-room", ref }),
+      /ref of at most 200 letters, numbers, dots, underscores, slashes or hyphens/);
+    assert.equal(store.room("commons").state.workItems["task-sync-branch"].claim, null);
     const card = store.workClaims.get("commons", "task-sync-branch");
     assert.equal(card.state, "unclaimed");
     assert.equal(card.branch, null);
-    const report = store.backfillRoomWorkItemClaims("commons");
-    assert.equal(report.errors.length, 1);
-    assert.match(report.errors[0], /branch must be 1\.\.200 characters/);
   });
 }
 
@@ -287,6 +299,10 @@ const atIso = hours => new Date(Date.parse(T0) + hours * HOUR).toISOString();
 function directSyncSetup() {
   const db = new DatabaseSync(":memory:");
   db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, id TEXT, body TEXT)");
+  // roomEvents reads through the events_room_type index on the composed
+  // head (it did not at this PR's authoring base): mirror the real schema
+  // so the direct door exercises the same read path as production.
+  db.exec("CREATE INDEX events_room_type ON events(room_id, json_extract(body, '$.type'))");
   const rows = new Map();
   const setCalls = [];
   const registry = {
@@ -311,7 +327,7 @@ function directSyncSetup() {
     ...itemOverrides
   });
   const run = (items, workItemId) => syncWorkItemClaim(
-    { db, workClaims: registry }, "room-1", "worker",
+    { db, workClaims: registry, ensureEventTypeIndex: () => {} }, "room-1", "worker",
     { type: "claim.acquired", at: atIso(3), data: { workItemId } },
     { workItems: Object.fromEntries(items.map(entry => [entry.id, entry])) });
   return { registry, rows, setCalls, item, run };
@@ -334,9 +350,12 @@ for (const [label, claimOverrides, itemOverrides] of [
 
 test("sync door (direct): valid sibling in the same plan is stored, poisoned primary is not", () => {
   const { rows, item, run } = directSyncSetup();
+  // The poison shape here must be one the mapper itself still rejects: a
+  // public HTTPS GitHub URL is normalised to a valid row on the composed
+  // head (see the door tests above), so it no longer exercises the guard.
   run([
     item("task-direct-ok"),
-    item("task-direct-poison", { repository: "https://github.com/Uuriko/project-room" })
+    item("task-direct-poison", { repository: "Uuriko/project room" })
   ], "task-direct-poison");
   assert.equal(rows.get("task-direct-ok")?.state, "claimed", "the valid planned row is written");
   assert.equal(rows.get("task-direct-ok")?.repo, "Uuriko/project-room");
