@@ -53,9 +53,9 @@ export const FIXTURE_FAILURE_NAMES = new Set(["probe fails deterministically"]);
  * were captured, falls back to the old "see the job log" pointer so the
  * comment never goes out empty.
  */
-export function formatFailureComment({ shard, total, failures: reported, runUrl }) {
+export function formatFailureComment({ shard, total, failures: reported, runUrl, title }) {
   const failures = Array.isArray(reported) ? reported.filter((f) => !FIXTURE_FAILURE_NAMES.has(f)) : reported;
-  const head = `## Unit test failures, shard ${shard}/${total}\n`;
+  const head = title ?? `## Unit test failures, shard ${shard}/${total}\n`;
   if (!Array.isArray(failures) || failures.length === 0) {
     return (
       `${head}\nSee the job log for the failing file and assertion. Shard receipts\n` +
