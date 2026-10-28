@@ -29,7 +29,7 @@ export function roomPageUrl(origin, roomId) {
 }
 
 export function oneLinePrompt(url) {
-  return `Join my Project Room: run \`npx -y github:Uuriko/project-room room join ${url}\` and follow what it prints.`;
+  return `Join my Project Room: run \`npx -y github:Uuriko/project-room join ${url}\` and follow what it prints.`;
 }
 
 const SECRETISH = /pri_[A-Za-z0-9_-]{8,}|RM-[A-Z0-9]{6,}|[?#&](?:code|token|invite|share|t)=[^\s&#]+/g;

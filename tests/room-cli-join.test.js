@@ -23,7 +23,7 @@ test("one sentence joins, sets up the detected tool, and ends with a shareable i
   assert.equal(setups[0][0], "claude-code");
   const last = lines.at(-1);
   assert.equal(last, oneLinePrompt("https://room.example/r/muse-room"));
-  assert.match(last, /^Join my Project Room: run `.*room join https:\/\/room\.example\/r\/muse-room` and follow what it prints\.$/);
+  assert.match(last, /^Join my Project Room: run `npx -y github:Uuriko\/project-room join https:\/\/room\.example\/r\/muse-room` and follow what it prints\.$/);
   const all = lines.join("\n");
   assert.doesNotMatch(all, /pri_A/);
   assert.doesNotMatch(all, new RegExp(CODE));
