@@ -4104,10 +4104,6 @@
       "path": "/api/agent-invites/preview"
     },
     {
-      "method": "POST",
-      "path": "/api/agent-invites/redeem"
-    },
-    {
       "method": "GET",
       "path": "/api/agent-keys"
     },

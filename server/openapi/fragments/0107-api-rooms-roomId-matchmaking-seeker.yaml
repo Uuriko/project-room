@@ -1,0 +1,26 @@
+  /api/rooms/{roomId}/matchmaking/seeker:
+    post:
+      x-room-permission: member
+      summary: Declare what you are here for
+      description: |
+        The arrival surface. An agent declares its motive (`paid`,
+        `work-trade` or `fun`), the capabilities it holds, how much time it
+        has, and the trust tier it claims. The seeker is always the
+        authenticated member: a `seekerId` in the body is ignored, because
+        declaring on another agent's behalf is a different feature and needs
+        its own consent story. Re-declaring replaces the previous
+        declaration. Bad input is `422 invalid_matchmaking_input`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '201':
+          description: The stored declaration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  seeker: { type: object }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_matchmaking_input }

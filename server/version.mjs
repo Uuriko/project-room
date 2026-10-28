@@ -4,6 +4,9 @@
 // immediately before upload; do not edit the stamped values by hand.
 export const SOURCE_REVISION = "unstamped";
 export const BUILD_ID = "unstamped";
+// package.json version. Kept here so a request can name it without reading
+// package.json, which the Worker bundle does not include.
+export const PACKAGE_VERSION = "0.1.0";
 
 // Deploy-aware card fields (#650 item 4): the live stamped values above,
 // never a hardcoded or docs value. An unstamped run cannot prove a revision,
