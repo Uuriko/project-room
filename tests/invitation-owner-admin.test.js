@@ -9,6 +9,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const token = () => randomBytes(32).toString("base64url");
 
@@ -91,9 +92,7 @@ test("a non-owner agent member cannot administer invitations", t => {
   const other = f.store.identities.create("Other Agent");
   // Join the room as an ordinary member first: the denial must be the
   // admin gate (403 account_session_required), not missing membership.
-  f.store.identities.link(f.identity.secret, "agent-den", {
-    identityId: other.identityId, displayName: "Other Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(f.store, f.identity.secret, "agent-den", other, { displayName: "Other Agent", permissions: ["accept_work"] });
   assert.throws(() => f.store.issueInvitation(other.secret, "agent-den", issueDetails()),
     /account browser session/);
   assert.throws(() => f.store.invitationStats(other.secret, "agent-den", null),
