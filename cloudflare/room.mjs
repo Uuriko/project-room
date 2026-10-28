@@ -40,6 +40,7 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { compressJsonResponse } from './response-compression.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
@@ -651,7 +652,7 @@ export default {
     let internalPublicPolicy = null, browserPublicPolicy = null;
     let internalAboutPolicy = null, browserAboutPolicy = null;
     // JDOT-PUBLIC-CSP-RUM end
-    const finish = (response, servedBy) => {
+    const finish = async (response, servedBy) => {
       // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
       // Door routing rewrites to ROOM_ORIGIN before the edge/DO handles it.
       // Rebase only our known public-page policy, and only after that request
@@ -671,7 +672,11 @@ export default {
       const totalMs = Date.now() - started;
       const appMs = appDurationMs(response.headers);
       logRoomRequest({ method: request.method, path: requestPath(request.url), status: response.status, totalMs, servedBy, appMs });
-      return withServerTiming(response, 'total', totalMs);
+      // B4-a: gzip JSON responses >=2 KB on the way out (the one exit every
+      // Worker, edge and Durable Object response shares). The helper is a
+      // no-op for anything else: no gzip offered, already encoded, SSE /
+      // streaming shapes, and bodyless answers pass through untouched.
+      return compressJsonResponse(request, withServerTiming(response, 'total', totalMs));
     };
     // getdasha edge doors: rewrite onto the Room origin BEFORE the origin
     // check so the worker Host reaches the guard, not the browser Host - the
