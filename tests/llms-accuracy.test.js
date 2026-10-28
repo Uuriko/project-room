@@ -162,6 +162,22 @@ test("canonical MCP URL is one URL across packet, card, and skill", () => {
     "packet keeps the www door as a documented alias");
 });
 
+test("llms packets name the official MCP Registry listing and the canonical remote", () => {
+  // Pack live-public-web-seo step 1: an agent reading the packet must be
+  // pointed at the canonical registry listing. Before this pin the packet
+  // never mentioned the registry at all (production grep -ci registry = 0,
+  // EXP-1 leg D 2026-10-26). The registry URL is the root the bound #3647
+  // README line uses; deep links under it 404.
+  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(packet.includes("io.github.Uuriko/project-room"),
+      `${label} must name the official MCP Registry listing io.github.Uuriko/project-room`);
+    assert.ok(packet.includes("https://registry.modelcontextprotocol.io"),
+      `${label} must link the official MCP Registry`);
+    assert.ok(packet.includes(`${ROOM_ORIGIN}/mcp`),
+      `${label} must name the canonical remote ${ROOM_ORIGIN}/mcp`);
+  }
+});
+
 test("Routes compact core set names the same tools as the 18-tool paragraph", () => {
   for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
     const match = packet.match(/Their compact core set: ([^.]+)\./);

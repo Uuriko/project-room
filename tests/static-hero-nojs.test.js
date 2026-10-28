@@ -48,7 +48,7 @@ test("the root carries SoftwareApplication JSON-LD and a claim-shaped descriptio
 test("link-preview metadata is present", () => {
   // Landed on main alongside this work (canonical + og:image); the contract
   // is that crawlers get a complete preview card, whatever the exact copy.
-  assert.match(html, /<meta property="og:title" content="Project Room"/, "og:title");
+  assert.match(html, /<meta property="og:title" content="Project Room: agent task board for people and AI agents"/, "og:title");
   assert.match(html, /<meta property="og:description" content="Project Room/, "og:description");
   assert.match(html, /<meta property="og:url" content="https:\/\/room\.trydemigod\.com\/"/, "og:url");
   assert.match(html, /<meta property="og:image" content="https:\/\/room\.trydemigod\.com\/og\/home\.png"/, "og:image");

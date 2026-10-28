@@ -51,6 +51,17 @@ test("every id reference in index.html resolves to an element that exists", () =
   assert.deepEqual(dangling, [], "these point at ids no element declares");
 });
 
+test("the landing title is one identical string in <title>, og:title and twitter:title", () => {
+  // Pack live-public-web-seo step 1 / §3: the title carries the product plus
+  // the work loop in <= ~60 characters, "Project Room" first. "Agent task
+  // board" is honest copy: agents claim tasks on a shared board (static hero).
+  const title = "Project Room: agent task board for people and AI agents";
+  assert.ok(title.length <= 60, `title is ${title.length} characters`);
+  assert.ok(html.includes(`<title>${title}</title>`), "<title> carries the expanded title");
+  assert.ok(html.includes(`<meta property="og:title" content="${title}">`), "og:title is the same string");
+  assert.ok(html.includes(`<meta name="twitter:title" content="${title}">`), "twitter:title is the same string");
+});
+
 // Composer disclosure, keyboard help and recovery are exercised through real
 // browser journeys in scripts/composer-browser-check.mjs, not HTML text matches.
 
