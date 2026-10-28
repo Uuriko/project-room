@@ -49,6 +49,25 @@ test("Phone menu drawer dims the room and closes on a tap outside", { timeout: 9
   await page.locator("#room-sidebar").waitFor({ state: "hidden" });
   assert.equal(await page.locator("#sidebar-toggle").getAttribute("aria-expanded"), "false");
   assert.equal((await scrim()).content, "none", "scrim goes away with the drawer");
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "sidebar-toggle", "focus returns to the menu button after a tap on the scrim");
+
+  // Keyboard: Escape still closes and restores focus; light theme dims too.
+  await page.evaluate(() => { document.documentElement.dataset.theme = "light"; });
+  await page.locator("#sidebar-toggle").click();
+  await page.locator("#room-sidebar").waitFor({ state: "visible" });
+  assert.match((await scrim()).background, /rgba\(0, 0, 0, 0\.[1-9]/, "scrim dims in light theme");
+  await page.keyboard.press("Escape");
+  await page.locator("#room-sidebar").waitFor({ state: "hidden" });
+  assert.equal(await page.evaluate(() => document.activeElement?.id), "sidebar-toggle", "Escape restores focus");
+
+  // Mid widths use the drawer too (521-940px).
+  await page.setViewportSize({ width: 800, height: 844 });
+  await page.locator("#sidebar-toggle").click();
+  await page.locator("#room-sidebar").waitFor({ state: "visible" });
+  assert.equal((await scrim()).position, "fixed", "scrim at 800px");
+  const wide = await page.locator("#room-sidebar").boundingBox();
+  await page.mouse.click(wide.x + wide.width + 40, 500);
+  await page.locator("#room-sidebar").waitFor({ state: "hidden" });
 
   const desk = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();
   await desk.goto(origin);

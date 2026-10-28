@@ -7663,8 +7663,12 @@ document.addEventListener("click", event => {
   // The path is fixed at dispatch, so a dialog choice whose handler already
   // re-rendered the menu (detaching the target) still counts as inside it.
   if (event.target.closest("dialog") || event.composedPath().some(node => node.nodeName === "DIALOG")) return;
+  // Focus was in the drawer (or nowhere): hand it back to the toggle, as
+  // Escape does, so it is not stranded inside the hidden sidebar.
+  const strand = document.activeElement === document.body || document.activeElement?.closest?.("#room-sidebar");
   shell.classList.remove("sidebar-open");
   $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+  if (strand) $("#sidebar-toggle").focus();
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
