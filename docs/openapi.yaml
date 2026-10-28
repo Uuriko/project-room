@@ -10453,6 +10453,8 @@ paths:
       description: >-
         Owner, or a member with both manage_members and decide. History, claims, and permissions move
         to keepMemberId. retireMemberId is retired. The merge is logged as member.merged.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
       requestBody:
         required: true
         content:

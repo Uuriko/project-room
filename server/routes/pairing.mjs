@@ -48,9 +48,9 @@ async function startPair(ctx) {
 }
 
 async function pollPair(ctx) {
-  const secret = ctx.url.searchParams.get("secret") ?? ctx.req.headers.authorization?.replace(/^bearer\s+/i, "");
+  const presented = ctx.url.searchParams.get("secret") ?? ctx.req.headers.authorization?.replace(/^bearer\s+/i, "");
   try {
-    const connection = ctx.store.pairing.poll(ctx.params.pairId, secret, { origin: originOf(ctx) });
+    const connection = ctx.store.pairing.poll(ctx.params.pairId, presented, { origin: originOf(ctx) });
     return send(ctx, 200, connection);
   } catch (error) {
     if (error instanceof PairPollError || error?.rfc8628) {

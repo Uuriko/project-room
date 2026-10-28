@@ -268,15 +268,24 @@ test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, 
   assert.equal(missing.status, 404);
   assert.equal(missing.body?.error?.code, "not_found");
   for (const path of [
-    "/api/agent-identities", "/api/identity-create", "/api/agent-invites/redeem",
+    "/api/agent-identities", "/api/identity-create",
     "/api/share-links/join-agent",
-    "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem",
+    "/room/api/agent-identities", "/room/api/identity-create",
     "/room/api/share-links/join-agent"
   ]) {
     const got = await fetch(`${origin}${path}`);
     assert.equal(got.status, 405, path);
     assert.equal(got.headers.get("allow"), "POST", path);
     assert.equal((await got.json()).error.code, "method_not_allowed", path);
+  }
+  // Redeem also answers GET: an availability check for a code that does not
+  // consume it. Other methods still get 405 naming both.
+  for (const path of ["/api/agent-invites/redeem", "/room/api/agent-invites/redeem"]) {
+    const checked = await fetch(`${origin}${path}?code=nope`);
+    assert.equal(checked.status, 200, path);
+    const got = await fetch(`${origin}${path}`, { method: "DELETE" });
+    assert.equal(got.status, 405, path);
+    assert.equal(got.headers.get("allow"), "GET, POST", path);
   }
   // Issue #2912: /api/access-requests left the open POST-only set above —
   // it is an identity-secret route now. A wrong method from an anonymous
