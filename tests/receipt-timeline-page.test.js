@@ -139,7 +139,11 @@ test("the page leads with the timeline; the proof sits one click deeper, unchang
   assert.ok(proofAt > timelineAt, "proof details come after the timeline");
   assert.ok(html.indexOf("<summary>Proof and record details</summary>") > proofAt,
     "the proof is behind one click (the details summary)");
-  assert.ok(html.indexOf("Hash evidence") > proofAt, "hashes moved inside the proof block");
+  // The visible hash row, not the JSON-LD property of the same name in
+  // the page head (receipt-share's structured data also calls its field
+  // "Hash evidence (stored sha256, not re-verified)" — a bare indexOf
+  // finds that first and reports a move that never happened).
+  assert.ok(html.indexOf("<dt>Hash evidence</dt>") > proofAt, "hashes moved inside the proof block");
   // Content unchanged: the stored hash and the honesty note are still
   // served verbatim, just inside the details block.
   assert.ok(html.includes("sha256:" + "ab".repeat(32)));
