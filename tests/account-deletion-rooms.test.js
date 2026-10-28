@@ -74,6 +74,11 @@ for (const entityProjection of [false, true]) test(`a solely owned personal room
     id: "secret-file", filename: "secret.txt", mediaType: "text/plain",
     data: Buffer.from("secret-bytes-p211").toString("base64")
   });
+  const { pushProjectMap, recordProjectMapPull } = await import('../server/project-map-store.mjs');
+  await pushProjectMap(ctx.f.store, roomId, { repo: 'private/repo', revision: 'r1', files: [{ path: 'private.js', source: 'export const secret = 1;' }] });
+  recordProjectMapPull(ctx.f.store, roomId, { repo: 'private/repo', number: 1, files: ['private.js'] });
+  const { countPurge } = await import('../server/operator-purge.mjs');
+  assert.equal(countPurge(ctx.f.store, [{ kind: 'room', id: roomId }]).find(row => row.table === 'project_maps').rows, 1);
   // Distinct cleanup risk: private record-only rail notes and exact-retry
   // outputs must not survive personal-room account deletion.
   ctx.f.store.command(key,roomId,{id:randomUUID(),type:T.MEMBER_ADDED,data:{memberId:"rail-agent",displayName:"Rail agent",kind:"agent",permissions:["accept_work"]}});
@@ -123,6 +128,8 @@ for (const entityProjection of [false, true]) test(`a solely owned personal room
   const rebuilt = ctx.f.store.rebuildProjection(roomId);
   assert.equal(rebuilt.state.room.archivedAt, room.state.room.archivedAt);
   assert.equal(rebuilt.state.messages.find(message => message.id === "secret-note").body, null);
+  for (const table of ['project_maps', 'project_map_queue', 'project_map_pulls', 'project_map_notices'])
+    assert.equal(ctx.f.store.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE room_id=?`).get(roomId).n, 0, `${table} purged`);
   for(const table of ["room_trial_tasks","room_trial_requests","room_vetting_keys","room_vetting_receipts","demigod_offer_profiles","demigod_offer_requests","demigod_contracts","demigod_contract_requests","buyer_signoff_loops","buyer_signoff_requests"]) assert.equal(ctx.f.store.db.prepare(`SELECT count(*) n FROM ${table} WHERE room_id=?`).get(roomId).n,0,`${table} personal data purged`);
 });
 

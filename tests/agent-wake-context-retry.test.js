@@ -15,13 +15,14 @@ import { isTransientWakeError, wakeRetryDelayMs } from '../client/wake-retry.mjs
 import { saveAgentConnection } from '../client/agent-connection.mjs';
 import { serveClaudeRoomChannel } from '../client/claude-channel.mjs';
 import { listen } from '../scripts/room-listen.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(':memory:');
   const owner = store.identities.create('Context retry owner');
   const agent = store.identities.create('Context retry receiver');
   new AgentRooms(store).create(owner.secret, { roomId: 'retry-room', title: 'Retry', purpose: 'Authority read fault injection' });
-  store.identities.link(owner.secret, 'retry-room', { identityId: agent.identityId, memberId: 'receiver', displayName: 'Receiver', permissions: [] });
+  linkWithProof(store, owner.secret, 'retry-room', agent, { memberId: 'receiver', displayName: 'Receiver', permissions: [] });
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const connection = { version: 1, origin: `http://127.0.0.1:${server.address().port}`, roomId: 'retry-room', memberId: 'receiver', token: agent.secret };

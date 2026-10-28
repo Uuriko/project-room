@@ -231,14 +231,15 @@ test("P2: redeem racing revoke resolves to exactly one outcome, never both", asy
     assert.ok(row.redeemed_at === null && row.revoked_at !== null);
   }
 
-  // revoke, revoke: exactly one wins.
+  // revoke, revoke: the second call is idempotent. The row is revoked once.
   {
     const { inviteId } = freshCode(fx);
     const first = attemptRevoke(fx, inviteId);
     const second = attemptRevoke(fx, inviteId);
     assert.equal(first.ok, true);
-    assert.equal(second.ok, false);
-    assert.equal(second.code, "invite_unavailable");
+    assert.equal(second.ok, true);
+    const row = rowState(fx, inviteId);
+    assert.ok(row.redeemed_at === null && row.revoked_at !== null);
   }
 
   // redeem x5: the compare-and-swap burn lets exactly one through.
