@@ -114,7 +114,7 @@ export function planTool(tool, { project, home, url, platform, claude }) {
     const path = join(home, ".config", "opencode", "opencode.json");
     files.push({ path, contents: planJson(path, readOrNull(path), data => {
       data.mcp ??= {};
-      data.mcp[SERVER_NAME] = { type: "remote", url, headers: { Authorization: envHeader() }, enabled: true };
+      data.mcp[SERVER_NAME] = { type: "remote", url, headers: { Authorization: "Bearer {env:" + SECRET_ENV + "}" }, oauth: false, enabled: true };
     }) });
     next = "opencode reads ~/.config/opencode/opencode.json. Export " + SECRET_ENV + " from room token, then start opencode.";
   } else if (tool === "grok") {
