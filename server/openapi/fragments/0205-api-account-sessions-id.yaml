@@ -1,0 +1,37 @@
+  /api/account/sessions/{id}:
+    delete:
+      x-room-permission: self
+      summary: Revoke one account session owned by the account
+      description: |
+        CX4 targeted revocation. Account-session write (X-CSRF-Token,
+        Origin, X-Session-Binding), 60 per minute per address. Ends exactly
+        the named account session — browser or native — effective
+        immediately: its cookie, reads, and streams are denied from the
+        next request. The account's other sessions and every OAuth
+        session are untouched, and POST /api/oauth/sessions/revoke-all
+        keeps its OAuth-only semantics (it never reached these slots).
+        Unknown ids, already-dead sessions, and other accounts' sessions
+        all answer 404 session_not_found, so a caller cannot probe for
+        them.
+      security:
+        - accountSession: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, maxLength: 128 }
+      responses:
+        '200':
+          description: "{ revoked }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [revoked]
+                properties:
+                  revoked: { type: integer, description: "1 when the named live session was revoked" }
+        '401': { description: unauthenticated }
+        '403': { description: csrf_denied }
+        '404': { description: session_not_found }
+        '422': { description: session_binding_required or invalid_session_id }
+        '429': { description: rate_limited }

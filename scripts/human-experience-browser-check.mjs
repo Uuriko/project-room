@@ -116,6 +116,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await api('producer',{action:'report',runId:run.id,attemptId:'test-host',expectedRevision:run.revision,state:'done',summary:'The recommendation is ready.',resultMessageId:'public-result'});
   for(const page of pages) { await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Result ready')); await page.locator('#assistant-face [data-assistant-message="public-result"]').click(); await page.locator('[data-message-record-id="public-result"]').waitFor(); }
   for(const page of pages) {
+    assert.equal(await page.locator('[data-message-record-id="public-result"] .message-meta strong').textContent(), f.store.room('commons').state.members.producer.displayName);
     await page.locator('#assistant-face .assistant-face-status').getByText('Result ready',{exact:true}).waitFor();
     assert.equal(await page.locator('#assistant-face').getByRole('button',{name:'Open result',exact:true}).count(), 1, 'the result is one tap from the card face');
     assert.equal(await page.locator('#assistant-face').getByRole('button',{name:'Stop',exact:true}).count(), 0, 'a finished ask has no Stop');
@@ -1067,4 +1068,30 @@ test('discarding an uncertain assistant control restores the face control access
   await page.locator('#assistant-discard').click();
   assert.equal(await stop.isEnabled(), true, 'Discard restores the unchanged face control for assistive technology');
   await stop.click(); await page.locator('#assistant-retry').waitFor({ state: 'visible' });
+});
+
+
+test('human room admin connects assistant without owner identity or redundant steer', {timeout:60000}, async t => {
+  const f=createAcceptanceFixture(), server=createRoomServer({store:f.store,streamInterval:40});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  const browser=await browserType.launch({headless:true});
+  t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  const page=await browser.newPage({viewport:{width:1280,height:900}});
+  await page.goto(`http://127.0.0.1:${server.address().port}`);await signInFixture(page,f.keys.guest);
+  await page.locator('#main').waitFor({state:'visible'});
+  await openSettings(page);
+  assert.equal(await page.locator('#assistant-setup').isVisible(),false,'ordinary membership does not expose administration');
+  await closeSettings(page);
+  const member=f.store.room('commons').state.members.guest;
+  f.store.command(f.keys.owner,'commons',{id:crypto.randomUUID(),type:'member.access_changed',data:{memberId:'guest',expectedMemberRevision:member.revision,permissions:['manage_members'],active:true}});
+  await page.reload();await page.locator('#main').waitFor({state:'visible'});
+  await configureAssistant(page);
+  const config=f.store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get('commons');
+  assert.equal(JSON.parse(config.value).coordinatorMemberId,'producer');
+  await page.locator('#message-input').fill('@Room Check the setup documentation.');
+  await page.locator('#message-form button[type=submit]').click();
+  await page.waitForFunction(()=>document.querySelector('#assistant-runs').textContent.includes('Check the setup documentation.'));
+  const runs=f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=?').all('commons');
+  assert.equal(runs.length,1);
+  assert.equal(JSON.parse(runs[0].value).initiatorId,'guest');
 });

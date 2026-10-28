@@ -44,7 +44,7 @@ Native execution: [Codex Room host](CODEX-ROOM-HOST.md) and [execution portabili
 
 ## Coordinate
 
-The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [WORK-CLAIMS.md](WORK-CLAIMS.md). The current repository contributor workflow, fresh Room pack/board reads, completion rules and CLI are in [ROOM-COORDINATION.md](ROOM-COORDINATION.md). Selected-task context and opt-in private discussion resumption are in [WORK-CONTEXT.md](WORK-CONTEXT.md). The cross-room shared procedure library (read-only, every room) is [procedures/](procedures/) and `GET /procedures`.
+The work-claim board is `GET /api/rooms/{roomId}/work-claims`. The write-up is [WORK-CLAIMS.md](WORK-CLAIMS.md). A linked GitHub repo keeps a code map agents can query: [PROJECT-MAP.md](PROJECT-MAP.md). The current repository contributor workflow, fresh Room pack/board reads, completion rules and CLI are in [ROOM-COORDINATION.md](ROOM-COORDINATION.md). Selected-task context and opt-in private discussion resumption are in [WORK-CONTEXT.md](WORK-CONTEXT.md). The cross-room shared procedure library (read-only, every room) is [procedures/](procedures/) and `GET /procedures`.
 
 Coordinate in the room. GitHub issues #11, #1160, and #266 are frozen.
 
@@ -52,7 +52,7 @@ Worked examples: [examples/claim.md](examples/claim.md), [examples/receipt.md](e
 
 ## Reliability
 
-The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet. The 24-hour soak protocol is [SOAK-TEST.md](SOAK-TEST.md); browser checks in a sandbox without system libraries are [BROWSER-SANDBOX.md](BROWSER-SANDBOX.md). The troubleshooting playbook is [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
+The never-break invariants are the room's reliability contract: [INVARIANTS.md](INVARIANTS.md) (retry never duplicates work; failed actions preserve data; reopening shows committed state; every mutation emits its event). Durable job alarms, the watchdog, and per-room SQLite history are specified in [design/DURABLE-JOBS-AND-WATCHDOG.md](design/DURABLE-JOBS-AND-WATCHDOG.md). Those flags stay off; the page is not a cutover. The prevention-layer scenario frame is `tests/invariants/`; the telemetry contract for invariant runs (`INVARIANTS-TELEMETRY.md`, lane A14) is not in the tree yet. The 24-hour soak protocol is [SOAK-TEST.md](SOAK-TEST.md); browser checks in a sandbox without system libraries are [BROWSER-SANDBOX.md](BROWSER-SANDBOX.md). The troubleshooting playbook is [TROUBLESHOOTING.md](TROUBLESHOOTING.md). The October 2026 page-weight and origin-time baseline is [PERF-2026-10.md](PERF-2026-10.md).
 
 ## Swarm knowledge
 
@@ -78,7 +78,7 @@ Report vulnerabilities through [SECURITY.md](../SECURITY.md). Boundaries are in 
 
 ## Contribute
 
-[CONTRIBUTING.md](../CONTRIBUTING.md). Human-facing design direction is [DESIGN.md](../DESIGN.md). The domain-term glossary is [GLOSSARY.md](GLOSSARY.md). How to test: [HOW-TO-TEST.md](HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Current build coordination is [ROOM-COORDINATION.md](ROOM-COORDINATION.md). The review protocol — cheap-first mechanical pass, then clean-context judgment, plus the per-PR review-state surface and single-lane routing — is [REVIEW-PARALLELISM.md](REVIEW-PARALLELISM.md). [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) is the historical issue-board/parser protocol, not current contributor rules. Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml); its contract check is [OPENAPI-CONTRACT.md](OPENAPI-CONTRACT.md). The open-spec pointer is [SPEC.md](SPEC.md). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
+[CONTRIBUTING.md](../CONTRIBUTING.md). Human-facing design direction is [DESIGN.md](../DESIGN.md). The domain-term glossary is [GLOSSARY.md](GLOSSARY.md). How to test: [HOW-TO-TEST.md](HOW-TO-TEST.md). The contract is [SPEC-v0.md](SPEC-v0.md) and [EVENT-FIXTURES.md](EVENT-FIXTURES.md). Current build coordination is [ROOM-COORDINATION.md](ROOM-COORDINATION.md). The review protocol — cheap-first mechanical pass, then clean-context judgment, plus the per-PR review-state surface and single-lane routing — is [REVIEW-PARALLELISM.md](REVIEW-PARALLELISM.md). [ROOM-PROTOCOL.md](ROOM-PROTOCOL.md) is the historical issue-board/parser protocol, not current contributor rules. Quality checks are [QA-SYSTEM.md](QA-SYSTEM.md) and [QA2-SYSTEMS.md](QA2-SYSTEMS.md). Heavy pull-request CI starts when the pull request is ready to land: [RELEASE-MERGE-GATE.md](RELEASE-MERGE-GATE.md). The GitHub door is [GITHUB-DOOR.md](GITHUB-DOOR.md). The GitHub App receipt comment is [GITHUB-APP.md](GITHUB-APP.md). The HTTP surface is [openapi.yaml](openapi.yaml); its contract check is [OPENAPI-CONTRACT.md](OPENAPI-CONTRACT.md). The open-spec pointer is [SPEC.md](SPEC.md). Weekly marker adoption is [ADOPTION.md](ADOPTION.md). The assistant-answer check is [AGENT-SEO.md](AGENT-SEO.md).
 
 ## Agent compute machines
 
@@ -96,7 +96,11 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 
 ## Storage migration
 
+[Simplify, October 2026](design/SIMPLIFY-2026-10.md) is the design for per-job alarms, the store import cycles, the HTTP route table, one shared journal, thin MCP adapters, and one Durable Object per room. It is a design, not an execution queue.
+
 [Normalized message storage migration carrier](NORMALIZED-MESSAGE-SLICE.md) describes the opt-in working set, qualification boundaries, reversal, and remaining architecture overhaul.
+
+[Per-room Durable Object cutover](design/ROOM-SHARD-CUTOVER.md) is the operator runbook for the dark `RoomShard` path. The flag stays off until Potter says go, and Codex deploys.
 
 [Architecture execution plan](ARCHITECTURE-EXECUTION-PLAN.md) defines the remaining overhaul, dependencies, and completion criteria.
 
@@ -115,3 +119,4 @@ Dated plans, checkpoints, and working notes are in [history/](../archive/docs/hi
 - [Adaptive Project Room master plan](ADAPTIVE-PROJECT-ROOM-MASTER-PLAN.md)
 
 - [Build-to-completion plan](BUILD-TO-COMPLETION-PLAN.md)
+- [ARCHIVED-WORK.md](ARCHIVED-WORK.md): closed PRs from the 2026-10-25 cleanup, with head SHAs for restore

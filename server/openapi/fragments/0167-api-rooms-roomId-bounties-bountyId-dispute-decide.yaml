@@ -1,0 +1,53 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/dispute/decide:
+    post:
+      summary: Rule on a dispute (seated decider only)
+      description: |
+        Only the seated decider (the designated verifier) may rule. A
+        rejected challenge releases the award (the bond compensates the
+        worker for delay, no fee); an upheld challenge cancels and refunds
+        the poster in full with no fee while the claimant's bond is slashed
+        to the pool. The settlement is attributed to the decider. API keys
+        need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [outcome, reasonCodes]
+              properties:
+                outcome: { type: string, enum: [upheld, rejected, split, frivolous] }
+                reasonCodes: { type: array, items: { type: string } }
+                rubricCheck:
+                  type: array
+                  description: |
+                    Optional arbiter re-check against the pinned rubric (slice 6):
+                    one {criterionId, verdict: pass|fail} per pinned criterion.
+                    Validated against the pin before the ruling lands and
+                    recorded on the resolution.
+                  items:
+                    type: object
+                    required: [criterionId, verdict]
+                    properties:
+                      criterionId: { type: string }
+                      verdict: { type: string, enum: [pass, fail] }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The dispute resolution
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  resolution: { type: object }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }

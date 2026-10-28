@@ -1,0 +1,22 @@
+  /api/inbox/sources/{sourceId}/attachments:
+    get:
+      summary: List one inbox source's attachment descriptors
+      description: >-
+        Account-session read. Attachment descriptors are metadata only
+        (id, kind, name, contentType, size, inline); the system never
+        retains attachment bytes. `?view=email-excerpt-v1` includes
+        channel sources; without it they 404 like the list hides them.
+        Another account's source 404s. Unknown attachment ids 404 on the
+        item route.
+      security:
+        - accountSession: []
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sourceId, attachments: [{ id, kind, name, contentType, size, inline }] }" }
+        '401': { description: account_session_required }
+        '404': { description: inbox_source_not_found }
+        '422': { description: unsupported_inbox_view }
