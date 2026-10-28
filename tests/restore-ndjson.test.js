@@ -179,7 +179,7 @@ test("operator restore replays a valid export and reports the verified summary",
   const summary = await response.json();
   assert.equal(summary.verified, true);
   assert.equal(summary.events, events);
-  assert.match(summary.note ?? "", /credential/i, "summary warns that secrets do not survive the export");
+  assert.match(summary.note ?? "", /credential/i, "summary describes credential recovery");
   assert.equal(target.db.prepare("SELECT count(*) AS n FROM events").get().n, events);
 });
 
@@ -426,4 +426,18 @@ test("operator restore endpoint: strict drift refusal is a legible 422, report o
     OPERATOR_TOKEN, badTarget);
   assert.equal(bad.status, 422);
   assert.equal((await bad.json()).error.code, "invalid_restore");
+});
+
+
+test("restore preserves credential verifiers and warns that old access keys may still authenticate", async t => {
+  const source = openStore(t, "restore-credential-source-");
+  source.initialize(initialRoom());
+  const originalKey = source.issueAccessKey("commons", "owner");
+  const target = openStore(t, "restore-credential-target-");
+  const response = await operatorRestoreResponse(fakeRequest({ body: exportNdjsonText(source.db) }), OPERATOR_TOKEN, target);
+  assert.equal(response.status, 200);
+  assert.doesNotThrow(() => target.authenticate(originalKey), "restore does not implicitly revoke an existing credential hash");
+  const result = await response.json();
+  assert.match(result.note, /existing credentials may still authenticate/);
+  assert.match(result.note, /Before reopening access, revoke and re-issue credentials/);
 });
