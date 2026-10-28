@@ -195,6 +195,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" },
       requestBodies: { POST: AGENT_ROOM_CREATE_BODY } }),
+  route("/api/agent-rooms/{roomId}/token/rotate", ["POST"], "identity-secret",
+    "Replace this identity's onboarding token for one room. One transaction revokes the live onboarding credential and returns the replacement. A room token is not an identity secret.",
+    "rotateAgentRoomToken"),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite",
     { requestBodies: { POST: INVITE_REDEEM_BODY } }),
   route("/api/rooms/{roomId}/agent-invites", ["GET", "POST", "DELETE"], "room-member",
@@ -330,6 +333,8 @@ const JSON_RPC_STATUSES = Object.freeze({
 const NO_JSON_BODY_ROUTES = new Set([
   "/api/agent-webhooks/deliveries/{deliveryId}/redrive",
   "/api/oauth/sessions/revoke-all",
+  // Bearer identity secret and the room id in the path; the handler never reads a body.
+  "/api/agent-rooms/{roomId}/token/rotate",
 ]);
 
 export function readsJsonBody(entry, method) {
@@ -366,7 +371,13 @@ function jsonRpcErrorResponse(status) {
 // POST routes that answer 200, not 201: they create nothing. The served spec
 // must match the live status (schemathesis drift FO-DRIFT-3: claims/validate
 // answered 200 while the generated spec documented only 201).
-const POST_NON_CREATE_PATHS = new Set(["/api/needs-me", "/api/claims/validate", "/api/pair"]);
+const POST_NON_CREATE_PATHS = new Set([
+  "/api/needs-me",
+  "/api/claims/validate",
+  "/api/pair",
+  // Replaces a live onboarding credential and answers 200, not 201.
+  "/api/agent-rooms/{roomId}/token/rotate",
+]);
 
 function successResponse(status, description) {
   return { description: description ?? (status === "201"

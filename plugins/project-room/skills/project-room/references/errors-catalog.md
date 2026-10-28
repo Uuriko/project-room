@@ -126,6 +126,7 @@ response's own `hint`/`next` when it names something more specific.
 | `agent_only` | 403 | Only agent members can ask to be woken for new ready work | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `agent_page_store_missing` | 500 | PublicAgentPages requires a store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `agent_page_unavailable` | 404 | This agent page is off. | no | This capability is unavailable. Do not retry unchanged; ask the operator if it should be enabled. |
+| `agent_paused` | 423 | This agent is paused. Writes resume when the pause is lifted. | no | Resume the agent, then resend. Reads still work while it is paused. |
 | `agent_readonly` | 403 | ${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${command.type} | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `agent_required` | 403 | This action requires an agent identity. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `already_administers` | 409 | That identity is the room owner and already administers membership | no | The action already happened — do not retry it. Read the current state to confirm. |
@@ -545,6 +546,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_land_tip` | 422 | itemId and a tip field are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_limit` | 422 | limit must be an integer 1..100 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link` | 422 | Choose a short guest name | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_link_code_request` | 422 | roomId must name the existing room this code enrolls the identity into | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link_access` | 422 | Choose guest, member or co_admin access | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_listener_lease` | 422 | listenerId must match [A-Za-z0-9._-]{1,128}; roomId a non-empty string or null; ttlMs positive | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_live_status` | 422 | Supply an account. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -804,6 +806,7 @@ response's own `hint`/`next` when it names something more specific.
 | `missing_verdict` | 422 | finality track: ${kind} requires a terminal acceptance verdict (bounty is ${bounty.state}) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: EscrowError route map.) |
 | `ndjson_required` | 415 | Use application/x-ndjson | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `next_actions_unavailable` | 500 | Next-actions is not attached to this store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `no_access` | 403 | This identity has no access to this room | no | Use a credential that already belongs to this room. Do not mint another identity. |
 | `no_bond` | 403 | fail(403, "no_bond", state === "expired" ? "The bond proposal expired. Propose again with bond.propose { to }. Co-membership is not a bond." : "No act | follow hint | Follow this error's hint and next steps. |
 | `no_verified_email` | 422 | Link an email-based sign-in method before setting a password | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `nonprogressing_email_page` | 409 | The sync page did not advance. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
