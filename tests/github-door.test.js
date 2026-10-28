@@ -28,6 +28,21 @@ test("a requested inbound delivery fails the CLI when the door is unconfigured",
   assert.equal(scheduled.status, 0, "an unused scheduled door can remain disabled");
 });
 
+test("configured inbound credentials never implicitly authorize public outbound publication", () => {
+  for (const publish of ["", "false", "TRUE", "1"]) {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/github-door.mjs", import.meta.url)), "out"], {
+      env: { ...process.env, ROOM_DOOR_SECRET: "synthetic", GITHUB_REPOSITORY: repo,
+        ROOM_DOOR_PUBLISH: publish, ROOM_ORIGIN: "http://127.0.0.1:1" }, encoding: "utf8"
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /outbound publication disabled/);
+  }
+  const enabled = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/github-door.mjs", import.meta.url)), "out"], {
+    env: { ...process.env, ROOM_DOOR_SECRET: "", GITHUB_REPOSITORY: repo, ROOM_DOOR_PUBLISH: "true" }, encoding: "utf8"
+  });
+  assert.match(enabled.stdout, /ROOM_DOOR_SECRET/, "explicit opt-in reaches configuration validation");
+});
+
 test("outbound checkpoints quiet pages so later public messages remain reachable", async t => {
   for (const ignoredMessages of [false, true]) await t.test(ignoredMessages ? "own and private messages" : "non-message events", async () => {
     const comments = [], requested = [];
