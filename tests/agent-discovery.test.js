@@ -280,7 +280,8 @@ test("conventional skill/agent filenames serve the same short packet as /llms.tx
       assert.equal(discoveryDoc(path).type, short.type, path);
       const get = await fetch(origin + path);
       assert.equal(get.status, 200, path);
-      assert.equal(await get.text(), short.body);
+      // #3655: served bytes are the packet rebased onto the serving origin.
+      assert.equal(await get.text(), discoveryDoc(path, origin).body);
     }
   }
 });
@@ -396,7 +397,8 @@ test("www leftover synonyms serve the short packet or agent card, not 404", asyn
     const get = await fetch(origin + path);
     assert.equal(get.status, 200, path);
     assert.equal(get.headers.get("content-type"), short.type, path);
-    assert.equal(await get.text(), short.body, path);
+    // #3655: served bytes are the packet rebased onto the serving origin.
+    assert.equal(await get.text(), discoveryDoc(path, origin).body, path);
   }
   for (const path of ["/room/agent.json", "/room/agent.json/"]) {
     assert.equal(discoveryDoc(path).body, card.body, path);
