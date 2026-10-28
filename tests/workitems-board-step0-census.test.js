@@ -120,22 +120,23 @@ test("step0 fates: a maximally populated item's board row drops the named fields
   assert.equal(row.reviews[0].verdict, "approve");
   assert.equal(row.attestations[0].memberId, "worker");
   assert.ok(boardJson.includes("HANDOFF-NEXT-SENTINEL")); // handoff nextAction survives as the chain note
-  // Dropped — no board field exists for any of these (Step 0 record §3):
-  for (const sentinel of ["DOD-SENTINEL", "RECEIPT-NEXT-SENTINEL", "HANDOFF-DONE-SENTINEL", "HANDOFF-LIMIT-SENTINEL"]) {
-    assert.equal(boardJson.includes(sentinel), false, `${sentinel} must not reach the board at Step 0`);
-  }
-  assert.equal(boardJson.includes(receipt.signedEvidence.signature), false, "the signed evidence object itself has no board home");
   // Amended by B-4' Phase 0 (settle-pass-19 RED cure, 2026-10-27): slice 2
-  // (decision fields) and slice 4 (accountableMemberId, this PR) gave the
-  // §4.2 identity fields board homes, so they are survivors now, carried
-  // verbatim in every mapped state. The brief itself (definitionOfDone,
-  // mode) is still homeless at this slice — slice 3 amends this list when
-  // it lands — as are verifierMemberId (policy kind only), receipt,
-  // handoff, helpWanted and publicTask.
+  // (decision fields), slice 4 (accountableMemberId) and slice 3a (brief
+  // carriage, this PR) gave the §4.1/§4.2 fields board homes, so they are
+  // survivors now, carried verbatim. Still homeless at this slice:
+  // verifierMemberId (policy kind only), receipt, handoff, helpWanted
+  // and publicTask.
+  assert.equal(row.definitionOfDone, "DOD-SENTINEL", "slice 3a: the brief has a board home");
+  assert.equal(row.mode, "write", "slice 3a: the mode has a board home");
   assert.equal(row.accountableMemberId, "worker", "slice 4: the accountable member has a board home");
   assert.equal(row.humanDecisionMakerId, "owner", "slice 2: the decision gate's addressee has a board home");
   assert.equal(row.ownerDecisionRequired, true, "slice 2: the decision gate flag has a board home");
-  for (const key of ["definitionOfDone", "mode", "verifierMemberId", "receipt", "handoff", "helpWanted", "publicTask"]) {
+  // Dropped — no board field exists for any of these (Step 0 record §3):
+  for (const sentinel of ["RECEIPT-NEXT-SENTINEL", "HANDOFF-DONE-SENTINEL", "HANDOFF-LIMIT-SENTINEL"]) {
+    assert.equal(boardJson.includes(sentinel), false, `${sentinel} must not reach the board at Step 0`);
+  }
+  assert.equal(boardJson.includes(receipt.signedEvidence.signature), false, "the signed evidence object itself has no board home");
+  for (const key of ["verifierMemberId", "receipt", "handoff", "helpWanted", "publicTask"]) {
     assert.equal(Object.hasOwn(row, key), false, `board row must not carry ${key} at Step 0`);
   }
   // #3547 kernel fact vs item vocabulary: the claim row now always carries

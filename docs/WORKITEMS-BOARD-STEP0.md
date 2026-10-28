@@ -171,6 +171,12 @@ description/brief field at all** — `title` is the only text it carries.
 `mode` (write/read — it decides whether a scope claim is required) is
 likewise absent. An accepted item migrated today loses its brief.
 
+**Amendment (B-4' Phase 0 slice 3a, 2026-10-27):** the board row now
+carries `definitionOfDone` and `mode` verbatim from the item, so the
+brief survives migration; the Step 0 fate test is amended to pin both
+as survivors. Slice 3b (brief readers) re-points the item-side readers
+at the board fields.
+
 ### 4.2 Accountability and decision routing (identity fields)
 - `accountableMemberId` survives only while the item is claimed/working/
   done (as `owner`). On an **accepted-but-unclaimed** item the board row
@@ -187,8 +193,7 @@ now carries `ownerDecisionRequired` (boolean), `humanDecisionMakerId`
 (string|null) and `accountableMemberId` (string|null) verbatim in every
 mapped state, including accepted-but-unclaimed — the Step 0 fate test is
 amended to pin the new survivors. `verifierMemberId` still survives only
-as a `reviewPolicy` kind. The brief fields of §4.1 remain homeless at
-this slice; slice 3 amends §4.1 when it lands.
+as a `reviewPolicy` kind.
 
 ### 4.3 Verification semantics: `independenceConfirmed`, bindings
 Item verification is designated-verifier-only, bound to a specific

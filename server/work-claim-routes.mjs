@@ -166,19 +166,23 @@ function summarizeBoardClaim(item) {
 }
 
 // B-4' row fields on Board LIST entries: the stored row contract carries
-// accountableMemberId / humanDecisionMakerId (string|null) and
-// ownerDecisionRequired (boolean) on every row (slices 2 and 4), but at
-// their defaults the three keys cost ~84 bytes per list entry of pure
-// noise — enough to push a 50-claim page past the #3289 64 KB guard.
-// List entries omit the keys when they hold their defaults; readers treat
-// an absent key as the default, and any non-default value is carried
-// verbatim. Stored rows and single-claim reads are unchanged.
+// accountableMemberId / humanDecisionMakerId / definitionOfDone / mode
+// (string|null) and ownerDecisionRequired (boolean) on every row
+// (slices 2, 4 and 3a), but at their defaults the keys cost ~130 bytes
+// per list entry of pure noise — enough to push a 50-claim page past
+// the #3289 64 KB guard. List entries omit the keys when they hold
+// their defaults; readers treat an absent key as the default, and any
+// non-default value is carried verbatim. Stored rows and single-claim
+// reads are unchanged.
 function sparseListClaim(item) {
-  if (item.accountableMemberId != null || item.humanDecisionMakerId != null || item.ownerDecisionRequired) return item;
+  if (item.accountableMemberId != null || item.humanDecisionMakerId != null || item.ownerDecisionRequired
+    || item.definitionOfDone != null || item.mode != null) return item;
   const copy = { ...item };
   delete copy.accountableMemberId;
   delete copy.humanDecisionMakerId;
   delete copy.ownerDecisionRequired;
+  delete copy.definitionOfDone;
+  delete copy.mode;
   return copy;
 }
 

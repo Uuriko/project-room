@@ -545,6 +545,8 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     // Same names/semantics as the item fields so the #3342 decisions inbox
     // (PR #3572 decisionFacts) can re-point at the board 1:1.
     accountableMemberId: typeof item.accountableMemberId === "string" && item.accountableMemberId.length > 0 ? item.accountableMemberId : null,
+    definitionOfDone: typeof item.definitionOfDone === "string" && item.definitionOfDone.length > 0 ? item.definitionOfDone : null,
+    mode: item.mode === "read" || item.mode === "write" ? item.mode : null,
     ownerDecisionRequired: item.ownerDecisionRequired === true,
     humanDecisionMakerId: typeof item.humanDecisionMakerId === "string" && item.humanDecisionMakerId.length > 0 ? item.humanDecisionMakerId : null,
     reviewedBy: reviewsMerged.length > 0 ? reviewsMerged[reviewsMerged.length - 1].memberId : null,
@@ -674,6 +676,8 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     ownerDecisionRequired: false,
     humanDecisionMakerId: null,
     accountableMemberId: null,
+    definitionOfDone: null,
+    mode: null,
     reviewedBy: null,
     attestations: [],
     tags: [],
