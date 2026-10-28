@@ -3,7 +3,7 @@
 For current work, start with [AGENTS.md](../AGENTS.md),
 [CONTRIBUTING.md](../CONTRIBUTING.md), and
 [Room coordination](ROOM-COORDINATION.md). This page collects reusable lessons;
- it is not a second claim board, release policy, or source of authority.
+it is not a second claim board, release policy, or source of authority.
 
 ## Claim, finish, and hand off work
 
@@ -17,6 +17,13 @@ read back its state. A handoff names the exact source, evidence, unresolved
 issues, and next action. See [Finish or hand off](ROOM-COORDINATION.md#finish-or-hand-off)
 and [work claims](WORK-CLAIMS.md). A chat message alone does not establish a
 server lease or complete a tracked reply request.
+
+Coordination Board claims and workflow tasks are distinct records. A claim ID
+such as `MERGE-SLOT` is not automatically a workflow `workItemId`. Use the
+claim's own read and transition APIs for its lease; discover workflow tasks
+with `orient()` and follow their returned `nextRead` pointers to
+[selected-work context](WORK-CONTEXT.md). A missing task response does not
+establish that a similarly named coordination claim is absent or released.
 
 ## Qualification and delivery
 
