@@ -17289,6 +17289,120 @@ paths:
         '403': {description: Missing current authority or configuration}
         '409': {description: Map revision or graph digest changed}
         '422': {description: Invalid repo or number}
+  /api/public/door-funnel:
+    get:
+      summary: Public door funnel aggregates
+      description: >-
+        Anonymous, counts-only weekly aggregates for the stranger door
+        (no login): joins per public-directory-listed room (from the
+        member.added and member.joined_via_invitation events), bucketed by
+        Monday 00:00 America/Los_Angeles weeks, oldest first. The public
+        response omits identity mint counts. A room owner presenting a
+        room access token or account session receives those counts and
+        Cache-Control private, no-store. Everyone else receives
+        Cache-Control public, max-age=600; the aggregate is reused for
+        ten minutes per weeks value. Example:
+        GET /api/public/door-funnel (the optional weeks query parameter
+        is clamped to 1..12, default 12). Totals only: no member ids,
+        handles, emails, identity links, or joiner data ever leave,
+        unlisted rooms never appear, and a listed room with no joins
+        renders 0. There is deliberately no fleet/outside split: no
+        fleet marker exists in the join data, so the response carries
+        classifier.available=false rather than a fabricated split.
+        Read-only; a source failure refuses the whole read with
+        door_funnel_unavailable instead of silently zeroing a leg.
+      security: []
+      parameters:
+        - name: weeks
+          in: query
+          required: false
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Weekly door funnel aggregates
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema: { type: string }
+                  generatedAt: { type: string }
+                  weeks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        startsAt: { type: string }
+                        joins:
+                          type: object
+                          additionalProperties: { type: integer }
+                        mints:
+                          type: integer
+                          description: Owner-authenticated read only. Omitted from the public response.
+                  directory:
+                    type: object
+                    properties:
+                      listedRooms: { type: integer }
+                      totalMembers: { type: integer }
+                      rooms:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            roomId: { type: string }
+                            memberCount: { type: integer }
+                  classifier:
+                    type: object
+                    properties:
+                      available: { type: boolean }
+                      reason: { type: string }
+        '429':
+          description: Per-address door funnel rate limit (error.code rate_limited)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+        '500':
+          description: Door funnel source unavailable (error.code door_funnel_unavailable)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  /api/verdict-inbox:
+    get:
+      summary: Verdict inbox — sectioned attention-set read (COMP-DEEP #1, REV §3 reqs 1–5)
+      description: |
+        The verdict inbox over a server-maintained attention set of
+        (claim, person, reason, since) tuples with Gerrit fold semantics
+        (per person per claim only the latest record is live). Membership
+        changes on claim lifecycle events only: delivery submitted adds
+        the named reviewer(s) with reason verdict-requested; a recorded
+        verdict removes the reviewer; request-revision / reject adds the
+        worker (revision-requested / rejected); accept clears the set;
+        re-delivery re-adds the reviewer (re-review-required); a verdict
+        voided by a new delivery re-adds its reviewers
+        (verdict-voided-new-delivery). A claim awaiting verdict whose set
+        stays empty past the room-configured interval (default 24h,
+        work-claims config verdictOrphanAfterMs) auto-adds the room owner
+        with reason orphaned-review. Sections are server-defined:
+        needsYourVerdict / returnedToYou / waitingOnWorker /
+        recentlyDecided; every row carries claimId, roomId, title,
+        personId, reason, since and waitingSeconds, sorted by waiting
+        time, oldest first. Two doors share the one underlying set: a
+        Bearer identity secret is the agent door (surface agent — agent
+        reviewers get a queue view of the same set); an account session
+        is the human door (surface human — tuples held by non-human
+        members never render there, so bots never enter the human set).
+        The response also carries Contract F follow totals (CD-06) under
+        `follow` when that provider is present, otherwise null. A room
+        whose read fails is named in roomErrors and excluded, never a 500.
+      security:
+        - accountSession: []
+        - identityBearer: []
+      responses:
+        '200':
+          description: "{ contractVersion: 1, generatedAt, viewerId, surface, sections: { needsYourVerdict, returnedToYou, waitingOnWorker, recentlyDecided }, totals, follow, roomErrors }"
+        '401': { description: unauthenticated or room_token_not_identity }
 components:
   securitySchemes:
     accountBrowserSession:

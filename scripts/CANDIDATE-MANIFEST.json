@@ -41,7 +41,7 @@
     "icons/icon-192.png": "sha256:8b1afa1152a889494606cf1d91479d6a8f0282a0161adbc11deac402f7fb4d8f",
     "icons/icon-512.png": "sha256:29b3c5e64459ea3c61c3ce6ddab857fea403b5270dc3337582fec31b47e3e95c",
     "icons/maskable-512.png": "sha256:af47118cfead824c67f3fa69ce99bfac368d3ffb77693319269f9a24cb9e539d",
-    "index.html": "sha256:35b2e5027a9c3b3d919b71e8961799c6747241534acd3a8f8a9d730d442a35ce",
+    "index.html": "sha256:260ec05d0dcc86dcb8e96eb81bc2c467fc57b704234af93116ae74ab456007f7",
     "manifest.webmanifest": "sha256:602341ff5426f69cf698028e4f3dec0f9ee22eb1dd5b96244598b50a52955224",
     "offers.html": "sha256:b1f1052a85efc02e51daf6fed9477d38c3e65cb70f8f2c1c519bee3a1f9a96dc",
     "offline.html": "sha256:904698a195de5f930487f6f7b9d12ab9d99a1e12b2ff1d2b66c91e66b101d55b",
@@ -106,7 +106,7 @@
     "src/needs-attention.js": "sha256:1177ebb1a066648f13fa74978b07f40b40b323fc056a3fa5a6096154b98fa080",
     "src/operator-ui.js": "sha256:112c9625cb486b0f50e7019b2d339ddac3de25ecc8fa252405b84a97e85d78df",
     "src/operator.css": "sha256:cd016a6147ff49f1bc0463e438353d24004199ddd98981ec433ef92fbc4b2568",
-    "src/owner-cockpit.js": "sha256:61bb8df98ae9aadf4745921456f17861d813559578680354258a1e0847ce40b1",
+    "src/owner-cockpit.js": "sha256:65ea5926db90c18a625bfbb8f225a803309944cf02951537255f1497b90f714c",
     "src/owner-project-offers-ui.js": "sha256:ef13c2a66323b21c3b353a7d8c1157e200f6f3ae9c7b5b73735028413a798ea8",
     "src/polls.js": "sha256:7d39af43a6d14593cbf54093e9d16183cc2bcbc3964173cdb8f1fed119813aa2",
     "src/portable-work.js": "sha256:88d9325a8cbb698ced48b9eb2ba594606b093a443d21939ca3a7fbee62e49c24",
@@ -139,7 +139,7 @@
     "src/signin-navigation.js": "sha256:494f2537099c152a1711d4a5c9087f89b67a35d1153ee9658e1aea6d71b35f25",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",
     "src/strings.js": "sha256:16d9742fc2ef6f0e9dad2e933857a4c120bc923dc3a71ec86e255c0aa7561615",
-    "src/styles.css": "sha256:d94a22ee7e40878f6e148ab616ea44f47239fedf89ccc43a02d3f31b286a3dc9",
+    "src/styles.css": "sha256:59e7d49529680dea4dd7effb6d900d91e12b85778e2ce32269cd06eb8108be9a",
     "src/updates-ui.js": "sha256:cc614d1a76799f35ac563c2f4cf3176019b932d47b9591ce9e574a86b50be28b",
     "src/work-announcements.js": "sha256:18fe08703df19663b853712933eb64fd448cc2905b0cb9154d015b27ddf51633",
     "src/work-help.js": "sha256:5a7795f5ea12f5f16ab16efe3b978c9945928e46afd801446938bdd5914ef5ac",
@@ -151,8 +151,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:63e02e5145a0c9b6aa01bfd199f03e659beb5ab0676f7558e2012c51b0b0b8b1",
-    "strings/en.json": "sha256:d7299f5cb2ed8578b168b65d1b19652bd48b825fe58a7b83b9748e175973741d"
+    "strings/en.js": "sha256:f9f41cd7b95254caa5656a41fa80146aafce3e10d957f487f73537f31dfe47ba",
+    "strings/en.json": "sha256:df5d4eec2d69cb51f80513d5198cfb1233ad60ea052ef555488c5065f1371a4e"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:318ec275c1e1de04ea272734746fce5a713afc25a203a114b5f426e0f424eff9",
