@@ -1320,7 +1320,11 @@ $("#choose-room").addEventListener("click", () => workspaceUI.showRoomList(true)
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
 window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
-setInterval(() => { if (!document.hidden) confirmAccount(); }, 5000);
+// PERF-F-S3: the periodic confirm runs at 60s, not 5s (720 → 60 req/hr/tab).
+// Session death is still caught instantly by the stream's access-ended
+// event where a stream is held, and the focus/visibility triggers above
+// fire this immediately when the user returns to the tab.
+setInterval(() => { if (!document.hidden) confirmAccount(); }, 60000);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 // plan-dir-card: render a directory card inside the member chip's profile.
 // owns[] and reach{} are host-supplied from live data (never fabricated);
@@ -2889,7 +2893,13 @@ async function refreshRequestRuns({ force = false } = {}) {
   // A request arriving during the read still gets its initial status promptly.
   void refreshRequestRuns();
 }
-setInterval(() => { void refreshRequestRuns({ force: true }); }, 10000);
+// PERF-F-S5: the 10s tick no longer forces a read — the change key in
+// refreshRequestRuns dedupes an unchanged open-request set, so this tick
+// only pays a room read when something changed. A 60s forced backstop
+// still refreshes run state while a reply request stays open
+// (360 → ≤60 forced reads/hr while a request is open).
+setInterval(() => { void refreshRequestRuns(); }, 10000);
+setInterval(() => { void refreshRequestRuns({ force: true }); }, 60000);
 function requestControls(message) {
   const request = state.replyRequests?.[message.id];
   if (!request) {

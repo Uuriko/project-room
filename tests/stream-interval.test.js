@@ -63,8 +63,9 @@ test("an idle stream does not re-read the store on every tick", async t => {
   const opened = f.reads();
   assert.equal(opened, 2, "open validates once and pumps once");
   await sleep(1200);
-  // The re-check cadence at a 50 ms interval is 250 ms, so ~5 light re-reads
-  // in 1.2 s — against the legacy pump's ~24 full reads in the same window.
+  // The re-check cadence at a 50 ms interval is 2 s (PERF-F-S4: multiplier
+  // 40, capped at 10 s), so no probe re-read falls inside this 1.2 s window
+  // at all — against the legacy pump's ~24 full reads in the same window.
   const idleReads = f.reads() - opened;
   assert.ok(idleReads <= 7, `idle stream re-read the store ${idleReads} times in 1.2 s`);
   assert.equal(await f.next(300), null, "an idle stream receives no room events");
