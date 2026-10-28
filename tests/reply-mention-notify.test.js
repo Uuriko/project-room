@@ -7,6 +7,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // An in-thread reply to an agent's post must notify that agent: a delivered
 // mention_states row (needs-me surfaces it) and a wake signal for a
@@ -85,7 +86,7 @@ test("reply to an agent's post wakes the agent's registered host", async (t) => 
   const owner = store.identities.create("Wake owner");
   new AgentRooms(store).create(owner.secret, { roomId: "wake-room", title: "Wake", purpose: "Reply wake testing" });
   const alias = store.identities.create("Linked alias");
-  store.identities.link(owner.secret, "wake-room", { identityId: alias.identityId, memberId: "linked-alias", displayName: "Alias", permissions: [] });
+  linkWithProof(store, owner.secret, "wake-room", alias, { memberId: "linked-alias", displayName: "Alias", permissions: [] });
   store.agentHeartbeats.heartbeat({ agentId: alias.identityId, hostId: "laptop", mode: "pull-only", cadenceSeconds: 60 });
   store.command(alias.secret, "wake-room", { id: randomUUID(), type: "message.posted", data: { messageId: "m1", body: "agent post" } });
   assert.equal(store.agentHeartbeats.pendingWakes(alias.identityId).length, 0);

@@ -147,25 +147,32 @@ test("a window that does not line up with held history falls back to one full re
 });
 
 test("a server that ignores ?messages=recent answers with a full snapshot, used as is", async t => {
-  const f = fixture(t, (url, n) => full(n === 1 ? 9 : 10, n === 1 ? history : [...history, message("m6")]));
+  // Paging can finish history from the head page, so this route keys off the
+  // URL: the recent read is a full body, and that body is the snapshot.
+  const f = fixture(t, url => url === RECENT ? full(10, [...history, message("m6")]) : full(9, history));
   await f.warm();
   f.connect(); await f.settle();
   f.notify(hint(10, "message.posted", { messageId: "m6" })); await f.settle();
   assert.equal(f.reads.at(-1), RECENT);
   assert.deepEqual(ids(f.seen.at(-1).state.messages), ["m1", "m2", "m3", "m4", "m5", "m6"]);
+  assert.equal(Object.hasOwn(f.seen.at(-1), "messagesWindow"), false);
 });
 
 test("an edit receipt that arrives after a newer windowed read still reads the full snapshot", async t => {
   // The stream's message.posted (10) lands before the edit command's own
   // receipt (9 is older); the windowed read at 10 kept m1 as it was held.
-  const f = fixture(t, (url, n) => n === 1 ? full(8, history)
-    : url === RECENT ? recent(10, [message("m4"), message("m5"), message("m6")], 3)
-    : full(10, [{ ...message("m1"), body: "edited" }, ...history.slice(1), message("m6")]));
+  // History can finish from the conversation head, so the full read is the
+  // edit's own request, not a slot in the warm-up.
+  let edited = false;
+  const f = fixture(t, url => url === RECENT ? recent(10, [message("m4"), message("m5"), message("m6")], 3)
+    : edited ? full(10, [{ ...message("m1"), body: "edited" }, ...history.slice(1), message("m6")])
+    : full(8, history));
   await f.warm();
   f.connect(); await f.settle();
   f.notify(hint(10, "message.posted", { messageId: "m6" })); await f.settle();
   assert.equal(f.reads.at(-1), RECENT);
   assert.equal(f.client.sequence, 10);
+  edited = true;
   f.route.receipt = hint(9, "message.edited", { messageId: "m1" });
   await f.client.send({ id: "edit", type: "message.edited", data: { messageId: "m1", body: "edited" } });
   assert.equal(f.reads.at(-1), FULL);
@@ -205,6 +212,8 @@ test("a stream open or error re-reads with the recent window once history is hel
   f.connect();
   for (const type of ["open", "error"]) {
     const before = f.reads.length;
+    // An error reads only when the stream is CLOSED; a retrying stream waits for open.
+    if (type === "error") f.client.stream.readyState = 2;
     f.client.stream.dispatchEvent(new Event(type)); await f.settle();
     assert.deepEqual(f.reads.slice(before), [RECENT], type);
     assert.deepEqual(ids(f.seen.at(-1).state.messages), ["m1", "m2", "m3", "m4", "m5"], type);

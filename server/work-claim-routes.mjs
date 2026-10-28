@@ -47,6 +47,8 @@ import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { alertLeaseRefusal, notifyClaimCollisions } from "./agent-collisions.mjs";
+import { noteProjectMapOverlap, publishProjectMapOverlap, withProjectMapOverlap } from "./project-map-store.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
@@ -60,12 +62,12 @@ import {
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
 import { publicReceiptById } from "./receipts-live.mjs";
-import { publicReceiptUrl, publicWorkClaimReceiptId } from "./public-read-model.mjs";
+import { publicReceiptUrl, publicWorkClaimReceiptId, publicWorkItemReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived } from "../src/events.js";
+import { isRoomArchived, publicReceipts } from "../src/events.js";
 import { availableClaimsFromBoard } from "./available-work.mjs";
 import { boardDoorForRequest, recordBoardView } from "./analytics/board-views.mjs"; // #3588: board-view facts for the activation funnel.
 
@@ -392,6 +394,18 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
 }
 
+// Legacy malformed rows remain available for explicit repair. Only validation
+// refusals are isolated; persistence/event failures must still fail the request.
+function skipInvalidMaintenanceClaim(error, item, skipped) {
+  if (!(error instanceof ClaimError) || error.code !== "invalid_claim_input") throw error;
+  skipped.count += 1;
+  if (skipped.claimIds.length < 5) skipped.claimIds.push(String(item.id).slice(0, 128));
+}
+function warnInvalidMaintenanceClaims(roomId, phase, skipped) {
+  if (skipped.count) console.warn(JSON.stringify({ event: "work_claim.maintenance_invalid", roomId,
+    phase, code: "invalid_claim_input", skippedCount: skipped.count, claimIds: skipped.claimIds }));
+}
+
 // Evaluate lease expiry across the room's items; expired claims auto-release
 // (owner cleared, history stamped by releaseExpired). Returns the ids that
 // were released by this sweep.
@@ -401,15 +415,16 @@ function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
   const entry = registry.list(roomId).filter(item => ACTIVE_CLAIM_STATES.includes(item.state)
     && typeof item.leaseExpiresAt === "string" && Date.parse(item.leaseExpiresAt) <= nowMs);
   if (entry.length === 0) return [];
-  const swept = releaseExpired(entry, nowMs);
-  const released = [];
-  // releaseExpired returns a normalized copy of every item, expired or not,
-  // so compare states: only a claim that actually lapsed counts as swept.
-  swept.forEach((item, index) => {
-    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") {
-      registry.set(roomId, item); released.push(item.id); onRelease(item, entry[index]);
+  const released = [], skipped = { count: 0, claimIds: [] };
+  for (const before of entry) {
+    let item;
+    try { [item] = releaseExpired([before], nowMs); }
+    catch (error) { skipInvalidMaintenanceClaim(error, before, skipped); continue; }
+    if (item.state === "unclaimed" && before.state !== "unclaimed") {
+      registry.set(roomId, item); released.push(item.id); onRelease(item, before);
     }
-  });
+  }
+  warnInvalidMaintenanceClaims(roomId, "lease_expiry", skipped);
   return released;
 }
 
@@ -478,11 +493,26 @@ const receiptOf = item => {
 // in to public receipts and neither the owner toggle nor an operator
 // unpublish hides it — so the field is never a dead link. No twin: both
 // fields are null, stating plainly that this receipt has no public page.
+//
+// The recorded opt-in is checked on the room state itself, never on the
+// projection rows: a stale row left by mirror drift must not advertise a
+// link for a room that opted out (the settled-lot RCA's lesson). And one
+// completion carries one public receipt under either of two ids — the
+// claim's own wcr_ row, or the wir_ row a completed board work item
+// projects the same completion under (the projection deliberately skips
+// the mirrored claim there, UT-SHARE F-3) — so both deterministic ids
+// are tried and whichever the public read resolves is the twin.
 const receiptWithPublicLink = (store, roomId, item) => {
   const receipt = receiptOf(item);
-  const publicId = publicWorkClaimReceiptId(roomId, item.id);
-  if (!publicReceiptById(store, publicId)) return Object.freeze({ ...receipt, publicId: null, publicUrl: null });
-  return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
+  const noTwin = Object.freeze({ ...receipt, publicId: null, publicUrl: null });
+  const state = store.room(roomId)?.state;
+  if (!state || publicReceipts(state).enabled !== true) return noTwin;
+  for (const publicId of [publicWorkClaimReceiptId(roomId, item.id), publicWorkItemReceiptId(roomId, item.id)]) {
+    if (publicReceiptById(store, publicId)) {
+      return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
+    }
+  }
+  return noTwin;
 };
 
 const receiptsQueryOf = (reject, params) => {
@@ -609,6 +639,8 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     if (linked === item) return item;
     registry.set(roomId, linked);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
+    try { notifyClaimCollisions(store, roomId, linked); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
+    try { noteProjectMapOverlap(store, roomId, linked); } catch (error) { console.error("project map overlap failed:", error?.message ?? error); }
     return linked;
   };
   return registry.transaction ? registry.transaction(run) : run();
@@ -627,7 +659,7 @@ export async function handleWorkClaims(options) {
     try {
       const item = linkWorkClaimPullRequest({ store: options.store, roomId: options.roomId,
         auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize });
-      return helpers.json(res, 200, item);
+      return helpers.json(res, 200, withProjectMapOverlap(options.store, options.roomId, item));
     } catch (error) {
       if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
       throw error;
@@ -683,7 +715,26 @@ export async function handleWorkClaims(options) {
     const result = registry.transaction ? registry.transaction(run) : run();
     return helpers.json(res, result.status, result.value);
   } catch (error) {
-    if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
+    if (error?.code === "file_lease_conflict" && error.body) {
+      try {
+        alertLeaseRefusal(options.store, options.roomId, {
+          claimId: error.attemptedClaimId, callerId: error.attemptedBy, conflict: error.body
+        });
+      } catch (alertError) {
+        console.error("collision alert failed:", alertError?.message ?? alertError);
+      }
+      let body = error.body;
+      try {
+        const overlap = publishProjectMapOverlap(options.store, options.roomId, {
+          id: error.attemptedClaimId, title: error.attemptedTitle, files: error.attemptedFiles,
+          repo: error.attemptedRepo, state: "claimed"
+        });
+        if (overlap) body = { ...body, overlap };
+      } catch (overlapError) {
+        console.error("project map overlap failed:", overlapError?.message ?? overlapError);
+      }
+      return helpers.json(res, 409, body);
+    }
     if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
     throw error;
   }
@@ -779,17 +830,22 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // agents that opted in (server/work-wants.mjs). Default off; never throws.
     if (action === "created" || action === "released") noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
     if (action === "state_changed" || action === "claimed") wakeNamedReviewers(store, roomId, item, { actorId: extra.actorId ?? caller });
+    try { notifyClaimCollisions(store, roomId, item); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
+    try { noteProjectMapOverlap(store, roomId, item); } catch (error) { console.error("project map overlap failed:", error?.message ?? error); }
     return item;
   };
   const closeLiveClaims = () => {
-    const closed = [];
+    const closed = [], skipped = { count: 0, claimIds: [] };
     for (const item of registry.list(roomId)) {
       if ((item.kind !== "land" && item.kind !== "deploy") || isTerminalClaimState(item.state)) continue;
-      const next = closeWhenLive(item, SOURCE_REVISION, nowMs);
+      let next;
+      try { next = closeWhenLive(item, SOURCE_REVISION, nowMs); }
+      catch (error) { skipInvalidMaintenanceClaim(error, item, skipped); continue; }
       if (!next) continue;
       commit(next, "state_changed");
       closed.push(next.id);
     }
+    warnInvalidMaintenanceClaims(roomId, "live_close", skipped);
     return closed;
   };
   const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
@@ -846,6 +902,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const error = new Error(body.error.message);
     error.code = "file_lease_conflict";
     error.body = body;
+    error.attemptedClaimId = item.id;
+    error.attemptedBy = caller;
+    error.attemptedFiles = item.files;
+    error.attemptedRepo = item.repo;
+    error.attemptedTitle = item.title;
     throw error;
   };
 
@@ -881,7 +942,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         at: nowMs
       });
     }
-    return json(res, 200, page);
+    return json(res, 200, withProjectMapOverlap(store, roomId, page));
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -1033,7 +1094,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
-      return json(res, 201, ackedAssignee);
+      return json(res, 201, withProjectMapOverlap(store, roomId, ackedAssignee));
     }
     commit(item, "created");
     return json(res, 201, item);
@@ -1043,7 +1104,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // SEC-2: member-authored text is marked untrusted for the reader.
     // #3661: the single-claim read carries the same derived pull
     // settlement state as the board page.
-    return json(res, 200, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller)));
+    return json(res, 200, withProjectMapOverlap(store, roomId, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller))));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
@@ -1114,6 +1175,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const error = new Error(body.error.message);
       error.code = "file_lease_conflict";
       error.body = body;
+      error.attemptedClaimId = claimed.id;
+      error.attemptedBy = caller;
+      error.attemptedFiles = claimed.files;
+      error.attemptedRepo = claimed.repo;
+      error.attemptedTitle = claimed.title;
       throw error;
     }
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
@@ -1130,8 +1196,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // W012 required reading: every enrollment response presents the reading
     // list for the claim's kind. Advisory only — enrollment never gates on
     // it, so there is no bypass to learn and no existing flow can break.
-    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
-      requiredReading: requiredReadingFor(item.kind) });
+    return json(res, 200, withProjectMapOverlap(store, roomId, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
+      requiredReading: requiredReadingFor(item.kind) }));
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);

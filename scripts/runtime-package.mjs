@@ -8,7 +8,7 @@ import { pathToFileURL } from "node:url";
 
 const v8Assets = ["index.html", ...["app.js", "client.js", "events.js", "conversation.js", "workflow.js", "share-links.js",
   "return-brief.js", "work-selectors.js", "work-status.js", "work-packet.js", "portable-work.js", "reminders.js", "reminder-time.js", "styles.css"].map(name => "src/" + name)];
-export const publicAssets = ["src/room-administration.js", "src/work-reducers.js", "src/message-reducers.js", "src/entry.js", "src/entry-started.js", "src/signin-entry.js", "src/signin-navigation.js", "src/account-client.js", "src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/owner-cockpit.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/workspace-navigation.js", "src/result-reader.js", "src/clipboard.js", "src/result-comparison.js", "src/result-feedback.js", "src/result-availability.js", "src/strings.js", "src/front-door.js", "src/human-experience.js", "src/conversation-intent.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-announcements.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-signin-page.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/board-ui.js", "src/board-keyboard.mjs", "src/board.css", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/access-presets.js", "src/room-setup-prompt.js", "src/service-origin.js", "src/updates-ui.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "skills/project-room-setup/SKILL.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Decision #36 (#3254, Option A): the generated agent pages are build output
+export const publicAssets = ["src/room-administration.js", "src/work-reducers.js", "src/message-reducers.js", "src/entry.js", "src/entry-started.js", "src/signin-entry.js", "src/signin-navigation.js", "src/account-client.js", "src/board-mine.js", "src/first-room-copy.js", "strings/en.js", "strings/en.json", "index.html", "project-room-mark.svg", "src/login-polish.css", "about.html", "offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/owner-cockpit.js", "src/project-offers.css", "favicon.svg", "icon.svg", "manifest.webmanifest", "push-sw.js", "src/app.js", "src/workspace-navigation.js", "src/result-reader.js", "src/clipboard.js", "src/result-comparison.js", "src/result-feedback.js", "src/result-availability.js", "src/strings.js", "src/front-door.js", "src/human-experience.js", "src/conversation-intent.js", "src/human-experience.css", "src/member-display-names.js", "src/room-layout.js", "src/client.js", "src/events.js", "src/display-name-guard.js", "src/conversation.js", "src/workflow.js", "src/human-push.js", "src/human-push-display.js", "src/spend-pricing-ui.js", "src/polls.js", "src/share-links.js", "src/return-brief.js", "src/work-selectors.js", "src/work-announcements.js", "src/work-status.js", "src/work-packet.js", "src/portable-work.js", "src/reminders.js", "src/reminder-time.js", "src/styles.css", "src/agent-connections.js", "src/room-charter.js", "src/room-instructions.js", "src/reply-requests.js", "src/work-help.js", "src/help-offers.js", "src/room-roster.js", "src/account-settings-ui.js", "src/auth-signin-ui.js", "src/agent-signin-ui.js", "src/agent-signin-page.js", "src/agent-first-run.js", "src/invite-context.js", "src/request-access.js", "src/room-deep-link.js", "src/browser-session.js", "src/composer-files.js", "src/session-expiry.js", "src/agent-invite-ui.js", "src/board-ui.js", "src/html-escape.js", "src/board-keyboard.mjs", "src/board.css", "src/join.js", "src/join-watchdog.js", "src/work-item-session.js", "src/work-loops.js", "src/chat-suggestions.js", "src/share-invite-code.js", "src/handoff-envelope-ui.js", "src/dm-consents.js", "src/friend-bond.js", "src/needs-attention.js", "src/access-presets.js", "src/room-setup-prompt.js", "src/service-origin.js", "src/updates-ui.js", "src/pairing-ui.js", "src/error-copy.js", "src/public-a11y.css", "connectors/muse.md", "skills/project-room-setup/SKILL.md", "compare/project-room-vs-slack.html", "compare/project-room-vs-discord.html", "compare/agent-collaboration-tool.html", "compare/multi-agent-workspace.html", "compare/ai-agent-coordination.html", "compare/project-room-vs-agent-room.html", "og/home.png", "og/fonts/Inter-Regular.ttf", "og/fonts/Inter-Regular.woff2", "og/fonts/OFL.txt", "og/about.png", "og/offers.png", "og/compare.png", "og/receipts.png", "offline.html", "icons/icon-192.png", "icons/icon-512.png", "icons/maskable-512.png", "icons/apple-touch-icon-180.png", "src/pwa-install.js", "src/push-ask.js", "scripts/install.sh", "docs/agents/index.html", "docs/agents/paste.html", "docs/agents/claude-code.html", "docs/agents/codex.html", "docs/agents/cursor.html", "docs/agents/cline.html", "docs/agents/vscode.html", "docs/agents/aider.html", "docs/agents/openai-agents-sdk.html", "docs/agents/langgraph.html", "docs/agents/crewai.html", "examples/integrations/claude-code/README.md", "examples/integrations/codex/README.md", "examples/integrations/cursor/README.md", "examples/integrations/cline/README.md", "examples/integrations/vscode/README.md", "examples/integrations/aider/README.md", "examples/integrations/openai-agents-sdk/README.md", "examples/integrations/langgraph/README.md", "examples/integrations/crewai/README.md", "operator.html", "src/operator-ui.js", "src/operator.css"];// Decision #36 (#3254, Option A): the generated agent pages are build output
 // (scripts/build-agent-docs.mjs renders them from the committed docs/agents/*.md
 // sources) — decision #32: generated output is never committed — so an
 // exact-commit package can never contain them, and they are not part of this
@@ -69,12 +69,20 @@ optional.push("src/audit-receipts.mjs", "src/outside-agents.mjs", "server/outsid
 optional.push("src/room-charter.js", "src/room-instructions.js");
 optional.push("src/reply-requests.js", "server/reply-requests.mjs");
 optional.push("server/dm-consents.mjs", "server/public-face.mjs"); // consent-bound DMs + public face (imported by server/store.mjs)
+optional.push("server/public-agent-page.mjs", "server/routes/public-agent-page.mjs"); // public agent page (imported by server/store.mjs and server/routes/table.mjs)
+optional.push("server/download-page.mjs"); // public /download status (imported by server/routes/table.mjs)
 optional.push("server/bonds.mjs"); // agent Bond + peer DMs (imported by server/store.mjs and server/http.mjs)
 optional.push("server/membership-delegation-journal.mjs"); // append-only membership grant decisions
+optional.push("server/journal.mjs"); // shared per-kind journal (imported by server/store.mjs and the other journal callers)
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
+optional.push("server/door-funnel.mjs", "server/routes/door-funnel.mjs"); // DOOR-FUNNEL-READ: public door funnel aggregates (route module imported by server/routes/table.mjs)
+optional.push("server/verdict-inbox.mjs", "server/verdict-inbox-read.mjs", "server/routes/verdict-inbox.mjs"); // COMP-DEEP #1 verdict inbox (route module imported by server/routes/table.mjs)
 optional.push("offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "server/project-offers.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
+optional.push("server/snapshot-window.mjs"); // shared room-read window (imported by server/http.mjs and server/room-bootstrap.mjs)
+optional.push("server/routes/room-window.mjs"); // windowed bootstrap and older-message page (imported by server/routes/table.mjs)
+optional.push("server/room-bootstrap.mjs"); // one-read room open (imported by server/http.mjs and server/mcp-room-profile.mjs)
 optional.push("src/curiosity-rank.mjs"); // curiosity sort for room_list_work (imported by server/mcp-room-profile.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
@@ -89,6 +97,7 @@ optional.push("src/presence-state.js"); // #660: pure presence/working-state der
 optional.push("client/room-digest.mjs", "client/reply-actions.mjs", "scripts/agent-replies.mjs", "client/request-runner.mjs", "client/host-process.mjs", "client/host-context-policy.mjs", "client/host-result.mjs", "client/host-subprocess.mjs", "client/host-verification.mjs", "client/agent-setup.mjs", "client/setup-journal.mjs", "scripts/connect-room.mjs", "scripts/run-room-request.mjs");
 optional.push("client/codex-runtime.mjs", "client/codex-shared-assistant.mjs", "client/shared-attachment-context.mjs", "client/codex-stdio.mjs", "client/room-assistant-client.mjs", "scripts/run-codex-room.mjs", "docs/CODEX-ROOM-HOST.md");
 optional.push("client/codex-host-status.mjs", "client/codex-supervisor.mjs");
+optional.push("client/codex-request-supervisor.mjs");
 optional.push("scripts/agent-doctor.mjs");
 optional.push("scripts/bootstrap-agent-room.mjs");
 optional.push("client/request-notices.mjs");
@@ -153,6 +162,8 @@ optional.push("server/mcp-result-text.mjs"); // withholds minted credentials fro
 optional.push("server/mcp-action-search.mjs"); // room_search_actions, room_run_action and the lean profile (imported by server/mcp-discovery.mjs and server/mcp-room-profile.mjs)
 optional.push("server/mcp-tool-contracts.mjs"); // AUX-08 access/cost/REST twin line on core and lean tool descriptions (imported by server/mcp-discovery.mjs)
 optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room tools (imported by server/http.mjs)
+optional.push("server/mcp-request-defaults.mjs"); // pinned API-key roomId defaults for hosted MCP calls (imported by server/mcp-room-profile.mjs and server/mcp-full-profile.mjs)
+optional.push("client/request-id.mjs"); // deterministic transport request IDs (imported by client/mcp-stdio.mjs, work-actions, help-actions, and reply-actions)
 optional.push("server/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/mcp-room-profile.mjs, server/mcp-full-profile.mjs, server/http.mjs)
 optional.push("server/a2a-jsonrpc.mjs"); // public A2A JSON-RPC join reply at /a2a (imported by server/http.mjs)
 optional.push("server/read-cursor.mjs"); // safe scalar foundation imported by needs-me
@@ -227,6 +238,7 @@ optional.push("server/work-claims.mjs"); // RC-2026-09-18-041: pure work-claim s
 optional.push("server/work-claim-sqlite.mjs");
 optional.push("server/persisted-row.mjs"); // RC-2026-09-27-2730: replay-safe persisted-row envelope + move-tolerant kind codec (imported by server/work-claim-sqlite.mjs, server/dispatch-journal.mjs, server/bounty-escrow.mjs; pure, no imports)
 optional.push("server/claim-collisions.mjs");
+optional.push("server/agent-collisions.mjs"); // overlap alerts for live claims (imported by server/work-claim-routes.mjs)
 optional.push("server/work-claim-routes.mjs"); // RC-2026-09-18-041: work-claim HTTP routes (imported by server/http.mjs)
 optional.push("server/work-claim-events.mjs"); // work_claim.updated receipts (imported by server/work-claim-routes.mjs; imports src/events.js)
 optional.push("server/work-claim-integrity.mjs"); // SEC-2: Board input bounds, event budget and status cache (imported by server/work-claim-routes.mjs; imports src/display-name-guard.js via server/display-name-guard.mjs and server/store.mjs limits)
@@ -279,6 +291,7 @@ optional.push("server/membership-resolution.mjs"); // #3882: shared guest-aware 
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs");
 optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)
+optional.push("cloudflare/job-alarm-reconciler.mjs"); // coalesced alarm reconciliation
 optional.push("cloudflare/job-heartbeat.mjs"); // per-job cron heartbeat (imported by cloudflare/room.mjs)
 optional.push("cloudflare/channel-drain-tick.mjs"); // channel-drain RPC decision table (imported by cloudflare/room.mjs)
 optional.push("cloudflare/edge-public.mjs"); // static assets and discovery docs answered outside the Durable Object (imported by cloudflare/room.mjs)
@@ -317,6 +330,7 @@ optional.push("src/agent-invite-ui.js"); // People-rail invite-code mint (collab
 optional.push("src/board-ui.js", "src/board-keyboard.mjs", "src/board-mine.js", "src/first-room-copy.js", "src/board.css"); // Tasks › Board (imported by src/app.js)
 optional.push("server/room-export-html.mjs");
 optional.push("server/room-export.mjs", "cloudflare/room-backup.mjs");
+optional.push("cloudflare/sql-cost-scope.mjs"); // optional bounded SQL diagnostic scopes
 optional.push("server/restore-ndjson.mjs"); // whole-store NDJSON restore (imported by cloudflare/room.mjs)
 optional.push("server/jobs.mjs"); // shared job registry (imported by cloudflare/job-heartbeat.mjs and server.mjs)
 optional.push("server/redact-read.mjs"); // read-time message tombstone (imported by server/http.mjs and the MCP room tools)
@@ -335,20 +349,25 @@ optional.push("src/agent-signin-page.js"); // Agent sign-in page logic (public a
 optional.push("src/join-watchdog.js"); // Join page loader watchdog (public asset, loaded by join.html)
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
+optional.push("server/pairing.mjs", "server/routes/pairing.mjs", "src/pairing-ui.js"); // device-code pairing, reconnect-by-key, and member merge (imported by server/store.mjs, server/routes/table.mjs, and src/app.js)
+optional.push("server/routes/agent-invite-redeem.mjs"); // agent invite redeem and fetch-only availability (imported by server/routes/table.mjs)
 optional.push("server/member-permission-requests.mjs", "server/routes/member-permissions.mjs"); // reviewed member permissions and their RT aliases
 optional.push("server/agent-fleet.mjs", "server/routes/agents.mjs"); // CP-AGENTS-1: fleet read model and its RT route (imported by server/routes/table.mjs and server/orient.mjs)
 optional.push("server/work-wants.mjs", "server/routes/wants-work.mjs"); // BOARD-WAKE-2: ready-work preference and its RT route (imported by server/store.mjs, server/work-claim-routes.mjs and server/routes/table.mjs)
 optional.push("server/routes/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grant RT routes (imported by server/routes/table.mjs)
 optional.push("server/routes/agent-work.mjs"); // bounded agent pickup route
+optional.push("server/routes/agent-room-token.mjs"); // onboarding token rotate RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/typing.mjs", "server/routes/room-digest.mjs", "server/room-digest.mjs", "server/message-read-index.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
 optional.push("server/legacy-message-shape.mjs"); // projection shape upgrade v1: legacy message records (imported by server/store.mjs)
 optional.push("server/routes/wake-status.mjs"); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
+optional.push("server/routes/agent-presence.mjs"); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/demo.mjs", "server/routes/human-push.mjs");
 optional.push("server/routes/front-door.mjs"); // EXP-7 Variant B: /about front-door live facts RT route (imported by server/routes/table.mjs)
 optional.push("src/front-door.js"); // EXP-7 Variant B: /about live-facts script (loaded by about.html, registered in server/public-assets.mjs)
 optional.push("server/routes/squads.mjs"); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
+optional.push("server/project-map.mjs", "server/project-map-store.mjs", "server/routes/project-map.mjs"); // per-room code map (imported by server/jobs.mjs, server/routes/table.mjs, server/mcp-room-profile.mjs)
 optional.push("server/spend-pricing.mjs", "server/routes/spend-pricing.mjs"); // spend-pricing kill switch: owner-only priced-tool gate lever (imported by server/routes/table.mjs and server/spend-grants.mjs)
 optional.push("server/room-flood-guard.mjs"); // per (room, member) chat post budget (imported by server/store.mjs)
 optional.push("server/membership-delegation.mjs"); // RC-2026-09-18-038: owner-granted membership administration (imported by server/store.mjs)
@@ -409,7 +428,9 @@ optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/v
 optional.push("src/work-reducers.js", "src/message-reducers.js", "src/spend-pricing-ui.js", "src/polls.js", "src/account-client.js");
 optional.push("src/entry.js", "src/signin-entry.js", "src/signin-navigation.js");
 optional.push("server/sql-binds.mjs"); // shared Worker-safe SQL list chunks imported by fleet, wakes, needs-me and restore
-optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs"); // Archive-aware message domain reads
+optional.push("server/html-escape.mjs", "src/html-escape.js"); // one HTML escape, re-exported for server callers
+optional.push("server/db-util.mjs"); // shared sqlite tableExists
+optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs", "server/agent-pause.mjs"); // Archive-aware message domain reads; pause admission asks agent-pause isPaused
 optional.push("server/room-shard.mjs", "server/room-shard-tables.mjs"); // per-room table classification; the worker re-exports it and still serves invite-only-pilot
 optional.push("server/room-shard-flag.mjs"); // ROOM_PER_ROOM_OBJECTS default off; storage_home is added only when the flag is on
 optional.push("server/room-shard-route.mjs", "cloudflare/room-shard.mjs"); // ROOM_SHARD class and the pilot/shard name resolver; flag off does not open shard storage

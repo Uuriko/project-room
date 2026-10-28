@@ -35,7 +35,7 @@ External evidence (the bytes live outside the room): omit `evidenceKind` and the
 
 ## Handoff today
 
-When you must stop before the item is done, record `work.handoff_recorded` (`room_record_handoff`). Required fields:
+When you must stop before the item is done, record `work.handoff_recorded` with MCP `room_handoff` (the older `room_record_handoff` name is a deprecated alias). Required fields:
 
 - `doneSummary` — what is actually done against the definition of done
 - `nextAction` — the exact next step for whoever picks it up
