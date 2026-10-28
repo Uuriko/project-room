@@ -1741,11 +1741,6 @@ body:has(#main:not([hidden])) .site-footer { display: none; }
 .member-observation, .member-pause-explanation, .presence-check-note { color: var(--muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .presence-refresh { margin-bottom: .75rem; }
 .presence-check-note { display: block; }
-/* Presence refreshes itself every 30s. While fresh (checked under 60s ago) the
-   timestamp says nothing new, so only a quiet control remains; stale keeps both. */
-.presence-refresh.is-fresh { margin-bottom: .5rem; }
-.presence-refresh.is-fresh .text-button { color: var(--muted); font-weight: 600; }
-.presence-refresh.is-fresh .presence-check-note { display: none; }
 .member-owned-by { overflow-wrap: anywhere; }
 
 #room-actions-list section { display: grid; gap: .15rem; }
