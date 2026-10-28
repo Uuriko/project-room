@@ -611,18 +611,34 @@ test("pruneWakeSignals retires acked signals past retention beyond the keep, wit
 test("DM fan-out rings the push doorbell once per message: a coalesced wake does not re-ring", t => {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
-  const ownerKey = f.store.issueAccessKey("commons", "owner");
   const sender = f.store.identities.create("dm-sender");
   const recipient = f.store.identities.create("dm-recipient");
+  // Current dm.posted surface (shape "to body messageId"): both identities
+  // link into the room and a peer.dm bond carries the DM.
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: sender.identityId, memberId: "dm-sender",
+    displayName: "DM Sender", permissions: ["accept_work"],
+  });
+  f.store.identities.link(f.keys.owner, "commons", {
+    identityId: recipient.identityId, memberId: "dm-recipient",
+    displayName: "DM Recipient", permissions: ["accept_work"],
+  });
+  const proposed = f.store.command(sender.secret, "commons", { id: randomUUID(), type: "bond.propose",
+    data: { to: recipient.identityId, scopes: ["peer.dm"] } });
+  f.store.command(recipient.secret, "commons", { id: randomUUID(), type: "bond.accept",
+    data: { bondId: proposed.event.data.bondId, scopes: ["peer.dm"] } });
   f.store.agentHeartbeats.heartbeat({ agentId: recipient.identityId, hostId: "host-1", mode: "wakeable", wakeUrl: "https://host.example.test/wake" });
   let rings = 0;
   f.store.agentHeartbeats.pushNotify = () => { rings++; };
-  const post = () => f.store.command(ownerKey, "commons", { id: randomUUID(), type: "dm.posted",
-    data: { messageId: "dm-doorbell-1", threadId: "thread-1", bondId: "bond-1",
-      fromIdentityId: sender.identityId, toIdentityId: recipient.identityId, body: "hello" } });
+  // Same command id for both posts: at the current surface a second
+  // command id reusing the messageId is refused, so the coalesced-wake
+  // scenario arrives as a replay of the same command.
+  const commandId = randomUUID();
+  const post = () => f.store.command(sender.secret, "commons", { id: commandId, type: "dm.posted",
+    data: { messageId: "dm-doorbell-1", to: recipient.identityId, body: "hello" } });
   post();
   assert.equal(rings, 1, "the first DM rings the doorbell");
   post();
   assert.equal(rings, 1, "a coalesced DM wake (same message) must not ring again");
-  assert.equal(f.store.agentHeartbeats.pendingWakes(recipient.identityId).length, 1, "the two posts coalesce to one durable signal");
+  assert.equal(f.store.agentHeartbeats.pendingWakes(recipient.identityId).filter(w => w.kind === "dm").length, 1, "the two posts coalesce to one durable signal");
 });
