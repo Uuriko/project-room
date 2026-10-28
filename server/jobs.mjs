@@ -301,7 +301,25 @@ export function measureStoreGrowth(store) {
     const count = Number(pages?.page_count);
     const bytes = Number(size?.page_size);
     if (Number.isFinite(count) && Number.isFinite(bytes)) dbBytes = count * bytes;
-  } catch { /* a runtime without page pragmas reports 0; the room gauges still watch */ }
+  } catch { /* a runtime without page pragmas falls through to the reads below */ }
+  // TEL: on the production Durable Object the page pragmas yield nothing,
+  // so dbBytes stayed the placeholder 0 while the store held real rooms —
+  // the §5 storage trigger could never fire on evidence. Two further
+  // honest total-size reads, first positive wins: the platform's own
+  // databaseSize on the DO storage adapter, then SQLite's dbstat sum.
+  if (!(dbBytes > 0)) {
+    try {
+      const platform = Number(store?.db?.storage?.sql?.databaseSize);
+      if (Number.isFinite(platform) && platform > 0) dbBytes = platform;
+    } catch { /* not a Durable Object adapter; the dbstat read remains */ }
+  }
+  if (!(dbBytes > 0)) {
+    try {
+      const stat = store.db.prepare("SELECT COALESCE(SUM(pgsize), 0) AS bytes FROM dbstat").get();
+      const bytes = Number(stat?.bytes);
+      if (Number.isFinite(bytes) && bytes > 0) dbBytes = bytes;
+    } catch { /* dbstat unavailable on this runtime; 0 stays a placeholder, read as UNMEASURED downstream */ }
+  }
   return {
     rooms: Number(row?.rooms) || 0,
     events: Number(row?.events) || 0,
@@ -685,6 +703,33 @@ export const JOBS = Object.freeze([
       if (!breach) return gauges;
       console.warn(`[store-growth] ${breach} crossed the store growth limit: ${JSON.stringify(gauges)}`);
       return { ...gauges, errors: 1, failureDetail: { code: "store_growth_limit" } };
+    }
+  }),
+  defineJob({
+    // TEL: the read surface for the PERF-50 §5 trigger gauges (burst write
+    // p95, DO CPU read share, poll share, total storage). The Durable
+    // Object records every request into an in-memory aggregator
+    // (server/request-telemetry.mjs); this hourly tick snapshots it —
+    // resetting the window — and merges the store gauges, so the summary
+    // on /api/health/jobs is exactly what fleet-tools/trigger-gauges.mjs
+    // reads as MEASURED. Fields with no samples stay absent (UNMEASURED
+    // downstream, never a fabricated zero). On Node there is no DO
+    // recorder, so only the store gauges ride the summary there.
+    name: "request-telemetry",
+    cadenceMs: HOUR_MS,
+    slow: true,
+    runtimes: Object.freeze(["worker", "node"]),
+    enabled: () => true,
+    disabledReason: () => null,
+    async run(store, ctx = {}) {
+      const gauges = measureStoreGrowth(store);
+      const tele = typeof ctx.room?.requestTelemetrySnapshot === "function"
+        ? ctx.room.requestTelemetrySnapshot() : null;
+      return {
+        ...(tele ?? {}),
+        activeRooms: gauges.rooms,
+        ...(gauges.dbBytes > 0 ? { totalStorageBytes: gauges.dbBytes } : {})
+      };
     }
   })
 ]);

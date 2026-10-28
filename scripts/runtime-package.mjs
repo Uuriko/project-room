@@ -332,6 +332,7 @@ optional.push("server/room-export.mjs", "cloudflare/room-backup.mjs");
 optional.push("cloudflare/sql-cost-scope.mjs"); // optional bounded SQL diagnostic scopes
 optional.push("server/restore-ndjson.mjs"); // whole-store NDJSON restore (imported by cloudflare/room.mjs)
 optional.push("server/jobs.mjs"); // shared job registry (imported by cloudflare/job-heartbeat.mjs and server.mjs)
+optional.push("server/request-telemetry.mjs"); // TEL: §5 trigger-gauge request aggregator (imported by cloudflare/room.mjs; snapshot read by the request-telemetry job in server/jobs.mjs)
 optional.push("server/redact-read.mjs"); // read-time message tombstone (imported by server/http.mjs and the MCP room tools)
 optional.push("server/dm-event-visibility.mjs"); // SEC-19 DM follow-up visibility (imported by server/store.mjs and server/http.mjs)
 optional.push("about.html");
