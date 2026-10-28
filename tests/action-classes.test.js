@@ -64,7 +64,7 @@ test("the reminder module never imports a send, post, session or spend capabilit
   const source = readFileSync(new URL("../server/reminders.mjs", import.meta.url), "utf8");
   const { specifiers, opaque } = moduleSpecifiers(source);
   assert.deepEqual(opaque, [], "every import in the reminder module is a plain literal the allowlist can see");
-  assert.deepEqual(specifiers.sort(), ["../src/events.js", "../src/workflow.js", "./store.mjs", "node:crypto"].sort(),
+  assert.deepEqual(specifiers.sort(), ["../src/events.js", "../src/workflow.js", "./service-error.mjs", "node:crypto"].sort(),
     "the draft-class reminder path keeps its minimal dependencies");
 });
 

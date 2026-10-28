@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html-escape.js";
 import { workStatus } from "./work-status.js";
 // Tasks › Board. Claims come from GET /work-claims. Live updates follow
 // work_claim.updated on the room snapshot the client already applies.
@@ -15,12 +16,6 @@ const COLUMNS = Object.freeze([
   ["review", "In review"],
   ["landed", "Landed"]
 ]);
-
-export function escapeHtml(text) {
-  return String(text ?? "").replace(/[&<>"']/g, char => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
-  }[char]));
-}
 
 function updatedAt(item) {
   const history = Array.isArray(item?.history) ? item.history : [];
@@ -719,6 +714,20 @@ function claimRecordHtml(item, members) {
   return [`<details class="claim-record" data-claim-record="${escapeHtml(item.id)}"><summary>`, uiText("board.record.summary"), "</summary>", parts.join(""), "</details>"].join("");
 }
 
+function overlapChip(item) {
+  const overlap = item?.overlap;
+  const shared = [];
+  if (Array.isArray(overlap?.files)) shared.push(...overlap.files);
+  if (Array.isArray(overlap?.symbols)) for (const name of overlap.symbols) shared.push(`${name}()`);
+  if (!overlap || shared.length === 0) return "";
+  const other = (Array.isArray(overlap.with) ? overlap.with : []).map(entry => entry?.label || entry?.id).filter(Boolean).join(", ");
+  return uiText("board.overlap.html", {
+    label: escapeHtml(overlap.duplicate ? uiText("board.overlap.duplicate") : uiText("board.overlap.chip")),
+    withLine: uiText("board.overlap.with", { other: escapeHtml(other) }),
+    sharedLine: uiText("board.overlap.shared", { shared: escapeHtml(shared.join(", ")) })
+  });
+}
+
 function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null, claimCap = null) {
   const ownerId = item.owner;
   const owner = ownerId ? memberName(members, ownerId) : "Unclaimed";
@@ -836,7 +845,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   }
   const title = workLink(item, workItems, `claim-work:${item.id}`, item.title || item.id, { claimRecord: true });
   const record = claimRecordHtml(item, members);
-  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
+  return `<article class="claim-card" data-claim-id="${escapeHtml(item.id)}"><h4 tabindex="-1">${title}</h4><p class="claim-owner">${ownerId ? `<span class="member-avatar" aria-hidden="true">${escapeHtml(initials(owner))}</span> ` : ""}<span>${escapeHtml(owner)}</span></p>${place}${fileBlock}${lease ? `<p class="claim-lease">${escapeHtml(lease)}</p>` : ""}${pr}${overlapChip(item)}${reviews}${reason}${deps ? `<ul class="claim-deps">${deps}</ul>` : ""}${links ? `<ul class="claim-chain">${links}</ul>` : ""}${record}<div class="claim-actions">${actions.join("")}</div></article>`;
 }
 
 function newItemForm() {
