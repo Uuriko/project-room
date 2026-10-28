@@ -1,0 +1,19 @@
+  /api/rooms/{roomId}/code/{dropId}/raw:
+    get:
+      summary: Download a code drop's exact bytes
+      description: |
+        text/plain for mbox and diff, application/octet-stream for a bundle.
+        X-Content-SHA256 carries the hash. Pipe to `git am -3`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - { name: dropId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Patch bytes
+          content:
+            text/plain:
+              schema: { type: string }
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404':
+          description: No such drop
