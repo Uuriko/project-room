@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { workContextMarkdown } from '../client/room-agent.mjs';
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -82,4 +83,29 @@ test('key order does not affect content version and oversized briefs fail withou
   assert.equal((await createWorkBrief(reordered)).version, first.version);
   context.work.definitionOfDone = 'x'.repeat(32768);
   await assert.rejects(createWorkBrief(context), { code: 'work_brief_too_large' });
+});
+
+
+test('compact text distinguishes unread discussion and bounded observed drafts from verified progress', t => {
+  const context = fixture(t).read();
+  const unread = workContextMarkdown(context);
+  assert.match(unread, /Discussion not read/);
+  assert.match(unread, /"includeDiscussion":true/);
+  const item = n => ({ sequence: n, message: { id: `draft-${n}`, authorId: n === 5 ? 'peer' : 'producer',
+    workItemId: context.work.id, body: 'PRIVATE DRAFT BODY', proposal: { basisRevision: 0 } } });
+  context.preparation = { changedDuringRead: true, eventsAfterDiscussion: true,
+    discussion: { items: [item(1), item(2), item(3), item(4), item(5)], since: 0, horizon: 5, hasMore: true, checkpoint: null },
+    nextRead: { tool: 'room_read_work_discussion', arguments: { workItemId: context.work.id, cursor: 'continue' } } };
+  const observed = workContextMarkdown(context);
+  assert.match(observed, /"draftMessageId":"draft-5"/);
+  assert.match(observed, /"authorId":"peer"/);
+  assert.match(observed, /"basisRevision":0/);
+  assert.doesNotMatch(observed, /draft-1|draft-2|PRIVATE DRAFT BODY/);
+  assert.match(observed, /"cursor":"continue"/);
+  assert.match(observed, /Work changed during this read/);
+  assert.match(observed, /newer room events/);
+  assert.match(observed, /not verified progress/);
+  context.preparation.discussion = { items: [], since: 5, horizon: 8, hasMore: false, checkpoint: 8 };
+  context.preparation.nextRead = null;
+  assert.match(workContextMarkdown(context), /No draft references in this observed window/);
 });
