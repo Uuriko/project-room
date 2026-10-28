@@ -8,6 +8,17 @@ test('isWriteSql counts every write shape and no plain read', () => {
   for (const sql of ['SELECT 1', "SELECT * FROM t WHERE note='update'", 'SELECT MIN(seq) FROM messages']) assert.equal(isWriteSql(sql), false, sql);
 });
 
+// Codex review of 259f812a: these shapes must count as writes, not slip
+// through as reads. Unknown statement kinds count too (over-count is safe).
+test('isWriteSql is a read allowlist: commented, multi-statement, PRAGMA and DDL count as writes', () => {
+  for (const sql of ['-- explanation\nINSERT INTO t VALUES(1)', '/* explanation */ UPDATE t SET a=1',
+    'SELECT 1; DELETE FROM t', 'SELECT 1;DELETE FROM t;', '/* unterminated SELECT 1', 'PRAGMA user_version = 3',
+    'CREATE TABLE IF NOT EXISTS t(a)', 'DROP TABLE t', 'WITH a AS (SELECT 1) DELETE FROM t WHERE x IN a',
+    "SELECT ';' AS s; UPDATE t SET a=1"]) assert.equal(isWriteSql(sql), true, sql);
+  for (const sql of ['-- why\nSELECT 1', '/* a */ /* b */\n  SELECT 1', 'SELECT 1;', '  select count(*) from t  ;  ',
+    'WITH a AS (SELECT 1) SELECT * FROM a']) assert.equal(isWriteSql(sql), false, sql);
+});
+
 test('writeStatements counts writes that changed rows; reads never touch rowsWritten', () => {
   let readsOfWriteCounter = 0, written = 1;
   const exec = sql => ({ rowsRead: 1, get rowsWritten() { if (!/^\s*(INSERT|UPDATE|DELETE|REPLACE)/i.test(sql)) throw new Error('read touched rowsWritten'); readsOfWriteCounter++; return written; },
