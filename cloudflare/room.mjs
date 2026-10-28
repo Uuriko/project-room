@@ -37,6 +37,7 @@ import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
 import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
 import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
+import { createRequestTelemetry } from '../server/request-telemetry.mjs'; // TEL: §5 trigger-gauge aggregator (request-telemetry job reads it)
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
@@ -124,6 +125,10 @@ export class ProjectRoom extends DurableObject {
     this.requestSignals = new AsyncLocalStorage();
     this.sqlCosts = env.ROOM_SQL_COST_LOG === '1'
       ? new SqlCostScopes({ emit: row => console.info(JSON.stringify(row)) }) : null;
+    // TEL: in-memory request aggregator for the §5 trigger gauges. record()
+    // is O(1) per request (see server/request-telemetry.mjs); the hourly
+    // request-telemetry job snapshots it onto /api/health/jobs.
+    this.requestTelemetry = createRequestTelemetry();
     const origin = roomOrigin(env);
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
@@ -228,8 +233,12 @@ export class ProjectRoom extends DurableObject {
   async #fetch(request) {
     const started = Date.now();
     const cold = this.store?.coldStart;
+    const url = new URL(request.url);
     const respond = response => {
       const appMs = Date.now() - started;
+      // TEL: one O(1) aggregator record per DO request, reusing the appMs
+      // and url this wrapper already computes — no new timing, parse or I/O.
+      this.requestTelemetry?.record({ method: request.method, pathname: url.pathname, searchParams: url.searchParams, durationMs: appMs });
       if (cold && !this.coldStartRequestLogged) {
         this.coldStartRequestLogged = true;
         const line = {
@@ -246,7 +255,6 @@ export class ProjectRoom extends DurableObject {
       return withServerTiming(response, 'app', appMs);
     };
     if (this.paused) return respond(maintenanceResponse(request));
-    const url = new URL(request.url);
     if (JOB_LIST_READS.has(url.pathname)) await this.refreshJobHealthSnapshot();
     // TM-2 split: the backup doors no longer share one credential.
     // ROOM_EXPORT_TOKEN opens the read door only and may stay armed standing
@@ -280,6 +288,13 @@ export class ProjectRoom extends DurableObject {
       // A commit in this request may have queued webhook, land, or claim work.
       this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
     }
+  }
+
+  // TEL: snapshot-and-reset read for the request-telemetry job
+  // (server/jobs.mjs), following the ctx.room.* pattern the channel-drain
+  // and gmail-sync jobs use. Null when no aggregator exists.
+  requestTelemetrySnapshot() {
+    return this.requestTelemetry ? this.requestTelemetry.snapshot() : null;
   }
 
   // Readiness is one statement. It does not open the room, replay events, or

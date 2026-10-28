@@ -5,7 +5,7 @@ const kinds = new Set(['request', 'job', 'background', 'scheduler', 'readiness',
 const operations = new Set(['mcp', 'work-claims', 'work-context', 'room-view', 'operator', 'other',
   'patrol', 'retention', 'integrity', 'webhooks', 'job-eligibility', 'storage-probe',
   'gmail-sync', 'channel-drain', 'webhook-dispatch', 'land-queue', 'claim-prs', 'public-read-model',
-  'public-work-reseed', 'escrow-epochs', 'room-backup', 'growth-watch', 'project-map', 'store-growth']);
+  'public-work-reseed', 'escrow-epochs', 'room-backup', 'growth-watch', 'project-map', 'store-growth', 'request-telemetry']);
 const counters = () => ({ statements: 0, rowsRead: 0, rowsWritten: 0, sqlErrors: 0, unknownRowCosts: 0 });
 const add = (target, source) => {
   for (const key of Object.keys(target)) target[key] = Math.min(Number.MAX_SAFE_INTEGER, target[key] + source[key]);
