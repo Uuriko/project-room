@@ -13,6 +13,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { constants as sqlite } from 'node:sqlite';
 import { setTier } from '../server/autonomy-tiers.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function setup(t, indexed = false) {
   const directory = mkdtempSync(join(tmpdir(), 'conversation-sync-'));
@@ -270,7 +271,7 @@ for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'proj
   assert.equal((await f.get({ messageId: 'ambiguous-reply' }, alex)).value.addressing.explicitlyMentioned, false);
   assert.equal((await f.get({ messageId: 'complete-reply' }, alex)).value.addressing.explicitlyMentioned, true);
   const alias = f.store.identities.create('Global Helper');
-  f.store.identities.link(f.owner, 'commons', { identityId: alias.identityId, memberId: 'local-helper', displayName: 'Local helper', permissions: [] });
+  linkWithProof(f.store, f.owner, 'commons', alias, { memberId: 'local-helper', displayName: 'Local helper', permissions: [] });
   f.post('alias-reply', '@Global Helper inspect this', { replyToId: 'topic' });
   assert.equal((await f.get({ messageId: 'alias-reply' }, alias.secret)).value.addressing.explicitlyMentioned, true);
   assert.equal(Object.hasOwn((await f.get({ limit: 10 }, f.alice)).value, 'addressing'), false);

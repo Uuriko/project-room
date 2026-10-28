@@ -1169,8 +1169,9 @@ export function loadPublicRoom(store, slug) {
   };
 }
 
-export function listPublicRoomSitemap(store) {
-  return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC").all()
+export function listPublicRoomSitemap(store, limit = 1000) {
+  const cap = Number.isInteger(limit) && limit > 0 ? Math.min(limit, 1000) : 1000;
+  return store.db.prepare("SELECT slug, set_at, receipts_enabled FROM public_rooms ORDER BY slug ASC LIMIT ?").all(cap)
     .filter(row => !isUnpublished(store.db, "room", row.slug))
     .map(row => ({
       slug: row.slug,

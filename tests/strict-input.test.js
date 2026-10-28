@@ -15,6 +15,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { llmsFullTxt, llmsTxt } from "../server/agent-discovery.mjs";
 import { applyStrictInputNext } from "../server/strict-input.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -30,8 +31,8 @@ async function serve(t) {
   store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Strict Agent");
-  store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, memberId: "strict-agent",
+  linkWithProof(store, ownerKey, "commons", identity, {
+    memberId: "strict-agent",
     displayName: "Strict Agent", permissions: ["accept_work"],
   });
   const agentKey = store.issueAccessKey("commons", "strict-agent");
