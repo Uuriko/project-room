@@ -1,0 +1,12 @@
+  /api/account/retention:
+    get:
+      summary: Account-deletion retention policy
+      description: |
+        RC-2026-09-19-078. Browser account-session route. Documents what
+        account deletion purges vs retains and why (audit rows under legal
+        hold, deactivated account tombstone, room-owned history).
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ policy: { version, summary, purged, retained } }" }
+        '401': { description: account_session_required or invalid_session }
