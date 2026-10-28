@@ -1,0 +1,13 @@
+  /api/auth/recovery-codes/status:
+    get:
+      summary: Recovery-code set status for the signed-in account (slice 6)
+      description: >-
+        Authenticated read (account_session cookie): reports
+        `{ configured, remaining }` — whether a recovery-code set exists and
+        how many codes are unburned. Codes are never exposed; there is no
+        re-display route.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: "{ configured, remaining (null when no set) }" }
+        '401': { description: unauthenticated }

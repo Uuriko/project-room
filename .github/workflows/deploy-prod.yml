@@ -298,7 +298,7 @@ jobs:
           else
             echo "::warning::prod smoke attempt 1 failed; retrying once in ${SMOKE_RETRY_DELAY_SECONDS:-150}s (Durable Object version lag) before recovery" >&2
             sleep "${SMOKE_RETRY_DELAY_SECONDS:-150}"
-            node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke.json"
+            node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke-attempt2.log" "$RUNNER_TEMP/prod-smoke.json"
           fi
       - name: Live smoke
         shell: bash
@@ -320,6 +320,8 @@ jobs:
           path: |
             ${{ runner.temp }}/pre-deploy.json
             ${{ runner.temp }}/deploy-recovery.json
+            ${{ runner.temp }}/prod-smoke-attempt*.log
+            ${{ runner.temp }}/prod-smoke.json
           retention-days: 90
       - name: Receipt to muse-room
         if: always() && steps.pre.outcome == 'success'
