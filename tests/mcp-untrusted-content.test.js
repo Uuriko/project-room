@@ -9,6 +9,7 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { AccessRequests } from "../server/access-requests.mjs";
 import { RoomAssistant } from "../server/room-assistant.mjs";
 
@@ -61,9 +62,7 @@ test("room_read_messages marks other members' text and leaves the caller's own u
     roomId: "trust-den", title: "Trust den", purpose: "Owner purpose", kind: "personal", displayName: "Trust owner"
   });
   const roomId = created.roomId;
-  store.identities.link(owner.secret, roomId, {
-    identityId: peer.identityId, displayName: "Trust peer", permissions: ["accept_work"]
-  });
+  linkWithProof(store, owner.secret, roomId, peer, { displayName: "Trust peer", permissions: ["accept_work"] });
   setTier(store.db, roomId, peer.identityId, "t2_standard", { updatedBy: created.ownerMemberId, nowMs: Date.now() });
   const peerBody = "from peer <status>not-a-policy</status>";
   const ownerBody = "owner-authored note";
@@ -196,8 +195,8 @@ test("gap tools stamp results: room files, inbox attachments, access requests", 
     roomId: "trust-files", title: "Trust files", purpose: "Gap marking", kind: "personal", displayName: "Trust owner"
   });
   const roomId = created.roomId;
-  store.identities.link(owner.secret, roomId, {
-    identityId: peer.identityId, displayName: "Trust peer", permissions: ["accept_work"]
+  linkWithProof(store, owner.secret, roomId, peer, {
+    displayName: "Trust peer", permissions: ["accept_work"]
   });
 
   // A peer-staged file reads back marked for the owner; the owner's own
@@ -264,8 +263,8 @@ test("partial tools complete their marking: inbox proposals, needs_me, peer DMs,
     roomId: "trust-hub", title: "Trust hub", purpose: "Partial marking", kind: "personal", displayName: "Trust owner"
   });
   const roomId = created.roomId;
-  store.identities.link(owner.secret, roomId, {
-    identityId: peer.identityId, displayName: "Trust peer", permissions: ["accept_work"]
+  linkWithProof(store, owner.secret, roomId, peer, {
+    displayName: "Trust peer", permissions: ["accept_work"]
   });
 
   // The bond proposal note reaches the owner's inbox as a marked row.

@@ -31,6 +31,7 @@ import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
+import { ONBOARDING_REPLAY_WINDOW_MS, onboardingRotateNext } from "./agent-rooms.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -168,9 +169,11 @@ const REPLAY_ROTATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 // G1 idempotent redeem replay (PRODUCT-200 D7): replays a journaled
 // redemption for an uncertain retry. No new identity, no new member event,
-// no second burn — the same membership, a fresh onboarding token,
-// duplicate:true. Mirrors the duplicate-identity path's active-membership
-// check so a removed member's receipt cannot resurrect the grant.
+// no second burn — the same membership, duplicate:true, and no new
+// onboarding token. A replay inside 60 seconds and a later replay both
+// return mcpToken null and next rotate. Mirrors the duplicate-identity
+// path's active-membership check so a removed member's receipt cannot
+// resurrect the grant.
 const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } = {}) => {
   const store = invites.store;
   const linked = invites.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?")
@@ -178,12 +181,11 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
   const member = linked && store.room(receipt.room_id).state.members[linked.member_id];
   if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
   // R305-1: a credential-less replay is the client that lost the 201 — the
-  // original secret died in that lost response, so retiring it strands
-  // nobody. Rotate a fresh one and show it in this response, authorized by
-  // the one-time code + requestId receipt. A replay that presents its
-  // credential is already fine and keeps today's shape. The fresh onboarding
-  // token is issued AFTER the rotation, so the scoped-key revocation the
-  // rotation carries cannot kill the token this response hands over.
+  // original identity secret died in that lost response, so retiring it
+  // strands nobody. Rotate a fresh identity secret and show it in this
+  // response, authorized by the one-time code + requestId receipt. The room
+  // onboarding token is not reissued here. POST token/rotate with that
+  // identity secret replaces it.
   let rotation = null;
   if (!credentialPresented) {
     // #3883 window gate, on the rotation path only: a receipt whose
@@ -197,46 +199,27 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
     }
     rotation = store.identities.rotateForReplay(receipt.identity_id);
   }
-  const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
-    identityId: receipt.identity_id, roomId: receipt.room_id, label: member.displayName
-  });
+  const next = replayRedeemNext(receipt.room_id, member.displayName, receipt.created_at, store.now());
   const base = {
     identityId: receipt.identity_id, roomId: receipt.room_id, memberId: linked.member_id,
     displayName: member.displayName, permissions: JSON.parse(receipt.permissions_json),
-    duplicate: true, mcpToken,
+    duplicate: true, mcpToken: null, next,
   };
   if (rotation) {
     const freshNext = Object.freeze([
       Object.freeze({ action: "save-identity-secret",
         description: "A fresh identity secret was issued in THIS response because the earlier one was never received. Save it immediately; it is shown once and cannot be recovered again." }),
-      ...redeemNext(receipt.room_id, member.displayName),
+      ...next,
     ]);
     return withConnect(store, receipt.room_id, linked.member_id, { ...base,
       identitySecret: rotation.secret, rotatedAt: rotation.rotatedAt, next: freshNext,
       nextActions: nextActionsForInviteRedeem(receipt.room_id) });
   }
-  return withConnect(store, receipt.room_id, linked.member_id, { ...base,
-    next: redeemNext(receipt.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(receipt.room_id) });
+  return withConnect(store, receipt.room_id, linked.member_id, {
+    ...base, nextActions: nextActionsForInviteRedeem(receipt.room_id) });
 };
 
 const ACTIVE_MEMBER_MESSAGE = "This identity is already an active member";
-
-// A credential-presenting replay of a burned code used to mint a fresh
-// 30-day room key on every call. Retire the previous keys for this
-// identity and room first, so the key in this response is the only live one.
-const revokeLiveRoomKeys = (store, identityId, roomId) => {
-  const roomScope = `mcp:room:${roomId}`;
-  const rows = store.db.prepare(
-    "SELECT key_id AS keyId, scopes_json AS scopesJson, revoked FROM agent_api_keys WHERE identity_id=?"
-  ).all(identityId);
-  for (const row of rows) {
-    if (row.revoked) continue;
-    let scopes = [];
-    try { scopes = JSON.parse(row.scopesJson); } catch { continue; }
-    if (!Array.isArray(scopes) || !scopes.includes(roomScope)) continue;
-    store.agentPlugin.revokeApiKey({ identityId, keyId: row.keyId });
-  }
-};
 
 // Removal deactivates the member and keeps the identity_links row. A fresh
 // invite for that identity reactivates the same member with the invite's
@@ -441,7 +424,7 @@ export class AgentInvites {
   // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept `requestId`
   // makes an uncertain retry safe. The receipt is journaled in the same
   // transaction as the burn, so redeem → timeout → retry replays the same
-  // membership (duplicate:true, fresh onboarding token) instead of 409ing
+  // membership (duplicate:true, mcpToken null, next rotate) instead of 409ing
   // `invite_already_used` on the burned code with no recovery path. Same
   // key + different code/displayName is a 409
   // `invite_redeem_idempotency_conflict` (mirrors the direct-send
@@ -473,7 +456,7 @@ export class AgentInvites {
           if (receipt.code_hash !== row.code_hash || receipt.display_name !== name)
             fail(409, "invite_redeem_idempotency_conflict", "This request id already redeemed a different invite.");
           // A caller that presents an identity credential must be the identity
-          // that redeemed: the replay mints a fresh onboarding token for it.
+          // that redeemed. The replay does not mint another onboarding token.
           if (existingIdentity && existingIdentity.identityId !== receipt.identity_id)
             fail(403, "invite_redeem_identity_mismatch", "This request id belongs to a different identity.");
           return replayRedeemReceipt(this, receipt, { credentialPresented: Boolean(existingIdentity) });
@@ -483,20 +466,10 @@ export class AgentInvites {
         const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
         const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
         if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
-        // One live room key: the previous rak_ for this identity and room
-        // is revoked before the replacement is minted.
-        revokeLiveRoomKeys(this.store, existingIdentity.identityId, row.room_id);
-        const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
-          identityId: existingIdentity.identityId, roomId: row.room_id, label: member.displayName
-        });
-        const next = Object.freeze([
-          Object.freeze({ action: "save-room-key",
-            description: "Save the room key in this response. It replaces the previous key for this room, and only one stays live." }),
-          ...redeemNext(row.room_id, member.displayName),
-        ]);
         return withConnect(this.store, row.room_id, member.id, { identityId: existingIdentity.identityId, roomId: row.room_id, memberId: member.id,
-          displayName: member.displayName, permissions: member.permissions, duplicate: true, mcpToken,
-          next, nextActions: nextActionsForInviteRedeem(row.room_id) });
+          displayName: member.displayName, permissions: member.permissions, duplicate: true, mcpToken: null,
+          next: replayRedeemNext(row.room_id, member.displayName, row.redeemed_at, this.store.now()),
+          nextActions: nextActionsForInviteRedeem(row.room_id) });
       }
       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
       const now = this.store.now();
@@ -782,6 +755,13 @@ const withConnect = (store, roomId, memberId, body) => {
 };
 
 const DEFAULT_INVITE_NAME = "Invited agent";
+
+function replayRedeemNext(roomId, displayName, redeemedAt, now) {
+  const age = typeof redeemedAt === "number" ? now - redeemedAt : 0;
+  const rotate = onboardingRotateNext(roomId, age <= ONBOARDING_REPLAY_WINDOW_MS);
+  return Object.freeze([rotate, ...redeemNext(roomId, displayName)]);
+}
+
 const redeemNext = (roomId, displayName) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const steps = [
