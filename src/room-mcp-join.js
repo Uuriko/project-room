@@ -142,6 +142,8 @@ export const HOSTED_ROOM_MCP_TOOLS = Object.freeze([
   "bounty_dispute",
   "bounty_watch",
   "bounty_finalize",
+  "bounty_unfund",
+  "bounty_delete",
   "bounty_transfer",
   "identity_read_verification",
   "identity_list_verified"

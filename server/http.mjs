@@ -4014,6 +4014,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const bountyDisputeDecideMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/dispute\/decide$/.exec(url.pathname);
       const bountyDisputeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/dispute$/.exec(url.pathname);
       const bountyFinalizeMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/finalize$/.exec(url.pathname);
+      const bountyUnfundMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/unfund$/.exec(url.pathname);
+      const bountyDeleteMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/delete$/.exec(url.pathname);
       const bountyRubricMatch = /^\/api\/rooms\/([^/]{1,384})\/bounties\/([^/]{1,128})\/rubric$/.exec(url.pathname);
       // Slice 10: literal segment — arbiter review-packet inspection; must
       // never be mistaken for a bounty id.
@@ -4027,7 +4029,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const bountyMatch = bountyListMatch ?? bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch
         ?? bountyDuplicateMatch ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch
         ?? bountyRejectMatch
-        ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch
+        ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyUnfundMatch ?? bountyDeleteMatch ?? bountyRubricMatch
         ?? bountyReviewsMatch ?? bountySybilFlagsMatch ?? bountySybilDismissMatch ?? bountySybilConfirmMatch
         ?? bountyReputationReviewsMatch;
       const creditsBalancesMatch = /^\/api\/rooms\/([^/]{1,384})\/credits\/balances\/([^/]{1,256})$/.exec(url.pathname);
@@ -4369,7 +4371,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : bountyClaimMatch ? "claim" : bountySubmitMatch ? "submit" : bountyAcceptMatch ? "accept"
           : bountyRejectMatch ? "reject"
           : bountyDisputeDecideMatch ? "dispute-decide" : bountyDisputeMatch ? "dispute"
-          : bountyFinalizeMatch ? "finalize" : bountyRubricMatch ? "rubric"
+          : bountyFinalizeMatch ? "finalize" : bountyUnfundMatch ? "unfund" : bountyDeleteMatch ? "delete" : bountyRubricMatch ? "rubric"
           : bountyReviewsMatch ? "reviews"
           : bountySybilFlagsMatch ? "sybil-flags" : bountySybilDismissMatch ? "sybil-dismiss"
           : bountySybilConfirmMatch ? "sybil-confirm"
@@ -4378,7 +4380,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           : creditsTransferMatch ? "transfer" : "epoch-close";
         const bountyIdMatch = bountyFundMatch ?? bountyDeclineMatch ?? bountySnoozeMatch ?? bountyDuplicateMatch
           ?? bountyWatchMatch ?? bountyClaimMatch ?? bountySubmitMatch ?? bountyAcceptMatch ?? bountyRejectMatch
-          ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyRubricMatch;
+          ?? bountyDisputeDecideMatch ?? bountyDisputeMatch ?? bountyFinalizeMatch ?? bountyUnfundMatch ?? bountyDeleteMatch ?? bountyRubricMatch;
         const identityMatch = creditsBalancesMatch ?? creditsHistoryMatch;
         const sybilFlagIdMatch = bountySybilDismissMatch ?? bountySybilConfirmMatch;
         return await handleBountyEscrow({ req, res, url, store, roomId, auth, escrowRoute,

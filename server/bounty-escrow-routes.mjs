@@ -283,6 +283,18 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
       return { roomId, bounty, receipt };
     });
   }
+  // Sponsor exits (Option A): the proposed-state delete — the same kernel
+  // path as decline, under the name a sponsor hunting an exit looks for,
+  // with the reason optional for the poster's own draft.
+  if (escrowRoute === "delete" && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { optional: ["reason", "idempotencyKey"] }))
+      invalidInput(reject, "{reason?, idempotencyKey?}");
+    return idem(payload, "bounty.delete", 200, () => {
+      const { bounty, receipt } = escrow.deleteBounty(roomId, bountyId, { deleter: caller, reason: payload.reason ?? null, actor });
+      return { roomId, bounty, receipt };
+    });
+  }
   if (escrowRoute === "snooze" && req.method === "POST") {
     const payload = await readPayload(reject, body, req);
     if (!shape(payload, { required: ["until"], optional: ["idempotencyKey"] }))
@@ -384,6 +396,20 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     return idem(payload, "bounty.finalize", 200, () => {
       const { bounty, action, receipt } = escrow.finalizeBounty(roomId, bountyId, { caller });
       return { roomId, bounty, action, receipt };
+    });
+  }
+  // Sponsor exits (Option A): poster-initiated unfund of a funded,
+  // unclaimed bounty — full escrow return, no fee, before the deadline.
+  // Money-adjacent: the kernel refuses every other state with an
+  // enumeration (see unfundBounty), and the idempotency shell above
+  // makes a replay return the original receipt without a second move.
+  if (escrowRoute === "unfund" && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { optional: ["reason", "idempotencyKey"] }))
+      invalidInput(reject, "{reason?, idempotencyKey?}");
+    return idem(payload, "bounty.unfund", 200, () => {
+      const { bounty, settlement, receipt } = escrow.unfundBounty(roomId, bountyId, { unfunder: caller, reason: payload.reason ?? null, actor });
+      return { roomId, bounty, settlement, receipt };
     });
   }
   if (escrowRoute === "balances" && req.method === "GET") {

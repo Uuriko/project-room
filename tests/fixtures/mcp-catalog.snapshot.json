@@ -337,6 +337,15 @@
         "openWorldHint": false
       }
     },
+    "bounty_delete": {
+      "inputSchema": "8cf27b63b71a2d6f",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
     "bounty_dispute": {
       "inputSchema": "706d1614d3833313",
       "annotations": {
@@ -411,6 +420,15 @@
     },
     "bounty_transfer": {
       "inputSchema": "04d7ba1655bb9549",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    },
+    "bounty_unfund": {
+      "inputSchema": "36c129494c3306a9",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

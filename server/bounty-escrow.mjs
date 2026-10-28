@@ -160,8 +160,11 @@ export const TRACK_FINALITY = "finality";
 // verdict stamped onto every terminal settlement. verified-complete is the
 // only settlement that pays the worker; partial is the dispute-split
 // exception; failed and unverified settle the worker at zero and return
-// the escrow to the poster.
-export const SETTLEMENT_KINDS = new Set(["verified-complete", "failed", "unverified", "partial"]);
+// the escrow to the poster. poster-withdrawn (sponsor exits) is the
+// poster-initiated pre-claim withdrawal of a funded bounty: no work was
+// ever claimed, the worker settles at zero because there is no worker,
+// and the escrow returns to the poster in full.
+export const SETTLEMENT_KINDS = new Set(["verified-complete", "failed", "unverified", "partial", "poster-withdrawn"]);
 
 // Acceptance track: verdict transitions on the bounty record (from-state ->
 // legal to-states). Terminal verdicts: accepted (work approved) or rejected
@@ -1567,21 +1570,118 @@ export class BountyEscrow {
     });
   }
 
+  // Poster-initiated unfund (sponsor exits, Option A): a FUNDED bounty no
+  // worker has claimed returns its full escrow to the poster before the
+  // deadline, through the finality track's existing refund machinery —
+  // the same journal kind ("refund") and the same _requireFinalityMove
+  // row _timeoutRefund uses, with no fee and no new journal kind. A
+  // claimed bounty is a different family (a worker has posted a bond and
+  // spent expectation on it), so unfund refuses from claimed onward with
+  // an enumeration of the paths that do apply; it never touches a claim
+  // bond, because the funded-unclaimed gate means none exists here.
+  unfundBounty(roomId, bountyId, { unfunder, reason = null, actor } = {}) {
+    return this.store.transaction(() => {
+      this._ensure();
+      const lane = this._requireLane(roomId, unfunder, "poster");
+      const act = this._actorFor(roomId, actor, lane);
+      const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
+      if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
+      const bounty = this._mutable(row);
+      check(lane === bounty.poster, "not_authorized", "only the poster may unfund their bounty");
+      if (reason !== null && reason !== undefined)
+        check(typeof reason === "string" && reason.length >= 1 && reason.length <= 2000,
+          "invalid_input", "reason must be 1..2000 characters");
+      const amount = toCredits(bounty.amountMillis);
+      if (bounty.state === "proposed")
+        fail("invalid_state", `bounty is proposed: nothing is locked, so there is nothing to unfund — delete the proposed bounty instead (POST /api/rooms/${roomId}/bounties/${bountyId}/delete, MCP bounty_delete; the triage spelling is decline)`);
+      if (bounty.state !== "funded" || bounty.claimant !== null) {
+        // Refusal-with-enumeration (the finalize family shape): the state,
+        // the amount locked, and the path that does apply. No money moves.
+        if (bounty.state === "claimed")
+          fail("invalid_state", `bounty is claimed: ${amount} credits stay locked while ${bounty.claimant} holds the claim — a poster cannot unilaterally unfund a claimed bounty. The paths that apply are: wait for the deadline and finalize (a timed-out claim refunds in full, no fee), or the dispute machinery if a dispute is opened. The candidate-8 money guards (offer withdraw, room archive) govern other surfaces, not this escrow`);
+        if (bounty.state === "submitted")
+          fail("invalid_state", `bounty is submitted: ${amount} credits stay locked while the submitted work awaits a verdict — a poster cannot unilaterally unfund a submitted bounty. The paths that apply are: accept or reject the submitted work (a rejection refunds in full, no fee), dispute it, or wait for the deadline and finalize`);
+        if (bounty.state === "accepted")
+          fail("invalid_state", `bounty is accepted: ${amount} credits are attributed to ${bounty.claimant} and the challenge window is running — there is no unfund from accepted. The paths that apply are: dispute within the challenge window, or finalize after it (finalize pays the vested award)`);
+        if (bounty.state === "disputed")
+          fail("invalid_state", `bounty is disputed: finality is frozen while the dispute is decided — the dispute decision settles the ${amount} locked credits; there is no unfund from disputed`);
+        if (bounty.state === "approved")
+          fail("invalid_state", `bounty is approved: the ${amount} credits have vested — finalize pays them out; there is no unfund from approved`);
+        fail("invalid_state", `bounty is ${bounty.state} (terminal): nothing to unfund — the escrow for this bounty has already settled`);
+      }
+      const at = isoNow(this.nowMs());
+      const lotId = newId("lot_");
+      // Finality: the poster withdrawal needs no acceptance verdict — the
+      // work never entered the acceptance track (the timeout refund's
+      // exact exception, on the same _requireFinalityMove row).
+      this._requireFinalityMove(bounty, "refund");
+      const movement = this._move({ roomId, at, from: { account: bounty.poster, state: "locked" }, to: { account: bounty.poster, state: "payable" },
+        amountMillis: bounty.amountMillis, kind: "refund", bountyId, lotId,
+        memo: "poster unfund: award refunded in full, no fee", actor: act,
+        receipt: { type: "refund-issued", payload: { reason: "poster-withdrawn", refundTo: bounty.poster } } });
+      this._transition(bounty, "refunded");
+      bounty.resolution = Object.freeze({ kind: "poster-withdrawn", refundedAt: at });
+      this._saveBounty(bounty);
+      const { settlement } = this._recordSettlement(bounty, { kind: "poster-withdrawn", workerMillis: 0,
+        refundMillis: bounty.amountMillis,
+        reason: "poster withdrew the funded bounty before any claim — escrow returned to poster in full, no fee", actor: act });
+      const event = this._event(roomId, "bounty.refunded",
+        { bountyId, actor: act, before: "funded", after: "refunded",
+          data: { reason: "poster-withdrawn", resolution: bounty.resolution, claimant: null,
+            ...(reason ? { posterReason: reason } : {}) } });
+      return { bounty: this._getBounty(roomId, bountyId), settlement,
+        receipt: { kind: "unfund", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
+          ...this._signed(movement) } };
+    });
+  }
+
+  // The shared proposed -> cancelled tail of the triage spellings:
+  // decline (reason mandatory, the triage decision) and delete (the
+  // sponsor-facing name for the same exit on the poster's own draft,
+  // reason optional). One kernel path, so the two spellings can never
+  // drift on state, record, or event.
+  _cancelProposed(roomId, bountyId, { triager, reason, actor, receiptKind, validateReason = null }) {
+    const { bounty, lane } = this._triageBounty(roomId, bountyId, triager);
+    const act = this._actorFor(roomId, actor, lane);
+    // Reason validation runs after triage, exactly where declineBounty
+    // always ran it, so existing error precedence is unchanged.
+    if (validateReason) validateReason();
+    this._transition(bounty, "cancelled");
+    bounty.declineReason = reason;
+    this._saveBounty(bounty);
+    const at = isoNow(this.nowMs());
+    const event = this._event(roomId, "bounty.declined",
+      { bountyId, actor: act, before: "proposed", after: "cancelled", data: { reason } });
+    return { bounty: this._getBounty(roomId, bountyId),
+      receipt: { kind: receiptKind, bountyId, at, actor: act, event } };
+  }
+
   declineBounty(roomId, bountyId, { decliner, reason, actor } = {}) {
     return this.store.transaction(() => {
       this._ensure();
-      const { bounty, lane } = this._triageBounty(roomId, bountyId, decliner);
-      const act = this._actorFor(roomId, actor, lane);
-      check(typeof reason === "string" && reason.length >= 1 && reason.length <= 2000,
-        "invalid_input", "reason must be 1..2000 characters");
-      this._transition(bounty, "cancelled");
-      bounty.declineReason = reason;
-      this._saveBounty(bounty);
-      const at = isoNow(this.nowMs());
-      const event = this._event(roomId, "bounty.declined",
-        { bountyId, actor: act, before: "proposed", after: "cancelled", data: { reason } });
-      return { bounty: this._getBounty(roomId, bountyId),
-        receipt: { kind: "decline", bountyId, at, actor: act, event } };
+      return this._cancelProposed(roomId, bountyId, { triager: decliner, reason, actor, receiptKind: "decline",
+        validateReason: () => check(typeof reason === "string" && reason.length >= 1 && reason.length <= 2000,
+          "invalid_input", "reason must be 1..2000 characters") });
+    });
+  }
+
+  // The proposed-state delete (sponsor exits, Option A): decline IS the
+  // delete for a poster's own draft — this is the same kernel path with
+  // the sponsor-facing name, and the reason is optional here because a
+  // poster deleting their own unsubmitted draft owes no triage rationale
+  // (a default reason is recorded so the audit trail always names one).
+  // Proposed bounties lock nothing, so no money moves and no journal
+  // rows are written.
+  deleteBounty(roomId, bountyId, { deleter, reason = null, actor } = {}) {
+    return this.store.transaction(() => {
+      this._ensure();
+      return this._cancelProposed(roomId, bountyId,
+        { triager: deleter, reason: reason ?? "poster deleted own proposed bounty", actor, receiptKind: "delete",
+          validateReason: () => {
+            if (reason !== null && reason !== undefined)
+              check(typeof reason === "string" && reason.length >= 1 && reason.length <= 2000,
+                "invalid_input", "reason must be 1..2000 characters");
+          } });
     });
   }
 
