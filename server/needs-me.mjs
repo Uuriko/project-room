@@ -653,7 +653,7 @@ export function bountyActionsNeededOf(store, roomId, memberId) {
       title: String(bounty.title ?? "").slice(0, OPEN_WORK_TITLE),
       why: "changes_requested",
       by: bounty.changesRequested.by ?? null,
-      summary: clip(bounty.changesRequested.summary),
+      summary: bounty.changesRequested.summary,
       round: bounty.changesRequested.round ?? null
     });
   }
