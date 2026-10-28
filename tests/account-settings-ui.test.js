@@ -87,11 +87,11 @@ test("settingsHtml shows linked methods with actions and honest provider states"
   assert.ok(!html.includes("/api/auth/google/link/start"), "unconfigured Google is not offered");
   assert.ok(html.includes("Email delivery isn\u2019t configured on this Room"), "unconfigured mail is honest");
   assert.ok(html.includes("data-form=\"password-change\""), "an existing password offers change, not set");
-  for (const heading of ["Profile", "Notifications", "Agents &amp; connections", "Billing / plan", "Advanced", "Linked sign-in methods"]) {
+  for (const heading of ["Profile", "Notifications", "Agents &amp; connections", "Usage &amp; limits", "Advanced", "Linked sign-in methods"]) {
     assert.ok(html.includes(heading), heading);
   }
   assert.ok(html.includes("Browser push preferences live per room in Catch up"), "notifications section points at the real push controls");
-  assert.ok(html.includes("No plan is billed from account settings."));
+  assert.ok(html.includes("under Usage &amp; limits."));
   assert.ok(html.includes("a@b.c"), "profile lists the account email");
   const advanced = html.slice(html.indexOf('id="settings-advanced-title"'));
   assert.ok(advanced.includes("Delete account"), "Advanced offers Delete account");

@@ -1,0 +1,48 @@
+/* global document */
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {rmSync,mkdirSync} from 'node:fs';
+import {chromium} from 'playwright';
+import AxeBuilder from '@axe-core/playwright';
+import {createAcceptanceFixture} from './acceptance-fixture.mjs';
+import {createRoomServer} from '../server/http.mjs';
+import {signInFixture} from './auth-signin.mjs';
+import {openSettings,clickChrome} from './room-chrome.mjs';
+for(const width of [390,1440]) for(const theme of ['light','dark']) {
+ test(`settings access, keyboard and agent semantics ${width} ${theme}`, {timeout:60000}, async t=>{
+  const f=createAcceptanceFixture();const account=f.store.accountForMember('commons','owner');f.store.completeOnboarding(account.id);
+  const server=createRoomServer({store:f.store,streamInterval:80});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  const origin=`http://127.0.0.1:${server.address().port}`;const browser=await chromium.launch({headless:true});
+  t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+  const context=await browser.newContext({viewport:{width,height:900},reducedMotion:'reduce'});let page=await context.newPage();page.setDefaultTimeout(10000);
+  const errors=[];page.on('pageerror',e=>errors.push(e.message));
+  await page.goto(origin);await signInFixture(page,f.keys.owner);await page.locator('#main').waitFor();
+  await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
+  const scan=async()=>{const result=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();assert.deepEqual(result.violations.map(v=>({id:v.id,targets:v.nodes.map(n=>n.target)})),[]);};
+  const shot=async name=>{mkdirSync('test-results/atlas-settings',{recursive:true});await page.screenshot({path:`test-results/atlas-settings/${name}-${width}-${theme}.png`});};
+  await openSettings(page,'room-permissions');
+  assert.equal(await page.locator('#room-permissions > summary').textContent(),'Access & privacy');
+  assert.equal(await page.locator('#room-permissions').evaluate(e=>e.closest('section').querySelector('h3').textContent),'Room');
+  assert.equal(await page.locator('#room-agent-permissions').evaluate(e=>e.closest('section').querySelector('h3').textContent),'Agents & connections');
+  assert.equal(await page.getByRole('heading',{name:'Usage & limits',exact:true}).count(),1);
+  const toggle=page.locator('#history-visibility-toggle');const before=await toggle.isChecked();
+  await page.locator('#history-visibility-control').click();await page.waitForFunction(before=>document.querySelector('#history-visibility-toggle').checked!==before,before);
+  await page.waitForFunction(()=>!document.querySelector('#history-visibility-toggle').disabled);
+  const geometry=await toggle.evaluate(e=>({box:e.getBoundingClientRect().toJSON(),row:e.parentElement.getBoundingClientRect().toJSON()}));
+  assert.ok(geometry.box.width<30&&geometry.row.height>=44,'compact checkbox with a full row target');
+  assert.ok(geometry.box.x-geometry.row.x<3,'checkbox aligned at start of label row');
+  await scan();await shot('privacy');await page.locator('#settings-close').click();
+  await page.reload();await page.locator('#main').waitFor();await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
+  await openSettings(page,'room-permissions');assert.equal(await toggle.isChecked(),!before,'privacy change persists after reload');
+  await page.locator('#settings-close').click();await openSettings(page,'record-panel');
+  await page.locator('#event-list').focus();assert.equal(await page.locator('#event-list').evaluate(e=>e===document.activeElement),true);
+  await page.keyboard.press('ArrowDown');await scan();await shot('history');await page.locator('#settings-close').click();
+  await clickChrome(page,'#connect-agent-button');
+  const codex=page.getByRole('button',{name:/Codex Best for OpenAI coding/});await codex.focus();await page.keyboard.press('Enter');
+  assert.ok(await page.locator('#agent-connect-name').inputValue(),'keyboard selects an agent');
+  await page.locator('#agent-other-types > summary').click();assert.equal(await page.getByRole('button',{name:/Hermes Best for research/}).count(),1);
+  await scan();await shot('agents');await page.keyboard.press('Escape');
+  page=await (await browser.newContext({viewport:{width,height:900},reducedMotion:'reduce'})).newPage();await page.goto(origin+'/?account=1');await signInFixture(page,f.store.issueAccountAccessKey(account.id));await page.locator('#account-rooms-panel').waitFor();await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
+  await scan();await shot('account');assert.deepEqual(errors,[]);
+ });
+}

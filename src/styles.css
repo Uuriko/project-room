@@ -259,7 +259,7 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .event-list { margin: 0; padding: .8rem 1rem 0; list-style: none; }
 .event-list li { display: grid; gap: .25rem; padding: .8rem 0; overflow-wrap: anywhere; }
 .event-list li + li { border-top: 1px solid var(--line-soft); }
-.event-list strong { display: block; color: #dbe2ec; font-size: .73rem; }
+.event-list strong { display: block; color: var(--text); font-size: var(--text-xs); }
 .event-list p { margin: .15rem 0 0; color: var(--muted); font-size: .67rem; }
 .prototype-note { margin: .6rem 1rem 1rem; padding: .8rem; border-top: 1px solid var(--line); color: #7f8b9b; font-size: .7rem; line-height: 1.55; }
 .prototype-note strong { color: #aeb8c5; }
@@ -502,6 +502,7 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 .record-panel > summary > span:first-child { display: grid; gap: .18rem; }
 .record-panel > summary .eyebrow { margin: 0; }
 .record-panel .event-list { max-height: 22rem; overflow-y: auto; }
+.record-panel .event-list:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
 
 @media (max-width: 1180px) {
   .community-shell { grid-template-columns: 12rem minmax(0, 1fr); }
@@ -1391,6 +1392,8 @@ summary { overflow-wrap: anywhere; }
 .connection-bar:has(#connection-status[data-state="connected"]):not(:focus-within) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .count-chip:empty { display: none; }
 .field { display: grid; gap: .4rem; margin-bottom: 1rem; }
+#room-permissions label:has(> input[type="checkbox"]) { display: flex; align-items: center; gap: var(--space-2); min-height: 44px; }
+#room-permissions label > input[type="checkbox"] { width: 1.15rem; height: 1.15rem; min-height: 0; margin: 0; padding: 0; flex: none; accent-color: var(--blue); }
 .field > span, #verifier-label { color: var(--muted); font-size: .85rem; font-weight: 600; }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
 #work-title-input { min-height: 0; }
@@ -1674,8 +1677,8 @@ summary { overflow-wrap: anywhere; }
 .room-more-actions { position: absolute; top: calc(100% + .25rem); right: 0; z-index: 50; width: min(16rem, calc(100vw - 2rem)); padding: .4rem; border: 1px solid var(--line); border-radius: .65rem; background: var(--panel-raised); box-shadow: var(--shadow); }
 .room-more:not([open]) > .room-more-actions { display: none; }
 .room-more-actions .topbar-button { display: flex; width: 100%; min-height: 44px; justify-content: space-between; text-align: left; }
-#room-permissions, #advanced-room-tools { margin-block: .75rem; }
-#room-permissions > summary, #advanced-room-tools > summary { min-height: 44px; cursor: pointer; padding-block: .65rem; }
+#room-permissions, #room-agent-permissions, #advanced-room-tools { margin-block: .75rem; }
+#room-permissions > summary, #room-agent-permissions > summary, #advanced-room-tools > summary { min-height: 44px; cursor: pointer; padding-block: .65rem; }
 
 /* Visible entry routes, each opening a focused sign-in flow. */
 .signin-entry-routes { display: grid; gap: .5rem; margin-top: 1.25rem; }

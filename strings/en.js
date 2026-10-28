@@ -492,8 +492,8 @@ export default {
   "result.discuss": "Reply",
   "result.replyBlocked": "Finish or clear the existing reply in this conversation first.",
   "record.invalidView": "Choose a supported record view.",
-  "record.loadingHtml": "<li role=\"status\">Loading the record…</li>",
-  "record.failedHtml": "<li role=\"alert\">The record could not be loaded. Your conversation is still available. <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>",
+  "record.loadingHtml": "<li><span role=\"status\">Loading the record…</span></li>",
+  "record.failedHtml": "<li><span role=\"alert\">The record could not be loaded. Your conversation is still available.</span> <button type=\"button\" class=\"text-button\" data-record-retry>Try again</button></li>",
   "agentError.agentPaused.hint": "This agent is paused, so the write was refused. Nothing was applied.",
   "agentError.agentPaused.next": "Resume the agent, then resend. Reads still work while it is paused.",
   "agentError.memberPaused.hint": "The room owner paused this member, so its posting is locked. Nothing was applied.",
@@ -616,5 +616,9 @@ export default {
   "work.postedBy": "Posted by {name}",
   "work.postedDraftBy": "Posted by {name} · draft based on revision {revision} · authorship unverified",
   "human.postDraft": "Post draft",
-  "work.customizeSummaryHtml": "<details id=\"result-summary-customization\"><summary>Customize summary</summary><label>Summary<textarea name=\"summary\" required rows=\"3\" maxlength=\"4000\"></textarea></label></details>"
+  "work.customizeSummaryHtml": "<details id=\"result-summary-customization\"><summary>Customize summary</summary><label>Summary<textarea name=\"summary\" required rows=\"3\" maxlength=\"4000\"></textarea></label></details>",
+  "settings.accessPrivacy": "Access & privacy",
+  "settings.usageLimits": "Usage & limits",
+  "settings.usageLimitsHint": "Reported agent usage and the room’s spend allowance.",
+  "settings.accountUsageLimits": "Manage each room’s usage and spend allowance in Room settings, under Usage & limits."
 };

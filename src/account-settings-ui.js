@@ -147,18 +147,17 @@ export function storeTheme(preference) {
   return applyTheme(next);
 }
 
-// Room Settings is a flat list in index.html (that file is owned by another
-// PR). Group the existing controls into the same sections as account settings
-// without removing them, so Results-only mode and the settings opener still
-// find each panel by id.
+// Preserve panel ids so deep links and the settings opener survive regrouping.
 export function organizeRoomSettings(dialog, doc = globalThis.document) {
   if (!dialog || dialog.dataset?.settingsGrouped === "true" || !doc?.createElement) return;
   const groups = [
-    ["Room", ["create-room-details", "room-about"], "The room’s name, purpose, and instructions."],
-    ["Agents & connections", ["room-permissions"], "Who can assign agents."],
-    ["Billing / plan", ["usage-panel", "spend-panel"], "Usage is what agents reported. Spend is this room’s allowance, not a subscription."],
+    ["Room", ["create-room-details", "room-about", "room-permissions"], "The room’s name, purpose, and instructions."],
+    ["Agents & connections", ["room-agent-permissions"], "Who can assign agents."],
+    [uiText("settings.usageLimits"), ["usage-panel", "spend-panel"], uiText("settings.usageLimitsHint")],
     ["Advanced", ["advanced-room-tools", "record-panel", "room-health"], "History and owner-only health."]
   ];
+  const accessTitle = dialog.querySelector("#room-permissions > summary");
+  if (accessTitle) accessTitle.textContent = uiText("settings.accessPrivacy");
   const results = dialog.querySelector("#results-panel");
   for (const [label, ids, hint] of groups) {
     const nodes = ids.map(id => dialog.querySelector(`#${id}`)).filter(Boolean);
@@ -397,8 +396,8 @@ export function settingsHtml({ methods = [], providers = null, emailVerification
     + section("settings-notifications-title", "Notifications",
       `<p class="form-hint">Browser push preferences live per room in Catch up → Notifications — choose mentions, direct messages, or both. Push delivery turns on from there once the room's push keys are provisioned; until then nothing leaves this tab.</p>`)
     + section("settings-agents-title", "Agents &amp; connections", oauthSectionHtml(providers, methods) + mailSectionHtml(providers))
-    + section("settings-billing-title", "Billing / plan",
-      `<p class="settings-empty">No plan is billed from account settings. A room\u2019s spend allowance is under Settings, in Billing / plan.</p>`)
+    + section("settings-billing-title", uiText("settings.usageLimits"),
+      `<p class="settings-empty">${escapeHtml(uiText("settings.accountUsageLimits"))}</p>`)
     + section("settings-advanced-title", "Advanced",
       `<h3>Linked sign-in methods</h3>${methodsBody}`
       + passwordSectionHtml(methods)

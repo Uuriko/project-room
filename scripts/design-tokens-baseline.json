@@ -135,7 +135,6 @@
     "src/styles.css ::: .done-chip { flex: 0 0 auto; display: inline-grid; place-items: center; gap: .25rem; min-height: 1.15rem; padding: .05rem .38rem; border: 1px solid var(--room-rule); border-radius: 99px; background: color-mix(in srgb, var(--room-green) 16%, var(--room-dark)); color: var(--room-green); font-size: .58rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }": 1,
     "src/styles.css ::: .empty-note { padding: 1.25rem; color: var(--muted); font-size: 1rem; line-height: 1.6; }": 1,
     "src/styles.css ::: .event-list p { margin: .15rem 0 0; color: var(--muted); font-size: .67rem; }": 1,
-    "src/styles.css ::: .event-list strong { display: block; color: #dbe2ec; font-size: .73rem; }": 2,
     "src/styles.css ::: .eyebrow { margin: 0 0 .45rem; color: var(--blue); font-size: .69rem; font-weight: 800; letter-spacing: .14em; }": 1,
     "src/styles.css ::: .field > span, #verifier-label { color: var(--muted); font-size: .85rem; font-weight: 600; }": 1,
     "src/styles.css ::: .file-chip { display: inline-flex; align-items: center; gap: .35rem; max-width: 100%; padding: .15rem .45rem; border: 1px solid var(--line); border-radius: 999px; font-size: .8rem; }": 1,

@@ -45,7 +45,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["mo
     const page = await f.open(f.keys.owner);
     const toggle = page.locator("#room-trust-toggle");
     assert.equal(await toggle.isVisible(), false, "authority controls stay out of ordinary chat");
-    await openSettings(page, "room-permissions");
+    await openSettings(page, "room-agent-permissions");
     await toggle.waitFor({ state: "visible" });
     assert.equal(await toggle.getAttribute("aria-pressed"), "true");
     assert.equal(await toggle.textContent(), "Cross-owner collaboration on");
@@ -60,7 +60,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["mo
     assert.equal(await toggle.textContent(), "Cross-owner collaboration on");
     assert.equal(f.trust().enabled, true);
     const guest = await f.open(f.keys.guest);
-    await openSettings(guest, "room-permissions");
+    await openSettings(guest, "room-agent-permissions");
     assert.equal(await guest.locator("#room-trust-toggle").isHidden(), true);
   });
 }

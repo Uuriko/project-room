@@ -41,7 +41,7 @@
     "icons/icon-192.png": "sha256:8b1afa1152a889494606cf1d91479d6a8f0282a0161adbc11deac402f7fb4d8f",
     "icons/icon-512.png": "sha256:29b3c5e64459ea3c61c3ce6ddab857fea403b5270dc3337582fec31b47e3e95c",
     "icons/maskable-512.png": "sha256:af47118cfead824c67f3fa69ce99bfac368d3ffb77693319269f9a24cb9e539d",
-    "index.html": "sha256:d68ca5c22c090587192baf6565c60314208c3edbc0448d8c19612a71bd9aef2f",
+    "index.html": "sha256:fe88c034b9df936280bddd4b1c26a014138237e130251fa3e2658c29a1c50a59",
     "manifest.webmanifest": "sha256:602341ff5426f69cf698028e4f3dec0f9ee22eb1dd5b96244598b50a52955224",
     "offers.html": "sha256:b1f1052a85efc02e51daf6fed9477d38c3e65cb70f8f2c1c519bee3a1f9a96dc",
     "offline.html": "sha256:904698a195de5f930487f6f7b9d12ab9d99a1e12b2ff1d2b66c91e66b101d55b",
@@ -62,7 +62,7 @@
     "skills/project-room-setup/SKILL.md": "sha256:44d201c16af5d71c7c453b94ea00ec7690e7e2051b4087442aaf9920b25ced12",
     "src/access-presets.js": "sha256:62f9670c0fae93e7de8e4d7c0ee17540edfd880677601458e9d21400a4f28a2c",
     "src/account-client.js": "sha256:4442f7fa06af665df658344d6cc6660fb9b213d0c07eb2d7e25b5db8b06dedd8",
-    "src/account-settings-ui.js": "sha256:576f241edeeff78273771785998e305790163ff18d4ed1e516bef87b6c1f46f7",
+    "src/account-settings-ui.js": "sha256:d6e067e61458228247ed1863f07cec7aab1e8f17f569ba815f13e29fb2ba0e34",
     "src/agent-connections.js": "sha256:6214a8af668dbec85ba5142c2fd284ef54ded0036e113bb2316a8edb880b4eeb",
     "src/agent-first-run.js": "sha256:6589f26941f8f2514f531712d58e791f0ef7cc2df7026e3034a88f9ddb940db7",
     "src/agent-invite-ui.js": "sha256:ec09f0c4d8ecebd75609c14fa3243c27d6ac21f8fb6645614c3d1522c3e7cf1f",
@@ -141,7 +141,7 @@
     "src/signin-navigation.js": "sha256:494f2537099c152a1711d4a5c9087f89b67a35d1153ee9658e1aea6d71b35f25",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",
     "src/strings.js": "sha256:16d9742fc2ef6f0e9dad2e933857a4c120bc923dc3a71ec86e255c0aa7561615",
-    "src/styles.css": "sha256:f44334b10ee405d382aaf593ec8edfe8125760b186ffbd8f123b4320ff5ad871",
+    "src/styles.css": "sha256:9ac336cd969894e7b7f12663a390ea241ea6f18b30e222f66c1eb362d670d9c0",
     "src/updates-ui.js": "sha256:a09ed80f301a001fa455525f5718a4d2f4941d04e010dc1abb5c3cc2f5c5a1c9",
     "src/work-announcements.js": "sha256:18fe08703df19663b853712933eb64fd448cc2905b0cb9154d015b27ddf51633",
     "src/work-help.js": "sha256:5a7795f5ea12f5f16ab16efe3b978c9945928e46afd801446938bdd5914ef5ac",
@@ -153,8 +153,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:5ad334e5ebae469703bdf1808ad684b95145fb58dbed027c45f488951b026198",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:ccf975eef8e092b3126a46ede879eb10bb01c1e7b628e974fba2ffa7b752b3ce",
-    "strings/en.json": "sha256:16862bdd876727474081476e18e376de63123d45f6d137286e082e8f9377bd82"
+    "strings/en.js": "sha256:9fe615e082c7059ebfca7d0fd11e89236d83a7261d875260c6a4f7041c118f47",
+    "strings/en.json": "sha256:353f36c32c89588c94d03c718199bf113f8f1b3f91f684966803341bd6050418"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:318ec275c1e1de04ea272734746fce5a713afc25a203a114b5f426e0f424eff9",
