@@ -1,0 +1,32 @@
+  /api/rooms/{roomId}/matchmaking/decisions/{decisionId}/answer:
+    post:
+      x-room-permission: member
+      summary: Record a person's answer
+      description: |
+        The caller must be a registered courier lane in this room
+        (`403 lane_not_registered` otherwise). `answer` is `accept`,
+        `decline` or `cancel`, as MCP elicitation defines it, and
+        `answeredBy` names the person who answered. A courier relays and
+        never decides: naming the courier as the author is refused, and the
+        carrier is recorded separately from the author so the answer stays
+        attributable.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: decisionId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The recorded answer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  answer: { type: object }
+        '401': { description: unauthenticated }
+        '403': { description: lane_not_registered }
+        '404': { description: decision_not_found }
+        '422': { description: invalid_matchmaking_input }

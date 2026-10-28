@@ -12,6 +12,7 @@ import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { jobByName } from "../server/jobs.mjs";
 import { catchUpMissedWakes } from "../server/sleeper-wake.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   installFakeWebhookDns(f.store);
@@ -38,8 +39,8 @@ async function hostlessAgent(t, flag) {
   f.store.featureEnv = { ROOM_OWNER_ASLEEP_WAKE: flag };
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("sleeper");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "sleeper",
+  linkWithProof(f.store, f.keys.owner, "commons", identity, {
+    memberId: "sleeper",
     displayName: "Sleeper", permissions: ["accept_work"],
   });
   f.store.dmConsents.request("commons", "owner", "sleeper", "fixture");
@@ -89,8 +90,8 @@ test("mention, room DM, and peer DM wake a hostless agent when the flag is on", 
   assert.equal(wakeCount(), 2);
 
   const sender = f.store.identities.create("sender");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: sender.identityId, memberId: "sender",
+  linkWithProof(f.store, f.keys.owner, "commons", sender, {
+    memberId: "sender",
     displayName: "Sender", permissions: ["accept_work"],
   });
   for (const memberId of ["sender", "sleeper"]) {
