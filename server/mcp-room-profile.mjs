@@ -37,6 +37,7 @@ import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.
 import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { AccessRequests } from "./access-requests.mjs";
+import { buildRoomBootstrap } from "./room-bootstrap.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { MCP_SUPPORTED_VERSIONS, MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./mcp-full-profile.mjs";
@@ -44,6 +45,7 @@ import { friendBondCommand } from "../src/friend-bond.js";
 import { validAttachmentData } from "./room-attachment-bytes.mjs";
 import { closestToolName, diagnoseArguments, mcpCallError } from "./mcp-arg-errors.mjs";
 import { withSpendCharge } from "./spend-grants.mjs";
+import { withDefaultRoomId } from "./mcp-request-defaults.mjs";
 import {
   hostedRoomTools as ROOM_TOOLS,
   hostedInboxTools as INBOX_TOOLS,
@@ -56,6 +58,7 @@ import { stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext,
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
+import { runRoomMap } from "./project-map-store.mjs";
 
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -75,6 +78,24 @@ function toolResult(value, isError = false, redactions = []) {
     structuredContent: value,
     ...(isError ? { isError: true } : {})
   };
+}
+
+function notMemberPair(store, secret, args, error) {
+  if (!(error instanceof ServiceError)) return null;
+  // Main answers a global identity outside the room with 403 no_access; older paths answer 401.
+  if (!((error.status === 401 && error.code === "unauthenticated") || (error.status === 403 && error.code === "no_access"))) return null;
+  if (!validId(args?.roomId)) return null;
+  const who = store.identities?.resolveGlobalIdentitySecret?.(secret);
+  if (!who) return null;
+  try {
+    const linked = store.db.prepare("SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?").get(args.roomId, who.identityId);
+    if (linked) return null;
+  } catch {
+    return null;
+  }
+  const mapped = new ServiceError(403, "not_member", "This identity is not a member of that room");
+  mapped.next = { action: "pair", method: "POST", path: "/api/pair", tool: "room_join", roomId: args.roomId };
+  return mapped;
 }
 
 function failureValue(error) {
@@ -143,6 +164,15 @@ function validRoomArgs(name, args) {
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
   if (name === "squads_list") return true;
+  if (name === "room_map") {
+    const repoOk = args.repo === undefined || typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200;
+    if (!repoOk || !["query", "path", "hotspots", "explain"].includes(args.op)) return false;
+    if (args.op === "hotspots") return args.q === undefined && args.from === undefined && args.to === undefined;
+    if (args.op === "path") {
+      return typeof args.from === "string" && typeof args.to === "string" && args.from.length >= 1 && args.to.length <= 300 && args.from.length <= 300 && args.to.length >= 1 && args.q === undefined;
+    }
+    return typeof args.q === "string" && args.q.length >= 1 && args.q.length <= 300 && args.from === undefined && args.to === undefined;
+  }
   if (name === "squads_get") return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
   if (name === "squads_create") return typeof args.name === "string" && args.name.length >= 1 && args.name.length <= 64;
   if (name === "squads_update_members" || name === "squads_disband") {
@@ -165,12 +195,20 @@ function validRoomArgs(name, args) {
   if (name === "room_join") {
     const link = args.linkToken !== undefined;
     const code = args.inviteCode !== undefined;
+    const pairing = args.roomId !== undefined || args.pairId !== undefined;
     const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.trim().length > 0 && args.displayName.length <= 80;
-    return link !== code && nameOk
+    const keyOk = args.publicKey === undefined || typeof args.publicKey === "string" && args.publicKey.length >= 1 && args.publicKey.length <= 128;
+    const proofOk = args.keyProof === undefined || typeof args.keyProof === "string" && args.keyProof.length >= 1 && args.keyProof.length <= 200;
+    const pairOk = args.pairId === undefined || validId(args.pairId);
+    const classic = link !== code && !pairing;
+    const door = !link && !code && pairing && pairOk;
+    return (classic || door) && nameOk && keyOk && proofOk
       && (!link || typeof args.linkToken === "string" && args.linkToken.length > 0 && args.linkToken.length <= 200)
       && (!code || typeof args.inviteCode === "string" && args.inviteCode.length > 0 && args.inviteCode.length <= 80);
   }
+  if (name === "room_merge_members") return validId(args.keepMemberId) && validId(args.retireMemberId);
   if (name === "get_room_context") return args.since_version === undefined || typeof args.since_version === "string" && /^[a-f0-9]{64}$/.test(args.since_version);
+  if (name === "room_read_bootstrap") return true;
   if (name === "room_list_events") {
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
       && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100);
@@ -216,12 +254,13 @@ function validRoomArgs(name, args) {
       && ["approve", "deny"].includes(args.decision) && permsOk && noteOk;
   }
   if (name === "room_create_agent_invite") {
-    const hasScope = args.profile !== undefined || args.permissions !== undefined;
+    const ownerOk = args.ownerEquivalent === undefined || args.ownerEquivalent === true || args.ownerEquivalent === false;
+    const hasScope = args.profile !== undefined || args.permissions !== undefined || args.ownerEquivalent !== undefined;
     const profileOk = args.profile === undefined || typeof args.profile === "string" && args.profile.length <= 32;
     const permsOk = args.permissions === undefined || validPermissionList(args.permissions);
     const ttlOk = args.expiresInMinutes === undefined || Number.isSafeInteger(args.expiresInMinutes) && args.expiresInMinutes >= 1;
     const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.length > 0 && args.displayName.length <= 80;
-    return hasScope && profileOk && permsOk && ttlOk && nameOk;
+    return hasScope && ownerOk && profileOk && permsOk && ttlOk && nameOk;
   }
   if (name === "room_list_agent_invites") return true;
   if (name === "room_revoke_agent_invite") return typeof args.inviteId === "string" && args.inviteId.length > 0 && args.inviteId.length <= 64;
@@ -420,6 +459,11 @@ function credentialRedactions(name, value) {
     mcpRedaction(value?.roomToken, "structuredContent.roomToken"),
     mcpRedaction(value?.identitySecret, "structuredContent.identitySecret"),
     mcpRedaction(value?.secret, "structuredContent.secret"),
+    mcpRedaction(value?.token, "structuredContent.token"),
+    mcpRedaction(value?.deviceSecret, "structuredContent.deviceSecret"),
+    mcpRedaction(value?.userCode, "structuredContent.userCode"),
+    mcpRedaction(value?.connection?.token, "structuredContent.connection.token"),
+    mcpRedaction(value?.connection?.identitySecret, "structuredContent.connection.identitySecret"),
   ];
 }
 
@@ -463,7 +507,10 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential) {
+  if (typeof spendCredential === "function") {
+    spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
+  }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   return withSpendCharge(store, secret, name, args,
@@ -471,7 +518,7 @@ function callRoomTool(store, secret, identity, name, args, agentRooms) {
 }
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
-  if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since });
+  if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId });
   if (name === "room_create") {
     const request = {};
     for (const key of ["title", "purpose", "roomId", "kind", "displayName", "requestId"]) {
@@ -482,7 +529,20 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_join") {
     const displayName = args.displayName ?? identity.displayName;
     if (args.linkToken !== undefined) return store.shareLinks.joinAgent(secret, args.linkToken, displayName);
-    return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
+    if (args.inviteCode !== undefined) return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
+    if (args.pairId !== undefined) return store.pairing.pollHeld(args.pairId, identity.identityId);
+    const started = store.pairing.start({
+      roomId: args.roomId, displayName,
+      publicKey: args.publicKey ?? null, keyProof: args.keyProof ?? null,
+      address: `mcp:${identity.identityId}`, holdFor: identity.identityId
+    });
+    if (started.connection) return started.connection;
+    const view = { ...started };
+    delete view.deviceSecret;
+    return view;
+  }
+  if (name === "room_merge_members") {
+    return store.pairing.merge(secret, args.roomId, { keepMemberId: args.keepMemberId, retireMemberId: args.retireMemberId });
   }
   if (name === "room_check_access" && args.roomId === undefined) {
     const allowed = mcpRoomAllowlist(store, secret);
@@ -520,6 +580,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     return doc;
   }
   if (name === "squads_list") return listSquads(store, secret, roomId);
+  if (name === "room_map") return runRoomMap(store, secret, args);
   if (name === "squads_get") return getSquad(store, secret, roomId, args.squadId);
   if (name === "squads_create") {
     const data = { name: args.name };
@@ -539,6 +600,9 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     if (context.not_modified) return context;
     const auth = store.authenticate(secret, roomId);
     return { ...stampRoomContext(context), orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret, boardList: memoizeBoardList(store) }) };
+  }
+  if (name === "room_read_bootstrap") {
+    return withContentTrust(buildRoomBootstrap(store, secret, roomId, null, { accessRequests: new AccessRequests(store), watchers: [] }));
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
@@ -599,7 +663,7 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_create_agent_invite") {
     const request = {};
-    for (const key of ["profile", "permissions", "expiresInMinutes", "displayName"]) {
+    for (const key of ["profile", "permissions", "ownerEquivalent", "expiresInMinutes", "displayName"]) {
       if (args[key] !== undefined) request[key] = args[key];
     }
     return store.invites.create(secret, roomId, request);
@@ -735,11 +799,12 @@ async function callWakeTool(store, secret, identity, name, args) {
   if (name === "wake_register" || name === "wake_clear" || name === "heartbeat_set") {
     const mode = name === "wake_register" ? "wakeable" : name === "wake_clear" ? "pull-only" : args.mode;
     const wakeUrl = name === "wake_clear" ? null : (args.wakeUrl ?? null);
-    // Cadence is sticky: wake_register/heartbeat_set pass the caller's
-    // value through untouched (omitted = preserve the stored declaration,
-    // a number = replace, explicit null = clear). wake_clear has no
+    // The cadence hint is sticky: wake_register/heartbeat_set pass the
+    // caller's value through untouched (omitted = preserve the stored
+    // hint, a number = replace, explicit null = clear); the store
+    // assigns the governing cadence from it. wake_clear has no
     // cadenceSeconds field by design, so it sends an explicit null —
-    // clearing the declaration is part of what "clear" means for this
+    // clearing the hint is part of what "clear" means for this
     // tool, now expressed as the documented clear instead of as the
     // side effect of an omitted field.
     const cadenceSeconds = name === "wake_clear" ? null : args.cadenceSeconds;
@@ -815,6 +880,14 @@ function argumentFailure(requestId, name, args, schema) {
     if (name === "report_tip" && args.sourceRevision === undefined && args.buildId === undefined && !report.missing.length) {
       report.invalid.sourceRevision = "sourceRevision or buildId is required";
     }
+    if (name === "room_record_handoff") {
+      for (const [alias, canonical] of [["done", "doneSummary"], ["next", "nextAction"], ["reason", "limitReason"]]) {
+        if (args[alias] !== undefined && args[canonical] !== undefined)
+          report.invalid[alias] = `${alias} and ${canonical} cannot both be supplied`;
+        else if (args[alias] === undefined && args[canonical] === undefined && !report.missing.includes(canonical))
+          report.missing.push(canonical);
+      }
+    }
   }
   if (!report.missing.length && !report.unexpected.length && !Object.keys(report.invalid).length) {
     report.invalid.arguments = "does not match the tool input";
@@ -842,7 +915,7 @@ function listSelection(message, searchParams) {
 
 const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name), ...ACTION_META_TOOL_NAMES]);
 
-async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms }) {
+async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
@@ -913,7 +986,9 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
       return mcpCallError(requestId, { reason: "unknown_tool", tool: called, suggestion: closestToolName(called, SUGGESTABLE_TOOLS) });
     }
     if (MCP_JOIN_TOOLS.some(entry => entry.name === name)) return handleMcpJoinRpc(message, { mcpUrl });
-    const args = message.params?.arguments ?? {};
+    let args = message.params?.arguments ?? {};
+    const selected = HOSTED_TOOLS.find(entry => entry.name === name);
+    args = withDefaultRoomId(store, secret, name, args, selected?.inputSchema);
     if (name === SEARCH_ACTIONS_TOOL) {
       const schema = actionMetaToolDefs.find(entry => entry.name === name).inputSchema;
       if (!validSearchActionsArgs(args)) return argumentFailure(requestId, name, args, schema);
@@ -929,9 +1004,8 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         return mcpCallError(requestId, { reason: "unknown_tool", tool: args.name, suggestion: closestToolName(args.name, HOSTED_ROOM_MCP_TOOLS) });
       }
       return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
-        { store, secret, identity, mcpUrl, searchParams, agentRooms });
+        { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential });
     }
-    const selected = HOSTED_TOOLS.find(entry => entry.name === name);
     const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
       : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
         : WAKE_TOOLS.some(entry => entry.name === name) ? validWakeArgs(name, args)
@@ -962,14 +1036,21 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
-      const value = await callRoomTool(store, secret, identity, name, args, agentRooms);
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential);
       // A minted invite code is a one-time credential: it rides in
       // structuredContent only, never in the text block hosts log
       // verbatim (issue #3750). room_run_action recurses into this same
       // handler with the inner tool name, so it is covered here too.
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, false, credentialRedactions(name, value)) };
     } catch (error) {
-      const value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(error) : failureValue(error);
+      const mapped = notMemberPair(store, secret, args, error) ?? error;
+      let value = WAKE_TOOLS.some(entry => entry.name === name) ? wakeFailure(mapped) : failureValue(mapped);
+      if (mapped.next) value.next = mapped.next;
+      if (mapped === error && error?.status === 409 && /stale/i.test(String(error?.message ?? "")) && typeof args?.roomId === "string") {
+        value = { ...value, reason: "stale_revision", next: [{ tool: "room_read_work", arguments: {
+          roomId: args.roomId, ...(typeof args.workItemId === "string" ? { workItemId: args.workItemId } : {})
+        } }] };
+      }
       return { jsonrpc: "2.0", id: requestId, result: toolResult(value, true) };
     }
   }
@@ -1007,7 +1088,7 @@ function mcpKeyGrantsScope(store, secret, requiredScope) {
 // Heartbeat, wake and webhook tools never reach callRoomTool; they run through
 // callWakeTool under the mcp:wake gate and are unchanged here.
 const MCP_ROOM_WRITE_TOOLS = new Set([
-  "room_create", "room_join",
+  "room_create", "room_join", "room_merge_members",
   "squads_create", "squads_update_members", "squads_disband",
   "room_post_message",
   "add_land_item", "remove_land_item", "report_tip",
@@ -1057,7 +1138,7 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, spendCredential } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
     // Anonymous enrollment: mint an identity secret without leaving MCP.
@@ -1076,6 +1157,6 @@ export function createHostedRoomMcp(store, { agentRooms } = {}) {
     if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
     const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
     if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
-    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms });
+    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential });
   };
 }

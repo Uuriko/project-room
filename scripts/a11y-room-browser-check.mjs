@@ -5,6 +5,7 @@
 // Both viewports. Fails on any serious or critical axe violation
 // (wcag2a/2aa/21a/21aa/22aa).
 import test from "node:test";
+import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -56,5 +57,23 @@ test("signed-in room view is axe-clean (serious/critical)", { timeout: 180000 },
     await page.locator("#main").waitFor({ state: "visible" });
     await page.locator("[data-message-id]").first().waitFor({ state: "visible" });
     assertAxeClean(await axeSerious(page), `signed-in room view @${viewport.width}px`);
+    // NEXT-5: the sidebar disclosures ship closed, so their controls stay out
+    // of the accessibility tree and out of the sweep above. On narrow screens
+    // the whole sidebar is off-canvas until Menu opens it. Reveal both before
+    // auditing button names.
+    if (viewport.width < 700 && !await page.locator("#main").evaluate(node => node.classList.contains("sidebar-open"))) {
+      await page.locator("#sidebar-toggle").click();
+      await page.locator("#room-sidebar").waitFor({ state: "visible" });
+    }
+    for (const selector of ["#invite-navigation", "#people-panel"]) {
+      const panel = page.locator(selector);
+      if (!await panel.evaluate(node => node.open)) await page.locator(`${selector} > summary`).click();
+    }
+    assertAxeClean(await axeSerious(page, { rules: ["button-name"] }), `signed-in room sidebar controls @${viewport.width}px`);
+    // The row name is rendered, not just composed in a helper.
+    assert.equal(
+      await page.getByRole("group", { name: /^Maya, human, / }).count(), 1,
+      "the member row is addressable by name, kind and status",
+    );
   }
 });

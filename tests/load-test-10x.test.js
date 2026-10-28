@@ -9,7 +9,8 @@
 //
 // Everything is simulated in-process over loopback: no real network, no devices.
 // Guardrails respected throughout: <=99 agent members, <=3 streams per credential,
-// 100 open streams per server, 60 writes per credential per minute.
+// 100 open streams per server. Credential writes burst at 40; chat posts
+// still stop at the per-member flood of 30.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
