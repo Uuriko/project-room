@@ -7,7 +7,7 @@
 //
 // A tree is built per room per epoch over the existing receipt leaves.
 // EPOCH_SIZE is the named epoch-boundary constant (leaves per epoch),
-// pinned by tests/merkle-receipt-proofs.test.mjs. A proof names its
+// pinned by tests/merkle-receipt-proofs.test.js. A proof names its
 // epoch and root; the standalone verifier (verifyProof) checks a proof
 // with leaf + sibling path + root ONLY — no access to the room log —
 // and rejects a proof whose epoch does not match the caller's epoch.
