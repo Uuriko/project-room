@@ -73,7 +73,8 @@ const SOURCE_PINS = {
   "ensureSpendGrantsSchema@3": "0f3f6dab2ae7d25b",
   "ensureAccountProfileSchema@1": "3fb6bfb33febc621",
   "ensureVerifiedEmailSchema@1": "a8321ba9d34e6ad4",
-  "ensureAttachmentSchema@1": "3189ca5ebea7bf33"
+  "ensureAttachmentSchema@1": "3189ca5ebea7bf33",
+  "ensureMentionLateAckSchema@1": "25f6c41e7ff55f49"
 };
 
 test("each additive ensure helper's source is pinned to its stamp label", () => {
