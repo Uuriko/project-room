@@ -18,3 +18,12 @@ test("other POST creates keep their 201", () => {
   assert.ok(op, "identity create is in the served spec");
   assert.ok(op.responses["201"], "201 still documented for a real create");
 });
+
+test("served spec documents 200 (not 201) for POST /api/agent-rooms/{roomId}/token/rotate", () => {
+  const op = spec.paths["/api/agent-rooms/{roomId}/token/rotate"]?.post;
+  assert.ok(op, "operation is in the served spec");
+  assert.equal(op.operationId, "rotateAgentRoomToken");
+  assert.ok(op.responses["200"], "200 documented");
+  assert.equal(op.responses["201"], undefined, "rotate replaces a credential; it does not create a room");
+  assert.equal(op.responses["415"], undefined, "the handler reads no JSON body");
+});
