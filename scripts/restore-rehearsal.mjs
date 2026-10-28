@@ -12,6 +12,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { backupRoom, reconcileRestoredAuthority } from "../server/backup.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 const directory = mkdtempSync(join(tmpdir(), "room-restore-rehearsal-"));
 const backupDest = mkdtempSync(join(tmpdir(), "room-backup-dest-"));
@@ -33,7 +34,7 @@ try {
     access: "contribute", keyHash: createHash("sha256").update(randomBytes(32).toString("base64url")).digest("hex"),
     expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
   const delegate = store.identities.create("Rehearsal delegate");
-  store.identities.link(owner, "commons", { identityId: delegate.identityId, permissions: ["steer"] });
+  linkWithProof(store, owner, "commons", delegate, { permissions: ["steer"] });
   store.delegation.grant(owner, "commons", { identityId: delegate.identityId });
   send(T.MESSAGE_POSTED, { messageId: randomUUID(), body: "history before the backup" });
 
