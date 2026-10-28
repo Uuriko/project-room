@@ -45,6 +45,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the manage_members-only config rule plus the
   // never-admin config validation are the integrity gate.
   "room_access_auto_approve",
+  "pairs", "pair_code_locks", "agent_member_keys", "room_join_policy",
   // membership_delegation_grants (owner-granted membership administration
   // for agent identities, RC-2026-09-18-038): purely additive and
   // intentionally NOT fenced — older writers have no code path to it, and
@@ -567,7 +568,11 @@ const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotatio
 // allowed by the recovery audit but never required. Older writers have no
 // code path to it.
 const DECISION_ROWS_ADDITIVE_TABLES = Object.freeze(["evidence_access_log"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...DECISION_ROWS_ADDITIVE_TABLES]);
+// project map (server/project-map-store.mjs): per-room code graph, rebuild
+// queue, open pull file sets, and overlap-notice keys. Created on first
+// push. Older writers have no path to these tables.
+const PROJECT_MAP_ADDITIVE_TABLES = Object.freeze(["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...DECISION_ROWS_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

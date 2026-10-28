@@ -4,9 +4,13 @@
 // agent permission scope and an expiry. Any agent redeems the code without
 // an owner round-trip: redemption mints a fresh agent identity, links it
 // into the room as an agent member with exactly the code's permissions, and
-// burns the code. Redeeming never creates an account session and can never
-// grant manage_members/decide — rejected at issuance, and re-checked by the
-// member.added event validator for kind:"agent".
+// burns the code. Redeeming never creates an account session. Ordinary
+// codes cannot grant manage_members, decide, or invite_member. The room's
+// owner member, human or agent, may mint an owner-equivalent code
+// (ownerEquivalent: true) that grants every permission the owner can
+// delegate. The invitee is a co-owner-level member, not the owner; the
+// owner seat stays put and the owner can still revoke or downgrade.
+// Co-owners and owner-equivalent members cannot mint another one.
 //
 // The code itself is the bearer credential, so only a hash of it is stored:
 // a deterministic scrypt (so lookup by hash still works, and no deployment
@@ -14,6 +18,8 @@
 // bare sha256. Codes minted before the v2 format (8 symbols, sha256 stored)
 // keep redeeming until they expire. Audit is the table: created_by/at,
 // expires_at, redeemed_at/by, revoked_at, all queryable through list().
+// An owner-equivalent mint also appends agent_invite.minted to the room
+// log, naming the minter. The raw code and its hash stay out of that event.
 
 import { createHash, randomBytes, randomUUID, scryptSync } from "node:crypto";
 import { ServiceError, PILOT_LIMITS, activeMemberCount } from "./store.mjs";
@@ -25,6 +31,7 @@ import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
 import { agentAccessProfiles } from "./agent-connections.mjs";
 import { assertAdmissibleMemberName } from "./display-name-guard.mjs";
 import { connectFields, starterFor } from "./routes/agent-connect.mjs";
+import { ONBOARDING_REPLAY_WINDOW_MS, onboardingRotateNext } from "./agent-rooms.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const hash = text => createHash("sha256").update(text).digest("hex");
@@ -97,7 +104,8 @@ export const agentInviteSchema = `
     expires_at INTEGER NOT NULL,
     redeemed_at INTEGER,
     redeemed_identity_id TEXT,
-    revoked_at INTEGER
+    revoked_at INTEGER,
+    owner_equivalent INTEGER NOT NULL DEFAULT 0
   );
   CREATE INDEX IF NOT EXISTS agent_invite_codes_room ON agent_invite_codes(room_id);
   -- G1 idempotent redeem (PRODUCT-200 D7): a client-kept requestId makes an
@@ -127,6 +135,7 @@ const view = (row, now) => ({
   roomId: row.room_id,
   createdBy: row.created_by,
   permissions: JSON.parse(row.permissions_json),
+  ownerEquivalent: row.owner_equivalent === 1,
   displayName: row.display_name,
   createdAt: row.created_at,
   expiresAt: row.expires_at,
@@ -135,6 +144,20 @@ const view = (row, now) => ({
   revokedAt: row.revoked_at,
   status: inviteStatus(row, now),
 });
+
+// The owner seat's own credential. The authenticated member id must be the
+// room owner. A human session, a human room key, the owner agent's identity
+// secret, and that agent's room connection all qualify. Co-owners,
+// owner-equivalent members, and owner delegates do not: a delegate is
+// stamped, and every other member has a different id.
+const isRoomOwnerPrincipal = (auth, authority) => {
+  if (!auth?.member || auth.delegate) return false;
+  if (auth.member.active === false) return false;
+  return auth.member.id === authority?.ownerId;
+};
+
+const samePermissionSet = (left, right) =>
+  Array.isArray(left) && left.length === right.length && right.every(permission => left.includes(permission));
 
 // #3883 (coordinator decision on the issue): the credential-less replay
 // rotation below is bounded to 30 days from the redemption receipt's
@@ -146,9 +169,11 @@ const REPLAY_ROTATION_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
 
 // G1 idempotent redeem replay (PRODUCT-200 D7): replays a journaled
 // redemption for an uncertain retry. No new identity, no new member event,
-// no second burn — the same membership, a fresh onboarding token,
-// duplicate:true. Mirrors the duplicate-identity path's active-membership
-// check so a removed member's receipt cannot resurrect the grant.
+// no second burn — the same membership, duplicate:true, and no new
+// onboarding token. A replay inside 60 seconds and a later replay both
+// return mcpToken null and next rotate. Mirrors the duplicate-identity
+// path's active-membership check so a removed member's receipt cannot
+// resurrect the grant.
 const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } = {}) => {
   const store = invites.store;
   const linked = invites.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?")
@@ -156,12 +181,11 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
   const member = linked && store.room(receipt.room_id).state.members[linked.member_id];
   if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
   // R305-1: a credential-less replay is the client that lost the 201 — the
-  // original secret died in that lost response, so retiring it strands
-  // nobody. Rotate a fresh one and show it in this response, authorized by
-  // the one-time code + requestId receipt. A replay that presents its
-  // credential is already fine and keeps today's shape. The fresh onboarding
-  // token is issued AFTER the rotation, so the scoped-key revocation the
-  // rotation carries cannot kill the token this response hands over.
+  // original identity secret died in that lost response, so retiring it
+  // strands nobody. Rotate a fresh identity secret and show it in this
+  // response, authorized by the one-time code + requestId receipt. The room
+  // onboarding token is not reissued here. POST token/rotate with that
+  // identity secret replaces it.
   let rotation = null;
   if (!credentialPresented) {
     // #3883 window gate, on the rotation path only: a receipt whose
@@ -175,46 +199,27 @@ const replayRedeemReceipt = (invites, receipt, { credentialPresented = false } =
     }
     rotation = store.identities.rotateForReplay(receipt.identity_id);
   }
-  const mcpToken = store.agentPlugin.issueOnboardingMcpToken({
-    identityId: receipt.identity_id, roomId: receipt.room_id, label: member.displayName
-  });
+  const next = replayRedeemNext(receipt.room_id, member.displayName, receipt.created_at, store.now());
   const base = {
     identityId: receipt.identity_id, roomId: receipt.room_id, memberId: linked.member_id,
     displayName: member.displayName, permissions: JSON.parse(receipt.permissions_json),
-    duplicate: true, mcpToken,
+    duplicate: true, mcpToken: null, next,
   };
   if (rotation) {
     const freshNext = Object.freeze([
       Object.freeze({ action: "save-identity-secret",
         description: "A fresh identity secret was issued in THIS response because the earlier one was never received. Save it immediately; it is shown once and cannot be recovered again." }),
-      ...redeemNext(receipt.room_id, member.displayName),
+      ...next,
     ]);
     return withConnect(store, receipt.room_id, linked.member_id, { ...base,
       identitySecret: rotation.secret, rotatedAt: rotation.rotatedAt, next: freshNext,
       nextActions: nextActionsForInviteRedeem(receipt.room_id) });
   }
-  return withConnect(store, receipt.room_id, linked.member_id, { ...base,
-    next: redeemNext(receipt.room_id, member.displayName), nextActions: nextActionsForInviteRedeem(receipt.room_id) });
+  return withConnect(store, receipt.room_id, linked.member_id, {
+    ...base, nextActions: nextActionsForInviteRedeem(receipt.room_id) });
 };
 
 const ACTIVE_MEMBER_MESSAGE = "This identity is already an active member";
-
-// A credential-presenting replay of a burned code used to mint a fresh
-// 30-day room key on every call. Retire the previous keys for this
-// identity and room first, so the key in this response is the only live one.
-const revokeLiveRoomKeys = (store, identityId, roomId) => {
-  const roomScope = `mcp:room:${roomId}`;
-  const rows = store.db.prepare(
-    "SELECT key_id AS keyId, scopes_json AS scopesJson, revoked FROM agent_api_keys WHERE identity_id=?"
-  ).all(identityId);
-  for (const row of rows) {
-    if (row.revoked) continue;
-    let scopes = [];
-    try { scopes = JSON.parse(row.scopesJson); } catch { continue; }
-    if (!Array.isArray(scopes) || !scopes.includes(roomScope)) continue;
-    store.agentPlugin.revokeApiKey({ identityId, keyId: row.keyId });
-  }
-};
 
 // Removal deactivates the member and keeps the identity_links row. A fresh
 // invite for that identity reactivates the same member with the invite's
@@ -241,6 +246,7 @@ const reactivateLinkedMember = (invites, row, member, identityId, { requestId, r
       permissions,
       active: true,
       authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+      ...(row.owner_equivalent === 1 ? { ownerEquivalent: true } : {}),
     },
   });
   let state;
@@ -304,6 +310,12 @@ export class AgentInvites {
       permissions: [...PERMISSIONS],
       agentSafePermissions: [...AGENT_INVITE_SAFE_PERMISSIONS],
       neverGrant: [...NEVER_GRANT],
+      ownerEquivalent: {
+        field: "ownerEquivalent",
+        value: true,
+        ownerOnly: true,
+        permissions: [...PERMISSIONS],
+      },
     };
   }
 
@@ -313,7 +325,7 @@ export class AgentInvites {
   // permissions list or a standing profile name
   // (chat/contribute/review/collaborate); the profile maps server-side to
   // a fixed set, so editing the request cannot widen authority.
-  create(token, roomId, { permissions, profile, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null,
+  create(token, roomId, { permissions, profile, ownerEquivalent, expiresInMinutes = DEFAULT_TTL_MINUTES, displayName } = {}, expectedSessionBinding = null,
     { emailVerificationUnachievable = false } = {}) {
     // Owner delegates (server/owner-delegates.mjs) arrive via
     // store.authenticate with the delegate flag stamped on the member copy.
@@ -326,12 +338,25 @@ export class AgentInvites {
     // emailVerificationUnachievable from the deployment mailer's isConfigured().
     if (auth.account && !emailVerificationUnachievable) this.store.accountLogins.assertEmailVerified(auth.account.id);
     const authority = this.store.roomAuthority(roomId);
-    if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) fail(403, "access_denied", "Invite grant required");
+    const ownerLevel = ownerEquivalent === true;
+    if (ownerEquivalent !== undefined && ownerEquivalent !== true) fail(422, "invalid_invite", "ownerEquivalent must be true");
+    if (ownerLevel) {
+      if (profile !== undefined || permissions !== undefined) {
+        fail(422, "invalid_invite_scope", "Choose ownerEquivalent or a profile or explicit permissions, not more than one");
+      }
+      if (!isRoomOwnerPrincipal(auth, authority)) {
+        fail(403, "owner_equivalent_forbidden", "Only the room owner can mint an owner-level invite");
+      }
+    } else if (!auth.delegate && !canInviteMembers(authority, auth.member.id)) {
+      fail(403, "access_denied", "Invite grant required");
+    }
     // Minting invites is a membership write: the read-only autonomy tier
     // applies even when the agent holds an invite grant (issue #996).
     enforceAutonomyTierForAction({ db: this.store.db, roomId, state: this.store.room(roomId).state, actor: auth.member, action: "agent_invite_create", fail });
     let profileName = null;
-    if (profile !== undefined) {
+    if (ownerLevel) {
+      permissions = [...PERMISSIONS];
+    } else if (profile !== undefined) {
       if (typeof profile !== "string" || !Object.hasOwn(agentAccessProfiles, profile))
         fail(422, "invalid_invite_scope", `profile must be one of: ${Object.keys(agentAccessProfiles).join(", ")}`);
       if (permissions !== undefined)
@@ -346,14 +371,15 @@ export class AgentInvites {
       fail(422, "invalid_invite_scope",
         `permissions must be a non-empty list of unique room permissions (valid: ${PERMISSIONS.join(", ")}; or use a profile: ${Object.keys(agentAccessProfiles).join(", ")})`);
     }
-    if (permissions.some(p => NEVER_GRANT.includes(p))) {
+    if (!ownerLevel && permissions.some(p => NEVER_GRANT.includes(p))) {
       fail(422, "invalid_invite_scope", "Agent invite codes cannot grant manage_members, decide, or invite_member");
     }
     // Non-owner issuers: manage_members may only grant bits they hold;
     // invite_member-only may grant the standing agent-safe set.
+    // Owner-equivalent minting already required the owner principal.
     const issuer = auth.delegate ? auth.member : authority.members[auth.member.id];
     if (!issuer || issuer.active === false) fail(403, "access_denied", "Active membership required");
-    if (!auth.delegate && auth.member.id !== authority.ownerId) {
+    if (!ownerLevel && !auth.delegate && auth.member.id !== authority.ownerId) {
       const admin = issuer.permissions.includes("manage_members");
       if (admin && permissions.some(p => !issuer.permissions.includes(p))) {
         fail(403, "invite_scope_exceeded", "A membership administrator cannot grant authority they do not hold");
@@ -374,9 +400,21 @@ export class AgentInvites {
     return this.store.transaction(() => {
       const now = this.store.now();
       const expiresAt = now + expiresInMinutes * 60000;
-      this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at)
-        VALUES(?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt);
-      return { code, inviteId: inviteId(stored), roomId, permissions, profile: profileName, displayName: name, createdAt: now, expiresAt, next: createNext(roomId, code) };
+      this.db.prepare(`INSERT INTO agent_invite_codes(code_hash,room_id,created_by,permissions_json,display_name,created_at,expires_at,owner_equivalent)
+        VALUES(?,?,?,?,?,?,?,?)`).run(stored, roomId, auth.member.id, JSON.stringify(permissions), name, now, expiresAt, ownerLevel ? 1 : 0);
+      if (ownerLevel) {
+        // Room log of who minted the grant. inviteId is the public 8-hex
+        // handle; the raw code and the stored hash never enter the event.
+        this.store.appendSideTableEvent(roomId, event({
+          type: T.AGENT_INVITE_MINTED,
+          actorId: auth.member.id,
+          roomId,
+          at: new Date(now).toISOString(),
+          idempotencyKey: randomUUID(),
+          data: { inviteId: inviteId(stored), ownerEquivalent: true },
+        }));
+      }
+      return { code, inviteId: inviteId(stored), roomId, permissions, profile: ownerLevel ? "owner" : profileName, ownerEquivalent: ownerLevel, displayName: name, createdAt: now, expiresAt, next: createNext(roomId, code) };
     });
   }
 
@@ -386,7 +424,7 @@ export class AgentInvites {
   // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept `requestId`
   // makes an uncertain retry safe. The receipt is journaled in the same
   // transaction as the burn, so redeem → timeout → retry replays the same
-  // membership (duplicate:true, fresh onboarding token) instead of 409ing
+  // membership (duplicate:true, mcpToken null, next rotate) instead of 409ing
   // `invite_already_used` on the burned code with no recovery path. Same
   // key + different code/displayName is a 409
   // `invite_redeem_idempotency_conflict` (mirrors the direct-send
@@ -418,7 +456,7 @@ export class AgentInvites {
           if (receipt.code_hash !== row.code_hash || receipt.display_name !== name)
             fail(409, "invite_redeem_idempotency_conflict", "This request id already redeemed a different invite.");
           // A caller that presents an identity credential must be the identity
-          // that redeemed: the replay mints a fresh onboarding token for it.
+          // that redeemed. The replay does not mint another onboarding token.
           if (existingIdentity && existingIdentity.identityId !== receipt.identity_id)
             fail(403, "invite_redeem_identity_mismatch", "This request id belongs to a different identity.");
           return replayRedeemReceipt(this, receipt, { credentialPresented: Boolean(existingIdentity) });
@@ -428,20 +466,10 @@ export class AgentInvites {
         const linked = this.db.prepare("SELECT member_id FROM identity_links WHERE room_id=? AND identity_id=?").get(row.room_id, existingIdentity.identityId);
         const member = linked && this.store.room(row.room_id).state.members[linked.member_id];
         if (!member?.active) fail(403, "access_ended", "Membership is no longer active");
-        // One live room key: the previous rak_ for this identity and room
-        // is revoked before the replacement is minted.
-        revokeLiveRoomKeys(this.store, existingIdentity.identityId, row.room_id);
-        const mcpToken = this.store.agentPlugin.issueOnboardingMcpToken({
-          identityId: existingIdentity.identityId, roomId: row.room_id, label: member.displayName
-        });
-        const next = Object.freeze([
-          Object.freeze({ action: "save-room-key",
-            description: "Save the room key in this response. It replaces the previous key for this room, and only one stays live." }),
-          ...redeemNext(row.room_id, member.displayName),
-        ]);
         return withConnect(this.store, row.room_id, member.id, { identityId: existingIdentity.identityId, roomId: row.room_id, memberId: member.id,
-          displayName: member.displayName, permissions: member.permissions, duplicate: true, mcpToken,
-          next, nextActions: nextActionsForInviteRedeem(row.room_id) });
+          displayName: member.displayName, permissions: member.permissions, duplicate: true, mcpToken: null,
+          next: replayRedeemNext(row.room_id, member.displayName, row.redeemed_at, this.store.now()),
+          nextActions: nextActionsForInviteRedeem(row.room_id) });
       }
       if (row.revoked_at != null) fail(410, "invite_revoked", "Invite code was revoked");
       const now = this.store.now();
@@ -451,6 +479,11 @@ export class AgentInvites {
       // The inviter's authority is re-checked at redemption, like invitation
       // acceptance: a demoted issuer's outstanding codes stop working.
       if (!canInviteMembers(room.state, row.created_by)) {
+        fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
+      }
+      // An owner-level code stays bound to the owner who minted it. A
+      // transferred room must not finish the grant under the new owner.
+      if (row.owner_equivalent === 1 && row.created_by !== room.state.room.ownerId) {
         fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
       }
       // Reserve two event slots: member.added plus the referral.completed
@@ -495,6 +528,13 @@ export class AgentInvites {
       const memberId = identity.identityId;
       if (!MEMBER_ID_PATTERN.test(memberId)) fail(500, "invite_failed", "Generated member id is invalid");
       const permissions = JSON.parse(row.permissions_json);
+      const ownerLevel = row.owner_equivalent === 1;
+      if (ownerLevel && !samePermissionSet(permissions, PERMISSIONS)) {
+        fail(409, "invite_rejected", "Owner-level invite scope is invalid");
+      }
+      if (!ownerLevel && permissions.some(p => NEVER_GRANT.includes(p))) {
+        fail(409, "invite_rejected", "Invite scope is not grantable");
+      }
       const incoming = event({
         id: randomUUID(),
         idempotencyKey: hash(`agent-invite-redeem:${row.code_hash}`),
@@ -509,6 +549,7 @@ export class AgentInvites {
           permissions,
           identityId: identity.identityId,
           authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
+          ...(ownerLevel ? { ownerEquivalent: true } : {}),
           // Referral attribution: the invite minter is the referrer. The
           // member.added validator re-checks the shape and the self rule.
           referredBy: row.created_by,
@@ -637,8 +678,12 @@ export class AgentInvites {
     if (!canInviteMembers(room.state, row.created_by)) {
       fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
     }
+    if (row.owner_equivalent === 1 && row.created_by !== room.state.room.ownerId) {
+      fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
+    }
     const permissions = JSON.parse(row.permissions_json);
-    const profile = Object.keys(agentAccessProfiles).find(name => {
+    const ownerEquivalent = row.owner_equivalent === 1;
+    const profile = ownerEquivalent ? "owner" : Object.keys(agentAccessProfiles).find(name => {
       const set = agentAccessProfiles[name];
       return set.length === permissions.length && set.every(p => permissions.includes(p));
     }) ?? "custom";
@@ -647,7 +692,7 @@ export class AgentInvites {
     const inviter = room.state?.members?.[row.created_by];
     const inviterDisplayName = typeof inviter?.displayName === "string" && inviter.displayName ? inviter.displayName : null;
     return { roomId: row.room_id, roomTitle: room.state?.room?.title ?? row.room_id,
-      permissions, profile, expiresAt: row.expires_at, inviterDisplayName };
+      permissions, profile, ownerEquivalent, expiresAt: row.expires_at, inviterDisplayName };
   }
 
   // Owner-only: revoke an unredeemed code by the handle list() and create()
@@ -682,6 +727,20 @@ export class AgentInvites {
     });
   }
 
+  // GET fallback for an agent that can only fetch a URL. Never throws and
+  // never returns the code. roomId is present only while the code can still
+  // be redeemed.
+  availability(code) {
+    const normalized = typeof code === "string" ? code.trim().toUpperCase().replace(/[IL]/g, "1").replace(/O/g, "0") : "";
+    if (!CODE_PATTERN.test(normalized)) return { status: "unavailable" };
+    const row = this.db.prepare("SELECT room_id, revoked_at, expires_at, redeemed_at FROM agent_invite_codes WHERE code_hash=?").get(codeHash(normalized));
+    if (!row) return { status: "unavailable" };
+    if (row.revoked_at != null) return { status: "revoked" };
+    if (this.store.now() >= row.expires_at) return { status: "expired" };
+    if (row.redeemed_at != null) return { status: "used" };
+    return { status: "available", roomId: row.room_id };
+  }
+
   // Owner-only: audit view. Raw codes are never stored and the stored hash
   // stays server-side; rows carry the inviteId handle that revoke() takes.
   list(token, roomId, expectedSessionBinding = null) {
@@ -710,6 +769,13 @@ const withConnect = (store, roomId, memberId, body) => {
 };
 
 const DEFAULT_INVITE_NAME = "Invited agent";
+
+function replayRedeemNext(roomId, displayName, redeemedAt, now) {
+  const age = typeof redeemedAt === "number" ? now - redeemedAt : 0;
+  const rotate = onboardingRotateNext(roomId, age <= ONBOARDING_REPLAY_WINDOW_MS);
+  return Object.freeze([rotate, ...redeemNext(roomId, displayName)]);
+}
+
 const redeemNext = (roomId, displayName) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const steps = [
@@ -723,6 +789,12 @@ const redeemNext = (roomId, displayName) => {
       description: "Publish your agent card: send { id: <uuid>, type: \"capabilities.advertised\", data: { capabilities: [\"web-research\", \"code-review\"] } } so other members know what to delegate to you." }),
     Object.freeze({ action: "find-work", method: "GET", path: `${room}/work-sessions`,
       description: "Work cards with status and holder. Claim a queued item by driving its session to processing; the claim is structural, not a convention." }),
+    Object.freeze({ action: "claim-work", tool: "room_claim", arguments: { action: "take", requestId: "<stable-id>", workItemId: "<workItemId>",
+      expectedRevision: 0, repository: "<owner/repo>", ref: "<branch>", paths: ["<path>"], expiresAt: "<ISO date-time>" },
+      description: "Projected work items: claim the task assigned to you with MCP room_claim action=take, declaring repository, ref, paths and expiresAt. Board session claims stay on the work-session route above." }),
+    Object.freeze({ action: "handoff-work", tool: "room_handoff", arguments: { requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+      doneSummary: "<what is done against the definition of done>", nextAction: "<exact next step>", limitReason: "<why you stopped>" },
+      description: "If you cannot finish a projected task you claimed, hand it back to the Board with MCP room_handoff. It records the receipt; it does not close, complete or reassign the work." }),
     Object.freeze({ action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-QUICKSTART.md",
       description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." }),
   ];
