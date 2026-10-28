@@ -12,7 +12,7 @@
 // Queued/pending runs do not block: they are not publishing, and each will
 // run this same guard at its own publish point.
 //
-//   gh api repos/<repo>/actions/workflows/deploy-prod.yml/runs?status=in_progress > active.json
+//   gh api "repos/<repo>/actions/workflows/<workflow-file>/runs" -f status=in_progress > active.json
 //   node scripts/deploy-concurrency-guard.mjs --self <run-id> active.json [more.json...]
 //
 // Exits 0 when publication may proceed, 1 when another run is in progress,
