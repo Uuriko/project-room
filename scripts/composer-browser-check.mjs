@@ -27,7 +27,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     send(T.MESSAGE_POSTED, { messageId: "topic", body: "Which book should we read?" });
     send(T.MESSAGE_POSTED, { messageId: "reply", body: "A short story collection?", replyToId: "topic" });
     send(T.MESSAGE_POSTED, { messageId: "ping", body: "Ping @Room owner" });
-    const server = createRoomServer({ store, streamInterval: 50 });
+    // The browser fixture drives more reads per credential than the production burst; keep the wider window here only.
+    const server = createRoomServer({ store, streamInterval: 50, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     let browser;
@@ -459,7 +460,7 @@ for (const [label, size] of OWN_SEND_SIZES) {
     send(T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: [] });
     send(T.MESSAGE_POSTED, { messageId: "hello", body: "Welcome, Maya" });
     const maya = store.issueAccessKey("commons", "maya");
-    const server = createRoomServer({ store, streamInterval: 40 });
+    const server = createRoomServer({ store, streamInterval: 40, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
