@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function setup(t) {
   const dir = mkdtempSync(join(tmpdir(), "owner-gates-"));
@@ -37,7 +38,7 @@ function refuses(fn, status, code) {
 test("a non-owner member is refused by each owner-only store gate", t => {
   const f = setup(t);
   const keyHash = createHash("sha256").update(randomBytes(32)).digest("hex");
-  refuses(() => f.store.identities.link(f.plainKey, "commons", { identityId: f.identity.identityId, permissions: ["accept_work"] }), 403, "access_denied");
+  refuses(() => linkWithProof(f.store, f.plainKey, "commons", f.identity, { permissions: ["accept_work"] }), 403, "access_denied");
   refuses(() => f.store.agentConnections.apply(f.plainSession.token, "commons", { action: "create", requestId: randomUUID(), memberId: "agent-x",
     displayName: "X", access: "contribute", keyHash, expiresAt: Date.now() + 86400000, expectedOwnerRevision: 0 }, f.plainSession.session.sessionBinding), 403, "owner_required");
   refuses(() => f.store.guestAgentLinks.owner(f.plainKey, "commons", null), 403, "owner_required");
@@ -55,7 +56,7 @@ test("a non-owner member is refused by each owner-only store gate", t => {
 
 test("the owner passes the same gates (control)", t => {
   const f = setup(t);
-  assert.ok(f.store.identities.link(f.ownerKey, "commons", { identityId: f.identity.identityId, permissions: ["accept_work"] }));
+  assert.ok(linkWithProof(f.store, f.ownerKey, "commons", f.identity, { permissions: ["accept_work"] }));
   assert.ok(f.store.invites.create(f.ownerKey, "commons", { profile: "chat", expiresInMinutes: 60, displayName: "Scribe" }, null).inviteId);
   assert.equal(f.store.wakeQueue.pause(f.ownerKey, "commons", { requestId: randomUUID(), reason: null }, null, { memberId: "victim" }).memberId, "victim");
   assert.ok(Array.isArray(f.store.guestInvites.list(f.ownerKey, "commons", null)) || f.store.guestInvites.list(f.ownerKey, "commons", null));

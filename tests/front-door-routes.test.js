@@ -76,3 +76,11 @@ test("frontDoorFacts: counters computed from the receipts; HEAD passes the head 
   assert.deepEqual(calls.json.body.latestReceipt.agents, ["agent-a"]);
   assert.deepEqual(calls.json.body.latestReceipt.humans, ["human-b"]);
 });
+
+test("the featured receipt skips internal QA and fleet test runs", async () => {
+  const { featuredReceipt } = await import("../server/routes/front-door.mjs");
+  const real = { id: "r3", title: "Docs link sweep: SWARM-PLUG-IN.md" };
+  assert.equal(featuredReceipt([{ id: "r1", title: "FLEET-QA share journey: write the cold-open" }, { id: "r2", title: "QA: smoke" }, real]), real);
+  assert.equal(featuredReceipt([{ id: "r1", title: "qa-grokbot room check" }]), null);
+  assert.equal(featuredReceipt([]), null);
+});
