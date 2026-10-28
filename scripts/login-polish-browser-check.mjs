@@ -208,7 +208,7 @@ test("sign-in offers email recovery only after invalid credentials and keeps no-
   await form.locator('[name="email"]').fill('new-person@example.invalid');
   await form.locator('[name="password"]').fill('valid-password-for-fixture');
   await form.locator('[type="submit"]').click();
-  const join = page.locator('#account-rooms-panel').getByRole('link', { name: 'Join room', exact: true });
+  const join = page.locator('#account-rooms-panel').getByRole('link', { name: 'Join with an invitation', exact: true });
   await join.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#account-rooms-list [data-account-room]').count(), 0);
   await join.focus();
