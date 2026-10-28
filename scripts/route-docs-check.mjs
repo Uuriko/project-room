@@ -13,11 +13,36 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
+import { renderOpenApi } from "./openapi-document.mjs";
 import { openapiOperations, routeCandidates } from "./open-routes.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
 import { HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
 
 export const templateKey = path => path.replace(/\{[^}]+\}|:[A-Za-z]+/g, "{}");
+
+// Retired Board v2 surface. server/http.mjs matches the whole /board/v2
+// prefix with one RegExp and answers 410. A regex literal cannot express
+// that prefix: the route extractor only expands fully anchored
+// ([^/]{1,N}) templates. These are the documented paths that prefix covers.
+export const BOARD_V2_RETIRED_TEMPLATES = [
+  "/api/rooms/{id}/board/v2/board",
+  "/api/rooms/{id}/board/v2/claims",
+  "/api/rooms/{id}/board/v2/claims/{id}/heartbeat",
+  "/api/rooms/{id}/board/v2/claims/{id}/receipts",
+  "/api/rooms/{id}/board/v2/claims/{id}/release",
+  "/api/rooms/{id}/board/v2/decisions",
+  "/api/rooms/{id}/board/v2/events",
+  "/api/rooms/{id}/board/v2/findings",
+  "/api/rooms/{id}/board/v2/health",
+  "/api/rooms/{id}/board/v2/mirror-map",
+  "/api/rooms/{id}/board/v2/notes",
+];
+
+const BOARD_V2_PREFIX_SOURCE = 'new RegExp("^/api/rooms/([^/]{1,384})/board/v2(?:/|$)")';
+
+export function httpRetiresBoardV2(http) {
+  return typeof http === "string" && http.includes(BOARD_V2_PREFIX_SOURCE);
+}
 
 // One shared route set for the CLI gate and the test suite: every source
 // the gate compares lives here, so a new source can never be visible to the
@@ -29,7 +54,7 @@ export function routeSources(root) {
     pluginRoutes: read("server/agent-plugin-routes.mjs"),
     nextActionsRoutes: read("server/next-actions-routes.mjs"),
     worker: read("cloudflare/room.mjs"),
-    openapi: read("docs/openapi.yaml"),
+    openapi: renderOpenApi(root),
   };
 }
 
@@ -93,6 +118,12 @@ export function servedRouteTemplates({ http, pluginRoutes, nextActionsRoutes, wo
   const served = new Map();
   // server/http.mjs also names "/api/rooms/:roomId" as a diagnostics label; it folds into the {roomId} template.
   for (const template of routeCandidates(http)) if (!served.has(templateKey(template)) || !template.includes(":")) served.set(templateKey(template), template);
+  if (httpRetiresBoardV2(http)) {
+    for (const template of BOARD_V2_RETIRED_TEMPLATES) {
+      const key = templateKey(template);
+      if (!served.has(key)) served.set(key, template);
+    }
+  }
   // Required, not optional. Routes live in two files now, and a caller that
   // passed only http.mjs got a clean-looking report in which every plugin
   // route was "documented but not served" - which is how the test beside this
