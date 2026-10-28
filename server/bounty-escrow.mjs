@@ -133,7 +133,7 @@ export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in
 // AI verifier lane judges against the pinned rubric. Chosen at post time,
 // pinned at fund time, immutable after.
 export const APPROVAL_MODES = Object.freeze(["human", "agent"]);
-function stateGroup(state) {
+export function stateGroup(state) {
   switch (state) {
     case "proposed": return "proposed";
     case "funded": return "funded";
