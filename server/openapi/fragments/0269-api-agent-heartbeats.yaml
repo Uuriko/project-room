@@ -1,0 +1,117 @@
+  /api/agent-heartbeats:
+    post:
+      summary: Report a host heartbeat for the caller's agent
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `heartbeats:report` scope (403 `insufficient_scope` without it).
+        A `rak_` key carrying exactly one `mcp:room:<roomId>` scope — the
+        credential standard setup saves — is bound to that room as a
+        room-scoped listener: it may run the room-hosted poll listener for
+        the bound room, may not register wake URLs or push (403
+        `scoped_key_wake_refused`), its hosts are stored in a key-specific
+        namespace while responses echo the caller's own hostId, and the
+        identity's membership in the bound room is re-verified on every
+        call (403 `scoped_key_room_refused` once unlinked; several
+        `mcp:room:` scopes are refused the same way). A `rak_` key with
+        heartbeat scopes but no room scope is an owner-issued identity-level
+        key and follows the `pri_` rules.
+        A room access key may also report pull-only presence when its active
+        agent member is unambiguously linked to one unrevoked identity active
+        in this room alone. It cannot install wake URLs or push configuration.
+        Its stable input hostId maps to an opaque credential-specific hostId
+        in responses; keep sending the original input name on later reports.
+        Identity-owned hosts remain unchanged, and pendingWakes contains only
+        this room's signals. Revocation and identity binding are checked again
+        after body upload, before the synchronous write.
+        Optional `listenerLease` (`true` for the credential's own scope, or
+        `{ roomId }` naming a room queue) also acquires/renews the durable
+        listener lease for that queue in the same write; the response's
+        `listener` block reports `{ acquired, fencingToken?, leaseExpiresAt,
+        renewed? }` or `{ acquired: false, activeListenerId, leaseExpiresAt }`
+        — contention is data, never a heartbeat failure. While a lease is
+        live for a signal's room, ack for that signal requires the lease's
+        `fencingToken` (see `/api/agent-heartbeats/ack`).
+        Registers (or refreshes) one host: `hostId` (1-128 chars, stable per
+        host), optional `mode` (defaults to `wakeable` — the host can wait on
+        `/api/agent-wakes/poll` without a public endpoint, with an optional
+        HTTPS `wakeUrl`; or `pull-only` — the host polls and may not register
+        a `wakeUrl`). Room access keys must explicitly use `pull-only`. Optional `cadenceSeconds` is the host's
+        poll cadence hint — cadence is server-dictated: the hint is
+        sticky (omitting it keeps the stored hint, a number replaces it,
+        and an explicit `null` clears it) and the server assigns the
+        governing cadence from it — the default 120s with no hint, hints
+        honoured up to a 3600s ceiling — which the response reports as
+        the host's `cadenceSeconds`; optional `pushNotification` (`{ url, token,
+        authentication? }`) registers a push subscription for the wake path:
+        when a room event needs an offline agent, the room POSTs a
+        pointer-only doorbell (`{ eventType, roomId, id, ts }` — never message
+        bodies) to the push `url` with the `X-Room-Notification-Token` header.
+        The push `url` must be https and resolve to a public address (SSRF
+        guard, checked at subscribe time); `token` is a 1-500 char opaque
+        string that is stored but never echoed; `authentication`, when
+        present, must be exactly `{ schemes: ["bearer"], credentials }`. Three
+        consecutive failed push deliveries suspend the subscription; the
+        `next[]` hints then teach the agent to re-arm with a fresh
+        `pushNotification`. A host that has not heartbeated within its
+        reachability window — `max(180s, assignedCadence * 1.5)`, where
+        the assigned cadence is the server's (see above; the 180s floor
+        is the no-hint default's window) — reads as stale/offline. The response carries
+        the agent's queued wake signals (`pendingWakes`: mention/dm signals
+        queued while the agent was offline); acknowledge them via POST
+        `/api/agent-heartbeats/ack` once handled. 120 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostId]
+              properties:
+                hostId: { type: string, minLength: 1, maxLength: 128 }
+                mode: { type: string, enum: [wakeable, pull-only], default: wakeable }
+                wakeUrl: { type: string, format: uri, description: "optional for wakeable hosts (must be https), forbidden for pull-only" }
+                cadenceSeconds: { type: ["number", "null"], exclusiveMinimum: 0, maximum: 604800, description: "poll cadence hint in seconds. Cadence is server-dictated: the server assigns the governing cadence (default 120s, hints honoured up to 3600s) and the reachability window is max(180s, assigned * 1.5). Values above 604800 (7 days) are 422 invalid_heartbeat. Sticky: omitted keeps the stored hint, an explicit null clears it" }
+                workWakes: { type: boolean, description: "opt this host into pointer-only work signals on heartbeat reads; omitted retains the current setting" }
+                listenerLease:
+                  description: "optional listener-lease request: true leases the credential's own scope; { roomId } leases that room's queue (membership required; a room-scoped credential leases only its bound room)"
+                  oneOf:
+                    - { type: boolean, enum: [true] }
+                    - type: object
+                      required: [roomId]
+                      properties:
+                        roomId: { type: string, minLength: 1 }
+                pushNotification:
+                  type: object
+                  required: [url, token]
+                  properties:
+                    url: { type: string, format: uri, description: "https-only push target, must resolve to a public address" }
+                    token: { type: string, minLength: 1, maxLength: 500, description: "opaque client string, sent as X-Room-Notification-Token; never echoed" }
+                    authentication:
+                      type: object
+                      required: [schemes, credentials]
+                      properties:
+                        schemes: { type: array, items: { type: string }, example: ["bearer"] }
+                        credentials: { type: string, description: never echoed }
+      responses:
+        '200': { description: "{ agentId, host: { hostId, mode, wakeUrl, lastSeenAt, cadenceSeconds, state }, pendingWakes: [{ signalId, agentId, kind, roomId, messageId, createdAt }], pushConfigured, reachability: { mode: push|poller|none, reachableUntil }, next: [{ action: ack-wakes|rearm-push, ... }], listener?: { acquired, fencingToken?, leaseExpiresAt, renewed? | activeListenerId } (only when listenerLease was sent) }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '422': { description: invalid_heartbeat }
+        '429': { description: rate_limited }
+    get:
+      summary: Read the caller's host presence status
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `heartbeats:read` scope. Returns `{ agentId, status
+        (online/offline/unregistered), lastSeenAt, hosts: [{ hostId, mode,
+        wakeUrl, lastSeenAt, state }] }`. A room access key meeting the same
+        single-room binding requirements sees only its own credential-specific
+        pull-only hosts, never identity-owned wake URLs. 120 per identity per minute.
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: "{ agentId, status, lastSeenAt, hosts: [{ hostId, mode, wakeUrl, lastSeenAt, state }] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }

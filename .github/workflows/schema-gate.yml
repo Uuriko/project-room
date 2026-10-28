@@ -20,6 +20,14 @@ name: schema-gate
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    # Docs-only diffs cannot move the schema migration. This check is not in
+    # the merge gate's required set. deploy-prod reads the push run, which
+    # stays unfiltered. A required check would need a companion job instead
+    # of this skip.
+    paths-ignore:
+      - "**/*.md"
+      - "docs/**"
   push:
     branches: [main]
 
@@ -38,6 +46,7 @@ concurrency:
 
 jobs:
   schema-gate:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
