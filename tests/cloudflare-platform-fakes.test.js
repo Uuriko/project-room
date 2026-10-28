@@ -126,7 +126,7 @@ test("scheduled RPC hits real ProjectRoom methods and fails on an unknown one", 
     console.error = originalError;
   }
   assert.deepEqual(names, ["invite-only-pilot"]);
-  assert.deepEqual(invoked, ["ensureJobAlarm"]);
+  assert.deepEqual(invoked, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
   assert.deepEqual(warnings, []);
   assert.deepEqual(errors, []);
   assert.throws(() => stub.notARealCronMethod(), /does not implement the method "notARealCronMethod"/);

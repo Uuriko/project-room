@@ -411,3 +411,36 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   release();
   assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
 });
+
+
+test('SDK repository and branch reach creation, claiming, and convenience reclaim over HTTP', async t => {
+  const { owner } = await fixture(t);
+  const created = await owner.workClaimCreate({ id: 'repo-direct', repo: 'acme/widgets', branch: 'codex/create' });
+  assert.equal(created.repo, 'acme/widgets'); assert.equal(created.branch, 'codex/create');
+  const claimed = await owner.claimWorkItem('repo-direct', { repo: 'acme/other', branch: 'codex/claim' });
+  assert.equal(claimed.repo, 'acme/other'); assert.equal(claimed.branch, 'codex/claim');
+  const convenient = await owner.workClaim('repo-convenience', { repo: 'acme/widgets', branch: 'codex/new' });
+  assert.equal(convenient.repo, 'acme/widgets'); assert.equal(convenient.branch, 'codex/new');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const reclaimed = await owner.workClaim('repo-convenience', { repo: 'acme/changed', branch: 'codex/reclaim' });
+  assert.equal(reclaimed.repo, 'acme/changed'); assert.equal(reclaimed.branch, 'codex/reclaim');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const retained = await owner.workClaim('repo-convenience');
+  assert.equal(retained.repo, 'acme/changed'); assert.equal(retained.branch, 'codex/reclaim');
+  assert.equal((await owner.workClaimGet('repo-convenience')).repo, 'acme/changed');
+});
+
+test('SDK invalid repository and branch declarations reach server validation', async t => {
+  const { owner } = await fixture(t);
+  for (const fields of [{ repo: 'invalid repo' }, { branch: 'invalid branch' }]) {
+    await assert.rejects(owner.workClaimCreate({ id: 'bad-repo-create', ...fields }), invalid);
+    await assert.rejects(owner.workClaim('bad-repo-convenience', fields), invalid);
+    await assert.rejects(owner.workClaimGet('bad-repo-create'), error => error.status === 404);
+    await assert.rejects(owner.workClaimGet('bad-repo-convenience'), error => error.status === 404);
+  }
+  await owner.workClaimCreate({ id: 'bad-repo-existing', repo: 'acme/widgets', branch: 'main' });
+  await assert.rejects(owner.claimWorkItem('bad-repo-existing', { repo: 'invalid repo' }), invalid);
+  await assert.rejects(owner.workClaim('bad-repo-existing', { branch: 'invalid branch' }), invalid);
+  const unchanged = await owner.workClaimGet('bad-repo-existing');
+  assert.equal(unchanged.state, 'unclaimed'); assert.equal(unchanged.repo, 'acme/widgets'); assert.equal(unchanged.branch, 'main');
+});
