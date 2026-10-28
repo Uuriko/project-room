@@ -95,6 +95,7 @@ import { ensureAttachmentSchema, verifyAttachmentSchema } from "./attachment-sch
 import { RoomAttachmentBytes } from "./room-attachment-bytes.mjs";
 import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attachment-bytes.mjs";
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
+import { refusalJournalSchema } from "./refusal-journal.mjs"; // #3617 (R-8): refusal journal table, converged with the schema pass like the other unfenced additive tables.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
 import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
@@ -1139,7 +1140,7 @@ function roomSchemaStamp() {
     humanPushSchema, humanPushPrefsSchema, quarantineThreadSplitSchema, slaBreachAlertSchema, inboxHandoffSchema,
     inboxHandoffRoomSchema, handoffEnvelopeSchema, agentPluginSchema, inboxCollabSchema,
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
-    bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
+    bountyEscrowSchema, refusalJournalSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
     accessRequestSchema, pairingSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
@@ -1941,6 +1942,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // stored CREATE TABLE text that verifySchema compares.
       convergeBountyDeployedSchema(this.db);
       this.db.exec(bountyEscrowSchema);
+      this.db.exec(refusalJournalSchema); // #3617 (R-8): purely additive, unfenced (see writer-fence.mjs); converged here so the recovery audit's application-table set always finds it.
       this.db.exec(projectOffersSchema);
       this.db.exec(demigodOffersSchema);
       this.db.exec(demigodContractsSchema);
