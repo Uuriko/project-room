@@ -54,12 +54,17 @@ export async function requestMemberPermissions(ctx) {
 export async function listMemberAccessRequests(ctx) {
   const requests = service(ctx);
   const { roomId, selected, fence } = roomContext(ctx, false);
-  const records = requests.list(selected.token, roomId, { status: ctx.url.searchParams.get("status") ?? "pending" }, fence);
+  const records = [...requests.list(selected.token, roomId, { status: ctx.url.searchParams.get("status") ?? "pending" }, fence)];
+  let nextJoinCursor = null;
+  if ((ctx.url.searchParams.get("status") ?? "pending") === "pending" && ctx.store.accountJoinRequests) {
+    try { const page = ctx.store.accountJoinRequests.list(selected.token, roomId, fence); records.push(...page.requests); nextJoinCursor = page.nextCursor; }
+    catch (error) { if (error.status !== 403) throw error; }
+  }
   const next = records.length ? [{ action: "decide-request", method: "POST",
-    path: `/api/rooms/${encodeURIComponent(roomId)}/access-requests/${encodeURIComponent(records[0].requestId)}/decide`,
-    description: `Decide ${records[0].displayName}'s request: send { decision: "approve", permissions: ${JSON.stringify(records[0].requestedPermissions)}, note: null }. Use "deny" to refuse. Send your current room credential.` }]
+    path: `/api/rooms/${encodeURIComponent(roomId)}/${records[0].kind === "human_join" ? "join-requests" : "access-requests"}/${encodeURIComponent(records[0].requestId)}/decide`,
+    description: records[0].kind === "human_join" ? `Send { decision: "approve" or "deny", expectedRevision: ${records[0].revision} } with your current room credential.` : `Decide ${records[0].displayName}'s request: send { decision: "approve", permissions: ${JSON.stringify(records[0].requestedPermissions)}, note: null }. Use "deny" to refuse. Send your current room credential.` }]
     : [{ action: "watch-requests", description: "No pending access requests." }];
-  return ctx.json(ctx.res, 200, { roomId, requests: records, next });
+  return ctx.json(ctx.res, 200, { roomId, requests: records, next, nextJoinCursor });
 }
 
 const parameters = Object.freeze({ type: "object", required: ["roomId"], properties: { roomId: { type: "string" } } });

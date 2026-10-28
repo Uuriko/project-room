@@ -1,0 +1,24 @@
+First-login room choices (2026-10-27)
+
+A signed-in person without a room chooses Create room, Join with an invitation,
+or Discover listed rooms. Signup and empty room-list refresh do not provision
+rooms. An explicit start=room intent retains its existing private-room shortcut.
+Invitations, native consent, and required terms retain precedence over this list.
+Existing members keep these actions in Rooms; membership search appears only
+when at least one room is present.
+
+Discovery reads the existing sanitized opt-in directory only after an explicit
+click. It neither loads private room history nor creates membership. A public
+listing says a room is visible, not that admission is open. The account-bound
+human request UI supplies the Request access callback; the older generic join
+request door creates agent identity and is not a substitute for human membership.
+Without that callback, discovery displays information without a misleading action.
+Invitation joins continue through the existing invitation route.
+
+Public/private creation and later owner settings belong to the coordinated owner
+flow. Creation remains private by default. Future open admission needs an explicit
+server-authorized policy and cannot be inferred from directory visibility.
+
+Directory pagination is cursor-based with explicit More and retry. There is no
+search box that pretends to search the whole directory while filtering one page.
+Account loss/change clears cached rendered discovery and cancels in-flight reads.

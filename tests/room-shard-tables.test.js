@@ -1,4 +1,6 @@
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
+import { accountJoinRequestsSchema } from "../server/account-join-schema.mjs";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -24,6 +26,7 @@ test("a fresh store's tables are classified room or directory", t => {
   assert.equal(homes.get("messages"), "room");
   assert.equal(homes.get("rooms"), "room");
   assert.equal(homes.get("accounts"), "directory");
+  assert.equal(homes.get("account_join_requests"), "directory", "account-bound admission stays with directory authority");
   assert.equal(homes.get("credentials"), "directory");
   assert.equal(homes.get("account_session_slots"), "directory");
   for (const [table, column] of Object.entries(ROOM_TABLE_KEYS)) {
@@ -40,4 +43,12 @@ test("a fresh store's tables are classified room or directory", t => {
 test("a table the classification does not name is refused", () => {
   assert.throws(() => tableHome("not_a_room_table"), /Unclassified SQLite table not_a_room_table/);
   assert.throws(() => assertShardClassification(["events"]), /directory table accounts is not in the live schema/);
+});
+
+test("every account admission schema table has an explicit shard home", t => {
+  const db = new DatabaseSync(":memory:"); t.after(() => db.close());
+  db.exec(accountJoinRequestsSchema);
+  const names = liveNames(db).filter(name => !name.startsWith("sqlite_"));
+  assert.ok(names.length > 0);
+  for (const name of names) assert.equal(tableHome(name), "directory");
 });

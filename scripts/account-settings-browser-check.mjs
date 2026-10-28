@@ -168,6 +168,14 @@ for (const width of [1280, 390]) test(`Profile opens directly from chat and save
   await signup.locator('[name="email"]').fill('direct-profile@example.invalid');
   await signup.locator('[name="password"]').fill('synthetic-profile-password');
   await signup.locator('button[type="submit"]').click();
+  await page.locator('#room-choices').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#account-rooms-list [data-account-room]').count(), 0, 'new account has no implicitly created room');
+  await page.locator('#room-choice-create').click();
+  await page.locator('#account-room-title').fill('My private room');
+  await page.locator('#account-room-purpose').fill('Keep my work together');
+  await page.locator('#account-room-name').fill('Ada');
+  assert.equal(await page.locator('#account-room-visibility').inputValue(), 'private');
+  await page.locator('#account-room-submit').click();
   await page.locator('#main').waitFor({ state: 'visible' });
   const account = await (await page.context().request.get(origin + '/api/account-session')).json();
   const roomUrl = page.url(), roomIdentity = await page.locator('#identity-label').textContent();
