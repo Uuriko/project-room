@@ -60,6 +60,11 @@ permissions:
   actions: read
 
 # One production change at a time. Never cancel a deploy that has started.
+# The group alone did not serialise dispatch runs on 2026-10-27 (two runs
+# overlapped and published against the same production), so the deploy job
+# ALSO runs a pre-publish guard (scripts/deploy-concurrency-guard.mjs) that
+# refuses to publish while any other deploy-prod/rollback-prod run is in
+# progress. Treat the group as queueing, the guard as enforcement.
 concurrency:
   group: production-deploy
   cancel-in-progress: false
@@ -238,6 +243,12 @@ jobs:
           version: 10
       - run: PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1 npm ci --no-audit --no-fund
       - run: pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+      - name: Stamp one build identity for this run
+        id: stamp
+        run: |
+          BUILD_ID="$(date -u +%Y-%m-%dT%H:%M:%SZ)-run-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "build_id=$BUILD_ID" >> "$GITHUB_OUTPUT"
+          echo "Build identity for this dispatch: $BUILD_ID (revision $SHA)" >> "$GITHUB_STEP_SUMMARY"
       - name: Record exact live versions and code schemas before upload
         id: pre
         run: node scripts/deploy-recovery.mjs snapshot "$RUNNER_TEMP/pre-deploy.json"
@@ -246,11 +257,22 @@ jobs:
           name: pre-deploy-${{ needs.gate.outputs.sha }}
           path: ${{ runner.temp }}/pre-deploy.json
           retention-days: 90
+      - name: Refuse to publish while another production run is active
+        id: concurrency-guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-prod.yml/runs?status=in_progress&per_page=100" > "$RUNNER_TEMP/active-deploy-prod.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/rollback-prod.yml/runs?status=in_progress&per_page=100" > "$RUNNER_TEMP/active-rollback-prod.json"
+          node scripts/deploy-concurrency-guard.mjs --self "$GITHUB_RUN_ID" "$RUNNER_TEMP/active-deploy-prod.json" "$RUNNER_TEMP/active-rollback-prod.json"
       - name: Deploy canonical Worker (project-room)
         id: prod
         working-directory: cloudflare
         env:
           ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
+          ROOM_BUILD_ID: ${{ steps.stamp.outputs.build_id }}
+          ROOM_SOURCE_REVISION: ${{ needs.gate.outputs.sha }}
         run: |
           set -euo pipefail
           pnpm exec wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1 | tee "$RUNNER_TEMP/deploy-prod.txt"
@@ -262,6 +284,8 @@ jobs:
         working-directory: cloudflare
         env:
           ROOM_AGENT_CARD_SIGNING_KEY: ${{ secrets.ROOM_AGENT_CARD_SIGNING_KEY }}
+          ROOM_BUILD_ID: ${{ steps.stamp.outputs.build_id }}
+          ROOM_SOURCE_REVISION: ${{ needs.gate.outputs.sha }}
         run: |
           set -euo pipefail
           pnpm exec wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1 | tee "$RUNNER_TEMP/deploy-entry.txt"
@@ -270,20 +294,21 @@ jobs:
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Smoke version, health, ready, legal pages
         shell: bash
-        # One retry before recovery: after a Worker upload the Durable Object
-        # can keep answering /api/version with the previous build for more
-        # than the 5-minute window (run 37880461862 rolled back a healthy
-        # deploy that way; the identical redeploy passed). The retry waits
-        # SMOKE_RETRY_DELAY_SECONDS (default 150) and re-checks for 60s more;
-        # a broken build still fails and recovers, about 3.5 minutes later.
+        env:
+          BUILD_ID: ${{ steps.stamp.outputs.build_id }}
+        # One attempt, ~90s budget by construction: the version wait is
+        # bounded by --wait-ms and each door's agent-card window by
+        # --agent-card-wait-ms, with no fixed retry sleep. The old shape
+        # (300s poll + 150s sleep + 60s poll) was 62-90% of the deploy job
+        # and still failed 4/4 runs on 2026-10-27 AFTER both Workers had
+        # published, so "failed" runs changed production while reporting
+        # failure. The smoke verifies the actually-published build of THIS
+        # run: every version door must report the dispatched sha AND the
+        # run-scoped build id stamped into both Workers. A door still on
+        # the previous build at the deadline fails and recovers, honestly
+        # and in ~90s instead of ~9 minutes.
         run: |
-          if node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 > "$RUNNER_TEMP/prod-smoke-attempt1.log"; then
-            cat "$RUNNER_TEMP/prod-smoke-attempt1.log" | tee "$RUNNER_TEMP/prod-smoke.json"
-          else
-            echo "::warning::prod smoke attempt 1 failed; retrying once in ${SMOKE_RETRY_DELAY_SECONDS:-150}s (Durable Object version lag) before recovery" >&2
-            sleep "${SMOKE_RETRY_DELAY_SECONDS:-150}"
-            node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke-attempt2.log" "$RUNNER_TEMP/prod-smoke.json"
-          fi
+          node scripts/prod-deploy-smoke.mjs --sha "$SHA" --build-id "$BUILD_ID" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 45000 --agent-card-wait-ms 20000 | tee "$RUNNER_TEMP/prod-smoke.json"
       - name: Live smoke
         shell: bash
         env:
@@ -304,7 +329,6 @@ jobs:
           path: |
             ${{ runner.temp }}/pre-deploy.json
             ${{ runner.temp }}/deploy-recovery.json
-            ${{ runner.temp }}/prod-smoke-attempt*.log
             ${{ runner.temp }}/prod-smoke.json
           retention-days: 90
       - name: Receipt to muse-room
@@ -345,6 +369,7 @@ jobs:
       - name: Summary
         if: always()
         env:
+          BUILD_ID: ${{ steps.stamp.outputs.build_id }}
           PROD_NEW: ${{ steps.prod.outputs.version }}
           ENTRY_NEW: ${{ steps.entry.outputs.version }}
           PROD_PRE: ${{ steps.pre.outputs.prod }}
@@ -355,6 +380,8 @@ jobs:
         run: |
           {
             echo "## deploy-prod ${SHA:0:8}"
+            echo ""
+            echo "Build identity (stamped into both Workers, verified by smoke): ${BUILD_ID:-unknown}"
             echo ""
             echo "| Worker | New version | Rollback target |"
             echo "|---|---|---|"

@@ -29,8 +29,13 @@ if (positionals.length > 1) throw new Error("expected at most one positional tar
 const targetArg = positionals[0] ?? null;
 const target = targetArg ? (isAbsolute(targetArg) ? targetArg : join(process.cwd(), targetArg)) : join(root, "server", "version.mjs");
 const opt = name => { const i = args.indexOf(name); return i === -1 ? null : args[i + 1]; };
-const revision = opt("--revision") ?? execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
-const buildId = opt("--build-id") ?? new Date().toISOString();
+// Deploy-lane seam: the workflow stamps ONE build identity per run by
+// exporting ROOM_SOURCE_REVISION (the gate-resolved sha) and ROOM_BUILD_ID
+// (run-scoped) into both wrangler builds, so the entry and canonical
+// Workers carry the same buildId and the post-deploy smoke can verify the
+// actually-published build of THIS run. Flags still win over the env.
+const revision = opt("--revision") ?? (process.env.ROOM_SOURCE_REVISION || null) ?? execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+const buildId = opt("--build-id") ?? (process.env.ROOM_BUILD_ID || null) ?? new Date().toISOString();
 if (!/^[0-9a-f]{40}$/.test(revision)) throw new Error("revision must be a full commit SHA");
 const source = readFileSync(target, "utf8");
 // M-56: JSON.stringify the interpolated values — the old template dropped the
