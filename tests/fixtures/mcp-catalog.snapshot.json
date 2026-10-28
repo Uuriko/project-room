@@ -129,7 +129,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -183,7 +183,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "89ae8ce5411aa8fb",
+      "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -228,7 +228,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "63b827209fe1c9eb",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -237,7 +237,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "4b961a3a4293f0c4",
+      "inputSchema": "84354e6433651648",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -617,7 +617,7 @@
       }
     },
     "room_accept_work": {
-      "inputSchema": "997d52d3df093d0c",
+      "inputSchema": "16a8651de12f83a5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -626,7 +626,7 @@
       }
     },
     "room_acquire_claim": {
-      "inputSchema": "60bbe03b9f4d42a8",
+      "inputSchema": "8095571b61c3be39",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -671,7 +671,7 @@
       }
     },
     "room_block_work": {
-      "inputSchema": "cb32d833da554242",
+      "inputSchema": "dc5251ff819d9e9b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -680,7 +680,7 @@
       }
     },
     "room_cancel_request": {
-      "inputSchema": "1f4c0acd234a8c3b",
+      "inputSchema": "8a119ab044bc83f3",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -697,8 +697,17 @@
         "openWorldHint": false
       }
     },
+    "room_claim": {
+      "inputSchema": "8840784b2798bcad",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_clear_halt": {
-      "inputSchema": "10ef080c6a66fafb",
+      "inputSchema": "e9ccf3e8ed111cb1",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -734,7 +743,7 @@
       }
     },
     "room_create_agent_invite": {
-      "inputSchema": "2884f452719ad86f",
+      "inputSchema": "2c5d9e38ee7de31a",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -752,7 +761,7 @@
       }
     },
     "room_decline_help_offer": {
-      "inputSchema": "c93102c738720d65",
+      "inputSchema": "4f350c3e95f4f636",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -778,6 +787,15 @@
         "openWorldHint": true
       }
     },
+    "room_handoff": {
+      "inputSchema": "46cf90aecbb15566",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_introduce_outside_agent": {
       "inputSchema": "352b7bb7d12425d5",
       "annotations": {
@@ -788,7 +806,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -904,6 +922,15 @@
         "openWorldHint": true
       }
     },
+    "room_map": {
+      "inputSchema": "9cfc8cae8778bdcc",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_mcp_snippet": {
       "inputSchema": "99334726611ccf58",
       "annotations": {
@@ -922,8 +949,17 @@
         "openWorldHint": false
       }
     },
+    "room_merge_members": {
+      "inputSchema": "d4341a4572f425c3",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_needs_me": {
-      "inputSchema": "89ae8ce5411aa8fb",
+      "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -932,7 +968,7 @@
       }
     },
     "room_offer_help": {
-      "inputSchema": "bf8202dfae059c28",
+      "inputSchema": "acae95d1a4b0d2fe",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -941,7 +977,7 @@
       }
     },
     "room_post_draft": {
-      "inputSchema": "9d90cc793474a002",
+      "inputSchema": "d61f6ac8fbe3056e",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -959,7 +995,7 @@
       }
     },
     "room_propose_work": {
-      "inputSchema": "a2f024c70bf9a3e9",
+      "inputSchema": "7b6b1a6cdf8d0680",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -978,6 +1014,15 @@
     },
     "room_read_board": {
       "inputSchema": "7dac81175f92cec4",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    "room_read_bootstrap": {
+      "inputSchema": "9c4dedb9bd1af453",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1040,7 +1085,7 @@
       }
     },
     "room_record_completion": {
-      "inputSchema": "b5baa11cf5d752b1",
+      "inputSchema": "c0f2faaebb255d63",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1049,7 +1094,7 @@
       }
     },
     "room_record_handoff": {
-      "inputSchema": "2f690e02f2c13878",
+      "inputSchema": "46cf90aecbb15566",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1058,7 +1103,7 @@
       }
     },
     "room_record_verification": {
-      "inputSchema": "0b925ba63ce5e4c4",
+      "inputSchema": "9367a63492018b31",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1067,7 +1112,7 @@
       }
     },
     "room_release_claim": {
-      "inputSchema": "997d52d3df093d0c",
+      "inputSchema": "16a8651de12f83a5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1076,7 +1121,7 @@
       }
     },
     "room_release_help_offer": {
-      "inputSchema": "6df8d335d804e11e",
+      "inputSchema": "ed652c0f24282cc1",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1085,7 +1130,7 @@
       }
     },
     "room_renew_claim": {
-      "inputSchema": "d1c971ee068b0902",
+      "inputSchema": "1dfb52b413fe238b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1094,7 +1139,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "63b827209fe1c9eb",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1112,7 +1157,7 @@
       }
     },
     "room_request_reply": {
-      "inputSchema": "800a9a09da8c852e",
+      "inputSchema": "7430b57c61573f97",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1121,7 +1166,7 @@
       }
     },
     "room_resolve_blocker": {
-      "inputSchema": "4be72edf2d3d6703",
+      "inputSchema": "0d919b8bc2fa5637",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1130,7 +1175,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "4b961a3a4293f0c4",
+      "inputSchema": "84354e6433651648",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1148,7 +1193,7 @@
       }
     },
     "room_select_help_offer": {
-      "inputSchema": "e01ff20c1de7f96c",
+      "inputSchema": "cf804d7e056cf301",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1166,7 +1211,7 @@
       }
     },
     "room_start_work": {
-      "inputSchema": "a164a6f1e85c925e",
+      "inputSchema": "f07fc885990b22bd",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1175,7 +1220,7 @@
       }
     },
     "room_submit_text_result": {
-      "inputSchema": "15543437625fbdc2",
+      "inputSchema": "06247538b2b8ee95",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1184,7 +1229,7 @@
       }
     },
     "room_supersede_work": {
-      "inputSchema": "096edd6511ab0071",
+      "inputSchema": "537712e7ad3bd558",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1193,7 +1238,7 @@
       }
     },
     "room_withdraw_help_offer": {
-      "inputSchema": "c93102c738720d65",
+      "inputSchema": "4f350c3e95f4f636",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1301,7 +1346,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+      "inputSchema": "5a81992641ec2856",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1330,7 +1375,7 @@
       }
     },
     "room_accept_work": {
-      "inputSchema": "997d52d3df093d0c",
+      "inputSchema": "16a8651de12f83a5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1339,7 +1384,7 @@
       }
     },
     "room_acquire_claim": {
-      "inputSchema": "60bbe03b9f4d42a8",
+      "inputSchema": "8095571b61c3be39",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1375,7 +1420,7 @@
       }
     },
     "room_block_work": {
-      "inputSchema": "cb32d833da554242",
+      "inputSchema": "dc5251ff819d9e9b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1388,6 +1433,15 @@
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_claim": {
+      "inputSchema": "8840784b2798bcad",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false
       }
@@ -1408,6 +1462,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_handoff": {
+      "inputSchema": "46cf90aecbb15566",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_join_kits": {
@@ -1473,6 +1536,15 @@
         "openWorldHint": true
       }
     },
+    "room_map": {
+      "inputSchema": "9cfc8cae8778bdcc",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_mcp_snippet": {
       "inputSchema": "99334726611ccf58",
       "annotations": {
@@ -1483,7 +1555,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "89ae8ce5411aa8fb",
+      "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1492,7 +1564,7 @@
       }
     },
     "room_post_draft": {
-      "inputSchema": "9d90cc793474a002",
+      "inputSchema": "d61f6ac8fbe3056e",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1510,7 +1582,7 @@
       }
     },
     "room_propose_work": {
-      "inputSchema": "a2f024c70bf9a3e9",
+      "inputSchema": "7b6b1a6cdf8d0680",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1564,7 +1636,7 @@
       }
     },
     "room_record_completion": {
-      "inputSchema": "b5baa11cf5d752b1",
+      "inputSchema": "c0f2faaebb255d63",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1573,7 +1645,7 @@
       }
     },
     "room_record_handoff": {
-      "inputSchema": "2f690e02f2c13878",
+      "inputSchema": "46cf90aecbb15566",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1582,7 +1654,7 @@
       }
     },
     "room_release_claim": {
-      "inputSchema": "997d52d3df093d0c",
+      "inputSchema": "16a8651de12f83a5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1591,7 +1663,7 @@
       }
     },
     "room_renew_claim": {
-      "inputSchema": "d1c971ee068b0902",
+      "inputSchema": "1dfb52b413fe238b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1600,7 +1672,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "63b827209fe1c9eb",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1609,7 +1681,7 @@
       }
     },
     "room_request_reply": {
-      "inputSchema": "800a9a09da8c852e",
+      "inputSchema": "7430b57c61573f97",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1618,7 +1690,7 @@
       }
     },
     "room_resolve_blocker": {
-      "inputSchema": "4be72edf2d3d6703",
+      "inputSchema": "0d919b8bc2fa5637",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1627,7 +1699,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "4b961a3a4293f0c4",
+      "inputSchema": "84354e6433651648",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1636,7 +1708,7 @@
       }
     },
     "room_start_work": {
-      "inputSchema": "a164a6f1e85c925e",
+      "inputSchema": "f07fc885990b22bd",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1645,7 +1717,7 @@
       }
     },
     "room_submit_text_result": {
-      "inputSchema": "15543437625fbdc2",
+      "inputSchema": "06247538b2b8ee95",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1728,7 +1800,7 @@
       }
     },
     "room_cancel_request": {
-      "inputSchema": "1f4c0acd234a8c3b",
+      "inputSchema": "8a119ab044bc83f3",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1800,7 +1872,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "89ae8ce5411aa8fb",
+      "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1845,7 +1917,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "63b827209fe1c9eb",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1863,7 +1935,7 @@
       }
     },
     "room_request_reply": {
-      "inputSchema": "800a9a09da8c852e",
+      "inputSchema": "7430b57c61573f97",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1872,7 +1944,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "4b961a3a4293f0c4",
+      "inputSchema": "84354e6433651648",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1991,7 +2063,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "89ae8ce5411aa8fb",
+      "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2045,7 +2117,7 @@
       }
     },
     "room_record_verification": {
-      "inputSchema": "0b925ba63ce5e4c4",
+      "inputSchema": "9367a63492018b31",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2054,7 +2126,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "63b827209fe1c9eb",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2063,7 +2135,7 @@
       }
     },
     "room_request_reply": {
-      "inputSchema": "800a9a09da8c852e",
+      "inputSchema": "7430b57c61573f97",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2072,7 +2144,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "4b961a3a4293f0c4",
+      "inputSchema": "84354e6433651648",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2182,7 +2254,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "89ae8ce5411aa8fb",
+      "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2209,7 +2281,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "63b827209fe1c9eb",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2218,7 +2290,7 @@
       }
     },
     "room_request_reply": {
-      "inputSchema": "800a9a09da8c852e",
+      "inputSchema": "7430b57c61573f97",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2227,7 +2299,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "4b961a3a4293f0c4",
+      "inputSchema": "84354e6433651648",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2281,7 +2353,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "a4311d75365d3fa1",
+      "inputSchema": "5a81992641ec2856",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2465,7 +2537,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2519,7 +2591,7 @@
       }
     },
     "room_needs_me": {
-      "inputSchema": "89ae8ce5411aa8fb",
+      "inputSchema": "e05fb8cf1ac6e40e",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -2564,7 +2636,7 @@
       }
     },
     "room_reply": {
-      "inputSchema": "7da2ddf2ad93430b",
+      "inputSchema": "63b827209fe1c9eb",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -2573,7 +2645,7 @@
       }
     },
     "room_respond_to_request": {
-      "inputSchema": "4b961a3a4293f0c4",
+      "inputSchema": "84354e6433651648",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
