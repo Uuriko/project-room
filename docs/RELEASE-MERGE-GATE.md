@@ -31,6 +31,14 @@ These stay ungated. They do not look at `ready-to-land` and they run on drafts:
 - `pin-gate.yml` (still limited to workflow, action, and lockfile paths)
 - `review-mechanical.yml`
 
+## Pull-request safety net
+
+`.github/workflows/test.yml` job `safety-net` runs on every pull request, including drafts. It does not look at `ready-to-land`. It runs `npm run lint`, the story unit tests, and the page-weight measurement with Chromium installed. The labeled unit job also keeps those tests in its selection, and the labeled browser shards keep the browser journey checks.
+
+## Affected suites
+
+A pull request with `ready-to-land` runs `node scripts/unit-ci.mjs --affected` and browser shards with `CI_BROWSER_SCOPE=affected`. Both selections come from `scripts/ci-affected.mjs` and always include the safety-net files. Pushes to `main`, `merge_group`, the nightly schedule, and `workflow_dispatch` run `unit-ci.mjs --all` and the full browser suite. `node_modules` and `cloudflare/node_modules` are cached from the lockfiles. Browser shard membership is balanced from `scripts/browser-ci-durations.json`.
+
 ## What stays on its previous trigger
 
 Pushes to `main` still run `test`, `schema-gate`, `pr-gates`, `machine`, and `relay` the same way they did before the label. `deploy-prod.yml` and `rollback-prod.yml` are unchanged. Post-merge `pull_request_target` workflows (`room-work-sync`, `trace-entry`) are unchanged.
