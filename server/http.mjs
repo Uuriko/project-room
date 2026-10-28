@@ -5,6 +5,7 @@ import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
+import { readRoomSnapshot } from "./snapshot-window.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
@@ -15,7 +16,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { ServiceError } from "./store.mjs";
 import { sqliteValueLimit } from "./storage-limits.mjs"; // r56: runtime row-limit fact on /api/version
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
-import { peerEventVisible, visibleBonds } from "./bonds.mjs";
+import { peerEventVisible } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
 import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
@@ -39,7 +40,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
-import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
+import { redactEventPage, redactEventRows, redactMessageTree } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
@@ -108,7 +109,7 @@ import {
   getReadHorizon, setReadHorizon, listSaved, setSaved
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
-import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
+import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage, googleCallbackResumePage } from "./google-oauth.mjs";
 import { createMagicLinkMailer, attemptMailDelivery, validateMagicReturnTo } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
@@ -322,9 +323,6 @@ const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
-// Messages a `?messages=recent` room snapshot carries (the /conversation page maximum).
-const SNAPSHOT_RECENT_MESSAGES = 100;
-
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
 // absent, makeValue() builds it, the least-recently-used entry is evicted at
@@ -361,6 +359,16 @@ function defaultAssetLoader(assetRoot) {
   };
 }
 
+// Per-credential token buckets. The older fixed windows allowed the whole
+// minute up front (600 reads, 60 writes), so a tight loop never waited.
+// A read burst of 70 then refills at 10/s, so an 80-poll does not all succeed.
+// A write burst of 40 then refills at 1/s. Chat posts still meet the separate
+// per-member flood of 30. Guest command posts stay on the guest-post window instead of this
+// write bucket. Keys are credential hashes, never the token.
+export const CREDENTIAL_READ_BURST = 70;
+export const CREDENTIAL_READ_REFILL_PER_SECOND = 10;
+export const CREDENTIAL_WRITE_BURST = 40;
+export const CREDENTIAL_WRITE_REFILL_PER_SECOND = 1;
 // Per-credential write budget for routes that carry no user-authored content.
 export const HOUSEKEEPING_WRITE_PER_MINUTE = 240;
 export const HOUSEKEEPING_WRITE_ROUTES = Object.freeze(new Set(["cursor", "presence", "activity-read", "activity-read-all", "read-horizon", "saved"]));
@@ -379,7 +387,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   connectorClients = [], // OAuth2 clients for third-party connectors (e.g. [{ clientId, name, redirectUris }])
   serviceMode = trustedLocalProxy ? "invite-only-pilot" : "single-node-pilot", deployment = undefined, production = false, growth = null, push = undefined,
   operatorAccountId = (globalThis.process && globalThis.process.env.ROOM_OPERATOR_ACCOUNT_ID) || "",
-  publicAgentPages = false }) {
+  publicAgentPages = false,
+  credentialReadBurst = CREDENTIAL_READ_BURST,
+  credentialWriteBurst = CREDENTIAL_WRITE_BURST }) {
   // BG-1 (drains NEW-RC-5): the fail-loud critical-config gate
   // (server/boot-config.mjs) runs here, in the shared boot path every entry
   // converges on — the node entry (server.mjs), the Worker entry
@@ -409,6 +419,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   };
   // Literals stay in this file so scripts/open-routes.mjs sees the legal API.
   const legalApiPaths = new Set(["/api/reports/public/challenge", "/api/reports/public", "/api/account/terms", "/api/operator/unpublish", "/api/health/jobs"]);
+  // Open pairing door, served from the route table: "/api/pair"
   // The Worker reads ROOM_SECURITY_CONTACT from its binding in edge-public.
   // Logging process.env here would warn on every isolate that has no env var.
   if (!isWorkersRuntime()) warnMissingSecurityContactCheck();
@@ -683,7 +694,27 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
   // (server/store.mjs), so every RoomStore carries it; http.mjs only owns
   // the service instance.
   const agentRooms = new AgentRooms(store);
-  const hostedRoomMcp = createHostedRoomMcp(store, { agentRooms });
+  if (!Number.isInteger(credentialReadBurst) || credentialReadBurst < 1) throw new Error("Credential read burst must be a positive integer");
+  if (!Number.isInteger(credentialWriteBurst) || credentialWriteBurst < 1) throw new Error("Credential write burst must be a positive integer");
+  const credentialReads = createRateLimiter({ capacity: credentialReadBurst, refillPerSecond: CREDENTIAL_READ_REFILL_PER_SECOND });
+  const credentialWrites = createRateLimiter({ capacity: credentialWriteBurst, refillPerSecond: CREDENTIAL_WRITE_REFILL_PER_SECOND });
+  function spendCredential(kind, credentialHash) {
+    const limiter = kind === "write" ? credentialWrites : credentialReads;
+    const decision = limiter.check(credentialHash);
+    if (decision.allowed) return;
+    const seconds = Math.max(1, Math.ceil(decision.retryAfterMs / 1000));
+    throw new ServiceError(429, "rate_limited", "Too many requests; retry after a minute", {
+      "Retry-After": String(seconds),
+      "X-RateLimit-Limit": limiter.capacity,
+      "X-RateLimit-Remaining": 0,
+      "X-RateLimit-Reset": Math.ceil((Date.now() + decision.retryAfterMs) / 1000),
+      "X-RateLimit-Bucket": kind === "write" ? "write" : "read",
+    });
+  }
+  const hostedRoomMcp = createHostedRoomMcp(store, {
+    agentRooms,
+    spendCredential: (secret, kind) => spendCredential(kind, rateHash(secret)),
+  });
   // Lane D agent plug-in surface (RC-2026-09-18-010): identity-scoped API
   // keys, public agent directory, derived plug-in manifest, per-agent webhook
   // subscriptions. Schema is applied in the store open path (server/store.mjs),
@@ -781,6 +812,16 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     if (left > 0) rateFamilies.set(family, left); else rateFamilies.delete(family);
   };
   function rate(id, maximum) {
+    // Room routes and the route table share one per-credential burst. The
+    // fixed window used to accept the whole minute at once.
+    if (typeof id === "string" && id.startsWith("read:") && maximum === 600) {
+      spendCredential("read", id.slice("read:".length));
+      return;
+    }
+    if (typeof id === "string" && id.startsWith("write:") && maximum === 60) {
+      spendCredential("write", id.slice("write:".length));
+      return;
+    }
     const now = Date.now();
     for (const [k, v] of rates) if (v.until <= now) dropRate(k);
     const family = rateFamily(id);
@@ -1309,7 +1350,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         gmail, channelWebhooks, telegram, telegramStatus,
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
-        publicAgentPages,
+        publicAgentPages, jevShadowAdmission,
+        streams,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
@@ -1398,8 +1440,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Bind the callback to the browser session that started the flow: a
           // cross-session (or cookie-less) completion fails closed in
           // complete() instead of adopting the state's slot (login CSRF).
+          const callbackSlot = cookie(req, accountCookieName);
+          if (!callbackSlot) {
+            if (url.searchParams.has("room_oauth_resume")) throw new ServiceError(401, "google_state_invalid", "Google session missing");
+            const html = googleCallbackResumePage(expectedOrigin() + url.pathname + url.search);
+            res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+            res.setHeader("Referrer-Policy", "no-referrer");
+            res.setHeader("Cache-Control", "no-store");
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            return res.end(html);
+          }
           const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search,
-            expectedSlotToken: cookie(req, accountCookieName) ?? null });
+            expectedSlotToken: callbackSlot });
           // Shared-model linking (RC-2026-09-17-017): the callback links the
           // Google subject through the account-login model. A link intent
           // attaches to the signed-in account; otherwise find-or-provision
@@ -2260,6 +2312,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       // --- end LEGAL ---
       if (url.pathname === "/sitemap.xml" && ["GET", "HEAD"].includes(req.method)) {
+        rate(`sitemap:${remoteAddress}`, 120);
         // Confirm bytes exist before advertising an asset-backed canonical URL.
         const candidates = [...publicSearchAssets(publicAssetPaths)]
           .filter(([path]) => reviewedPublicSearchPaths.includes(path));
@@ -2421,9 +2474,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // starting at GET / alone can find the agent card from Link headers.
         // GR1: marketing documents also name the canonical host.
         const linkPath = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : (gr1Alias ? url.pathname : null);
-        res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
+        const discovery = linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url);
+        const shell = path === "index.html";
+        res.setHeader("Link", shell ? `${discovery}, </src/styles.css>; rel=preload; as=style` : discovery);
+        if (shell && req.method === "GET" && typeof res.writeEarlyHints === "function") {
+          try { res.writeEarlyHints({ link: ["</src/styles.css>; rel=preload; as=style"] }); }
+          catch { /* this platform has no early hints */ }
+        }
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        else if (path === "src/styles.css") res.setHeader("Cache-Control", "public, max-age=3600");
+        else if (shell) res.setHeader("Cache-Control", "public, max-age=60");
         // The front door keeps the GitHub anchor in source. Omit it from the
         // served bytes unless this server was given a GitHub auth config.
         const payload = path === "index.html"
@@ -3059,12 +3120,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // no identitySecret field: it already holds the durable
           // credential, and a presented credential is never echoed back.
           const mintedSecret = typeof redeemed.identitySecret === "string" ? redeemed.identitySecret : null;
+          const mcpToken = redeemed.mcpToken ?? null;
           return json(res, 201, {
             identityId: redeemed.identityId,
-            roomToken: redeemed.mcpToken.credential,
+            roomToken: mcpToken?.credential ?? null,
             credentialKind: "room_token",
             ...(mintedSecret ? { identitySecret: mintedSecret } : {}),
-            mcpToken: redeemed.mcpToken,
+            mcpToken,
             roomId: redeemed.roomId,
             memberId: redeemed.memberId,
             displayName: redeemed.displayName,
@@ -3077,9 +3139,13 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               mintedSecret
                 ? "Save identitySecret now — it is your identity's durable credential, shown once, and it never expires"
                 : "Your identity secret remains your durable credential — it never expires, and this response does not echo a presented credential back",
-              "Save roomToken too — it is room-scoped, expires in 30 days, and is shown once; use it as Authorization: Bearer on /mcp for this room",
+              mcpToken
+                ? "Save roomToken too — it is room-scoped, expires in 30 days, and is shown once; use it as Authorization: Bearer on /mcp for this room"
+                : `This replay did not include a room token. POST /api/agent-rooms/${encodeURIComponent(redeemed.roomId)}/token/rotate with the identity secret to revoke the old onboarding token and issue a new one.`,
               "roomToken is room-scoped: identity-wide routes such as /api/agent-rooms and /api/needs-me refuse it and take identitySecret instead; use room_check_access and room_needs_me on /mcp for room-scoped checks",
-              "If roomToken expires, do NOT mint a replacement identity: POST /api/join again with your original inviteCode and Authorization: Bearer <identitySecret> to receive a fresh room token — same membership, same display name (duplicate: true). identitySecret also authenticates room routes directly",
+              mcpToken
+                ? "If roomToken expires, do NOT mint a replacement identity: POST /api/agent-rooms/" + encodeURIComponent(redeemed.roomId) + "/token/rotate with the identity secret. Redeeming the invite again does not mint another room token. identitySecret also authenticates room routes directly"
+                : "Do not redeem this invite again to mint another room token. POST /api/agent-rooms/" + encodeURIComponent(redeemed.roomId) + "/token/rotate with the identity secret.",
               `Orient: GET /api/rooms/${redeemed.roomId}/activation-pack`,
               `Read the room: GET /api/rooms/${redeemed.roomId}?view=work`
             ]
@@ -3244,7 +3310,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!webAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
         if (isWebFetchGuest(webAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
         protectWrite(req, webAuth, isBearer);
-        rate(`write:${webAuth.credentialHash}`, 60);
+        spendCredential("write", webAuth.credentialHash);
         const data = await body(req);
         try {
           return json(res, 200, await store.webFetch.fetch(webAuth.roomId, webAuth.member.id, data, { credentialHash: webAuth.credentialHash }));
@@ -3277,7 +3343,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (!researchAuth.member?.id) reject(401, "unauthenticated", "Member credential required");
         if (isWebFetchGuest(researchAuth.member)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
         protectWrite(req, researchAuth, researchIsBearer);
-        rate(`write:${researchAuth.credentialHash}`, 60);
+        spendCredential("write", researchAuth.credentialHash);
         const researchData = await body(req);
         try {
           return json(res, 200, await store.webResearch.research(researchAuth.roomId, researchAuth.member.id, researchData, { credentialHash: researchAuth.credentialHash }));
@@ -3361,45 +3427,8 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if ((url.pathname === "/api/agent-identities" || url.pathname === "/api/identity-create") && req.method !== "POST") {
         reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
       }
-      // Agent invite codes: redemption is unauthenticated (the code is the
-      // bearer credential); issuance is owner-only per room.
-      if (url.pathname === "/api/agent-invites/redeem" && req.method === "POST") {
-        rate(`invite-redeem:${remoteAddress}`, 20);
-        const data = await body(req);
-        // Colony round-2 (musespark-explorer, 2026-10-06): the static 422 here
-        // blamed the caller for sending *less* when the body carried an *extra*
-        // field — a recovery trap for a cold client. Port the access-request
-        // diagnoseArguments pattern so the 422 names the offending field.
-        const diagnosis = diagnoseArguments({
-          required: ["code", "displayName"],
-          properties: { code: { type: "string" }, displayName: { type: "string" }, requestId: { type: "string" } },
-          additionalProperties: false,
-        }, data);
-        if (diagnosis) {
-          const parts = [];
-          if (diagnosis.missing.length) parts.push(`missing required field${diagnosis.missing.length > 1 ? "s" : ""}: ${diagnosis.missing.join(", ")}`);
-          if (diagnosis.unexpected.length) parts.push(`unexpected field${diagnosis.unexpected.length > 1 ? "s" : ""}: ${diagnosis.unexpected.join(", ")}`);
-          for (const [field, reason] of Object.entries(diagnosis.invalid)) parts.push(`${field}: ${reason}`);
-          reject(422, "invalid_invite", `Invalid invite redeem (${parts.join("; ")}). Send exactly {code, displayName} with an optional requestId.`);
-        }
-        // G1 idempotent redeem (PRODUCT-200 D7): an opt-in client-kept
-        // requestId makes an uncertain retry safe — the retry replays the
-        // journaled redemption instead of 409ing on the burned code.
-        let requestId = null;
-        if (data.requestId !== undefined) {
-          if (!validId(data.requestId)) reject(422, "invalid_invite", "Send a valid request id for retry-safe redemption.");
-          requestId = data.requestId;
-        }
-        const redeemedInvite = store.invites.redeem(data.code, { displayName: data.displayName, identitySecret: bearer(req), requestId });
-        // Jev-harness admission gate, shadow mode (docs/JEV-GATES.md):
-        // score the join, journal the would-be decision, admit anyway.
-        jevShadowAdmission("agent-invite:redeem", { roomId: redeemedInvite.roomId, identityId: redeemedInvite.identityId,
-          displayName: redeemedInvite.displayName ?? data.displayName, card: null });
-        return json(res, 201, redeemedInvite);
-      }
-      if (url.pathname === "/api/agent-invites/redeem" && req.method !== "POST") {
-        reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
-      }
+      // Agent invite redeem (POST) and its fetch-only availability read (GET)
+      // are served from the route table: "/api/agent-invites/redeem"
       // Signed referral invites: the owner, or a member who can invite, mints
       // a bearer token and carries it out-of-band — the server never sends it.
       // Redemption is unauthenticated (the token is the credential) and
@@ -3566,6 +3595,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // creates a room and becomes its owner. The pri_ secret travels in
       // the bearer header (never a JSON body); per-address rate limit
       // before the body is read, per-identity budget inside the module.
+      // Token rotation lives in the route table (server/routes/agent-room-token.mjs).
       if (url.pathname === "/api/agent-rooms" && req.method === "GET") {
         rate(`agent-room-list:${remoteAddress}`, 60);
         return json(res, 200, agentRooms.list(bearer(req), url.searchParams.get("after") ?? ""));
@@ -3649,14 +3679,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           const granted = (auth.apiKeyScopes ?? []).some(scope => scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
-        rate(`read:${auth.credentialHash}`, 600);
+        spendCredential("read", auth.credentialHash);
         if (updatesListMatch) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET, HEAD" });
           return json(res, 200, listRoomUpdates(store, selected.token, roomId, updatesQuery(), fence), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        spendCredential("write", auth.credentialHash);
         const data = await body(req);
         // JDOT-COH-UPDATES-BASIS begin
         // Missing expectedBasis can reach only an authenticated legacy receipt;
@@ -3720,14 +3750,14 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
             scope === requiredScope || (scope.endsWith(":*") && requiredScope.startsWith(scope.slice(0, -1))));
           if (!granted) reject(403, "insufficient_scope", `API key lacks the ${requiredScope} scope`);
         }
-        rate(`read:${auth.credentialHash}`, 600);
+        spendCredential("read", auth.credentialHash);
         if (action === "list_land_queue") {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
           return json(res, 200, store.landQueue.list(roomId, auth.member.id), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: "POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        spendCredential("write", auth.credentialHash);
         const data = await body(req);
         try {
           if (action === "add_land_item") {
@@ -3797,17 +3827,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         }
         if (readFileId) {
           if (!["GET", "HEAD"].includes(req.method)) reject(405, "method_not_allowed", "Method not allowed", { Allow: "GET" });
-          rate(`read:${auth.credentialHash}`, 600);
+          spendCredential("read", auth.credentialHash);
           return json(res, 200, store.roomAttachments.get(selected.token, roomId, readFileId), req.method === "HEAD");
         }
         if (!writing) {
           if (!["GET", "HEAD"].includes(req.method) || fileId) reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET" });
-          rate(`read:${auth.credentialHash}`, 600);
+          spendCredential("read", auth.credentialHash);
           return json(res, 200, store.roomAttachments.list(selected.token, roomId), req.method === "HEAD");
         }
         if (req.method !== "POST") reject(405, "method_not_allowed", "Method not allowed", { Allow: fileId ? "POST" : "GET, POST" });
         protectWrite(req, auth, selected.bearer);
-        rate(`write:${auth.credentialHash}`, 60);
+        spendCredential("write", auth.credentialHash);
         if (fileId) {
           const data = await body(req);
           if (!exact(data, ["messageId"]) || typeof data.messageId !== "string") reject(422, "invalid_message", "messageId is required");
@@ -4061,15 +4091,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const auth = roomAuth(selected, roomId, fence);
       if (selected.bearer && auth.credentialScope !== "room") reject(403, "access_denied", "Bearer account sessions are not accepted");
       if (!selected.bearer && auth.kind !== "session") reject(401, "unauthenticated", "Browser session required");
-      rate(`read:${auth.credentialHash}`, 600);
-      if (!["GET", "HEAD"].includes(req.method)) {
+      if (["GET", "HEAD"].includes(req.method)) {
+        spendCredential("read", auth.credentialHash);
+      } else {
         protectWrite(req, auth, selected.bearer);
         // Housekeeping writes (read markers, saves, presence, cursor)
-        // fire as a side effect of reading and typing. They get their own
-        // bucket so a fast typist's read markers don't spend the 60/min
-        // budget the chat flood guard and real writes share.
+        // fire as a side effect of reading and typing. They keep a wide
+        // per-minute window so a fast typist does not spend the credential
+        // write burst. Guest command posts stay on the guest-post window.
         const housekeeping = HOUSEKEEPING_WRITE_ROUTES.has(route);
-        rate(housekeeping ? `write-hk:${auth.credentialHash}` : `write:${auth.credentialHash}`, housekeeping ? HOUSEKEEPING_WRITE_PER_MINUTE : 60);
+        const guestCommand = route === "commands"
+          && typeof selected.token === "string"
+          && selected.token.startsWith(GUEST_AGENT_TOKEN_PREFIX);
+        if (housekeeping) rate(`write-hk:${auth.credentialHash}`, HOUSEKEEPING_WRITE_PER_MINUTE);
+        else if (!guestCommand) spendCredential("write", auth.credentialHash);
       }
       // RC-2026-09-18-012: API-key callers are confined to their stored
       // scopes on every room route — reads need rooms:read, writes need
@@ -4390,12 +4425,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
-        // `?messages=recent`: the full snapshot with only the newest
-        // SNAPSHOT_RECENT_MESSAGES visible messages. A busy room's full
-        // history (muse-room: 5,300+ messages, ~5 MB) no longer has to ship
-        // on every open; older history pages through /conversation.
+        // Default and `?messages=recent` are the same window (newest messages
+        // that fit the byte budget). `?full=1` is the retired unbounded
+        // document, only while ROOM_SNAPSHOT_FULL_COMPAT=1, and it sets
+        // Deprecation. Older messages page through /messages.
         const recentMessages = params.has("messages");
-        if (recentMessages && (params.has("view") || params.get("messages") !== "recent"
+        const fullRead = params.has("full");
+        if (fullRead && (params.get("full") !== "1" || params.getAll("full").length !== 1 || recentMessages || params.has("view")
+          || [...params.keys()].some(key => !["full", "auth"].includes(key) || params.getAll(key).length !== 1))) {
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        }
+        if (fullRead && process.env.ROOM_SNAPSHOT_FULL_COMPAT !== "1") {
+          reject(422, "invalid_snapshot_view", "The full room read is retired. Read the window, then page older messages.");
+        }
+        if (recentMessages && (params.has("view") || fullRead || params.get("messages") !== "recent"
           || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
@@ -4410,28 +4453,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const snapshotView = params.has("view") ? "work" : "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
-        if (snapshotView === "work") delete snapshot.state.agentHalts;
-        if (snapshotView === "full") {
-          // RC-2026-09-19-070: strip targeted DMs from both carriers in the
-          // full snapshot — the audit tail (state.eventLog, the named P0) and
-          // the live projection (state.messages, which the client renders as
-          // the timeline). Pins reference messages by id, so pins of hidden
-          // DMs are dropped too — otherwise the pin would reveal the DM's
-          // existence. The work view carries none of these.
-          const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
-          const visibleIds = new Set(visibleMessages.map(message => message.id));
-          // The recent window trims after DM filtering, so hidden DMs never
-          // count toward it; pins still follow every visible message.
-          const windowed = recentMessages ? visibleMessages.slice(-SNAPSHOT_RECENT_MESSAGES) : visibleMessages;
-          const nextState = { ...snapshot.state,
-            messages: windowed,
-            eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
-            pins: recentMessages ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
-          if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
-          snapshot.state = redactSnapshotState(nextState);
+        if (fullRead) {
+          res.setHeader("Deprecation", "true");
+          res.setHeader("Link", `</api/rooms/${encodeURIComponent(roomId)}>; rel="successor-version"`);
         }
-        return json(res, 200, snapshot);
+        return json(res, 200, readRoomSnapshot(store, selected.token, roomId, fence, {
+          view: snapshotView,
+          helpContext: helpContext === "1",
+          offerContext: offerContext === "1",
+          auditView: auditHeader ? "activity" : "full",
+          windowed: snapshotView === "full" && !fullRead,
+          visibility: { dmMessageVisible, roomEventVisible, peerContext }
+        }));
       }
       if (route === "outside-agents") {
         const network = new OutsideAgents(store);
@@ -4610,7 +4643,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (req.method === "POST") {
           const keys = Object.keys(data);
           if (!keys.includes("identityId") || !keys.includes("permissions")
-            || keys.some(k => !["identityId", "memberId", "displayName", "permissions"].includes(k))
+            || keys.some(k => !["identityId", "memberId", "displayName", "permissions", "identityLinkCode"].includes(k))
             || typeof data.identityId !== "string") reject(422, "invalid_identity", "identityId and permissions are required");
           return json(res, 201, store.identities.link(selected.token, roomId, data, fence));
         }
@@ -5368,10 +5401,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       if (route === "stream" && req.method === "GET") return stream(req, res, selected.token, roomId, Number(req.headers["last-event-id"] ?? url.searchParams.get("after") ?? 0), auth, operationId);
       if (route === "commands" && req.method === "POST") {
         // Research r7, opt-in: ROOM_PAUSE_BLOCKS_POSTS=1 makes an owner's
-        // Pause also stop the paused member from POSTING in that room. A
-        // pause the member set on itself never blocks. Default off: blocking
-        // posts is an owner/product decision, not part of the pause default.
-        if (process.env.ROOM_PAUSE_BLOCKS_POSTS === "1" && auth?.member) {
+        // Pause also stop a paused human from POSTING in that room. A pause
+        // the human set on itself never blocks. Agents are not gated here:
+        // store.command refuses a paused agent's writes either way, including
+        // a pause the agent set itself. Default off for humans.
+        if (process.env.ROOM_PAUSE_BLOCKS_POSTS === "1" && auth?.member && auth.member.kind !== "agent") {
           const memberPause = store.wakeQueue.pauseStatus(roomId, auth.member.id);
           if (memberPause && memberPause.heldBy !== "self") reject(423, "member_paused", "The room owner paused this member. Posting resumes when the owner resumes it.");
         }
