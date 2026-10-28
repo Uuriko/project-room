@@ -2043,6 +2043,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // DM data ever leaves. Registered BEFORE the /api/public/rooms/{code}
       // matcher below, which would otherwise read "directory" as a code.
       if (url.pathname === "/api/public/rooms/directory" && req.method === "GET") {
+        // SEARCH-COHERENCE parameter honesty: a parameter is honoured or
+        // honestly refused — never silently ignored (the offers/public-work
+        // 422 shape). This directory accepts only after and limit.
+        if ([...url.searchParams.keys()].some(key => !["after", "limit"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_directory", "Only after and limit accepted");
         rate(`room-directory:${remoteAddress}`, 120);
         return json(res, 200, store.roomDirectory.list({
           after: url.searchParams.get("after"),
@@ -2147,6 +2151,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // code, or admission data ever leaves. ?since=<cursor> returns only
       // items opened/created after the cursor (cheap resume for pollers).
       if (url.pathname === "/api/opportunities.json" && req.method === "GET") {
+        // SEARCH-COHERENCE parameter honesty, as on the directory above:
+        // only room, limit and since are accepted; anything else is a 422,
+        // never a silently ignored filter.
+        if ([...url.searchParams.keys()].some(key => !["room", "limit", "since"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_opportunities", "Only room, limit and since accepted");
         rate(`opportunities:${remoteAddress}`, 120);
         return json(res, 200, buildOpportunitiesFeed(store, {
           now: store.now(),
@@ -2207,6 +2215,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       const receiptDetail = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))(\.json)?$/.exec(url.pathname);
       const receiptCard = /^\/receipts\/((?:pwr_[a-f0-9]{16,128}|wcr_[a-f0-9]{32}|wir_[a-f0-9]{32}|lot_[a-f0-9]{16}))\/(og\.png|badge\.svg)$/.exec(url.pathname);
       if ((url.pathname === "/receipts" || url.pathname === "/api/public/receipts" || receiptDetail || receiptCard) && ["GET", "HEAD"].includes(req.method)) {
+        // SEARCH-COHERENCE parameter honesty: on the list (API + HTML wall)
+        // only room, agent, cursor and limit are accepted, and on a receipt
+        // detail only verify — any other or repeated parameter is a 422
+        // naming the accepted set, never a silently ignored filter (the
+        // UT2 probe found ?q= / ?after= returning byte-identical lists).
+        // Share cards (og.png / badge.svg) are embeds, not a list surface,
+        // and stay parameter-tolerant.
+        if (receiptDetail) {
+          if ([...url.searchParams.keys()].some(key => key !== "verify" || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_receipt_query", "Only verify accepted");
+        } else if (!receiptCard) {
+          if ([...url.searchParams.keys()].some(key => !["room", "agent", "cursor", "limit"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_receipt_query", "Only room, agent, cursor and limit accepted");
+        }
         rate(`receipts:${remoteAddress}`, 120);
         const indexable = !url.search;
         if (indexable) res.setHeader("X-Robots-Tag", "all");
@@ -2282,7 +2302,10 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // JDOT-PUBLIC-CSP-RUM begin: public-page policy
         res.setHeader("Content-Security-Policy", publicPageCsp(expectedOrigin(), RECEIPTS_PAGE_CSP));
         // JDOT-PUBLIC-CSP-RUM end
-        const html = Buffer.from(renderReceiptsHtml(queried));
+        const html = Buffer.from(renderReceiptsHtml(queried, {
+          room: url.searchParams.get("room"),
+          agent: url.searchParams.get("agent"),
+        }));
         res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Content-Length": html.length });
         return res.end(req.method === "HEAD" ? undefined : html);
       }
@@ -2376,6 +2399,11 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           return sendPage(200, page.html, templateDetail[2] ? page.document : null, `/templates/${templateDetail[1]}`);
         }
         if (url.pathname === "/agents") {
+          // SEARCH-COHERENCE parameter honesty: the agents page accepts
+          // only ref and cursor; a search-shaped parameter (?q=, ?search=)
+          // is a 422 here, never a silently unfiltered page. The API form
+          // is /api/agents/directory, which honours q and capability.
+          if ([...url.searchParams.keys()].some(key => !["ref", "cursor"].includes(key) || url.searchParams.getAll(key).length !== 1)) reject(422, "invalid_agent_directory", "Only ref and cursor accepted");
           const page = agentDirectoryView(store, { ref, cursor: url.searchParams.get("cursor") });
           if (page.error) reject(page.error.status, page.error.code, page.error.message);
           return sendPage(200, page.html, null, "/agents");

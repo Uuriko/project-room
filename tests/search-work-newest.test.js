@@ -24,7 +24,7 @@ function fixture() {
   return { dir, store, ownerKey: store.issueAccessKey("commons", "owner") };
 }
 
-test("a capped work search page keeps the newest matches, oldest first", () => {
+test("a capped work search page keeps the newest matches, newest first", () => {
   const { dir, store, ownerKey } = fixture();
   try {
     const ids = [];
@@ -43,8 +43,8 @@ test("a capped work search page keeps the newest matches, oldest first", () => {
     }
     const page = store.search(ownerKey, "commons", "gamma", "work", null, { limit: 2 });
     assert.equal(page.total, 5, "the match count covers every hit, not just the page");
-    assert.deepEqual(page.workItems.map(w => w.id), ids.slice(-2),
-      "capped work pages must keep the newest matches like message pages do (#2024)");
+    assert.deepEqual(page.workItems.map(w => w.id), ids.slice(-2).reverse(),
+      "capped work pages must keep the newest matches like message pages do (#2024), presented newest-first (SEARCH-COHERENCE Option A)");
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

@@ -51,8 +51,8 @@ test("capped work search keeps the NEWEST-created matches even for integer-like 
     propose(store, ownerKey, "9");
     const page = store.search(ownerKey, "commons", "numeric task", "work", null, { limit: 2 });
     assert.equal(page.total, 3, "match count covers every hit");
-    assert.deepEqual(page.workItems.map(w => w.id), ["10", "9"],
-      "must keep the two newest-CREATED matches, not the two numerically-largest ids");
+    assert.deepEqual(page.workItems.map(w => w.id), ["9", "10"],
+      "must keep the two newest-CREATED matches, newest first, not the two numerically-largest ids");
   } finally {
     store.close();
     rmSync(dir, { recursive: true, force: true });

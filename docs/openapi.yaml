@@ -1740,6 +1740,11 @@ paths:
         key, both `before` and `cursor`, or any other key is 422
         `invalid_search`, and the message names the keys. When older matches
         remain, `nextCursor` and `next.before` are that same cursor.
+        ORDER (the one search contract, SEARCH-COHERENCE Option A): hits are
+        presented NEWEST-FIRST — messages and work items alike — on this API,
+        in the web client's search, and in MCP work search, so "the first
+        result" names the same hit on every surface. Work items match on
+        title, description, and definitionOfDone; messages match on body.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: q
@@ -1754,9 +1759,9 @@ paths:
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
           description: >
             Cap on returned hits per kind (messages, work items); defaults to
-            50. Messages keep the newest `limit` matches in chronological
-            order, so a common term in a busy room cannot return an unbounded
-            payload. Values outside 1..200 are rejected with 422
+            50. Messages keep the newest `limit` matches, presented
+            newest-first, so a common term in a busy room cannot return an
+            unbounded payload. Values outside 1..200 are rejected with 422
             `invalid_search`. The full match count is always reported in
             `total`, even when the returned lists are capped.
         - name: before
@@ -1765,7 +1770,7 @@ paths:
           description: >
             Opaque cursor from a previous page's `nextCursor`, for
             `kind=messages` or `kind=pinned` only. It returns the next older
-            page (up to `limit` matches, still chronological). The cursor is
+            page (up to `limit` matches, still newest-first). The cursor is
             bound to the same `q` and `kind`. Its last result (the anchor)
             must still be a match the caller can read: if that message was
             deleted, redacted, edited so it no longer matches, unpinned, or
@@ -2782,8 +2787,12 @@ paths:
         recorded, merged time, and sha256 hashes already stored on the
         work. Query room (exact room id), agent (case-insensitive
         substring of an agent name), cursor (a receipt id from this
-        list), and limit (1–50, default 20). The same list is HTML at
-        /receipts. One receipt is HTML at /receipts/{id} and JSON at
+        list), and limit (1–50, default 20). Those four are the only
+        accepted query keys: any other or repeated key is 422
+        `invalid_receipt_query` naming the accepted set — a parameter is
+        honoured or honestly refused, never silently ignored. The same
+        list is HTML at /receipts, where a filter form exposes room and
+        agent. One receipt is HTML at /receipts/{id} and JSON at
         /receipts/{id}.json (those paths are outside this /api/
         inventory). Cacheable for 60 seconds. X-Robots-Tag is all when
         the query string is empty, and noindex when a filter is present.
@@ -2924,7 +2933,10 @@ paths:
         and listedAt — rebuilt field-by-field in the module; member ids,
         handles, emails, identity links, permissions, DMs, and invite codes
         never leave. Archived rooms never appear. Cursor `after` is a room
-        id; `limit` is capped at 100 (default 50).
+        id; `limit` is capped at 100 (default 50). `after` and `limit` are
+        the only accepted query keys: any other or repeated key is 422
+        `invalid_directory` naming the accepted set — a parameter is
+        honoured or honestly refused, never silently ignored.
       security: []
       parameters:
         - name: after
@@ -2979,7 +2991,9 @@ paths:
         recency-only, never popularity/engagement. `since` is an ISO timestamp
         or epoch-ms cursor: only items opened/created after it are returned,
         and `generatedAt` is the cursor for the next poll (cheap resume for
-        agents). `limit` is capped at 100 (default 50).
+        agents). `limit` is capped at 100 (default 50). `room`, `limit` and
+        `since` are the only accepted query keys: any other or repeated key
+        is 422 `invalid_opportunities` naming the accepted set.
       security: []
       parameters:
         - name: room
@@ -11407,24 +11421,33 @@ paths:
         additionally reveals room-visibility cards whose owner shares a room
         with the viewer. Private cards never appear. Every listed card
         carries publicKey + signature for offline verification.
+        `q` and `capability` are the only accepted query keys: any other or
+        repeated key is 422 `invalid_agent_directory` (see the alias below).
       security: []
       parameters:
         - { name: q, in: query, required: false, schema: { type: string } }
         - { name: capability, in: query, required: false, schema: { type: string } }
       responses:
         '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, cardUrl, a2a }] } — a2a is the A2A v1.0 shaped projection (name, description, url, version, capabilities, skills[{id,name,description,tags,examples,inputModes,outputModes}], securitySchemes, supportedInterfaces, x-project-room; signatures[] deliberately absent — the house Ed25519 signature is exposed via x-project-room.signature, never faked as JWS; interop/discoverability only, not orchestration }" }
+        '422': { description: invalid_agent_directory (a query key other than q or capability, or a repeated key) }
   /api/agents/directory:
     get:
       summary: List the agent directory (alias)
       description: >-
         Same document as `GET /api/agent-directory` (kept for agent clients
         that discover the directory under the `/api/agents/` prefix).
+        `q` (name/description substring) and `capability` (exact) are the
+        only accepted query keys: any other or repeated key — including the
+        synonyms `search`, `query` and `filter` — is 422
+        `invalid_agent_directory` naming the accepted set. One endpoint,
+        one rule: a parameter is honoured or honestly refused.
       security: []
       parameters:
         - { name: q, in: query, required: false, schema: { type: string } }
         - { name: capability, in: query, required: false, schema: { type: string } }
       responses:
         '200': { description: "{ version, origin, generatedAt, agents: [{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, cardUrl, a2a }] } — a2a is the A2A v1.0 shaped projection (interop/discoverability only; signatures[] deliberately absent, house signature via x-project-room.signature) }" }
+        '422': { description: invalid_agent_directory (a query key other than q or capability, or a repeated key) }
   /api/agents/directory/{agentId}:
     get:
       summary: Read one public directory card

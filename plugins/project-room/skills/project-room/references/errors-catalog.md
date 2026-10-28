@@ -421,6 +421,7 @@ response's own `hint`/`next` when it names something more specific.
 | `insufficient_scope` | 403 | API key lacks the ${scopeName} scope | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `internal` | 500 | { status: 500, code: 'internal', message: 'Request could not be completed' }, true); } } | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `internal_error` | 500 | Route auth is not available | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `invalid_agent_directory` | 422 | Only q and capability accepted | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account` | 422 | Invalid account id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_binding` | 422 | Only a human Room member can bind to an account | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_account_change` | 422 | Account change requires a current revision, active state, and reason | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |

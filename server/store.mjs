@@ -5349,8 +5349,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
   // Round-2 #113: full-text search over messages and work items.
   // Substring match, case-insensitive; deleted messages are excluded.
-  // kind=pinned narrows to messages in state.pins (issue #6 B2), in message
-  // order like the other kinds. Backlog 11: messages by an author the caller
+  // SEARCH-COHERENCE (Option A): the one documented search order is
+  // NEWEST-FIRST on every surface — this store, the web client's
+  // searchMessages, and MCP work search all present the newest hit first.
+  // The paging window is unchanged (the newest `limit` matches, `before`
+  // walks to older pages); only the order inside a page is newest-first.
+  // kind=pinned narrows to messages in state.pins (issue #6 B2), in the
+  // same order as the other kinds. Backlog 11: messages by an author the caller
   // muted (E4) are excluded for every kind, server-side (mutedEvent), so
   // agents and other API readers match the UI.
   search(token, roomId, query, kind = "all", expectedSessionBinding = null, { limit = 50, before = null } = {}) {
@@ -5389,7 +5394,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         }
         result.total = matches.length; // the full count on every page
         // The page holds the newest `limit` matches strictly older than the
-        // cursor anchor (all matches without a cursor), still chronological.
+        // cursor anchor (all matches without a cursor), presented
+        // NEWEST-FIRST (SEARCH-COHERENCE Option A, like the web client).
         // The anchor must itself be a match this caller can read now. A
         // missing id, an id the caller may not read, and an anchor that left
         // the result set (deleted, redacted, edited away, unpinned, author
@@ -5400,10 +5406,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           if (stop < 0) fail(422, "invalid_search_cursor", SEARCH_CURSOR_INVALID);
         }
         const start = Math.max(0, stop - limit);
-        for (const m of matches.slice(start, stop)) {
+        const page = matches.slice(start, stop);
+        for (const m of [...page].reverse()) {
           result.messages.push({ id: m.id, authorId: m.authorId, body: m.body, createdAt: m.createdAt, workItemId: m.workItemId });
         }
-        if (kind !== "all" && start > 0) result.nextCursor = encodeSearchCursor(needle, kind, result.messages[0].id);
+        // The next page is strictly older, so its cursor anchors on the
+        // OLDEST hit of this page — the last one under newest-first.
+        if (kind !== "all" && start > 0) result.nextCursor = encodeSearchCursor(needle, kind, page[0].id);
       }
       if (kind === "all" || kind === "work") {
         const workHits = [];
@@ -5414,15 +5423,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             workHits.push(w);
           }
         }
-        // Keep the newest `limit` matches (still chronological), like the
-        // messages loop above: the first ones leave every newer match
-        // unreachable — there is no offset, and limit tops out at 200.
+        // Keep the newest `limit` matches, presented NEWEST-FIRST like the
+        // messages loop above (SEARCH-COHERENCE Option A): the first ones
+        // leave every newer match unreachable — there is no offset, and
+        // limit tops out at 200.
         // Order by createdAt, NOT by object key order: JS enumerates
         // integer-like keys ("2","10") in ascending numeric order regardless
         // of insertion, so key order is not creation order for numeric ids
         // (validId permits them). Stable sort keeps insertion order on ties.
         workHits.sort((a, b) => (a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : 0));
-        for (const w of workHits.slice(-limit)) {
+        for (const w of workHits.slice(-limit).reverse()) {
           result.workItems.push({ id: w.id, title: w.title, state: w.state, accountableMemberId: w.accountableMemberId });
         }
       }
