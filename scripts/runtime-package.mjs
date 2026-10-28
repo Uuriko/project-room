@@ -419,6 +419,7 @@ optional.push("src/entry.js", "src/signin-entry.js", "src/signin-navigation.js")
 optional.push("server/sql-binds.mjs"); // shared Worker-safe SQL list chunks imported by fleet, wakes, needs-me and restore
 optional.push("server/html-escape.mjs", "src/html-escape.js"); // one HTML escape, re-exported for server callers
 optional.push("server/db-util.mjs"); // shared sqlite tableExists
+optional.push("server/notification-service.mjs"); // P5 discovery-charter build registration
 optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs"); // Archive-aware message domain reads
 optional.push("server/room-shard.mjs", "server/room-shard-tables.mjs"); // per-room table classification; the worker re-exports it and still serves invite-only-pilot
 optional.push("server/room-shard-flag.mjs"); // ROOM_PER_ROOM_OBJECTS default off; storage_home is added only when the flag is on
