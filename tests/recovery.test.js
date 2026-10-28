@@ -120,6 +120,10 @@ test("online capture preserves all application tables, identity boundaries and e
       assert.equal(table.rows, 0, "a public agent page and its questions stay empty until an owner opts in");
       continue;
     }
+    if (table.table === "refusal_journal") {
+      assert.equal(table.rows, 0, "refusal records exist only after a bounty, public-work or board surface refuses an action; the seeded coverage records no refusal (#3617 R-8)");
+      continue;
+    }
     assert.ok(table.rows > 0, `${table.table} has substantive fixture data`);
   }
   assert.equal(before.legacyCheckpoints, 1); assert.equal(before.replay.checkpointEvents, 2);
