@@ -4,8 +4,13 @@
       description: >-
         Open (also HEAD). On the Worker, 200 `{ status: ready, mode, do }`
         only when invite-only-pilot answers `SELECT 1` within one second;
-        otherwise 503 `{ status: degraded, do }` (`do.status` is `timeout` or
-        `error`). The Node process answers 200 `{ status: ready }` when its
+        a settled ready verdict is then cached at the Worker for three
+        seconds (`do.cached: true`, no store call) — a store that breaks
+        inside that window surfaces as 503 at the first probe after it.
+        Otherwise 503 `{ status: degraded, do }` (`do.status` is `timeout` or
+        `error`), except a first-ever probe whose start is still pending,
+        which answers 503 `{ status: starting, do }` (`do.status` is
+        `starting`) while the cold object constructs in the background. The Node process answers 200 `{ status: ready }` when its
         store answers and 503 `{ status: unavailable }` when storage is down.
         Worker readiness also reports the bound authority's `emailVerification`
         and `emailVerificationScope: durable-object` when that authority supports
