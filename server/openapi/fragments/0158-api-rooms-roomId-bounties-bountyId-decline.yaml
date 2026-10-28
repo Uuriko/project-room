@@ -1,0 +1,34 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/decline:
+    post:
+      summary: Decline a proposed bounty
+      description: |
+        Poster-only triage decision: PROPOSED → CANCELLED with a reason.
+        Emits `bounty.declined`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 1 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The cancelled bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
