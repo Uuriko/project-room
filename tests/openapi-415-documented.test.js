@@ -9,7 +9,7 @@ const ops = Object.entries(doc.paths).flatMap(([path, item]) => Object.entries(i
 
 test("415 is documented on every body-reading operation and resolves to a component", () => {
   const body = ops.filter(o => ["POST", "PUT", "PATCH"].includes(o.method) && !["/a2a", "/mcp", "/room/mcp"].includes(o.path)
-    && !["/api/agent-webhooks/deliveries/{deliveryId}/redrive", "/api/oauth/sessions/revoke-all"].includes(o.path));
+    && !["/api/agent-webhooks/deliveries/{deliveryId}/redrive", "/api/oauth/sessions/revoke-all", "/api/agent-rooms/{roomId}/token/rotate"].includes(o.path));
   assert.ok(body.length >= 25, `expected the body routes, got ${body.length}`);
   for (const { path, method, op } of body) assert.deepEqual(op.responses["415"], { $ref: "#/components/responses/UnsupportedMediaType" }, `${method} ${path}`);
   assert.match(doc.components.responses.UnsupportedMediaType.description, /json_required/);
@@ -19,7 +19,7 @@ test("415 is not documented on reads, JSON-RPC doors, or POSTs that read no body
   for (const { path, method, op } of ops) {
     if (["GET", "HEAD"].includes(method)) assert.equal(op.responses["415"], undefined, `${method} ${path}`);
   }
-  for (const p of ["/a2a", "/mcp", "/room/mcp", "/api/agent-webhooks/deliveries/{deliveryId}/redrive", "/api/oauth/sessions/revoke-all"]) {
+  for (const p of ["/a2a", "/mcp", "/room/mcp", "/api/agent-webhooks/deliveries/{deliveryId}/redrive", "/api/oauth/sessions/revoke-all", "/api/agent-rooms/{roomId}/token/rotate"]) {
     assert.equal(doc.paths[p]?.post?.responses["415"], undefined, p);
   }
 });

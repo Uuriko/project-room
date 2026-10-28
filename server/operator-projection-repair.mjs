@@ -29,6 +29,7 @@
 
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
+import { tableExists } from "./db-util.mjs";
 import { ServiceError } from "./store.mjs";
 import { appendOperatorAction } from "./operator-actions.mjs";
 
@@ -39,10 +40,6 @@ const errorClassOf = error => {
   return /^[a-z][a-z0-9_]{0,63}$/i.test(name) ? name : "unknown";
 };
 const errorTextOf = error => String(error?.message ?? error).replace(/\s+/g, " ").trim().slice(0, 240);
-
-function tableExists(db, name) {
-  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
-}
 
 function rawRoom(store, roomId) {
   return store.db.prepare("SELECT sequence, projection, archived_at FROM rooms WHERE id=?").get(roomId) ?? null;
