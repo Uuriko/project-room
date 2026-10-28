@@ -83,6 +83,15 @@ jobs:
       - name: Verify exact source, schema floor and compatibility before rollback
         id: pre
         run: node scripts/manual-rollback.mjs preflight "$RUNNER_TEMP/rollback-preflight.json"
+      - name: Refuse to roll back while another production run is active
+        id: concurrency-guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/deploy-prod.yml/runs?status=in_progress&per_page=100" > "$RUNNER_TEMP/active-deploy-prod.json"
+          gh api "repos/$GITHUB_REPOSITORY/actions/workflows/rollback-prod.yml/runs?status=in_progress&per_page=100" > "$RUNNER_TEMP/active-rollback-prod.json"
+          node scripts/deploy-concurrency-guard.mjs --self "$GITHUB_RUN_ID" "$RUNNER_TEMP/active-deploy-prod.json" "$RUNNER_TEMP/active-rollback-prod.json"
       - name: Roll back
         id: rollback
         run: node scripts/manual-rollback.mjs execute "$RUNNER_TEMP/rollback-preflight.json"

@@ -2,12 +2,12 @@
 // Post-deploy smoke for the production lane (.github/workflows/deploy-prod.yml
 // and rollback-prod.yml). Public endpoints only: no credentials, no writes.
 //
-//   node scripts/prod-deploy-smoke.mjs --sha <40-hex> \
+//   node scripts/prod-deploy-smoke.mjs --sha <40-hex> [--build-id <id>] \
 //     [--origin https://room.trydemigod.com] [--entry https://www.getdasha.com/room] \
-//     [--wait-ms 300000] \
+//     [--wait-ms 45000] \
 //     [--agent-card-public-key <base64>] [--agent-card-key-id <id>] \
 //     [--agent-card-agent-id <id>] [--agent-card-fetches 10] \
-//     [--agent-card-wait-ms 90000]
+//     [--agent-card-wait-ms 20000] [--agent-card-gap-ms 500]
 //
 // Test-only knobs (env fallbacks SMOKE_AGENT_CARD_PUBLIC_KEY,
 // SMOKE_AGENT_CARD_KEY_ID, SMOKE_AGENT_CARD_AGENT_ID, SMOKE_AGENT_CARD_FETCHES,
@@ -21,6 +21,14 @@
 // then requires /api/health status "ok", /api/ready status "ready", and HTTP
 // 200 for /terms, /privacy and / on both doors. Prints one JSON report;
 // exits 1 on any failure.
+// When --build-id is given (the deploy lane stamps one run-scoped identity
+// into both Workers via ROOM_BUILD_ID, see scripts/stamp-version.mjs), every
+// version door must also report that exact buildId: sourceRevision alone
+// cannot distinguish this run's publish from an earlier deploy of the same
+// revision or a concurrent run's publish. Total budget is the ~90s class by
+// construction: --wait-ms (default 45s) bounds the version wait and
+// --agent-card-wait-ms (default 20s) bounds each door's card window; there
+// is no fixed retry sleep — the workflow runs this script exactly once.
 // Without --sha it skips the revision wait (used after a rollback, where the
 // old revision is the expected one and is checked by the caller), but still
 // checks health, readiness and pages on both doors.
@@ -61,9 +69,10 @@ const opt = (name, fallback = "") => {
   return i >= 0 && args[i + 1] !== undefined ? args[i + 1] : fallback;
 };
 const sha = opt("sha");
+const buildId = opt("build-id");
 const origin = opt("origin", "https://room.trydemigod.com").replace(/\/$/, "");
 const entry = opt("entry", "https://www.getdasha.com/room").replace(/\/$/, "");
-const waitMs = Number(opt("wait-ms", "300000"));
+const waitMs = Number(opt("wait-ms", "45000"));
 // Test seams (#1524): the deploy pipeline never sets these, so production
 // always verifies against the pinned key with the full fetch count. Tests
 // inject their own keypair through these knobs — they cannot sign for the
@@ -75,8 +84,10 @@ const agentCardPublicKey = opt("agent-card-public-key", process.env.SMOKE_AGENT_
 const agentCardKeyId = opt("agent-card-key-id", process.env.SMOKE_AGENT_CARD_KEY_ID || AGENT_CARD_KEY_ID);
 const agentCardAgentId = opt("agent-card-agent-id", process.env.SMOKE_AGENT_CARD_AGENT_ID || AGENT_CARD_AGENT_ID);
 const agentCardFetches = Math.max(1, Number(opt("agent-card-fetches", process.env.SMOKE_AGENT_CARD_FETCHES || "10")) || 10);
-const agentCardWaitRaw = Number(opt("agent-card-wait-ms", process.env.SMOKE_AGENT_CARD_WAIT_MS || "90000"));
-const agentCardWaitMs = Number.isFinite(agentCardWaitRaw) && agentCardWaitRaw >= 0 ? agentCardWaitRaw : 90000;
+const agentCardWaitRaw = Number(opt("agent-card-wait-ms", process.env.SMOKE_AGENT_CARD_WAIT_MS || "20000"));
+const agentCardWaitMs = Number.isFinite(agentCardWaitRaw) && agentCardWaitRaw >= 0 ? agentCardWaitRaw : 20000;
+const agentCardGapRaw = Number(opt("agent-card-gap-ms", process.env.SMOKE_AGENT_CARD_GAP_MS || "500"));
+const agentCardGapMs = Number.isFinite(agentCardGapRaw) && agentCardGapRaw >= 0 ? agentCardGapRaw : 500;
 if (sha && !/^[0-9a-f]{40}$/.test(sha)) {
   console.error("prod-deploy-smoke: --sha must be a full 40-character lowercase hex commit");
   process.exit(2);
@@ -251,23 +262,28 @@ export async function checkAgentCardDoor({
 }
 
 async function main() {
-  const report = { ok: true, sha: sha || null, origin, entry, checks: [] };
+  const report = { ok: true, sha: sha || null, buildId: buildId || null, origin, entry, checks: [] };
   const record = (name, pass, detail) => {
     report.checks.push({ name, pass, ...detail });
     if (!pass) report.ok = false;
   };
 
-  if (sha) {
+  if (sha || buildId) {
     const doors = [`${origin}/api/version`, `${origin}/api/version/worker`, `${entry}/api/version`, `${entry}/api/version/worker`];
     const deadline = Date.now() + waitMs;
     const last = {};
+    const matches = value => (!sha || value?.sourceRevision === sha) && (!buildId || value?.buildId === buildId);
     for (;;) {
       const results = await Promise.all(doors.map(get));
-      results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; });
-      if (doors.every(d => last[d] === sha) || Date.now() > deadline) break;
-      await sleep(10000);
+      results.forEach((r, i) => {
+        last[doors[i]] = r.json
+          ? { sourceRevision: r.json.sourceRevision ?? null, buildId: r.json.buildId ?? null }
+          : { sourceRevision: `http ${r.status}`, buildId: null };
+      });
+      if (doors.every(d => matches(last[d])) || Date.now() > deadline) break;
+      await sleep(2000);
     }
-    for (const d of doors) record(`version ${d}`, last[d] === sha, { got: last[d] });
+    for (const d of doors) record(`version ${d}`, matches(last[d]), { got: last[d].sourceRevision, gotBuildId: last[d].buildId });
   }
 
   for (const door of [origin, entry]) {
@@ -292,6 +308,7 @@ async function main() {
       url: cardUrl,
       expectedRevision: sha || null,
       fetches: agentCardFetches,
+      gapMs: agentCardGapMs,
       waitMs: agentCardWaitMs,
       publicKey: agentCardPublicKey,
       keyId: agentCardKeyId,

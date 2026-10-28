@@ -13,6 +13,7 @@ import { readinessDetail } from "../scripts/prod-deploy-smoke.mjs";
 
 const script = fileURLToPath(new URL("../scripts/prod-deploy-smoke.mjs", import.meta.url));
 const revision = "a".repeat(40);
+const fixtureBuildId = "2026-10-27T00:00:00.000Z-run-4242-1";
 const smokePaths = ["/api/health", "/api/ready", "/terms", "/privacy", "/"];
 const versionPaths = ["/api/version", "/api/version/worker"];
 const cardPath = "/.well-known/agent-card.json";
@@ -57,7 +58,7 @@ async function door(t, prefix, failure) {
   const responses = new Map([
     ["/api/health", { status: "ok" }],
     ["/api/ready", { status: "ready", emailVerification: "enforced", emailVerificationScope: "durable-object" }],
-    ...versionPaths.map(path => [path, { sourceRevision: revision }]),
+    ...versionPaths.map(path => [path, { sourceRevision: revision, buildId: fixtureBuildId }]),
     ...["/terms", "/privacy", "/"].map(path => [path, "<!doctype html><title>Room</title>"]),
     [cardPath, fixtureCard],
   ].map(([path, body]) => [`${prefix}${path}`, { status: 200, body }]));
@@ -94,7 +95,7 @@ function runReport(command, args, options = {}) {
   });
 }
 
-function runSmoke(origin, entry, withSha) {
+function runSmoke(origin, entry, withSha, buildId) {
   const args = [script, "--origin", `${origin.url}/`, "--entry", `${entry.url}/`,
     "--agent-card-public-key", cardKeyPair.publicKey,
     "--agent-card-key-id", cardKeyId,
@@ -103,6 +104,7 @@ function runSmoke(origin, entry, withSha) {
     // doors ~ 27s) cannot fit inside the CLI timeout this suite enforces.
     "--agent-card-fetches", "1"];
   if (withSha) args.push("--sha", revision, "--wait-ms", "0");
+  if (buildId) args.push("--build-id", buildId);
   return runReport(process.execPath, args);
 }
 
@@ -179,8 +181,9 @@ for (const filename of ["prod-deploy-smoke.mjs", "live-smoke.mjs"]) {
         env: { ...process.env, SHA: revision, PROD_ORIGIN: origin.url, ENTRY_ORIGIN: entry.url,
           ROOM_SMOKE_ORIGIN: origin.url, ROOM_SMOKE_GITHUB_API: origin.url,
           RUNNER_TEMP: directory, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "",
-          // The prod smoke step retries once after a delay; no wait in tests.
-          SMOKE_RETRY_DELAY_SECONDS: "0",
+          // The literal deploy step reads the run's build identity from
+          // BUILD_ID (in the workflow it is the stamp step's output).
+          BUILD_ID: fixtureBuildId,
           // The pipeline test runs the literal deploy-prod.yml step, so the
           // card-check test seams arrive through the env fallbacks.
           SMOKE_AGENT_CARD_PUBLIC_KEY: cardKeyPair.publicKey,
@@ -195,11 +198,12 @@ for (const filename of ["prod-deploy-smoke.mjs", "live-smoke.mjs"]) {
       assert.equal(readFileSync(join(directory, logs[0]), "utf8"), result.stdout);
       assert.equal(result.code, healthy ? 0 : 1, "the workflow must preserve the smoke exit status through tee");
       if (filename === "prod-deploy-smoke.mjs") {
-        const first = JSON.parse(readFileSync(join(directory, "prod-smoke-attempt1.log"), "utf8"));
-        assert.equal(first.ok, healthy);
-        if (!healthy) assert.deepEqual(JSON.parse(readFileSync(join(directory, "prod-smoke-attempt2.log"), "utf8")), result.report);
+        // One smoke attempt, one report file: no attempt1/attempt2 retry pair.
+        const only = JSON.parse(readFileSync(join(directory, "prod-smoke.json"), "utf8"));
+        assert.deepEqual(only, result.report);
+        assert.equal(readdirSync(directory).filter(name => name.includes("attempt")).length, 0);
         const upload = job.steps.find(item => item.with?.name === "deploy-recovery-${{ needs.gate.outputs.sha }}");
-        assert.match(upload.with.path, /prod-smoke-attempt\*\.log/);
+        assert.doesNotMatch(upload.with.path, /attempt/);
         assert.match(upload.with.path, /prod-smoke\.json/);
       }
     });
@@ -223,6 +227,31 @@ for (const failedDoor of ["origin", "entry"]) {
   }
 }
 
+
+// The deploy run stamps ONE build identity into both Workers; the smoke
+// must prove it verified that run's build, not an earlier deploy of the
+// same revision (a redeploy, or a concurrent run's publish, reports the
+// same sourceRevision with a different buildId).
+test("with SHA and build id: passes when both doors report this run's build", async t => {
+  const origin = await door(t, "/canonical");
+  const entry = await door(t, "/room");
+  const { code, report } = await runSmoke(origin, entry, true, fixtureBuildId);
+  assert.equal(code, 0, JSON.stringify(report));
+  const versionChecks = report.checks.filter(check => check.name.startsWith("version "));
+  assert.equal(versionChecks.length, 4);
+  assert.ok(versionChecks.every(check => check.pass && check.gotBuildId === fixtureBuildId));
+});
+
+test("with SHA and build id: rejects doors still serving a previous build of the same revision", async t => {
+  const origin = await door(t, "/canonical");
+  const entry = await door(t, "/room");
+  const { code, report } = await runSmoke(origin, entry, true, "1999-01-01T00:00:00.000Z-run-1-1");
+  assert.equal(code, 1, JSON.stringify(report));
+  assert.equal(report.ok, false);
+  const failed = report.checks.filter(check => !check.pass);
+  assert.equal(failed.length, 4, JSON.stringify(report));
+  assert.ok(failed.every(check => check.name.startsWith("version ") && check.gotBuildId === fixtureBuildId && check.got === revision));
+});
 
 test("readiness diagnostics retain bounded timeout, error and ready evidence without response secrets", () => {
   for (const status of ["timeout", "error", "ok"]) {

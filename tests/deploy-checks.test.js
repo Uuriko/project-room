@@ -539,6 +539,35 @@ test("actual production workflow captures schemas before uploads and uses guarde
   assert.match(steps.find(step => step.name === "Summary").run, /Code schemas/);
 });
 
+test("deploy smoke verifies this run's stamped build inside a ~90s budget, guarded against overlapping runs", () => {
+  const source = readFileSync(new URL("../.github/workflows/deploy-prod.yml", import.meta.url), "utf8");
+  const workflow = parseYaml(source), steps = workflow.jobs.deploy.steps;
+  // Concurrency: the declared group stays, and a pre-publish guard re-checks
+  // at the publish point (the group alone did not stop the 2026-10-27 overlap).
+  assert.equal(workflow.concurrency.group, "production-deploy");
+  const guard = steps.findIndex(step => step.id === "concurrency-guard");
+  const prod = steps.findIndex(step => step.id === "prod");
+  assert.ok(guard >= 0 && guard < prod, "guard runs before the first publish");
+  assert.match(steps[guard].run, /deploy-concurrency-guard\.mjs/);
+  assert.match(steps[guard].run, /rollback-prod\.yml/);
+  // One build identity, stamped once and injected into both Worker builds.
+  const stamp = steps.find(step => step.id === "stamp");
+  assert.ok(stamp, "stamp step exists");
+  assert.match(stamp.run, /GITHUB_RUN_ID/);
+  for (const step of steps.filter(step => ["prod", "entry"].includes(step.id))) {
+    assert.equal(step.env.ROOM_BUILD_ID, "${{ steps.stamp.outputs.build_id }}");
+    assert.equal(step.env.ROOM_SOURCE_REVISION, "${{ needs.gate.outputs.sha }}");
+  }
+  // Smoke: single attempt, verifies revision AND build id, no fixed
+  // 300s poll + 150s sleep + 60s retry constants anywhere in the step.
+  const smoke = steps.find(step => step.name === "Smoke version, health, ready, legal pages");
+  assert.match(smoke.run, /--sha "\$SHA" --build-id "\$BUILD_ID"/);
+  assert.match(smoke.run, /--wait-ms 45000/);
+  assert.match(smoke.run, /--agent-card-wait-ms 20000/);
+  assert.doesNotMatch(smoke.run, /300000|150|attempt|sleep/);
+  assert.equal(smoke.env.BUILD_ID, "${{ steps.stamp.outputs.build_id }}");
+});
+
 import { createServer } from "node:http";
 for (const [previousVersion, candidateVersion] of [[37, 38], [42, 42]])
 test(`actual recovery CLI refuses ${previousVersion}-to-${candidateVersion} fallback with changed table definitions`, async t => {

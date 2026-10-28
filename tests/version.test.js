@@ -57,6 +57,20 @@ test("stamp-version writes immutable revision/build metadata and re-import verif
   assert.throws(() => execFileSync("node", ["scripts/stamp-version.mjs", target, "--revision", "notasha"], { stdio: "pipe" }), /revision must be a full commit SHA/);
 });
 
+test("stamp-version honours ROOM_SOURCE_REVISION/ROOM_BUILD_ID env (one identity per deploy run); flags win", t => {
+  const directory = mkdtempSync(join(tmpdir(), "room-stamp-"));
+  const target = join(directory, "version.mjs");
+  copyFileSync(new URL("../server/version.mjs", import.meta.url), target);
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const envRevision = "3".repeat(40);
+  const env = { ...process.env, ROOM_SOURCE_REVISION: envRevision, ROOM_BUILD_ID: "env-build-1" };
+  const out = JSON.parse(execFileSync("node", ["scripts/stamp-version.mjs", target], { encoding: "utf8", env }));
+  assert.deepEqual(out, { stamped: true, sourceRevision: envRevision, buildId: "env-build-1" });
+  const flagRevision = "4".repeat(40);
+  const out2 = JSON.parse(execFileSync("node", ["scripts/stamp-version.mjs", target, "--revision", flagRevision, "--build-id", "flag-build"], { encoding: "utf8", env }));
+  assert.deepEqual(out2, { stamped: true, sourceRevision: flagRevision, buildId: "flag-build" });
+});
+
 test("M-55: stamp-version parses --flag value pairs structurally (target may follow flags)", t => {
   const root = join(fileURLToPath(import.meta.url), "..", "..", ".tmp");
   const directory = mkdtempSync(join(root, "room-stamp-"));
