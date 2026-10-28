@@ -122,7 +122,7 @@ test("step0 fates: a maximally populated item's board row drops the named fields
   assert.ok(boardJson.includes("HANDOFF-NEXT-SENTINEL")); // handoff nextAction survives as the chain note
   // Amended by B-4' Phase 0 (settle-pass-19 RED cure, 2026-10-27): slice 2
   // (decision fields), slice 4 (accountableMemberId) and slice 3a (brief
-  // carriage, this PR) gave the §4.1/§4.2 fields board homes, so they are
+  // carriage) gave the §4.1/§4.2 fields board homes, so they are
   // survivors now, carried verbatim. Still homeless at this slice:
   // verifierMemberId (policy kind only), receipt, handoff, helpWanted
   // and publicTask.

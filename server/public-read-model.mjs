@@ -7,6 +7,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { publicPage, joinLink, publicName, publicTask, publicReceipts } from "../src/events.js";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
+import { boardRowForItem, briefForWorkItem } from "./work-item-board.mjs";
 import {
   OPERATOR_HIDDEN_RECEIPT_SQL,
   ownerHiddenReceiptSql,
@@ -403,7 +404,7 @@ function memberIndex(state) {
   return members;
 }
 
-function pageFields(state) {
+function pageFields(state, store = null) {
   const members = Object.values(state?.members ?? {}).filter(member => member && member.active !== false);
   const agents = members.filter(member => member.kind === "agent").length;
   const names = members
@@ -411,7 +412,10 @@ function pageFields(state) {
     .map(member => member.displayName);
   const tasks = Object.values(state?.workItems ?? {})
     .filter(item => item && OPEN.has(item.state) && publicTask(item).enabled === true && typeof item.title === "string")
-    .map(item => ({ title: item.title, definitionOfDone: typeof item.definitionOfDone === "string" ? item.definitionOfDone : "" }));
+    .map(item => {
+      const brief = briefForWorkItem(item, store ? boardRowForItem(store, state?.room?.id, item.id) : null);
+      return { title: item.title, definitionOfDone: typeof brief.definitionOfDone === "string" ? brief.definitionOfDone : "" };
+    });
   return {
     humans: members.length - agents,
     agents,
@@ -456,7 +460,7 @@ function joinTokenFor(store, roomId, state, auth) {
 function upsertPublicRoom(store, state, auth) {
   const slug = state?.room?.id;
   if (!SLUG.test(slug ?? "")) return;
-  const fields = pageFields(state);
+  const fields = pageFields(state, store);
   const join = joinTokenFor(store, slug, state, auth);
   const setAt = publicPage(state).setAt;
   const updatedAt = typeof setAt === "string" ? setAt : new Date().toISOString();
