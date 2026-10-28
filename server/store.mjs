@@ -154,7 +154,7 @@ const RETIRED_BOARD_V2_SCHEMA = `
   CREATE INDEX IF NOT EXISTS idx_board_vtwo_events_lane ON board_vtwo_events(lane);
 `;
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
-import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
+import { AgentHeartbeats, agentHeartbeatSchema, convergeWakeSignalRoomScope, declaredCadenceSchema } from "./agent-heartbeats.mjs"; // RC-2026-09-18-051: wakeable agent presence.
 import { wakeForAgent } from "./sleeper-wake.mjs";
 import { WorkWakes, workWakeSchema } from "./work-wakes.mjs"; // Opt-in pointer-only work delivery on heartbeat reads.
 import { recordWakeEvent } from "./wake-metrics.mjs"; // #3345 wake-reliability accounting.
@@ -1529,6 +1529,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         this.agentPlugin.verifySchema({ allowAbsent: true }); // Lane D plug-in tables: additive, read-only never migrates.
         this.workWakes.verifySchema({ allowAbsent: true }); // Opt-in work delivery tables additive, read-only never migrates.
         this.agentHeartbeats.verifySchema({ allowAbsent: true }); // RC-2026-09-18-051: heartbeat tables additive, read-only never migrates.
+        this.agentHeartbeats.verifyDeclaredCadenceSchema({ allowAbsent: true }); // #3592: raw-declaration sidecar additive, partitioned the same way.
         this.inboxAttachments.verifySchema({ allowAbsent: true }); // Identity inbox attachment bytes: additive, read-only never migrates.
         this.guestInvites.verifySchema({ allowAbsent: true }); // RC-2026-09-23-100: guest-invite tables additive, read-only never migrates.
         this.guestInvites.verifySelfServeSchema({ allowAbsent: true }); // RC-2026-09-25-912: self-serve seats + idempotency records, additive, read-only never migrates.
@@ -1778,6 +1779,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // rebuild), since IF NOT EXISTS cannot rewrite the stored DDL.
       convergeWakeSignalRoomScope(this.db);
       this.db.exec(agentHeartbeatSchema);
+      // Issue #3592: the raw cadence declaration sidecar — purely additive
+      // like the heartbeat tables, created here at writable open; read-only
+      // opens never migrate and verify it partitioned (absent = tolerated).
+      this.db.exec(declaredCadenceSchema);
+      this.agentHeartbeats.verifyDeclaredCadenceSchema();
       // Opt-in work delivery: host preferences + pointer journal, purely additive, no schema version bump.
       this.db.exec(workWakeSchema);
       this.workWakes.verifySchema();

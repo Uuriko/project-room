@@ -47,7 +47,7 @@ export const DIRECTORY_TABLES = Object.freeze([
   "account_security_events", "account_session_slots", "account_setup", "account_terms", "accounts",
   "activity_events", "activity_fanout_failures", "agent_api_keys", "agent_autonomy_tiers",
   "agent_bonds", "agent_capability_grants", "agent_connection_operations", "agent_connections",
-  "agent_directory_cards", "agent_hosts", "agent_identities", "agent_identity_rotation_receipts",
+  "agent_declared_cadences", "agent_directory_cards", "agent_hosts", "agent_identities", "agent_identity_rotation_receipts",
   "agent_identity_verification", "agent_invite_codes", "agent_invite_redeem_receipts",
   "agent_key_registry", "agent_member_keys", "agent_public_asks", "agent_public_pages", "agent_push_configs",
   "agent_room_ownership", "agent_skill_cards",

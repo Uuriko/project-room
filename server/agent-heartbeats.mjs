@@ -160,10 +160,12 @@ export const wakeRoomActivitySchema = `
 // window — a 48h declaration is stored there as 3600s and the declaration
 // itself is lost. This table keeps the hint the host actually sent so
 // wakeableWindowFor can still read it; presence and reachability keep
-// using the assignment. Lazy DDL, kept out of agentHeartbeatSchema for
-// the same reason as the lease/activity tables above: deployed databases
-// keep passing the strict DDL-text verifySchema. It holds no secrets —
-// only the declared interval and its stamp.
+// using the assignment. Kept out of agentHeartbeatSchema: the store
+// creates it at writable open (next to agentHeartbeatSchema), heartbeats
+// ensure it for direct-DB consumers, and verifyDeclaredCadenceSchema()
+// partitions it (present = shape-verified, absent = tolerated) so a
+// read-only open of a pre-#3592 backup never migrates and never fails.
+// It holds no secrets — only the declared interval and its stamp.
 export const declaredCadenceSchema = `
   CREATE TABLE IF NOT EXISTS agent_declared_cadences (
     agent_id TEXT NOT NULL, host_id TEXT NOT NULL,
@@ -381,6 +383,23 @@ export class AgentHeartbeats {
   ensureRoomActivitySchema() {
     this.db.exec(wakeRoomActivitySchema);
     return this;
+  }
+
+  // Issue #3592: partitioned verify for the raw-declaration sidecar —
+  // present means its stored DDL must match declaredCadenceSchema
+  // exactly; absent is tolerated (a pre-#3592 database, or a read-only
+  // open, which never migrates). Mirrors verifySchema's DDL-text compare
+  // for the one table that is not part of agentHeartbeatSchema.
+  verifyDeclaredCadenceSchema({ allowAbsent = false } = {}) {
+    const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
+    const sql = declaredCadenceSchema.trim().replace(/;$/, "");
+    const actual = this.db.prepare("SELECT sql FROM sqlite_master WHERE name=?").get("agent_declared_cadences")?.sql;
+    if (actual === undefined) {
+      if (allowAbsent) return false;
+      throw new Error("Agent declared-cadence schema requires operator reconciliation");
+    }
+    if (normalize(actual) !== normalize(sql)) throw new Error("Agent declared-cadence schema requires operator reconciliation");
+    return true;
   }
 
   // plan-wake-live: stamp the agent's last-polled-at. Polls and

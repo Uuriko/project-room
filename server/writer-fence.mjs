@@ -173,6 +173,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // activity, read by the wakeable / not-wakeable lists; older writers have
   // no code path to it and AgentHeartbeats.verifySchema() is read-only-safe.
   "agent_wake_polls",
+  // Issue #3592: agent_declared_cadences (the raw cadence declaration the
+  // wakeability window reads, kept apart from the server-assigned cadence
+  // in agent_push_configs). Same rationale as agent_wake_polls — purely
+  // additive, per-identity rows, created at store open, and partitioned
+  // in AgentHeartbeats.verifyDeclaredCadenceSchema() so a read-only open
+  // of a pre-#3592 backup tolerates its absence.
+  "agent_declared_cadences",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",
@@ -528,10 +535,8 @@ const MATCHMAKING_ADDITIVE_TABLES = Object.freeze([
 // Wake-lease tables (durable listener queue, server/agent-heartbeats.mjs):
 // purely additive, created lazily on first lease use. CX5-FIX adds
 // agent_wake_room_activity (room-attributed listener activity), created
-// lazily on first room-scoped poll/heartbeat. agent_declared_cadences
-// keeps the raw cadence declaration for the wakeability window (#3592),
-// created lazily on the first explicit cadence declaration.
-const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity", "agent_declared_cadences"]);
+// lazily on first room-scoped poll/heartbeat.
+const WAKE_LEASE_ADDITIVE_TABLES = Object.freeze(["agent_wake_listener_leases", "agent_wake_signal_claims", "agent_wake_room_activity"]);
 // Wake-reliability accounting (#3345, server/wake-metrics.mjs): counters +
 // loss journal, purely additive, created lazily on first recorded outcome;
 // kind/timestamp/subject only, never content. Older writers have no code
