@@ -5,9 +5,10 @@ import { charterContext } from "../src/room-charter.js";
 import { currentWorkRecord } from "./work-context.mjs";
 import { isDeepStrictEqual } from "node:util";
 import { Buffer } from "node:buffer";
-import { validId, MAX_MESSAGE_BODY_CHARS, ownMember } from "../src/events.js";
+import { validId, MAX_MESSAGE_BODY_CHARS, ownMember as memberOf } from "../src/events.js";
 import { prepareReplyPost, recordReplyPost, cancelReplyRequest, replyContextOwners, REPLY_CANCELLED } from "../src/reply-requests.js";
 import { stampReplyRead } from "./content-trust.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 export const REPLY_PAGE_LIMIT = 20, REPLY_MAX_PAGE_LIMIT = 50, REPLY_PAGE_BYTES = 65536;
 const integer = value => Number.isSafeInteger(value) && value >= 0;
@@ -57,14 +58,14 @@ export class ReplyRequests {
     return this.store.transaction(() => {
       const auth = this.store.authenticate(token, roomId), state = this.store.room(roomId).state, me = auth.member;
       if (me.kind !== "agent") fail("ask_owner_agents_only", "Only agent members ask their owner; people can send a request directly", 403);
-      const ownerId = ownMember(state.members, me.id)?.accountableHumanId, owner = ownerId ? ownMember(state.members, ownerId) : null;
+      const ownerId = memberOf(state.members, me.id)?.accountableHumanId, owner = ownerId ? memberOf(state.members, ownerId) : null;
       if (!owner || owner.active === false || owner.kind !== "human" || ownerId === me.id)
         fail("owner_unavailable", "This agent has no active human owner in this room. Ask the room owner to set one; nothing was sent", 409);
       const messageId = askMessageId(me.id, requestId), requests = state.replyRequests ?? {};
       if (Object.hasOwn(requests, messageId)) return this.askOwnerView(state, requests[messageId], roomId, { duplicate: true });
       const pending = Object.values(requests).find(request => request.status === "open" && request.requesterId === me.id && request.recipientId === ownerId);
-      if (pending) throw Object.assign(new Error(`Your earlier question to your owner is still open (${pending.id}). Read its outcome, or cancel it, before asking another`),
-        { code: "ask_pending", status: 409, requestMessageId: pending.id });
+      if (pending) throw Object.assign(new ServiceError(409, "ask_pending", `Your earlier question to your owner is still open (${pending.id}). Read its outcome, or cancel it, before asking another`),
+        { detail: { requestMessageId: pending.id } });
       this.store.command(token, roomId, { id: requestId, type: "message.posted",
         data: { messageId, body: question, toMemberId: ownerId, requestKind: "reply" } });
       const after = this.store.room(roomId).state;
@@ -88,7 +89,7 @@ export class ReplyRequests {
       const message = messageRepository(this.store, roomId, state).getMany([request.responseMessageId]).get(request.responseMessageId);
       note = typeof message?.body === "string" ? message.body : null;
     }
-    const by = request.terminalActorId ? ownMember(state.members, request.terminalActorId) : null;
+    const by = request.terminalActorId ? memberOf(state.members, request.terminalActorId) : null;
     const path = `/api/rooms/${encodeURIComponent(roomId)}`;
     return { contractVersion: 1, roomId, requestMessageId: request.id, ownerId: request.recipientId, outcome, note,
       answeredBy: by ? { memberId: by.id, kind: by.kind } : null,

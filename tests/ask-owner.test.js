@@ -9,6 +9,8 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { ASK_OWNER_MAX_CHARS } from "../server/reply-requests.mjs";
+import { ASK_OWNER_ROUTES } from "../server/routes/ask-owner.mjs";
+import { ROUTES, assertRouteRow } from "../server/routes/table.mjs";
 
 function fixture(t) {
   const store = new RoomStore(":memory:"); t.after(() => store.close());
@@ -64,7 +66,7 @@ test("a retry with the same requestId returns the same request without posting a
 test("one open question to the owner at a time", t => {
   const f = fixture(t), first = f.ask("one");
   assert.throws(() => f.ask("two", "A different question?"), error => error.code === "ask_pending" && error.status === 409
-    && error.requestMessageId === first.requestMessageId);
+    && error.detail?.requestMessageId === first.requestMessageId);
   // Another agent asking the same owner is independent.
   assert.equal(f.ask("three", "Mine is separate?", "other").outcome, "unanswered");
 });
@@ -138,5 +140,16 @@ test("HTTP: POST returns 201 at once, a retry 200, GET reads the outcome", async
   assert.equal((await read.json()).outcome, "unanswered");
   const pending = await call("POST", base, { question: "Something else?", requestId: "http-3" });
   assert.equal(pending.status, 409);
-  assert.equal((await pending.json()).error?.code ?? "", "ask_pending");
+  const refused = await pending.json();
+  assert.equal(refused.error?.code, "ask_pending");
+  assert.equal(JSON.stringify(refused).includes(view.requestMessageId), true, "the refusal names the open request");
+});
+
+test("the two ask-owner rows are valid, registered and room-scoped", () => {
+  assert.deepEqual(ASK_OWNER_ROUTES.map(row => `${row.method} ${row.path}`), ["POST /api/rooms/{roomId}/ask-owner", "GET /api/rooms/{roomId}/ask-owner"]);
+  for (const row of ASK_OWNER_ROUTES) {
+    assert.deepEqual(assertRouteRow(row), []);
+    assert.equal(row.auth, "room"); assert.equal(row.scope, "room");
+    assert.equal(ROUTES.includes(row), true);
+  }
 });
