@@ -58,8 +58,10 @@ export async function putOwnWantsWork(ctx) {
   }
 }
 
-export function deleteOwnWantsWork(ctx) {
+export async function deleteOwnWantsWork(ctx) {
   const { roomId, auth } = context(ctx, true);
+  // Turning the preference off takes no fields. A blank body clears it.
+  await ctx.body(ctx.req, { allowEmpty: true, fields: [], unknownCode: "invalid_request" });
   return ctx.json(ctx.res, 200, body(roomId, auth.member.id, clearWantsWork(ctx.store.db, roomId, auth.member.id)));
 }
 
