@@ -1,0 +1,25 @@
+  /api/inbox/connections:
+    get:
+      summary: List the account's channel connections
+      description: |
+        Unified inbox (docs/UNIFIED-INBOX.md). Browser account-session route:
+        authenticated by the account_session cookie plus X-Session-Binding,
+        never by a room or agent bearer key. Returns the generic connection
+        record for every email and Telegram connection the account owns.
+      security:
+        - accountSession: []
+      responses:
+        '422': { description: session_binding_required }
+        '200':
+          description: Connection records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  contractVersion: { type: integer, enum: [1] }
+                  viewer: { type: object }
+                  connections:
+                    type: array
+                    items: { $ref: '#/components/schemas/ChannelConnection' }
+        '401': { description: account_session_required }

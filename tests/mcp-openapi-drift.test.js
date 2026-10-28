@@ -20,18 +20,18 @@
 //    shape and the MCP tools list — none compares tool input schemas
 //    against OpenAPI request schemas parameter by parameter.
 // 4. No production seam: imports the already-exported tool registries and
-//    reads docs/openapi.yaml off disk. No new exports, flags, or wrappers.
+//    the fragment renderer. No new exports, flags, or wrappers.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import { renderOpenApi } from "../scripts/openapi-document.mjs";
 import {
   hostedMcpToolDefs,
   hostedRoomTools,
 } from "../server/mcp-hosted-tools.mjs";
 import { publicWorkMcpDefinitions } from "../server/mcp-public-work.mjs";
 
-const openapi = parse(readFileSync(new URL("../docs/openapi.yaml", import.meta.url), "utf8"));
+const openapi = parse(renderOpenApi());
 
 // ---------------------------------------------------------------------------
 // OpenAPI model

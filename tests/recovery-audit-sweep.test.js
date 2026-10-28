@@ -10,6 +10,7 @@ import { AccessRequests } from "../server/access-requests.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
 import { seedStarter } from "../server/starter-room.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // A gate for one bug class, found three times in one day.
 //
@@ -220,12 +221,8 @@ function sweep() {
   try {
     const left = fixture.store.identities.create("Sweep bond left");
     const right = fixture.store.identities.create("Sweep bond right");
-    fixture.store.identities.link(fixture.keys.owner, "commons", {
-      identityId: left.identityId, displayName: "Sweep bond left", permissions: ["accept_work"]
-    });
-    fixture.store.identities.link(fixture.keys.owner, "commons", {
-      identityId: right.identityId, displayName: "Sweep bond right", permissions: ["accept_work"]
-    });
+    linkWithProof(fixture.store, fixture.keys.owner, "commons", left, { displayName: "Sweep bond left", permissions: ["accept_work"] });
+    linkWithProof(fixture.store, fixture.keys.owner, "commons", right, { displayName: "Sweep bond right", permissions: ["accept_work"] });
     // Graduated autonomy tiers: linked agent identities enroll at t1_readonly;
     // promote them so the sweep exercises the bond command surface.
     for (const identity of [left, right])
@@ -290,6 +287,16 @@ function sweep() {
   if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.WORK_CLAIM_UPDATED))
     broke.push(`${T.WORK_CLAIM_UPDATED}: the sweep never got this event into the log, so nothing was audited`);
 
+  // agent_invite.minted is not a command. An owner-level mint records who
+  // minted it and leaves the projection otherwise unchanged.
+  try {
+    fixture.store.invites.create(fixture.keys.owner, "commons", { ownerEquivalent: true, expiresInMinutes: 60 });
+    exercised.add(T.AGENT_INVITE_MINTED);
+    auditRecovery(fixture.store);
+  } catch (error) { broke.push(`${T.AGENT_INVITE_MINTED}: ${error.message}`); }
+  if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.AGENT_INVITE_MINTED))
+    broke.push(`${T.AGENT_INVITE_MINTED}: the sweep never got this event into the log, so nothing was audited`);
+
   // room.starter_seeded is not a command. Seeding the fixture room records it
   // before the room is archived.
   try {
@@ -339,7 +346,11 @@ test("the event surface has not grown without this sweep noticing", () => {
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
+  // agent_invite.minted is exercised above via an owner-level invite mint (it is not a command).
   // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
-  assert.equal(Object.values(T).length, 66,
+  // member.merged and pair.requested/approved/denied are not exercised here:
+  // they need an agent-pairing flow and two live agent members. They are
+  // covered by tests/pairing-flow.test.js and tests/pairing-reconnect.test.js.
+  assert.equal(Object.values(T).length, 71,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

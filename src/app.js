@@ -13,7 +13,7 @@ import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./clie
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, memberRowName } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 function clipGraphemes(text, maxUnits) {
@@ -35,6 +35,7 @@ import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { installPairing } from "./pairing-ui.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
@@ -78,17 +79,23 @@ function validatedOAuthReturn(value) {
       && !target.username && !target.password ? target.pathname + target.search : null;
   } catch { return null; }
 }
+function validatedDesktopConsent(value) {
+  const target = validatedOAuthReturn(value);
+  if (!target) return false;
+  const consent = new URL(target, location.origin).searchParams;
+  return consent.getAll("client_id").length === 1 && consent.get("client_id") === "project-room-macos"
+      && consent.getAll("redirect_uri").length === 1 && consent.get("redirect_uri") === location.origin + "/api/auth/desktop/callback"
+      && consent.getAll("state").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("state") || "")
+      && consent.getAll("code_challenge").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("code_challenge") || "")
+      && consent.getAll("code_challenge_method").length === 1 && consent.get("code_challenge_method") === "S256";
+}
 try {
   const params = new URLSearchParams(location.search);
   const target = params.get("oauth") === "login" ? validatedOAuthReturn(params.get("return")) : null;
   if (target) {
     sessionStorage.setItem(oauthReturnKey, target);
-    const providers = params.getAll("provider"), consent = new URL(target, location.origin).searchParams;
-    const nativeConsent = consent.getAll("client_id").length === 1 && consent.get("client_id") === "project-room-macos"
-      && consent.getAll("redirect_uri").length === 1 && consent.get("redirect_uri") === location.origin + "/api/auth/desktop/callback"
-      && consent.getAll("state").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("state") || "")
-      && consent.getAll("code_challenge").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("code_challenge") || "")
-      && consent.getAll("code_challenge_method").length === 1 && consent.get("code_challenge_method") === "S256";
+    const providers = params.getAll("provider");
+    const nativeConsent = validatedDesktopConsent(target);
     if (nativeConsent && params.getAll("return").length === 1 && params.getAll("oauth").length === 1
       && providers.length === 1 && ["google", "github"].includes(providers[0])) initialDesktopProvider = providers[0];
     // Consume intent in this document only, so refresh/cancel cannot restart it.
@@ -202,6 +209,20 @@ if (initialGitHubFailed) {
   const url = new URL(location.href);
   url.searchParams.delete("github");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+// End only the exact native PKCE journey retained in this tab. The server
+// callback restricts the custom scheme response and the app verifies its state.
+// Consume before navigating: browser refresh/retry must not replay cancellation.
+if (initialGoogleFailed || initialGitHubFailed) {
+  try {
+    const target = sessionStorage.getItem(oauthReturnKey);
+    if (validatedDesktopConsent(target)) {
+      const consent = new URL(target, location.origin).searchParams;
+      sessionStorage.removeItem(oauthReturnKey);
+      location.assign("/api/auth/desktop/callback?" + new URLSearchParams({ state: consent.get("state"), error: "access_denied" }));
+      return;
+    }
+  } catch { /* Storage unavailable: retain ordinary browser sign-in recovery. */ }
 }
 const initialJoinFragment = (() => {
   // [QA-Join]: a Google/GitHub OAuth round-trip drops the #join/ fragment (it
@@ -409,13 +430,36 @@ const client = new RoomClient({
   lazyHistory: true,
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
+  onOptimistic(command) {
+    const data = command?.data;
+    const authorId = session?.member?.id;
+    if (!state || !authorId || !state.members?.[authorId] || typeof data?.body !== "string" || !data.body) return;
+    const id = typeof data.messageId === "string" ? data.messageId : command.id;
+    if (state.messages.some(message => message.id === id)) return;
+    state = { ...state, messages: [...state.messages, {
+      id, authorId, body: data.body, createdAt: new Date().toISOString(),
+      replyToId: data.replyToId ?? null, toMemberId: data.toMemberId ?? null,
+      channelId: data.channelId || activeChannelId, pendingSend: true
+    }] };
+    render();
+  },
+  onSendSettled({ command, ok, maybeSaved }) {
+    if (!state || ok) return;
+    const id = command?.data?.messageId || command?.id;
+    state = maybeSaved
+      ? { ...state, messages: state.messages.map(message => message.pendingSend && message.id === id ? { ...message, pendingSend: "maybe" } : message) }
+      : { ...state, messages: state.messages.filter(message => !(message.pendingSend && message.id === id)) };
+    render();
+  },
   onSnapshot(snapshot, identity) {
     snapshotAuditView = snapshot.auditView ?? "full";
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
     if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
-    state = snapshot.state; session = identity;
+    const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
+    state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
+    session = identity;
     displayNames = createMemberDisplayNames(state.members);
     announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary);
     void refreshRequestRuns();
@@ -698,6 +742,7 @@ function lazyDisclosure({ panel, load, install, onError }) {
 
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
+installPairing({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
@@ -828,7 +873,7 @@ const signinUI = createAuthSigninUI({
     if (invitation.secret) { $("#invitation-email").click(); signinUI.showMagic(); }
     else openEmailAuth("magic", { recordHistory: false });
     setFormStatus($("#auth-link-error"),
-      `${message} Request a new link or continue with Google.`, true);
+      `${message} Log in with your password or continue with Google.`, true);
   },
   onSignedIn: async () => {
     const restoration = accountClient.restore();
@@ -2035,7 +2080,7 @@ function render() {
       ? `<p class="member-observation">Last host report: <time datetime="${esc(new Date(serverPresence.presence.lastSeenAt).toISOString())}">${esc(new Date(serverPresence.presence.lastSeenAt).toLocaleString())}</time></p>` : "";
     const lastReport = agent && presenceStale && serverState
       ? `<p class="member-observation">Last reported availability: ${esc(presenceLabel(serverState))}</p>` : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" role="group" aria-label="${esc(memberRowName(m, availability))}" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -2781,7 +2826,7 @@ function renderSearch(now = Date.now()) {
   if (!active) searchCollapsed = false;
   $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const loadingOlder = client.loadHistory(); // search covers the whole room, not just the held window
+  const loadingOlder = false; // the first page is the held window; older pages load on scroll
   const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
@@ -4248,7 +4293,8 @@ $("#message-form").addEventListener("submit", e => {
     if (!ownsSendingDraft()) return;
     const delivery = $("#message-delivery");
     const savedMessageId = data.messageId || sendingCommand.id;
-    const visible = state.messages.some(message => message.id === savedMessageId);
+    // An optimistic copy is not history: only a held (read-confirmed) copy counts.
+    const visible = state.messages.some(message => message.id === savedMessageId && !message.pendingSend);
     delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
     const link = document.createElement("a");
     link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
@@ -6689,7 +6735,7 @@ function ownsPresenceRequest(request) {
 }
 // New room events are coalesced: the feed refetches at most once per window while the tab is visible.
 const NOTIFICATION_COALESCE_MS = 1500;
-const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access", access_decision: "reviewed your access request" };
+const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access", access_decision: "reviewed your access request", pair_request: "pair request" };
 const ownsNotifications = ticket => Boolean(ticket) && notificationOwner === ticket && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession();
 function resetNotifications() {
   notificationBefore = null; notificationLoading = false;
@@ -6999,7 +7045,7 @@ async function refreshPresenceStates() {
   const request = { seq: ++presenceSeq, generation: client.generation, room: state };
   presenceRequest = request;
   try {
-    const result = await client.request(client.path("/presence"));
+    const result = await client.request(client.path("/presence"), { fresh: true }); // a refresh is a new read
     if (!ownsPresenceRequest(request)) return;
     const next = new Map();
     for (const entry of result?.members ?? []) {
@@ -7737,6 +7783,19 @@ configureAuthPanel();
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
 const ready = (async () => {
   const initialResult = await initialSignin;
+  // Returning members land on ?room=... after OAuth. Their pending native
+  // consent owns this navigation before any Room session/snapshot restoration.
+  // Keep account and terms checks; an uncertain read leaves the target for retry.
+  let nativeReturn = null;
+  try { nativeReturn = sessionStorage.getItem(oauthReturnKey); } catch { /* Ordinary navigation remains available. */ }
+  if (new URLSearchParams(location.search).get("oauth") !== "login" && validatedDesktopConsent(nativeReturn)) {
+    const account = await ensureAccountSession();
+    if (account?.authenticated) {
+      if (resumeOAuthConsent()) return;
+      showAccountWorkspace(); // Terms must be accepted before native consent.
+    } else location.assign(nativeReturn); // The consent endpoint requires sign-in.
+    return;
+  }
   if (await resumeEmailVerification()) return;
   if (restoreRoomSession) { await client.restore(); return; }
   if (signedIn) { await landAfterSignIn(); return; }
