@@ -61,9 +61,26 @@ const tooBig = error => isTooBig(error)
   ? new ServiceError(409, "pilot_limit", "Room storage limit reached (platform row limit); no data was changed")
   : error;
 
+// Over-counting is harmless (an extra alarm re-arm); missing a write is not,
+// so anything that starts like a write counts, including WITH ... INSERT.
+const WRITE_SQL = /^\s*(?:WITH\b[\s\S]*?)?\b(?:INSERT|UPDATE|DELETE|REPLACE)\b/i;
+const writeSqlCache = new Map();
+export function isWriteSql(sql) {
+  let hit = writeSqlCache.get(sql);
+  if (hit === undefined) {
+    hit = WRITE_SQL.test(String(sql));
+    if (writeSqlCache.size < 4096) writeSqlCache.set(sql, hit);
+  }
+  return hit;
+}
+
 export class DurableDatabase {
   constructor(storage, { observeStatement } = {}) {
     this.storage = storage; this.isTransaction = false; this.rowsRead = 0;
+    // Write statements executed. ProjectRoom.fetch compares it before and after
+    // a request to skip re-arming the job alarm when nothing changed. Counted
+    // from the SQL text, so cursor counters stay untouched on the fast path.
+    this.writeStatements = 0;
     this.observeStatement = observeStatement;
   }
   // Observers receive only counters, never SQL, bindings or errors. Capture
@@ -86,6 +103,7 @@ export class DurableDatabase {
     };
   }
   #all(sql, args) {
+    if (isWriteSql(sql)) this.writeStatements += 1;
     const finish = this.observeStatement ? this.#observation() : null;
     let cursor, failed = false;
     try { cursor = this.storage.sql.exec(sql, ...args); return cursor.toArray(); }
@@ -99,6 +117,7 @@ export class DurableDatabase {
     const db = this;
     function* iterate(...args) {
       // Generator body starts on first next(), including observation capture.
+      if (isWriteSql(sql)) db.writeStatements += 1;
       if (!db.observeStatement) {
         let cursor;
         try { cursor = db.storage.sql.exec(sql, ...args); yield* cursor; }

@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { Miniflare } from "miniflare";
+import { createHash } from "node:crypto";
 
 const origin = "https://room.example.test";
 
@@ -190,6 +191,42 @@ test("channel drain: an orphaned inflight stamp keeps the stuck clock (#3927 R3)
     const settled = await pollDrainState(mf, "drain-orphan", state => state.outcomeAt !== null && state.stamp === null);
     assert.ok(settled.outcomeAt !== null, "the replacement drain completed");
     assert.equal(settled.stamp, null, "the replacement drain cleared the stamp");
+  } finally {
+    await mf.dispose();
+  }
+});
+
+// A read that writes no rows must not re-run earliestFutureAlarm (about 20
+// statements including a full work_claims scan); a request that writes must.
+test("only a request that wrote rows re-arms the job alarm", async () => {
+  const mf = await start();
+  const settle = () => new Promise(resolve => setTimeout(resolve, 300));
+  try {
+    const backfill = await call(mf, "/probe/backfill?name=arm");
+    assert.equal(backfill.body.done, true, JSON.stringify(backfill.body));
+    // Something must be queued, or a re-arm correctly sets no alarm at all.
+    await call(mf, "/probe/seed-due?name=arm&delayMs=600000");
+    await call(mf, "/probe/ensure?name=arm");
+    assert.equal(typeof (await call(mf, "/probe/alarm-at?name=arm")).body.alarmAt, "number");
+    const cleared = await call(mf, "/probe/clear-alarm?name=arm");
+    assert.equal(cleared.body.alarmAt, null);
+    const read = await call(mf, "/probe/do-fetch?name=arm&method=GET&path=" + encodeURIComponent("/api/rooms/no-such-room"));
+    assert.ok(read.body.status >= 400 && read.body.status < 500, JSON.stringify(read.body));
+    await settle();
+    assert.equal((await call(mf, "/probe/alarm-at?name=arm")).body.alarmAt, null, "a read-only request armed the alarm");
+    const displayName = "Arm Probe";
+    const bucket = Math.floor(Date.now() / 600000);
+    let proof = null;
+    for (let i = 0; i < 1e6 && proof === null; i++) {
+      const nonce = i.toString(36);
+      if (createHash("sha256").update(`${bucket}:${displayName}:${nonce}`).digest("hex").startsWith("000")) proof = nonce;
+    }
+    const response = await mf.dispatchFetch(origin + "/probe/do-fetch?name=arm&method=POST&path=" + encodeURIComponent("/api/agent-identities"),
+      { method: "POST", body: JSON.stringify({ displayName, proof }) });
+    const minted = await response.json();
+    assert.equal(minted.status, 201, JSON.stringify(minted));
+    await settle();
+    assert.equal(typeof (await call(mf, "/probe/alarm-at?name=arm")).body.alarmAt, "number", "a writing request did not re-arm the alarm");
   } finally {
     await mf.dispose();
   }

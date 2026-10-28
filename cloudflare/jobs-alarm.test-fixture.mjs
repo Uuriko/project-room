@@ -33,6 +33,10 @@ export class JobsProbe extends ProjectRoom {
   jobRunCounts() {
     return { gmailRuns: this.gmailRuns, channelRuns: this.channelRuns };
   }
+  async clearJobAlarm() {
+    await this.ctx.storage.deleteAlarm();
+    return this.ctx.storage.getAlarm();
+  }
   async readJobAlarm() {
     if (this.paused || !this.store) return null;
     return this.ctx.storage.getAlarm();
@@ -170,6 +174,19 @@ export default {
     }
     if (url.pathname === "/probe/drain-state") {
       return Response.json(await room(env, request).readDrainState());
+    }
+    if (url.pathname === "/probe/clear-alarm") {
+      return Response.json({ alarmAt: await room(env, request).clearJobAlarm() });
+    }
+    // Sends one request straight to ProjectRoom.fetch, the way the entry
+    // Worker does (it stamps the trusted visitor address).
+    if (url.pathname === "/probe/do-fetch") {
+      const method = url.searchParams.get("method") || "GET";
+      const body = method === "GET" ? undefined : await request.text();
+      const response = await room(env, request).fetch(new Request(url.origin + url.searchParams.get("path"), {
+        method, body, headers: { "content-type": "application/json", "origin": url.origin, "host": url.host, "x-room-visitor-ip": "203.0.113.5" }
+      }));
+      return Response.json({ status: response.status, error: response.ok ? undefined : (await response.text()).slice(0, 300) });
     }
     if (url.pathname === "/probe/alarm") {
       const target = room(env, request);
