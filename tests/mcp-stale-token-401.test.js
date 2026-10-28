@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "mcp-stale-token-"));
@@ -39,8 +40,12 @@ async function fixture(t) {
     roomId: "stale-token-room", title: "Stale token room", purpose: "stale-token 401 specimen",
     kind: "personal", displayName: "Stale token owner"
   });
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: agent.identityId, displayName: "Stale token agent", permissions: []
+  // Direct link now requires holder proof (SECURITY-FIX C3, #942): the
+  // agent holder mints a link code for this room and link() consumes it
+  // through the production gate — linkWithProof is the canonical fixture
+  // helper for exactly that (no bypass).
+  linkWithProof(store, owner.secret, created.roomId, agent, {
+    displayName: "Stale token agent", permissions: []
   });
   const roomId = created.roomId;
   const scopes = [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"];
