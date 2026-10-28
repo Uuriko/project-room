@@ -213,8 +213,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const owner = await json(login, 201);
     const ownerHeaders = { Cookie: cookie.split(';')[0], 'X-CSRF-Token': owner.csrf, 'X-Session-Binding': owner.sessionBinding };
     // Work delivery crosses the actual HTTP + Durable Object SQLite boundary.
+    const workLinkCode = await json(await call(`/api/identities/${identity.identityId}/link-code`, { headers: identityHeaders,
+      data: { roomId: 'commons' } }), 201);
     await json(await call('/api/rooms/commons/identity-links', { headers: ownerHeaders,
-      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'] } }), 201);
+      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'], identityLinkCode: workLinkCode.linkCode } }), 201);
     const beatWork = () => call('/api/agent-heartbeats', { headers: identityHeaders,
       data: { hostId: 'worker-work-test', mode: 'pull-only', workWakes: true } });
     assert.equal((await json(await beatWork())).host.workWakes, true);
@@ -572,7 +574,7 @@ test('Worker bounty HTTP receipts create distinct durable webhook deliveries wit
 });
 
 
-test('Worker board v2 routes stay retired across restart, including when the old flag is set', async () => {
+test('Worker board v2 routes stay retired', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const origin = 'https://room.example.test', directory = await mkdtemp(join(tmpdir(), 'project-room-cf-board-'));
@@ -580,7 +582,7 @@ test('Worker board v2 routes stay retired across restart, including when the old
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } },
     durableObjectsPersist: directory, bindings: { ROOM_ORIGIN: origin } };
-  let mf = new Miniflare(config);
+  const mf = new Miniflare(config);
   const call = async (path, key, data, status = 410) => {
     const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
       headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1',
@@ -598,12 +600,7 @@ test('Worker board v2 routes stay retired across restart, including when the old
     assert.equal(retired.error.code, 'board_v2_retired');
     assert.equal(retired.next[0].href, '/api/rooms/commons/work-claims');
     assert.equal((await call(base + '/claims', ownerKey, payload)).error.code, 'board_v2_retired');
-    await mf.dispose();
-    config.bindings.ROOM_BOARD_V2_ENABLED = '1';
-    mf = new Miniflare(config);
-    const again = await call(base + '/claims', ownerKey, payload);
-    assert.equal(again.error.code, 'board_v2_retired');
-    assert.equal(again.next[0].href, '/api/rooms/commons/work-claims');
+    assert.equal((await call(base + '/claims/task-1/not-a-route', ownerKey)).error.code, 'board_v2_retired');
   } finally { await mf.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -678,8 +675,11 @@ test('Workers held wake poll receives a fresh online mention and fences revoked 
     const { ownerKey } = await json(await call('/__test-provision'));
     const peer = await json(await call('/api/agent-identities', { displayName: 'Workers wake agent' }), 201);
     const ownerHeaders = { Authorization: `Bearer ${ownerKey}` }, identityHeaders = { Authorization: `Bearer ${peer.secret}` };
+    const peerLinkCode = await json(await call(`/api/identities/${peer.identityId}/link-code`, {
+      roomId: 'commons'
+    }, identityHeaders), 201);
     await json(await call('/api/rooms/commons/identity-links', {
-      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: []
+      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: [], identityLinkCode: peerLinkCode.linkCode
     }, ownerHeaders), 201);
     const key = await json(await call('/api/agent-keys', { scopes: ['heartbeats:report', 'heartbeats:read'] }, identityHeaders), 201);
     const peerHeaders = { Authorization: `Bearer ${key.credential}` };

@@ -20,7 +20,7 @@ import { DARK_DECLARATIONS, LIGHT_DECLARATIONS } from "../src/design-tokens.js";
 import { ROOM_ORIGIN } from "./agent-discovery.mjs";
 import { CONTENT_TRUST } from "./content-trust.mjs";
 import { LEGAL_FOOTER_LINKS, reportHref } from "./legal-pages.mjs";
-import { escapeHtml } from "./receipts-page.mjs";
+import { escapeHtml } from "./html-escape.mjs";
 import { loadPublicRoom, proofLevelOf } from "./public-read-model.mjs";
 import { queryRoomProof } from "./receipts-live.mjs";
 import { PROOF_LEVELS, jsonLdScriptTag } from "./receipt-share.mjs";

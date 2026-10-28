@@ -1,0 +1,18 @@
+  /api/rooms/{roomId}/provider-heartbeats:
+    get:
+      summary: Provider heartbeat dashboard
+      description: Per-agent-provider liveness (live/stale/idle) from work-session heartbeats, plus current work.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Provider heartbeat dashboard
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  evaluatedAt: { type: string }
+                  providers: { type: array, items: { type: object } }
