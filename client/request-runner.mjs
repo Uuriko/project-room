@@ -26,12 +26,18 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal }) {
+export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
+  if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
+  const checkSelection = request => {
+    if (allowRequest && allowRequest(request) !== true)
+      throw Object.assign(new Error("Requester is not enabled for this host"), { code: "requester_not_allowed" });
+  };
   const client = new RoomAgentClient(connection);
   let context = await client.replyContext(requestMessageId, { limit: 50, signal });
   if (context.viewerId !== connection.memberId || context.request.recipientId !== connection.memberId)
     throw new Error("Request must be addressed to the configured member");
+  checkSelection(context.request);
   const id = "host-" + createHash("sha256").update(JSON.stringify([
     connection.origin, connection.roomId, connection.memberId, requestMessageId,
     context.roomCreatedEventId, context.request.openingEventId
@@ -68,6 +74,7 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       throw new Error("Request identity changed while preparing");
     messages.push(...context.page.items);
   }
+  checkSelection(context.request);
   if (!context.current.answerBasis || !context.preparation) throw new Error("Request is not ready or service lacks prepared context");
   if (context.preparation.work && context.request.workItemId) {
     const selected = await client.workContext(context.request.workItemId, { signal });
@@ -168,7 +175,7 @@ export function isRequestEligible(request, { owned, runState, hasPendingDelivery
   return runState !== "needs_attention" && hasPendingDelivery;
 }
 
-export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true }) {
+export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, onPoll = () => {} }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
   let delay = intervalMs, connectionUnavailable = false, pendingStatement;
@@ -177,9 +184,10 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
     let cursor = null;
     try {
       const { requests, evaluatedThrough, runs, blockedBy = {} } = await client.agentWork({ signal });
+      onPoll();
       cursor = evaluatedThrough;
       const owned = request => Object.hasOwn(runs, request.id);
-      const eligible = requests.filter(request => isRequestEligible(request, {
+      const eligible = requests.filter(request => (!allowRequest || allowRequest(request) === true) && isRequestEligible(request, {
         owned: owned(request),
         blocked: Object.hasOwn(blockedBy, request.id),
         runState: runs[request.id]?.state,
@@ -190,7 +198,7 @@ export async function runRequestQueue({ connection, db, execute, preflight, sign
         // A saved response may be retried only by its original local journal.
         // Another host's ownership is never a lease that can be stolen.
         if (owned(request) && !pending(request)) continue;
-        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal })); }
+        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest })); }
         catch (error) {
           if (error?.code === "host_isolation_unavailable") throw error;
           emit({ status: "needs_attention", requestMessageId: request.id });

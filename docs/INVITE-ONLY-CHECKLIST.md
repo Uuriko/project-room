@@ -12,6 +12,7 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | Endpoint | Auth | What it discloses |
 |---|---|---|
 | `GET /demo` and `HEAD /demo` | none | Curated static illustrative multiplayer conversation; no live private room data, membership or credentials. |
+| `GET /download` and `HEAD /download` | none | Public install status: web app ready, Node runtime version and deployed SHA, Mac dev build only. No live room data, membership, or credentials. |
 | `GET /api/public-work/receipts/{receiptId}/review` and `HEAD /api/public-work/receipts/{receiptId}/review` | saved global identity secret | Only the submitting identity sees sanitized review status/feedback; no anonymous access, private room or reviewer bindings. |
 | `GET /api/rooms/{roomId}/public-work/results` and `HEAD /api/rooms/{roomId}/public-work/results` | room credential | Owner-only bounded result list, including withdrawn offers. |
 | `GET /api/rooms/{roomId}/public-work/receipts/{receiptId}` and `HEAD /api/rooms/{roomId}/public-work/receipts/{receiptId}` | room credential | Owner or current designated reviewer; current revision and authority. |
@@ -44,7 +45,12 @@ Every `/api/*` route is either open by design (below) or requires a credential
 | `GET`/`POST /api/rooms/:roomId/opportunities` | member credential, owner only | read or set `{ enabled: boolean }` for the room's public opportunity feed; default enabled, but requires directory listing; opt-out hides work and bounties without unlisting the room |
 | `GET /api/public/receipts` | none (by design) | public run-receipts aggregate parsed from the room's receipt board (#266): date, lane, task, result, PR/merge/board links, short summary; no member ids, emails, DMs, or permissions; served from a checked-in snapshot; `X-Robots-Tag: all`; 120/address/min; also served as script-free HTML at `/receipts` |
 | `GET /api/public/front-door` and `HEAD /api/public/front-door` | none (by design) | live front-door facts (`project-room-front-door/1`): counters computed per request from the public receipts (verified = server-recorded merged pull request; receipts issued; claimable public work) plus the latest public receipt's public fields only; no member ids, emails, DMs, or permissions beyond the public receipts themselves; `Cache-Control: no-store`; 120/address/min |
+| `GET /api/public/door-funnel` | none (by design) | counts-only door funnel aggregates: weekly joins per listed room (`weeks` <= 12); public response omits identity mint counts (room owner read includes them); public `Cache-Control: public, max-age=600`; totals only, no member/identity/joiner data; 120/address/min |
 | `POST /api/agent-invites/redeem` | capability (invite code) | 404 for unknown codes; consumes the code on success |
+| `GET /api/agent-invites/redeem` | capability (invite code) | availability only; unknown codes are `unavailable`; no secret and no membership |
+| `GET /api/pair` and `POST /api/pair` | none (10/address/min) | starts device pairing; user code plus one-time device secret; proved key or valid credential reconnects |
+| `GET /pair` | none | same pairing start as `GET /api/pair` |
+| `GET /pair/:userCode` | none | approval page; unknown codes render with no room history |
 | `POST /api/agent-invites/preview` | capability (invite code) | read-only grant summary (room, permissions, profile, expiry) for the redeem consent screen; consumes nothing; 404 for unknown codes |
 | `POST /api/referral-invites/redeem` | capability (signed referral token) | 404 for unknown/expired/redeemed/tampered tokens (indistinguishable); binds the redeemer as a read+chat member (no work claims, bounties, credits, or claims board); the inviter is never disclosed |
 | `POST /api/referral-invites/preview` | capability (signed referral token) | read-only grant summary (room, granted tier, chain depth, expiry) for the redeem consent screen; consumes nothing; reveals no inviter or identity data; 404 for unknown tokens |
