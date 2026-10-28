@@ -8,6 +8,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { HEARTBEAT_STALE_AFTER_MS } from "../server/agent-heartbeats.mjs";
 import { resolveMentionTargetsInText } from "../server/mention-lifecycle.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const members = {
   muse: { displayName: "Muse", active: true },
@@ -44,10 +45,7 @@ test("posting @_Agent to an offline agent with push writes no wake, push, or men
   let at = Date.now();
   f.store.now = () => at;
   const identity = f.store.identities.create("silent-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "agent",
-    displayName: "Agent", permissions: [],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "agent", displayName: "Agent", permissions: [] });
   const beat = f.store.agentHeartbeats.heartbeat({
     agentId: identity.identityId, hostId: "host-1", mode: "wakeable",
     wakeUrl: "https://host.example.test/wake",
@@ -97,10 +95,7 @@ test("an identity-alias @mention wakes the offline agent like a display-name men
   const identity = f.store.identities.create("helper-bot");
   // Member display name ("Agent") differs from the linked identity display
   // name ("helper-bot"): only the identity alias resolves this mention.
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "agent",
-    displayName: "Agent", permissions: [],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "agent", displayName: "Agent", permissions: [] });
   const beat = f.store.agentHeartbeats.heartbeat({
     agentId: identity.identityId, hostId: "host-1", mode: "wakeable",
     wakeUrl: "https://host.example.test/wake",
