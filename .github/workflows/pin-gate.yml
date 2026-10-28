@@ -16,6 +16,7 @@ name: pin-gate
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - '.github/**'
       - 'scripts/check-workflow-pins.mjs'
