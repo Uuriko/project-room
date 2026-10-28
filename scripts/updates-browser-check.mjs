@@ -35,7 +35,11 @@ async function setup(t, storeOptions = {}) {
   store.command(owner, "commons", command(T.MEMBER_ADDED, {
     memberId: "agent", displayName: "Reply Agent", kind: "agent", permissions: ["accept_work", "complete_work"]
   }));
-  const server = createRoomServer({ store, streamInterval: 60 });
+  // Opening the room refreshes updates together with needs-attention,
+  // reminders and access-requests. That fan-out is wider than the production
+  // read burst, so this browser fixture keeps the previous 600-read window.
+  // Production callers stay on the burst.
+  const server = createRoomServer({ store, streamInterval: 60, credentialReadBurst: 600 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   let browser;

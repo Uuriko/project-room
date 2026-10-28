@@ -75,9 +75,14 @@ optional.push("server/bonds.mjs"); // agent Bond + peer DMs (imported by server/
 optional.push("server/membership-delegation-journal.mjs"); // append-only membership grant decisions
 optional.push("server/journal.mjs"); // shared per-kind journal (imported by server/store.mjs and the other journal callers)
 optional.push("server/room-directory.mjs"); // #605 opt-in public room directory (imported by server/store.mjs)
+optional.push("server/door-funnel.mjs", "server/routes/door-funnel.mjs"); // DOOR-FUNNEL-READ: public door funnel aggregates (route module imported by server/routes/table.mjs)
+optional.push("server/verdict-inbox.mjs", "server/verdict-inbox-read.mjs", "server/routes/verdict-inbox.mjs"); // COMP-DEEP #1 verdict inbox (route module imported by server/routes/table.mjs)
 optional.push("offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "server/project-offers.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
+optional.push("server/snapshot-window.mjs"); // shared room-read window (imported by server/http.mjs and server/room-bootstrap.mjs)
+optional.push("server/routes/room-window.mjs"); // windowed bootstrap and older-message page (imported by server/routes/table.mjs)
+optional.push("server/room-bootstrap.mjs"); // one-read room open (imported by server/http.mjs and server/mcp-room-profile.mjs)
 optional.push("src/curiosity-rank.mjs"); // curiosity sort for room_list_work (imported by server/mcp-room-profile.mjs)
 optional.push("src/dm-consents.js"); // DM consent browser view-model + API helpers (imported by src/app.js)
 optional.push("src/friend-bond.js"); // Friend / Bond People chrome (imported by src/app.js and src/client.js)
@@ -285,6 +290,7 @@ optional.push("server/membership-resolution.mjs"); // #3882: shared guest-aware 
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs");
 optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)
+optional.push("cloudflare/job-alarm-reconciler.mjs"); // coalesced alarm reconciliation
 optional.push("cloudflare/job-heartbeat.mjs"); // per-job cron heartbeat (imported by cloudflare/room.mjs)
 optional.push("cloudflare/channel-drain-tick.mjs"); // channel-drain RPC decision table (imported by cloudflare/room.mjs)
 optional.push("cloudflare/edge-public.mjs"); // static assets and discovery docs answered outside the Durable Object (imported by cloudflare/room.mjs)
@@ -346,6 +352,7 @@ optional.push("server/agent-fleet.mjs", "server/routes/agents.mjs"); // CP-AGENT
 optional.push("server/work-wants.mjs", "server/routes/wants-work.mjs"); // BOARD-WAKE-2: ready-work preference and its RT route (imported by server/store.mjs, server/work-claim-routes.mjs and server/routes/table.mjs)
 optional.push("server/routes/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grant RT routes (imported by server/routes/table.mjs)
 optional.push("server/routes/agent-work.mjs"); // bounded agent pickup route
+optional.push("server/routes/agent-room-token.mjs"); // onboarding token rotate RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/typing.mjs", "server/routes/room-digest.mjs", "server/room-digest.mjs", "server/message-read-index.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
@@ -419,7 +426,7 @@ optional.push("src/entry.js", "src/signin-entry.js", "src/signin-navigation.js")
 optional.push("server/sql-binds.mjs"); // shared Worker-safe SQL list chunks imported by fleet, wakes, needs-me and restore
 optional.push("server/html-escape.mjs", "src/html-escape.js"); // one HTML escape, re-exported for server callers
 optional.push("server/db-util.mjs"); // shared sqlite tableExists
-optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs"); // Archive-aware message domain reads
+optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs", "server/agent-pause.mjs"); // Archive-aware message domain reads; pause admission asks agent-pause isPaused
 optional.push("server/room-shard.mjs", "server/room-shard-tables.mjs"); // per-room table classification; the worker re-exports it and still serves invite-only-pilot
 optional.push("server/room-shard-flag.mjs"); // ROOM_PER_ROOM_OBJECTS default off; storage_home is added only when the flag is on
 optional.push("server/room-shard-route.mjs", "cloudflare/room-shard.mjs"); // ROOM_SHARD class and the pilot/shard name resolver; flag off does not open shard storage

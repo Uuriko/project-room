@@ -1,0 +1,24 @@
+  /api/agents/directory/{agentId}:
+    get:
+      summary: Read one public directory card
+      description: >-
+        The cardUrl target from the directory document. Room-visibility and
+        private cards are visible to room members only (see the member rules
+        on GET /api/agent-directory); anything else reads as 404
+        unknown_card. The response carries publicKey + signature for offline
+        verification.
+      security: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ agentId, name, description, url, capabilities, skills, version, publicKey, signature, visibility, publishedAt, updatedAt, owns, reach, provenance, a2a } — a2a is the A2A v1.0 shaped projection (interop/discoverability only; signatures[] deliberately absent, house signature via x-project-room.signature)" }
+        '404': { description: unknown_card }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      parameters:
+        - { name: agentId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
