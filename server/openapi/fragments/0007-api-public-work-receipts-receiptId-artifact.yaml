@@ -1,0 +1,64 @@
+  /api/public-work/receipts/{receiptId}/artifact:
+    get:
+      operationId: "getPublicWorkArtifact"
+      summary: "Fetch the exact UTF-8 contribution bytes for independent digest checking."
+      description: "Public: no credential required."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            "text/plain":
+              schema:
+                type: "string"
+                description: "Exact artifact bytes, attachment; recompute SHA-256."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: "Invalid fields, unsupported query or ineligible owner task."
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        -
+          name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security: []
+    head:
+      operationId: "headPublicWorkArtifact"
+      summary: "Fetch the exact UTF-8 contribution bytes for independent digest checking."
+      description: "Public: no credential required."
+      responses:
+        "200":
+          description: "OK"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
+        "422":
+          description: "Invalid fields, unsupported query or ineligible owner task."
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+      parameters:
+        -
+          name: "receiptId"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      security: []
