@@ -30,6 +30,31 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
    - **Board stocked:** `curl -sS 'https://room.trydemigod.com/api/public-work/tasks?limit=1'` → `claimableCount` must be **> 0**. A drained board (every task submitted, nothing reseeded) fails the receipt until the board is reseeded.
    - **Gallery fresh:** `curl -sS 'https://room.trydemigod.com/api/public/receipts?limit=1'` → the newest receipt's `at` must be **less than 7 days old**. A frozen gallery fails the receipt the same way; check whether any room has the *Publish receipts from this room* toggle on with work settled since.
 
+### Temporary SQL cost diagnosis
+
+The production Durable Object defaults to `ROOM_SQL_COST_LOG=0`. The entry Worker
+and staging omit it and remain off. For a bounded investigation, explicitly set
+production to `1`, qualify and deploy that revision, then collect a short
+ordinary-traffic sample of `room.sql_cost`,
+group by `scopeKind` and `operation`, and retain `unscoped`, `late` and unknown
+counter totals. The records contain fixed categories and numeric counters, never
+SQL text, bindings, request paths or identity values. Existing request logs are
+separate and are not redacted by this option.
+
+`coverage: adapter-observed` excludes direct raw SQL such as writer-permit updates
+and `changes()` probes. These are SQL row/statement counters, not CPU, latency or
+queue duration. Request summaries end at response headers and say `complete:false`;
+streaming work may finish later. Child jobs and explicitly scoped background work
+do not count toward their parent. Unscoped and late totals flush on the next scoped
+completion and can be lost if the isolate ends first.
+
+After capturing evidence, set `env.production.vars.ROOM_SQL_COST_LOG` to `"0"` in
+`cloudflare/wrangler.jsonc`, regenerate `scripts/CANDIDATE-MANIFEST.json`, qualify
+and deploy the change through the same lane. Use an explicit `"0"`, rather than
+removing the variable: deployment preserves existing bindings with `--keep-vars`.
+Verify the production Worker variable and absence of new `room.sql_cost` records
+after disablement. Do not increase deadlines or generate a load test for this sample.
+
 ### Optional auto-deploy
 
 When the repository variable `ROOM_AUTO_DEPLOY` is `1`, `deploy-prod` also runs after `test` or `schema-gate` completes on `main`. It deploys only the current main tip, only when both gates are green, and only if production does not already report that commit. The variable is unset by default.

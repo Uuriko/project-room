@@ -26,7 +26,7 @@ export const CORE_REST_TWINS = Object.freeze({
   room_read_request: ["GET /api/rooms/{roomId}/reply-context"],
   room_check_access: ["GET /api/agent-rooms"],
   room_create: ["POST /api/agent-rooms"],
-  room_join: ["POST /api/share-links/join-agent", "POST /api/agent-invites/redeem"],
+  room_join: ["POST /api/share-links/join-agent", "POST /api/agent-invites/redeem", "POST /api/pair"],
   room_put_file: ["POST /api/rooms/{roomId}/files"],
   room_commit_file: ["POST /api/rooms/{roomId}/files/{id}/commit"],
   add_land_item: ["POST /api/rooms/{roomId}/add_land_item"],
