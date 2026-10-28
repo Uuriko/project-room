@@ -73,6 +73,11 @@ function sweep() {
 
   step(T.ROOM_CHARTER_UPDATED, "owner", () => ({ expectedRevision: state().room.charter?.revision ?? 0, purpose: "Coordinate the pilot.", outputs: "An agenda.", boundaries: "No spend.", escalation: "Ask the owner." }));
   step(T.ROOM_POLICY_SET, "owner", { requireIndependentReview: true, requireOwnerDecision: true });
+  // --- #661: the anti-shout pacing policy is a room policy like the ones
+  // above (disabled again for the rest of the sweep, so no later reply in
+  // this fixture is paced). ---
+  step(T.ROOM_PACING_POLICY_SET, "owner", { enabled: true, maxUnnamedAgentReplies: 2 });
+  step(T.ROOM_PACING_POLICY_SET, "owner", { enabled: false });
   step(T.ROOM_SPEND_ALLOWANCE_SET, "owner", { allowanceCents: 10000, periodDays: 30 });
   step(T.ROOM_SPEND_PRICING_SET, "owner", { enabled: false });
   step(T.ROOM_SPEND_PRICING_SET, "owner", { enabled: true });
@@ -351,6 +356,6 @@ test("the event surface has not grown without this sweep noticing", () => {
   // member.merged and pair.requested/approved/denied are not exercised here:
   // they need an agent-pairing flow and two live agent members. They are
   // covered by tests/pairing-flow.test.js and tests/pairing-reconnect.test.js.
-  assert.equal(Object.values(T).length, 71,
+  assert.equal(Object.values(T).length, 72,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
