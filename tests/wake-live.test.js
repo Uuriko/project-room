@@ -41,6 +41,7 @@ import { DatabaseSync } from "node:sqlite";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import {
   AgentHeartbeats,
   agentHeartbeatSchema,
@@ -222,8 +223,8 @@ test("GET /api/wake-status?roomId= lists the room's wakeable and not-wakeable me
   const never = await keyedAgent(f, origin, "wake-never-agent");
   const outsider = await keyedAgent(f, origin, "wake-outsider-agent");
   for (const [i, a] of [live, idle, never].entries()) {
-    f.store.identities.link(f.keys.owner, "commons", {
-      identityId: a.identity.identityId, memberId: a.identity.identityId,
+    linkWithProof(f.store, f.keys.owner, "commons", a.identity, {
+      memberId: a.identity.identityId,
       displayName: `wake test ${i}`, permissions: ["write_external"],
     });
   }
