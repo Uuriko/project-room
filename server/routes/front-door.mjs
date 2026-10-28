@@ -36,5 +36,6 @@ export const FRONT_DOOR_ROUTES = Object.freeze(["GET", "HEAD"].map(method => Obj
   id: `public-front-door-${method.toLowerCase()}`, method, path: "/api/public/front-door",
   auth: "none", capability: null, scope: "public", handler: frontDoorFacts,
   parity: "exempt:public web front-door facts feed for the /about hero; no MCP tool serves page counters — agents read the same records via the public receipts API",
+  publication: "gate:public-visibility",
   schema: { response: { type: "object" } }, events: []
 })));
