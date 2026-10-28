@@ -80,7 +80,9 @@ function toolResult(value, isError = false, redactions = []) {
 }
 
 function notMemberPair(store, secret, args, error) {
-  if (!(error instanceof ServiceError) || error.status !== 401 || error.code !== "unauthenticated") return null;
+  if (!(error instanceof ServiceError)) return null;
+  // Main answers a global identity outside the room with 403 no_access; older paths answer 401.
+  if (!((error.status === 401 && error.code === "unauthenticated") || (error.status === 403 && error.code === "no_access"))) return null;
   if (!validId(args?.roomId)) return null;
   const who = store.identities?.resolveGlobalIdentitySecret?.(secret);
   if (!who) return null;
