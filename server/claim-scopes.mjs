@@ -1,5 +1,6 @@
 // Live admission policy, not a change to historical event replay. Reservations
 // coordinate this room only; they neither authorize nor stop external execution.
+import { claimRepositoryOf, claimBranchOf, normalizeClaimRepository, ClaimError } from './work-claims.mjs';
 import { activeClaim } from '../src/workflow.js';
 
 export class ClaimScopeError extends Error {
@@ -25,6 +26,16 @@ export function claimScope(claim) {
       throw new ClaimScopeError('Repository and revision must be explicit, without surrounding whitespace.');
     }
   }
+  try { claimRepositoryOf(normalizeClaimRepository(claim.repository)); }
+  catch (error) {
+    if (!(error instanceof ClaimError)) throw error;
+    throw new ClaimScopeError('Use a repository name of at most 200 letters, numbers, dots, underscores, slashes or hyphens, or a public HTTPS GitHub repository URL.');
+  }
+  try { claimBranchOf(claim.ref); }
+  catch (error) {
+    if (!(error instanceof ClaimError)) throw error;
+    throw new ClaimScopeError('Use a ref of at most 200 letters, numbers, dots, underscores, slashes or hyphens.');
+  }
   if (!Array.isArray(claim.paths) || !claim.paths.length) throw new ClaimScopeError('Choose at least one path.');
   return claim.paths.map(pathScope);
 }
@@ -33,12 +44,17 @@ const covers = (scope, other) => scope.path === other.path || (scope.subtree && 
 
 export function conflictingClaim(workItems, candidate, now) {
   const paths = claimScope(candidate.claim);
+  const repository = normalizeClaimRepository(candidate.claim.repository);
   for (const item of Object.values(workItems)) {
     if (item.id === candidate.id || !activeClaim(item, now)) continue;
     const claim = item.claim;
-    // Repository and ref are declared identities, not resolved aliases or proofs
-    // of external isolation. Cross-room coordination is deliberately not claimed.
-    if (claim.repository !== candidate.claim.repository || claim.ref !== candidate.claim.ref) continue;
+    // Repository identities unify public GitHub URLs with owner/name; refs remain
+    // declared strings, not proofs of external isolation. Cross-room coordination is deliberately not claimed.
+    const otherRepository = normalizeClaimRepository(claim.repository);
+    const githubAlias = repository !== candidate.claim.repository || otherRepository !== claim.repository;
+    const sameRepository = typeof otherRepository === "string" && (githubAlias
+      ? otherRepository.toLowerCase() === repository.toLowerCase() : otherRepository === repository);
+    if (!sameRepository || claim.ref !== candidate.claim.ref) continue;
     let existing;
     try { existing = claimScope(claim); }
     catch { return item; } // Ambiguous legacy scope needs explicit release/review.

@@ -9,7 +9,10 @@ import { promisify } from "node:util";
 import { createHash, scryptSync } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { AgentRooms } from "../server/agent-rooms.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { mintHolderLinkCode } from "./helpers/link-with-proof.mjs";
+import { PERMISSIONS } from "../src/events.js";
 
 const sha256 = text => createHash("sha256").update(text).digest("hex");
 const slowHash = code => scryptSync(code, "project-room-agent-invite-v2", 32, { N: 16384, r: 8, p: 1 }).toString("hex");
@@ -159,11 +162,11 @@ test("redeem folds the Crockford confusables so a transcribed code still works",
 });
 
 test("minting is owner-only and can never grant administration", async t => {
-  const { origin, ownerKey } = await serve(t);
+  const { store, origin, ownerKey } = await serve(t);
   // An agent member cannot mint.
   const id = await post(origin, "/api/agent-identities", { displayName: "Grunt" });
   const linked = await post(origin, "/api/rooms/commons/identity-links",
-    { identityId: id.json.identityId, permissions: ["accept_work"] }, ownerKey);
+    { identityId: id.json.identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId: id.json.identityId, secret: id.json.secret }, "commons") }, ownerKey);
   assert.equal(linked.status, 201);
   const denied = await mint(origin, id.json.secret, { permissions: ["accept_work"] });
   assert.equal(denied.status, 403);
@@ -254,10 +257,10 @@ test("unknown, revoked, and expired codes fail distinctly", async t => {
 });
 
 test("revocation is owner-only and cannot burn a used code", async t => {
-  const { origin, ownerKey } = await serve(t);
+  const { store, origin, ownerKey } = await serve(t);
   const id = await post(origin, "/api/agent-identities", { displayName: "Grunt" });
   const linked = await post(origin, "/api/rooms/commons/identity-links",
-    { identityId: id.json.identityId, permissions: ["accept_work"] }, ownerKey);
+    { identityId: id.json.identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId: id.json.identityId, secret: id.json.secret }, "commons") }, ownerKey);
   assert.equal(linked.status, 201);
   const minted = await mint(origin, ownerKey, { permissions: ["accept_work"] });
   const denied = await del(origin, "/api/rooms/commons/agent-invites", { inviteId: minted.json.inviteId }, id.json.secret);
@@ -299,17 +302,17 @@ test("list is the audit trail: creation, redemption, revocation, expiry", async 
   // Non-owners cannot read the audit.
   const id = await post(origin, "/api/agent-identities", { displayName: "Grunt" });
   const linked = await post(origin, "/api/rooms/commons/identity-links",
-    { identityId: id.json.identityId, permissions: ["accept_work"] }, ownerKey);
+    { identityId: id.json.identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId: id.json.identityId, secret: id.json.secret }, "commons") }, ownerKey);
   assert.equal(linked.status, 201);
   assert.equal((await get(origin, "/api/rooms/commons/agent-invites", id.json.secret)).status, 403);
 });
 
 test("an agent with invite_member (no manage_members/decide) mints; a peer redeems and checks", async t => {
-  const { origin, ownerKey } = await serve(t);
+  const { store, origin, ownerKey } = await serve(t);
   const inviter = await post(origin, "/api/agent-identities", { displayName: "Inviter Bot" });
   assert.equal(inviter.status, 201);
   const linked = await post(origin, "/api/rooms/commons/identity-links",
-    { identityId: inviter.json.identityId, permissions: ["invite_member"] }, ownerKey);
+    { identityId: inviter.json.identityId, permissions: ["invite_member"], identityLinkCode: mintHolderLinkCode(store, { identityId: inviter.json.identityId, secret: inviter.json.secret }, "commons") }, ownerKey);
   assert.equal(linked.status, 201, JSON.stringify(linked.json));
   const minted = await mint(origin, inviter.json.secret, { profile: "contribute", expiresInMinutes: 60, displayName: "Peer Bot" });
   assert.equal(minted.status, 201, JSON.stringify(minted.json));
@@ -679,7 +682,7 @@ test("invite redeem returns machine-readable next steps for a redeemed agent (RC
   for (const step of res.json.next) {
     assert.equal(typeof step.action, "string");
     assert.equal(typeof step.description, "string");
-    assert.ok((step.method && step.path) || step.doc, "each step has a method+path or a doc pointer");
+    assert.ok((step.method && step.path) || step.tool || step.doc, "each step has a method+path, a tool, or a doc pointer");
     if (step.path) {
       assert.ok(step.path.includes("/api/rooms/commons/") || step.path === "/api/agent-invites/redeem",
         `step path is concrete and room-scoped: ${step.path}`);
@@ -755,9 +758,13 @@ test("ANCHOR-D7a: redeem times out, retry with the same requestId recovers the m
   assert.equal(retry.json.memberId, first.json.memberId);
   assert.equal(retry.json.roomId, first.json.roomId);
   assert.equal(retry.json.duplicate, true);
-  assert.ok(typeof retry.json.mcpToken?.credential === "string" && /^rak_/.test(retry.json.mcpToken.credential),
-    "replay re-issues an onboarding token");
-  assert.notEqual(retry.json.mcpToken.credential, first.json.mcpToken.credential, "replay mints a fresh token, not the lost one");
+  assert.equal(retry.json.mcpToken, null, "a replay does not mint another onboarding token");
+  assert.equal(retry.json.next[1].action, "rotate");
+  assert.equal(typeof retry.json.identitySecret, "string");
+  const rotated = await post(origin, "/api/agent-rooms/commons/token/rotate", {}, retry.json.identitySecret);
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.json));
+  assert.match(rotated.json.mcpToken.credential, /^rak_/);
+  assert.equal(store.authenticate(rotated.json.mcpToken.credential, "commons").identityId, first.json.identityId);
   assert.equal(Object.keys(store.room("commons").state.members).length, membersBefore + 1, "no second membership");
   assert.doesNotThrow(() => store.db.prepare("SELECT 1 FROM agent_invite_redeem_receipts WHERE request_id=?").get(requestId));
   // Contrast: without the requestId the legacy trap still 409s — the client
@@ -765,6 +772,28 @@ test("ANCHOR-D7a: redeem times out, retry with the same requestId recovers the m
   const legacy = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "G1 Bot" });
   assert.equal(legacy.status, 409);
   assert.equal(legacy.json.error.code, "invite_already_used");
+});
+
+test("re-redeeming an invite with the same identity does not mint another token", async t => {
+  const { store, origin, ownerKey } = await serve(t);
+  const me = store.identities.create("Returning Agent");
+  const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60, displayName: "Returning Agent" });
+  assert.equal(minted.status, 201);
+  const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Returning Agent" }, me.secret);
+  assert.equal(first.status, 201, JSON.stringify(first.json));
+  assert.match(first.json.mcpToken.credential, /^rak_/);
+  const again = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Returning Agent" }, me.secret);
+  assert.equal(again.status, 201, JSON.stringify(again.json));
+  assert.equal(again.json.duplicate, true);
+  assert.equal(again.json.mcpToken, null);
+  assert.equal(again.json.next[0].action, "rotate");
+  assert.match(again.json.next[0].description, /inside 60 seconds/);
+  assert.equal(store.authenticate(first.json.mcpToken.credential, "commons").identityId, me.identityId);
+  const rotated = await post(origin, again.json.next[0].path, {}, me.secret);
+  assert.equal(rotated.status, 200, JSON.stringify(rotated.json));
+  assert.throws(() => store.authenticate(first.json.mcpToken.credential, "commons"),
+    err => err.status === 401 && err.code === "unauthenticated");
+  assert.equal(store.authenticate(rotated.json.mcpToken.credential, "commons").identityId, me.identityId);
 });
 
 test("ANCHOR-D7e: a replay with another identity's credential is refused and mints no token", async t => {
@@ -900,23 +929,330 @@ test("revoke answers 200 for a revoked or expired invite and 404 for an unknown 
   assert.equal(expiredAgain.json.status, "expired");
 });
 
-test("three credential replays of a burned invite leave one live room key", async t => {
+test("three credential replays of a burned invite mint no room key", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const minted = await mint(origin, ownerKey, { permissions: ["accept_work"], displayName: "Replay Bot" });
   const first = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Replay Bot" });
   assert.equal(first.status, 201, JSON.stringify(first.json));
-  let last = first;
+  const originalId = first.json.mcpToken.keyId;
   for (let i = 0; i < 3; i++) {
-    last = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Replay Bot" }, first.json.identitySecret);
+    const last = await post(origin, "/api/agent-invites/redeem", { code: minted.json.code, displayName: "Replay Bot" }, first.json.identitySecret);
     assert.equal(last.status, 201, JSON.stringify(last.json));
     assert.equal(last.json.duplicate, true);
-    assert.match(last.json.mcpToken.credential, /^rak_/);
-    assert.equal(last.json.next[0].action, "save-room-key");
+    assert.equal(last.json.mcpToken, null);
+    assert.equal(last.json.next[0].action, "rotate");
   }
   const live = store.agentPlugin.listApiKeys(first.json.identityId).filter(key => !key.revoked);
   assert.equal(live.length, 1);
-  assert.equal(live[0].keyId, last.json.mcpToken.keyId);
+  assert.equal(live[0].keyId, originalId);
   const raw = credential => credential.slice("rak_".length);
-  assert.equal(store.agentPlugin.verifyApiKeySecret(raw(first.json.mcpToken.credential)), null);
-  assert.equal(store.agentPlugin.verifyApiKeySecret(raw(last.json.mcpToken.credential))?.keyId, last.json.mcpToken.keyId);
+  assert.equal(store.agentPlugin.verifyApiKeySecret(raw(first.json.mcpToken.credential))?.keyId, originalId);
+});
+
+const absent = (blob, secret, label) => {
+  assert.equal(typeof secret === "string" && secret.length > 8, true, label);
+  assert.equal(String(blob).includes(secret), false, label);
+};
+
+test("owner mints and redeems an owner-level invite; preview does not consume it", async t => {
+  const lines = [];
+  const warn = console.warn, error = console.error;
+  const note = args => lines.push(args.map(part => typeof part === "string" ? part : part instanceof Error ? part.message : "").join(" "));
+  console.warn = (...args) => { note(args); warn.apply(console, args); };
+  console.error = (...args) => { note(args); error.apply(console, args); };
+  t.after(() => { console.warn = warn; console.error = error; });
+  const { store, origin, ownerKey } = await serve(t);
+  const minted = await mint(origin, ownerKey, { ownerEquivalent: true, expiresInMinutes: 60 });
+  assert.equal(minted.status, 201, minted.json?.error?.code ?? "mint failed");
+  assert.equal(minted.json.ownerEquivalent, true);
+  assert.equal(minted.json.profile, "owner");
+  assert.deepEqual(minted.json.permissions, [...PERMISSIONS]);
+  const code = minted.json.code;
+  const codeHash = slowHash(code);
+
+  const preview = () => post(origin, "/api/agent-invites/preview", { code });
+  const first = await preview();
+  const second = await preview();
+  assert.equal(first.status, 200, first.json?.error?.code ?? "preview failed");
+  assert.equal(second.status, 200, second.json?.error?.code ?? "second preview failed");
+  assert.equal(first.json.ownerEquivalent, true);
+  assert.equal(first.json.profile, "owner");
+  assert.deepEqual(first.json.permissions, [...PERMISSIONS]);
+  assert.equal(first.json.identityId, undefined);
+  assert.equal(first.json.memberId, undefined);
+  assert.equal(first.json.secret, undefined);
+  assert.equal(first.json.code, undefined);
+  absent(JSON.stringify(first.json), code, "preview omits the invite code");
+  absent(JSON.stringify(first.json), codeHash, "preview omits the code hash");
+  absent(JSON.stringify(first.json), ownerKey, "preview omits the owner key");
+
+  const listed = await get(origin, "/api/rooms/commons/agent-invites", ownerKey);
+  assert.equal(listed.status, 200, listed.json?.error?.code ?? "list failed");
+  const row = listed.json.invites.find(invite => invite.inviteId === minted.json.inviteId);
+  assert.equal(row?.status, "active");
+  assert.equal(row?.ownerEquivalent, true);
+  assert.deepEqual(row?.permissions, [...PERMISSIONS]);
+  absent(JSON.stringify(listed.json), code, "invite list omits the invite code");
+  absent(JSON.stringify(listed.json), codeHash, "invite list omits the code hash");
+  absent(JSON.stringify(listed.json), ownerKey, "invite list omits the owner key");
+
+  const redeemed = await redeem(origin, code, "Ada Vale");
+  assert.equal(redeemed.status, 201, redeemed.json?.error?.code ?? "redeem failed");
+  const secret = redeemed.json.identitySecret;
+  const memberId = redeemed.json.memberId;
+  assert.notEqual(memberId, "owner");
+  assert.deepEqual(redeemed.json.permissions, [...PERMISSIONS]);
+  const member = store.room("commons").state.members[memberId];
+  assert.equal(member.kind, "agent");
+  assert.equal(member.delegatedAdmin, true);
+  assert.deepEqual(member.permissions, [...PERMISSIONS]);
+  assert.equal(store.room("commons").state.room.ownerId, "owner");
+
+  const events = store.db.prepare("SELECT body FROM events WHERE room_id=?").all("commons").map(entry => entry.body).join("\n");
+  assert.match(events, /"ownerEquivalent":true/);
+  assert.match(events, /"delegatedAdmin":true/);
+  const mintLog = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=?").all("commons", "agent_invite.minted").map(entry => JSON.parse(entry.body));
+  assert.equal(mintLog.length, 1);
+  assert.equal(mintLog[0].actorId, "owner");
+  assert.equal(mintLog[0].data.inviteId, minted.json.inviteId);
+  assert.equal(mintLog[0].data.ownerEquivalent, true);
+  assert.equal(mintLog[0].data.code, undefined);
+  absent(events, code, "event log omits the invite code");
+  absent(events, codeHash, "event log omits the code hash");
+  absent(events, ownerKey, "event log omits the owner key");
+  absent(events, secret, "event log omits the identity secret");
+
+  const again = await mint(origin, secret, { ownerEquivalent: true });
+  assert.equal(again.status, 403);
+  assert.equal(again.json.error.code, "owner_equivalent_forbidden");
+  absent(JSON.stringify(again.json), code, "forbidden body omits the invite code");
+  absent(JSON.stringify(again.json), secret, "forbidden body omits the identity secret");
+
+  store.command(ownerKey, "commons", { id: randomUUID(), type: "member.added",
+    data: { memberId: "pat", displayName: "Pat Lee", kind: "human", permissions: ["accept_work"] } });
+  const changed = await post(origin, "/api/rooms/commons/commands", {
+    id: randomUUID(), type: "member.access_changed",
+    data: { memberId: "pat", expectedMemberRevision: 0, permissions: ["accept_work", "verify"], active: true },
+  }, secret);
+  assert.equal(changed.status, 201, changed.json?.error?.message ?? "access change failed");
+  assert.deepEqual(store.room("commons").state.members.pat.permissions, ["accept_work", "verify"]);
+
+  const messageId = randomUUID();
+  const posted = await post(origin, "/api/rooms/commons/commands", {
+    id: randomUUID(), type: "message.posted", data: { messageId, body: "Ship the pilot." },
+  }, secret);
+  assert.equal(posted.status, 201, posted.json?.error?.message ?? "post failed");
+  const decision = await post(origin, "/api/rooms/commons/commands", {
+    id: randomUUID(), type: "decision.recorded",
+    data: { sourceMessageId: messageId, statement: "Ship the pilot." },
+  }, secret);
+  assert.equal(decision.status, 201, decision.json?.error?.message ?? "decision failed");
+
+  const ownerMember = store.room("commons").state.members.owner;
+  const touchOwner = await post(origin, "/api/rooms/commons/commands", {
+    id: randomUUID(), type: "member.access_changed",
+    data: { memberId: "owner", expectedMemberRevision: ownerMember.revision, permissions: ["accept_work"], active: true },
+  }, secret);
+  assert.equal(touchOwner.status, 422);
+  assert.equal(touchOwner.json.error.code, "command_rejected");
+  assert.equal(store.room("commons").state.room.ownerId, "owner");
+  assert.ok(store.room("commons").state.members.owner.permissions.includes("manage_members"));
+
+  const chatMint = await mint(origin, ownerKey, { profile: "chat", expiresInMinutes: 60 });
+  assert.equal(chatMint.status, 201, chatMint.json?.error?.code ?? "chat mint failed");
+  const chat = await redeem(origin, chatMint.json.code, "Cara Moss");
+  assert.equal(chat.status, 201, chat.json?.error?.code ?? "chat redeem failed");
+  const chatDecision = await post(origin, "/api/rooms/commons/commands", {
+    id: randomUUID(), type: "decision.recorded",
+    data: { sourceMessageId: messageId, statement: "Chat agents do not decide." },
+  }, chat.json.identitySecret);
+  assert.equal(chatDecision.status, 422);
+  assert.equal(chatDecision.json.error.code, "command_rejected");
+
+  const co = store.room("commons").state.members[memberId];
+  store.command(ownerKey, "commons", { id: randomUUID(), type: "member.access_changed", data: {
+    memberId, expectedMemberRevision: co.revision, permissions: ["accept_work"], active: true,
+  } });
+  const downgraded = store.room("commons").state.members[memberId];
+  assert.deepEqual(downgraded.permissions, ["accept_work"]);
+  assert.equal(downgraded.delegatedAdmin, undefined);
+  assert.equal(store.room("commons").state.room.ownerId, "owner");
+  const after = await post(origin, "/api/rooms/commons/commands", {
+    id: randomUUID(), type: "decision.recorded",
+    data: { sourceMessageId: messageId, statement: "A downgraded member does not decide." },
+  }, secret);
+  assert.equal(after.status, 422);
+  assert.equal(after.json.error.code, "command_rejected");
+
+  const burned = await redeem(origin, code, "Ada Vale");
+  assert.equal(burned.status, 409);
+  assert.equal(burned.json.error.code, "invite_already_used");
+
+  const log = lines.join("\n");
+  absent(log, code, "logs omit the invite code");
+  absent(log, codeHash, "logs omit the code hash");
+  absent(log, ownerKey, "logs omit the owner key");
+  absent(log, secret, "logs omit the identity secret");
+  absent(log, chat.json.identitySecret, "logs omit the chat identity secret");
+  absent(log, chatMint.json.code, "logs omit the chat invite code");
+});
+
+test("CLI invite-code owner asks for an owner-level invite", async t => {
+  const { origin, ownerKey } = await serve(t);
+  const ownerEnv = { ROOM_AGENT_ROOM: "commons", ROOM_AGENT_MEMBER: "owner", ROOM_AGENT_TOKEN: ownerKey };
+  const minted = await cli(origin, ["invite-code", "owner", "60", "Owner Peer"], ownerEnv);
+  assert.equal(minted.status, 0, minted.stderr);
+  assert.equal(minted.json.ownerEquivalent, true);
+  assert.equal(minted.json.profile, "owner");
+  assert.deepEqual(minted.json.permissions, [...PERMISSIONS]);
+  absent(minted.stderr, minted.json.code, "cli stderr omits the invite code");
+  absent(minted.stderr, ownerKey, "cli stderr omits the owner key");
+});
+
+test("a member who is not the owner seat cannot mint an owner-level invite", async t => {
+  const lines = [];
+  const warn = console.warn, error = console.error;
+  const note = args => lines.push(args.map(part => typeof part === "string" ? part : part instanceof Error ? part.message : "").join(" "));
+  console.warn = (...args) => { note(args); warn.apply(console, args); };
+  console.error = (...args) => { note(args); error.apply(console, args); };
+  t.after(() => { console.warn = warn; console.error = error; });
+  const { store, origin, ownerKey } = await serve(t);
+  const denied = async (token, label) => {
+    const res = await mint(origin, token, { ownerEquivalent: true });
+    assert.equal(res.status, 403, label);
+    assert.equal(res.json.error.code, "owner_equivalent_forbidden", label);
+    assert.equal(res.json.error.message, "Only the room owner can mint an owner-level invite", label);
+    absent(JSON.stringify(res.json), token, `${label} body omits the caller credential`);
+    return res;
+  };
+
+  const inviter = await post(origin, "/api/agent-identities", { displayName: "Inviter Bot" });
+  assert.equal(inviter.status, 201, inviter.json?.error?.code ?? "identity failed");
+  const linked = await post(origin, "/api/rooms/commons/identity-links",
+    { identityId: inviter.json.identityId, permissions: ["invite_member"], identityLinkCode: mintHolderLinkCode(store, { identityId: inviter.json.identityId, secret: inviter.json.secret }, "commons") }, ownerKey);
+  assert.equal(linked.status, 201, linked.json?.error?.code ?? "link failed");
+  await denied(inviter.json.secret, "invite_member agent");
+
+  const worker = await post(origin, "/api/agent-identities", { displayName: "Worker Bot" });
+  assert.equal(worker.status, 201, worker.json?.error?.code ?? "worker identity failed");
+  const workerLink = await post(origin, "/api/rooms/commons/identity-links",
+    { identityId: worker.json.identityId, permissions: ["accept_work"], identityLinkCode: mintHolderLinkCode(store, { identityId: worker.json.identityId, secret: worker.json.secret }, "commons") }, ownerKey);
+  assert.equal(workerLink.status, 201, workerLink.json?.error?.code ?? "worker link failed");
+  await denied(worker.json.secret, "accept_work agent");
+
+  store.command(ownerKey, "commons", { id: randomUUID(), type: "member.added",
+    data: { memberId: "clerk", displayName: "Clerk Lee", kind: "human", permissions: ["invite_member"] } });
+  await denied(store.issueAccessKey("commons", "clerk"), "invite_member member");
+
+  store.command(ownerKey, "commons", { id: randomUUID(), type: "member.added",
+    data: { memberId: "warden", displayName: "Warden Lee", kind: "human", permissions: ["manage_members", "invite_member"] } });
+  await denied(store.issueAccessKey("commons", "warden"), "manage_members member");
+
+  const flag = await mint(origin, ownerKey, { ownerEquivalent: false });
+  assert.equal(flag.status, 422);
+  assert.equal(flag.json.error.code, "invalid_invite");
+  const mixed = await mint(origin, ownerKey, { ownerEquivalent: true, permissions: ["accept_work"] });
+  assert.equal(mixed.status, 422);
+  assert.equal(mixed.json.error.code, "invalid_invite_scope");
+  const bits = await mint(origin, ownerKey, { permissions: ["manage_members"] });
+  assert.equal(bits.status, 422);
+  assert.equal(bits.json.error.code, "invalid_invite_scope");
+  const log = lines.join("\n");
+  absent(log, ownerKey, "logs omit the owner key");
+  absent(log, inviter.json.secret, "logs omit the inviter secret");
+  absent(log, worker.json.secret, "logs omit the worker secret");
+});
+
+test("an agent owner can mint an owner-level invite; a co-owner agent and a non-owner agent cannot", async t => {
+  const lines = [];
+  const warn = console.warn, error = console.error;
+  const note = args => lines.push(args.map(part => typeof part === "string" ? part : part instanceof Error ? part.message : "").join(" "));
+  console.warn = (...args) => { note(args); warn.apply(console, args); };
+  console.error = (...args) => { note(args); error.apply(console, args); };
+  t.after(() => { console.warn = warn; console.error = error; });
+  const { store, origin } = await serve(t);
+  const agentOwner = store.identities.create("Nia Cole");
+  const room = new AgentRooms(store).create(agentOwner.secret, {
+    roomId: "agent-den", title: "Agent den", purpose: "Owner seat stays put", kind: "personal", displayName: "Nia Cole",
+  });
+  const roomId = room.roomId;
+  assert.equal(store.room(roomId).state.room.ownerId, agentOwner.identityId);
+
+  const minted = await post(origin, `/api/rooms/${roomId}/agent-invites`, { ownerEquivalent: true, expiresInMinutes: 60 }, agentOwner.secret);
+  assert.equal(minted.status, 201, minted.json?.error?.code ?? "identity mint failed");
+  assert.equal(minted.json.ownerEquivalent, true);
+  assert.equal(minted.json.profile, "owner");
+  assert.deepEqual(minted.json.permissions, [...PERMISSIONS]);
+  const code = minted.json.code;
+  const codeHash = slowHash(code);
+
+  const viaRoom = await post(origin, `/api/rooms/${roomId}/agent-invites`, { ownerEquivalent: true }, room.mcpToken.credential);
+  assert.equal(viaRoom.status, 201, viaRoom.json?.error?.code ?? "room connection mint failed");
+  assert.equal(viaRoom.json.ownerEquivalent, true);
+  assert.equal(store.room(roomId).state.room.ownerId, agentOwner.identityId);
+
+  const mcp = await fetch(`${origin}/room/mcp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${agentOwner.secret}` },
+    body: JSON.stringify({ jsonrpc: "2.0", id: "t", method: "tools/call", params: {
+      name: "room_create_agent_invite", arguments: { roomId, ownerEquivalent: true },
+    } }),
+  });
+  const mcpBody = await mcp.json();
+  assert.notEqual(mcpBody.result?.isError, true);
+  assert.equal(mcpBody.result?.structuredContent?.ownerEquivalent, true);
+  const mcpCode = mcpBody.result?.structuredContent?.code;
+  assert.equal(typeof mcpCode, "string");
+  const mcpText = (mcpBody.result?.content ?? []).filter(block => block.type === "text").map(block => block.text).join("\n");
+  absent(mcpText, mcpCode, "mcp text omits the invite code");
+  absent(mcpText, agentOwner.secret, "mcp text omits the identity secret");
+  absent(mcpText, room.mcpToken.credential, "mcp text omits the room connection");
+
+  const ordinary = await post(origin, `/api/rooms/${roomId}/agent-invites`, { profile: "chat" }, agentOwner.secret);
+  assert.equal(ordinary.status, 201, ordinary.json?.error?.code ?? "chat mint failed");
+
+  const mintLog = store.db.prepare("SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')=?").all(roomId, "agent_invite.minted").map(entry => JSON.parse(entry.body));
+  assert.equal(mintLog.length, 3);
+  for (const entry of mintLog) {
+    assert.equal(entry.actorId, agentOwner.identityId);
+    assert.equal(entry.data.ownerEquivalent, true);
+    assert.match(entry.data.inviteId, /^[a-f0-9]{8}$/);
+    assert.equal(entry.data.code, undefined);
+  }
+  const eventText = mintLog.map(entry => JSON.stringify(entry)).join("\n");
+  absent(eventText, code, "mint log omits the invite code");
+  absent(eventText, codeHash, "mint log omits the code hash");
+  absent(eventText, viaRoom.json.code, "mint log omits the room-connection code");
+  absent(eventText, mcpCode, "mint log omits the mcp code");
+  absent(eventText, agentOwner.secret, "mint log omits the identity secret");
+  absent(eventText, room.mcpToken.credential, "mint log omits the room connection");
+  absent(eventText, ordinary.json.code, "mint log omits the chat invite code");
+
+  const redeemed = await redeem(origin, code, "Co Owner");
+  assert.equal(redeemed.status, 201, redeemed.json?.error?.code ?? "redeem failed");
+  assert.notEqual(redeemed.json.memberId, agentOwner.identityId);
+  assert.equal(store.room(roomId).state.room.ownerId, agentOwner.identityId);
+  const coOwnerDenied = await post(origin, `/api/rooms/${roomId}/agent-invites`, { ownerEquivalent: true }, redeemed.json.identitySecret);
+  assert.equal(coOwnerDenied.status, 403, coOwnerDenied.json?.error?.code ?? "co-owner status");
+  assert.equal(coOwnerDenied.json.error.code, "owner_equivalent_forbidden");
+  const coOwnerRoom = await post(origin, `/api/rooms/${roomId}/agent-invites`, { ownerEquivalent: true }, redeemed.json.mcpToken.credential);
+  assert.equal(coOwnerRoom.status, 403, coOwnerRoom.json?.error?.code ?? "co-owner room connection status");
+  assert.equal(coOwnerRoom.json.error.code, "owner_equivalent_forbidden");
+
+  const peer = await post(origin, "/api/agent-identities", { displayName: "Peer Bot" });
+  assert.equal(peer.status, 201, peer.json?.error?.code ?? "peer identity failed");
+  const linked = await post(origin, `/api/rooms/${roomId}/identity-links`,
+    { identityId: peer.json.identityId, permissions: ["invite_member"], identityLinkCode: mintHolderLinkCode(store, { identityId: peer.json.identityId, secret: peer.json.secret }, roomId) }, agentOwner.secret);
+  assert.equal(linked.status, 201, linked.json?.error?.code ?? "peer link failed");
+  const peerDenied = await post(origin, `/api/rooms/${roomId}/agent-invites`, { ownerEquivalent: true }, peer.json.secret);
+  assert.equal(peerDenied.status, 403, peerDenied.json?.error?.code ?? "peer status");
+  assert.equal(peerDenied.json.error.code, "owner_equivalent_forbidden");
+  assert.equal(store.room(roomId).state.room.ownerId, agentOwner.identityId);
+
+  const log = lines.join("\n");
+  absent(log, code, "logs omit the invite code");
+  absent(log, agentOwner.secret, "logs omit the identity secret");
+  absent(log, room.mcpToken.credential, "logs omit the room connection");
+  absent(log, redeemed.json.identitySecret, "logs omit the co-owner secret");
+  absent(log, peer.json.secret, "logs omit the peer secret");
 });
