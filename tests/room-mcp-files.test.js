@@ -138,7 +138,11 @@ test("enrolled members upload and download room_attachments through hosted MCP",
   const hidden = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" }, outsider.secret);
   assert.equal(hidden.body.result.isError, true);
   assert.equal(hidden.value.status, 403);
-  assert.equal(hidden.value.code, "no_access");
+  // Hosted MCP remaps a non-member identity to not_member with a pair hint
+  // (mcp-room-profile.mjs notMemberPair, f3a63d62); no_access is the
+  // store/HTTP-layer code for the same refusal.
+  assert.equal(hidden.value.code, "not_member");
+  assert.equal(hidden.value.next.action, "pair");
   assert.equal(JSON.stringify(hidden.body).includes("room file bytes"), false);
 
   const blocked = await call(origin, "room_put_file", {
@@ -235,7 +239,8 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
     roomId: created.roomId, id: "note", messageId: "msg-1"
   }, outsider.secret);
   assert.equal(hidden.value.status, 403);
-  assert.equal(hidden.value.code, "no_access");
+  assert.equal(hidden.value.code, "not_member");
+  assert.equal(hidden.value.next.action, "pair");
   assert.equal(JSON.stringify(hidden.body).includes(owner.secret), false);
 
   const committed = await call(origin, "room_commit_file", {
