@@ -46,3 +46,31 @@ for(const [width,decision] of [[1280,"Approve"],[390,"Approve"],[390,"Decline"]]
  assert.equal(s.publicFace.status("commons","owner").enabled,false);
 
 });
+
+test("human request refresh ignores older same-account results and errors across mutations",async t=>{
+ const f=createAcceptanceFixture(),server=createRoomServer({store:f.store});await new Promise(r=>server.listen(0,"127.0.0.1",r));
+ const browser=await chromium.launch({headless:true});t.after(async()=>{await browser.close();server.closeStreams();server.closeAllConnections();await new Promise(r=>server.close(r));f.store.close();rmSync(f.directory,{recursive:true,force:true});});
+ const page=await browser.newPage();await page.goto(`http://127.0.0.1:${server.address().port}`);
+ const result=await page.evaluate(async()=>{
+  const {createHumanJoinUI}=await import('/src/human-join-ui.js');
+  const container=document.createElement('div');document.body.append(container);const calls=[];
+  const client={session:{authenticated:true},request:(path,options)=>new Promise((resolve,reject)=>calls.push({path,options,resolve,reject}))};
+  const ui=createHumanJoinUI({accountClient:client,container});
+  const row=status=>({requestId:'humanjoin-race',roomId:'commons',status,revision:status==='pending'?0:1});
+  const old=ui.refresh(),fresh=ui.refresh();calls[1].resolve({requests:[row('approved')]});await fresh;calls[0].resolve({requests:[row('pending')]});await old;
+  const olderResult=container.textContent;
+  const failed=ui.refresh(),newer=ui.refresh();calls[3].resolve({requests:[row('approved')]});await newer;calls[2].reject(new Error('old failure'));await failed;
+  const olderError=container.querySelector('[role="alert"]')?.textContent??null;
+  ui.open('commons','Commons');const initial=calls.at(-1);initial.resolve({requests:[]});await new Promise(r=>setTimeout(r,0));
+  const beforeSubmit=ui.refresh(),submitRead=calls.at(-1);container.querySelector('[name="displayName"]').value='Human';container.querySelector('form').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+  submitRead.resolve({requests:[row('approved')]});await beforeSubmit;const duringSubmit=container.querySelector('[data-join-status]')?.textContent??'';
+  ui.reset();const staleAfterReset=ui.refresh(); // unauthenticated owner is reselected only for the same explicit session
+  calls.at(-1).resolve({requests:[row('pending')]});await staleAfterReset;
+  const beforeCancel=ui.refresh(),cancelRead=calls.at(-1);[...container.querySelectorAll('button')].find(b=>b.textContent==='Cancel request').click();
+  cancelRead.resolve({requests:[row('approved')]});await beforeCancel;const duringCancel=container.querySelector('[data-join-status]')?.textContent??'';
+  const obsolete=ui.refresh(),obsoleteRead=calls.at(-1);ui.reset();client.session={authenticated:true};const nextAccount=ui.refresh();calls.at(-1).resolve({requests:[]});await nextAccount;obsoleteRead.resolve({requests:[row('approved')]});await obsolete;const afterAccountSwitch=container.textContent;
+  ui.reset();return {olderResult,olderError,duringSubmit,duringCancel,afterAccountSwitch};
+ });
+ assert.match(result.olderResult,/Open room/);assert.doesNotMatch(result.olderResult,/Waiting for approval|Cancel request/);
+ assert.equal(result.olderError,null);assert.equal(result.duringSubmit,'');assert.doesNotMatch(result.duringCancel,/Open room/);assert.doesNotMatch(result.afterAccountSwitch,/Open room|commons/);
+});
