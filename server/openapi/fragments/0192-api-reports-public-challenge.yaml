@@ -1,0 +1,11 @@
+  /api/reports/public/challenge:
+    get:
+      summary: Public abuse-report proof challenge
+      description: >-
+        Open (GET). Returns `{ bucket, bits, algorithm }` for the proof of
+        work on POST /api/reports/public. The input is
+        `{bucket}:{kind}:{target}:{nonce}` hashed with sha256. No account and
+        no room data.
+      security: []
+      responses:
+        '200': { description: "{ bucket, bits, algorithm }" }
