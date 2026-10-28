@@ -2173,6 +2173,8 @@ function render() {
   const stackMore = roster.length - stack.length;
   renderContent("#presence-avatars", `${stack.map(m => `<span class="member-avatar ${m.kind === "agent" ? "agent" : "person"}"><span>${initials(m.displayName)}</span></span>`).join("")}${stackMore > 0 ? `<span class="presence-avatars-more">+${stackMore}</span>` : ""}`);
   renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${shownPeople.length ? `<p class="presence-heading">People</p>${shownPeople.map(presenceRow).join("")}` : ""}${shownAgents.length ? `<p class="presence-heading">Agents</p>${shownAgents.map(presenceRow).join("")}` : ""}${othersHtml}${removedAgentsHtml}`);
+  // Presence refreshes itself; the manual control only needs weight when stale.
+  $("#presence-list .presence-refresh")?.classList.toggle("is-fresh", !presenceNote);
   // JDOT-MEMBER-PERMS-UI begin
   memberPermissionsUI.sync();
   ownerAttentionCard.sync();
