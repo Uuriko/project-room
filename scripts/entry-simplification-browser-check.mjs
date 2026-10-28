@@ -19,8 +19,11 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   const accountId = fixture.store.accountForMember('commons', 'owner').id;
   fixture.store.completeOnboarding(accountId);
   await page.goto(`http://127.0.0.1:${server.address().port}/`);
-  await page.waitForFunction(() => document.querySelector('#github-signin').hidden);
-  assert.equal(await page.locator('#github-signin').isVisible(), false);
+  await page.waitForFunction(() => {
+    const button = document.querySelector('#github-signin');
+    return !button || button.hidden;
+  });
+  assert.equal(await page.locator('#github-signin').count(), 0);
   await page.goto(`http://127.0.0.1:${server.address().port}/?room=commons`);
   await signInFixture(page, fixture.store.issueAccountAccessKey(accountId));
   await page.locator('#main').waitFor();

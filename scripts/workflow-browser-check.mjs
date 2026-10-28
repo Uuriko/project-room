@@ -18,7 +18,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId: "human-reviewer", displayName: "Test human reviewer", kind: "human", permissions: ["verify"] } });
     const reviewerKey = fixture.store.issueAccessKey("commons", "human-reviewer");
-    const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+    // Each work card step refreshes the room with its side panels, which is
+    // wider than the production credential burst. This browser fixture keeps
+    // the previous 600-read and 600-write windows; production stays on the burst.
+    const server = createRoomServer({ store: fixture.store, streamInterval: 60, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     let browser;

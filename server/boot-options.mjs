@@ -19,5 +19,9 @@ export function defaultServerArgs({ store, env = process.env, ...rest }) {
   const googleAuth = rest.origin ? googleConfig(env, rest.origin) : null;
   const githubAuth = rest.origin ? githubConfig(env, rest.origin) : null;
   const gmailAuth = rest.origin ? gmailConfig(env, rest.origin, googleAuth) : null;
-  return { googleAuth, githubAuth, gmailAuth, ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer };
+  return {
+    googleAuth, githubAuth, gmailAuth,
+    publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === "1",
+    ...rest, store, channelWebhooks: store ? new ChannelWebhookInbox(store) : null, magicLinkMailer,
+  };
 }
