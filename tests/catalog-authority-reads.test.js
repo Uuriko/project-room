@@ -32,6 +32,7 @@ import { DurableDatabase, durableStorage } from "../cloudflare/storage.mjs";
 import { createDoContext } from "./helpers/do-storage-emulator.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { issueGrant, revokeGrant } from "../server/grants.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const ROOMS = ["room-a", "room-b", "room-c", "room-d", "room-e"];
 
@@ -44,8 +45,8 @@ function seatPeer(store) {
   for (const roomId of ROOMS) {
     store.initialize(initialRoom(roomId, "owner"));
     const ownerKey = store.issueAccessKey(roomId, "owner");
-    store.identities.link(ownerKey, roomId, {
-      identityId: peer.identityId, memberId: "peer", displayName: "Catalog Peer", permissions: [],
+    linkWithProof(store, ownerKey, roomId, peer, {
+      memberId: "peer", displayName: "Catalog Peer", permissions: [],
     });
     for (let i = 0; i < 20; i++) {
       store.command(ownerKey, roomId, {
@@ -166,8 +167,8 @@ test("check 2 — history/access policy: the prefix carries the policy in full a
     id: randomUUID(), type: "room.history_visibility_set",
     data: { historyVisibility: "since_join" },
   });
-  store.identities.link(ownerKey, "room-hist", {
-    identityId: peer.identityId, memberId: "peer", displayName: "Catalog Peer", permissions: [],
+  linkWithProof(store, ownerKey, "room-hist", peer, {
+    memberId: "peer", displayName: "Catalog Peer", permissions: [],
   });
   // The policy fields the prefix extracts are the stored policy, in full:
   // identical to what the full-state load reports for the same room.
