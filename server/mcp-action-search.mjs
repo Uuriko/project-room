@@ -2,11 +2,15 @@
 // reach the long tail without loading the whole catalog into the model.
 //
 // room_search_actions finds hosted tools by words in their name and
-// description and returns each match's exact inputSchema, so an agent can
-// call it directly. room_run_action calls one of those tools by name for
-// clients that only let the model use listed tools. It re-enters the same
-// tools/call path, so argument checks, scopes, autonomy tiers, spend and
-// receipts are exactly what a direct call gets. Neither tool grants anything.
+// description and returns each match's name, summary, read-only flag and
+// REST route — never its inputSchema (PERF-50 E1-a: embedded schemas were
+// 68–88% of a search response's bytes). An agent fetches exact schemas
+// once with tools/list profile=full; a call with wrong arguments names
+// the missing and unexpected fields. room_run_action calls one of those
+// tools by name for clients that only let the model use listed tools. It
+// re-enters the same tools/call path, so argument checks, scopes,
+// autonomy tiers, spend and receipts are exactly what a direct call
+// gets. Neither tool grants anything.
 // Search is filtered by the same capabilityVisibleTo predicate as tools/list:
 // a tool this agent may not use is absent, never present-but-denying.
 import { hostedMcpToolDefs } from "./mcp-hosted-tools.mjs";
@@ -22,7 +26,7 @@ const DEFAULT_RESULTS = 5;
 export const actionMetaToolDefs = Object.freeze([
   {
     name: SEARCH_ACTIONS_TOOL,
-    description: "Find a Room action that isn't in this short list. Pass query (plain words, for example \"close board claim\" or \"upload file\"). Returns up to limit matches with each tool's exact inputSchema and its REST route when there is one. Call a match directly, or through room_run_action. Read only; grants nothing.",
+    description: "Find a Room action that isn't in this short list. Pass query (plain words, for example \"close board claim\" or \"upload file\"). Returns up to limit matches with name, summary, read-only flag and REST route when there is one — no inputSchemas; fetch those once with tools/list profile=full. Call a match directly, or through room_run_action. Read only; grants nothing.",
     inputSchema: {
       type: "object",
       properties: {
@@ -134,8 +138,7 @@ export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, to
     name: tool.name,
     summary: firstSentence(tool.description),
     readOnly: tool.annotations?.readOnlyHint === true,
-    rest: restRouteOf(tool),
-    inputSchema: tool.inputSchema
+    rest: restRouteOf(tool)
   }));
   return {
     query,
@@ -143,7 +146,7 @@ export function searchActions(query, { agent = null, limit = DEFAULT_RESULTS, to
     totalMatches: scored.length,
     next: matches.length === 0
       ? "No match. Try other words, or list everything with tools/list profile=full."
-      : "Call a match directly with its inputSchema, or use room_run_action { name, arguments }."
+      : "Call a match directly, or use room_run_action { name, arguments }. Matches carry no schema: fetch exact inputSchemas once with tools/list profile=full; a call with wrong arguments names the missing and unexpected fields."
   };
 }
 
