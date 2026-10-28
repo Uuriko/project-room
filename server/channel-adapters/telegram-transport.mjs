@@ -14,7 +14,7 @@
 // closed at the transport layer; the operation-keyed receipt store and the
 // send journal bound the blast radius to in-flight retries of one attempt.
 // Narrowing to a single attempt + reconcile is a product decision.
-import { ServiceError } from "../store.mjs";
+import { ServiceError } from "../service-error.mjs";
 import { requireContract } from "../channel-connection.mjs";
 import { provider, channel } from "./telegram.mjs";
 import { redactTelegram } from "./telegram-config.mjs";

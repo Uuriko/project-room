@@ -1,0 +1,12 @@
+  /api/account/onboarding:
+    get:
+      summary: First-run onboarding state
+      description: |
+        RC-2026-09-19-078. Browser account-session route. New accounts are
+        created un-onboarded and land here until they complete onboarding:
+        `{ accountId, completed, steps: [{ id, title, detail, done }] }`.
+      security:
+        - accountSession: []
+      responses:
+        '200': { description: Onboarding state for the caller's account }
+        '401': { description: account_session_required or invalid_session }

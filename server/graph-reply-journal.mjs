@@ -3,7 +3,7 @@ import { validId } from "../src/events.js";
 import { emailInput, emailOpaqueId, exactEmailFields } from "./email-envelope.mjs";
 import { compareReplyEnvelope, compareReplyUpdateEnvelope, replyObservationReviewable } from "./graph-reply-draft.mjs";
 export { replyObservationReviewable };
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { inspectUpdate } from "./graph-reply-update-review.mjs";
 
 const fail = (code, message, status = 409) => { throw new ServiceError(status, code, message); };
