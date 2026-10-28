@@ -5879,8 +5879,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const rows = [];
     try {
       const stmt = this.db.prepare(
-        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
+        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body,
+                o.acknowledged_at AS acknowledgedAt
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         LEFT JOIN mention_observations o ON o.room_id=m.room_id AND o.message_event_id=m.message_event_id
+           AND o.mentioned_member_id=m.mentioned_member_id
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
            AND e.sequence>? AND e.sequence<=?
          ORDER BY e.sequence DESC LIMIT ?`
@@ -5905,6 +5908,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           // Filter before consuming page slots: otherwise newer expired rows
           // answered late can hide an older unresolved mention indefinitely.
           if (row.state === "timed_out" && currentById.hasReply(memberId, logged.data.messageId ?? row.eventId)) continue;
+          // An explicit ack after the deadline is the member saying "handled"
+          // for a mention they answered outside the thread. Without this the
+          // open list only ever grows. An ack before the deadline keeps the
+          // mention open as today.
+          if (row.state === "timed_out" && Number.isSafeInteger(row.acknowledgedAt) && Number.isSafeInteger(row.timeoutAt) && row.acknowledgedAt > row.timeoutAt) continue;
           if (rows.length < limit) rows.push(row);
         }
         if (batch.length < want) break;
