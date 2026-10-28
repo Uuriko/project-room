@@ -1,15 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { parseCoverageMap, checkCoverage, parseBrowserSuite } from "../scripts/journey-coverage.mjs";
+import { parseCoverageMap, checkCoverage, parseBrowserSuite, wiredBrowserSuite } from "../scripts/journey-coverage.mjs";
 
 const markdown = readFileSync(new URL("../docs/JOURNEY-COVERAGE-MAP.md", import.meta.url), "utf8");
-const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 
 test("coverage map parses and every claimed capability has wired executable evidence", () => {
   const map = parseCoverageMap(markdown);
   assert.ok(map.claims.length >= 7, "the README capability claims are all mapped");
-  const problems = checkCoverage(map, { browserSuite: parseBrowserSuite(pkg.scripts["test:browser"]) });
+  const problems = checkCoverage(map, { browserSuite: wiredBrowserSuite() });
   assert.deepEqual(problems, []);
 });
 

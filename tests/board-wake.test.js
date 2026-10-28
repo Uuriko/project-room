@@ -23,6 +23,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { verifyDeliverySignature } from "../server/webhook-dispatch.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // /reassign binds the claim round the caller read (expectedClaimedAt + expectedHistoryLength).
 const roundOf = c => ({ expectedClaimedAt: (c.claim ?? c).claimedAt, expectedHistoryLength: ((c.claim ?? c).history?.length ?? 0) + ((c.claim ?? c).historyOmitted ?? 0) });
@@ -51,10 +52,7 @@ async function fixture(t) {
   const enroll = name => {
     const identity = store.identities.create(name);
     const memberId = name.toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 32);
-    store.identities.link(ownerKey, "commons", {
-      identityId: identity.identityId, memberId, displayName: name,
-      permissions: ["accept_work", "complete_work"]
-    });
+    linkWithProof(store, ownerKey, "commons", identity, { memberId, displayName: name, permissions: ["accept_work", "complete_work"] });
     return { ...identity, memberId };
   };
   const post = async (path, body, secret) => {

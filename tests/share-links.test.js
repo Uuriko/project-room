@@ -11,6 +11,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { AccountClient } from "../src/client.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function fixture(t, ownerId = "owner") {
   const directory = mkdtempSync(join(tmpdir(), "room-share-contract-")), filename = join(directory, "room.sqlite");
@@ -255,9 +256,7 @@ test("HTTP share-link administration refuses non-owner bearer keys; owner identi
 function agentOwnerFixture(t) {
   const f = fixture(t);
   const identity = f.store.identities.create("Owning Agent");
-  f.store.identities.link(f.ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(f.store, f.ownerKey, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   new AgentRooms(f.store).transfer(f.ownerKey, "commons", { toMemberId: identity.identityId });
   assert.equal(f.store.roomAuthority("commons").ownerId, identity.identityId);
   const revision = f.store.roomAuthority("commons").members[identity.identityId].revision;
@@ -334,9 +333,7 @@ test("HTTP: owner and appointed agent admin can manage shared invites; ordinary 
   assert.equal((await cancelled.json()).link.status, "cancelled");
   // A work grant alone never permits membership administration.
   const other = f.store.identities.create("Other Agent");
-  f.store.identities.link(f.ownerKey, "commons", {
-    identityId: other.identityId, displayName: "Other Agent", permissions: ["accept_work", "steer", "verify"]
-  });
+  linkWithProof(f.store, f.ownerKey, "commons", other, { displayName: "Other Agent", permissions: ["accept_work", "steer", "verify"] });
   const otherBearer = { Authorization: `Bearer ${other.secret}` };
   for (const args of [
     ["/api/rooms/commons/share-links", {}],
@@ -440,7 +437,7 @@ test("v34 databases migrate share-link and invitation history to v36 with issuer
   assert.doesNotThrow(() => store.shareLinks.verify());
   // The nullable columns now accept an agent issuer end to end.
   const identity = store.identities.create("Migrated Owner");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, displayName: "Migrated Owner", permissions: ["accept_work"] });
+  linkWithProof(store, ownerKey, "commons", identity, { displayName: "Migrated Owner", permissions: ["accept_work"] });
   new AgentRooms(store).transfer(ownerKey, "commons", { toMemberId: identity.identityId });
   const agentToken = randomBytes(32).toString("base64url");
   const agentCreated = store.shareLinks.create(identity.secret, "commons",
