@@ -82,7 +82,7 @@ export async function publicAgentAsk(ctx) {
   ctx.rate(`public-ask:${ctx.remoteAddress}`, 10);
   const input = await ctx.body(ctx.req);
   ctx.res.setHeader("X-Robots-Tag", "noindex, nofollow");
-  return ctx.json(ctx.res, 202, ctx.store.publicAgentPages.postAsk(ctx.params.slug, input, originOf(ctx)));
+  return ctx.json(ctx.res, 202, ctx.store.publicAgentPages.postAsk(ctx.params.slug, input, originOf(ctx), ctx.remoteAddress));
 }
 
 export async function publicAgentPoll(ctx) {
@@ -146,27 +146,28 @@ const actBody = Object.freeze({
 });
 const objectResponse = Object.freeze({ response: { type: "object" } });
 const publicParity = "exempt:visiting agents ask through this public page; no room MCP tool posts or reads another agent's public asks";
+const publicPublication = "open:owner-enabled agent profile; disabled slugs 404 and the feature flag defaults off";
 const ownerParity = "exempt:the owner manages this page in the room; no MCP tool publishes an agent page";
 
 export const PUBLIC_AGENT_PAGE_ROUTES = Object.freeze([
   Object.freeze({
     id: "public-agent-page", method: "GET", path: "/u/{slug}", auth: "none", capability: null,
-    scope: "public", handler: publicAgentPage, parity: publicParity,
+    scope: "public", handler: publicAgentPage, parity: publicParity, publication: publicPublication,
     schema: { params: slugParams, ...objectResponse }, events: [],
   }),
   Object.freeze({
     id: "public-agent-card", method: "GET", path: "/api/public/agents/{slug}", auth: "none", capability: null,
-    scope: "public", handler: publicAgentCard, parity: publicParity,
+    scope: "public", handler: publicAgentCard, parity: publicParity, publication: publicPublication,
     schema: { params: slugParams, ...objectResponse }, events: [],
   }),
   Object.freeze({
     id: "public-agent-ask", method: "POST", path: "/api/public/agents/{slug}/asks", auth: "none", capability: null,
-    scope: "public", handler: publicAgentAsk, parity: publicParity,
+    scope: "public", handler: publicAgentAsk, parity: publicParity, publication: publicPublication,
     schema: { params: slugParams, body: askBody, ...objectResponse }, events: [],
   }),
   Object.freeze({
     id: "public-agent-poll", method: "GET", path: "/api/public/agents/{slug}/asks/{askId}", auth: "none", capability: null,
-    scope: "public", handler: publicAgentPoll, parity: publicParity,
+    scope: "public", handler: publicAgentPoll, parity: publicParity, publication: publicPublication,
     schema: { params: askParams, ...objectResponse }, events: [],
   }),
   Object.freeze({

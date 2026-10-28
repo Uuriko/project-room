@@ -1,0 +1,66 @@
+  /api/rooms/{roomId}/pins:
+    get:
+      summary: List pinned messages
+      description: |
+        Issue #6 B2. The room's pinned messages in the order they were pinned,
+        joined with the live message (author, body, createdAt). Members only;
+        membership is re-checked on every call. Deleted messages (tombstones)
+        never appear. At most 50 pins per room.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: Ordered pinned list
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinnedList'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+    post:
+      summary: Pin or unpin one message
+      description: |
+        Any active member may pin or unpin a live message. Appends a
+        `message.pinned` / `message.unpinned` event through the single write
+        path; a request for the state the room is already in appends nothing
+        and answers `changed: false`. `requestId` is an optional client
+        idempotency key for the underlying command (same rules as the
+        `commands` route). Answers 201 when an event was appended and 200
+        when the room was already in the requested state or `requestId`
+        replayed an earlier command. Pinning a deleted message is 409
+        `message_deleted` (the same pin through `commands` is 409
+        `command_rejected`); the 51st pin is 409 `command_rejected` (pin capacity).
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [messageId, pinned]
+              properties:
+                messageId: { type: string }
+                pinned: { type: boolean }
+                requestId: { type: string, description: Optional idempotency key for the command }
+      responses:
+        '201':
+          description: "Event appended (`changed: true`); body is the resulting pinned list"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinResult'
+        '200':
+          description: "Already in the requested state, or an idempotent `requestId` replay (`changed: false`)"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PinResult'
+        '401':
+          description: No room credential, or membership ended (unauthenticated)
+        '404':
+          description: No such message in this room (message_not_found)
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
