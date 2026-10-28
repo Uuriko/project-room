@@ -392,6 +392,18 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
 }
 
+// Legacy malformed rows remain available for explicit repair. Only validation
+// refusals are isolated; persistence/event failures must still fail the request.
+function skipInvalidMaintenanceClaim(error, item, skipped) {
+  if (!(error instanceof ClaimError) || error.code !== "invalid_claim_input") throw error;
+  skipped.count += 1;
+  if (skipped.claimIds.length < 5) skipped.claimIds.push(String(item.id).slice(0, 128));
+}
+function warnInvalidMaintenanceClaims(roomId, phase, skipped) {
+  if (skipped.count) console.warn(JSON.stringify({ event: "work_claim.maintenance_invalid", roomId,
+    phase, code: "invalid_claim_input", skippedCount: skipped.count, claimIds: skipped.claimIds }));
+}
+
 // Evaluate lease expiry across the room's items; expired claims auto-release
 // (owner cleared, history stamped by releaseExpired). Returns the ids that
 // were released by this sweep.
@@ -401,15 +413,16 @@ function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
   const entry = registry.list(roomId).filter(item => ACTIVE_CLAIM_STATES.includes(item.state)
     && typeof item.leaseExpiresAt === "string" && Date.parse(item.leaseExpiresAt) <= nowMs);
   if (entry.length === 0) return [];
-  const swept = releaseExpired(entry, nowMs);
-  const released = [];
-  // releaseExpired returns a normalized copy of every item, expired or not,
-  // so compare states: only a claim that actually lapsed counts as swept.
-  swept.forEach((item, index) => {
-    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") {
-      registry.set(roomId, item); released.push(item.id); onRelease(item, entry[index]);
+  const released = [], skipped = { count: 0, claimIds: [] };
+  for (const before of entry) {
+    let item;
+    try { [item] = releaseExpired([before], nowMs); }
+    catch (error) { skipInvalidMaintenanceClaim(error, before, skipped); continue; }
+    if (item.state === "unclaimed" && before.state !== "unclaimed") {
+      registry.set(roomId, item); released.push(item.id); onRelease(item, before);
     }
-  });
+  }
+  warnInvalidMaintenanceClaims(roomId, "lease_expiry", skipped);
   return released;
 }
 
@@ -805,14 +818,17 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return item;
   };
   const closeLiveClaims = () => {
-    const closed = [];
+    const closed = [], skipped = { count: 0, claimIds: [] };
     for (const item of registry.list(roomId)) {
       if ((item.kind !== "land" && item.kind !== "deploy") || isTerminalClaimState(item.state)) continue;
-      const next = closeWhenLive(item, SOURCE_REVISION, nowMs);
+      let next;
+      try { next = closeWhenLive(item, SOURCE_REVISION, nowMs); }
+      catch (error) { skipInvalidMaintenanceClaim(error, item, skipped); continue; }
       if (!next) continue;
       commit(next, "state_changed");
       closed.push(next.id);
     }
+    warnInvalidMaintenanceClaims(roomId, "live_close", skipped);
     return closed;
   };
   const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {

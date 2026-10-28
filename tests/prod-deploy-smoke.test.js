@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
 import { generateKeyPair, signCard, signCardJws } from "../server/agent-card-signing.mjs";
 
+import { readinessDetail } from "../scripts/prod-deploy-smoke.mjs";
+
 const script = fileURLToPath(new URL("../scripts/prod-deploy-smoke.mjs", import.meta.url));
 const revision = "a".repeat(40);
 const smokePaths = ["/api/health", "/api/ready", "/terms", "/privacy", "/"];
@@ -192,6 +194,14 @@ for (const filename of ["prod-deploy-smoke.mjs", "live-smoke.mjs"]) {
       assert.equal(logs.length, 1, "tee retains one JSON report");
       assert.equal(readFileSync(join(directory, logs[0]), "utf8"), result.stdout);
       assert.equal(result.code, healthy ? 0 : 1, "the workflow must preserve the smoke exit status through tee");
+      if (filename === "prod-deploy-smoke.mjs") {
+        const first = JSON.parse(readFileSync(join(directory, "prod-smoke-attempt1.log"), "utf8"));
+        assert.equal(first.ok, healthy);
+        if (!healthy) assert.deepEqual(JSON.parse(readFileSync(join(directory, "prod-smoke-attempt2.log"), "utf8")), result.report);
+        const upload = job.steps.find(item => item.with?.name === "deploy-recovery-${{ needs.gate.outputs.sha }}");
+        assert.match(upload.with.path, /prod-smoke-attempt\*\.log/);
+        assert.match(upload.with.path, /prod-smoke\.json/);
+      }
     });
   }
 }
@@ -212,3 +222,31 @@ for (const failedDoor of ["origin", "entry"]) {
     });
   }
 }
+
+
+test("readiness diagnostics retain bounded timeout, error and ready evidence without response secrets", () => {
+  for (const status of ["timeout", "error", "ok"]) {
+    const detail = readinessDetail({status: status === "ok" ? 200 : 503, ms: 1234,
+      json: {status: status === "ok" ? "ready" : "degraded", do: {status, ms: 1001, timeoutMs: 1000, statusCode: 200, error: "SECRET"}, secret: "SECRET"}});
+    assert.deepEqual(detail.do, {status, ms: 1001, timeoutMs: 1000, statusCode: 200});
+    assert.equal(detail.elapsedMs, 1234);
+    assert.ok(!JSON.stringify(detail).includes("SECRET"));
+  }
+  const hostile = readinessDetail({status: 503, ms: Infinity, error: "SECRET", json: {
+    status: "SECRET", emailVerification: "SECRET", emailVerificationScope: "SECRET",
+    do: {status: "SECRET", ms: -1, timeoutMs: "1000", statusCode: 999}}});
+  assert.deepEqual(hostile, {status: 503, body: null, emailVerification: "unknown", emailVerificationScope: "unknown", do: {status: "unknown"}});
+  for (const errorKind of ["fetch_timeout", "fetch_error"]) assert.equal(readinessDetail({status: 0, errorKind, error: "SECRET"}).transport, errorKind);
+});
+
+test("real smoke CLI preserves failed readiness timeout evidence and still rejects it", async t => {
+  const origin = await door(t, "/canonical");
+  const entry = await door(t, "/room", {path: "/api/ready", status: 503, body: {
+    status: "degraded", do: {status: "timeout", timeoutMs: 1000, ms: 1002, error: "SECRET"}}});
+  const {code, report} = await runSmoke(origin, entry, false);
+  assert.equal(code, 1);
+  const failed = report.checks.find(check => !check.pass);
+  assert.deepEqual(failed.do, {status: "timeout", ms: 1002, timeoutMs: 1000});
+  assert.equal(typeof failed.elapsedMs, "number");
+  assert.ok(!JSON.stringify(report).includes("SECRET"));
+});
