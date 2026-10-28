@@ -98,10 +98,23 @@ test('a queued reconnect rechecks account ownership without signing out the repl
   assert.equal(account.session, replacement);
 });
 
+test('a stream error while the browser is still retrying does not read; open does', async t => {
+  const { client, streams } = fixture(t);
+  let reads = 0; const healthy = client.fetcher;
+  client.fetcher = async (...args) => { reads++; return healthy(...args); };
+  client.connect(); streams[0].emit('error', 0);
+  await Promise.resolve();
+  assert.equal(reads, 0);
+  assert.equal(client.flight ?? null, null);
+  streams[0].emit('open', 1); await client.flight?.promise;
+  assert.ok(reads > 0);
+});
+
 test('a late stream-refresh rejection cannot clear a replacement session', async t => {
   const { client, streams } = fixture(t);
   client.fetcher = async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'Old session ended' } }) });
-  client.connect(); streams[0].emit('error', 0);
+  // An HTTP refusal leaves EventSource CLOSED (2); that error is the one that reads.
+  client.connect(); streams[0].emit('error', 2);
   const oldFlight = client.flight.promise;
   // Let request/refresh reject, but switch identity before the stream's outer catch.
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
