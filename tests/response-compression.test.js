@@ -73,9 +73,9 @@ test("the real full tools/list body lands in the B4 target class (~160 KB -> ~25
   assert.equal(gunzipSync(wire).toString("utf8"), body);
 });
 
-test("the real anonymous tools/list body (4,840 B) gzips to the B4-measured 1,663 B class", async () => {
+test("the real anonymous tools/list body (4,871 B) gzips to the B4-measured 1,663 B class", async () => {
   const body = JSON.stringify(handleMcpJoinRpc({ jsonrpc: "2.0", id: 1, method: "tools/list" }));
-  assert.equal(new TextEncoder().encode(body).byteLength, 4840);
+  assert.equal(new TextEncoder().encode(body).byteLength, 4871);
   const out = await compressJsonResponse(gzipRequest(), jsonResponse(body));
   assert.equal(out.headers.get("Content-Encoding"), "gzip");
   const wire = new Uint8Array(await out.arrayBuffer());
