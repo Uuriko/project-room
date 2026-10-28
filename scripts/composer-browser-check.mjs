@@ -27,7 +27,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     send(T.MESSAGE_POSTED, { messageId: "topic", body: "Which book should we read?" });
     send(T.MESSAGE_POSTED, { messageId: "reply", body: "A short story collection?", replyToId: "topic" });
     send(T.MESSAGE_POSTED, { messageId: "ping", body: "Ping @Room owner" });
-    const server = createRoomServer({ store, streamInterval: 50 });
+    // The browser fixture drives more reads per credential than the production burst; keep the wider window here only.
+    const server = createRoomServer({ store, streamInterval: 50, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     let browser;
@@ -48,6 +49,36 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     assert.match(await input.getAttribute("placeholder"), /Message #/);
+
+    // A committed write must remain visible when subsequent history reads fail.
+    const failRead = route => route.fulfill({ status: 503, contentType: "application/json",
+      body: JSON.stringify({ error: "service_unavailable", message: "Temporarily unavailable" }) });
+    await page.route(/\/api\/rooms\/commons(?:\?.*)?$/, failRead);
+    await page.route("**/api/rooms/commons/stream**", failRead);
+    server.closeStreams();
+    await page.waitForFunction(() => document.querySelector("#connection-status").textContent.includes("interrupted"));
+    // Force a gap so the command receipt cannot use the contiguous delta path.
+    send(T.MESSAGE_POSTED, { messageId: "unseen-before-send", body: "Background update" });
+    await input.fill("Committed during read outage");
+    await input.press("Enter");
+    await page.waitForFunction(() => document.querySelector("#message-input").value === "");
+    assert.match(await page.locator("#message-delivery").innerText(), /Message saved/);
+    assert.match(await page.locator("#message-delivery").innerText(), /history/);
+    assert.equal(await page.locator('[data-member-record-id="nova"]').getAttribute("data-presence"), "unknown");
+    assert.match(await page.locator('[data-member-record-id="nova"]').textContent(), /connection interrupted/);
+    const savedMessage = store.room("commons").state.messages.find(m => m.body === "Committed during read outage");
+    assert.ok(savedMessage);
+    assert.match(await page.locator("#message-delivery a").getAttribute("href"), new RegExp(savedMessage.id));
+    await page.reload();
+    await page.waitForFunction(() => document.querySelector("#connection-status").textContent.includes("unavailable"));
+    assert.equal(await page.locator("#signin-methods").isVisible(), false, "a service outage is not a sign-in prompt");
+    await page.unroute(/\/api\/rooms\/commons(?:\?.*)?$/, failRead);
+    await page.unroute("**/api/rooms/commons/stream**", failRead);
+    await page.locator("#refresh-button").click();
+    await page.locator("#main").waitFor({ state: "visible" });
+    // The boot cache can paint the last held window first; the fresh read then adds the saved message.
+    await page.locator('[data-message-record-id="' + savedMessage.id + '"]').waitFor({ state: "attached", timeout: 10000 });
+    assert.equal(await page.locator('[data-message-record-id="' + savedMessage.id + '"]').count(), 1);
 
     // Paste must retain overflow rather than silently send a truncated message.
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin });
@@ -257,7 +288,17 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await page.locator("#search-mentions").getAttribute("aria-pressed"), "false");
     await page.locator('[data-message-record-id="topic"] [data-message-action="thread"]').click();
     assert.match(await input.getAttribute("placeholder"), /Reply in thread/);
+    assert.equal(await input.inputValue(), "");
+    await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    assert.match(await input.getAttribute("placeholder"), /Reply in thread/, "an empty composer still restores the active task thread");
+    await input.fill("A finished thread reply survives return");
+    await page.locator('#message-form button[type="submit"]').click();
+    await page.waitForFunction(() => !document.querySelector('#message-input').disabled && document.querySelector('#message-input').value === '');
+    await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
+    assert.match(await input.getAttribute("placeholder"), /Reply in thread/, "sending a result does not lose the active thread on reload");
+    assert.equal(store.room('commons').state.messages.filter(m => m.body === 'A finished thread reply survives return').length, 1);
     await page.locator("#thread-back").click();
+    await page.reload(); await page.locator("#main").waitFor({ state: "visible" });
     assert.match(await input.getAttribute("placeholder"), /Message #/);
     assert.equal(await page.locator("#composer-options").count(), 1);
     assert.equal(await page.locator("#remember-drafts").count(), 0);
@@ -419,7 +460,7 @@ for (const [label, size] of OWN_SEND_SIZES) {
     send(T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: [] });
     send(T.MESSAGE_POSTED, { messageId: "hello", body: "Welcome, Maya" });
     const maya = store.issueAccessKey("commons", "maya");
-    const server = createRoomServer({ store, streamInterval: 40 });
+    const server = createRoomServer({ store, streamInterval: 40, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
