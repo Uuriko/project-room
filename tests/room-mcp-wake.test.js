@@ -263,7 +263,8 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
   }, store.identities.create("Pause outsider").secret);
   assert.equal(outsider.body.result.isError, true);
   assert.equal(outsider.value.status, 403);
-  assert.equal(outsider.value.code, "no_access");
+  assert.equal(outsider.value.code, "not_member");
+  assert.equal(outsider.value.next.action, "pair");
 
   const cross = await call(origin, "wake.pause", {
     roomId: created.roomId, memberId: created.ownerMemberId, requestId: "pause-peer", reason: "no"

@@ -98,16 +98,18 @@ remains the route that needs no Cloudflare runtime.
 
 ## What a restore recovers — and what it destroys
 
-The NDJSON export hashes every secret column (sha256). A restore recovers
-**data**, never working credentials:
+The NDJSON export sanitizes named raw secret columns. It preserves already-hashed
+credential verifiers, so **existing credentials may still authenticate after restore**.
+Restoring data does not rotate credentials or fence delayed pre-restore requests:
 
 1. Every sanitized secret cell (webhook secrets, push key material and
    tokens, join tokens, verifiers, encrypted payloads — the exact list is
    `EXPORT_SECRET_COLUMNS` in `server/room-export.mjs`) is substituted on
    restore — NULL, or an empty string where the column is NOT NULL — never
    the export's sha256 placeholder as a live value. The restore result's
-   `sanitizedCells` counts every substitution per table and column. **All
-   of them must be re-issued** after a restore before agents can act again.
+   `sanitizedCells` counts every substitution per table and column. Replace
+   these secrets to restore affected integrations. This does not invalidate
+   credentials whose stored hashes were preserved.
 2. A restore resurrects authority exactly as it was **at backup time**.
    Anything revoked between the backup and the loss (keys, share links,
    memberships, delegations) comes back looking current. The operator must
@@ -129,7 +131,8 @@ The NDJSON export hashes every secret column (sha256). A restore recovers
    before replaying; from a saved export file, use the same script with
    `--from <export>` (or `scripts/replay-room-export.mjs` directly).
    A failed replay leaves the destination unpromoted.
-3. Re-issue every credential, and re-apply post-backup revocations (see
+3. Keep access closed while revoking and re-issuing credentials, replacing
+   sanitized secrets, and re-applying post-backup revocations (see
    above). Treat the restored room as authoritative **as of `backedUpAt`**.
 
 (The request-body endpoint runbook applies only to exports under the 64 MiB
