@@ -41,6 +41,12 @@ import {
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
 
+function sameScopeSet(actual, expected) {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  const have = new Set(actual);
+  return expected.every(scope => have.has(scope));
+}
+
 // Purely additive, intentionally outside the writer fence (see
 // unfencedAdditiveTables in server/writer-fence.mjs): older writers have no
 // code path to these tables, and every row is scoped to an agent identity.
@@ -217,6 +223,9 @@ export class AgentPluginError extends Error {
 }
 
 export class AgentPluginStore {
+  #protectedOnboardingKeyIds = new Set();
+  #onboardingRotationDepth = 0;
+
   constructor(store) {
     this.store = store;
     this.db = store.db;
@@ -422,18 +431,65 @@ export class AgentPluginStore {
     }
   }
 
+  onboardingMcpScopes(roomId) {
+    // CX5-FIX: heartbeats:report/read let the saved credential run the
+    // room-scoped wake listener (createHeartbeatActor binds it to this
+    // room via the mcp:room: scope below). Without them the standard
+    // setup credential 403'd on its own listener surface.
+    return [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"];
+  }
+
   issueOnboardingMcpToken({ identityId, roomId, label }) {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      // CX5-FIX: heartbeats:report/read let the saved credential run the
-      // room-scoped wake listener (createHeartbeatActor binds it to this
-      // room via the mcp:room: scope below). Without them the standard
-      // setup credential 403'd on its own listener surface.
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"],
+      scopes: this.onboardingMcpScopes(roomId),
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });
+    return this.#onboardingTokenView(issued);
+  }
+
+  // POST /api/agent-rooms/{id}/token/rotate. One transaction revokes the
+  // onboarding keys already live for this room and inserts the replacement.
+  // A key minted by an overlapping rotate is claimed before the insert
+  // returns, so this rotation does not revoke it. A wider key, or an
+  // onboarding bundle for another room, is not in the revoke set. Room-create
+  // replay does not call this.
+  rotateOnboardingMcpToken({ identityId, roomId, label }) {
+    const outermost = this.#onboardingRotationDepth === 0;
+    this.#onboardingRotationDepth += 1;
+    try {
+      return this.mutate(() => {
+        const expected = this.onboardingMcpScopes(roomId);
+        const priorIds = [];
+        for (const record of this.apiKeys.keysForIdentity(identityId)) {
+          if (record.revoked || !sameScopeSet(record.scopes, expected)) continue;
+          if (this.#protectedOnboardingKeyIds.has(record.keyId)) continue;
+          priorIds.push(record.keyId);
+        }
+        const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
+        const issued = this.#issueProtectedOnboardingKey({
+          identityId,
+          scopes: expected,
+          expiresAt: this.store.now() + 30 * 86400000,
+          label: host
+        });
+        for (const keyId of priorIds) {
+          const current = this.keys.get(keyId);
+          if (!current || current.revoked || this.#protectedOnboardingKeyIds.has(keyId)) continue;
+          this.apiKeys.revoke(keyId);
+          this.db.prepare("UPDATE agent_api_keys SET revoked=1 WHERE key_id=?").run(keyId);
+        }
+        return this.#onboardingTokenView(issued);
+      });
+    } finally {
+      this.#onboardingRotationDepth -= 1;
+      if (outermost) this.#protectedOnboardingKeyIds.clear();
+    }
+  }
+
+  #onboardingTokenView(issued) {
     return {
       credential: API_KEY_PREFIX + issued.secret,
       scopes: [...issued.scopes],
@@ -441,6 +497,32 @@ export class AgentPluginStore {
       label: issued.label,
       keyId: issued.keyId
     };
+  }
+
+  // Claim the key id before Map.set returns. An overlapping retry that
+  // starts from that insert then sees the id and leaves the key live.
+  #issueProtectedOnboardingKey(request) {
+    const previous = this.keys.set.bind(this.keys);
+    this.keys.set = (keyId, record) => {
+      this.#protectedOnboardingKeyIds.add(keyId);
+      return previous(keyId, record);
+    };
+    try {
+      const issued = this.apiKeys.issue(request);
+      const record = this.keys.get(issued.keyId);
+      this.#persistApiKey(record);
+      return issued;
+    } finally {
+      this.keys.set = previous;
+    }
+  }
+
+  #persistApiKey(record) {
+    this.db.prepare(`INSERT INTO agent_api_keys
+      (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
+      .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
+        record.label, record.createdAt, record.expiresAt);
   }
 
   notePresentedKeyUse(keyId, { at = null, ua = null } = {}) {
@@ -459,12 +541,7 @@ export class AgentPluginStore {
   issueApiKey({ identityId, scopes, expiresAt = null, label = null }) {
     return this.mutate(() => {
       const issued = this.apiKeys.issue({ identityId, scopes, expiresAt, label });
-      const record = this.keys.get(issued.keyId);
-      this.db.prepare(`INSERT INTO agent_api_keys
-        (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
-        .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
-          record.label, record.createdAt, record.expiresAt);
+      this.#persistApiKey(this.keys.get(issued.keyId));
       return issued;
     });
   }
@@ -1285,7 +1362,7 @@ export class AgentPluginStore {
       // member id in this room through the shared guest-aware resolver.
       // An identity seated in neither identity_links nor guest_members
       // for this room is not a member and hears nothing.
-      const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId);
+      const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId, this.store.now());
       if (!memberId) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
@@ -1472,13 +1549,14 @@ export class AgentPluginStore {
     };
     if (!sub.enabled) return skip();
     // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
-    // identity lost its room link between fan-out and dispatch is skipped,
+    // identity lost its room seat between fan-out and dispatch is skipped,
     // not sent. Fail closed at the last moment too. The delivery stays
-    // pending, so a re-linked identity still receives it on a later drain.
-    const link = this.db.prepare(
-      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?")
-      .get(row.room_id, row.agent_id);
-    if (!link && row.room_id) return skip();
+    // pending, so a re-seated identity still receives it on a later drain.
+    // The seat lookup goes through the shared guest-aware resolver
+    // (identity_links first, guest_members fallback) — the same one the
+    // fan-out uses (#3777) — so a trial seat's queued delivery is not
+    // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
+    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now)) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
     // payload?.data: a stored payload that parses to a non-object (or an
@@ -1636,21 +1714,27 @@ export class AgentPluginStore {
   async #drainWebhookDeliveriesOnce({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
     const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
     // Only rows that can actually be attempted fill the batch. Deliveries of a
-    // disabled subscription or of an identity no longer linked to the event's
-    // room stay pending but are left out here; otherwise a large skipped
+    // disabled subscription or of an identity no longer seated in the event's
+    // room (identity_links or guest_members — the resolver's two seats,
+    // #3881) stay pending but are left out here; otherwise a large skipped
     // backlog occupies every LIMIT-sized batch and live deliveries wait behind
     // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
     // subscription was removed (s is NULL) are still selected so they
-    // dead-letter as before.
+    // dead-letter as before. A guest seat counts as seated here only
+    // while it holds a live access credential (the resolver's liveness
+    // gate, mirrored in SQL), so a disconnected guest's rows stay out.
     const due = this.db.prepare(
       `SELECT d.* FROM agent_webhook_deliveries d
        LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
        WHERE d.state IN ('pending','failed') AND d.next_attempt_at <= ?
        ${agentId ? "AND d.agent_id = ?" : ""}
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
-         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
+         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id)
+         OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id
+           AND EXISTS (SELECT 1 FROM credentials c WHERE c.room_id = g.room_id AND c.member_id = g.member_id
+             AND c.kind = 'access' AND c.revoked = 0 AND c.expires_at > ?)))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
-      .all(...(agentId ? [now, agentId, limit] : [now, limit]));
+      .all(...(agentId ? [now, agentId, now, limit] : [now, now, limit]));
     const isolated = [];
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {

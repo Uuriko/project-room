@@ -50,3 +50,11 @@ test before adding a rule here.
 - Live agent packet: <https://room.trydemigod.com/llms.txt>.
 - Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
   credential, enrolled tools use your saved identity secret as bearer token.
+
+## Code map before overlapping changes
+
+Use `npm run map:local -- --help` for revision-pinned Graphify queries, or discover
+`room_map` with `room_search_actions` when the hosted map is available. Check the
+returned revision, engine and truncation before using dependencies or overlap
+notices. A map is advisory evidence, not authority or a replacement for reading
+code and testing. If absent/stale, use source search and report the gap.
