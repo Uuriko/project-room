@@ -1902,6 +1902,10 @@ const ROWS = [
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
   { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  { table: "pairs", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "pair_code_locks", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "agent_member_keys", key: "room_id", action: "delete", match: { room: ["room_id"] } },
+  { table: "room_join_policy", key: "room_id", action: "delete", match: { room: ["room_id"] } },
   // FTS5 message search index + shadow tables (PERF-50 D2-a,
   // server/message-search.mjs): a derived external-content index over the
   // messages table with no room key of its own. Room purge deletes the
