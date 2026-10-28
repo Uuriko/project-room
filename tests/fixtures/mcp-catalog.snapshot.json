@@ -1021,6 +1021,15 @@
         "openWorldHint": true
       }
     },
+    "room_read_bootstrap": {
+      "inputSchema": "9c4dedb9bd1af453",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
     "room_read_inbox": {
       "inputSchema": "3380eb84fe9882b4",
       "annotations": {

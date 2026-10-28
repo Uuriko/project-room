@@ -37,6 +37,7 @@ import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.
 import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { AccessRequests } from "./access-requests.mjs";
+import { buildRoomBootstrap } from "./room-bootstrap.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { MCP_SUPPORTED_VERSIONS, MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./mcp-full-profile.mjs";
@@ -207,6 +208,7 @@ function validRoomArgs(name, args) {
   }
   if (name === "room_merge_members") return validId(args.keepMemberId) && validId(args.retireMemberId);
   if (name === "get_room_context") return args.since_version === undefined || typeof args.since_version === "string" && /^[a-f0-9]{64}$/.test(args.since_version);
+  if (name === "room_read_bootstrap") return true;
   if (name === "room_list_events") {
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
       && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100);
@@ -598,6 +600,9 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     if (context.not_modified) return context;
     const auth = store.authenticate(secret, roomId);
     return { ...stampRoomContext(context), orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret, boardList: memoizeBoardList(store) }) };
+  }
+  if (name === "room_read_bootstrap") {
+    return withContentTrust(buildRoomBootstrap(store, secret, roomId, null, { accessRequests: new AccessRequests(store), watchers: [] }));
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);

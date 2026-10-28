@@ -5,6 +5,7 @@ import { publicPageCsp } from "./public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
+import { readRoomSnapshot } from "./snapshot-window.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
@@ -15,7 +16,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { ServiceError } from "./store.mjs";
 import { sqliteValueLimit } from "./storage-limits.mjs"; // r56: runtime row-limit fact on /api/version
 import { ABUSE_RATE_FAMILIES, loadAbuseRateBucket, saveAbuseRateBucket } from "./abuse-rate-buckets.mjs";
-import { peerEventVisible, visibleBonds } from "./bonds.mjs";
+import { peerEventVisible } from "./bonds.mjs";
 import { clientAddress, STREAM_INTERVAL_DEFAULT_MS } from "./deployment.mjs";
 import { isWorkersRuntime } from "./ip-blocklist.mjs";
 import { validId, memberCan, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
@@ -39,7 +40,7 @@ import { SOURCE_REVISION, BUILD_ID } from "./version.mjs";
 import { agentErrorBody, errorCategory, mergeErrorDetail, ERROR_COMMAND_TYPE } from "../src/agent-error.mjs";
 import { DiagnosticsLog, supportExportBundle } from "./diagnostics.mjs";
 import { renderRoomExportHtml, EXPORT_HTML_CSP } from "./room-export-html.mjs";
-import { redactEventPage, redactEventRows, redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
+import { redactEventPage, redactEventRows, redactMessageTree } from "./redact-read.mjs";
 import { messageInHistory, eventInHistory, requireExportOwner, recordRoomExport } from "./history-visibility.mjs"; // PRIV-2
 import { discoveryDoc, isHealthAliasPath, rewriteRoomApiPrefix, EDGE_DOOR_HOSTS, ROOM_ORIGIN, agentCardSignatureState } from "./agent-discovery.mjs";
 import { validateCriticalConfig } from "./boot-config.mjs";
@@ -322,9 +323,6 @@ const JSON_BODY_BYTES = 16384;
 const rateHash = value => createHash("sha256").update(String(value)).digest("hex");
 // A lagging stream that still has not drained its final event by now is dropped.
 const STREAM_DRAIN_GRACE_MS = 5000;
-// Messages a `?messages=recent` room snapshot carries (the /conversation page maximum).
-const SNAPSHOT_RECENT_MESSAGES = 100;
-
 // Least-recently-used bookkeeping for small internal caches (channel senders).
 // Returns the cached value for key, marking it most-recently-used; when key is
 // absent, makeValue() builds it, the least-recently-used entry is evicted at
@@ -1353,6 +1351,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         sendBudgets, sendBudgetChannelFor, syntheticInboxTransport,
         resolveChannelTransport, directSendFetch,
         publicAgentPages, jevShadowAdmission,
+        streams,
       })) return;
       if ((url.pathname === "/api/health" || url.pathname === "/api/health/" || isHealthAliasPath(inboundPath) || isHealthAliasPath(url.pathname)) && ["GET", "HEAD"].includes(req.method)) {
         return json(res, 200, { status: "ok", mode: serviceMode, emailVerification, ...deploymentField }, req.method === "HEAD");
@@ -2468,9 +2467,17 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         // starting at GET / alone can find the agent card from Link headers.
         // GR1: marketing documents also name the canonical host.
         const linkPath = canonical && reviewedPublicSearchPaths.includes(canonical) ? canonical : (gr1Alias ? url.pathname : null);
-        res.setHeader("Link", linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url));
+        const discovery = linkPath ? publicPageLinks(url, linkPath) : discoveryLinks(url);
+        const shell = path === "index.html";
+        res.setHeader("Link", shell ? `${discovery}, </src/styles.css>; rel=preload; as=style` : discovery);
+        if (shell && req.method === "GET" && typeof res.writeEarlyHints === "function") {
+          try { res.writeEarlyHints({ link: ["</src/styles.css>; rel=preload; as=style"] }); }
+          catch { /* this platform has no early hints */ }
+        }
         const binary = type === "image/png" || type === "font/ttf" || type === "font/woff2";
         if (binary) res.setHeader("Cache-Control", "public, max-age=86400");
+        else if (path === "src/styles.css") res.setHeader("Cache-Control", "public, max-age=3600");
+        else if (shell) res.setHeader("Cache-Control", "public, max-age=60");
         // The front door keeps the GitHub anchor in source. Omit it from the
         // served bytes unless this server was given a GitHub auth config.
         const payload = path === "index.html"
@@ -4411,12 +4418,20 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       }
       if (!route && req.method === "GET") {
         const params = url.searchParams;
-        // `?messages=recent`: the full snapshot with only the newest
-        // SNAPSHOT_RECENT_MESSAGES visible messages. A busy room's full
-        // history (muse-room: 5,300+ messages, ~5 MB) no longer has to ship
-        // on every open; older history pages through /conversation.
+        // Default and `?messages=recent` are the same window (newest messages
+        // that fit the byte budget). `?full=1` is the retired unbounded
+        // document, only while ROOM_SNAPSHOT_FULL_COMPAT=1, and it sets
+        // Deprecation. Older messages page through /messages.
         const recentMessages = params.has("messages");
-        if (recentMessages && (params.has("view") || params.get("messages") !== "recent"
+        const fullRead = params.has("full");
+        if (fullRead && (params.get("full") !== "1" || params.getAll("full").length !== 1 || recentMessages || params.has("view")
+          || [...params.keys()].some(key => !["full", "auth"].includes(key) || params.getAll(key).length !== 1))) {
+          reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
+        }
+        if (fullRead && process.env.ROOM_SNAPSHOT_FULL_COMPAT !== "1") {
+          reject(422, "invalid_snapshot_view", "The full room read is retired. Read the window, then page older messages.");
+        }
+        if (recentMessages && (params.has("view") || fullRead || params.get("messages") !== "recent"
           || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
@@ -4431,28 +4446,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         const snapshotView = params.has("view") ? "work" : "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
-        const snapshot = store.snapshot(selected.token, roomId, fence, snapshotView, helpContext === "1", offerContext === "1", auditHeader ? "activity" : "full", recentMessages ? SNAPSHOT_RECENT_MESSAGES : null);
-        if (snapshotView === "work") delete snapshot.state.agentHalts;
-        if (snapshotView === "full") {
-          // RC-2026-09-19-070: strip targeted DMs from both carriers in the
-          // full snapshot — the audit tail (state.eventLog, the named P0) and
-          // the live projection (state.messages, which the client renders as
-          // the timeline). Pins reference messages by id, so pins of hidden
-          // DMs are dropped too — otherwise the pin would reveal the DM's
-          // existence. The work view carries none of these.
-          const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
-          const visibleIds = new Set(visibleMessages.map(message => message.id));
-          // The recent window trims after DM filtering, so hidden DMs never
-          // count toward it; pins still follow every visible message.
-          const windowed = recentMessages ? visibleMessages.slice(-SNAPSHOT_RECENT_MESSAGES) : visibleMessages;
-          const nextState = { ...snapshot.state,
-            messages: windowed,
-            eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
-            pins: recentMessages ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId)) };
-          if (snapshot.state.bonds) nextState.bonds = visibleBonds(snapshot.state.bonds, peerContext);
-          snapshot.state = redactSnapshotState(nextState);
+        if (fullRead) {
+          res.setHeader("Deprecation", "true");
+          res.setHeader("Link", `</api/rooms/${encodeURIComponent(roomId)}>; rel="successor-version"`);
         }
-        return json(res, 200, snapshot);
+        return json(res, 200, readRoomSnapshot(store, selected.token, roomId, fence, {
+          view: snapshotView,
+          helpContext: helpContext === "1",
+          offerContext: offerContext === "1",
+          auditView: auditHeader ? "activity" : "full",
+          windowed: snapshotView === "full" && !fullRead,
+          visibility: { dmMessageVisible, roomEventVisible, peerContext }
+        }));
       }
       if (route === "outside-agents") {
         const network = new OutsideAgents(store);
