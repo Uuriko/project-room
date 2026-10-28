@@ -345,7 +345,7 @@ function redactRoomMessages(store, roomId, actorId) {
   const log = readRedactionLog(store.db, roomId);
   for (const [index, messageId] of ids.entries()) {
     const result = commitMessageRedaction(store.db, {
-      roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRest, log, writeProjection: index === ids.length - 1
+      roomId, state, actorId, at, messageId, bodiesAtRest: store.bodiesAtRestFor(roomId), log, writeProjection: index === ids.length - 1
     });
     state = result.state;
     removed += result.rewritten;

@@ -16,8 +16,11 @@ import { isMessageEntityRef, referenceMessageEntities, hydrateMessageEntities } 
 // referenced set, so the release is a set difference over the sha index
 // instead of a second full-projection parse in SQL.)
 //
-// Rollout: hydration is always on. Slimming is on only when the store was
-// opened with bodiesAtRest (ROOM_BODIES_AT_REST=1). Turning it off makes the
+// Rollout: hydration is always on. Slimming is on for a room when the store
+// selects that room (see the hot-room selection below): the global switch
+// (ROOM_BODIES_AT_REST=1), an explicit room list
+// (ROOM_BODIES_AT_REST_ROOMS), or hot-room auto-selection
+// (ROOM_BODIES_AT_REST_HOT=1). Turning selection off makes the
 // next write of each room store full bodies again; store.rehydrateAllProjections()
 // does that for every room at once, in one transaction, which an older build
 // needs before a rollback. Take a backup first, as for any rollback.
@@ -28,6 +31,41 @@ import { createHash } from "node:crypto";
 // stayed inline. At 256 those move to projection_bodies too: ~317 KB freed on
 // the next write and inline body growth per message roughly halved.
 export const BODY_AT_REST_MIN_CHARS = 256;
+
+// Hot-room selection (C4-1): the 4 MiB projection cap is a hot-room problem
+// only — fleet-average rooms grow ~139 B/day while the largest production
+// room was already 1,130,818 B — so bodies-at-rest no longer has to be
+// all-or-nothing per store. A room is hot once its stored projection
+// reaches HOT_ROOM_PROJECTION_BYTES (1 MiB, a quarter of the cap): the one
+// production room past the line selects itself, cold rooms keep the exact
+// inline bytes they have today. Selection is sticky (RoomStore checks for
+// existing body rows as well as size), so slimming a room back under the
+// threshold never flips it to inline on the next write or after a restart.
+export const HOT_ROOM_PROJECTION_BYTES = 1024 * 1024;
+
+// Room ids from an env-style value: comma/whitespace separated string, or
+// any iterable of ids. Always a fresh Set of non-empty strings.
+export function parseRoomIdList(value) {
+  if (value == null) return new Set();
+  const items = typeof value === "string" ? value.split(/[\s,]+/) : value;
+  const rooms = new Set();
+  for (const item of items) {
+    const id = String(item).trim();
+    if (id) rooms.add(id);
+  }
+  return rooms;
+}
+
+// The one place the ROOM_BODIES_AT_REST* env vars are read, shared by the
+// Node entry (via RoomStore's option defaults) and both Cloudflare entries,
+// so every entry point engages the same rooms from the same config.
+export function bodiesAtRestOptionsFromEnv(env = {}) {
+  return {
+    bodiesAtRest: env.ROOM_BODIES_AT_REST === "1",
+    bodiesAtRestRooms: parseRoomIdList(env.ROOM_BODIES_AT_REST_ROOMS),
+    bodiesAtRestHot: env.ROOM_BODIES_AT_REST_HOT === "1"
+  };
+}
 
 export const PROJECTION_BODIES_SCHEMA = `
 CREATE TABLE IF NOT EXISTS projection_bodies (
