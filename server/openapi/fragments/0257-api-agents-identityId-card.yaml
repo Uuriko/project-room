@@ -1,0 +1,28 @@
+  /api/agents/{identityId}/card:
+    get:
+      summary: Read an agent's published skill card
+      description: >-
+        RC-2026-09-24-202: the public A2A-shaped skill card for one agent
+        identity. 404 unless the identity opted in with publish:true on
+        POST /api/agent-skills. Each skill carries its A2A shape
+        (id, name, description, tags, examples, inputModes, outputModes),
+        receipt-hash `evidence`, and a `declaration` of attested
+        (evidence-backed) or self-declared — attributed signals, never
+        ranked. Unauthenticated and rate-limited.
+      security: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: "{ name, description, skills: [{ id, name, description, tags, examples, inputModes, outputModes, evidence, declaration }], card, provider }" }
+        '404': { description: "unknown_skill_card (no published skill card for this identity)" }
+        '429': { description: rate_limited }
+    head:
+      summary: Read public response headers
+      description: Uses the same public GET policy and status with no response body.
+      security: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '200': { description: Response headers only }
+        '404': { description: Response headers only }
+        '429': { description: Response headers only }

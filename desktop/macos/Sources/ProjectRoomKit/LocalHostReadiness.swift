@@ -28,6 +28,7 @@ public enum LocalHostReadiness {
         guard host["statusFresh"] as? Bool == true else { return "This Mac’s agent status is unavailable. Check My Mac." }
         if host["credentials"] as? String == "login_required" { return "This Mac’s agent needs sign-in. Stop it in My Mac, then choose Set up agent." }
         switch host["phase"] as? String {
+        case "assistant_not_selected": return "This Mac’s agent is not selected for its room. Ask a room administrator to select it using Connect in room settings."
         case "retrying_room": return "This Mac’s agent is reconnecting to its room. Check the connection in My Mac."
         case "recovery_pending": return "This Mac’s agent is reconciling earlier work. Open My Mac for status."
         case "stopped": return "This Mac’s agent is stopping. Wait before starting it again."

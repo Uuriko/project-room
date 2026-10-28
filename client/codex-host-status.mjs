@@ -2,7 +2,7 @@ import { existsSync, lstatSync, readFileSync, realpathSync, renameSync, unlinkSy
 import { isAbsolute, join } from "node:path";
 import { WatchJournal } from "./watch-journal.mjs";
 
-const phases = new Set(["watching_room", "protocol_qualified", "running", "settled", "recovery_pending", "retrying_room", "stopped"]);
+const phases = new Set(["watching_room", "assistant_not_selected", "protocol_qualified", "running", "settled", "recovery_pending", "retrying_room", "stopped"]);
 const credentials = new Set(["unknown", "present", "login_required", "not_required"]);
 const privatePath = (path, directory = false) => {
   const stat = lstatSync(path);
@@ -63,7 +63,7 @@ export function createCodexStatusWriter(directory, connection, { onError = () =>
         if (event.status === "protocol_qualified") record.protocol = "qualified";
         if (event.status === "recovery_pending") record.protocol = "unverified";
         if (typeof event.runId === "string" && event.runId.length <= 128) record.runId = event.runId;
-        else if (["watching_room", "stopped"].includes(event.status)) delete record.runId;
+        else if (["watching_room", "assistant_not_selected", "stopped"].includes(event.status)) delete record.runId;
       }
       if (event.type === "host_readiness" && credentials.has(event.credentials)) {
         record.credentials = event.credentials; record.protocol = "qualified";

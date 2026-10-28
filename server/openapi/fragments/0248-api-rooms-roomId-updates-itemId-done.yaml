@@ -1,0 +1,38 @@
+  /api/rooms/{roomId}/updates/{itemId}/done:
+    post:
+      summary: Mark an update handled
+      description: >-
+        Marks handled for the current member, not shared task completion. New
+        operations require the listed basisToken as expectedBasis; changed basis
+        refuses with no effect. Exact retries retain requestId and expectedBasis
+        and return the historical committed receipt under current authentication.
+        Omitted expectedBasis is allowed only for an exact committed legacy retry.
+        The item leaves this member's actionable lists, including needs-me.
+        Existing source-basis limitations and independent wake/reply-derived handling
+        remain; older writers do not retain this guard on downgrade.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: itemId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId]
+              additionalProperties: false
+              properties:
+                requestId: { type: string }
+                expectedBasis:
+                  type: string
+                  pattern: '^ub1_[a-f0-9]{64}$'
+                  description: Required for every new operation. Omission is reserved for exact already-committed legacy receipt retries; never refresh this token to retry an older action.
+      responses:
+        '200': { description: The update, state handled when it was actionable. duplicate is true on an exact retry. }
+        '401': { description: unauthenticated }
+        '404': { description: update_not_found }
+        '409': { description: 'update_changed (refresh and review before a new action) or idempotency_conflict (requestId reused with another action, item or basis)' }
+        '422': { description: 'update_basis_required for an unbound new operation; invalid_update for malformed fields or token' }
