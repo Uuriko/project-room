@@ -47,10 +47,8 @@ for (const width of [1280, 390]) test(`entry recovery and room search at ${width
   await page.getByText('Room notes', { exact: true }).click();
   assert.equal(await page.locator('#choose-room').isVisible(), false);
   assert.equal(await page.getByRole('link', { name: 'Join room', exact: true }).isVisible(), true);
-  await page.locator('#account-rooms-search').fill('no-room-with-this-title');
-  assert.equal(await page.locator('#account-rooms-list button:visible').count(), 0);
-  assert.match(await page.locator('#account-rooms-filter-status').innerText(), /No matching rooms/);
-  await page.locator('#account-rooms-search').fill('');
+  assert.equal(await page.getByRole('searchbox', { name: 'Search your rooms' }).count(), 0);
+  assert.ok(await page.locator('#account-rooms-list button:visible').count() > 0);
   await page.locator('#account-settings > summary').click();
   await page.locator('#account-settings-body .account-settings').waitFor();
   mkdirSync('test-results/entry', { recursive: true });

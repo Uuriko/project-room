@@ -104,11 +104,8 @@
       </nav>
       <p id="account-status" class="form-hint" role="status" hidden></p>
       <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
-        <h2 id="account-rooms-title" class="view-title">Rooms</h2>
+        <h2 id="account-rooms-title" class="view-title" tabindex="-1">Rooms</h2>
         <p id="account-rooms-status" role="status"></p>
-        <label for="account-rooms-search">Search your rooms</label>
-        <input id="account-rooms-search" type="search" autocomplete="off">
-        <p id="account-rooms-filter-status" role="status"></p>
         <p><a class="button" href="./join">Join room</a></p>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
@@ -178,13 +175,13 @@
             <button id="tasks-board-open" type="button">Board</button>
             <button id="new-work-open" type="button">New work</button>
           </nav>
-          <details id="invite-navigation" class="invite-navigation"><summary>Invite <span aria-hidden="true">+</span></summary>
+          <div id="invite-navigation" class="invite-navigation">
           <div id="sidebar-invite"></div>
           <div class="people-actions">
             <button id="connect-agent-button" class="button secondary" type="button" hidden>Add agent</button>
             <button id="invite-agents-button" class="button secondary" type="button" hidden>Agent invites</button>
           </div>
-          </details>
+          </div>
           <details id="people-panel" class="sidebar-panel" open>
             <summary id="presence-title" class="sidebar-label"><span>Participants</span><span id="presence-count" class="count-chip"></span></summary>
             <div id="presence-list" class="presence-list"></div>

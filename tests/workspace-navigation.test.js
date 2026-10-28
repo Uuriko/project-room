@@ -55,10 +55,10 @@ test("a failed optional setup still creates, and a rejected creation can retry",
 test("browsing rooms consumes an old sign-in destination without losing the app base path", async () => {
   const { installWorkspaceNavigation } = await import("../src/workspace-navigation.js");
   const originals = Object.fromEntries(["document", "location", "history"].map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
-  const elements = new Map(); const visits = [];
+  const elements = new Map(); const visits = [], focused = [];
   try {
     globalThis.document = { querySelector(selector) {
-      if (!elements.has(selector)) elements.set(selector, { hidden: false, addEventListener() {} });
+      if (!elements.has(selector)) elements.set(selector, { hidden: false, addEventListener() {}, focus() { focused.push(selector); } });
       return elements.get(selector);
     } };
     globalThis.location = { href: "https://example.test/room/?next=old-private&room=current&theme=dark#room/current" };
@@ -69,6 +69,8 @@ test("browsing rooms consumes an old sign-in destination without losing the app 
     assert.deepEqual(visits, ["/room/?theme=dark#pr-view/room-list"]);
     assert.equal(elements.get("#account-rooms-panel").hidden, false);
     assert.equal(elements.get("#main").hidden, true);
+    assert.deepEqual(focused, ["#account-rooms-title"]);
+    await Promise.resolve();
   } finally {
     for (const [key, descriptor] of Object.entries(originals)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);

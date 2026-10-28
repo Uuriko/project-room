@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   LAST_ROOM_KEY, LAST_ROOM_TITLE_KEY, LAST_ROOM_BY_MEMBER_KEY, HAD_ACCOUNT_KEY, AUTH_KIND_KEY, GUIDE_DISMISSED_KEY, SESSION_HINT_COPY,
   rememberLastRoom, rememberAccountHint, readLastRoom, readLastRoomTitle, readAccountHint, clearBrowserSessionHints,
-  rememberMemberRoom, readMemberRoom, signInRoomTarget, clearStoredPasswords
+  rememberMemberRoom, readMemberRoom, signInRoomTarget, clearStoredPasswords, stashProviderRoom, takeProviderRoom
 } from "../src/browser-session.js";
 
 function memoryStore(start = {}) {
@@ -102,4 +102,22 @@ test("session hint copy never names a secret and explains cookie vs localStorage
   assert.match(SESSION_HINT_COPY, /Room-key sessions and account sessions each stay signed in for up to 8 hours/);
   assert.match(SESSION_HINT_COPY, /Log out/);
   assert.doesNotMatch(SESSION_HINT_COPY, /pri_|ga1\.|ROOM_AGENT_TOKEN|sk-/);
+});
+
+
+test("provider room intent is bounded, one-shot and never an arbitrary URL", () => {
+  const storage = memoryStore();
+  stashProviderRoom("muse-room", storage, 1000);
+  assert.equal(takeProviderRoom(storage, 2000), "muse-room");
+  assert.equal(takeProviderRoom(storage, 2000), null);
+  stashProviderRoom("muse-room", storage, 1000);
+  assert.equal(takeProviderRoom(storage, 1801000), null);
+  stashProviderRoom("muse-room", storage, 2000);
+  assert.equal(takeProviderRoom(storage, 1000), null);
+  stashProviderRoom("muse-room", storage, 1000);
+  stashProviderRoom("https://outside.example", storage, 1000);
+  assert.equal(takeProviderRoom(storage, 2000), null);
+  stashProviderRoom("muse-room", storage, 1000);
+  stashProviderRoom(null, storage, 1000);
+  assert.equal(takeProviderRoom(storage, 2000), null);
 });

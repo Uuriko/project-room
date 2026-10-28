@@ -57,15 +57,13 @@ test("signed-in room view is axe-clean (serious/critical)", { timeout: 180000 },
     await page.locator("#main").waitFor({ state: "visible" });
     await page.locator("[data-message-id]").first().waitFor({ state: "visible" });
     assertAxeClean(await axeSerious(page), `signed-in room view @${viewport.width}px`);
-    // NEXT-5: the sidebar disclosures ship closed, so their controls stay out
-    // of the accessibility tree and out of the sweep above. On narrow screens
-    // the whole sidebar is off-canvas until Menu opens it. Reveal both before
-    // auditing button names.
+    // Reveal the narrow sidebar and participant disclosure before auditing
+    // button names. Invitation actions are directly available in the sidebar.
     if (viewport.width < 700 && !await page.locator("#main").evaluate(node => node.classList.contains("sidebar-open"))) {
       await page.locator("#sidebar-toggle").click();
       await page.locator("#room-sidebar").waitFor({ state: "visible" });
     }
-    for (const selector of ["#invite-navigation", "#people-panel"]) {
+    for (const selector of ["#people-panel"]) {
       const panel = page.locator(selector);
       if (!await panel.evaluate(node => node.open)) await page.locator(`${selector} > summary`).click();
     }

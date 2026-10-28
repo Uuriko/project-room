@@ -124,7 +124,8 @@ test("callback success establishes the session and returns the same-origin page"
     { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
   assert.equal(callback.status, 200);
   const html = await callback.text();
-  assert.match(html, /content="0;url=\/\?room=commons"/);
+  assert.match(html, /content="0;url=\/\?account=1&amp;signin=google"/);
+  assert.doesNotMatch(html, /room=commons/, "membership ordering must not override the browser room intent");
   const sessionCookie = accountCookie(callback);
   // QAS-702: the callback mints a fresh slot token — the pre-login token is
   // dead and the fresh cookie token carries the Google session.

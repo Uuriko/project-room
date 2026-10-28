@@ -1440,10 +1440,7 @@ summary { overflow-wrap: anywhere; }
 .sidebar-head .room-overview-open { display: flex; align-items: center; justify-content: space-between; gap: .5rem; width: 100%; min-width: 0; padding: .35rem; border: 0; border-radius: .4rem; background: transparent; color: var(--text); text-align: left; }
 .sidebar-head .room-overview-open:hover { background: var(--panel-raised); }
 .invite-navigation { border-top: 1px solid var(--line-soft); padding-top: .25rem; }
-.invite-navigation > summary { display: flex; justify-content: space-between; align-items: center; min-height: 44px; padding-inline: .5rem; cursor: pointer; font-size: .85rem; color: var(--muted); list-style: none; }
-.invite-navigation > summary::-webkit-details-marker { display: none; }
-.invite-navigation[open] > summary { color: var(--text); }
-.invite-navigation .button { width: 100%; min-height: 40px; border: 0; background: transparent; color: var(--text); text-align: left; justify-content: flex-start; padding: .5rem; }
+.invite-navigation .button { width: 100%; min-height: 44px; border: 0; background: transparent; color: var(--text); text-align: left; justify-content: flex-start; padding: .5rem; }
 .invite-navigation .button:hover { background: var(--panel-raised); }
 .invite-navigation .people-actions { display: grid; gap: .15rem; }
 .composer-row textarea { grid-column: 1 / -1; grid-row: 1; }
@@ -1797,8 +1794,7 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
 .inline-result .portable-actions { flex-wrap: wrap; }
 
 #account-rooms-panel { max-width: 40rem; margin: 1.5rem auto; }
-#account-rooms-search { width: 100%; }
-#account-rooms-filter-status:empty, #account-rooms-status:empty { display: none; }
+#account-rooms-status:empty { display: none; }
 #account-rooms-panel #owner-cockpit { margin-top: 1.5rem; }
 body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
 @media (max-width: 700px) { #account-rooms-panel { margin: 1rem .75rem; } }

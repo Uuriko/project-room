@@ -16,7 +16,17 @@ export function installWorkspaceNavigation({ account, getRoom, onRooms, onNaviga
     url.searchParams.delete("next");
     url.hash = "#pr-view/room-list";
     if (url.href !== location.href) history[push ? "pushState" : "replaceState"](null, "", url.pathname + url.search + url.hash);
-    onNavigate(); sync(); onRooms();
+    onNavigate(); sync();
+    const owned = account.session;
+    const title = $("#account-rooms-title");
+    if (push && owned?.authenticated) title?.focus({ preventScroll: true });
+    Promise.resolve(onRooms()).then(() => {
+      if (!push || !browsing || account.session !== owned || !owned?.authenticated
+        || document.activeElement !== title) return;
+      const rows = [...document.querySelectorAll("#account-rooms-list [data-account-room]")];
+      const current = getRoom()?.room?.id;
+      (rows.find(row => row.dataset.accountRoom === current) || rows[0])?.focus({ preventScroll: true });
+    });
   }
   function showRooms() {
     const wasBrowsing = browsing;

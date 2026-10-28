@@ -56,7 +56,7 @@ import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
 import { selectedRoomFromLocation as roomFromLocation, roomIdFromHash, roomIdFromNext, ROOM_ACCESS_NOTICE } from "./room-deep-link.js";
 import { installAgentInvites } from "./agent-invite-ui.js";
-import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget } from "./browser-session.js";
+import { rememberLastRoom, rememberAccountHint, readLastRoom, readAccountHint, hasSessionHint, clearBrowserSessionHints, rememberMemberRoom, readMemberRoom, clearStoredPasswords, signInRoomTarget, stashProviderRoom, takeProviderRoom } from "./browser-session.js";
 import { arrivalsNeedFileRefresh, attachFailureCopy, attachmentFromBytes, composerAudienceNote, COMPOSER_FILE_BYTES, fileChipLabel, ROOM_FILE_REFRESH_DELAYS_MS } from "./composer-files.js";
 import { formatSessionExpiry } from "./session-expiry.js";
 import { handoffEnvelopeListHtml, envelopesForWork } from "./handoff-envelope-ui.js";
@@ -73,6 +73,9 @@ const bodyHtmlCache = createBodyHtmlCache();
 // Only our exact consent path is a return target; never follow arbitrary URLs.
 const oauthReturnKey = "project-room:oauth-return:v1";
 let initialDesktopProvider = null;
+const googleReturn = new URLSearchParams(location.search).getAll("signin").length === 1
+  && new URLSearchParams(location.search).get("signin") === "google";
+const providerRoomIntent = googleReturn ? takeProviderRoom() : null;
 function validatedOAuthReturn(value) {
   if (typeof value !== "string" || !value.startsWith("/oauth/authorize?") || value.length > 4096) return null;
   try {
@@ -335,7 +338,7 @@ function stashInviteForOAuth() {
 // invitation before the navigation, since the OAuth round-trip drops the
 // #invite/ fragment.
 { const googleButton = $("#google-signin");
-  if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
+  if (googleButton) googleButton.addEventListener("click", () => { stashProviderRoom(selectedRoomFromLocation()); stashInviteForOAuth(); }); }
 { const githubButton = $("#github-signin");
   if (githubButton) githubButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
@@ -958,19 +961,10 @@ function mountAccountSettings() {
 $("#account-settings").addEventListener("toggle", () => {
   if ($("#account-settings").open && accountClient.session?.authenticated) void mountAccountSettings();
 });
-function filterAccountRooms() {
-  const query = $("#account-rooms-search").value.trim().toLocaleLowerCase();
-  const rows = [...$("#account-rooms-list").children];
-  for (const row of rows) row.hidden = Boolean(query) && !row.textContent.toLocaleLowerCase().includes(query);
-  $("#account-rooms-filter-status").textContent = query && rows.length && rows.every(row => row.hidden)
-    ? uiText("entry.rooms.noMatches") : "";
-}
-$("#account-rooms-search").addEventListener("input", filterAccountRooms);
 function clearPrivateWorkspace(options) {
   $("#account-profile-dialog").close(); profileSettingsUI.reset();
   workspaceUI?.reset(options); roomListVersion++;
   $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
-  $("#account-rooms-search").value = ""; $("#account-rooms-filter-status").textContent = "";
   accountSettingsUI.reset();
   $("#account-status").textContent = ""; $("#account-status").hidden = true;
   $("#account-settings").open = false; $("#account-settings-body").replaceChildren();
@@ -1067,7 +1061,7 @@ async function landAfterSignIn() {
   if (await resumeEmailVerification()) return;
   if (resumeOAuthConsent()) return;
   const target = signInRoomTarget({
-    nextRoom: roomIdFromNext(new URLSearchParams(location.search).get("next")),
+    nextRoom: providerRoomIntent || roomIdFromNext(new URLSearchParams(location.search).get("next")),
     deepLinkRoom: roomFromLocation({ search: location.search, hash: location.hash }),
     rememberedRoom: rememberedRoomId()
   });
@@ -1186,16 +1180,15 @@ async function loadAccountRooms(more = false) {
       const named = title && title !== room.id;
       const heading = document.createElement("strong");
       heading.textContent = named ? title : room.id;
-      const meta = document.createElement("small");
-      meta.className = "inbox-row-kind";
-      meta.textContent = roomKindLabel(room.kind) + (archived ? " · Archived" : "");
-      const action = document.createElement("span");
-      action.textContent = archived ? "Read only" : "Open";
-      button.append(heading, meta, action);
+      button.append(heading);
+      if (archived) {
+        const action = document.createElement("span");
+        action.textContent = "Read only";
+        button.append(action);
+      }
       button.setAttribute("aria-label", `${archived ? "Read archived room" : "Open"} ${named ? title : room.id}`);
       button.addEventListener("click", () => openAccountRoom(room.id)); $("#account-rooms-list").append(button);
     }
-    filterAccountRooms();
     roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;
     $("#account-rooms-status").textContent = $("#account-rooms-list").children.length ? "" : roomListCursor ? "No available rooms on this page." : "No rooms yet.";
     // RC-2026-09-19-088: first sign-in must never land in an empty void. A
@@ -5408,7 +5401,6 @@ function chooseRoomAction(id) {
   }
   if (id === "how-agent") {
     revealPeopleChrome();
-    $("#invite-navigation").open = true;
     const button = $("#connect-agent-button");
     const target = button && !button.hidden ? button : $("#people-panel > summary");
     target.scrollIntoView({ block: "nearest" }); target.focus({ preventScroll: true });
@@ -8223,6 +8215,7 @@ const ready = (async () => {
       // Q3-C: the skip link is the first stop. Don't move focus past it.
       return;
     }
+    if (googleReturn) { await landAfterSignIn(); return; }
     if (!requestedRoom) showAccountWorkspace();
     else {
       try { await client.restore(requestedRoom); }

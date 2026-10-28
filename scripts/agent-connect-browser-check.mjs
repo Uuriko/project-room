@@ -34,7 +34,6 @@ async function setup(t, mobile = false) {
       await page.locator("#sidebar-toggle").click();
       await page.locator("#room-sidebar").waitFor({ state: "visible" });
     }
-    if (!(await page.locator("#invite-navigation").evaluate(node => node.open))) await page.locator("#invite-navigation > summary").click();
     await page.locator("#connect-agent-button").waitFor({ state: "visible" });
   };
   await reveal();

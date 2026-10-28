@@ -147,10 +147,6 @@ export async function clickChrome(page, selector) {
   }
   if (['#invite-people-button', '#connect-agent-button', '#invite-agents-button'].includes(selector)) {
     if (await page.locator('#main').isVisible()) await ensureSidebarOpen(page);
-    if (selector !== '#room-actions-open' && await page.locator('#invite-navigation').isVisible()
-      && !(await page.locator('#invite-navigation').evaluate(node => node.open))) {
-      await page.locator('#invite-navigation > summary').click();
-    }
   }
   if (['#nav-inbox', '#nav-rooms', '#choose-room'].includes(selector) && await page.locator('#main').isVisible()) {
     if (await control.evaluate(node => Boolean(node.closest('#room-sidebar')))) await ensureSidebarOpen(page);

@@ -1474,13 +1474,9 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
               revokeRoomToken: oldRoomToken && tokenPattern.test(oldRoomToken) ? oldRoomToken : null,
               rotateSlot: true });
           setCookie(res, accountCookieName, freshSlotToken, Math.max(0, Math.floor((loggedIn.expiresAt - store.now()) / 1000)));
-          const firstRoom = store.db.prepare("SELECT room_id FROM member_accounts WHERE account_id=? ORDER BY room_id LIMIT 1")
-            .get(linked.accountId);
-          // A fresh account has no rooms yet: land on the account home, where
-          // the room list, invite redemption, and "New room" creation live.
-          // The error path is reserved for genuine failures (denied consent,
-          // bad state), which the client surfaces with a real message.
-          return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1");
+          // The authenticated client resolves explicit intent or its account's
+          // remembered room. Alphabetical membership order is not navigation intent.
+          return finishGoogle("/?account=1&signin=google");
         } catch (error) {
           // Log only a bounded error identifier, never callback URLs, tokens,
           // provider bodies, emails, or arbitrary exception messages.

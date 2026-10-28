@@ -41,15 +41,12 @@ export function installRoomLayout() {
   const invitationState = () => {
     const visible = ['#invite-people-button', '#connect-agent-button', '#invite-agents-button'].filter(selector => !get(selector).hidden).length;
     invites.hidden = visible === 0;
-    invites.querySelector('summary').hidden = visible <= 1;
-    if (visible === 1) invites.open = true;
   };
   for (const selector of ['#invite-people-button', '#connect-agent-button', '#invite-agents-button']) new MutationObserver(invitationState).observe(get(selector), { attributes: true, attributeFilter: ['hidden'] });
   invitationState();
   for (const selector of ['#invite-people-button', '#connect-agent-button', '#invite-agents-button']) {
     get(selector).addEventListener('click', () => {
       if (main.hidden) return;
-      invites.open = true;
       if (getComputedStyle(get('#room-sidebar')).display === 'none') get('#sidebar-toggle').click();
     }, { capture: true });
   }

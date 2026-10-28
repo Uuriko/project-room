@@ -10,6 +10,24 @@ export const LAST_ROOM_BY_MEMBER_KEY = "pr-last-room-by-member";
 export const HAD_ACCOUNT_KEY = "pr-had-account";
 export const AUTH_KIND_KEY = "pr-auth-kind";
 export const GUIDE_DISMISSED_KEY = "pr-guide-dismissed";
+const PROVIDER_ROOM_KEY = "pr-provider-room-intent";
+
+export function stashProviderRoom(roomId, storage = globalThis.sessionStorage, now = Date.now()) {
+  try {
+    storage.removeItem(PROVIDER_ROOM_KEY);
+    if (typeof roomId === "string" && ROOM_ID_PATTERN.test(roomId)) storage.setItem(PROVIDER_ROOM_KEY, JSON.stringify({ roomId, at: now }));
+  } catch { /* Storage is optional; authenticated room selection still works. */ }
+}
+
+export function takeProviderRoom(storage = globalThis.sessionStorage, now = Date.now()) {
+  try {
+    const raw = storage.getItem(PROVIDER_ROOM_KEY);
+    storage.removeItem(PROVIDER_ROOM_KEY);
+    const value = JSON.parse(raw);
+    return typeof value?.roomId === "string" && ROOM_ID_PATTERN.test(value.roomId)
+      && Number.isFinite(value.at) && now >= value.at && now - value.at < 30 * 60 * 1000 ? value.roomId : null;
+  } catch { return null; }
+}
 
 export const SESSION_HINT_COPY = "This browser keeps an HttpOnly session cookie — not localStorage. Closing the tab does not log you out. Room-key sessions and account sessions each stay signed in for up to 8 hours. Log out clears the cookie. The last room for this account stays in this browser so the next sign-in can return there.";
 
