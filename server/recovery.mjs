@@ -54,7 +54,12 @@ export function auditRecovery(store) {
   return store.readTransaction(() => {
     requireState(store.storagePlatform.version(store.db) === STORE_SCHEMA_VERSION);
     store.storagePlatform.verifyWriterFence(store.db);
-    requireState(store.db.prepare("PRAGMA quick_check").get().quick_check === "ok");
+    // Check one table (with its indexes) at a time. A whole-database
+    // quick_check holds state for every b-tree at once and runs out of
+    // memory inside a Durable Object once the schema passes a size limit.
+    for (const { name } of store.db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT GLOB 'sqlite_*' AND name NOT GLOB '_cf_*' ORDER BY name").all()) {
+      requireState(store.db.prepare(`PRAGMA quick_check("${name.replaceAll('"', '""')}")`).get().quick_check === "ok");
+    }
     requireState(store.db.prepare("PRAGMA foreign_key_check").all().length === 0);
     const platform = store.db.storage ? "durable-object" : "node-sqlite";
     const runtimeTables = platform === "durable-object" ? ["room_runtime_version", "room_writer_permit"] : [];
