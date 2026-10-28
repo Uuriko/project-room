@@ -22,7 +22,11 @@ test("participant context cannot replace shared interaction guidance or its trus
 });
 
 async function setup(t, during, { replyToResult = false } = {}) {
-  const f = createAcceptanceFixture({ dmConsent: true }), server = createRoomServer({ store: f.store });
+  // The shared assistant polls every 10ms, and each poll spends a credential
+  // read. This fixture keeps the previous 600-read window so that poll is
+  // not refused as abuse. Production callers stay on the burst.
+  const f = createAcceptanceFixture({ dmConsent: true });
+  const server = createRoomServer({ store: f.store, credentialReadBurst: 600, credentialWriteBurst: 60 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const db = new DatabaseSync(":memory:");
   t.after(async () => { db.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); f.store.close(); });

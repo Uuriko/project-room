@@ -46,7 +46,6 @@ Set these on the staging script only, with `pnpm exec wrangler secret put NAME -
 - `GH_TOKEN`
 - `GITHUB_OAUTH_CLIENT_ID`
 - `GITHUB_OAUTH_CLIENT_SECRET`
-- `ROOM_BOARD_V2_ENABLED`
 - `ROOM_RETENTION_ALLOW_DELETION`
 - `STITCHING_ENABLED`
 - `ROOM_PASSKEY_RP_ID`
