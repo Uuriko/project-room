@@ -108,7 +108,7 @@ import {
   getReadHorizon, setReadHorizon, listSaved, setSaved
 } from "./activity.mjs";
 import { listOpenQuestions } from "./open-questions.mjs";
-import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage } from "./google-oauth.mjs";
+import { GoogleSignIn, GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, googlePostLoginPage, googleCallbackResumePage } from "./google-oauth.mjs";
 import { createMagicLinkMailer, attemptMailDelivery, validateMagicReturnTo } from "./magic-links.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { emailLookupHash, normalizeEmail } from "./account-login-methods.mjs";
@@ -1399,8 +1399,18 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // Bind the callback to the browser session that started the flow: a
           // cross-session (or cookie-less) completion fails closed in
           // complete() instead of adopting the state's slot (login CSRF).
+          const callbackSlot = cookie(req, accountCookieName);
+          if (!callbackSlot) {
+            if (url.searchParams.has("room_oauth_resume")) throw new ServiceError(401, "google_state_invalid", "Google session missing");
+            const html = googleCallbackResumePage(expectedOrigin() + url.pathname + url.search);
+            res.setHeader("Content-Security-Policy", "default-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'");
+            res.setHeader("Referrer-Policy", "no-referrer");
+            res.setHeader("Cache-Control", "no-store");
+            res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+            return res.end(html);
+          }
           const completed = await signIn.complete({ callbackUrl: expectedOrigin() + url.pathname + url.search,
-            expectedSlotToken: cookie(req, accountCookieName) ?? null });
+            expectedSlotToken: callbackSlot });
           // Shared-model linking (RC-2026-09-17-017): the callback links the
           // Google subject through the account-login model. A link intent
           // attaches to the signed-in account; otherwise find-or-provision
