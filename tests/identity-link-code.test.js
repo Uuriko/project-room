@@ -35,13 +35,29 @@ test("mint with the holder's own secret returns 201 with a 128-bit code and 10-m
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f);
   const agent = f.store.identities.create("Link-code agent");
-  const { status, body } = await jsonOf(await post(origin, `/api/identities/${agent.identityId}/link-code`, null, agent.secret));
+  const { status, body } = await jsonOf(await post(origin, `/api/identities/${agent.identityId}/link-code`, { roomId: "commons" }, agent.secret));
   assert.equal(status, 201);
   assert.equal(body.identityId, agent.identityId);
+  assert.equal(body.roomId, "commons", "the code is bound to the room named at mint");
   assert.match(body.linkCode, /^[A-Za-z0-9_-]{22}$/, "128 bits, base64url");
   assert.equal(body.expiresAt - Date.now() < 10 * 60 * 1000 + 5000 && body.expiresAt - Date.now() > 9 * 60 * 1000, true);
-  // The minted code is exactly the one the enrollment path consumes.
-  assert.doesNotThrow(() => f.store.identities.consumeLinkCode(agent.identityId, body.linkCode));
+  // The minted code is exactly the one the enrollment path consumes —
+  // in the room it was minted for.
+  assert.doesNotThrow(() => f.store.identities.consumeLinkCode(agent.identityId, body.linkCode, { roomId: "commons" }));
+});
+
+test("C2: minting without a room binding is refused 422", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const agent = f.store.identities.create("Link-code agent");
+  const path = `/api/identities/${agent.identityId}/link-code`;
+  const noRoom = await jsonOf(await post(origin, path, {}, agent.secret));
+  assert.equal(noRoom.status, 422);
+  assert.equal(noRoom.body.error.code, "invalid_link_code_request");
+  const badRoom = await jsonOf(await post(origin, path, { roomId: "no-such-room" }, agent.secret));
+  assert.equal(badRoom.status, 422);
+  assert.equal(badRoom.body.error.code, "invalid_link_code_request");
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) n FROM identity_link_codes").get().n, 0, "no unbound code was stored");
 });
 
 test("minting is the holder's consent: no auth, wrong secret, and revoked identity all fail", async t => {

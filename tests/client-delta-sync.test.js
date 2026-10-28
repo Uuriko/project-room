@@ -210,7 +210,9 @@ test("a paged fill that cannot prove the segment falls back to the legacy full r
   const all = history();
   const f = fixture(t, {
     read: url => url === RECENT ? recent(9, all.slice(-3), 2) : full(9, all),
-    page: url => url.includes("cursor=c1") ? page(9, all.slice(0, 1), null) : page(9, all, "c1") // one older message short
+    // The head page is the window anchor. The continuation is one message
+    // short of `omitted`, so the walk cannot prove the older segment.
+    page: url => url.includes("cursor=c1") ? page(9, all.slice(0, 1), null) : page(9, all.slice(-3), "c1")
   });
   await f.client.refresh();
   await new Promise(resolve => setTimeout(resolve, 400));
@@ -218,6 +220,47 @@ test("a paged fill that cannot prove the segment falls back to the legacy full r
   assert.equal(held.partial, false);
   assert.deepEqual(held.messages.map(message => message.id), ["m1", "m2", "m3", "m4", "m5"]);
   assert.deepEqual(f.reads, [RECENT, FULL], "the short segment was rejected and the full read completed history");
+});
+
+test("a byte-trimmed window backfills shed head messages in chronological order", async t => {
+  const messages = Array.from({ length: 600 }, (_, index) => record(`m${String(index + 1).padStart(3, "0")}`, index + 1));
+  const pages = [];
+  for (let start = 500; start >= 0; start -= 100) pages.push(messages.slice(start, start + 100));
+  let next = 0;
+  const f = fixture(t, {
+    read: url => url === RECENT ? recent(9, messages.slice(-87), 513) : assert.fail("the trimmed window must page, not reread the room"),
+    page: () => {
+      const batch = pages[next];
+      const cursor = next < pages.length - 1 ? `c${next + 1}` : null;
+      next += 1;
+      return page(9, batch, cursor);
+    }
+  });
+  await f.client.refresh();
+  await new Promise(resolve => setTimeout(resolve, 400));
+  const held = f.client.heldMessages();
+  assert.equal(held.partial, false);
+  assert.deepEqual(held.messages.map(message => message.id), messages.map(message => message.id));
+  assert.equal(held.messages[0].id, "m001");
+  assert.equal(held.messages.at(-1).id, "m600");
+});
+
+test("a windowed answer to a full refresh keeps the next message applicable", async t => {
+  const all = history();
+  let refreshed = false;
+  const f = fixture(t, {
+    read: () => refreshed ? recent(10, all.slice(-3), 2) : full(9, all),
+    page: () => assert.fail("complete history does not page")
+  });
+  await f.warm();
+  refreshed = true;
+  f.notify(receipt(10, envelope(T.MEMBER_STATUS_UPDATED, 10, { memberId: "human", status: "here" })));
+  await f.settle();
+  assert.equal(f.client.heldMessages().partial, false, "the window merged onto history already held");
+  f.notify(receipt(11, envelope(T.MESSAGE_POSTED, 11, { body: "after", channelId: "general" })));
+  await f.settle();
+  assert.equal(f.client.deltaStats.applied, 1);
+  assert.equal(f.seen.at(-1).state.messages.at(-1).body, "after");
 });
 
 test("the liveness probe ends access when the credential dies under live deltas", async t => {

@@ -14,6 +14,7 @@ import {
   getAgentAutonomyTier, setAgentAutonomyTier,
   AUTONOMY_TIERS, DEFAULT_AUTONOMY_TIER, ENROLLMENT_TIER,
 } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // Graduated autonomy tiers: new agent members start t2_standard (full member
 // access). The owner can demote one agent to t1_readonly, and that demotion
@@ -267,9 +268,7 @@ test("join paths: invite redeem, share link, and access-request approve can post
   });
 
   const linkedIdentity = f.store.identities.create("Linked agent");
-  const linked = f.store.identities.link(f.keys.owner, "commons", {
-    identityId: linkedIdentity.identityId, permissions: [],
-  });
+  const linked = linkWithProof(f.store, f.keys.owner, "commons", linkedIdentity, { permissions: [] });
   assert.equal(getTier(f.db(), "commons", linked.memberId).autonomyTier, "t2_standard", "access-request approve enrolls t2");
   post(linkedIdentity.secret, "approved agent posts");
 
