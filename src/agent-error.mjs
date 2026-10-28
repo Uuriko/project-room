@@ -507,7 +507,7 @@ function axFamilyRecovery(code) {
     return ["The inviter's authority changed. Ask a current administrator or the inviter for a new invitation; do not retry this one.",
       "Ask a current administrator or the inviter for a new invitation."];
   }
-  if (/_changed$/.test(code)) {
+  if (/_changed$/.test(code) || code === "pair_closed") {
     return ["The state changed underneath this request. Re-read the current state and retry against it; do not resend against the old state.",
       "Re-read the current state and retry against it."];
   }
@@ -515,7 +515,7 @@ function axFamilyRecovery(code) {
     return ["That already exists — do not create a duplicate. Read the current state and use the existing record.",
       "Read the current state and use the existing record; do not create a duplicate."];
   }
-  if (/_expired$|_revoked$|_too_old$/.test(code) || code === "membership_ended") {
+  if (/_expired$|_revoked$|_too_old$/.test(code) || code === "membership_ended" || code === "expired_token") {
     return ["This has expired, been revoked, or ended and will not work again. Start fresh — a new invite or a new request — rather than retrying this one.",
       "Ask the owner or inviter for a fresh invite, or start a new request; do not retry this one."];
   }
@@ -544,7 +544,7 @@ function axFamilyRecovery(code) {
     return ["This is not supported here. Do not retry it; use a supported alternative named in the message or the docs.",
       "Use a supported alternative; do not retry the unsupported form."];
   }
-  if (/_not_found$/.test(code) || /^unknown_/.test(code)) {
+  if (/_not_found$/.test(code) || /^unknown_/.test(code) || code === "code_failed") {
     return ["That resource or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.",
       "Re-list the resource and retry with a current id; do not guess ids."];
   }

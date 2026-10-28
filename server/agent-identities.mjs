@@ -11,7 +11,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { fastIdentityHashCandidates, forgetIdentityVerifier, isV2IdentityHash, legacyIdentityHash, scryptIdentityHash } from "./identity-secret-hash.mjs";
 import { ServiceError } from "./store.mjs";
-import { generateKeyPair as generateEd25519KeyPair } from "./agent-card-signing.mjs";
+import { generateKeyPair as generateEd25519KeyPair, isValidPublicKey } from "./agent-card-signing.mjs";
 import { nextActionsForIdentityMint } from "./discoverability.mjs";
 import { checkAgentDisplayName, assertNotReservedRoleName } from "./display-name-guard.mjs";
 import { refreshDirectoryIdentity } from "./public-read-model.mjs";
@@ -374,7 +374,7 @@ export class AgentIdentities {
   // `anonymous` marks an unauthenticated HTTP mint. Those rows spend the
   // address, network, and daily budgets and stay inactive until the holder
   // authenticates, posts, or is linked. Invite and in-process mints omit it.
-  create(displayName, { secret: suppliedSecret, anonymous } = {}) {
+  create(displayName, { secret: suppliedSecret, anonymous, publicKey: suppliedPublicKey } = {}) {
     const name = typeof displayName === "string" ? displayName.trim() : "";
     if (!name || name.length > 80) fail(422, "invalid_identity", "displayName must be 1-80 characters");
     // RC-2026-09-19-086: reject C0 control chars like share-link join does
@@ -456,11 +456,21 @@ export class AgentIdentities {
       // privateKeyWarning, and is not stored. The agent signs public-key
       // claims (signed-claims.mjs ed25519 mode) with it, so cross-room
       // claim verification needs no shared secret.
-      const keyPair = generateEd25519KeyPair();
-      this.store.keyRegistry.registerKey(identityId, keyPair.publicKey, { validFrom: now });
+      let publicKey = suppliedPublicKey ?? null;
+      let privateKey = null;
+      if (suppliedPublicKey) {
+        if (!isValidPublicKey(publicKey)) fail(422, "invalid_key", "publicKey must be a valid Ed25519 public key");
+        const taken = this.db.prepare(`SELECT 1 FROM agent_key_registry WHERE public_key=? AND revoked_at IS NULL
+          AND valid_from<=? AND (valid_until IS NULL OR valid_until>?)`).get(publicKey, now, now);
+        if (taken) fail(409, "key_already_registered", "This public key is already registered");
+      } else {
+        const keyPair = generateEd25519KeyPair();
+        publicKey = keyPair.publicKey;
+        privateKey = keyPair.privateKey;
+      }
+      this.store.keyRegistry.registerKey(identityId, publicKey, { validFrom: now });
       return { identityId, displayName: name, ...(recoveredId ? { duplicate: false } : { secret }),
-        publicKey: keyPair.publicKey, privateKey: keyPair.privateKey,
-        privateKeyWarning: PRIVATE_KEY_ONCE_WARNING,
+        publicKey, ...(privateKey ? { privateKey, privateKeyWarning: PRIVATE_KEY_ONCE_WARNING } : {}),
         next: SIGNUP_NEXT, nextActions: nextActionsForIdentityMint() };
     });
   }
