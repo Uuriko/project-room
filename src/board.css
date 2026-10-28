@@ -37,7 +37,9 @@
    like the card's other free-text rows. */
 .claim-pr, .claim-repo { overflow-wrap: anywhere; }
 .overlap-chip { margin: 0 0 var(--space-2); color: var(--muted); font-size: var(--text-xs); }
-.overlap-chip summary { min-height: 1.5rem; cursor: pointer; color: var(--amber); }
+/* Keep the overlap disclosure at the same touch-target floor as the
+   neighboring files and record disclosures. */
+.overlap-chip summary { min-height: 44px; padding-block: .65rem; cursor: pointer; color: var(--amber); }
 .overlap-chip p { margin: var(--space-2) 0 0; overflow-wrap: anywhere; }
 /* M-02 mobile: the per-card file list disclosure had no touch sizing
    (~20px tall) — below the 44px coarse-pointer floor from PR 2034. */
