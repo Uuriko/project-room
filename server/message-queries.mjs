@@ -70,13 +70,19 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
     }).filter(record => cursor === null || (descending ? order(record,cursor)<0 : order(record,cursor)>0))
       .sort((a,b)=>descending ? -order(a,b) : order(a,b));
     const direction = descending ? 'DESC' : 'ASC', compare = descending ? '<' : '>';
+    // The explicit inclusive bound lets SQLite seek the cursor in room_seq.
+    // The OR tie-break alone otherwise rescans the archive prefix each page.
+    const cursorBound = descending ? '<=' : '>=';
     let sequence = cursor?.seq ?? (descending ? Number.MAX_SAFE_INTEGER : -1), id = cursor?.id ?? '', offset = 0;
     for (;;) {
+      // Descending pages have two upper bounds. Bind their intersection to the
+      // archive range so SQLite cannot keep choosing the original archive end.
+      const pageParams = descending ? [roomId, Math.min(marker.throughSeq, sequence), marker.retainedJson] : params;
       const rows = store.db.prepare(`SELECT message_id,seq,record_json,body FROM messages WHERE ${archived}
-        AND (seq ${compare} ? OR (seq=? AND message_id ${compare} ?))
+        AND seq ${cursorBound} ? AND (seq ${compare} ? OR (seq=? AND message_id ${compare} ?))
         ${visibleSql}
         ${bodyPrefix === null ? '' : 'AND substr(body,1,length(?))=?'} ORDER BY seq ${direction},message_id ${direction} LIMIT 128`)
-        .all(...params, sequence, sequence, id, ...visibleParams, ...(bodyPrefix === null ? [] : [bodyPrefix,bodyPrefix]));
+        .all(...pageParams, sequence, sequence, sequence, id, ...visibleParams, ...(bodyPrefix === null ? [] : [bodyPrefix,bodyPrefix]));
       if (!rows.length) break;
       for (const row of rows) {
         const key = {seq:row.seq,id:row.message_id};
@@ -96,7 +102,7 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
       let sequence=-1,id='';
       for (;;) {
         const rows=store.db.prepare(`SELECT seq,message_id,author_id,to_member_id,created_at,deleted_at FROM messages WHERE ${archived}
-          AND (seq>? OR (seq=? AND message_id>?)) ORDER BY seq,message_id LIMIT 256`).all(...params,sequence,sequence,id);
+          AND seq>=? AND (seq>? OR (seq=? AND message_id>?)) ORDER BY seq,message_id LIMIT 256`).all(...params,sequence,sequence,sequence,id);
         if(!rows.length)break;
         for(const row of rows)if(visible({id:row.message_id,authorId:row.author_id,toMemberId:row.to_member_id,createdAt:row.created_at,deletedAt:row.deleted_at}))count++;
         const last=rows.at(-1);sequence=last.seq;id=last.message_id;
@@ -109,6 +115,22 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
       for(const m of records({descending:true})) if(visible(m)){out.push(m);if(out.length===limit)break;}
       return out.reverse();
     },
+    // The room read's window count (store.snapshot): same answer as
+    // countMetadata with messageInHistory(floor) plus the DM rule, but the
+    // archive is counted by one SQLite aggregate instead of 256-row pages
+    // decoded in JS. Every default room read pays this; it grew with history.
+    countViewerVisible(viewerId, floor = null) {
+      const visible = message => messageInHistory(message, floor)
+        && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
+      const count = live.filter(visible).length;
+      if (!marker) return count;
+      const floorSql = floor ? ` AND created_at IS NOT NULL AND (created_at > ? OR (created_at = ? AND message_id NOT IN (SELECT value FROM json_each(?))))` : '';
+      const floorParams = floor ? [floor.at, floor.at, JSON.stringify([...(floor.sameInstant ?? [])])] : [];
+      const row = store.db.prepare(`SELECT COUNT(*) AS n FROM messages WHERE ${archived}
+        AND (to_member_id IS NULL OR to_member_id = '' OR author_id = ? OR to_member_id = ?)${floorSql}`)
+        .get(...params, viewerId, viewerId, ...floorParams);
+      return count + Number(row?.n ?? 0);
+    },
     firstPostedAtByAuthor() {
       const result=new Map();
       const add=(author,at)=>{const time=Date.parse(at);if(author && Number.isFinite(time) && (!result.has(author)||time<result.get(author)))result.set(author,time);};
@@ -116,7 +138,7 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
         let sequence=-1,id='';
         for (;;) {
           const rows=store.db.prepare(`SELECT seq,message_id,author_id,created_at FROM messages WHERE ${archived}
-            AND (seq>? OR (seq=? AND message_id>?)) ORDER BY seq,message_id LIMIT 256`).all(...params,sequence,sequence,id);
+            AND seq>=? AND (seq>? OR (seq=? AND message_id>?)) ORDER BY seq,message_id LIMIT 256`).all(...params,sequence,sequence,sequence,id);
           if(!rows.length)break;
           for(const row of rows)add(row.author_id,row.created_at);
           const last=rows.at(-1);sequence=last.seq;id=last.message_id;
