@@ -1721,6 +1721,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
+      // CREATE IF NOT EXISTS does not add columns to a table that already
+      // exists. owner_equivalent records an owner-level invite (default 0).
+      // This runs before the writer fence is installed.
+      const inviteColumns = new Set(this.db.prepare("PRAGMA table_info(agent_invite_codes)").all().map(column => column.name));
+      if (!inviteColumns.has("owner_equivalent")) {
+        this.db.exec("ALTER TABLE agent_invite_codes ADD COLUMN owner_equivalent INTEGER NOT NULL DEFAULT 0");
+      }
       // Signed referral invites: purely additive (no data migration, no
       // fence impact); the ledger is written only by the mint/redeem paths
       // and holds no credential data (tokens are bearer strings, never
@@ -4802,7 +4809,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const visible = message => messageInHistory(message, floor)
             && (!message.toMemberId || message.authorId === auth.member.id || message.toMemberId === auth.member.id);
           messages = repository.recent(messageLimit, visible);
-          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countMetadata(visible)-messages.length,older:"conversation"};
+          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countViewerVisible(auth.member.id, floor)-messages.length,older:"conversation"};
           const pinned = repository.getMany((pins ?? []).map(pin=>pin.messageId));
           pins = (pins ?? []).filter(pin=>pinned.has(pin.messageId) && visible(pinned.get(pin.messageId)));
         } else {

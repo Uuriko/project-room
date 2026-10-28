@@ -197,7 +197,16 @@ test("the handler rate-limits by remote address, then serves the funnel read", (
 });
 
 test("a room owner receives mint counts on a private response; another member does not", () => {
-  const store = storeOf(seededDb(), LISTED);
+  // The handler reads the funnel at the real clock (no now injection), so
+  // this test seeds mints relative to today: two in the current week, one
+  // in the previous week, none the week before — the [0, 1, 2] shape the
+  // fixed-date seed produced only while the calendar sat in its week.
+  const db = makeDb();
+  const nowMs = Date.now();
+  mint(db, nowMs - 60_000);
+  mint(db, nowMs - 120_000);
+  mint(db, nowMs - 7 * 24 * 3600_000);
+  const store = storeOf(db, LISTED);
   store.roomAuthority = () => ({ ownerId: "owner-1" });
   store.authenticate = token => {
     if (token === "owner-token") return { roomId: "room-a", member: { id: "owner-1" } };
@@ -228,7 +237,11 @@ test("a room owner receives mint counts on a private response; another member do
   assert.equal(rejected.status, 200);
   assert.equal(rejected.body.weeks.some(week => Object.hasOwn(week, "mints")), false);
 
-  const cookieStore = storeOf(seededDb(), LISTED);
+  const cookieDb = makeDb();
+  mint(cookieDb, nowMs - 60_000);
+  mint(cookieDb, nowMs - 120_000);
+  mint(cookieDb, nowMs - 7 * 24 * 3600_000);
+  const cookieStore = storeOf(cookieDb, LISTED);
   cookieStore.authenticate = () => { const error = new Error("no token"); error.status = 401; throw error; };
   cookieStore.roomAuthority = () => ({ ownerId: "owner-1" });
   cookieStore.authenticateAccountSession = () => ({ account: { id: "acct-1" } });

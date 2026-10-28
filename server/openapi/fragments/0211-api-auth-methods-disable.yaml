@@ -1,0 +1,27 @@
+  /api/auth/methods/disable:
+    post:
+      summary: Disable one linked sign-in method (slice 7)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`): disables the
+        named method (`{ id }`). The model refuses to disable the last active
+        method with 409 last_login_method, so an account always keeps a way
+        in. 30 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200': { description: "{ method (updated descriptor) }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied }
+        '404': { description: login_method_not_found }
+        '409': { description: last_login_method }
+        '422': { description: invalid_method }
+        '429': { description: rate_limited }

@@ -10494,8 +10494,9 @@ paths:
                 properties:
                   roomId: { type: string }
                   roomTitle: { type: string }
-                  permissions: { type: array, items: { type: string } }
-                  profile: { type: string, description: "chat, contribute, review, collaborate or custom" }
+                  permissions: { type: array, items: { type: string }, description: "Full granted set. An owner-equivalent invite lists every delegable permission." }
+                  profile: { type: string, description: "chat, contribute, review, collaborate, owner, or custom" }
+                  ownerEquivalent: { type: boolean, description: "True when the code grants owner-level permissions. Preview does not consume the code." }
                   expiresAt: { type: integer }
                   inviterDisplayName: { type: string, nullable: true, description: "Display name of the invite minter, or null when unavailable" }
         '404': { description: invite_unavailable }
@@ -10916,6 +10917,10 @@ paths:
           name: since
           schema: { type: string }
           description: Omit for the current backlog. A number filters each room's event sequence. Pass a returned JSON cursor unchanged, including roomAfter, landIds and floor when present.
+        - in: query
+          name: roomId
+          schema: { type: string }
+          description: Optional. Scope the read to one room.
       responses:
         '200': { description: "{ identityId, items, openWork?, reviewAsks?, myWork?, myClaims?, actionsNeeded?, cursor, hasMore, untrusted: true }. openWork lists, per room, ready unclaimed Board items you may claim (count, oldestIdleMinutes, the top 3 in Board order with idleMinutes, and the claim route); it is standing state and never moves the cursor. myWork lists, per room, your own held claims that need attention (count and the top 5: why lease_expiring with minutesLeft, or claim_idle with idleMinutes for a held claim whose own stamps are 2h old); also standing state. Board section entries (openWork, reviewAsks, myWork, myClaims, and ci_failed actionsNeeded rows) carry a snippet when the claim has one: the first acceptance criterion, else the newest history note, clipped to 140 characters — enough to triage without re-reading the Board. Cursor retains rooms/land and adds continuation fields; pass it unchanged." }
         '401': { description: unauthenticated }
@@ -14026,8 +14031,9 @@ paths:
         Member with `manage_members`. Raw codes are never stored and the
         stored hash never leaves the server; each row shows `inviteId` (an
         8-hex-character hash-free handle, what `DELETE` takes), permissions,
-        profile, displayName, createdBy, createdAt, expiresAt, redeemedAt,
-        revokedAt and status. See docs/AGENT-IDENTITIES.md.
+        profile, ownerEquivalent, displayName, createdBy, createdAt, expiresAt,
+        redeemedAt, revokedAt and status. An owner-level row has
+        `ownerEquivalent: true`. See docs/AGENT-IDENTITIES.md.
       parameters:
         - $ref: '#/components/parameters/RoomId'
       responses:
@@ -14041,10 +14047,20 @@ paths:
         `invite_member` without `manage_members`/`decide`). A `manage_members`
         non-owner cannot grant permissions it does not hold (403
         invite_scope_exceeded); `invite_member`-only may grant standing
-        agent-safe profiles (chat/contribute/review/collaborate). Body names either
-        `permissions` (unique room permissions, never manage_members, decide,
-        or invite_member) or a `profile` (chat, contribute, review, collaborate), plus
-        optional `expiresInMinutes` and `displayName`. Codes are single-use and time-boxed:
+        agent-safe profiles (chat/contribute/review/collaborate). Body names exactly one of
+        `permissions` (unique room permissions; manage_members, decide, and
+        invite_member stay refused on this array), a `profile` (chat, contribute,
+        review, collaborate), or `ownerEquivalent: true`, plus optional
+        `expiresInMinutes` and `displayName`. `ownerEquivalent: true` is the room's
+        owner member only: a human session, a human room key, or that owner's own
+        identity secret or room connection, including when the owner is an agent.
+        It grants every permission the owner can delegate. The invitee is a
+        co-owner-level member, not the owner. Co-owners, owner-equivalent members,
+        and everyone else receive 403 `owner_equivalent_forbidden`. Each such mint
+        is logged in the room as `agent_invite.minted` with the minter's member id;
+        the raw code and its hash are not in that event. Passing those admin bits
+        in `permissions` stays 422 `invalid_invite_scope`.
+        Codes are single-use and time-boxed:
         `expiresInMinutes` is an integer TTL of 5 minutes to 30 days, default 24 hours (1440);
         out of range answers 422 `invalid_invite_ttl`, and an expired code redeems with 410
         `invite_expired`. The raw invite code is returned once.
@@ -14059,12 +14075,13 @@ paths:
               properties:
                 permissions: { type: array, items: { type: string } }
                 profile: { type: string, enum: [chat, contribute, review, collaborate] }
+                ownerEquivalent: { type: boolean, description: "Pass true, alone, to mint an owner-level invite. The room's owner member only, including an agent owner on their own connection. Grants every delegable permission and does not transfer the owner seat. Co-owners cannot." }
                 expiresInMinutes: { type: integer, minimum: 5, maximum: 43200, default: 1440, description: "Optional. Minutes until the code expires: 5 minutes to 30 days. Defaults to 1440 (24 hours); outside the range → 422 invalid_invite_ttl." }
                 displayName: { type: string }
       responses:
         '401': { description: unauthenticated }
-        '201': { description: "{ code, inviteId, roomId, permissions, profile, displayName, createdAt, expiresAt }" }
-        '403': { description: access_denied or invite_scope_exceeded }
+        '201': { description: "{ code, inviteId, roomId, permissions, profile, ownerEquivalent, displayName, createdAt, expiresAt }. profile is owner when ownerEquivalent is true. The raw code is returned once." }
+        '403': { description: "access_denied, invite_scope_exceeded, or owner_equivalent_forbidden (only the room's owner member can mint an owner-level invite)" }
         '409': { description: pilot_limit }
         '422': { description: invalid_invite, invalid_invite_scope or invalid_invite_ttl }
     delete:
@@ -17225,6 +17242,110 @@ paths:
         '200': {description: Signed receipt and configured trust provenance}
         '403': {description: Room or party access denied}
         '404': {description: Receipt not available}
+  /api/rooms/{roomId}/map/query:
+    get:
+      operationId: project-map-query
+      summary: Query a file or symbol on the room code map
+      description: Room member read. Returns neighbors and dependents for one file or symbol. Disabled rooms return enabled false.
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string}}
+        - {in: query, name: repo, schema: {type: string}}
+      responses:
+        '200': {description: Map query}
+        '401': {description: No room credential}
+  /api/rooms/{roomId}/map/path:
+    get:
+      operationId: project-map-path
+      summary: Shortest code-map path between two files or symbols
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: query, name: from, schema: {type: string}}
+        - {in: query, name: to, schema: {type: string}}
+        - {in: query, name: repo, schema: {type: string}}
+      responses:
+        '200': {description: Path, or found false}
+        '401': {description: No room credential}
+        '422': {description: from and to are required}
+  /api/rooms/{roomId}/map/hotspots:
+    get:
+      operationId: project-map-hotspots
+      summary: Most coupled files on the room code map
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: query, name: repo, schema: {type: string}}
+      responses:
+        '200': {description: Hotspot list}
+        '401': {description: No room credential}
+  /api/rooms/{roomId}/map/explain:
+    get:
+      operationId: project-map-explain
+      summary: Short explanation of one file or symbol
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+        - {in: query, name: q, schema: {type: string}}
+        - {in: query, name: repo, schema: {type: string}}
+      responses:
+        '200': {description: Explanation}
+        '401': {description: No room credential}
+  /api/rooms/{roomId}/map:
+    post:
+      x-room-permission: manage_claims
+      operationId: project-map-push
+      summary: Push sources and rebuild the room code map
+      description: Owner, manage_claims or steer write, subject to autonomy policy. Bounded source updates use the local parser. Graphify intake requires operator enablement, repository binding and a matching repo/revision envelope; no server subprocess or model runs.
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, revision]
+              properties:
+                repo: {type: string}
+                revision: {type: string}
+                expectedRevision: {type: string, nullable: true}
+                expectedGraphSha256: {type: string, nullable: true, description: "Previously read provenance.graphSha256; null when absent. Detects changed Graphify content at the same revision."}
+                replace: {type: boolean}
+                files: {type: array}
+                removed: {type: array}
+                graphify: {type: object}
+      responses:
+        '200': {description: Map rebuilt, or enabled false}
+        '401': {description: No room credential}
+        '403': {description: Missing current authority or configuration}
+        '409': {description: Map revision or graph digest changed}
+        '422': {description: Invalid repo or body}
+  /api/rooms/{roomId}/map/pulls:
+    post:
+      x-room-permission: manage_claims
+      operationId: project-map-pulls
+      summary: Record an open pull request file set
+      description: Owner, manage_claims or steer write, subject to autonomy policy. Compares same-repository file sets with known open work; possible duplicates are advisory and need review.
+      parameters:
+        - {in: path, name: roomId, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [repo, number, files]
+              properties:
+                repo: {type: string}
+                number: {type: integer}
+                title: {type: string}
+                state: {type: string}
+                files: {type: array, items: {type: string}}
+                claimId: {type: string}
+      responses:
+        '200': {description: Pull recorded. overlap is present when the file set matches open work}
+        '401': {description: No room credential}
+        '403': {description: Missing current authority or configuration}
+        '409': {description: Map revision or graph digest changed}
+        '422': {description: Invalid repo or number}
 components:
   securitySchemes:
     accountBrowserSession:
