@@ -5,6 +5,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom('commons'));
@@ -13,7 +14,7 @@ async function fixture(t) {
   for (const [id, permissions, tier] of [['reader', [], 't2_standard'], ['readonly-admin', ['manage_claims'], 't1_readonly'],
     ['manager', ['manage_claims'], 't2_standard'], ['steerer', ['steer'], 't2_standard']]) {
     const identity = store.identities.create(id); identities[id] = identity;
-    store.identities.link(owner, 'commons', { identityId: identity.identityId, memberId: id, displayName: id, permissions });
+    linkWithProof(store, owner, 'commons', identity, { memberId: id, displayName: id, permissions });
     tokens[id] = store.issueAccessKey('commons', id);
     setTier(store.db, 'commons', id, tier, { updatedBy: 'owner', nowMs: store.now() });
   }

@@ -13,6 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { ensurePeopleOpen, openSettings, closeSettings, openMemberProfile } from "./room-chrome.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 for (const theme of ["dark", "light"]) test(`revoked identity (${theme}): People says signed out for good, keeps Remove, To drops the seat`, { timeout: 90000 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-identity-revoked-"));
@@ -20,8 +21,8 @@ for (const theme of ["dark", "light"]) test(`revoked identity (${theme}): People
   store.initialize(initialRoom());
   const owner = store.issueAccessKey("commons", "owner");
   const gone = store.identities.create("Gone agent"), kept = store.identities.create("Kept agent");
-  store.identities.link(owner, "commons", { identityId: gone.identityId, permissions: ["accept_work"] });
-  store.identities.link(owner, "commons", { identityId: kept.identityId, permissions: ["accept_work"] });
+  linkWithProof(store, owner, "commons", gone, { permissions: ["accept_work"] });
+  linkWithProof(store, owner, "commons", kept, { permissions: ["accept_work"] });
   store.identities.revoke(gone.identityId, gone.secret);
   const server = createRoomServer({ store, streamInterval: 60 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
