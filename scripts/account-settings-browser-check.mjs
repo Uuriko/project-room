@@ -144,7 +144,7 @@ test("sign-in UI: email link returns to the existing account with a configured m
   f.store.accountLogins.linkMagicMethod(magicId, { email: "magic-browser@example.invalid" });
   const magic = await freshPage();
   await magic.goto(origin + "/?account=1");
-  await openMagicSignin(magic);
+  await openMagicSignin(magic, "magic-browser@example.invalid");
   await magic.locator('#auth-signin-ui [data-signin-form="password"] [name="email"]').fill("magic-browser@example.invalid");
   await magic.locator('#auth-signin-ui [data-signin-form="password"] button[type="submit"]').click();
   await magic.locator("#email-auth-panel").getByText(/Check .* for your sign-in link/).waitFor();
