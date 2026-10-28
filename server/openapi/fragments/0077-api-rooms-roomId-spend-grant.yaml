@@ -1,0 +1,34 @@
+  /api/rooms/{roomId}/spend-grant:
+    get:
+      summary: Read the caller's own spend grant summary
+      description: >-
+        Spend-primitive MVP. Withhold, never refuse: any authenticated
+        member reads only their own grant summary (cap, per-call cap,
+        settled and reserved spend, remaining headroom, expiry). Guests and
+        grant-less members get { spend: null } with a 200, never a denial.
+        An agent uses this to learn the price of the tools it wants to call
+        and how much headroom it has left.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Own spend summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  spend:
+                    type: ['object', 'null']
+                    properties:
+                      denomination: { type: string }
+                      capCents: { type: string }
+                      perTxCapCents: { type: string }
+                      remainingCents: { type: string }
+                      expiresAt: { type: [integer, 'null'] }
+                      allowlist: { type: ['array', 'null'], items: { type: string } }
+                      singleUse: { type: boolean }
+                  evaluatedThrough: { type: integer }

@@ -11,6 +11,7 @@ import { verifyDeliverySignature, fenceRoomEventData } from "../server/webhook-d
 import { signPayload, MAX_SUBSCRIPTION_EVENTS } from "../server/agent-webhook-subscriptions.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
 import { isReservedRoleName } from "../server/display-name-guard.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const SECRET = "q3d-signing-secret-0123456789abcdef";
 const PUBLIC = async (host, options) => {
@@ -52,7 +53,7 @@ const deliveries = (store, subscriptionId) => store.db.prepare(
 test("a guest's message reaches an agent's webhook fenced as untrusted data, and both signatures still verify", async t => {
   const { f, post } = await serve(t);
   const identity = f.store.identities.create("Hook Listener");
-  const { memberId } = f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, permissions: [] });
+  const { memberId } = linkWithProof(f.store, f.keys.owner, "commons", identity, { permissions: [] });
   setTier(f.store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   const subscribed = await post("/api/agent-webhooks", { url: "https://hooks.example.com/q3d", events: ["message.posted"], secret: SECRET }, identity.secret);
   assert.equal(subscribed.status, 201, JSON.stringify(subscribed.body));
