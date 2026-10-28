@@ -1,0 +1,42 @@
+  /api/rooms/{roomId}:
+    get:
+      summary: Room snapshot
+      description: >-
+        Current projection for a member: `{ roomId, sequence, state, charter,
+        cursor, catchUpCursor, viewerId, ... }`. `cursor` is the stored
+        caught-up marker that event resume starts from. `catchUpCursor` (full
+        view) is the read-only Catch up boundary: that marker moved past the
+        viewer's own unbroken run of events, the same boundary the return
+        brief uses. Reading it never writes a marker. `?view=work` (the only view) returns the
+        work-focused snapshot (`snapshotView`, `snapshotVersion`). Header
+        `x-project-room-help-context: 1` (with `view=work`) adds help
+        context; `x-project-room-offer-context: 1` (full view only) adds
+        offer context. Room routes accept a room bearer key, a browser room
+        session, or a signed-in account session with `?auth=account`.
+        `?messages=recent` (full view only, no other filters) returns the
+        full snapshot with only the newest 100 visible messages in
+        `state.messages` and a `messagesWindow` `{ mode: recent, limit,
+        omitted, older: conversation }`; the first
+        `/api/rooms/{roomId}/conversation?limit=100` page is the same window,
+        so older history pages from its `nextCursor`.
+        The optional `x-project-room-audit-view: activity-v1` header on
+        full/recent snapshots preserves decision/work/claim activity from
+        the same audit tail while omitting other audit events (messages
+        still appear in the projection). The response declares
+        `auditView: activity` and `auditVersion: 1`. Omit the header for
+        the complete default audit tail. Older servers may ignore it.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: view
+          in: query
+          schema: { type: string, enum: [work] }
+        - name: messages
+          in: query
+          schema: { type: string, enum: [recent] }
+        - name: X-Project-Room-Audit-View
+          in: header
+          schema: { type: string, enum: [activity-v1] }
+      responses:
+        '200': { description: Snapshot }
+        '401': { description: unauthenticated }
+        '422': { description: "invalid_snapshot_view, invalid_help_context or invalid_offer_context" }

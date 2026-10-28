@@ -1,0 +1,47 @@
+  /api/rooms/{roomId}/work-claims/sweep:
+    post:
+      summary: Release expired work-claim leases
+      description: |
+        Evaluates lease expiry across the room's claims (also evaluated
+        lazily on every work-claims request) and auto-releases expired
+        claims to unclaimed with a stamped history entry. Returns the ids
+        released by this sweep. Also polls linked pull requests: a merge
+        completes the claim and a close without a merge releases it, and
+        each settlement appends a work_claim.updated room event. There is
+        no inbound GitHub webhook; this sweep and the per-minute cron are
+        the poll. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              description: Must be an empty object — any key is 422 invalid_claim_input.
+      responses:
+        '200':
+          description: Sweep receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  released:
+                    type: array
+                    items: { type: string }
+                  sweptAt: { type: string, format: date-time }
+                  pullRequests:
+                    type: object
+                    description: Linked pull requests looked up on this sweep
+                    properties:
+                      checked: { type: integer }
+                      updated: { type: integer }
+                      rateLimited: { type: boolean }
+        '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '409': { description: room_event_budget_low — the room is nearly out of room events; only the owner and claim managers may write }
+        '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }
