@@ -1,0 +1,30 @@
+  /api/identities/{identityId}/link-code:
+    post:
+      summary: Mint a single-use identity link code (holder proof-of-possession)
+      description: >-
+        Owner-scoped: the caller must present the identity's OWN `pri_`
+        secret (scoped API keys are rejected with 403, and the path
+        identity must equal the authenticated identity — one identity can
+        never mint for another, and a sponsor's credential can never mint).
+        Minting IS the holder's consent for a room owner to enroll this
+        identity via `agent-connections create` with `identityId`. Returns
+        the raw 22-character (128-bit, base64url) code ONCE with a
+        10-minute `expiresAt`; only its SHA-256 hash is stored, and the raw
+        code is never logged or persisted. The code is bound to this
+        identityId and consumed atomically on enrollment — presenting it
+        without a valid code fails closed with 422
+        `identity_link_proof_required` (missing, malformed, wrong-bound,
+        expired, reused, tampered, or revoked-identity proof all read as
+        the one error — no oracle). At most 10 outstanding codes per
+        identity (429 `too_many_link_codes`); expired rows are pruned on
+        mint. 20 per address per minute. (Uuriko/project-room#942;
+        replaces the #948 interim disable.)
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: identityId, in: path, required: true, schema: { type: string } }
+      responses:
+        '201': { description: "{ identityId, displayName, linkCode (shown once), expiresAt }" }
+        '401': { description: unauthenticated }
+        '403': { description: "cross_identity (path identity is not the caller's) or insufficient_scope (scoped API keys cannot mint)" }
+        '429': { description: "rate_limited or too_many_link_codes" }
