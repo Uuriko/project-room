@@ -1789,7 +1789,15 @@ body:has(#auth-panel:not([hidden])) .site-footer { display: none; }
 body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
 @media (max-width: 700px) { #account-rooms-panel { margin: 1rem .75rem; } }
 
-#account-rooms-panel > p > .button { display: inline-flex; align-items: center; min-height: 44px; }
+#account-rooms-panel > p > .button { display: inline-flex; align-items: center; min-height: 44px; font-size: var(--text-sm); text-decoration: none; }
+#account-rooms-panel > p:has(> .button) { margin: .75rem 0 .5rem; }
+/* New room and Account are disclosures: give them a visible row and a +/- state,
+   matching the sidebar's Add people +. The glyph is hidden from assistive tech
+   (details already announces expanded/collapsed). */
+#account-rooms-panel > details > summary { display: flex; align-items: center; justify-content: space-between; min-height: 44px; border-top: 1px solid var(--line); color: var(--text); font-size: var(--text-sm); font-weight: 600; list-style: none; cursor: pointer; }
+#account-rooms-panel > details > summary::-webkit-details-marker { display: none; }
+#account-rooms-panel > details > summary::after { content: "+" / ""; color: var(--muted); font-size: var(--text-md); font-weight: 400; }
+#account-rooms-panel > details[open] > summary::after { content: "\2212" / ""; }
 body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: none; }
 
 #signin-methods:has(#google-signin[hidden]):has(#github-signin[hidden]) .signin-divider { display: none; }
