@@ -27,7 +27,7 @@
 // follow-up slices; they all build on this model.
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 

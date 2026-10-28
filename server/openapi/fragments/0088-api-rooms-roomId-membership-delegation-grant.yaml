@@ -1,0 +1,29 @@
+  /api/rooms/{roomId}/membership-delegation/grant:
+    post:
+      summary: Grant membership administration to an agent identity (owner)
+      description: >-
+        Owner-only. Grants an agent identity linked into this room the right
+        to list and decide access requests. The grant is revocable, binds to
+        the identity (not the member record), and never lets the holder grant
+        to anyone else — there is no self-grant and no transitive grant. The
+        grant adds the agent-safe invite_member permission to the delegate's
+        member record (needed for the approval path; stripped on revoke);
+        manage_members itself never enters an agent's member permissions.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string, description: "Agent identity id (ai_...), linked into this room" }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: The granted membership-administration grant }
+        '403': { description: access_denied (owner only) }
+        '404': { description: not_found (no such linked agent identity) }
+        '409': { description: grant_active (already granted) }
+        '422': { description: invalid_request }

@@ -1,3 +1,4 @@
+import { createJobAlarmReconciler } from "./job-alarm-reconciler.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
@@ -19,6 +20,7 @@ import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { channelDrainTickShape, CHANNEL_DRAIN_INFLIGHT_KEY } from './channel-drain-tick.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
+import { SqlCostScopes, sqlCostOperation } from './sql-cost-scope.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
 import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath } from '../server/agent-discovery.mjs';
@@ -92,8 +94,26 @@ function roomOrigin(env) {
   return origin;
 }
 
+// TM-2: resolve the split backup credentials for the operator export and
+// restore doors. Each door's handler reads a missing or sub-16-char value
+// as "unconfigured" (404), so the values pass through untouched — except
+// when both secrets hold the same usable value: then one credential would
+// open both doors, the split would be void, and both doors fail closed
+// until the operator sets distinct values.
+function splitBackupTokens(env) {
+  const exportToken = env.ROOM_EXPORT_TOKEN;
+  const restoreToken = env.ROOM_RESTORE_TOKEN;
+  if (typeof exportToken === 'string' && exportToken.length >= 16 && exportToken === restoreToken) {
+    return { exportToken: undefined, restoreToken: undefined };
+  }
+  return { exportToken, restoreToken };
+}
+
 // One pilot workspace per object, not one object per member. Account/session
 // ownership currently spans rooms, so splitting by room would break that contract.
+// Reads that carry the job list: refresh the heartbeat snapshot first.
+const JOB_LIST_READS = new Set(['/api/owner/overview']);
+
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -102,10 +122,12 @@ export class ProjectRoom extends DurableObject {
     this.state = ctx;
     this.env = env;
     this.requestSignals = new AsyncLocalStorage();
+    this.sqlCosts = env.ROOM_SQL_COST_LOG === '1'
+      ? new SqlCostScopes({ emit: row => console.info(JSON.stringify(row)) }) : null;
     const origin = roomOrigin(env);
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
-    this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
+    this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage, { observeStatement: this.sqlCosts?.observeStatement }), storagePlatform: durableStorage,
       stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred",
       // Phase 1a: large message bodies at rest outside the projection row.
       bodiesAtRest: env.ROOM_BODIES_AT_REST === "1" });
@@ -116,11 +138,12 @@ export class ProjectRoom extends DurableObject {
     // the cron tick remains the restart-safe backstop.
     this.store.agentPlugin.setDispatchKick(() => {
       queueMicrotask(() => {
-        this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}).finally(() => {
+        this.#sqlScope('background', 'webhooks', () => this.store.agentPlugin.drainWebhookDeliveries()).catch(() => {}).finally(() => {
           this.#armJobAlarm().catch(() => {});
         });
       });
     });
+    this.store.featureEnv = env;
     bootstrapRoom(this.store, env);
     this.store.landQueue.configure({ env });
     // Google sign-in is optional: unconfigured or misconfigured credentials
@@ -139,9 +162,14 @@ export class ProjectRoom extends DurableObject {
     catch (error) { console.warn(`room github auth disabled: ${error.message}`); }
     this.gmailSync = gmailAuth ? new GmailSync(new GmailMailbox(this.store, gmailAuth)) : null;
     const deployment = env.ROOM_DEPLOYMENT === 'production' || env.ROOM_DEPLOYMENT === 'staging' ? env.ROOM_DEPLOYMENT : undefined;
+    // The owner overview's job list reads the heartbeat view, refreshed on
+    // each recorded tick and before each overview read (the Node scheduler
+    // records are absent in the Durable Object, so the list was empty here).
+    this.jobHealthSnapshot = null;
     this.server = createRoomServer({ store: this.store, origin: env.ROOM_ORIGIN, assetRoot: origin, serviceMode: env.ROOM_SERVICE_MODE ?? 'cloudflare-staging',
       deployment,
-      boardV2Enabled: env.ROOM_BOARD_V2_ENABLED === '1',
+      jobHealth: () => this.jobHealthSnapshot,
+      publicAgentPages: env.ROOM_PUBLIC_AGENT_PAGES === '1',
       push: vapidFromEnv(env),
       googleAuth,
       gmailAuth,
@@ -181,7 +209,23 @@ export class ProjectRoom extends DurableObject {
     });
     this.handler = httpServerHandler(this.server);
   }
-  async fetch(request) {
+  #sqlScope(kind, operation, fn, options) {
+    if (!this.sqlCosts) return fn();
+    // Flush unattributed counters separately; no subtraction or request ownership
+    // inferred for constructor work, legacy RPCs or callbacks after scope close.
+    const finish = () => this.sqlCosts.flushUnattributed();
+    try {
+      const result = this.sqlCosts.run(kind, operation, fn, options);
+      if (result && typeof result.then === 'function') return Promise.resolve(result).finally(finish);
+      finish(); return result;
+    } catch (error) { finish(); throw error; }
+  }
+  fetch(request) {
+    // Response body/stream work may outlive headers; never claim a complete
+    // invocation. Subsequent inherited SQL is emitted in the late bucket.
+    return this.#sqlScope('request', sqlCostOperation(request.url), () => this.#fetch(request), { partial: true });
+  }
+  async #fetch(request) {
     const started = Date.now();
     const cold = this.store?.coldStart;
     const respond = response => {
@@ -203,27 +247,36 @@ export class ProjectRoom extends DurableObject {
     };
     if (this.paused) return respond(maintenanceResponse(request));
     const url = new URL(request.url);
+    if (JOB_LIST_READS.has(url.pathname)) await this.refreshJobHealthSnapshot();
+    // TM-2 split: the backup doors no longer share one credential.
+    // ROOM_EXPORT_TOKEN opens the read door only and may stay armed standing
+    // for the nightly second-home pull; ROOM_RESTORE_TOKEN opens the two
+    // restore doors and stays unset outside a restore incident, so they
+    // answer 404 in normal operation. The retired ROOM_BACKUP_TOKEN opens
+    // nothing. If both secrets are configured to the same usable value the
+    // split is void, so both doors fail closed until the values differ.
+    const backupTokens = splitBackupTokens(this.env);
     if (url.pathname === '/api/operator/export') {
-      return respond(operatorExportResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store.db));
+      return respond(operatorExportResponse(request, backupTokens.exportToken, this.store.db));
     }
     // Disaster recovery: replay a whole-store NDJSON export into this Durable
-    // Object's storage. Same operator token as the export; fail-closed on a
-    // non-empty store (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
+    // Object's storage. Restore token only; fail-closed on a non-empty store
+    // (see server/restore-ndjson.mjs and docs/BACKUP-DR.md).
     if (url.pathname === '/api/operator/restore') {
-      return respond(await operatorRestoreResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store));
+      return respond(await operatorRestoreResponse(request, backupTokens.restoreToken, this.store));
     }
     // Same recovery, sourced from the daily backup already sitting in the
     // ROOM_BACKUPS_KV namespace: the request-body path caps at 64 MiB and
     // the current backup is past it (#3409), so the parts are pulled and
     // replayed one at a time instead of uploaded whole.
     if (url.pathname === '/api/operator/restore-from-backup') {
-      return respond(await operatorRestoreFromBackupResponse(request, this.env.ROOM_BACKUP_TOKEN, this.store, this.env.ROOM_BACKUPS_KV));
+      return respond(await operatorRestoreFromBackupResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
-      this.ctx.waitUntil(this.store.humanPush.flush());
+      this.ctx.waitUntil(this.#sqlScope('background', 'other', () => this.store.humanPush.flush()));
       // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
-      this.ctx.waitUntil(Promise.resolve(flushRoomGuide(this.store)));
+      this.ctx.waitUntil(this.#sqlScope('background', 'other', () => Promise.resolve(flushRoomGuide(this.store))));
       // A commit in this request may have queued webhook, land, or claim work.
       this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
     }
@@ -232,6 +285,9 @@ export class ProjectRoom extends DurableObject {
   // Readiness is one statement. It does not open the room, replay events, or
   // scan a table. A paused object has no database, so it is not ready.
   probeStorage() {
+    return this.#sqlScope('readiness', 'storage-probe', () => this.#probeStorage());
+  }
+  #probeStorage() {
     if (this.paused || !this.store) return { ok: false };
     const row = this.store.db.prepare("SELECT 1 AS ok").get();
     return { ok: row?.ok === 1, emailVerification: magicLinkMailerFromEnv(this.env) ? 'enforced' : 'relaxed-no-mailer' };
@@ -249,32 +305,44 @@ export class ProjectRoom extends DurableObject {
   // Cron heartbeat: the Worker records each tick's per-job outcome here after
   // the jobs settle; GET /api/health/jobs reads it back (no secrets stored).
   async recordCronTick(outcomes) {
-    const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
-    const next = applyOutcomes(previous, outcomes);
-    // #3927 R4: drainChannelBacklog only PEEKS at the completed drain
-    // outcome; it is consumed here, once the heartbeat record reporting
-    // it is durable. If the put fails, the report marker is released and
-    // the stash stays, so the next drain tick reports the same outcome
-    // again instead of it being lost with the failed write.
-    const reported = this.channelDrainOutcomeReported ?? null;
-    const drainRecorded = reported !== null && Array.isArray(outcomes)
-      && outcomes.some(outcome => outcome?.job === 'channel-drain');
-    try {
-      await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
-    } catch (error) {
-      this.channelDrainOutcomeReported = null;
-      throw error;
-    }
-    if (drainRecorded) {
-      this.channelDrainOutcomeReported = null;
-      if (this.channelDrainOutcome === reported) {
-        // Consume exactly once; a completion that queued behind the
-        // reported outcome while it awaited this record is promoted.
-        this.channelDrainOutcome = this.channelDrainOutcomeHeld ?? null;
-        this.channelDrainOutcomeHeld = null;
+    // Serialize the entire read/merge/write across alarms and cron RPCs.
+    const persist = async () => {
+      const previous = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+      const next = applyOutcomes(previous, outcomes);
+      // #3927 R4: drainChannelBacklog only PEEKS at the completed drain
+      // outcome; it is consumed here, once the heartbeat record reporting
+      // it is durable. If the put fails, the report marker is released and
+      // the stash stays, so the next drain tick reports the same outcome
+      // again instead of it being lost with the failed write.
+      const reported = this.channelDrainOutcomeReported ?? null;
+      const drainRecorded = reported !== null && Array.isArray(outcomes)
+        && outcomes.some(outcome => outcome?.job === 'channel-drain');
+      try {
+        await this.ctx.storage.put(HEARTBEAT_STORAGE_KEY, next);
+      } catch (error) {
+        this.channelDrainOutcomeReported = null;
+        throw error;
       }
-    }
-    return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
+      if (drainRecorded) {
+        this.channelDrainOutcomeReported = null;
+        if (this.channelDrainOutcome === reported) {
+          // Consume exactly once; a completion that queued behind the
+          // reported outcome while it awaited this record is promoted.
+          this.channelDrainOutcome = this.channelDrainOutcomeHeld ?? null;
+          this.channelDrainOutcomeHeld = null;
+        }
+      }
+      this.jobHealthSnapshot = jobHealthView(next, Date.now(), this.env, this.store).jobs;
+      return { recorded: Array.isArray(outcomes) ? outcomes.length : 0 };
+    };
+    const pending = (this.cronTickTail ?? Promise.resolve()).then(persist, persist);
+    this.cronTickTail = pending;
+    try { return await pending; }
+    finally { if (this.cronTickTail === pending) this.cronTickTail = null; }
+  }
+  async refreshJobHealthSnapshot() {
+    try { this.jobHealthSnapshot = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store).jobs; }
+    catch (error) { console.warn(`[job-heartbeat] snapshot failed: ${error?.message ?? error}`); }
   }
   async readJobHealth() {
     const view = jobHealthView(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY), Date.now(), this.env, this.store);
@@ -479,60 +547,69 @@ export class ProjectRoom extends DurableObject {
   }
   // Due jobs only. Slow jobs (retention, integrity, backup) run from the
   // safety-net cron. Fast jobs run from the alarm when their nextDueAt arrives.
-  async #runDueJobs({ includeSlow }) {
+  #runDueJobs(options) {
+    return this.#sqlScope('scheduler', 'job-eligibility', () => this.#runDueJobsBody(options));
+  }
+  async #runDueJobsBody({ includeSlow, onlyJob = null }) {
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
     const lastRan = lastRanFrom(stored);
     const now = Date.now();
     const selected = selectWorkerJobs(this.env, this.store).filter(job => {
+      if (onlyJob !== null && job.name !== onlyJob) return false;
       if (job.slow && !includeSlow) return false;
       return jobIsDue(job, this.store, now, lastRan[job.name]);
     });
-    const runners = {};
+    const outcomes = [];
     for (const job of selected) {
-      runners[job.name] = () => job.run(this.store, {
+      const result = await runCronJobs({ [job.name]: () => this.#sqlScope('job', job.name, () => job.run(this.store, {
         deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
         env: this.env, room: this, now: () => Date.now()
-      });
-    }
-    const outcomes = await runCronJobs(runners);
-    if (outcomes.length) {
-      try { await this.recordCronTick(outcomes); }
-      catch (error) { console.error(`[job-heartbeat] record failed: ${error?.message ?? error}`); }
+      })) });
+      // A later job may reset the object. Commit completed work before
+      // starting it; a failed heartbeat write must not claim a healthy tick.
+      await this.recordCronTick(result);
+      outcomes.push(...result);
     }
     return outcomes;
   }
   // Set the alarm only when the new time is earlier than the one already set.
   // Nothing queued deletes a leftover alarm so an idle room is not woken.
-  async #armJobAlarm({ retryDelayMs = 0 } = {}) {
-    if (this.paused || !this.store) return { armed: false, alarmAt: null };
-    const now = Date.now();
-    const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
-    let when = earliestFutureAlarm(JOBS, {
-      env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker"
-    });
-    if (retryDelayMs > 0) {
-      const retryAt = now + retryDelayMs;
-      when = when == null ? retryAt : Math.min(when, retryAt);
-    }
-    const current = await this.ctx.storage.getAlarm();
-    if (when == null) {
-      if (current != null) await this.ctx.storage.deleteAlarm();
-      return { armed: false, alarmAt: null };
-    }
-    if (current != null && current <= when) return { armed: false, alarmAt: current };
-    await this.ctx.storage.setAlarm(when);
-    return { armed: true, alarmAt: when };
+  #armJobAlarm(options) {
+    return this.#sqlScope('scheduler', 'job-eligibility', () => this.#armJobAlarmBody(options));
   }
-  // Safety-net RPC. Runs anything already due, then re-arms a missing alarm.
+  async #armJobAlarmBody({ retryDelayMs = 0 } = {}) {
+    if (this.paused || !this.store) return { armed: false, alarmAt: null };
+    this.jobAlarmReconciler ??= createJobAlarmReconciler({
+      storage: this.ctx.storage,
+      calculate: async () => {
+        const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+        return earliestFutureAlarm(JOBS, {
+          env: this.env, store: this.store, now: Date.now(), lastRan: lastRanFrom(stored), runtime: "worker"
+        });
+      }
+    });
+    return this.jobAlarmReconciler({ retryDelayMs });
+  }
+  // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
   // anything due?" without this wake. The cron stays at 30 minutes.
   async ensureJobAlarm() {
     if (this.paused || !this.store) return { skipped: "paused", armed: false };
-    const outcomes = await this.#runDueJobs({ includeSlow: true });
+    const outcomes = await this.#runDueJobs({ includeSlow: false });
     const armed = await this.#armJobAlarm();
     const failed = outcomes.filter(outcome => !outcome.ok && !JOBS.find(job => job.name === outcome.job)?.slow);
     if (failed.length) throw new Error(`cron jobs failed: ${failed.map(outcome => outcome.job).join(", ")}`);
     return { ...armed, ran: outcomes.map(outcome => outcome.job) };
+  }
+  // Separate RPC invocations give each slow job its own CPU budget. A reset
+  // cannot erase outcomes already committed by another invocation.
+  async runSlowJob(name) {
+    if (!JOBS.some(job => job.name === name && job.slow && job.runtimes.includes("worker"))) {
+      throw new Error("Unsupported slow job");
+    }
+    if (this.paused || !this.store) return { skipped: "paused" };
+    await yieldToQueuedRequests();
+    return this.#runDueJobs({ includeSlow: true, onlyJob: name });
   }
   // Platform alarm. A throw is rescheduled so a failed tick is not dropped.
   async alarm() {
@@ -597,8 +674,17 @@ export default {
     // invite redeem hit the same handlers as origin (www /api/* is Webflow).
     if (isEdgeDoorUrl(request.url)) {
       const inbound = new URL(request.url);
-      const path = rewriteRoomApiPrefix(inbound.pathname) + inbound.search;
-      request = new Request(new URL(path, roomOrigin(env).origin), request);
+      const pathname = rewriteRoomApiPrefix(inbound.pathname);
+      const target = new URL(pathname + inbound.search, roomOrigin(env).origin);
+      // OAuth state is bound to a host-only account cookie. Start on the
+      // canonical callback host before creating either the slot or state;
+      // an internal rewrite would set the cookie on the public entry host.
+      if (request.method === 'GET' && pathname === '/api/auth/google/start') {
+        return finish(new Response(null, { status: 302, headers: {
+          Location: target.href, 'Cache-Control': 'no-store'
+        } }), 'worker');
+      }
+      request = new Request(target, request);
     } else if (EDGE_DOOR_HOSTS.includes(new URL(request.url).hostname)) {
       // The /room* route also catches /rooms, /roommates and similar lookalikes
       // (an exact pattern would drop /room?ref= query strings). Those are simply
@@ -728,14 +814,29 @@ export default {
 
   // Safety-net cron (wrangler production trigger is every 30 minutes).
   // Reading Durable Object storage always wakes it, so this handler cannot
-  // ask "is anything due?" from the Worker. It makes one RPC that runs jobs
-  // already due and re-arms the alarm when one is missing. Webhook retries,
+  // ask "is anything due?" from the Worker. Fast work re-arms its alarm;
+  // each slow job then runs in a separate RPC, with due checks in the object.
+  // Continue after an RPC failure so one reset cannot starve later jobs.
+  // Webhook retries,
   // land-queue polls, and claim polls run from ProjectRoom.alarm() at the
   // next due time. A failed fast job fails this invocation so Cron Events
   // show the exception.
   async scheduled(event, env, ctx) {
     if (maintenanceEnabled(env.ROOM_MAINTENANCE)) return;
-    const room = env.ROOM.getByName('invite-only-pilot');
-    await room.ensureJobAlarm();
+    let room = env.ROOM.getByName('invite-only-pilot');
+    const failures = [];
+    try { await room.ensureJobAlarm(); }
+    catch { failures.push("fast jobs"); room = env.ROOM.getByName('invite-only-pilot'); }
+    for (const job of JOBS.filter(job => job.slow && job.runtimes.includes("worker"))) {
+      try { await room.runSlowJob(job.name); }
+      catch { failures.push(job.name); room = env.ROOM.getByName('invite-only-pilot'); }
+    }
+    if (failures.length) throw new Error(`Scheduled job RPC failed: ${failures.join(", ")}`);
   }
 };
+
+// Per-room objects stay classified and unwired. Fetch still names
+// invite-only-pilot. This re-export keeps the classification on the worker
+// import graph; it does not open a second Durable Object.
+export { tableHome } from '../server/room-shard.mjs';
+export { RoomShard } from './room-shard.mjs';

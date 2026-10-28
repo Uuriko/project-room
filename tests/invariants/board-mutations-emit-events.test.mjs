@@ -101,7 +101,7 @@ invariantSuite([
       configureBoard(f);
       ctx.item = await addItem(f);
       const agent = mintIdentity(f, "handoff-probe");
-      const { link } = linkToRoom(f, agent.identityId, ["accept_work"]);
+      const { link } = linkToRoom(f, agent, ["accept_work"]);
       ctx.other = link.memberId;
       ctx.before = roomSequence(f);
       return ctx;
