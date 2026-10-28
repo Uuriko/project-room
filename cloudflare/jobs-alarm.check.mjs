@@ -266,6 +266,37 @@ test("only a request that wrote rows re-arms the job alarm", async () => {
   }
 });
 
+// The gate only pays off if real agent traffic reads as read-only. An
+// authenticated needs-me poll (the hottest agent read) must not count as a
+// write: activated_at is guarded by IS NULL, so after the first request it
+// changes no rows.
+test("authenticated agent polls do not re-arm the job alarm", async () => {
+  const mf = await start();
+  const settle = () => new Promise(resolve => setTimeout(resolve, 300));
+  const alarmAt = async () => (await call(mf, "/probe/alarm-at?name=poll")).body.alarmAt;
+  try {
+    assert.equal((await call(mf, "/probe/backfill?name=poll")).body.done, true);
+    await call(mf, "/probe/seed-due?name=poll&delayMs=600000");
+    await call(mf, "/probe/ensure?name=poll");
+    const minted = await mf.dispatchFetch(origin + "/probe/do-fetch?name=poll&method=POST&path=" + encodeURIComponent("/api/agent-identities"),
+      { method: "POST", body: JSON.stringify({ displayName: "Poll Probe", proof: mintProof("Poll Probe") }) }).then(response => response.json());
+    assert.equal(minted.status, 201, JSON.stringify(minted));
+    const { secret } = JSON.parse(minted.body);
+    assert.equal(typeof secret, "string");
+    const poll = () => mf.dispatchFetch(origin + "/probe/do-fetch?name=poll&method=GET&path=" + encodeURIComponent("/api/needs-me"),
+      { headers: { authorization: `Bearer ${secret}` } }).then(response => response.json());
+    // The first authenticated request may stamp activated_at once; spend it.
+    assert.equal((await poll()).status, 200);
+    await settle();
+    await call(mf, "/probe/clear-alarm?name=poll");
+    for (let i = 0; i < 3; i++) assert.equal((await poll()).status, 200);
+    await settle();
+    assert.equal(await alarmAt(), null, "an authenticated read-only agent poll re-armed the alarm");
+  } finally {
+    await mf.dispose();
+  }
+});
+
 // Edge cases for write-gated arming: boot, a refused command, a read racing a write.
 test("write-gated arming: first request after boot, refused command, read racing a write", async () => {
   const mf = await start();
