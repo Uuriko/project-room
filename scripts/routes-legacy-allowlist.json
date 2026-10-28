@@ -2759,6 +2759,10 @@
     },
     {
       "method": "GET",
+      "path": "/api/verdict-inbox"
+    },
+    {
+      "method": "GET",
       "path": "/api/version"
     },
     {
@@ -6370,6 +6374,10 @@
     {
       "method": "HEAD",
       "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/verdict-inbox"
     },
     {
       "method": "GET",

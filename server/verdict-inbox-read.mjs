@@ -5,21 +5,29 @@
 // already authorised, and injects Lane B's CD-06 follow records
 // (Contract F) when that provider is present on the store.
 //
-// Contract F consumption: CD-06 (Lane B) shipped claimFollowTotals +
+// Contract F consumption: CD-06 (Lane B) was to ship claimFollowTotals +
 // listClaimFollows in server/claim-follows.mjs — per-member totals
 // { followedClaims, unreadClaims, unreadEvents, mentions } and per-claim
 // follow records { claimId, roomId, policy, unreadCount, mentionCount }.
-// This PR lands after CD-06, so the import is direct. A generic
-// store-surface probe remains as a fallback for alternate wirings; if
-// neither answers, follow reads as null — never as invented zeroes.
+// That module never landed, so the import is OPTIONAL (cure for the
+// settle-pass-19 RED, 2026-10-27): a static import of an absent module
+// killed every surface that loads this one. When the module is absent
+// the generic store-surface probe below remains the fallback for
+// alternate wirings; if neither answers, follow reads as null — never
+// as invented zeroes.
 import { buildVerdictInbox } from "./verdict-inbox.mjs";
-import { claimFollowTotals, listClaimFollows } from "./claim-follows.mjs";
 import { ownMember } from "../src/events.js";
+
+let claimFollowTotals = null;
+let listClaimFollows = null;
+try {
+  ({ claimFollowTotals, listClaimFollows } = await import("./claim-follows.mjs"));
+} catch { /* CD-06 module absent: follow reads stay null */ }
 
 const MAX_ROOMS = 40;
 
 function followForRoom(store, roomId, memberId) {
-  try {
+  if (claimFollowTotals && listClaimFollows) try {
     const totals = claimFollowTotals(store.db, { roomId, memberId });
     if (totals && typeof totals === "object") {
       const claims = listClaimFollows(store.db, { roomId, memberId })

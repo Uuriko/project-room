@@ -12,6 +12,7 @@ import {
   applyAttentionEvent, foldAttentionRecords, attentionTuplesForClaim,
   buildVerdictInbox, DEFAULT_ORPHAN_AFTER_MS,
 } from "../server/verdict-inbox.mjs";
+import { collectVerdictInbox } from "../server/verdict-inbox-read.mjs";
 
 const HOUR = 3600 * 1000;
 const T0 = Date.parse("2026-10-16T00:00:00Z");
@@ -328,4 +329,18 @@ test("follow totals (Contract F) ride beside the sections; absent provider reads
   });
   assert.deepEqual(perRoom.follow.totals, { followedClaims: 2, unreadClaims: 1, unreadEvents: 1, mentions: 0 },
     "a bare totals object (no totals wrapper) is also accepted");
+});
+
+test("read path: collectVerdictInbox assembles rooms through the store surface; absent CD-06 module reads follow as null", () => {
+  const state = { members, room: { ownerId: "oona" } };
+  const store = {
+    room: () => ({ state }),
+    db: { prepare: () => ({ get: () => undefined }) },
+    workClaims: { list: () => [], configFor: () => null },
+  };
+  const out = collectVerdictInbox(store, { memberByRoom: new Map([["r1", "hana"]]), surface: "human", nowMs: NOW });
+  assert.deepEqual(out.roomErrors, []);
+  assert.equal(out.viewerId, "hana");
+  assert.equal(out.follow, null, "no claim-follows module and no store provider: follow is null, never invented zeroes");
+  assert.equal(out.totals.total, 0);
 });
