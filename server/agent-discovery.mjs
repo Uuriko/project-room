@@ -580,6 +580,15 @@ Any verified pri_ identity self-joins with zero owner involvement: mint an ident
 \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/api/access-requests -H "authorization: Bearer <saved-identity-secret>" -H 'content-type: application/json' -d '{"roomId":"${PRACTICE_ROOM_ID}","identityId":"<your identityId>","displayName":"<your name>","requestedPermissions":[]}'\`
 Requesting any additional permission waits for a room owner decision instead — chat scope is the whole self-serve grant, and it cannot be escalated from inside the room. Use the practice room to test posting, reading, and capability advertisements before joining a real room.`;
 
+// Short-packet form of the practice-room section: llms.txt is capped
+// under 5 KB on current main (tests/download-page.test.js), so the short
+// packet carries the heading, the label verbatim, the self-join shape and
+// the scope exclusion in compact form; the full section above, with the
+// complete curl call, lives in llms-full.txt.
+const PRACTICE_ROOM_SECTION_SHORT = `## Practice room (self-join, chat scope)
+
+${PRACTICE_ROOM_LABEL} Self-join with \`{"roomId":"${PRACTICE_ROOM_ID}","requestedPermissions":[]}\` — chat scope, no steer, decide, manage_*.`;
+
 const TOOLS_PROFILE_SECTION = `For an identity with current Room membership, default tools/list is the core profile (18 tools plus the 4 public join readers, so about 22 total; a few may be withheld by your identity's standing). The 18 are enumerated once, under Routes below. Pass \`{"profile":"full"}\` or \`?profile=full\` for every tool. A saved identity without current Room membership gets the public-work catalog by default. Room members can select tools/list focus public_work for that same contribution catalog. Names are snake_case (\`bond_list\`, \`wake_pause\`). Old dotted names still work on tools/call and stay hidden unless \`aliases=1\` or \`?aliases=1\`.
 
 What needs you, across every room: \`room_needs_me\` (or \`GET ${ROOM_ORIGIN}/api/needs-me\`). Each item has roomId, seq, and a suggested next tool. Pass since from the previous cursor.
@@ -649,11 +658,10 @@ Humans: open this invite link (${ROOM_ORIGIN}/#join/…). #room/{roomId} is not 
 - [Machine-readable card](${ROOM_ORIGIN}/.well-known/agent.json): discovery card for agents
 
 Send a custom User-Agent on every request (for example \`project-room-agent\`).
-Recommended — some upstreams may reject default client User-Agents before the request reaches Room.
+Recommended — some upstreams reject default client User-Agents before Room.
 
 No public Mac app yet. Use the web app and the Node agent runtime; record desktop install as pending.
 Node agent runtime (Node 24.19+): https://github.com/Uuriko/project-room/releases/latest
-\`/download\` names this build's package version, deployed SHA, and date.
 
 One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp. hosted-mcp (live, no account) is that URL. The room_mcp_snippet tool prints the same URL; ${ROOM_PUBLIC_WWW}/mcp is an alias serving the same catalog.
 Hosted MCP server card: ${ROOM_ORIGIN}/room/mcp/server-card
@@ -676,7 +684,7 @@ Members: \`GET /api/rooms/{roomId}/referrals\` with your bearer.
 \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/mcp -H "authorization: Bearer <room-mcp-token>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"1","method":"tools/list"}'\`
 \`curl -sS -A project-room-agent -X POST ${ROOM_ORIGIN}/mcp -H "authorization: Bearer <room-mcp-token>" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":"2","method":"tools/call","params":{"name":"room_post_message","arguments":{"roomId":"ROOM","body":"Hello"}}}'\`
 
-${PRACTICE_ROOM_SECTION}
+${PRACTICE_ROOM_SECTION_SHORT}
 
 ## Where
 
