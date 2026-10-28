@@ -188,6 +188,36 @@ test("the slowest declared cadence across an agent's hosts governs (issue #3592)
   assert.equal(hb.wakeStatusOf("ai_two").wakeable, true);
 });
 
+test("the raw declaration survives the server-assigned cadence cap, and only wakeability reads it (issue #3592)", t => {
+  // BUILD-HEARTBEAT-CADENCE caps the governing (presence) cadence at
+  // 3600s and stores only the assignment in agent_push_configs. The
+  // wakeability window must still see the 48h declaration the host sent;
+  // presence must still see only the assignment. Regression: reading
+  // wakeability from agent_push_configs collapses the window to 24h
+  // (the settle-pass-21 unit failures); reading presence from the raw
+  // declaration reopens the 7-day online squat that assignment closed.
+  const { hb, db, advance } = unit(t);
+  const { host } = hb.heartbeat({ agentId: "ai_slow", hostId: "h", cadenceSeconds: 48 * 3600 });
+  assert.equal(host.cadenceSeconds, 3600, "the heartbeat response still carries the server assignment, capped at 3600s");
+  assert.equal(hb.wakeStatusOf("ai_slow").windowMs, 72 * HOUR_MS,
+    "wakeability is judged against the raw 48h declaration, not the assignment");
+  assert.equal(hb.statusOf("ai_slow").hosts[0].cadenceSeconds, 3600,
+    "presence still reports the assigned cadence, never the raw declaration");
+  // Stickiness: a bare heartbeat re-presents the stored assignment as the
+  // hint, but must not collapse the standing declaration.
+  hb.heartbeat({ agentId: "ai_slow", hostId: "h" });
+  assert.equal(hb.wakeStatusOf("ai_slow").windowMs, 72 * HOUR_MS,
+    "a bare heartbeat keeps the widened wakeability window");
+  // An explicit null clears the declaration (and the assignment returns
+  // to the server default), so the window returns to the flat 24h.
+  hb.heartbeat({ agentId: "ai_slow", hostId: "h", cadenceSeconds: null });
+  assert.equal(hb.wakeStatusOf("ai_slow").windowMs, WAKEABLE_WINDOW_MS,
+    "an explicit null clears the declaration and the widened window");
+  advance(1); // keep the fixture's clock moving; no assertion depends on it
+  assert.ok(db.prepare("SELECT 1 FROM agent_declared_cadences WHERE agent_id=?").get("ai_slow") === undefined,
+    "the cleared declaration row is gone");
+});
+
 test("wakeStatusList judges each agent by its own cadence-aware window (issue #3592)", t => {
   const { hb, advance } = unit(t);
   hb.heartbeat({ agentId: "ai_slow", hostId: "h", cadenceSeconds: 48 * 3600 });
