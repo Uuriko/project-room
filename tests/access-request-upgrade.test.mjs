@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // Owner-boundary regression: existing access-request tests cover admission,
 // including a join granted before review, but not a request by a current
@@ -24,10 +25,7 @@ function setup(t, permissions = ["steer"]) {
   store.initialize(initialRoom("commons"));
   const ownerToken = store.issueAccessKey("commons", "owner", 30 * 86400000);
   const identity = store.identities.create("Existing Agent");
-  const { memberId } = store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, memberId: "existing-agent",
-    displayName: "Existing Agent", permissions,
-  });
+  const { memberId } = linkWithProof(store, ownerToken, "commons", identity, { memberId: "existing-agent", displayName: "Existing Agent", permissions });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const fixture = {
     get store() { return store; }, ownerToken, identity, memberId,
@@ -119,7 +117,7 @@ test("unprivileged and admission-only reviewers cannot approve an upgrade", t =>
   assert.throws(() => f.requests.decide(f.identity.secret, "commons", "ar_admin", { decision: "approve" }),
     error => error.status === 403 && error.code === "access_denied");
   const reviewer = f.store.identities.create("Admission Reviewer");
-  f.store.identities.link(f.ownerToken, "commons", { identityId: reviewer.identityId, permissions: [] });
+  linkWithProof(f.store, f.ownerToken, "commons", reviewer, { permissions: [] });
   f.store.delegation.grant(f.ownerToken, "commons", { identityId: reviewer.identityId });
   assert.throws(() => f.requests.decide(reviewer.secret, "commons", "ar_admin", { decision: "approve" }),
     error => error.status === 403 && error.code === "access_denied");
@@ -138,10 +136,7 @@ test("changed or withdrawn membership invalidates a pending upgrade", async t =>
     revoked: f => f.store.identities.revoke(f.identity.identityId, f.identity.secret),
     relinked: f => {
       f.store.identities.unlink(f.ownerToken, "commons", f.identity.identityId);
-      f.store.identities.link(f.ownerToken, "commons", {
-        identityId: f.identity.identityId, memberId: f.memberId,
-        permissions: [], settleAccessRequests: false,
-      });
+      linkWithProof(f.store, f.ownerToken, "commons", f.identity, { memberId: f.memberId, permissions: [], settleAccessRequests: false });
     },
   };
   for (const [name, change] of Object.entries(changes)) {

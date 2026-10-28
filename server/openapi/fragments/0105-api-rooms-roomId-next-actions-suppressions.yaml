@@ -1,0 +1,66 @@
+  /api/rooms/{roomId}/next-actions-suppressions:
+    get:
+      summary: Read the caller's next-action kind suppressions
+      description: |
+        RC-2026-09-25-911. Returns the caller's suppression set, newest
+        first. Private per member.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The suppression set
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  viewerId: { type: string }
+                  suppressions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        kind: { type: string }
+                        reason: { type: [string, 'null'] }
+                        updatedAt: { type: integer }
+        '401':
+          description: unauthenticated
+    put:
+      summary: Replace the caller's next-action kind suppressions
+      description: |
+        RC-2026-09-25-911. Replace-all: the posted list becomes the caller's
+        entire suppression set (an empty list clears it). Kind is free-form,
+        1..64 characters; reason at most 280 characters. Private per member.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                suppressions:
+                  type: array
+                  items:
+                    type: object
+                    required: [kind]
+                    properties:
+                      kind: { type: string, minLength: 1, maxLength: 64 }
+                      reason: { type: string, maxLength: 280 }
+      responses:
+        '200':
+          description: Suppression set replaced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  viewerId: { type: string }
+                  kinds: { type: array, items: { type: string } }
+        '401':
+          description: unauthenticated
+        '422':
+          description: invalid_input
