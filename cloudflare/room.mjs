@@ -9,6 +9,7 @@ import { httpServerHandler } from 'cloudflare:node';
 import { isIP } from 'node:net';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { RoomStore } from '../server/store.mjs';
+import { bodiesAtRestOptionsFromEnv } from '../server/projection-at-rest.mjs';
 import { stitchConfigFromEnv } from '../server/inbox-stitch.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { vapidFromEnv } from '../server/push-subscriptions.mjs';
@@ -130,7 +131,9 @@ export class ProjectRoom extends DurableObject {
     this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage, { observeStatement: this.sqlCosts?.observeStatement }), storagePlatform: durableStorage,
       stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred",
       // Phase 1a: large message bodies at rest outside the projection row.
-      bodiesAtRest: env.ROOM_BODIES_AT_REST === "1" });
+      // C4-1: the global switch plus hot-room selection (list + auto), all
+      // read from env in one place (server/projection-at-rest.mjs).
+      ...bodiesAtRestOptionsFromEnv(env) });
     // ACT-1a: one delimited call. Room Guide advances after commands. ACT-4 owns nudges.
     installGuideCommandHook(this.store);
     // Event-push dispatch: same fire-and-forget flush as the node entry

@@ -49,7 +49,7 @@ import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./inv
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
 import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
-import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
+import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection, HOT_ROOM_PROJECTION_BYTES, parseRoomIdList } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
@@ -1368,9 +1368,20 @@ class ProjectionCache {
 export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
+    bodiesAtRestRooms = globalThis.process?.env?.["ROOM_BODIES_AT_REST_ROOMS"], bodiesAtRestHot = globalThis.process?.env?.["ROOM_BODIES_AT_REST_HOT"] === "1", bodiesAtRestHotBytes = HOT_ROOM_PROJECTION_BYTES,
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
+    // C4-1 hot-room selection, on top of the global switch: an explicit
+    // room list (ROOM_BODIES_AT_REST_ROOMS) and/or auto-selection of hot
+    // rooms (ROOM_BODIES_AT_REST_HOT=1; see bodiesAtRestFor). Rooms found
+    // selected are memoised in hotBodiesRooms for the life of the store.
+    this.bodiesAtRestRooms = parseRoomIdList(bodiesAtRestRooms);
+    this.bodiesAtRestHot = bodiesAtRestHot === true;
+    if (!Number.isSafeInteger(bodiesAtRestHotBytes) || bodiesAtRestHotBytes < 1)
+      throw new Error("bodiesAtRestHotBytes must be a positive integer");
+    this.bodiesAtRestHotBytes = bodiesAtRestHotBytes;
+    this.hotBodiesRooms = new Set();
     this.verifyProjectionCache = verifyProjectionCache === true;
     if (messageProjectionWindow !== null && (!Number.isSafeInteger(messageProjectionWindow) || messageProjectionWindow < 1))
       throw new Error("messageProjectionWindow must be a positive integer or null");
@@ -2171,7 +2182,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const row = this.db.prepare("SELECT projection FROM rooms WHERE id=?").get(id);
         const raw = JSON.parse(row.projection);
         const state = hydrateWorkItems(this.db, id, raw);
-        const projection = storedProjection(this.db, id, state, { enabled: this.bodiesAtRest, workEntities: !reverse });
+        const projection = storedProjection(this.db, id, state, { enabled: this.bodiesAtRestFor(id), workEntities: !reverse });
         if (projection !== row.projection) {
           this.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(projection, id);
           converted++;
@@ -3605,9 +3616,25 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       return count;
     });
   }
+  // Phase 1a selection: is bodies-at-rest engaged for this room? The global
+  // switch, the explicit list, or — with hot selection on — a hot room: one
+  // that already holds body rows (sticky, so slimming a room back under the
+  // threshold never flips it to inline on the next write or after a
+  // restart) or whose stored projection has reached the hot threshold.
+  // A selected answer is memoised; an unselected one costs one primary-key
+  // read per write, because a cold room can heat up at any time.
+  bodiesAtRestFor(roomId) {
+    if (this.bodiesAtRest) return true;
+    if (this.bodiesAtRestRooms.has(roomId) || this.hotBodiesRooms.has(roomId)) return true;
+    if (!this.bodiesAtRestHot || !this.db) return false;
+    const row = this.db.prepare("SELECT length(CAST(projection AS BLOB)) AS n, EXISTS(SELECT 1 FROM projection_bodies WHERE room_id=?) AS rested FROM rooms WHERE id=?").get(roomId, roomId);
+    if (!row || (row.rested !== 1 && row.n < this.bodiesAtRestHotBytes)) return false;
+    this.hotBodiesRooms.add(roomId);
+    return true;
+  }
   // Phase 1a: the one serializer for rooms.projection. Every writer uses it.
   storedProjection(roomId, state) {
-    return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRest });
+    return storedProjection(this.db, roomId, state, { enabled: this.bodiesAtRestFor(roomId) });
   }
   // A body row can only go missing through a write outside storedProjection.
   // The event log is still the source of truth: replay it and refill.
@@ -6318,7 +6345,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // transaction rewrite the log and advance the room sequence.
         if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
           const redacted = commitMessageRedaction(this.db, {
-            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId, bodiesAtRest: this.bodiesAtRest
+            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId, bodiesAtRest: this.bodiesAtRestFor(roomId)
           });
           state = redacted.state;
         }
