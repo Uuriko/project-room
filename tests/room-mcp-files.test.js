@@ -403,7 +403,8 @@ test("staged files expire and a member cannot exceed the staged-file cap", t => 
 });
 
 test("staged files stay with the uploader; DM-committed files stay with the DM pair (#983)", async t => {
-  const { origin, store, rooms } = await serve(t);
+  let now = Date.now();
+  const { origin, store, rooms } = await serve(t, { now: () => now });
   const owner = store.identities.create("Scope owner");
   const peer = store.identities.create("Scope peer");
   const third = store.identities.create("Scope third");
@@ -462,6 +463,23 @@ test("staged files stay with the uploader; DM-committed files stay with the DM p
   assert.equal(ownerStaged.value.attachment.data, data("staged"), "uploader can still download their staged file");
   const thirdPub = await getAs(third.secret, "pub-note");
   assert.equal(thirdPub.value.attachment.data, data("public"), "public file stays downloadable room-wide");
+  // Lifecycle transitions must not turn private IDs into an existence oracle.
+  await call(origin, "room_put_file", { roomId: created.roomId, id: "discard-note", filename: "discard.txt", mediaType: "text/plain", data: data("discard") }, owner.secret);
+  const discarded = await call(origin, "room_discard_file", { roomId: created.roomId, id: "discard-note" }, owner.secret);
+  assert.equal(discarded.value.status, "discarded");
+  now += 25 * 3600000;
+  for (const id of ["staged-note", "discard-note"]) {
+    for (const secret of [peer.secret, third.secret]) {
+      const hidden = await getAs(secret, id);
+      assert.equal(hidden.value.status, 404, `${id} remains hidden after expiry or discard`);
+      assert.equal(hidden.value.code, "attachment_not_found");
+    }
+    const entitled = await getAs(owner.secret, id);
+    assert.equal(entitled.value.status, 410, "uploader still learns that bytes are unavailable");
+  }
+  assert.equal((await getAs(peer.secret, "dm-note")).value.attachment.data, data("dm"));
+  assert.equal((await getAs(third.secret, "pub-note")).value.attachment.data, data("public"));
+
 });
 
 test("a committed DM file whose message is missing from the projection is not room-visible (#2950)", async t => {
