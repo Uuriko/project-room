@@ -1,0 +1,35 @@
+# Safety net: five join/work stories, the access invariants, and the room
+# page and snapshot budgets. Runs on every pull request, including drafts.
+# The job name is the check name the merge queue waits on.
+
+name: safety-net
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && 'safety-net-main' || format('safety-net-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  safety-net:
+    name: safety-net
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Run safety-net stories, invariants, and budgets
+        run: scripts/test-env.sh node --test --test-reporter=spec --test-concurrency=1 tests/safety-net/*.test.js

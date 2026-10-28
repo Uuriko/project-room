@@ -35,7 +35,7 @@ import { approvalGate, patchUnchanged, queueCheckVerdict } from "../server/merge
 const ORIGIN = "https://room.trydemigod.com";
 const REPO = "Uuriko/project-room";
 const BASE = "main";
-const REQUIRED_CHECKS = ["test", "contract", "lint", "browser", "cloudflare"];
+const REQUIRED_CHECKS = ["test", "contract", "lint", "browser", "cloudflare", "safety-net"];
 const WORKER_DIR = join(homedir(), "workspace", "pr-mergequeue-worker");
 const STATE_FILE = join(WORKER_DIR, ".worker-state.json");
 const MAX_CONSECUTIVE_FAILURES = 3;

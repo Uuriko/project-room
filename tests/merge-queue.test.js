@@ -318,7 +318,7 @@ cp.execFileSync=(cmd,args,opts={})=>{
    }
   }
   if(args[0]==='api'&&args[1]=== 'repos/'+repo+'/commits/'+next+'/check-runs?per_page=100'){
-   polls++;return JSON.stringify(['test','contract','lint','browser','cloudflare'].map((name,id)=>({id,name,status:polls===1?'queued':'completed',conclusion:polls===1?null:'success'})));
+   polls++;return JSON.stringify(['test','contract','lint','browser','cloudflare','safety-net'].map((name,id)=>({id,name,status:polls===1?'queued':'completed',conclusion:polls===1?null:'success'})));
   }
   if(args[0]==='api'&&args[1]==='repos/'+repo+'/commits/'+next+'/status')return '[]';
  }
