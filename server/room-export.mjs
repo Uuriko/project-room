@@ -491,7 +491,12 @@ export const REPLAY_SKIPPED_TABLES = Object.freeze([
   "room_runtime_version", "room_writer_permit",
   "emissary_drops", "emissary_idempotency", "emissary_invite_attribution",
   "emissary_journal", "external_identities", "external_receipts",
-  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures"
+  "abuse_rate_buckets", "agent_wake_counters", "agent_wake_failures",
+  // FTS5 message search index + shadow tables (PERF-50 D2-a): derived from
+  // `messages`, and the shadow tables are read-only index internals no
+  // replay may load. The restored store rebuilds the index from its
+  // messages rows on first search (server/message-search.mjs).
+  "messages_fts", "messages_fts_data", "messages_fts_idx", "messages_fts_docsize", "messages_fts_config"
 ]);
 
 const CLAIM_PERMIT_TABLE = "public_work_claim_writer_permit";

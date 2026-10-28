@@ -565,7 +565,18 @@ const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotatio
 // queue, open pull file sets, and overlap-notice keys. Created on first
 // push. Older writers have no path to these tables.
 const PROJECT_MAP_ADDITIVE_TABLES = Object.freeze(["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES]);
+// messages_fts + its FTS5 shadow tables (PERF-50 D2-a, server/message-search.mjs):
+// a derived external-content index over the fenced messages table, kept in
+// step by triggers on messages and rebuilt from it on first search use.
+// Lazy-additive, NOT part of the audited application set: the shadow tables
+// hold index internals whose raw row layout legitimately changes when FTS
+// segments merge, so a content hash over them cannot survive a backup
+// roundtrip — recovery fidelity for search is the messages table itself,
+// from which the index is rebuilt. Older writers have no code path to it,
+// and store.search() probes it per query and falls back to the legacy scan
+// when it is absent or a room is not covered.
+const MESSAGE_SEARCH_TABLES = Object.freeze(["messages_fts", "messages_fts_data", "messages_fts_idx", "messages_fts_docsize", "messages_fts_config"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES, ...MESSAGE_SEARCH_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the

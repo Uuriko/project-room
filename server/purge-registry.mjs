@@ -1901,7 +1901,19 @@ const ROWS = [
   { table: "work_item_board_backfill", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
-  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } }
+  { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // FTS5 message search index + shadow tables (PERF-50 D2-a,
+  // server/message-search.mjs): a derived external-content index over the
+  // messages table with no room key of its own. Room purge deletes the
+  // room's messages rows and the index's AFTER DELETE trigger removes the
+  // corresponding index entries in the same transaction; the shadow
+  // tables hold only index internals keyed by messages rowid, so there is
+  // nothing purge can or should delete from them directly.
+  ...["messages_fts", "messages_fts_data", "messages_fts_idx", "messages_fts_docsize", "messages_fts_config"].map(table => ({
+    table, key: "rowid", action: "retain",
+    reason: "Derived FTS5 index over messages; entries are removed by trigger when the room's messages rows are purged, and the index is rebuilt from messages on first search",
+    match: {}
+  }))
 ];
 
 export const PURGE_TABLES = Object.freeze(ROWS.map(row => Object.freeze({

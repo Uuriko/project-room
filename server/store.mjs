@@ -51,6 +51,7 @@ import { WANTS_WORK_SCHEMA } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { CODE_DROPS_SCHEMA, CodeDrops } from "./code-drops.mjs"; // room-native patch exchange
 import { PROJECTION_BODIES_SCHEMA, storedProjection, hydrateProjection } from "./projection-at-rest.mjs"; // Phase 1a
 import { MESSAGES_SCHEMA, MESSAGES_BACKFILL_CURSOR_SCHEMA, MESSAGES_BACKFILL_BLOCKS_SCHEMA, archivedMessageRow, archiveMarker, archivedMatchingRecords, archivedThreadRecords, archiveRoomMessages, restoreArchivedMessages, runMessagesBackfill, checkMessagesParity as verifyMessagesParity, runMessagesParityCheck, messagesBackfillCaughtUp } from "./messages-store.mjs";
+import { ensureMessageSearchIndex, messageSearchCandidates, messageSearchCoversRoom } from "./message-search.mjs"; // FTS5 room-message search (PERF-50 D2-a)
 import { runLegacyMessageShapeUpgrade } from "./legacy-message-shape.mjs";
 import { commitMessageRedaction } from "./message-redaction.mjs";
 import { runPatrolTick, patrolFindings as listPatrolFindings, patrolBlocks as listPatrolBlocks } from "./patrol.mjs";
@@ -2029,6 +2030,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // before installWriterFence attaches the v37 triggers. IF NOT EXISTS
       // is idempotent. A warm wake whose stamp matches skips this block.
       this.db.exec(MESSAGES_SCHEMA);
+      // The FTS5 message search index (PERF-50 D2-a) is NOT created here:
+      // it is a lazily created derived index (see server/message-search.mjs
+      // for why a fresh store must not create it). store.search() ensures
+      // it on first use.
       // v38 preserves complete current message records. Existing rows remain
       // null until the budgeted replay fills them; never scan history on open.
       if (!this.db.prepare("SELECT 1 FROM pragma_table_info('messages') WHERE name='record_json'").get()) {
@@ -5343,7 +5348,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     });
   }
   // Round-2 #113: full-text search over messages and work items.
-  // Substring match, case-insensitive; deleted messages are excluded.
+  // Message matching is FTS5 (unicode61, AND of terms, case/diacritic
+  // folded) with the legacy substring scan as fallback — see
+  // server/message-search.mjs; deleted messages are excluded.
   // kind=pinned narrows to messages in state.pins (issue #6 B2), in message
   // order like the other kinds. Backlog 11: messages by an author the caller
   // muted (E4) are excluded for every kind, server-side (mutedEvent), so
@@ -5357,6 +5364,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // returned as nextCursor. It is bound to the same query and kind, so it
     // cannot carry a page from one search into another.
     const cursor = before == null ? null : decodeSearchCursor(before, needle, kind);
+    // PERF-50 D2-a: lazily create/rebuild the FTS5 index on first message
+    // search, before the read transaction (creation is a write). A failure
+    // (read-only handle, no FTS5 in this SQLite build) is not an error:
+    // the candidate query below returns null and the legacy scan serves.
+    if (kind !== "work") ensureMessageSearchIndex(this.db);
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const room = this.room(roomId);
@@ -5368,6 +5380,35 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // a cursor is resolved, so a cursor can only point at a match this
         // caller would see anyway.
         const matches = [];
+        // PERF-50 D2-a: candidate generation is the FTS5 index over the
+        // messages table (both legs: the table double-writes live rows and
+        // keeps archived ones), whenever the index covers this room. Every
+        // filter below still runs per candidate, before the cursor is
+        // resolved, exactly as on the scan path. The legacy scan remains
+        // the fallback for rooms the messages table has not caught up
+        // with, SQLite builds without FTS5, and term-less needles.
+        const liveMessages = room.state.messages ?? [];
+        const ftsCandidates = messageSearchCoversRoom(this.db, roomId, liveMessages.length)
+          ? messageSearchCandidates(this.db, roomId, needle) : null;
+        if (ftsCandidates) {
+          const liveById = new Map(liveMessages.map(m => [m.id, m]));
+          for (const row of ftsCandidates) {
+            // The projection is authoritative for live messages; archived
+            // candidates serve their stored current record, as the
+            // archived leg did.
+            let m = liveById.get(row.messageId);
+            if (!m) {
+              if (row.recordJson == null) continue;
+              try { m = { ...JSON.parse(row.recordJson), body: row.body }; } catch { continue; }
+            }
+            if (m.body == null) continue; // tombstone (deleted or redacted)
+            if (!messageInHistory(m, floor)) continue; // PRIV-2: before the reader joined
+            if (kind === "pinned" && !isPinned(room.state, m.id)) continue;
+            if (mutedEvent(room.state, auth.member?.id, { actorId: m.authorId })) continue; // muted author (E4), every kind
+            if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue; // targeted DM, RC-2026-09-19-070
+            matches.push(m);
+          }
+        } else {
         // Archived messages are not in the projection; they are older than every
         // projected message, so they come first.
         for (const m of [...archivedMatchingRecords(this.db, roomId, needle), ...(room.state.messages ?? [])]) {
@@ -5381,6 +5422,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           // existence, count, or bodies to a third party.
           if (m.toMemberId && m.authorId !== auth.member?.id && m.toMemberId !== auth.member?.id) continue;
           if (m.body.toLowerCase().includes(needle)) matches.push(m);
+        }
         }
         result.total = matches.length; // the full count on every page
         // The page holds the newest `limit` matches strictly older than the
