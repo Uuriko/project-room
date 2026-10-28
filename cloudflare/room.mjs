@@ -114,6 +114,14 @@ function splitBackupTokens(env) {
 // Reads that carry the job list: refresh the heartbeat snapshot first.
 const JOB_LIST_READS = new Set(['/api/owner/overview']);
 
+// Re-arm the job alarm after a request only when it ran a write statement.
+// An unknown counter (a database without writeStatements) keeps the old
+// always-arm path.
+export function shouldArmAfterRequest(before, after) {
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return true;
+  return after !== before;
+}
+
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
@@ -272,13 +280,24 @@ export class ProjectRoom extends DurableObject {
     if (url.pathname === '/api/operator/restore-from-backup') {
       return respond(await operatorRestoreFromBackupResponse(request, backupTokens.restoreToken, this.store, this.env.ROOM_BACKUPS_KV));
     }
+    // Rows written before this request, so the finally can skip re-arming the
+    // job alarm when the request changed nothing (most reads).
+    const writesBefore = this.store.db?.writeStatements;
+    // The constructor (bootstrapRoom, landQueue.configure) can write before any
+    // request is counted, so the first request after boot always re-arms.
+    const firstSinceBoot = !this.alarmArmedSinceBoot;
+    this.alarmArmedSinceBoot = true;
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
       this.ctx.waitUntil(this.#sqlScope('background', 'other', () => this.store.humanPush.flush()));
       // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
       this.ctx.waitUntil(this.#sqlScope('background', 'other', () => Promise.resolve(flushRoomGuide(this.store))));
       // A commit in this request may have queued webhook, land, or claim work.
-      this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
+      // A request that wrote nothing cannot have: job state only changes
+      // through writes, alarm() re-arms after every run, and the cron
+      // ensureJobAlarm is the backstop. Skipping saves earliestFutureAlarm's
+      // ~20 statements (incl. a full work_claims scan) on every read.
+      if (firstSinceBoot || shouldArmAfterRequest(writesBefore, this.store.db?.writeStatements)) this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
     }
   }
 
