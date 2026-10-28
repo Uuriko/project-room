@@ -8,6 +8,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
 import { createWork, claimWork } from "../server/work-claims.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // plan-dir-card (store + HTTP boundary): owner-only directory seeding,
 // member-card reads with visibility enforcement, cardAgentId on the
@@ -33,14 +34,8 @@ function setup(t) {
   const ownerToken = store.issueAccessKey("commons", "owner", 30 * 86400000);
   const seedIdentity = store.identities.create("Seed Agent");
   const cardIdentity = store.identities.create("Card Agent");
-  const seedLink = store.identities.link(ownerToken, "commons", {
-    identityId: seedIdentity.identityId, memberId: "seed-agent",
-    displayName: "Seed Agent", permissions: ["accept_work", "complete_work", "verify"],
-  });
-  const cardLink = store.identities.link(ownerToken, "commons", {
-    identityId: cardIdentity.identityId, memberId: "card-agent",
-    displayName: "Card Agent", permissions: ["steer"],
-  });
+  const seedLink = linkWithProof(store, ownerToken, "commons", seedIdentity, { memberId: "seed-agent", displayName: "Seed Agent", permissions: ["accept_work", "complete_work", "verify"] });
+  const cardLink = linkWithProof(store, ownerToken, "commons", cardIdentity, { memberId: "card-agent", displayName: "Card Agent", permissions: ["steer"] });
   const agentToken = store.issueAccessKey("commons", "card-agent", 30 * 86400000);
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, ownerToken, agentToken, seedIdentity, cardIdentity, seedMemberId: seedLink.memberId, cardMemberId: cardLink.memberId };

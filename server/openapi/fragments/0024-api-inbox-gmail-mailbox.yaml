@@ -1,0 +1,53 @@
+  /api/inbox/gmail/mailbox:
+    post:
+      summary: Read, search, compose, save provider drafts and organize the owner's Gmail mailbox.
+      security:
+        - accountSession: []
+      description: Requires account cookie, X-Session-Binding, same-origin Origin and X-CSRF-Token. Mutations require gmail.modify and a unique requestId; accepted and unknown receipts replay without repeating the provider write. Plain text and sanitized HTML compose, with up to 20 attachments totaling 10 MiB. Payload limit 16 MiB. mailboxId selects an account-owned Gmail connection. Unknown send/save receipts can be reconciled from provider Message-ID evidence without redispatch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [list, read, thread, attachment, save, draft-delete, send, archive, inbox, trash, untrash, read-mark, unread, star, unstar] }
+                requestId: { type: string, maxLength: 128 }
+                id: { type: string, maxLength: 128 }
+                sourceId: { type: string, maxLength: 1024, description: For read only; resolves an owned imported message within the selected Gmail connection. }
+                draftId: { type: string, maxLength: 128 }
+                expectedMessageId: { type: string, maxLength: 128 }
+                replyId: { type: string, maxLength: 128 }
+                mailboxId: { type: string, maxLength: 128 }
+                threadId: { type: string, maxLength: 128 }
+                partId: { type: string }
+                html: { type: string, maxLength: 200000 }
+                attachments:
+                  type: array
+                  maxItems: 20
+                  items:
+                    type: object
+                    properties:
+                      name: { type: string }
+                      type: { type: string }
+                      data: { type: string, description: Base64 encoded file bytes. }
+                      messageId: { type: string }
+                      partId: { type: string }
+                folder: { type: string, enum: [inbox, sent, starred, trash, all, drafts] }
+                query: { type: string, maxLength: 500 }
+                pageToken: { type: string, maxLength: 2048 }
+                to: { type: string, maxLength: 4096 }
+                cc: { type: string, maxLength: 4096 }
+                bcc: { type: string, maxLength: 4096 }
+                subject: { type: string, maxLength: 4096 }
+                body: { type: string, maxLength: 100000 }
+      responses:
+        '200': { description: Owner-bound mailbox data or accepted/unknown operation receipt. }
+        '401': { description: Account session expired. }
+        '403': { description: Origin or CSRF rejected. }
+        '413': { description: Request exceeds the payload limit. }
+        '422': { description: "Invalid input, draft changed or Gmail needs reconnecting." }
+        '429': { description: Rate limit exceeded. }
+        '502': { description: Gmail unavailable. }
+        '503': { description: Gmail is not configured. }

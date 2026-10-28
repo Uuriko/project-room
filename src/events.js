@@ -35,6 +35,10 @@ export const EVENT_TYPES = Object.freeze({
   // --- end GR2 ---
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
+  MEMBER_MERGED: "member.merged",
+  PAIR_REQUESTED: "pair.requested",
+  PAIR_APPROVED: "pair.approved",
+  PAIR_DENIED: "pair.denied",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
@@ -669,6 +673,10 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
+    [EVENT_TYPES.MEMBER_MERGED]: mergeMembers,
+    [EVENT_TYPES.PAIR_REQUESTED]: recordPair,
+    [EVENT_TYPES.PAIR_APPROVED]: recordPair,
+    [EVENT_TYPES.PAIR_DENIED]: recordPair,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
@@ -1019,6 +1027,60 @@ function transferOwnership(state, incoming) {
   state.room.previousOwnerId = previous;
   state.room.ownershipTransferredAt = incoming.at;
   state.room.ownershipRevision = (state.room.ownershipRevision ?? 0) + 1;
+}
+
+function recordPair(state, incoming) {
+  requireFields(incoming.data, ["pairId", "displayName", "status"]);
+  if (!["pending", "approved", "denied"].includes(incoming.data.status)) throw new Error("Invalid status");
+  const code = incoming.data.userCode;
+  if (code !== undefined && (typeof code !== "string" || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code))) throw new Error("Invalid userCode");
+  if (incoming.data.memberId !== undefined && !Object.hasOwn(state.members, incoming.data.memberId)) {
+    if (incoming.data.status === "approved") throw new Error("Unknown member");
+  }
+}
+
+// Owner, or a member who holds both membership administration and decide.
+// invite_member alone is not owner-level.
+function ownerLevel(state, actorId) {
+  if (actorId === state.room?.ownerId) return true;
+  const actor = Object.hasOwn(state.members, actorId) && state.members[actorId];
+  return Boolean(actor && actor.active !== false
+    && actor.permissions.includes("manage_members") && actor.permissions.includes("decide"));
+}
+
+function mergeMembers(state, incoming) {
+  requireFields(incoming.data, ["keptMemberId", "retiredMemberId", "expectedKeptRevision", "expectedRetiredRevision"]);
+  if (!ownerLevel(state, incoming.actorId)) throw new Error("Owner required");
+  const kept = Object.hasOwn(state.members, incoming.data.keptMemberId) && state.members[incoming.data.keptMemberId];
+  const retired = Object.hasOwn(state.members, incoming.data.retiredMemberId) && state.members[incoming.data.retiredMemberId];
+  if (!kept || !retired || kept.active === false || retired.active === false) throw new Error("Unknown member");
+  if (kept.kind !== "agent" || retired.kind !== "agent") throw new Error("Agents only");
+  if (kept.id === retired.id || kept.id === state.room.ownerId || retired.id === state.room.ownerId) throw new Error("Cannot merge");
+  if (kept.revision !== incoming.data.expectedKeptRevision || retired.revision !== incoming.data.expectedRetiredRevision) {
+    throw new Error("Stale revision");
+  }
+  const union = [];
+  for (const permission of PERMISSIONS) {
+    if (kept.permissions.includes(permission) || retired.permissions.includes(permission)) union.push(permission);
+  }
+  const isOwner = incoming.actorId === state.room.ownerId;
+  const granted = isOwner ? union : union.filter(permission => !AGENT_ADMIN_PERMISSIONS.includes(permission) || kept.permissions.includes(permission));
+  validatePermissions(granted, "agent", false, isOwner && granted.some(permission => AGENT_ADMIN_PERMISSIONS.includes(permission)));
+  kept.permissions = granted;
+  kept.revision += 1;
+  kept.mergedFrom = [...(kept.mergedFrom ?? []), retired.id];
+  retired.active = false;
+  retired.mergedInto = kept.id;
+  retired.revision += 1;
+  for (const message of state.messages ?? []) {
+    if (message.authorId === retired.id) message.authorId = kept.id;
+    if (message.toMemberId === retired.id) message.toMemberId = kept.id;
+  }
+  for (const item of Object.values(state.workItems ?? {})) {
+    if (item.accountableMemberId === retired.id) item.accountableMemberId = kept.id;
+    if (item.verifierMemberId === retired.id) item.verifierMemberId = kept.id;
+    if (item.claim && item.claim.holderId === retired.id) item.claim.holderId = kept.id;
+  }
 }
 
 function addMember(state, incoming) {
