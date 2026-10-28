@@ -1,0 +1,33 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/watch:
+    post:
+      summary: Watch a bounty
+      description: |
+        Subscribes the caller to bounty updates without claiming.
+        Subscriptions are sticky: they survive unclaim and claim-timeout.
+        Idempotent. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The watch subscription
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bountyId: { type: string }
+                  watcher: { type: string }
+                  watching: { type: boolean }
+        '401': { description: unauthenticated }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }

@@ -16,6 +16,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { collectNeedsMe } from "../server/needs-me.mjs";
 import { createWork, claimWork, updateWork, recordCi } from "../server/work-claims.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-read-path-"));
@@ -159,8 +160,7 @@ test("needs-me Board sections carry a triage snippet from the claim itself", t =
   const owner = store.identities.create("Owen");
   const ada = store.identities.create("Ada");
   rooms.create(owner.secret, { roomId: "board", title: "board", purpose: "snippets", kind: "personal" });
-  store.identities.link(owner.secret, "board", { identityId: ada.identityId, displayName: "Ada",
-    permissions: ["steer", "accept_work", "complete_work", "verify"] });
+  linkWithProof(store, owner.secret, "board", ada, { displayName: "Ada", permissions: ["steer", "accept_work", "complete_work", "verify"] });
   const adaId = store.db.prepare("SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?")
     .get(ada.identityId, "board").m;
   const t0 = Date.parse("2026-10-05T00:00:00Z");

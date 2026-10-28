@@ -564,8 +564,7 @@ export const JOBS = Object.freeze([
     // a fully submitted latest round to advance.
     enabled(_env, store) {
       if (!store?.publicWorkClaims) return false;
-      const status = store.publicWorkClaims.starterPoolStatus();
-      return status.available && status.anchored > 0 && status.claimable === 0 && status.due.length > 0;
+      return store.publicWorkClaims.starterPoolPending();
     },
     disabledReason: () => "Public-work starter pool has claimable tasks or no seed round is due",
     async run(store, ctx) {

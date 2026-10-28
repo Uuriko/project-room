@@ -206,7 +206,7 @@ test('closeKeepSet keeps what every viewer needs (randomized, with DMs, replies,
     const size = 6 + rand(30);
     for (let i = 0; i < size; i++) {
       const authorId = authors[rand(4)];
-      const message = { id: `m${i}`, authorId, body: rand(2) ? `q${i}?` : `s${i}`, createdAt: new Date(1e12 + i * 1000).toISOString() };
+      const message = { id: `m${i}`, authorId, body: rand(2) ? `q${i}?` : `s${i}`, createdAt: new Date(1e12 + Math.floor(i / 3) * 1000).toISOString() };
       if (i > 0 && rand(3) === 0) message.replyToId = `m${rand(i)}`;
       if (rand(5) === 0) message.toMemberId = authors[(authors.indexOf(authorId) + 1 + rand(3)) % 4];
       if (rand(12) === 0) message.deletedAt = message.createdAt;
@@ -327,4 +327,24 @@ test('closeKeepSet follows a long chain of closing DMs in one pass', () => {
   const took = Date.now() - started;
   assert.equal(keep.size, 2 * rungs + 1, 'the whole ladder and its thread root stay');
   assert.ok(took < 1000, `a ${rungs}-rung ladder took ${took} ms (the per-round version took about 49 s)`);
+});
+
+// Array order is the persisted projection/event order, including imported
+// snapshots. Clock resolution must not let an earlier sibling close a new ask.
+test('equal-time earlier sibling does not answer a later question or archive it', () => {
+  const messages = [msg('q','a','ready?'), msg('ans','b','yes',{replyToId:'q'}), msg('k','a','and prod?',{replyToId:'q'})];
+  assert.deepEqual(ids(findOpenQuestions({messages})),['k']);
+  assert.deepEqual([...closeKeepSet(messages)].sort(),['ans','k','q']);
+  const later = [...messages, msg('later','b','ready too',{replyToId:'q'})];
+  assert.deepEqual(ids(findOpenQuestions({messages:later})),[]);
+  assert.ok(closeKeepSet(later,new Set(['k'])).has('later'));
+});
+test('equal-time DM sibling ordering retains visibility rules and imported order', () => {
+  const messages = [msg('q','a','ready?'),msg('dm','b','yes',{replyToId:'q',toMemberId:'a'}),msg('k','a','next?',{replyToId:'q',toMemberId:'b'})];
+  assert.deepEqual(ids(findOpenQuestions({messages,viewerId:'b'})),['k']);
+  assert.ok(closeKeepSet(messages).has('k'));
+  assert.deepEqual(ids(findOpenQuestions({messages:JSON.parse(JSON.stringify(messages)),viewerId:'b'})),['k']);
+  const later=[messages[0],messages[2],messages[1]];
+  assert.deepEqual(ids(findOpenQuestions({messages:later,viewerId:'b'})),[]);
+  assert.deepEqual(ids(findOpenQuestions({messages:later,viewerId:'c'})),['q']);
 });
