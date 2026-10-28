@@ -2,13 +2,19 @@
 // session title and todo list an agent already keeps, so nobody has to type a status.
 // Pure and offline: no network, no storage. Hosts feed it the hook payloads they already
 // emit (Claude Code TodoWrite, Codex update_plan, Gemini/opencode/generic todo arrays).
-// The output is scrubbed so a secret, invite code or local path never becomes presence.
+// The output is a self-reported activity hint, not evidence that the agent is running now:
+// liveness is always "unknown" here and any TTL stays owned by the host/runtime.
+// clean() is a best-effort scrub (secrets, invite codes, key=value credentials, emails,
+// paths), not a privacy boundary: nothing here forwards titles or todos anywhere, and any
+// later broadcast must be an explicit, room-scoped opt-in.
 
 const MAX = 120;
 const SCRUB = [
   [/pri_[A-Za-z0-9_-]{8,}|rak_[A-Za-z0-9_-]{8,}|RM-[A-Z0-9]{6,}/g, "[redacted]"],
   [/(?:gh[pousr]_|github_pat_|sk-)[A-Za-z0-9_-]{8,}/g, "[redacted]"],
-  [/(?:~|\/(?:Users|home|workspace|tmp|var|private))\/[^\s,;)]*/g, "[path]"],
+  [/\b(?:token|secret|password|passwd|api[_-]?key|auth|credential|bearer)\s*[=:]\s*\S+/gi, "[redacted]"],
+  [/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, "[email]"],
+  [/(?:~|(?<![\w.:/])\/[^\s/,;)]+)\/[^\s,;)]*/g, "[path]"],
   [/[A-Za-z]:\\[^\s,;)]*/g, "[path]"],
 ];
 
@@ -45,7 +51,9 @@ export function fromHookPayload(payload) {
   return { title, todos };
 }
 
-// { status: "working"|"idle", line, counts } — line is null when there is nothing worth showing.
+// { kind: "activity_hint", status, liveness: "unknown", line, counts }
+// status: "active" (a todo is marked in progress), "planned" (title or pending todos only),
+// "done" (every todo completed) or "none". line is null when there is nothing worth showing.
 export function derivePresence({ title, todos } = {}) {
   const items = normalizeTodos(todos);
   const done = items.filter(i => i.state === "done").length;
@@ -53,12 +61,15 @@ export function derivePresence({ title, todos } = {}) {
   const counts = { done, total: items.length };
   const head = clean(title, 60);
   const allDone = items.length > 0 && done === items.length;
-  if (!head && !active) return { status: "idle", line: allDone ? `Done ${done}/${items.length}` : null, counts };
+  const inProgress = items.some(i => i.state === "active");
+  const status = allDone ? "done" : inProgress ? "active" : head || active ? "planned" : "none";
+  const hint = line => ({ kind: "activity_hint", status, liveness: "unknown", line, counts });
+  if (!head && !active) return hint(allDone ? `Done ${done}/${items.length}` : null);
   const parts = [];
   if (head) parts.push(head);
   if (active && !allDone) parts.push(clean(active.text, 60));
   if (items.length) parts.push(`${done}/${items.length}`);
-  return { status: allDone ? "idle" : "working", line: clean(parts.join(" · ")), counts };
+  return hint(clean(parts.join(" · ")));
 }
 
 // Only report when the line actually changed: hosts call this on every hook, the room hears

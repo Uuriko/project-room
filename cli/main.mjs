@@ -27,7 +27,7 @@ login saves a private connection. It prints no secret.
 setup writes that tool's config and refers to PROJECT_ROOM_SECRET. It does not write the secret into the config.
 token prints the secret for this project's connection on stdout.
 doctor checks Node, the connection, /api/ready, room_check_access, and the tool config.
-presence derives one short presence line from a session title and todo list (no network, nothing secret).
+presence derives a self-reported activity hint from a session title and todo list (offline; liveness unknown; best-effort scrub).
 code shares patches through the room: no GitHub access needed to send, review, or apply.
 `;
 

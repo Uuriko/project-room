@@ -1,10 +1,16 @@
 // room presence: read a host hook payload (JSON) on stdin and print the derived presence
-// as one JSON line. Agent-first and offline; prints nothing secret.
+// as one JSON activity hint. Agent-first and offline: it sends nothing anywhere. Input is
+// capped at MAX_STDIN bytes; the scrub is best-effort, not a privacy boundary.
 import { derivePresence, fromHookPayload } from "../../client/auto-presence.mjs";
+
+export const MAX_STDIN = 64 * 1024;
 
 async function readStdin(stdin) {
   let data = "";
-  for await (const chunk of stdin) data += chunk;
+  for await (const chunk of stdin) {
+    data += chunk;
+    if (Buffer.byteLength(data) > MAX_STDIN) throw new Error(`room presence reads at most ${MAX_STDIN} bytes of hook payload`);
+  }
   return data;
 }
 
