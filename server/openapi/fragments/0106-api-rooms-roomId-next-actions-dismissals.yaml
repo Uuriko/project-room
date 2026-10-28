@@ -1,0 +1,30 @@
+  /api/rooms/{roomId}/next-actions-dismissals:
+    get:
+      summary: Read the caller's next-action dismissal history
+      description: |
+        RC-2026-09-25-911. Audit read-back: the caller's dismissals, newest
+        first, including lapsed rows (`active: false`). Private per member.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The dismissal history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  viewerId: { type: string }
+                  dismissals:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        actionId: { type: string }
+                        dismissedAt: { type: integer }
+                        expiresAtMs: { type: [integer, 'null'] }
+                        reason: { type: [string, 'null'] }
+                        active: { type: boolean }
+        '401':
+          description: unauthenticated

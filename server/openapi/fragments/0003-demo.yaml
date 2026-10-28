@@ -1,0 +1,11 @@
+  /demo:
+    get:
+      summary: Illustrative shared conversation
+      security: []
+      responses:
+        '200': { description: Script-free curated demo with no live room data }
+    head:
+      summary: Demo metadata
+      security: []
+      responses:
+        '200': { description: Demo headers without a response body }

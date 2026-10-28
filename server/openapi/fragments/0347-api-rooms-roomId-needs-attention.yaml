@@ -1,0 +1,34 @@
+  /api/rooms/{roomId}/needs-attention:
+    get:
+      summary: Owner "needs your attention" rollup (#662)
+      description: >-
+        Room owner with `manage_members`, by room Bearer <redacted> or signed-in
+        account session (the CLI uses the bearer). Aggregates every place an
+        owner decision is required: pending access requests (inline approve/deny
+        via the decide path), work awaiting verification or an owner decision,
+        spend-allowance headroom below 20% (or over), and claim leases expiring
+        within 24h. 403 owner_required for anyone else. Each item carries the
+        concrete next action so approvals live in the conversation surface
+        instead of a separate admin area. Returns at most 25 items per page, with
+        actions ahead of informational notices when the queue exceeds 25.
+        itemCount counts all collected items; actionCount counts action-severity
+        items. Shadow measurements are omitted by default; explicit includeShadow=true
+        includes the five most recent informational shadow escalations for Advanced diagnostics.
+        Use the opaque nextCursor/previousCursor to navigate. If the collected
+        queue changes, continuation restarts at offset zero with reset=true;
+        clients replace the displayed page rather than append it.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: cursor
+          in: query
+          schema: { type: string }
+          description: Opaque continuation returned by this endpoint; stale or invalid cursors restart the first page.
+        - name: includeShadow
+          in: query
+          schema: { type: boolean, default: false }
+          description: Explicit owner diagnostics opt-in; shadow measurements are not human actions.
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, viewerId, viewerAccountId, viewerAuthEpoch, viewerSessionBinding, viewerSessionRevision, evaluatedThrough, itemCount, actionCount, pageOffset, reset, nextCursor, previousCursor, items: [{ kind, id, workItemId?, severity, title, detail, actions: [{ action, method, path, body?, hint? }] }] }" }
+        '403': { description: owner_required }
+        '422': { description: invalid_attention_query }

@@ -18,7 +18,7 @@ import {
 } from "../server/work-item-board.mjs";
 import { availableWorkInRoom } from "../server/available-work.mjs";
 import { handleWorkClaims } from "../server/work-claim-routes.mjs";
-import { updateWork, recordReview } from "../server/work-claims.mjs";
+import { updateWork, recordReview, canCloseWork } from "../server/work-claims.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 
 const T0 = "2026-10-01T00:00:00.000Z";
@@ -168,10 +168,17 @@ test("mapping: completed -> done with receipt attestation, evidence and the done
   const row = boardClaimForWorkItem(done, factsFor([completeEvent, verifyEvent]), { nowMs: NOW });
   assert.equal(row.state, "done");
   assert.equal(row.owner, "worker");
-  assert.deepEqual(row.attestations, [{ memberId: "worker", at: at(6 * H), note: "Shipped it" }]);
+  // #3712: the passed verification also projects the verifier's own
+  // attestation (at the review's time), and the derived review carries
+  // the claim basis it stands against.
+  assert.deepEqual(row.attestations, [
+    { memberId: "worker", at: at(6 * H), note: "Shipped it" },
+    { memberId: "owner", at: at(7 * H), note: "Checks out" },
+  ]);
   assert.deepEqual(row.evidenceRefs, ["https://example.com/delivery"]);
   assert.deepEqual(row.blobs, [blob]);
-  assert.deepEqual(row.reviews, [{ memberId: "owner", verdict: "approve", summary: "Checks out", url: null, at: at(7 * H) }]);
+  assert.deepEqual(row.reviews, [{ memberId: "owner", verdict: "approve", summary: "Checks out", url: null, at: at(7 * H),
+    basis: { version: 1, owner: "worker", claimedAt: at(2 * H), revision: null, headSha: null, deliveryDigest: null, deliveryGeneration: 0 } }]);
   assert.equal(row.reviewedBy, "owner");
   const doneStamp = row.history.findLast(stamp => stamp.action === "state:done");
   assert.equal(doneStamp.note, "Shipped it"); // the receipts surface reads this note as the summary
@@ -755,4 +762,80 @@ test("sync: DCP-1 — renew against a foreign row is refused; release is not (th
   const after = f.store.workClaims.get("commons", "task-legacy");
   assert.equal(after.state, "claimed");
   assert.equal(after.owner, "owner");
+});
+
+// #3712: the board projection must carry the two facts the kernel's
+// reviewed-completion gate requires — a current basis on the
+// verification-derived review, and the verifier's own attestation at
+// the review's time — or work verified through the work-item door can
+// never be completed through the board door under a reviewed policy.
+const issueItem3712 = () => ({ id: "w1", title: "Reviewed work", state: "completed", revision: 4,
+  createdAt: "2026-10-14T12:00:00.000Z", updatedAt: "2026-10-15T11:00:00.000Z",
+  claim: { holderId: "worker", status: "released", acquiredAt: "2026-10-14T12:00:00.000Z",
+    expiresAt: "2026-10-16T12:00:00.000Z", paths: [], repository: "Uuriko/project-room", ref: "main",
+    releasedAt: "2026-10-15T11:00:00.000Z" },
+  receipt: { reportedById: "worker", summary: "done", eventId: "e1", evidenceVersion: 1 },
+  verification: { verifierId: "verifier", result: "pass", completionEventId: "e1",
+    evidenceVersion: 1, independenceConfirmed: true },
+  decision: null });
+const close3712 = (row, opts = {}) => canCloseWork({ ...row, state: "in_progress", owner: "worker" }, "verifier",
+  { policy: "distinct_member", reviewMembers: ["verifier"], ...opts });
+
+test("#3712: the issue's verbatim repro — the projected row closes under distinct_member", async () => {
+  const { createWork, claimWork } = await import("../server/work-claims.mjs");
+  const T = Date.parse("2026-10-15T12:00:00.000Z");
+  // Control — the board-native flow (unchanged by this fix).
+  let claim = createWork({ id: "w1", title: "Reviewed work" }, { now: T, agentId: "creator" });
+  claim = claimWork(claim, "worker", { now: T });
+  claim = updateWork(claim, "worker", { state: "in_progress", now: T });
+  claim = recordReview(claim, "verifier", { verdict: "approve", summary: "verified", now: T + 1000 });
+  assert.equal(canCloseWork(claim, "verifier", { policy: "distinct_member", reviewMembers: ["verifier"] }), true);
+
+  const row = boardClaimForWorkItem(issueItem3712(), null);
+  assert.deepEqual(row.reviews, [{ memberId: "verifier", verdict: "approve", summary: "verification", url: null,
+    at: "2026-10-15T11:00:00.000Z",
+    basis: { version: 1, owner: "worker", claimedAt: "2026-10-14T12:00:00.000Z", revision: null,
+      headSha: null, deliveryDigest: null, deliveryGeneration: 0 } }]);
+  assert.deepEqual(row.attestations, [
+    { memberId: "worker", at: "2026-10-15T11:00:00.000Z", note: "done" },
+    { memberId: "verifier", at: "2026-10-15T11:00:00.000Z", note: "verification" },
+  ]);
+  assert.equal(close3712(row), true);
+  // independent_principal additionally requires the verifier set.
+  assert.equal(close3712(row, { policy: "independent_principal" }), false);
+  assert.equal(close3712(row, { policy: "independent_principal", verifyMembers: ["verifier"] }), true);
+});
+
+test("#3712: negative specimens stay refused", () => {
+  const row = boardClaimForWorkItem(issueItem3712(), null);
+  // (a) a basis revision stale against the row's current revision.
+  const stale = structuredClone(row);
+  stale.reviews[0].basis.revision = "rev-stale";
+  assert.equal(close3712(stale), false);
+  // (a, via the sync path) the board row's revision moves after the
+  // review was recorded: mergeReviews preserves the recorded basis
+  // verbatim, never rebinds it, so the gate reads it stale.
+  const moved = boardClaimForWorkItem(issueItem3712(), null, { existing: { ...row, revision: "rev-2" } });
+  assert.equal(moved.reviews[0].basis.revision, null);
+  assert.equal(close3712(moved), false);
+  // (b) the verifier attestation's time differs from the review's.
+  const drift = structuredClone(row);
+  drift.attestations.find(entry => entry.memberId === "verifier").at = "2026-10-15T11:00:01.000Z";
+  assert.equal(close3712(drift), false);
+  // (c) a changes_requested verification: no approve, no verifier attestation.
+  const failed = boardClaimForWorkItem(
+    { ...issueItem3712(), verification: { ...issueItem3712().verification, result: "fail" } }, null);
+  assert.equal(failed.reviews[0].verdict, "changes_requested");
+  assert.equal(failed.attestations.some(entry => entry.memberId === "verifier"), false);
+  assert.equal(close3712(failed), false);
+  // (d) a caller outside the reviewer set.
+  assert.equal(close3712(row, { reviewMembers: ["someone-else"] }), false);
+});
+
+test("#3712: a projected basis survives a subsequent sync", () => {
+  const row = boardClaimForWorkItem(issueItem3712(), null);
+  const resynced = boardClaimForWorkItem(issueItem3712(), null, { existing: row, nowMs: Date.parse("2026-10-15T12:00:00.000Z") });
+  assert.deepEqual(resynced.reviews, row.reviews);
+  assert.deepEqual(resynced.attestations, row.attestations);
+  assert.equal(close3712(resynced), true);
 });
