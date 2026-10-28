@@ -7,7 +7,7 @@
 // dedupe verdict: the exact lookup is retained as the fallback on a
 // Bloom positive (mightContainWithFallback). HLL/Bloom output must
 // NEVER feed money counts, billing, sponsor reporting presented as
-// exact, or any gate formula. tests/probabilistic-counters.test.mjs
+// exact, or any gate formula. tests/probabilistic-counters.test.js
 // case 4 is the standing negative guard on that rule.
 //
 // Sizing (named constants, no env flags): Bloom 10 bits/item unless a
