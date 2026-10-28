@@ -180,6 +180,10 @@ export const SAFE_ENTROPY_TOKENS = [
   // joined path token over the entropy threshold.
   "archive/docs/plans/HUMAN-EXPERIENCE-PLAN-20261006.txt", // DESIGN.md citation
   "archive/docs/plans/GROK-DEEP-PLUG-PLAN-2026-09-29.md", // scripts/grok-room-host.mjs pointer string
+  // Doc citations in OpenAPI fragment descriptions (server/openapi/fragments/); prose paths, not credentials.
+  "docs/PRIVATE-INBOX-FOUNDATION-2026-09-08.md.",
+  "docs/PRIVATE-REMINDERS-CHECKPOINT-2026-09-07.md",
+  "docs/REPLY-REQUESTS-FOUNDATION-CHECKPOINT-2026-09-08.md",
 ];
 
 // Directories scanned: source code where a real secret could hide.
