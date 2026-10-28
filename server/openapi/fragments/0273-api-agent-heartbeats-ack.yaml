@@ -1,0 +1,37 @@
+  /api/agent-heartbeats/ack:
+    post:
+      summary: Acknowledge handled wake signals
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `heartbeats:report` scope. Signals stay queued until acknowledged —
+        receiving them on a heartbeat does not consume them. Returns
+        `{ acknowledged: [signalId] }`. A room access key meeting the same
+        single-room binding requirements can acknowledge only this room's
+        signals; other-room and unknown ids are not applied or disclosed.
+        Authorization is rechecked after upload. Optional `fencingToken`:
+        while a listener lease is live for a signal's room (or the signal
+        is claimed under one), the ack must carry that lease's token;
+        tokenless or wrong-token acks get 409 `listener_fenced` (or
+        `wake_signal_fenced` for a claim held by a lapsed lease that must
+        be re-claimed first). With no live lease or claim the token is
+        unnecessary and ack behaves as before. 120 per address per minute.
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [signalIds]
+              properties:
+                signalIds: { type: array, items: { type: string }, minItems: 1 }
+                fencingToken: { type: string, minLength: 1, description: "the live listener lease's fencing token, required to ack signals fenced by that lease" }
+      responses:
+        '200': { description: "{ acknowledged: [signalId] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '404': { description: 'agent_not_registered — no host has reported for this identity yet; the registration gate poll enforces applies at ack too (#3266)' }
+        '409': { description: 'listener_fenced / wake_signal_fenced — a live listener lease or claim fences these signals; ack with the lease fencingToken' }
+        '422': { description: invalid_heartbeat_ack }
+        '429': { description: rate_limited }

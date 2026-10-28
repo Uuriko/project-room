@@ -36,8 +36,10 @@ Local artifacts are written outside source by the run command. Browser screensho
 
 ## Running
 
-- Interactive: `node experiments/collaboration/server.mjs`; open the printed loopback URL. Query parameters `variant=conversation|split|work`, `scenario=writing|analysis|coding`, and `task=resume|review` select a fresh trial.
-- Qualification: `node experiments/collaboration/run.mjs /absolute/output/directory`.
+The harness used to live in `experiments/collaboration/`. It is no longer in the working tree; git history keeps the sources. The notes below record the qualification that was run against that harness. They are not current commands.
+
+- Interactive server: `experiments/collaboration/server.mjs`, then the printed loopback URL. Query parameters `variant=conversation|split|work`, `scenario=writing|analysis|coding`, and `task=resume|review` selected a fresh trial.
+- Qualification entry: `experiments/collaboration/run.mjs /absolute/output/directory`.
 - The report records the Git base and dirty status. Qualification consists of 36 scripted browser task trials (3 domains × 3 layouts × 2 widths × 2 tasks), 9 handoff conditions and 9 negative controls. The 3 compact-only handoffs are expected failures of the deliberately incomplete input, not product regressions or proof that summaries are bad.
 - Trial exports retain failed attempts and elapsed wall time. No answer is transmitted outside the loopback server. The local form has no participant identity field.
 - The review scorer is deliberately limited to fixed fixture facts/phrases. It can reject known bad outputs, but cannot establish writing quality or semantic correctness generally. Use blinded human evaluation and additional independent domain checks for live-model trials.
@@ -70,9 +72,9 @@ The initial phrase scorer could falsely label a contradictory answer as passing:
 
 Validation: 36 browser trials, 9 wrong-answer controls, 3 adversarial controls and 9 context conditions completed without harness failures. A separate 12-case recovery run (three layouts × two widths × two failures) preserves correction drafts after scoring transport failure and prevents a delayed score from contaminating a newly selected scenario. These are research-interface checks; they do not add production behavior.
 
-Run recovery with `node experiments/collaboration/recovery.mjs /absolute/output/directory`.
+Recovery was `experiments/collaboration/recovery.mjs /absolute/output/directory`.
 
-Run the real API baseline with `node experiments/collaboration/production-context.mjs /absolute/output/directory`. It uses the existing disposable acceptance fixture, production HTTP server and validated RoomAgentClient. It grows unrelated history while retrieving one work item and its linked discussion, then creates a new SDK client and resumes a server-issued discussion checkpoint. No model is called.
+The API baseline was `experiments/collaboration/production-context.mjs /absolute/output/directory`. It used the disposable acceptance fixture, production HTTP server and validated RoomAgentClient. It grows unrelated history while retrieving one work item and its linked discussion, then creates a new SDK client and resumes a server-issued discussion checkpoint. No model is called.
 
 Observed serialized JSON bytes (not compression, token counts or a timing benchmark):
 

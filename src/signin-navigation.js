@@ -26,11 +26,13 @@ export function createSigninNavigation({ getUI, active }) {
     $("#email-auth-step").hidden = !auxiliary;
     $("#signin-methods").hidden = auxiliary;
     $("#signin-entry-routes").hidden = auxiliary;
-    $("#google-signin").hidden = view === "welcome";
-    $("#github-signin").hidden = view === "welcome";
-    if (unavailableProviders.has("google")) $("#google-signin").hidden = true;
-    if (unavailableProviders.has("github")) $("#github-signin").hidden = true;
-    $("#terms-notice").hidden = view === "welcome";
+    // #github-signin is omitted when GitHub is unconfigured. A missing anchor must not throw.
+    const paintAnchor = name => {
+      const anchor = $(`#${name}-signin`);
+      if (anchor) anchor.hidden = view === "welcome" || unavailableProviders.has(name);
+    };
+    paintAnchor("google");
+    paintAnchor("github");
   }
   function withReplay(value, action) {
     replay = value;
