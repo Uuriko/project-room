@@ -29,3 +29,13 @@ test("formatSessionExpiry returns null instead of guessing", () => {
   assert.equal(formatSessionExpiry(0), null);
   assert.equal(formatSessionExpiry("soon"), null);
 });
+
+test("formatSessionExpiry drops seconds and shows only the time on the same day", () => {
+  const now = new Date(2026, 9, 28, 9, 0, 0).getTime();
+  const later = new Date(2026, 9, 28, 17, 1, 47).getTime();
+  const sameDay = formatSessionExpiry(later, now);
+  assert.doesNotMatch(sameDay, /47/, "no seconds");
+  assert.doesNotMatch(sameDay, /2026/, "no date for today");
+  const nextDay = formatSessionExpiry(new Date(2026, 9, 29, 1, 0, 0).getTime(), now);
+  assert.match(nextDay, /2026/, "date shown for another day");
+});
