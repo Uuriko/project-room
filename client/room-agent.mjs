@@ -368,6 +368,16 @@ export async function listAgentRooms(origin, identitySecret, { after = "", ...op
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid room list");
   return value;
 }
+export function validProjectMapArguments(args) {
+  if (!args || typeof args !== "object" || Array.isArray(args)
+    || Object.keys(args).some(key => !["op", "q", "from", "to", "repo"].includes(key))) return false;
+  const bounded = value => typeof value === "string" && value.length >= 1 && value.length <= 300;
+  if (args.repo !== undefined && !(typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200)) return false;
+  if (args.op === "hotspots") return args.q === undefined && args.from === undefined && args.to === undefined;
+  if (args.op === "path") return bounded(args.from) && bounded(args.to) && args.q === undefined;
+  return ["query", "explain"].includes(args.op) && bounded(args.q) && args.from === undefined && args.to === undefined;
+}
+
 export class RoomAgentClient {
   #origin;
   #roomId;
@@ -478,15 +488,21 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   async #checkIdentityConnection({ signal } = {}) {
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
+    // Identity checks need current membership and ownership, not message history.
+    // Require the existing versioned work view; never fall back to a full room.
+    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=work`, undefined, signal);
     const member = snapshot?.state?.members?.[this.#memberId];
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
     // grant — allow the CLI connect/check ladder when this identity is the
     // room owner. Non-owner agents require the server's explicit owner-grant marker.
     const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
-    if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
-      || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
+    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "work" || snapshot.snapshotVersion !== 1
+      || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
+      || snapshot.viewerAccountId !== null || snapshot.viewerAuthEpoch !== null
+      || snapshot.viewerSessionBinding !== null || snapshot.viewerSessionRevision !== null
+      || !member || member.id !== this.#memberId || member.kind !== "agent" || member.active !== true
+      || !Number.isSafeInteger(member.revision) || member.revision < 0
       || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
       || (!ownerAgent && member.delegatedAdmin !== true && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {
       throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
@@ -891,7 +907,13 @@ export class RoomAgentClient {
     const done = next === null;
     return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
-  workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee, acceptanceCriteria } = {}, { signal } = {}) {
+  projectMap(args, { signal } = {}) {
+    if (!validProjectMapArguments(args)) throw new Error("Choose a valid bounded project-map read");
+    const { op, ...fields } = args;
+    const query = new URLSearchParams(Object.entries(fields).filter(([, value]) => value !== undefined));
+    return this.#request(`/map/${op}${query.size ? `?${query}` : ""}`, undefined, signal);
+  }
+  workClaimCreate({ id, title, reviewPolicy, note, tags, files, repo, branch, dependsOn, parentClaimId, evidenceRefs, pullRequest, assignee, acceptanceCriteria } = {}, { signal } = {}) {
     if (typeof id !== "string" || !id) throw new Error("Choose a work claim id");
     return this.#request("/work-claims", { id,
       ...(title === undefined ? {} : { title }),
@@ -899,6 +921,7 @@ export class RoomAgentClient {
       ...(acceptanceCriteria === undefined ? {} : { acceptanceCriteria }),
       ...(tags === undefined ? {} : { tags }),
       ...(files === undefined ? {} : { files }),
+      ...(repo === undefined ? {} : { repo }), ...(branch === undefined ? {} : { branch }),
       ...(dependsOn === undefined ? {} : { dependsOn }),
       ...(parentClaimId === undefined ? {} : { parentClaimId }),
       ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
@@ -924,10 +947,11 @@ export class RoomAgentClient {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/${verb === "cancel" ? "cancel" : "close"}`,
       reason === undefined ? {} : { reason }, signal);
   }
-  claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
+  claimWorkItem(id, { note, leaseHours, files, repo, branch, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
     return this.#request(`/work-claims/${encodeURIComponent(id)}/claim`,
       { ...(note === undefined ? {} : { note }), ...(leaseHours === undefined ? {} : { leaseHours }),
-        ...(files === undefined ? {} : { files }), ...(advisory === undefined ? {} : { advisory }),
+        ...(files === undefined ? {} : { files }),
+        ...(repo === undefined ? {} : { repo }), ...(branch === undefined ? {} : { branch }), ...(advisory === undefined ? {} : { advisory }),
         ...(dependsOn === undefined ? {} : { dependsOn }),
         ...(parentClaimId === undefined ? {} : { parentClaimId }),
         ...(evidenceRefs === undefined ? {} : { evidenceRefs }),
@@ -977,12 +1001,12 @@ export class RoomAgentClient {
   // Convenience: claim, creating the item first when it does not exist yet.
   // title, reviewPolicy and tags apply only to creation; files apply to every
   // claim. Omitted files retain the declaration, while [] explicitly clears it.
-  async workClaim(id, { title, reviewPolicy, note, tags, files, leaseHours, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
-    try { return await this.claimWorkItem(id, { note, leaseHours, files, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal }); }
+  async workClaim(id, { title, reviewPolicy, note, tags, files, repo, branch, leaseHours, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal } = {}) {
+    try { return await this.claimWorkItem(id, { note, leaseHours, files, repo, branch, advisory, dependsOn, parentClaimId, evidenceRefs, pullRequest, signal }); }
     catch (error) {
       if (!(error instanceof RoomClientError) || error.status !== 404) throw error;
-      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest }, { signal });
-      return this.claimWorkItem(id, { note, leaseHours, files, advisory, pullRequest, signal });
+      await this.workClaimCreate({ id, title, reviewPolicy, note, tags, files, repo, branch, dependsOn, parentClaimId, evidenceRefs, pullRequest }, { signal });
+      return this.claimWorkItem(id, { note, leaseHours, files, repo, branch, advisory, pullRequest, signal });
     }
   }
   async workComplete(id, { deliveryMode, note, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, signal } = {}) {

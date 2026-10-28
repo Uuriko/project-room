@@ -1,0 +1,91 @@
+  /api/rooms/{roomId}/commands:
+    post:
+      summary: Append an event command
+      description: |
+        The single write path. Body is an event envelope: {id, type, data}.
+        `id` is a client-generated idempotency key (UUID) — resending the
+        same id with the same input returns the original receipt (200);
+        with different input returns 409 idempotency_conflict.
+        201 on first commit, 200 on idempotent duplicate.
+        Hosted MCP `room_post_message` submits this same message.posted
+        envelope `{ id, type, data: { messageId, body } }`. It does not
+        open a second write path.
+        Room lifecycle (issue #6 A2): `room.archived` (data: optional
+        `reason`, 280 characters) is owner-only and makes the room read
+        only — reads, streams and export continue, every later command
+        answers 409 room_archived. `member.access_changed` targeted at the
+        caller with unchanged permissions and `active: false` is a leave and
+        needs no manage_members; the owner cannot leave.
+
+        Room channels (Phase 2): Every room has a `#general` channel plus
+        optional user-created channels. Channels are managed via generic
+        commands (no dedicated CRUD routes):
+        - `channel.created`: data {channelId, name}. Any active member may
+          create. Names normalize to lowercase, spaces become dashes;
+          allowed chars: a-z, 0-9, dash, underscore; length 1-48. Max 50
+          channels per room. Duplicate names rejected (409).
+        - `channel.renamed`: data {channelId, name, expectedRevision}.
+          Owner-only. `general` cannot be renamed.
+        - `channel.archived`: data {channelId, expectedRevision}.
+          Owner-only. `general` cannot be archived. Archived channels reject
+          new messages (409 channel_archived).
+        Messages carry `channelId`; omitted defaults to `general`. `message.posted`
+        and `message.edited` data.body is 1 to 65536 characters. A longer body
+        is refused with that limit named (`body must be at most 65536 characters`).
+        The client `say()` uses the same ceiling. Those two commands may be up
+        to 512 KiB (413 `too_large`); every other command stays at 16 KiB.
+        Replies
+        are pinned to the thread root's channel. A public thread reply may set
+        `alsoSendToChannel: true` to also land as a top-level message in the
+        thread's channel (same event; ignored for DMs and work proposals).
+        Events: `channel.created`,
+        `channel.renamed`, `channel.archived`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CommandEnvelope'
+      responses:
+        '401': { description: unauthenticated }
+        '201':
+          description: Committed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '200':
+          description: Idempotent duplicate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CommandReceipt'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/InvalidInput'
+        '429':
+          description: >-
+            rate_limited — two write guards can fire here. 1) The shared
+            per-credential write budget: 60 writes per rolling minute per
+            credential (claim creation, message posts, web/fetch+research,
+            and other non-GET room calls all spend it). The 429 body says
+            "Too many requests; retry after a minute" and carries
+            `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
+            `X-RateLimit-Reset` headers — the body's "a minute" is fixed
+            wording, so use `X-RateLimit-Reset` for the true reset. A
+            `Retry-After: 60` header is also present on the wire. 2) The
+            chat flood guard, only for `message.posted`/`dm.posted`: burst
+            30 per (room, member), refilling 1 token per 2 seconds. Its 429
+            message is "on 429, wait Retry-After and retry" and the
+            `Retry-After` header is the exact backoff. Reactions, edits,
+            deletes, reads, and work/claim commands never spend either
+            budget. Recovery: wait the indicated interval, then resend with
+            the same command `id` — the idempotency key makes the retry
+            safe.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'

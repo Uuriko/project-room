@@ -11,7 +11,8 @@ on:
     branches: [main]
   merge_group:
     types: [checks_requested]
-  # Browser shards still run on pull requests. The coverage ratchet runs
+  # Browser shards run on pull requests (the affected scripts), on main,
+  # and in the merge queue (the full suite). The coverage ratchet runs
   # on the nightly schedule, workflow_dispatch, and merge_group — not on
   # pull requests or main pushes. It was the ~14 minute long pole and it
   # is not a required check.
@@ -78,7 +79,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - if: needs.changes.outputs.docs_only != 'true'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.changes.outputs.docs_only != 'true'
+        id: node-modules
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+      - if: needs.changes.outputs.docs_only != 'true' && steps.node-modules.outputs.cache-hit != 'true'
         run: npm ci # `npm run check` now includes the lint gate, which needs the eslint devDependency.
       - if: needs.changes.outputs.docs_only != 'true'
         run: npm run check
@@ -125,7 +132,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - if: needs.changes.outputs.docs_only != 'true'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.changes.outputs.docs_only != 'true'
+        id: node-modules
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+      - if: needs.changes.outputs.docs_only != 'true' && steps.node-modules.outputs.cache-hit != 'true'
         run: npm ci
       # No-new-untested-server-module gate (RC-2026-09-25-302): zero-dep, runs
       # alongside eslint.
@@ -142,8 +155,10 @@ jobs:
   # including setup, and they queued behind the two-job account limit, so
   # the split cost three runner slots without overlapping. One process is
   # about one setup plus the three test portions (historically ~10 minutes;
-  # the cap is 25). scripts/unit-ci.mjs --all runs every discovered file and
-  # writes unit-all-*.json for the duration refresh.
+  # the cap is 25). A pull request runs the affected files
+  # (scripts/unit-ci.mjs --affected). Main, the merge queue, schedule, and
+  # workflow_dispatch run scripts/unit-ci.mjs --all, which writes
+  # unit-all-*.json for the duration refresh.
   unit:
     needs: [changes]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true'
@@ -160,11 +175,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: node-modules
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies and Linux host isolation
         run: |
           sudo apt-get update -qq && sudo apt-get install -y bubblewrap &
           pid=$!
-          npm ci
+          if [ "${{ steps.node-modules.outputs.cache-hit }}" != "true" ]; then
+            npm ci
+          fi
           wait "$pid"
       - name: Permit the sandbox launcher to create its isolated namespaces
         # Ubuntu 24.04 denies capabilities inside unprivileged user namespaces
@@ -189,11 +211,18 @@ jobs:
       - name: Verify automatic host namespace support without operator input
         run: node scripts/host-isolation-preflight.mjs
       - name: Run the unit suite
-        run: node scripts/unit-ci.mjs --all
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            node scripts/unit-ci.mjs --affected --base="$BASE_SHA"
+          else
+            node scripts/unit-ci.mjs --all
+          fi
       - name: Report failures to PR
         if: failure() && github.event_name == 'pull_request'
         run: |
-          node scripts/report-unit-failures.mjs --all --body-file="$RUNNER_TEMP/unit-failures.md"
+          node scripts/report-unit-failures.mjs --affected --body-file="$RUNNER_TEMP/unit-failures.md"
           gh pr comment "$PR_NUMBER" --repo Uuriko/project-room --body-file "$RUNNER_TEMP/unit-failures.md" || echo "comment failed"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -207,12 +236,15 @@ jobs:
   browser-shards:
     name: browser shard ${{ matrix.shard }}/6
     needs: changes
-    # Skip only when the merge-base diff explicitly does not touch browser
-    # paths. A skipped or failed filter, and every main push, still runs shards.
-    # Main pushes skip the shards (nightly + PRs still run them).
-    if: always() && !cancelled() && github.event_name != 'push' && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
+    # Pull requests run the affected scripts. Main, the merge queue, schedule,
+    # and workflow_dispatch run the full suite. Skip only when the merge-base
+    # diff explicitly does not touch browser paths.
+    if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))) && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    env:
+      CI_BROWSER_SCOPE: ${{ github.event_name == 'pull_request' && 'affected' || 'full' }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     strategy:
       fail-fast: false
       matrix:
@@ -225,7 +257,13 @@ jobs:
         with:
           node-version: 24
           cache: npm
-      - run: npm ci
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: node-modules
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+      - if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci
       - name: Resolve Playwright version
         id: pw
         run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
@@ -255,12 +293,12 @@ jobs:
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    env:
+      CI_BROWSER_SCOPE: ${{ github.event_name == 'pull_request' && 'affected' || 'full' }}
+      BASE_SHA: ${{ github.event.pull_request.base.sha }}
     steps:
       # Required check name stays `browser`. An intentional shard skip must
       # report success; a skip for any other reason fails closed.
-      - name: Main push defers browser shards to the nightly run
-        if: github.event_name == 'push' && needs.browser-shards.result == 'skipped'
-        run: echo "browser shards run nightly and on pull requests, not on main pushes" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Browser paths unchanged versus the merge base
         if: needs.changes.result == 'success' && needs.changes.outputs.browser == 'false' && needs.browser-shards.result == 'skipped'
         run: echo "browser shards skipped; pull request diff does not touch browser paths" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -268,10 +306,12 @@ jobs:
         if: needs.changes.outputs.docs_only == 'true' && needs.browser-shards.result == 'skipped'
         run: echo "browser shards skipped; pull request diff is docs-only" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Fail closed when shards were skipped unexpectedly
-        if: github.event_name != 'push' && needs.browser-shards.result == 'skipped' && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
+        if: needs.browser-shards.result == 'skipped' && needs.changes.outputs.docs_only != 'true' && (needs.changes.result != 'success' || needs.changes.outputs.browser != 'false')
         run: echo "browser shards skipped unexpectedly (changes=${{ needs.changes.result }}, browser=${{ needs.changes.outputs.browser }})" && exit 1
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         if: needs.browser-shards.result != 'skipped'
+        with:
+          fetch-depth: 0 # Affected selection diffs the pull-request base.
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         if: needs.browser-shards.result != 'skipped'
         with:
@@ -314,7 +354,19 @@ jobs:
         if: needs.changes.outputs.docs_only != 'true'
         with:
           version: 10
-      - if: needs.changes.outputs.docs_only != 'true'
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.changes.outputs.docs_only != 'true'
+        id: node-modules
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        if: needs.changes.outputs.docs_only != 'true'
+        id: cloudflare-modules
+        with:
+          path: cloudflare/node_modules
+          key: cloudflare-modules-v1-${{ runner.os }}-${{ hashFiles('cloudflare/pnpm-lock.yaml') }}
+      - if: needs.changes.outputs.docs_only != 'true' && steps.node-modules.outputs.cache-hit != 'true'
         run: npm ci
       - name: Resolve Playwright version
         id: pw
@@ -330,7 +382,9 @@ jobs:
         run: |
           npx playwright install --with-deps chromium &
           pid=$!
-          pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+          if [ "${{ steps.cloudflare-modules.outputs.cache-hit }}" != "true" ]; then
+            pnpm --dir cloudflare install --frozen-lockfile --ignore-scripts
+          fi
           wait "$pid"
       - name: Verify the shared Workers runtime and restart journey
         if: needs.changes.outputs.docs_only != 'true'
@@ -377,11 +431,18 @@ jobs:
         with:
           node-version: 24
           cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: node-modules
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
       - name: Install dependencies and Linux host isolation
         run: |
           sudo apt-get update -qq && sudo apt-get install -y bubblewrap &
           pid=$!
-          npm ci
+          if [ "${{ steps.node-modules.outputs.cache-hit }}" != "true" ]; then
+            npm ci
+          fi
           wait "$pid"
       - name: Permit the sandbox launcher to create its isolated namespaces
         # Same setup as the unit job (Ubuntu 24.04 denies capabilities inside
@@ -405,13 +466,59 @@ jobs:
         run: node scripts/host-isolation-preflight.mjs
       - name: Enforce per-module coverage thresholds
         run: node scripts/coverage-thresholds.mjs
+  # Ungated. Drafts and unlabeled pull requests still run story tests, rule
+  # checks, and the page-weight measurement. The labeled jobs above keep the
+  # required check names.
+  safety-net:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Depth 2 gives the PR merge commit's first parent, which the i18n
+          # ratchet scans. A depth-1 checkout looks like a modified baseline.
+          fetch-depth: 2
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: node-modules
+        with:
+          path: node_modules
+          key: node-modules-v1-${{ runner.os }}-node24-${{ hashFiles('package-lock.json') }}
+      - if: steps.node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+      - name: Resolve Playwright version
+        id: pw
+        run: echo "version=$(node -p "require('./node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}-chromium
+      - name: Rule checks, story tests, and page weight
+        run: |
+          set +e
+          npx playwright install --with-deps chromium &
+          install=$!
+          npm run lint
+          lint=$?
+          node scripts/ci-affected.mjs --run-stories
+          stories=$?
+          wait "$install"
+          install_status=$?
+          set -e
+          if [ "$install_status" -ne 0 ]; then exit "$install_status"; fi
+          if [ "$lint" -ne 0 ] || [ "$stories" -ne 0 ]; then exit 1; fi
+          node scripts/ci-affected.mjs --run-page-weight
   test:
-    needs: [changes, contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage]
+    needs: [changes, contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage, safety-net]
     if: always() && !cancelled() && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Require contract, lint, unit, browser, cloudflare, visual-refresh-guard, and coverage
+      - name: Require contract, lint, unit, browser, cloudflare, visual-refresh-guard, coverage, and the safety net
         env:
           CONTRACT: ${{ needs.contract.result }}
           LINT: ${{ needs.lint.result }}
@@ -420,11 +527,12 @@ jobs:
           CLOUDFLARE: ${{ needs.cloudflare.result }}
           VISUAL_REFRESH_GUARD: ${{ needs.visual-refresh-guard.result }}
           COVERAGE: ${{ needs.coverage.result }}
+          SAFETY_NET: ${{ needs.safety-net.result }}
           DOCS_ONLY: ${{ needs.changes.outputs.docs_only }}
           EVENT_NAME: ${{ github.event_name }}
         run: |
           failed=0
-          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "coverage:$COVERAGE"; do
+          for pair in "contract:$CONTRACT" "lint:$LINT" "unit:$UNIT" "browser:$BROWSER" "cloudflare:$CLOUDFLARE" "visual-refresh-guard:$VISUAL_REFRESH_GUARD" "coverage:$COVERAGE" "safety-net:$SAFETY_NET"; do
             name=${pair%%:*}
             result=${pair#*:}
             echo "$name=$result"
@@ -438,12 +546,20 @@ jobs:
               failed=1
               continue
             fi
+            # The safety net is pull-request only, including drafts.
+            if [ "$name" = "safety-net" ] && [ "$result" = "skipped" ]; then
+              if [ "$EVENT_NAME" = "pull_request" ]; then
+                echo "safety-net skipped on pull_request"
+                failed=1
+              fi
+              continue
+            fi
             # Docs-only diffs skip unit and the refresh-marker guard. The
             # required names above still ran and passed.
             if [ "$DOCS_ONLY" = "true" ] && [ "$result" = "skipped" ] && { [ "$name" = "unit" ] || [ "$name" = "visual-refresh-guard" ]; }; then
               continue
             fi
-            # browser=success already covers the intentional main-push skip.
+            # browser=success already covers an intentional shard skip.
             if [ "$result" != "success" ]; then failed=1; fi
           done
           exit "$failed"
