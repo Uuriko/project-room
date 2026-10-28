@@ -38,6 +38,10 @@ export const PROOF_LEVELS = Object.freeze({
     label: "Artifact hash recorded",
     note: "A public-work delivery whose artifact sha256 was recorded when it was submitted. The checks listed on its receipt are reported by the worker (verification: hash_only) — not an acceptance, and not a payment.",
   }),
+  "platform-checked-delivery": Object.freeze({
+    label: "Platform-checked delivery",
+    note: "A public-work delivery the platform itself checked: the executed checks listed on its receipt were run by the platform, not only reported by the worker (verification: system_checked). The receipt page states the delivery outcome and any reviewer decision.",
+  }),
   "room-recorded": Object.freeze({
     label: "Room-recorded",
     note: "The room recorded this work and made the record public.",
@@ -52,17 +56,38 @@ const LEVEL_SCOPE = Object.freeze({
   "self-attested-completion": "the worker recorded it done; no other member reviewed it",
   "room-recorded-completion": "the room recorded it done; no server-verified merge backs it",
   "artifact-hash-recorded": "delivery hash recorded at submission; checks are worker-reported, not an acceptance",
+  "platform-checked-delivery": "the platform itself executed the checks listed on the receipt; the delivery outcome is stated on the receipt page",
   "room-recorded": "the room recorded this work and made the record public",
 });
 
 const isLot = receipt => receipt?.source === "bounty-lot" && !!receipt?.lot;
+
+// The share layer's grade for one receipt. proofLevelOf assigns by source
+// alone, so every public-work receipt inherited the weakest level's words
+// ("checks are worker-reported, not an acceptance") — false for a receipt
+// whose checks the platform itself executed (verification:
+// "system_checked", the composed outcome publicWorkReceiptOutcome
+// records), in any delivery state. The share layer grades public-work by
+// the verification fact the receipt carries; every other source keeps
+// proofLevelOf's assignment. The level names who ran the checks, never
+// the outcome: a system_checked receipt may be verified, submitted, or
+// rejected, and the line stays true for all three.
+function shareProofLevelOf(receipt) {
+  if (receipt?.source === "public-work") {
+    const verification = typeof receipt.verification === "string"
+      ? receipt.verification
+      : receipt.verification?.state;
+    return verification === "system_checked" ? "platform-checked-delivery" : "artifact-hash-recorded";
+  }
+  return proofLevelOf(receipt);
+}
 
 // The graded label alone (badge segment, OG badge row). Lot receipts are
 // not proofLevelOf's vocabulary: their record is a ledger movement plus a
 // settlement verdict, so the label names exactly that.
 export function proofLabelOf(receipt) {
   if (isLot(receipt)) return "Ledger-recorded movement";
-  return PROOF_LEVELS[proofLevelOf(receipt)].label;
+  return PROOF_LEVELS[shareProofLevelOf(receipt)].label;
 }
 
 // Label + scope in one line — the unit every share surface quotes.
@@ -73,7 +98,7 @@ export function verdictLineOf(receipt) {
       ? `Ledger-recorded movement — settlement verdict “${kind}”, recorded in the room's credit ledger`
       : "Ledger-recorded movement — recorded in the room's credit ledger";
   }
-  const level = proofLevelOf(receipt);
+  const level = shareProofLevelOf(receipt);
   return `${PROOF_LEVELS[level].label} — ${LEVEL_SCOPE[level]}`;
 }
 
