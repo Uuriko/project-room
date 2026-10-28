@@ -16,7 +16,7 @@ import { messageRepository } from "./message-repository.mjs";
 // event because they muted its actor.
 import { randomUUID } from "node:crypto";
 import { validId, isMutedBy } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs";

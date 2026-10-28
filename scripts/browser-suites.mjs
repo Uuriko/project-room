@@ -48,7 +48,7 @@ export const BROWSER_SUITE_EXCLUSIONS = {
 
   // Aggregator gates: test.yml runs these against the shard receipts.
   "browser-shards-check.mjs": "test.yml `browser` aggregator job runs it against the shard receipts; it is the gate, not a suite",
-  "unit-shards-check.mjs": "test.yml `unit` aggregator job runs it against the shard receipts; it is the gate, not a suite",
+  "unit-shards-check.mjs": "shard receipt gate covered by tests/unit-shards.test.js; CI runs unit-ci --all in one job",
   // `npm run check` (contract job) spawns these directly.
   "design-contrast-check.mjs": "spawned by scripts/check.mjs (npm run check)",
   "docs-link-check.mjs": "spawned by scripts/check.mjs (npm run check)",
@@ -60,8 +60,8 @@ export const BROWSER_SUITE_EXCLUSIONS = {
   // Dedicated workflows run these.
   "answer-engine-check.mjs": "run by .github/workflows/answer-engine-check.yml",
   "listing-check.mjs": "run by .github/workflows/listing-check.yml",
-  "pr-diff-size-check.mjs": "run by .github/workflows/pr-diff-size.yml; it is the diff-size gate, not a suite",
-  "quarantine-check.mjs": "run by .github/workflows/zero-bug-quarantine.yml",
+  "pr-diff-size-check.mjs": "run by .github/workflows/pr-gates.yml; it is the diff-size gate, not a suite",
+  "quarantine-check.mjs": "run by .github/workflows/pr-gates.yml",
   "review-scope-check.mjs": "run by .github/workflows/review-mechanical.yml",
   // Gate machinery whose logic is exercised by the unit suite.
   "route-docs-check.mjs": "shared route-docs machinery: imported by tests (route-docs-check, openapi-*, invite-only-boundary, developer-contract); the gate runs via npm run check",

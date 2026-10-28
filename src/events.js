@@ -35,6 +35,10 @@ export const EVENT_TYPES = Object.freeze({
   // --- end GR2 ---
   ROOM_ARCHIVED: "room.archived",
   MEMBER_ADDED: "member.added",
+  MEMBER_MERGED: "member.merged",
+  PAIR_REQUESTED: "pair.requested",
+  PAIR_APPROVED: "pair.approved",
+  PAIR_DENIED: "pair.denied",
   MEMBER_JOINED_VIA_INVITATION: "member.joined_via_invitation",
   MEMBER_ACCESS_CHANGED: "member.access_changed",
   MEMBER_STATUS_UPDATED: "member.status_updated",
@@ -114,7 +118,12 @@ export const EVENT_TYPES = Object.freeze({
   WORK_CLAIM_UPDATED: "work_claim.updated",
   // ACT-1a: a room's starter task and Room Guide were seeded once.
   // ACT-1b (/start, landing, receipt UI) waits on S1, RT, and GR2 deployed.
-  ROOM_STARTER_SEEDED: "room.starter_seeded"
+  ROOM_STARTER_SEEDED: "room.starter_seeded",
+  // Owner-equivalent invite mint. agent_invite_codes stays the source of
+  // truth; this event is the room log of who minted it. The handler
+  // validates the envelope and records nothing in the projection. Replay
+  // does not re-check that the actor is still the owner.
+  AGENT_INVITE_MINTED: "agent_invite.minted"
 });
 
 // Room channels (Phase 2 of the Discord/Slack-like redesign): every room has
@@ -415,12 +424,14 @@ export const AGENT_AUTONOMY_PERMISSIONS = Object.freeze(["steer", "accept_work",
 // invite_member holders may mint these without holding them; they cannot
 // grant manage_members/decide/invite_member via invite-code.
 export const AGENT_INVITE_SAFE_PERMISSIONS = AGENT_AUTONOMY_PERMISSIONS;
-// Permissions no invitation mechanism may ever confer, whichever door the
-// invitation comes through: membership administration, decisions, and
-// inviting stay with members who hold them directly, never with whoever
-// redeems an invite. The agent-invite door refuses them at mint
-// (server/agent-invites.mjs) and the share-link grant is capped by the same
-// set (server/share-links.mjs, #3549) — one definition, every door.
+// Permissions ordinary invitations must not confer: membership
+// administration, decisions, and inviting. Share links and ordinary agent
+// invites refuse them (server/share-links.mjs, server/agent-invites.mjs,
+// #3549). The one exception is an owner-equivalent agent invite
+// (ownerEquivalent: true), which only the room's owner member can mint,
+// including when that owner is an agent. It grants these bits to a
+// co-owner-level member and does not transfer the owner seat. Co-owners
+// cannot mint another one.
 export const NEVER_GRANT = Object.freeze(["manage_members", "decide", "invite_member"]);
 export const AGENT_ADMIN_PERMISSIONS = Object.freeze(["manage_members", "decide"]);
 
@@ -576,6 +587,10 @@ const MESSAGE_REWRITE_TYPES = new Set([
   EVENT_TYPES.MESSAGE_REDACTED, EVENT_TYPES.POLL_VOTED
 ]);
 function lightMessageCloneIds(incoming) {
+  // member.merged (added on main after the #3408 audit) is a ranging
+  // writer on messages: mergeMembers rewrites authorId/toMemberId on
+  // every message by the retired member. It keeps the full clone.
+  if (incoming?.type === EVENT_TYPES.MEMBER_MERGED) return null;
   if (incoming?.type === EVENT_TYPES.MESSAGE_POSTED) return new Set();
   // Audited non-rewrite types (see the second-step note below) get the
   // same empty set: slice the array, clone no elements. A rewrite type
@@ -626,9 +641,13 @@ function lightMessageCloneIds(incoming) {
 // and an assignment to a frozen object throws even when it would
 // assign the value already present (#3408 cure). The backfill can
 // therefore never reach the input state's objects.
+// member.merged is in this set for the same reason as the receipt
+// sweep family: mergeMembers ranges over every item and rewrites
+// accountable/verifier/claim-holder ids for the retired member, so it
+// keeps the full workItems clone too.
 const WORK_SWEEP_TYPES = new Set([
   EVENT_TYPES.MESSAGE_DELETED, EVENT_TYPES.MESSAGE_REDACTED,
-  EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN
+  EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN, EVENT_TYPES.MEMBER_MERGED
 ]);
 function workItemNeedsDefaults(item) {
   if (!item || typeof item !== "object") return false;
@@ -664,8 +683,8 @@ function cloneStateForApply(current, incoming, journal = null) {
   const lightWork = lightWorkItemsClone(current, incoming);
   for (const key of Object.keys(state)) {
     if (key === "eventLog" || key === "seenEvents" || key === "seenIdempotencyKeys") continue;
-    if (key === "messages" && Array.isArray(current.messages)) {
-      state.messages = lightMessages === null || lightMessages.size === 0
+    if (key === "messages" && lightMessages !== null && Array.isArray(current.messages)) {
+      state.messages = lightMessages.size === 0
         ? current.messages.slice()
         : current.messages.map(message => (message && lightMessages.has(message.id) ? structuredClone(message) : message));
       continue;
@@ -736,6 +755,10 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.ROOM_ARCHIVED]: archiveRoom,
     [EVENT_TYPES.OWNERSHIP_TRANSFERRED]: transferOwnership,
     [EVENT_TYPES.MEMBER_ADDED]: addMember,
+    [EVENT_TYPES.MEMBER_MERGED]: mergeMembers,
+    [EVENT_TYPES.PAIR_REQUESTED]: recordPair,
+    [EVENT_TYPES.PAIR_APPROVED]: recordPair,
+    [EVENT_TYPES.PAIR_DENIED]: recordPair,
     [EVENT_TYPES.MEMBER_JOINED_VIA_INVITATION]: joinMemberViaInvitation,
     [EVENT_TYPES.MEMBER_ACCESS_CHANGED]: changeMemberAccess,
     [EVENT_TYPES.MEMBER_STATUS_UPDATED]: updateMemberStatus,
@@ -797,7 +820,8 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.DM_CONSENT_CHANGED]: recordDmConsentChange,
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
     [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
-    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded
+    [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded,
+    [EVENT_TYPES.AGENT_INVITE_MINTED]: recordAgentInviteMinted
   };
   const handler = handlers[incoming.type];
   if (!Object.hasOwn(handlers, incoming.type)) throw new Error(`Unsupported event type: ${incoming.type}`);
@@ -881,10 +905,16 @@ function validateEnvelope(incoming) {
       || Object.keys(action).some(field => field !== "claimId" && field !== "label")))) throw new Error(`Invalid ${key}`);
     // work_claim.updated deletion receipts name stranded dependents: claim ids.
     if (key === "dependents" && (!Array.isArray(value) || value.length > 64 || value.some(v => typeof v !== "string" || !validId(v)))) throw new Error(`Invalid ${key}`);
+    // Receipt-card cost: exactly { spentCents, capCents, model }, each recorded
+    // or null. Cents are non-negative integers; model is 1-100 characters.
+    if (key === "cost" && (!value || typeof value !== "object" || Array.isArray(value)
+      || Object.keys(value).length !== 3 || !["spentCents", "capCents", "model"].every(field => field in value)
+      || [value.spentCents, value.capCents].some(c => c !== null && !(Number.isSafeInteger(c) && c >= 0))
+      || (value.model !== null && (typeof value.model !== "string" || !value.model.trim() || value.model.length > 100)))) throw new Error(`Invalid ${key}`);
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1079,6 +1109,60 @@ function transferOwnership(state, incoming) {
   state.room.previousOwnerId = previous;
   state.room.ownershipTransferredAt = incoming.at;
   state.room.ownershipRevision = (state.room.ownershipRevision ?? 0) + 1;
+}
+
+function recordPair(state, incoming) {
+  requireFields(incoming.data, ["pairId", "displayName", "status"]);
+  if (!["pending", "approved", "denied"].includes(incoming.data.status)) throw new Error("Invalid status");
+  const code = incoming.data.userCode;
+  if (code !== undefined && (typeof code !== "string" || !/^[A-Z0-9]{4}-[A-Z0-9]{4}$/.test(code))) throw new Error("Invalid userCode");
+  if (incoming.data.memberId !== undefined && !Object.hasOwn(state.members, incoming.data.memberId)) {
+    if (incoming.data.status === "approved") throw new Error("Unknown member");
+  }
+}
+
+// Owner, or a member who holds both membership administration and decide.
+// invite_member alone is not owner-level.
+function ownerLevel(state, actorId) {
+  if (actorId === state.room?.ownerId) return true;
+  const actor = Object.hasOwn(state.members, actorId) && state.members[actorId];
+  return Boolean(actor && actor.active !== false
+    && actor.permissions.includes("manage_members") && actor.permissions.includes("decide"));
+}
+
+function mergeMembers(state, incoming) {
+  requireFields(incoming.data, ["keptMemberId", "retiredMemberId", "expectedKeptRevision", "expectedRetiredRevision"]);
+  if (!ownerLevel(state, incoming.actorId)) throw new Error("Owner required");
+  const kept = Object.hasOwn(state.members, incoming.data.keptMemberId) && state.members[incoming.data.keptMemberId];
+  const retired = Object.hasOwn(state.members, incoming.data.retiredMemberId) && state.members[incoming.data.retiredMemberId];
+  if (!kept || !retired || kept.active === false || retired.active === false) throw new Error("Unknown member");
+  if (kept.kind !== "agent" || retired.kind !== "agent") throw new Error("Agents only");
+  if (kept.id === retired.id || kept.id === state.room.ownerId || retired.id === state.room.ownerId) throw new Error("Cannot merge");
+  if (kept.revision !== incoming.data.expectedKeptRevision || retired.revision !== incoming.data.expectedRetiredRevision) {
+    throw new Error("Stale revision");
+  }
+  const union = [];
+  for (const permission of PERMISSIONS) {
+    if (kept.permissions.includes(permission) || retired.permissions.includes(permission)) union.push(permission);
+  }
+  const isOwner = incoming.actorId === state.room.ownerId;
+  const granted = isOwner ? union : union.filter(permission => !AGENT_ADMIN_PERMISSIONS.includes(permission) || kept.permissions.includes(permission));
+  validatePermissions(granted, "agent", false, isOwner && granted.some(permission => AGENT_ADMIN_PERMISSIONS.includes(permission)));
+  kept.permissions = granted;
+  kept.revision += 1;
+  kept.mergedFrom = [...(kept.mergedFrom ?? []), retired.id];
+  retired.active = false;
+  retired.mergedInto = kept.id;
+  retired.revision += 1;
+  for (const message of state.messages ?? []) {
+    if (message.authorId === retired.id) message.authorId = kept.id;
+    if (message.toMemberId === retired.id) message.toMemberId = kept.id;
+  }
+  for (const item of Object.values(state.workItems ?? {})) {
+    if (item.accountableMemberId === retired.id) item.accountableMemberId = kept.id;
+    if (item.verifierMemberId === retired.id) item.verifierMemberId = kept.id;
+    if (item.claim && item.claim.holderId === retired.id) item.claim.holderId = kept.id;
+  }
 }
 
 function addMember(state, incoming) {
@@ -1535,6 +1619,19 @@ function recordLandUpdate(state, incoming) {
 export const WORK_CLAIM_EVENT_ACTIONS = Object.freeze(["created", "claimed", "state_changed", "reviewed", "released", "reassigned", "renewed", "lease_expired", "pr_merged", "pr_closed", "ci_changed", "deleted", "premise_flagged", "premise_cleared", "closed"]);
 const WORK_CLAIM_EVENT_STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 
+// Owner-equivalent invite mint. The invite table is the source of truth.
+// Validates the minter was a member and the public handle shape, and
+// records nothing in the projection. Does not require the actor to still
+// be the owner: ownership can move after the mint, and replay must keep
+// the historical record.
+function recordAgentInviteMinted(state, incoming) {
+  knownMember(state, incoming.actorId);
+  if (typeof incoming.data.inviteId !== "string" || !/^[a-f0-9]{8}$/.test(incoming.data.inviteId)) {
+    throw new Error("Invalid inviteId");
+  }
+  if (incoming.data.ownerEquivalent !== true) throw new Error("Invalid ownerEquivalent");
+}
+
 // Thin receipt: validated, never copied into the projection.
 function recordStarterSeeded(state, incoming) {
   requireFields(incoming.data, ["templateSlug", "intentKind"]);
@@ -1612,7 +1709,10 @@ function recordReferral(state, incoming) {
 function recordDecision(state, incoming) {
   const actor = requireMember(state, incoming.actorId);
   requirePermission(state, incoming.actorId, "decide");
-  if (actor.kind !== "human") throw new Error("Only a human member may record a decision");
+  // Humans record decisions. An agent can too only when the owner empowered
+  // them (delegatedAdmin), which is how an owner-equivalent invite lands.
+  // An ordinary agent cannot, even if a stale projection still lists the bit.
+  if (actor.kind !== "human" && actor.delegatedAdmin !== true) throw new Error("Only a human member may record a decision");
   requireFields(incoming.data, ["sourceMessageId", "statement"]);
   requirePublicDecisionSource(state, incoming.data.sourceMessageId);
   const statement = String(incoming.data.statement);
