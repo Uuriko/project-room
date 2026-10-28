@@ -606,12 +606,12 @@ test("DM fan-out rings the push doorbell once per message: a coalesced wake does
   const recipient = f.store.identities.create("dm-recipient");
   // Current dm.posted surface (shape "to body messageId"): both identities
   // link into the room and a peer.dm bond carries the DM.
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: sender.identityId, memberId: "dm-sender",
+  linkWithProof(f.store, f.keys.owner, "commons", sender, {
+    memberId: "dm-sender",
     displayName: "DM Sender", permissions: ["accept_work"],
   });
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: recipient.identityId, memberId: "dm-recipient",
+  linkWithProof(f.store, f.keys.owner, "commons", recipient, {
+    memberId: "dm-recipient",
     displayName: "DM Recipient", permissions: ["accept_work"],
   });
   const proposed = f.store.command(sender.secret, "commons", { id: randomUUID(), type: "bond.propose",
