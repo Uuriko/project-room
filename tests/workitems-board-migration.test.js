@@ -787,7 +787,7 @@ test("delivery and review survive a work command, restart and another board tran
 
 test("sync: DCP-1 — a claim-taking event against a foreign active board row is refused (D-1)", async (t) => {
   const f = fixture(t);
-  const { createWork, claimWork } = await import("../server/work-claims.mjs");
+  const { createWork } = await import("../server/work-claims.mjs");
   f.send(f.ownerKey, "propose-foreign", "work.proposed", {
     workItemId: "task-foreign", title: "Foreign-held task", definitionOfDone: "x",
     accountableMemberId: "worker", mode: "write",
@@ -815,7 +815,7 @@ test("sync: DCP-1 — a claim-taking event against a foreign active board row is
 
 test("sync: DCP-1 — renew against a foreign row is refused; release is not (the skip survives)", async (t) => {
   const f = fixture(t);
-  const { createWork, claimWork } = await import("../server/work-claims.mjs");
+  const { createWork } = await import("../server/work-claims.mjs");
   f.send(f.ownerKey, "propose-legacy", "work.proposed", {
     workItemId: "task-legacy", title: "Legacy double-hold", definitionOfDone: "x",
     accountableMemberId: "worker", mode: "write",
@@ -870,7 +870,7 @@ const close3712 = (row, opts = {}) => canCloseWork({ ...row, state: "in_progress
   { policy: "distinct_member", reviewMembers: ["verifier"], ...opts });
 
 test("#3712: the issue's verbatim repro — the projected row closes under distinct_member", async () => {
-  const { createWork, claimWork } = await import("../server/work-claims.mjs");
+  const { createWork } = await import("../server/work-claims.mjs");
   const T = Date.parse("2026-10-15T12:00:00.000Z");
   // Control — the board-native flow (unchanged by this fix).
   let claim = createWork({ id: "w1", title: "Reviewed work" }, { now: T, agentId: "creator" });
