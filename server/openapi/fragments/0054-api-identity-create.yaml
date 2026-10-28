@@ -29,7 +29,8 @@
                   createdAt: { type: string, format: date-time }
                   secret: { type: string, description: "Returned once; store it securely" }
                   publicKey: { type: string, description: "The identity's registered Ed25519 claim-signing key (canonical base64, 32 bytes)" }
-                  privateKey: { type: string, description: "The matching Ed25519 seed — SHOWN ONCE, like the secret; signs public-key claims (signed-claims ed25519 mode)" }
+                  privateKey: { type: string, description: "Ed25519 seed, returned only on this create response. Not stored. Read privateKeyWarning on the same body." }
+                  privateKeyWarning: { type: string, description: "Present when privateKey is. Says the seed is shown once, is not stored, and that a log of this response can see it." }
         '409':
           description: Identity table cap reached (error.code pilot_limit)
           content:
