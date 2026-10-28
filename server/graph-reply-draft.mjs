@@ -2,7 +2,7 @@
 import { emailDigest, emailOpaqueId, emailInput, readEmailEnvelope, previewEmailReply, requireEmail, EmailContractError } from "./email-envelope.mjs";
 import { normalizeGraphEmail } from "./graph-email.mjs";
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (code, message) => { throw new ServiceError(409, code, message); };
 const lf = value => value.replace(/\r\n?/g, "\n");

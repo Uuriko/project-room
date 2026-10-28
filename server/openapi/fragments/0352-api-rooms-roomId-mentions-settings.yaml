@@ -1,0 +1,23 @@
+  /api/rooms/{roomId}/mentions/settings:
+    post:
+      summary: Configure the mention timeout (#658)
+      description: >-
+        Room owner only. Overrides the per-room mention timeout
+        (mentionTimeoutMs, default 30 minutes) after which unacknowledged
+        mentions read as timed_out. Body: `{ timeoutMs }`, an integer
+        between 60000 and 86400000. 403 owner_required for anyone else.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [timeoutMs]
+              properties:
+                timeoutMs: { type: integer }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, timeoutMs }" }
+        '403': { description: owner_required }
