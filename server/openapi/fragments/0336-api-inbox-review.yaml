@@ -1,0 +1,28 @@
+  /api/inbox/review:
+    post:
+      summary: Record a reply review
+      description: >-
+        Account-session write (CSRF; 60 per account per minute). Body is a
+        `reply.review` or `reply.update.review` transition
+        (requestId, sourceId, attemptId / updateId, expectedRevision, ...);
+        anything else is 422 invalid_reply_review. The receipt names the
+        reviewed attempt (attemptId, revision, reviewVersion) or update
+        (updateId, attemptId, revision, reviewVersion).
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, action, sourceId]
+              properties:
+                requestId: { type: string }
+                action: { type: string, enum: [reply.review, reply.update.review] }
+                sourceId: { type: string }
+      responses:
+        '201': { description: "{ contractVersion, viewer, receipt, duplicate: false }" }
+        '200': { description: Exact retry (duplicate true) }
+        '409': { description: "idempotency_conflict, reply_update_unresolved or a stale revision" }
+        '422': { description: invalid_reply_review }
