@@ -94,7 +94,7 @@
     "src/help-offers.js": "sha256:1f04d85618cfadc4118d73911f81e3ac08d3f324eeb011bd338655bbaaa4489c",
     "src/html-escape.js": "sha256:c11803b39ce9bb53a49d7bad6e7f520b556d8a1b2247c24060392dc6e4dd90ca",
     "src/human-experience.css": "sha256:c4eb8870bedbafda4bc85f1a85788070d94815e60a0eff5a3f1902a4f9804aa3",
-    "src/human-experience.js": "sha256:c43c1a5ea028935b55052ef8c0bacad3e56b49fc44d101138209077a29474195",
+    "src/human-experience.js": "sha256:085c6a7bb5b30f197426666d8ed981380d6be0a2a18fa307a216bc8bae57473d",
     "src/human-push-display.js": "sha256:e5ae3ec560fe7334442557e286e5d297f8b579a215f41c2702890ba49d8050f6",
     "src/human-push.js": "sha256:d1c35ff1ea9b2cdfd352282db6a7fb1cbcd814e503b53e03a45884adfa041ae3",
     "src/invite-context.js": "sha256:17328cc6619c64592b75995baa441d45e136da37c80f2079bbdb6c7fc3c44bea",

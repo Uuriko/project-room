@@ -253,7 +253,11 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     ask.hidden = !human() || !contribution;
   }
   async function refresh() {
-    const since = Date.now() - lastRead, fallback = Object.values(projection?.runs ?? {}).some(run => !CLOSED.includes(run.status)) ? 1000 : 15000;
+    // Assistant configuration emits no room event, so while this tab does not
+    // know a connected assistant it keeps the short poll: a stale "not
+    // connected" would turn a first "@Room" ask into a plain post (Fo, C10).
+    const connected = Boolean(projection?.assistant?.coordinatorMemberId) && projection.assistant.availability !== 'not_connected';
+    const since = Date.now() - lastRead, fallback = Object.values(projection?.runs ?? {}).some(run => !CLOSED.includes(run.status)) ? 1000 : connected ? 15000 : 3000;
     if (!human() || !getState() || reading || document.hidden || since < (roomMoved ? 500 : fallback)) return;
     const stamp = key(); reading = true; lastRead = Date.now(); roomMoved = false;
     try { const next = await client.request(path()); if (stamp !== key()) return; const changed = projection?.assistant.coordinatorMemberId !== next.assistant.coordinatorMemberId || projection?.assistant.name !== next.assistant.name; projection = next; paint(); if (changed) refreshTranscript(); }
