@@ -287,6 +287,7 @@ optional.push("server/membership-resolution.mjs"); // #3882: shared guest-aware 
 optional.push("server/members-directory.mjs"); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
 optional.push("server/gmail-content.mjs","server/gmail-import-authority.mjs","server/gmail-sync.mjs","server/vendor/gmail-html-sanitizer.mjs","server/vendor/gmail-html-LICENSES.txt", "server/gmail-mailbox.mjs", "server/gmail-actions.mjs");
 optional.push("server/retention-run.mjs"); // dry-run retention caller (imported by cloudflare/room.mjs)
+optional.push("cloudflare/job-alarm-reconciler.mjs"); // coalesced alarm reconciliation
 optional.push("cloudflare/job-heartbeat.mjs"); // per-job cron heartbeat (imported by cloudflare/room.mjs)
 optional.push("cloudflare/channel-drain-tick.mjs"); // channel-drain RPC decision table (imported by cloudflare/room.mjs)
 optional.push("cloudflare/edge-public.mjs"); // static assets and discovery docs answered outside the Durable Object (imported by cloudflare/room.mjs)
