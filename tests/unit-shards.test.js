@@ -74,6 +74,12 @@ test("unit shards execute each test file once and aggregate only complete curren
   assert.equal(existsSync(customScratch), true);
   assert.equal(existsSync(join(dir, ".tmp")), true, "repository-local owners retain scratch with custom TMPDIR");
   assert.equal(gate().status, 0, "scratch setup retains exact successful receipts");
+  rmSync(join(dir, "executed.txt"), { force: true });
+  const all = invoke("scripts/unit-ci.mjs", ["--all"]);
+  assert.equal(all.status, 0, all.stdout + all.stderr);
+  assert.match(all.stdout, /unit-ci: all, 9 test files/);
+  assert.deepEqual(readFileSync(join(dir, "executed.txt"), "utf8").trim().split("\n").map(Number).sort((a, b) => a - b), [...files.keys()]);
+  assert.equal(gate().status, 0, "the single-job receipt is not a shard receipt");
 });
 
 test("unit shard plan is complete, deterministic, and balanced on measured runtimes", () => {

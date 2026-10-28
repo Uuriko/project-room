@@ -1,7 +1,7 @@
 // Gmail mailbox access is separate from Google account sign-in. Credentials
 // and pending browser sessions are encrypted at rest and never projected.
 import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
-import { ServiceError } from './store.mjs';
+import { ServiceError } from './service-error.mjs';
 import { normalizeGmailMessage } from './channel-adapters/gmail.mjs';
 export const GMAIL_CALLBACK = '/api/auth/gmail/callback';
 const scope = 'https://www.googleapis.com/auth/gmail.modify';
