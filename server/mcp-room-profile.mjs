@@ -54,7 +54,9 @@ import {
 } from "./mcp-hosted-tools.mjs";
 import { listedMcpTools, MCP_TOOL_FOCUSES } from "./mcp-discovery.mjs";
 import { ACTION_META_TOOL_NAMES, SEARCH_ACTIONS_TOOL, RUN_ACTION_TOOL, actionMetaToolDefs, isRunnableAction, searchActions, validRunActionArgs, validSearchActionsArgs } from "./mcp-action-search.mjs";
-import { stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext, stampWorkListing, withContentTrust } from "./content-trust.mjs";
+import { stampAccessRequests, stampAttachmentGet, stampEvents, stampRoomContext, stampWorkListing, withContentTrust, CONTENT_TRUST } from "./content-trust.mjs";
+import { publicRoomView } from "./public-rooms.mjs";
+import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { redactEventPage } from "./redact-read.mjs";
 import { resolveCatalogAgent, catalogCallDenial } from "./capability-visibility.mjs";
 import { listSquads, getSquad, createSquad, updateSquadMembers, disbandSquad } from "./squads.mjs"; // plan-squads: squad roster
@@ -517,6 +519,60 @@ function callRoomTool(store, secret, identity, name, args, agentRooms, spendCred
     () => dispatchRoomToolCall(store, secret, identity, name, args, agentRooms));
 }
 
+// MCP room discovery (charter MCP-ROOM-DISCOVERY, Option B — parity with
+// the anonymous public face). A non-member identity asking about an exact
+// roomId it already holds learns no more than an unauthenticated browser:
+// for a room whose owner enabled its public page, exactly the identity
+// fields publicRoomView serves anonymously (slug, title, purpose, member
+// counts, join mode + href, admission) — never names, tasks, receipts, or
+// history, which are room content. Any other existing room answers
+// existence + joinability only; an unknown id answers room_not_found.
+// The three shapes are distinct, as the charter requires. No search, no
+// list, no enumeration. Every non-member answer spends from one
+// per-identity bucket before any read, so probing random roomIds is
+// expensive and existent/nonexistent ids cost the same.
+const roomDiscoveryLimiter = createRateLimiter({ capacity: 20, refillPerSecond: 20 / 3600 });
+
+function nonMemberRoomDiscovery(store, identity, roomId, error) {
+  if (!((error?.status === 401 && error?.code === "unauthenticated")
+    || (error?.status === 403 && error?.code === "no_access"))) return null;
+  const limit = roomDiscoveryLimiter.check(`room-discovery:${identity.identityId}`);
+  if (!limit.allowed) throw new ServiceError(429, "rate_limited", limit.message);
+  const base = {
+    contractVersion: 1, type: "agent_connection_check", roomId, member: false,
+    identityId: identity.identityId, checkedAt: new Date().toISOString(),
+    expiresAt: null, scope: "room", externalExecution: false
+  };
+  let exists = false;
+  try { exists = Boolean(store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)); } catch { exists = false; }
+  if (!exists) {
+    return {
+      ...base, status: "room_not_found", exists: false,
+      next: [{ action: "check-room-id", description: "No room has this id. Check the roomId for a typo, or ask whoever sent you for the exact id or an invite link." }]
+    };
+  }
+  const view = publicRoomView(store, roomId);
+  if (!view) {
+    return {
+      ...base, status: "room_exists", exists: true, public: false, joinability: "invite-or-request",
+      next: [
+        { action: "join-with-invite", tool: "room_join", description: "If you were given an invite link or code for this room, join with room_join." },
+        { action: "request-access", method: "POST", path: "/api/access-requests", description: "Otherwise request access with POST /api/access-requests using your saved identity; the room owner decides." }
+      ]
+    };
+  }
+  const doc = view.document;
+  return {
+    ...base, status: "room_discovered", exists: true, public: true,
+    slug: doc.slug, title: doc.title, purpose: doc.purpose, counts: doc.counts,
+    join: doc.join, admission: doc.agentJoin.admission,
+    contentTrust: CONTENT_TRUST, untrusted: true,
+    next: [doc.join.mode === "link"
+      ? { action: "join-with-invite", tool: "room_join", description: "This room publishes a join link (join.href). Join with room_join using that link and your own saved identity." }
+      : { action: "request-access", method: "POST", path: "/api/access-requests", description: "This room admits by request. Request access with POST /api/access-requests using your saved identity; the room owner decides." }]
+  };
+}
+
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId });
   if (name === "room_create") {
@@ -557,13 +613,19 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   const roomId = args.roomId;
   if (name === "room_check_access") {
-    const auth = store.authenticate(secret, roomId);
-    return {
-      contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
-      roomId, memberId: auth.member.id, identityId: auth.identityId ?? identity.identityId,
-      kind: auth.member.kind, permissions: [...auth.member.permissions],
-      checkedAt: new Date().toISOString(), expiresAt: null, scope: "room", externalExecution: false
-    };
+    try {
+      const auth = store.authenticate(secret, roomId);
+      return {
+        contractVersion: 1, type: "agent_connection_check", status: "credential_accepted",
+        roomId, memberId: auth.member.id, identityId: auth.identityId ?? identity.identityId,
+        kind: auth.member.kind, permissions: [...auth.member.permissions],
+        checkedAt: new Date().toISOString(), expiresAt: null, scope: "room", externalExecution: false
+      };
+    } catch (error) {
+      const discovery = nonMemberRoomDiscovery(store, identity, roomId, error);
+      if (discovery) return discovery;
+      throw error;
+    }
   }
   if (name === "room_activation_pack") {
     const auth = store.authenticate(secret, roomId);
