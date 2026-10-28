@@ -8,8 +8,9 @@
 //   Name/<workItemId>                 -> that member, only if they own the session
 //   repo:Name | owner/repo:Name       -> that member, only if they hold a live claim in that repo
 //
-// Anything ambiguous is rejected with candidates instead of guessed.
-import { resolveMemberId } from "./swarm-brief.mjs";
+// Anything ambiguous is rejected with candidates instead of guessed: a token that is one
+// member's id and another member's display name is ambiguous too. A whole string that
+// equals a display name (names may contain ":" or "/") is a member address first.
 
 const LIVE = new Set(["claimed", "in_progress", "blocked"]); // same as ACTIVE_CLAIM_STATES
 const idOf = row => row?.memberId ?? row?.id;
@@ -48,20 +49,34 @@ const repoMatches = (claimRepo, wanted) => {
   return b.includes("/") ? a === b : a === b || a.endsWith("/" + b);
 };
 
+function lookup(active, person) {
+  const candidates = candidatesFor(active, person);
+  const ids = [...new Set(candidates.map(c => c.memberId))];
+  if (ids.length === 1) return { memberId: ids[0] };
+  return ids.length > 1 ? { error: "ambiguous", candidates } : { error: "unknown_member" };
+}
+
 export function resolveAddress(input, { members = [], claims = [] } = {}) {
+  const active = (Array.isArray(members) ? members : []).filter(row => row && row.active !== false && typeof idOf(row) === "string");
+  if (typeof input === "string") {
+    const whole = input.trim().replace(/^@/, "");
+    if (whole && (whole.includes(":") || whole.includes("/")) && candidatesFor(active, whole).length) {
+      const hit = lookup(active, whole);
+      return hit.memberId ? { ok: true, memberId: hit.memberId } : { ok: false, ...hit };
+    }
+  }
   const parsed = parseAddress(input);
   if (!parsed) return { ok: false, error: "invalid_address" };
-  const active = (Array.isArray(members) ? members : []).filter(row => row && row.active !== false && typeof idOf(row) === "string");
-  const memberId = resolveMemberId(active, parsed.person);
-  if (!memberId) {
-    const candidates = candidatesFor(active, parsed.person);
-    return candidates.length > 1 ? { ok: false, error: "ambiguous", candidates } : { ok: false, error: "unknown_member" };
-  }
+  const hit = lookup(active, parsed.person);
+  if (!hit.memberId) return { ok: false, ...hit };
+  const memberId = hit.memberId;
   if (parsed.kind === "member") return { ok: true, memberId };
   const live = (Array.isArray(claims) ? claims : []).filter(item => item && item.owner === memberId && LIVE.has(item.state));
   if (parsed.kind === "session") {
     const owned = live.find(item => item.id === parsed.session || item.workItemId === parsed.session);
-    return owned ? { ok: true, memberId, workItemId: owned.workItemId ?? owned.id } : { ok: false, error: "session_not_owned", memberId };
+    if (!owned) return { ok: false, error: "session_not_owned", memberId };
+    // claimId is the Board claim; workItemId only when the claim is linked to a real work item.
+    return { ok: true, memberId, claimId: owned.id, ...(typeof owned.workItemId === "string" && owned.workItemId ? { workItemId: owned.workItemId } : {}) };
   }
   const inRepo = live.filter(item => repoMatches(item.repo, parsed.repo));
   if (!inRepo.length) return { ok: false, error: "not_in_repo", memberId };

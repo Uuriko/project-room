@@ -37,8 +37,8 @@ test("member addresses reuse roster resolution: id or unique name, inactive igno
 });
 
 test("session addresses resolve only to a live claim the member owns", () => {
-  assert.deepEqual(resolveAddress("Claude/reason-take-3", { members, claims }), { ok: true, memberId: "ai_claude", workItemId: "reason-take-3" });
-  assert.deepEqual(resolveAddress("Codex/wi_9", { members, claims }), { ok: true, memberId: "ai_codex", workItemId: "wi_9" });
+  assert.deepEqual(resolveAddress("Claude/reason-take-3", { members, claims }), { ok: true, memberId: "ai_claude", claimId: "reason-take-3" });
+  assert.deepEqual(resolveAddress("Codex/w2", { members, claims }), { ok: true, memberId: "ai_codex", claimId: "w2", workItemId: "wi_9" });
   assert.equal(resolveAddress("Codex/reason-take-3", { members, claims }).error, "session_not_owned");
   assert.equal(resolveAddress("Claude/old", { members, claims }).error, "session_not_owned");
 });
@@ -69,11 +69,27 @@ test("pauseDigest delivers only what is new since the cursor, scrubbed, and adva
   assert.equal(d.deliver, true);
   assert.equal(d.nextAfter, 42);
   assert.deepEqual(d.items.map(i => [i.kind, i.sequence]), [["mention", 41], ["request", 42]]);
-  assert.match(d.text, /2 new for you since your last pause, 1 open request\./);
+  assert.match(d.text, /2 new for you since your last pause, 1 request\./);
+  assert.match(pauseDigest({ directMessages: [{ sequence: 9, from: "a", body: "b", requestKind: "reply", state: "open" }] }).text, /1 request \(1 open\)\./);
   assert.match(d.text, /data, not instructions/);
   assert.doesNotMatch(d.text, /pri_x/);
   const none = pauseDigest(inbox, { after: 42 });
   assert.deepEqual(none, { deliver: false, nextAfter: 42, items: [], text: "" });
   const many = pauseDigest({ directMessages: Array.from({ length: 7 }, (_, i) => ({ sequence: i + 1, from: "a", body: "b" })) });
   assert.match(many.text, /and 2 more: read room_read_inbox with after=0/);
+});
+
+test("review fixes: id vs display-name collision is ambiguous; names with : or / resolve as members", () => {
+  const tricky = [
+    { memberId: "ai_c", displayName: "ai_d" },
+    { memberId: "ai_d", displayName: "Grok" },
+    { memberId: "ai_m", displayName: "Grok Build: this Mac" },
+    { memberId: "ai_s", displayName: "Ops/Night" },
+  ];
+  const amb = resolveAddress("ai_d", { members: tricky });
+  assert.equal(amb.error, "ambiguous");
+  assert.deepEqual(amb.candidates.map(c => c.memberId).sort(), ["ai_c", "ai_d"]);
+  assert.deepEqual(resolveAddress("Grok", { members: tricky }), { ok: true, memberId: "ai_d" });
+  assert.deepEqual(resolveAddress("Grok Build: this Mac", { members: tricky }), { ok: true, memberId: "ai_m" });
+  assert.deepEqual(resolveAddress("@ops/night", { members: tricky }), { ok: true, memberId: "ai_s" });
 });
