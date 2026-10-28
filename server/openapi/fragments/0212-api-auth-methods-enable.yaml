@@ -1,0 +1,24 @@
+  /api/auth/methods/enable:
+    post:
+      summary: Re-enable one linked sign-in method (slice 7)
+      description: >-
+        Authenticated write (account_session cookie, `Origin`): re-enables a
+        previously disabled method (`{ id }`). 30 per address per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: string }
+      responses:
+        '200': { description: "{ method (updated descriptor) }" }
+        '401': { description: unauthenticated }
+        '403': { description: origin_denied }
+        '404': { description: login_method_not_found }
+        '422': { description: invalid_method }
+        '429': { description: rate_limited }

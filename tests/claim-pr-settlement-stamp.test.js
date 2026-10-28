@@ -114,6 +114,9 @@ test("the single-claim read and the board list agree on settlement", async t => 
   const store = new RoomStore(":memory:");
   store.initialize(initialRoom("commons"));
   t.after(() => store.close());
+  // Pin the route clock to the fixture time: the board list hides done claims
+  // older than DONE_WINDOW_MS, so the real clock would age this fixture out.
+  store.now = () => NOW;
   store.workClaims.set("commons", finishedMerged("read-asserted", 4110));
   const helpers = {
     json: (_res, status, value) => ({ status, value }),
