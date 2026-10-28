@@ -300,3 +300,18 @@ export function jobHealthResponse(view, { head = false } = {}) {
 export function jobHealthUnavailable({ head = false } = {}) {
   return jobHealthResponse({ schema: 'room.job-health/1', status: 'unavailable', generatedAt: iso(Date.now()), jobs: [] }, { head });
 }
+
+// One owner per job in this object instance. The callback must include its
+// durable outcome write. Rejections release ownership; nothing is cached after
+// settlement. Job idempotency and persisted cadence still handle restarts.
+export function createJobRunCoordinator() {
+  const active = new Map();
+  return (name, run) => {
+    if (active.has(name)) return active.get(name);
+    const pending = Promise.resolve().then(run).finally(() => {
+      if (active.get(name) === pending) active.delete(name);
+    });
+    active.set(name, pending);
+    return pending;
+  };
+}

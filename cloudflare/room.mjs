@@ -34,8 +34,8 @@ import { progressEscrowEpochs as runEscrowEpochs } from '../server/bounty-epoch-
 import { pruneAbuseRateBuckets } from '../server/abuse-rate-buckets.mjs';
 import { pruneOAuthProvider } from '../server/oauth-provider-store.mjs';
 import { syncClaimPullRequests } from '../server/claim-pr-sync.mjs';
-import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
-import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
+import { CRON_JOB_BUDGET_MS, HEARTBEAT_STORAGE_KEY, applyOutcomes, createJobRunCoordinator, jobHealthResponse, jobHealthUnavailable, jobHealthView, runCronJobs, selectWorkerJobs } from './job-heartbeat.mjs';
+import { ALARM_RETRY_MS, JOBS, earliestFutureAlarm, jobEnabled, jobIsDue, lastRanFrom } from '../server/jobs.mjs';
 import { countOpenPublicReports } from '../server/legal-store.mjs'; // open public-report count on GET /api/health/jobs
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
@@ -561,13 +561,22 @@ export class ProjectRoom extends DurableObject {
     });
     const outcomes = [];
     for (const job of selected) {
-      const result = await runCronJobs({ [job.name]: () => this.#sqlScope('job', job.name, () => job.run(this.store, {
-        deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
-        env: this.env, room: this, now: () => Date.now()
-      })) });
-      // A later job may reset the object. Commit completed work before
-      // starting it; a failed heartbeat write must not claim a healthy tick.
-      await this.recordCronTick(result);
+      this.coordinateJobRun ??= createJobRunCoordinator();
+      const result = await this.coordinateJobRun(job.name, async () => {
+        // Selection may precede another job's await or another caller's commit.
+        // Recheck inside ownership before work; a waiter never extends a deadline.
+        const latest = lastRanFrom(await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY));
+        if (this.paused || !this.store || !jobEnabled(job, this.env, this.store)
+          || !jobIsDue(job, this.store, Date.now(), latest[job.name])) return [];
+        const result = await runCronJobs({ [job.name]: () => this.#sqlScope('job', job.name, () => job.run(this.store, {
+          deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
+          env: this.env, room: this, now: () => Date.now()
+        })) });
+        // A later job may reset the object. Commit completed work before
+        // starting it; a failed heartbeat write must not claim a healthy tick.
+        await this.recordCronTick(result);
+        return result;
+      });
       outcomes.push(...result);
     }
     return outcomes;
