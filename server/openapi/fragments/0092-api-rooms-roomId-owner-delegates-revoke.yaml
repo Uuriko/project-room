@@ -1,0 +1,25 @@
+  /api/rooms/{roomId}/owner-delegates/revoke:
+    post:
+      summary: Revoke owner delegation from an agent identity (owner)
+      description: >-
+        Owner-only. Revokes an active owner-delegation grant. Revocation is
+        strictly top-down and takes effect on the next authenticated request:
+        after revocation the identity's delegate-gated calls fail exactly as
+        before the grant.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [identityId]
+              properties:
+                identityId: { type: string, description: Agent identity id (ai_...) }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: The revoked grant }
+        '403': { description: access_denied (owner only) }
+        '404': { description: not_found (no active grant) }
+        '422': { description: invalid_request }
