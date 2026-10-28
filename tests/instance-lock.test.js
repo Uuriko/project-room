@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, readFileSync, existsSync, utimesSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { acquireInstanceLock, pidAlive, procState, INSTANCE_LOCK_ERRORS } from "../server/instance-lock.mjs";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 function lockDir(t) {
   const dir = mkdtempSync(join(tmpdir(), "project-room-instance-lock-"));
@@ -107,20 +107,35 @@ test("pidAlive answers for a live pid and a bogus pid", t => {
 // database directory was refused forever instead of reclaiming the lock.
 // A zombie is created deterministically with a tiny python3 helper: fork a
 // child that exits immediately, then do not wait() on it for a few seconds.
-test("a zombie pid reads as dead and its lock is reclaimed", t => {
-  const probe = spawnSync("python3", [
+test("a zombie pid reads as dead and its lock is reclaimed", async t => {
+  // The helper must still be running while we probe: once it exits, its
+  // unreaped child is reparented to init (or a subreaper) and reaped at once,
+  // so a spawnSync that waits for exit would only ever see a vanished pid.
+  const helper = spawn("python3", [
     "-c",
-    "import os,sys,time\np=os.fork()\nif p==0: os._exit(0)\nprint(p,flush=True)\ntime.sleep(6)",
-  ], { encoding: "utf8", timeout: 10_000 });
-  if (probe.status !== 0 || !probe.stdout?.trim()) {
-    t.skip(`no python3 fork available on this host (status ${probe.status})`);
+    "import os,sys,time\np=os.fork()\nif p==0: os._exit(0)\nprint(p,flush=True)\ntime.sleep(30)",
+  ], { stdio: ["ignore", "pipe", "ignore"] });
+  t.after(() => helper.kill("SIGKILL"));
+  const line = await new Promise(resolve => {
+    let out = "";
+    const timer = setTimeout(() => resolve(null), 10_000);
+    helper.on("error", () => { clearTimeout(timer); resolve(null); });
+    helper.stdout.on("data", chunk => {
+      out += chunk;
+      if (out.includes("\n")) { clearTimeout(timer); resolve(out.trim()); }
+    });
+  });
+  if (!line) {
+    t.skip("no python3 fork available on this host");
     return;
   }
-  const zombie = Number(probe.stdout.trim());
+  const zombie = Number(line);
   if (!Number.isSafeInteger(zombie) || zombie <= 0) {
     t.skip("python3 did not report a usable pid");
     return;
   }
+  // The child exits immediately but may not have been scheduled yet.
+  for (let i = 0; i < 50 && procState(zombie) !== "Z"; i += 1) await new Promise(r => setTimeout(r, 20));
   const state = procState(zombie);
   assert.equal(state, "Z", "the unreaped child is a zombie in /proc");
   assert.equal(pidAlive(zombie), false, "a zombie is not an alive lock holder");
