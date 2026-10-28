@@ -199,13 +199,16 @@ test("sign-in offers email recovery only after invalid credentials and keeps no-
 
   store.createAccount('ui-no-room', 'New person');
   store.completeOnboarding('ui-no-room');
+  // Returning account that left its rooms: existing first-run behavior may
+  // create a starter room for a never-member account. This fixture has none.
+  store.markAccountHadRoom('ui-no-room');
   store.accountLogins.linkPasswordMethod('ui-no-room', { email: 'new-person@example.invalid', verifier: hashPassword('valid-password-for-fixture') });
   await page.goto(origin + '/?account=1');
   await form.waitFor({ state: 'visible' });
   await form.locator('[name="email"]').fill('new-person@example.invalid');
   await form.locator('[name="password"]').fill('valid-password-for-fixture');
   await form.locator('[type="submit"]').click();
-  const join = page.locator('#account-rooms-panel').getByRole('link', { name: 'Join room', exact: true });
+  const join = page.locator('#account-rooms-panel').getByRole('link', { name: 'Join with an invitation', exact: true });
   await join.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#account-rooms-list [data-account-room]').count(), 0);
   await join.focus();
