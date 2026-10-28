@@ -23,6 +23,7 @@ import { WANTS_WORK_ROUTES } from "./wants-work.mjs"; // BOARD-WAKE-2
 import { WORK_CLAIM_ROUTES } from "./work-claims.mjs";
 import { PR_WEBHOOK_ROUTES } from "../claim-autolink.mjs";
 import { ROOM_DIGEST_ROUTES } from "./room-digest.mjs";
+import { ROOM_WINDOW_ROUTES } from "./room-window.mjs";
 import { TYPING_ROUTES } from "./typing.mjs";
 import { WAKE_STATUS_ROUTES } from "./wake-status.mjs"; // plan-wake-live: wakeable / not-wakeable lists
 import { AGENT_PRESENCE_ROUTES } from "./agent-presence.mjs"; // Presence Gap 4: cross-room presence read
@@ -63,7 +64,7 @@ function unknownSchemaTypes(schema, out) {
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
 export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...AGENT_ROOM_TOKEN_ROUTES, ...DEMO_ROUTES, ...DOWNLOAD_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PROJECT_MAP_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
-  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...DOOR_FUNNEL_ROUTES, ...VERDICT_INBOX_ROUTES, ...PR_WEBHOOK_ROUTES]);
+  ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...ROOM_WINDOW_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...DOOR_FUNNEL_ROUTES, ...VERDICT_INBOX_ROUTES, ...PR_WEBHOOK_ROUTES]);
 
 export function assertRouteRow(row) {
   const problems = [];
@@ -112,6 +113,8 @@ export const MESSAGE_BODY_READS = Object.freeze([
   Object.freeze({ id: "context", group: "room", method: "GET", path: "/api/rooms/{roomId}/context" }),
   Object.freeze({ id: "agent-work", group: "room", method: "GET", path: "/api/rooms/{roomId}/agent-work" }),
   Object.freeze({ id: "digest", group: "room", method: "GET", path: "/api/rooms/{roomId}/digest" }),
+  Object.freeze({ id: "room-bootstrap", group: "room", method: "GET", path: "/api/rooms/{roomId}/bootstrap" }),
+  Object.freeze({ id: "room-messages", group: "room", method: "GET", path: "/api/rooms/{roomId}/messages" }),
   Object.freeze({ id: "open-questions", group: "room", method: "GET", path: "/api/rooms/{roomId}/open-questions" }),
   Object.freeze({ id: "activity", group: "room", method: "GET", path: "/api/rooms/{roomId}/activity" }),
   Object.freeze({ id: "mentions", group: "room", method: "GET", path: "/api/rooms/{roomId}/mentions" }),
