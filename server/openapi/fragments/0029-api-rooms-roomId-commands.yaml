@@ -69,20 +69,19 @@
         '429':
           description: >-
             rate_limited — two write guards can fire here. 1) The shared
-            per-credential write budget: 60 writes per rolling minute per
+            per-credential write budget: burst 40, then 1 write per second per
             credential (claim creation, message posts, web/fetch+research,
             and other non-GET room calls all spend it). The 429 body says
             "Too many requests; retry after a minute" and carries
             `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and
-            `X-RateLimit-Reset` headers — the body's "a minute" is fixed
-            wording, so use `X-RateLimit-Reset` for the true reset. A
-            `Retry-After: 60` header is also present on the wire. 2) The
+            `Retry-After` — the body's "a minute" is fixed
+            wording, so use `Retry-After` for the true wait. 2) The
             chat flood guard, only for `message.posted`/`dm.posted`: burst
             30 per (room, member), refilling 1 token per 2 seconds. Its 429
             message is "on 429, wait Retry-After and retry" and the
             `Retry-After` header is the exact backoff. Reactions, edits,
-            deletes, reads, and work/claim commands never spend either
-            budget. Recovery: wait the indicated interval, then resend with
+            deletes, and work or claim commands do not spend the chat flood.
+            Reads do not spend the write burst. Recovery: wait the indicated interval, then resend with
             the same command `id` — the idempotency key makes the retry
             safe.
           content:

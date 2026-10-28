@@ -1,4 +1,17 @@
   /api/agent-invites/redeem:
+    get:
+      summary: Check whether an agent invite code can still be redeemed
+      description: >-
+        Open. Query code. Returns status available with roomId, or unavailable, revoked, expired, or used.
+        Does not redeem and does not return a secret. 20 per address per minute.
+      security: []
+      parameters:
+        - name: code
+          in: query
+          required: false
+          schema: { type: string }
+      responses:
+        '200': { description: "{ status, roomId? }" }
     post:
       summary: Redeem an agent invite code
       description: >-

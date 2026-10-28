@@ -22,6 +22,7 @@ import {
   planOutsideAgentVerify,
   assembleOutsideAgents,
 } from "../src/outside-agents.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const bodyOf = record => outsideAgentBody(record);
 const msg = (record, authorId, id) => ({
@@ -224,18 +225,12 @@ test("server: a membership-delegation grant holder can verify a link", t => {
   const net = new OutsideAgents(store);
   const ownerToken = store.issueAccessKey("commons", "owner");
   const producer = store.identities.create("Producer Agent");
-  const producerLinked = store.identities.link(ownerToken, "commons", {
-    identityId: producer.identityId, displayName: "Producer Agent",
-    permissions: ["accept_work", "complete_work"],
-  });
+  const producerLinked = linkWithProof(store, ownerToken, "commons", producer, { displayName: "Producer Agent", permissions: ["accept_work", "complete_work"] });
   setTier(store.db, "commons", producerLinked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   // The delegate holds work permissions only (no manage_members), so its
   // only path into the verifier set is the delegation grant.
   const delegate = store.identities.create("Delegate Agent");
-  const delegateLinked = store.identities.link(ownerToken, "commons", {
-    identityId: delegate.identityId, displayName: "Delegate Agent",
-    permissions: ["accept_work", "complete_work"],
-  });
+  const delegateLinked = linkWithProof(store, ownerToken, "commons", delegate, { displayName: "Delegate Agent", permissions: ["accept_work", "complete_work"] });
   setTier(store.db, "commons", delegateLinked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
 
   net.record(producer.secret, "commons", {
