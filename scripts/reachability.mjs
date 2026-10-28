@@ -64,6 +64,11 @@ export const KEEP = [
   // edit those files, and the runtime package list is one of them.
   "server/repro-check.mjs",
   "server/agent-audit.mjs",
+  // Deliberately standalone guard (I3, money-adjacent) — REACHABILITY
+  // CLASS RULE KEEP: no live settle path calls it by design. Wiring it
+  // into settlement is money-semantic and a separate gated decision —
+  // NOT decided here. Remove when that wiring lands.
+  "server/bounty-sybil-guard.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
