@@ -18,7 +18,7 @@
 // and there is no ERC-8004 or other on-chain dependency. Verifiers trust
 // the room that registered the key.
 import { generateKeyPair as generateEd25519KeyPair, isValidPublicKey } from "./agent-card-signing.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 

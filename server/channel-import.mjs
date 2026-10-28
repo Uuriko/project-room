@@ -7,7 +7,7 @@ import { connectionState, profileChannel, requireContract } from "./channel-conn
 import * as telegram from "./channel-adapters/telegram.mjs";
 import { webhookAcceptsHash } from "./channel-adapters/telegram-rotation.mjs";
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 // Webhook route limits (server/http.mjs): the JSON body cap is 64 KB because a
