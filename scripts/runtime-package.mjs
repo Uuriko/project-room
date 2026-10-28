@@ -422,6 +422,7 @@ optional.push("server/db-util.mjs"); // shared sqlite tableExists
 optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs"); // Archive-aware message domain reads
 optional.push("server/room-shard.mjs", "server/room-shard-tables.mjs"); // per-room table classification; the worker re-exports it and still serves invite-only-pilot
 optional.push("server/room-shard-flag.mjs"); // ROOM_PER_ROOM_OBJECTS default off; storage_home is added only when the flag is on
+optional.push("server/probabilistic-counters.mjs"); // P5 discovery-charter build registration
 optional.push("server/room-shard-route.mjs", "cloudflare/room-shard.mjs"); // ROOM_SHARD class and the pilot/shard name resolver; flag off does not open shard storage
 optional.push("server/room-shard-copy.mjs"); // operator copy of one room's room-tables and the digest compare; not called from the command path
 // Retired UI files remain recognized only when an historical commit contains them.
