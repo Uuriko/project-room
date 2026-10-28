@@ -181,6 +181,15 @@ likewise absent. An accepted item migrated today loses its brief.
 - `humanDecisionMakerId` and `ownerDecisionRequired` have no board field
   in any state. The decision gate's addressee exists only on the item.
 
+**Amendment (B-4' Phase 0, 2026-10-27):** slice 2 (decision fields) and
+slice 4 (`accountableMemberId`) closed most of this gap: the board row
+now carries `ownerDecisionRequired` (boolean), `humanDecisionMakerId`
+(string|null) and `accountableMemberId` (string|null) verbatim in every
+mapped state, including accepted-but-unclaimed — the Step 0 fate test is
+amended to pin the new survivors. `verifierMemberId` still survives only
+as a `reviewPolicy` kind. The brief fields of §4.1 remain homeless at
+this slice; slice 3 amends §4.1 when it lands.
+
 ### 4.3 Verification semantics: `independenceConfirmed`, bindings
 Item verification is designated-verifier-only, bound to a specific
 completion event (`completionEventId`) and evidence version, and the
