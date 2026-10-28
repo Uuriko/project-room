@@ -1,9 +1,11 @@
+import { messageRepository } from "./message-repository.mjs";
 import { gmailImportAuth } from './gmail-import-authority.mjs';
 import { createHash } from "node:crypto";
 import { validId, EVENT_TYPES as T, hasConfirmedIndependentPass } from "../src/events.js";
 import { currentApproval } from "../src/workflow.js";
 import { storedText } from "./text-results.mjs";
-import { ServiceError } from "./store.mjs";
+import { historyFloor, messageVisibleToViewer } from "./history-visibility.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { isSend, internalSend, validateSend, sendPreview, transitionSend } from "./inbox-outbox.mjs";
 import { readEmailEnvelope, EmailContractError } from "./email-envelope.mjs";
 import { indexMessages, search as runInboxSearch } from "./inbox-search.mjs";
@@ -15,11 +17,11 @@ import { InboxStitchStore } from "./inbox-stitch-store.mjs";
 import { createNotifyPrefs } from "./notify-prefs.mjs";
 import { runImportGuards, replayImportedNotification, scoreImportedEnvelope } from "./inbox-import-guards.mjs";
 import { shadowDecisionForImport } from "./spam-shadow.mjs";
-import { spamQuarantineStatuses } from "./spam-quarantine-journal.mjs";
+import { spamQuarantineStatuses } from "./journal.mjs";
 import { reviewCoverageBySignal } from "./quarantine-review-coverage.mjs";
 import { channels, connectionState, profileChannel } from "./channel-connection.mjs";
 import { prepareGraphReplyDraft, buildGraphReplyDraft, classifyGraphReplyCreation, classifyGraphReplyUpdateAcknowledgment, normalizeReplyObservation, prepareGraphReplyUpdate, buildGraphReplyUpdate, compareReplyUpdateEnvelope } from "./graph-reply-draft.mjs";
-import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./graph-reply-journal.mjs";
+import { isReplyAttempt, validateReplyAttempt, transitionReplyAttempt, replyObservationReviewable, isReplyUpdate, transitionReplyUpdate } from "./journal.mjs";
 import { buildUpdateInspection, buildUpdateReview, replyAttemptWithObservation } from "./graph-reply-update-review.mjs";
 
 const transportAuthority = Symbol("private inbox transport");
@@ -929,7 +931,7 @@ export class Inbox {
       AND json_extract(request_json,'$.action') IN ('source.share','source.excerpt') ORDER BY sequence DESC`).all(accountId, before, sourceId, roomId)
       .map(row => ({ ...row, request: JSON.parse(row.request_json), receipt: JSON.parse(row.receipt_json) }));
   }
-  resultRecord(sourceRevision, share, item, state) {
+  resultRecord(sourceRevision, share, item, state, viewerId = null) {
     const base = { workItemId: item.id, title: item.title, shareRequestId: share.request_id,
       sourceRevision: share.request.sourceRevision, messageId: share.receipt.messageId };
     const status = share.request.sourceRevision !== sourceRevision ? "source_changed"
@@ -937,6 +939,18 @@ export class Inbox {
       : !item.receipt?.nativeText ? "no_native_result"
       : !hasConfirmedIndependentPass(item) || !currentApproval(item) || state.members[item.decision?.actorId]?.kind !== "human" ? "needs_review" : "ready";
     if (status !== "ready") return { ...base, status, resultVersion: null };
+    // R206-1: a result body is room text. It is readable only where the room's
+    // read rules make it readable: a DM reaches only its parties, a message
+    // below the reader's history floor reaches no one, and a reader with no
+    // active Room membership reaches nothing. viewerId null is the audit
+    // replay, which must reproduce journaled receipts from the stored text.
+    if (viewerId !== null) {
+      const member = state.members[viewerId];
+      const message = messageRepository({ db: this.db }, state.room.id, state).get(item.receipt.nativeText.messageId);
+      if (!member || member.active === false || !message
+        || !messageVisibleToViewer(message, viewerId, historyFloor(this.db, state, state.room.id, viewerId)))
+        return { ...base, status: "no_native_result", resultVersion: null };
+    }
     const evidence = storedText(this.db, state, item.id, item.receipt.nativeText.messageId, item.receipt.nativeText.messageEventId);
     if (evidence.body.length > 4000) return { ...base, status: "too_long", resultVersion: null };
     const proof = { roomId: state.room.id, workItemId: item.id, shareRequestId: share.request_id,
@@ -954,17 +968,22 @@ export class Inbox {
       if (workItemId !== null && !items.length) fail(404, "inbox_result_not_found", "Result not found.");
       return { contractVersion: 1, viewer: viewer(auth), sourceId, roomId, sourceRevision: source.revision,
         results: items.map(item => {
-          const value = this.resultRecord(source.revision, shares.get(item.sourceMessageId), item, state);
+          const value = this.resultRecord(source.revision, shares.get(item.sourceMessageId), item, state, auth.member.id);
           if (workItemId === null) { delete value.body; delete value.proof; }
           return value;
         }) };
     });
   }
-  adopted(accountId, request, room, before) {
+  adopted(accountId, request, room, before, { replay = false } = {}) {
     const share = this.shares(accountId, request.sourceId, request.roomId, before).find(s => s.request_id === request.shareRequestId);
     const item = room.state.workItems[request.workItemId];
     if (!share || !item || item.sourceMessageId !== share.receipt.messageId) fail(404, "inbox_result_not_found", "Result not found.");
-    const result = this.resultRecord(request.sourceRevision, share, item, room.state);
+    // R206-1: a live adopt reads as the adopting account's Room member; an
+    // account without membership there reads nothing. The audit replay
+    // reproduces the journaled body from the stored text instead.
+    const viewerId = replay ? null
+      : this.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(room.state.room.id, accountId)?.member_id ?? "";
+    const result = this.resultRecord(request.sourceRevision, share, item, room.state, viewerId);
     if (result.status !== "ready" || result.resultVersion !== request.resultVersion)
       fail(409, "stale_inbox_result", "Result or review changed. Review again.");
     return { body: result.body, origin: { ...result.proof, roomSequence: room.sequence } };
@@ -1475,7 +1494,7 @@ export class Inbox {
             require(revision(receipt.origin?.roomSequence) && receipt.origin.roomSequence > 0);
             const roomKey = canonical([request.roomId, receipt.origin.roomSequence]);
             if (!historicalRooms.has(roomKey)) historicalRooms.set(roomKey, this.store.rebuildProjection(request.roomId, receipt.origin.roomSequence));
-            Object.assign(expected, this.adopted(row.account_id, request, historicalRooms.get(roomKey), row.sequence));
+            Object.assign(expected, this.adopted(row.account_id, request, historicalRooms.get(roomKey), row.sequence, { replay: true }));
           }
           drafts.set(key, { account_id: row.account_id, source_id: request.sourceId, revision: expected.revision, source_revision: request.sourceRevision,
             body: request.action === "draft.adopt" ? expected.body : request.body, updated_at: row.at });

@@ -34,6 +34,7 @@ async function fixture(t, { reviewerPermissions = [] } = {}) {
 
 const invalid = error => error.status === 422 && error.code === 'invalid_claim_input';
 
+const roundOf = c => ({ expectedClaimedAt: c.claimedAt ?? c.claim?.claimedAt, expectedHistoryLength: (c.history?.length ?? c.claim?.history?.length ?? 0) + (c.historyOmitted ?? c.claim?.historyOmitted ?? 0) });
 test('SDK retains declared files, overlap warnings, and completion receipt metadata over HTTP', async t => {
   const { owner: client } = await fixture(t);
   const created = await client.workClaimCreate({ id: 'holder', files: ['./src//shared.js'], tags: ['migration'] });
@@ -69,7 +70,7 @@ test('SDK convenience claim and completion preserve creation metadata and explic
   assert.deepEqual(made.files, ['src/first.js']);
   assert.deepEqual(made.tags, ['created']);
   assert.equal(made.reviewPolicy, 'distinct_member');
-  await client.workRelease('convenience');
+  await client.workRelease('convenience', roundOf(await client.workClaimGet('convenience')));
   const reclaimed = await client.workClaim('convenience', { files: [] });
   assert.deepEqual(reclaimed.files, []);
   assert.deepEqual(reclaimed.tags, ['created']);
@@ -113,11 +114,15 @@ test('SDK sends invalid declarations for server rejection instead of silently dr
 
 test('SDK preserves legacy notes and requires an explicit approval for reviewed completion', async t => {
   const { owner, peer } = await fixture(t, { reviewerPermissions: ['verify'] });
+  const BUNDLE = { artifact: { kind: 'text', ref: 'room://artifacts/sdk', sha256: 'd'.repeat(64) },
+    checks: [{ name: 'unit', result: 'pass' }], criteria: [] };
   await owner.workClaim('reviewed', { reviewPolicy: 'distinct_member' });
   await owner.updateWorkItem('reviewed', { state: 'in_progress' });
   const before = stripTrust(await owner.workClaimGet('reviewed'));
+  // #3546: from in_progress there is no completion call at all — the work
+  // must be delivered first, whatever the review state.
   await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
-    error => error.status === 403 && error.code === 'work_review_rejected');
+    error => error.status === 422 && error.code === 'work_not_delivered');
   assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), before);
   const reviewed = await peer.reviewWorkItem('reviewed', { note: 'Checked the result' });
   assert.equal(reviewed.attestations.length, 1);
@@ -125,7 +130,7 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
   assert.equal(reviewed.attestations[0].note, 'Checked the result');
   assert.deepEqual(reviewed.reviews, []);
   await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
-    error => error.status === 403 && error.code === 'work_review_rejected');
+    error => error.status === 422 && error.code === 'work_not_delivered');
   await assert.rejects(peer.workComplete('reviewed', { reviewedBy: 'reviewer' }),
     error => error.status === 403 && error.code === 'work_not_owner');
   assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), reviewed);
@@ -134,7 +139,7 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
     assert.equal(negative.reviews[0].verdict, verdict);
     assert.equal(negative.reviews[0].memberId, 'reviewer');
     await assert.rejects(owner.workComplete('reviewed', { reviewedBy: 'reviewer' }),
-      error => error.status === 403 && error.code === 'work_review_rejected');
+      error => error.status === 422 && error.code === 'work_not_delivered');
     assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), negative);
   }
   const approval = { verdict: 'approve', summary: 'Explicitly approved the current result', url: 'https://example.com/review/result' };
@@ -142,9 +147,15 @@ test('SDK preserves legacy notes and requires an explicit approval for reviewed 
   assert.equal(approved.reviews[0].memberId, 'reviewer');
   for (const [field, value] of Object.entries(approval)) assert.equal(approved.reviews[0][field], value);
   assert.deepEqual(stripTrust((await owner.workClaimGet('reviewed')).reviews), approved.reviews);
-  const done = await owner.workComplete('reviewed', { reviewedBy: 'reviewer' });
+  // the holder delivers; the reviewer verifies from their own session
+  const delivered = await owner.workDeliver('reviewed', { delivery: BUNDLE });
+  assert.equal(delivered.state, 'delivered');
+  await assert.rejects(owner.workComplete('reviewed', {}),
+    error => error.status === 403 && error.code === 'work_review_rejected');
+  const done = await peer.workComplete('reviewed', {});
   assert.equal(done.state, 'done');
   assert.equal(done.reviewedBy, 'reviewer');
+  assert.equal(done.verification.state, 'verified');
   await assert.rejects(peer.reviewWorkItem('reviewed', { note: 'Too late' }), invalid);
   assert.deepEqual(stripTrust(await owner.workClaimGet('reviewed')), done);
 });
@@ -185,7 +196,10 @@ test('SDK links a later PR with both preconditions and preserves HTTP refusals',
     expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
   const linked = await owner.linkWorkItemPullRequest(claimed.id, args);
   assert.equal(linked.pullRequests[0].url, args.pullRequest.slice(0, -1));
-  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
+  // #3661: reads derive pullRequest.settlement (never stored), so the read
+  // carries exactly one field the mutation response and stored record lack.
+  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)),
+    { ...linked, pullRequest: { ...linked.pullRequest, settlement: 'pending' } });
   await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, args), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, 'work_claim_conflict');
@@ -198,7 +212,9 @@ test('SDK links a later PR with both preconditions and preserves HTTP refusals',
     { expectedClaimedAt: null }, { pullRequest: { url: args.pullRequest, outcome: 'merged' } }]) {
     await assert.rejects(owner.linkWorkItemPullRequest(claimed.id, { ...fresh, ...fields }), invalid);
   }
-  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)), linked);
+  // #3661: as above, the read carries the derived settlement field.
+  assert.deepEqual(stripTrust(await owner.workClaimGet(claimed.id)),
+    { ...linked, pullRequest: { ...linked.pullRequest, settlement: 'pending' } });
 });
 
 // Transport regression: handler coverage cannot see a state option dropped by
@@ -237,6 +253,9 @@ test('SDK state filters retrieve older done claims through explicit and automati
 
 // The published OpenAPI example is client input, not an expected value derived
 // from the implementation. Exercise it against a real capped stored history.
+// A plain read reunites the spilled prefix (W3 claim-history spill), so the
+// SDK sees the full documented history; mutation responses still return the
+// stored 200-stamp window plus the omission counter.
 test('the documented capped-history PR basis succeeds through the SDK', async t => {
   const api = parse(readFileSync(new URL('../docs/openapi.yaml', import.meta.url), 'utf8'));
   const schemas = api.paths['/api/rooms/{roomId}/work-claims/{claimId}/update'].post
@@ -251,8 +270,8 @@ test('the documented capped-history PR basis succeeds through the SDK', async t 
   for (let index = 0; index < additions; index++) item = updateWork(item, 'owner', { note: `Progress ${index}` });
   store.workClaims.set('commons', item);
   const read = await owner.workClaimGet(item.id);
-  assert.equal(read.history.length, 200);
-  assert.equal(read.historyOmitted, 3);
+  assert.equal(read.history.length, 203);
+  assert.equal(read.historyOmitted, undefined);
   const input = { pullRequest: 'https://github.com/Uuriko/project-room/pull/18', expectedClaimedAt: read.claimedAt };
   await assert.rejects(owner.linkWorkItemPullRequest(item.id, { ...input, expectedHistoryLength: 200 }),
     error => error.status === 409 && error.code === 'work_claim_conflict');
@@ -391,4 +410,37 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   await disconnected;
   release();
   assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
+});
+
+
+test('SDK repository and branch reach creation, claiming, and convenience reclaim over HTTP', async t => {
+  const { owner } = await fixture(t);
+  const created = await owner.workClaimCreate({ id: 'repo-direct', repo: 'acme/widgets', branch: 'codex/create' });
+  assert.equal(created.repo, 'acme/widgets'); assert.equal(created.branch, 'codex/create');
+  const claimed = await owner.claimWorkItem('repo-direct', { repo: 'acme/other', branch: 'codex/claim' });
+  assert.equal(claimed.repo, 'acme/other'); assert.equal(claimed.branch, 'codex/claim');
+  const convenient = await owner.workClaim('repo-convenience', { repo: 'acme/widgets', branch: 'codex/new' });
+  assert.equal(convenient.repo, 'acme/widgets'); assert.equal(convenient.branch, 'codex/new');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const reclaimed = await owner.workClaim('repo-convenience', { repo: 'acme/changed', branch: 'codex/reclaim' });
+  assert.equal(reclaimed.repo, 'acme/changed'); assert.equal(reclaimed.branch, 'codex/reclaim');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const retained = await owner.workClaim('repo-convenience');
+  assert.equal(retained.repo, 'acme/changed'); assert.equal(retained.branch, 'codex/reclaim');
+  assert.equal((await owner.workClaimGet('repo-convenience')).repo, 'acme/changed');
+});
+
+test('SDK invalid repository and branch declarations reach server validation', async t => {
+  const { owner } = await fixture(t);
+  for (const fields of [{ repo: 'invalid repo' }, { branch: 'invalid branch' }]) {
+    await assert.rejects(owner.workClaimCreate({ id: 'bad-repo-create', ...fields }), invalid);
+    await assert.rejects(owner.workClaim('bad-repo-convenience', fields), invalid);
+    await assert.rejects(owner.workClaimGet('bad-repo-create'), error => error.status === 404);
+    await assert.rejects(owner.workClaimGet('bad-repo-convenience'), error => error.status === 404);
+  }
+  await owner.workClaimCreate({ id: 'bad-repo-existing', repo: 'acme/widgets', branch: 'main' });
+  await assert.rejects(owner.claimWorkItem('bad-repo-existing', { repo: 'invalid repo' }), invalid);
+  await assert.rejects(owner.workClaim('bad-repo-existing', { branch: 'invalid branch' }), invalid);
+  const unchanged = await owner.workClaimGet('bad-repo-existing');
+  assert.equal(unchanged.state, 'unclaimed'); assert.equal(unchanged.repo, 'acme/widgets'); assert.equal(unchanged.branch, 'main');
 });

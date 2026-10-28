@@ -1,16 +1,22 @@
 # Deploy runbook
 
+## Canonical runtime
+
+**The Cloudflare Worker + Durable Object is the canonical — and only — production runtime for Project Room.** The same server code also runs under plain Node, but Node is a **dev/test/pilot runtime only**: it is how the service runs locally, in CI, and in the invite-only VPS pilot. Node is not a production candidate and is not a storage failover for the Durable Object. When a change behaves differently across the two runtimes, the Worker/Durable Object behavior is the correct one and the Node difference is the bug.
+
+The VPS pilot (systemd units and Caddyfile in `deploy/`) is **parked** as of 2026-10-13: treated as dead for planning, kept in tree for reference, and not part of the release lane below. Unpark it only by an explicit decision recorded here.
+
 Three Workers run the same code. Only one of them owns production data.
 
 | Script | Role | How it is reached |
 | --- | --- | --- |
 | `project-room-stage` | Isolated staging. Its own Durable Object. No `script_name` on `ROOM`. | `https://project-room-stage.getdasha.workers.dev` only. No custom domain. |
-| `project-room` | Canonical production. Owns the live Durable Object, the minute cron, and `room.trydemigod.com`. | `wrangler deploy --env production` |
+| `project-room` | Canonical production. Owns the live Durable Object, the every-30-minutes cron (`*/30 * * * *`), and `room.trydemigod.com`. | `wrangler deploy --env production` |
 | `project-room-staging` | Public entry for `getdasha.com/room`. Forwards to the production Durable Object with `script_name: project-room`. | `wrangler deploy` with no `--env` |
 
 The entry script is still named `project-room-staging`. That name is historical. Do not rename the deployed script: the getdasha route and email routing are bound to it. `wrangler.jsonc` cannot carry comments (`JSON.parse` reads it), so this page and `cloudflare/README.md` are where the role is named. The entry's role is entry, not a second room.
 
-Isolated staging is the place a schema or constructor change runs before production. It does not see production rows. The Worker, the workflow, and the secret names are in [STAGING.md](STAGING.md). Gmail stays off on every deploy (`ROOM_GMAIL_ENABLED=0`, and keep `ROOM_GMAIL_PILOT_ONLY=1`). Turning Gmail on is a separate release after the [Gmail setup requirements](history/GMAIL-SETUP.md).
+Isolated staging is the place a schema or constructor change runs before production. It does not see production rows. The Worker, the workflow, and the secret names are in [STAGING.md](STAGING.md). Gmail stays off on every deploy (`ROOM_GMAIL_ENABLED=0`, and keep `ROOM_GMAIL_PILOT_ONLY=1`). Turning Gmail on is a separate release after the [Gmail setup requirements](../archive/docs/history/GMAIL-SETUP.md).
 
 Run the commands below from `cloudflare/` unless a command says otherwise. `--keep-vars` leaves secrets and dashboard text bindings in place. Do not put secret values in the repo.
 
@@ -29,7 +35,7 @@ The first staging deploy creates the `room-sqlite-v1` class on `project-room-sta
 
 GitHub Actions deploys `main` to this Worker on every push, and from the Actions tab (`.github/workflows/staging.yml`). The workflow needs the Actions secrets `CLOUDFLARE_API_TOKEN` (Workers script edit on this account) and `ROOM_AGENT_CARD_SIGNING_KEY`. If that token can see more than one account, also set `CLOUDFLARE_ACCOUNT_ID`. When a secret is missing the workflow fails with `missing <NAME>` and deploys nothing. It does not deploy production, and it is not a required check on `main`.
 
-Worker secrets on `project-room-stage` are optional for the public smoke. Set a name only when the rehearsal needs it, with `pnpm exec wrangler secret put NAME --env staging`. Names only, never values in git: `ROOM_IDENTITY_HASH_KEY`, `ROOM_MAINTENANCE`, `ROOM_BOOTSTRAP_OWNER_HASH`, `ROOM_BOOTSTRAP_EXPIRES_AT`, `ROOM_VAPID_PUBLIC_KEY`, `ROOM_VAPID_PRIVATE_KEY`, `ROOM_VAPID_SUBJECT`, `ROOM_GOOGLE_CLIENT_ID`, `ROOM_GOOGLE_CLIENT_SECRET`, `ROOM_GMAIL_TOKEN_KEY`, `ROOM_GMAIL_PILOT_ACCOUNT_ID`, `RESEND_API_KEY`, `ROOM_MAGIC_FROM`, `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `ROOM_BOARD_V2_ENABLED`, `ROOM_RETENTION_ALLOW_DELETION`, `STITCHING_ENABLED`, `ROOM_PASSKEY_RP_ID`, `ROOM_OPERATOR_ACCOUNT_ID`, `ROOM_OPERATOR_TOKEN_SHA256`, `ROOM_OPERATOR_PROTECTED_ROOMS`, `ROOM_AGENT_CARD_SIGNING_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ROOM_BACKUP_TOKEN`. `CHANNEL_SEND_BUDGET`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present.
+Worker secrets on `project-room-stage` are optional for the public smoke. Set a name only when the rehearsal needs it, with `pnpm exec wrangler secret put NAME --env staging`. Names only, never values in git: `ROOM_IDENTITY_HASH_KEY`, `ROOM_MAINTENANCE`, `ROOM_BOOTSTRAP_OWNER_HASH`, `ROOM_BOOTSTRAP_EXPIRES_AT`, `ROOM_VAPID_PUBLIC_KEY`, `ROOM_VAPID_PRIVATE_KEY`, `ROOM_VAPID_SUBJECT`, `ROOM_GOOGLE_CLIENT_ID`, `ROOM_GOOGLE_CLIENT_SECRET`, `ROOM_GMAIL_TOKEN_KEY`, `ROOM_GMAIL_PILOT_ACCOUNT_ID`, `RESEND_API_KEY`, `ROOM_MAGIC_FROM`, `GITHUB_TOKEN`, `GH_TOKEN`, `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`, `ROOM_RETENTION_ALLOW_DELETION`, `STITCHING_ENABLED`, `ROOM_PASSKEY_RP_ID`, `ROOM_OPERATOR_ACCOUNT_ID`, `ROOM_OPERATOR_TOKEN_SHA256`, `ROOM_OPERATOR_PROTECTED_ROOMS`, `ROOM_AGENT_CARD_SIGNING_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `ROOM_EXPORT_TOKEN`, `ROOM_RESTORE_TOKEN`. `CHANNEL_SEND_BUDGET`, `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`, and `TELEMETRY` are read when present.
 
 ## 2. Verify staging
 
@@ -40,7 +46,7 @@ node scripts/cold-start-probe.mjs --base https://project-room-stage.getdasha.wor
 ROOM_SMOKE_ORIGIN=https://project-room-stage.getdasha.workers.dev node scripts/live-smoke.mjs --browser
 ```
 
-The cold-start probe fails when the first `/api/version` takes 2 seconds or more. The smoke checks public pages only. It does not sign in.
+The cold-start probe's 2-second budget gates only the Worker cold start: its first request is `/api/version/worker`, answered by the Worker without touching the Durable Object. The probe then requests `/api/version` as a separate, ungated Durable Object cold-start measurement (`doCold` in its report), so a slow DO cold start is reported distinctly and does not fail the Worker gate. Cloudflare 1101 (JavaScript exception) and 1102 (CPU limit) responses are counted separately in the report. The smoke checks public pages only. It does not sign in.
 
 Also run the cross-worker identity check in `cloudflare/http.check.mjs` in CI (the `cloudflare` job). That check proves the entry and the canonical Worker still share one production namespace, and that staging's binding has no `script_name`.
 
@@ -52,9 +58,11 @@ Do not pull, commit, or rebuild from a different tree between staging and produc
 
 ```sh
 cd cloudflare
-pnpm exec wrangler deploy --env production --keep-vars
-pnpm exec wrangler deploy --keep-vars
+pnpm exec wrangler deploy --env production --keep-vars --var ROOM_BODIES_AT_REST:1
+pnpm exec wrangler deploy --keep-vars --var ROOM_BODIES_AT_REST:1
 ```
+
+Both commands carry the `--var ROOM_BODIES_AT_REST:1` pin, exactly as `deploy-prod` does; the pin is load-bearing (see [DEPLOY-LANE.md](DEPLOY-LANE.md)) and must not be dropped in the manual path.
 
 Keep `env.production.limits.cpu_ms` at `30000`. A 1000 ms budget on the owning script caused repeated CPU resets and HTTP 500 / 1101 on 25 September 2026. The entry can keep its own 1000 ms forwarding budget. Do not let the top-level limit overwrite production. See [INCIDENT-1101-RUNBOOK.md](INCIDENT-1101-RUNBOOK.md).
 
@@ -98,12 +106,14 @@ Record the version ids you rolled back to in `docs/CURRENT-ROOM.md`.
 
 ## Backups
 
-The Durable Object cannot hand out its sqlite file. `GET /api/operator/export` streams the event log and the other tables as NDJSON. Secret and token columns are sha256 hex. Already-hashed columns stay. `auth_epoch` stays a number. The route answers 404 until `ROOM_BACKUP_TOKEN` (at least 16 characters) is set on the script that owns the object:
+The Durable Object cannot hand out its sqlite file. `GET /api/operator/export` streams the event log and the other tables as NDJSON. Secret and token columns are sha256 hex. Already-hashed columns stay. `auth_epoch` stays a number. The route answers 404 until `ROOM_EXPORT_TOKEN` (at least 16 characters) is set on the script that owns the object:
 
 ```sh
 cd cloudflare
-pnpm exec wrangler secret put ROOM_BACKUP_TOKEN --env production
+pnpm exec wrangler secret put ROOM_EXPORT_TOKEN --env production
 ```
+
+TM-2 split the backup credential: `ROOM_EXPORT_TOKEN` opens the export door only and may stay armed standing; the restore doors (`POST /api/operator/restore`, `POST /api/operator/restore-from-backup`) answer only to `ROOM_RESTORE_TOKEN`, which stays unset outside a restore incident. The retired `ROOM_BACKUP_TOKEN` opens nothing.
 
 Set it on `--env staging` as well if operators will pull a staging export. The check runs inside the Durable Object, so a secret only on the entry Worker does not unlock the route.
 
@@ -113,15 +123,16 @@ Replay a saved export into a new file:
 node scripts/replay-room-export.mjs --from room-export.ndjson --to /var/lib/project-room/restore/room.sqlite
 ```
 
-The production cron writes `room-backups/YYYY-MM-DD.ndjson` to R2 when the owning script has a binding named `ROOM_BACKUPS`. Without that binding the tick skips and the cron still succeeds. The binding is not in the checked-in config. Add it only after the bucket exists, under `env.production` in `cloudflare/wrangler.jsonc`:
+The production cron writes one nightly backup of the whole Durable Object store to `room-backups/YYYY-MM-DD.ndjson`. It uses an R2 binding named `ROOM_BACKUPS` when one exists, and otherwise the Workers KV binding `ROOM_BACKUPS_KV`. Production uses KV today: `cloudflare/wrangler.jsonc` binds `ROOM_BACKUPS_KV` under `env.production` to the KV namespace `project-room-backups`, stored as 16 MiB parts plus a manifest written last, with a 35-day expiry. R2 is not enabled on the Cloudflare account yet. A failed write is logged as `[room-backup]` and does not fail the rest of the cron. See [BACKUPS.md](BACKUPS.md) for the KV layout, the R2 switch-over steps, and the tested restore.
 
-```json
-"r2_buckets": [{ "binding": "ROOM_BACKUPS", "bucket_name": "project-room-backups" }]
-```
-
-Then deploy the canonical Worker with `--keep-vars`. A binding that exists only in the dashboard is dropped on the next deploy. Create the bucket `project-room-backups` first.
+Bindings must live in the checked-in config: a binding that exists only in the dashboard is dropped on the next deploy.
 
 The on-disk Node server still uses `scripts/backup-room.mjs`, which copies a sqlite file. That path is not the hosted Durable Object.
+
+Disaster recovery for the hosted object — the `POST /api/operator/restore`
+endpoint that replays an NDJSON export into an empty Durable Object, the
+honest RPO/RTO, and what a restore does and does not recover — is
+[BACKUP-DR.md](BACKUP-DR.md).
 
 ## Operator
 
@@ -156,8 +167,7 @@ second failed run in a row notifies once. Later failures in that same incident
 do not notify again. When a later run passes, the Worker sends one recovery
 notice and clears the incident.
 
-The 6-hour GitHub schedules stay the deep checks: `live-smoke.yml` and
-`qa2-synthetic.yml`. This Worker is the 5-minute outage signal.
+The 6-hour GitHub schedule `live-smoke.yml` stays the deep check. This Worker is the 5-minute outage signal.
 
 Notices go to two destinations. Each one stays quiet until its secret is set.
 The Worker never writes the token or the webhook URL into the notice or the

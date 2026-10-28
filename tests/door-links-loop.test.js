@@ -4,7 +4,7 @@
 //  - #1602: /about's "Open Project Room" CTA must not be href="/" (which
 //    reloads the front door). It points at the room app's start-room intent
 //    (/?start=room) — the same main action as the www door's "Start a room"
-//    (deploy/room-entry.mjs START_ROOM_URL).
+//    (server/room-entry.mjs START_ROOM_URL).
 //  - #1605: the no-JS static hero's "Human door" must not point at
 //    https://www.trydemigod.com/room, and the www door must not link back
 //    into a room-host page that links back to it (no www -> room -> www
@@ -20,8 +20,8 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { ROOM_ENTRY_HTML, START_ROOM_URL } from "../deploy/room-entry.mjs";
-import { ROOM_ORIGIN } from "../deploy/agent-discovery.mjs";
+import { ROOM_ENTRY_HTML, START_ROOM_URL } from "../server/room-entry.mjs";
+import { ROOM_ORIGIN } from "../server/agent-discovery.mjs";
 
 const WWW_DOOR_URL = "https://www.trydemigod.com/room";
 

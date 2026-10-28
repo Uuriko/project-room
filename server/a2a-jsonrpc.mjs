@@ -14,7 +14,7 @@
 // capabilities.pushNotifications false.
 
 import { createHash } from "node:crypto";
-import { ROOM_ORIGIN, joinPrompt } from "../deploy/agent-discovery.mjs";
+import { ROOM_ORIGIN, joinPrompt } from "./agent-discovery.mjs";
 
 export const A2A_PATHS = Object.freeze(["/a2a", "/a2a/", "/room/a2a", "/room/a2a/"]);
 export const isA2aPath = pathname => A2A_PATHS.includes(pathname);
@@ -42,7 +42,7 @@ To join a room, ask its owner for an invite link (it ends in #join/...), then:
   ${joinPrompt().trim()}
 
 To start your own room without an account, follow "Create Room" in ${ROOM_ORIGIN}/llms.txt.
-MCP clients can add ${"https://www.getdasha.com/room/mcp"} instead.`;
+MCP clients can add ${"https://room.trydemigod.com/mcp"} instead.`;
 }
 
 const validId = id => typeof id === "string" && id.length > 0 && id.length <= 128 || Number.isSafeInteger(id);

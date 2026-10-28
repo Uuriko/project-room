@@ -11,6 +11,7 @@ import { attachmentLimits } from "../server/attachment-schema.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { issueSpendGrant } from "../server/spend-grants.mjs";
 import { mcpAttachmentBodyBytes } from "../server/room-attachment-bytes.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 const FILE_TOOLS = ["room_put_file", "room_list_files", "room_get_file", "room_discard_file", "room_commit_file"];
@@ -85,9 +86,7 @@ test("enrolled members upload and download room_attachments through hosted MCP",
   const created = rooms.create(owner.secret, {
     roomId: "file-den", title: "File den", purpose: "Room file bytes", kind: "personal", displayName: "File owner"
   });
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "File peer", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "File peer", permissions: [] });
   const names = (await (await rpc(origin, "tools/list", { profile: "full" }, owner.secret)).json()).result.tools.map(tool => tool.name);
   for (const name of FILE_TOOLS) assert.equal(names.includes(name), true);
   const bytes = Buffer.from("room file bytes");
@@ -138,7 +137,12 @@ test("enrolled members upload and download room_attachments through hosted MCP",
 
   const hidden = await call(origin, "room_get_file", { roomId: created.roomId, id: "note" }, outsider.secret);
   assert.equal(hidden.body.result.isError, true);
-  assert.equal(hidden.value.status, 401);
+  assert.equal(hidden.value.status, 403);
+  // Hosted MCP remaps a non-member identity to not_member with a pair hint
+  // (mcp-room-profile.mjs notMemberPair, f3a63d62); no_access is the
+  // store/HTTP-layer code for the same refusal.
+  assert.equal(hidden.value.code, "not_member");
+  assert.equal(hidden.value.next.action, "pair");
   assert.equal(JSON.stringify(hidden.body).includes("room file bytes"), false);
 
   const blocked = await call(origin, "room_put_file", {
@@ -172,9 +176,7 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
   const created = rooms.create(owner.secret, {
     roomId: "commit-den", title: "Commit den", purpose: "Commit a staged file", kind: "personal", displayName: "Commit owner"
   });
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Commit peer", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "Commit peer", permissions: [] });
   // #953: new agent members default to t1_readonly; peer needs write access for message.posted
   setTier(store.db, created.roomId, peer.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   // Spend-primitive MVP: room_put_file is priced (5 credits); the peer holds
@@ -236,7 +238,9 @@ test("an enrolled uploader commits a staged file onto a message they posted", as
   const hidden = await call(origin, "room_commit_file", {
     roomId: created.roomId, id: "note", messageId: "msg-1"
   }, outsider.secret);
-  assert.equal(hidden.value.status, 401);
+  assert.equal(hidden.value.status, 403);
+  assert.equal(hidden.value.code, "not_member");
+  assert.equal(hidden.value.next.action, "pair");
   assert.equal(JSON.stringify(hidden.body).includes(owner.secret), false);
 
   const committed = await call(origin, "room_commit_file", {
@@ -411,9 +415,7 @@ test("staged files stay with the uploader; DM-committed files stay with the DM p
     roomId: "scope-den", title: "Scope den", purpose: "File visibility scope", kind: "personal", displayName: "Scope owner"
   });
   for (const ident of [peer, third]) {
-    store.identities.link(owner.secret, created.roomId, {
-      identityId: ident.identityId, displayName: ident.displayName, permissions: []
-    });
+    linkWithProof(store, owner.secret, created.roomId, ident, { displayName: ident.displayName, permissions: [] });
     // #953: new agent members default to t1_readonly; members need write access for message.posted
     setTier(store.db, created.roomId, ident.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
@@ -462,4 +464,68 @@ test("staged files stay with the uploader; DM-committed files stay with the DM p
   assert.equal(ownerStaged.value.attachment.data, data("staged"), "uploader can still download their staged file");
   const thirdPub = await getAs(third.secret, "pub-note");
   assert.equal(thirdPub.value.attachment.data, data("public"), "public file stays downloadable room-wide");
+});
+
+test("a committed DM file whose message is missing from the projection is not room-visible (#2950)", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Orphan owner");
+  const peer = store.identities.create("Orphan peer");
+  const third = store.identities.create("Orphan third");
+  const created = rooms.create(owner.secret, {
+    roomId: "orphan-den", title: "Orphan den", purpose: "Missing-message file visibility", kind: "personal", displayName: "Orphan owner"
+  });
+  for (const ident of [peer, third]) {
+    linkWithProof(store, owner.secret, created.roomId, ident, { displayName: ident.displayName, permissions: [] });
+    setTier(store.db, created.roomId, ident.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  }
+  store.command(owner.secret, created.roomId, {
+    id: "post-dm-orphan", type: "message.posted",
+    data: { messageId: "msg-dm-orphan", body: "dm file here", toMemberId: peer.identityId }
+  });
+  const data = Buffer.from("bytes:orphan-dm").toString("base64");
+  const staged = await call(origin, "room_put_file", {
+    roomId: created.roomId, id: "orphan-note", filename: "orphan-note.txt", mediaType: "text/plain", data
+  }, owner.secret);
+  assert.equal(staged.value.status, "staged");
+  const committed = await call(origin, "room_commit_file", {
+    roomId: created.roomId, id: "orphan-note", messageId: "msg-dm-orphan"
+  }, owner.secret);
+  assert.equal(committed.value.status, "committed");
+
+  // Sanity: while the DM message is in the projection, the recipient can
+  // download the file and a non-party cannot.
+  const peerBefore = await call(origin, "room_get_file", { roomId: created.roomId, id: "orphan-note" }, peer.secret);
+  assert.equal(peerBefore.value.attachment.data, data);
+
+  // Simulate the history replacement named in #2950: export the room,
+  // drop the DM post, and re-import. The attachment row survives (still
+  // committed to msg-dm-orphan) but the message no longer resolves in
+  // state.messages.
+  const exported = [...store.exportEvents(owner.secret, created.roomId)];
+  assert.equal(exported.some(line => line.event.data?.messageId === "msg-dm-orphan"), true);
+  const replacement = exported
+    .filter(line => line.event.data?.messageId !== "msg-dm-orphan")
+    .map((line, index) => ({ sequence: index + 1, event: line.event }));
+  store.importEvents(owner.secret, created.roomId, replacement);
+  assert.equal(store.room(created.roomId).state.messages.some(entry => entry.id === "msg-dm-orphan"), false);
+  const row = store.db.prepare("SELECT state, message_id FROM room_attachments WHERE room_id=? AND id=?").get(created.roomId, "orphan-note");
+  assert.equal(row.state, "committed");
+  assert.equal(row.message_id, "msg-dm-orphan");
+
+  // Fail closed: without the message we cannot prove who the DM parties
+  // were, so nobody but the uploader (the proven message author, enforced
+  // by commit()) may see or download the file.
+  for (const [label, secret] of [["DM recipient", peer.secret], ["non-party", third.secret]]) {
+    const listed = await call(origin, "room_list_files", { roomId: created.roomId }, secret);
+    assert.equal(listed.value.files.some(file => file.id === "orphan-note"), false,
+      `${label} must not list a committed file whose message is missing`);
+    const got = await call(origin, "room_get_file", { roomId: created.roomId, id: "orphan-note" }, secret);
+    assert.equal(got.value.status, 404, `${label} must not download a committed file whose message is missing`);
+    assert.equal(got.body.result.isError, true);
+  }
+  const ownerList = await call(origin, "room_list_files", { roomId: created.roomId }, owner.secret);
+  assert.equal(ownerList.value.files.some(file => file.id === "orphan-note"), true,
+    "the uploader retains access to their own committed file");
+  const ownerGot = await call(origin, "room_get_file", { roomId: created.roomId, id: "orphan-note" }, owner.secret);
+  assert.equal(ownerGot.value.attachment.data, data, "the uploader can still download their own committed file");
 });

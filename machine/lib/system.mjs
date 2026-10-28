@@ -114,6 +114,13 @@ async function wirePfAnchor(pfConf) {
 // Uninstall runs the recorded revert commands and no others.
 export async function applySystemChanges(home = configHome()) {
   const changes = [];
+  // Persist after every applied change, not only on full success: the
+  // changes are live on the host as soon as each command runs, so a
+  // mid-sequence failure (or a crash) must still leave a record that
+  // revertSystemChanges can replay. Without this, a partial failure
+  // stranded live changes that uninstall could never revert (#2876).
+  const persist = () => { if (changes.length) saveChanges(changes, home); };
+  const fail = error => { persist(); return { ok: false, error, changes }; };
   // Capture once: the wire and its revert must target the same file.
   const pfConf = pfConfPath();
   for (const key of ["disablesleep", "autorestart"]) {
@@ -121,42 +128,54 @@ export async function applySystemChanges(home = configHome()) {
     const revertValue = previous ?? "0";
     const applied = await runCommand("pmset", ["-a", key, "1"], { timeoutMs: 5000 });
     if (applied.code !== 0) {
-      return { ok: false, error: `pmset ${key} failed`, changes };
+      return fail(`pmset ${key} failed`);
     }
     changes.push({
       id: `pmset.${key}`,
       previous,
       revert: ["pmset", "-a", key, revertValue],
     });
+    persist();
   }
   const anchor = await anchorRules();
   const anchorPath = join(home, "pf-anchor.conf");
   mkdirSync(home, { recursive: true, mode: 0o700 });
   writeFileSync(anchorPath, anchor.text, { mode: 0o644 });
   const loaded = await runCommand("pfctl", ["-a", PF_ANCHOR_NAME, "-f", anchorPath], { timeoutMs: 5000 });
-  if (loaded.code !== 0) return { ok: false, error: "pf anchor failed", changes };
-  // The loaded anchor evaluates only when referenced from /etc/pf.conf and
-  // pf is enabled. Wire both and verify the anchor is live.
-  const wired = await wirePfAnchor(pfConf);
-  if (!wired.ok) return { ok: false, error: `pf anchor wiring failed: ${wired.error}`, changes };
-  const anchors = await runCommand("pfctl", ["-s", "Anchors"], { timeoutMs: 5000 });
-  if (anchors.code !== 0 || !anchors.stdout.toString("utf8").split("\n").some(line => line.trim() === PF_ANCHOR_NAME)) {
-    return { ok: false, error: "pf anchor is not live after wiring", changes };
-  }
+  if (loaded.code !== 0) return fail("pf anchor failed");
   // BSD and GNU sed both accept an attached, non-empty backup suffix.
   // Use a unique backup so a pre-existing administrator backup is untouched.
   const backupSuffix = `.room-machine-${randomUUID()}`;
   const quotedPfConf = shellQuote(pfConf);
-  changes.push({
+  // The anchor is live from the load above, before its revert shape is
+  // final: wiring decides whether the revert must also remove the pf.conf
+  // reference. Record the anchor as soon as the wiring outcome is known on
+  // every path — including the failure paths — so a stranded anchor is
+  // always flushable (and its pf.conf reference removable) by uninstall.
+  const pfAnchorChange = addedLine => ({
     id: "pf.anchor",
     gateway: anchor.gateway,
     hosts: anchor.hosts,
-    revert: wired.addedLine
+    revert: addedLine
       // Remove the anchor reference from pf.conf, reload the main ruleset so
       // the reference is gone, then flush the anchor's rules.
       ? ["sh", "-c", `sed -i${backupSuffix} '/^anchor "${PF_ANCHOR_NAME}"$/d' ${quotedPfConf} && pfctl -f ${quotedPfConf} && pfctl -a ${PF_ANCHOR_NAME} -F all && rm -f ${shellQuote(pfConf + backupSuffix)}`]
       : ["pfctl", "-a", PF_ANCHOR_NAME, "-F", "all"],
   });
+  // The loaded anchor evaluates only when referenced from /etc/pf.conf and
+  // pf is enabled. Wire both and verify the anchor is live.
+  const wired = await wirePfAnchor(pfConf);
+  if (!wired.ok) {
+    changes.push(pfAnchorChange(wired.addedLine));
+    return fail(`pf anchor wiring failed: ${wired.error}`);
+  }
+  const anchors = await runCommand("pfctl", ["-s", "Anchors"], { timeoutMs: 5000 });
+  if (anchors.code !== 0 || !anchors.stdout.toString("utf8").split("\n").some(line => line.trim() === PF_ANCHOR_NAME)) {
+    changes.push(pfAnchorChange(wired.addedLine));
+    return fail("pf anchor is not live after wiring");
+  }
+  changes.push(pfAnchorChange(wired.addedLine));
+  persist();
   const domains = [
     ["AllowedEthernetLocalNetworkAddresses", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
     ["AllowedWiFiLocalNetworkAddresses", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"],
@@ -167,7 +186,7 @@ export async function applySystemChanges(home = configHome()) {
     const wrote = await runCommand("defaults", [
       "write", "com.apple.network.local-network", key, "-array", ...values,
     ], { timeoutMs: 5000 });
-    if (wrote.code !== 0) return { ok: false, error: `defaults ${key} failed`, changes };
+    if (wrote.code !== 0) return fail(`defaults ${key} failed`);
     changes.push({
       id: `defaults.${key}`,
       previous,
@@ -175,6 +194,7 @@ export async function applySystemChanges(home = configHome()) {
         ? ["defaults", "delete", "com.apple.network.local-network", key]
         : ["defaults", "write", "com.apple.network.local-network", key, "-string", previous.trim()],
     });
+    persist();
   }
   saveChanges(changes, home);
   return { ok: true, changes, anchor };

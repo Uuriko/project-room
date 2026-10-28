@@ -88,6 +88,29 @@ test('price type, timeline, and revision terms are validated; every record is re
   assert.equal(saved.feePolicyRef, 'demigod:placement-10pct/v1');
 });
 
+test('rubric maxScore must be numeric: non-numeric scores are rejected at creation, not at contract completion', t => {
+  // Contract: contract completion derives rubric weights from maxScore and
+  // hard-requires /^[0-9]+(\.[0-9]{1,2})?$/, so an offer whose maxScore is
+  // arbitrary text could be presented/accepted and mint a contract that can
+  // never complete. Regression (#2927): rubricOf validating maxScore only
+  // as non-empty text, letting 'high' or '5.555' through.
+  const { store } = fixture(t);
+  for (const [i, maxScore] of ['high', '5.555', '-5', '.5', '5.', ''].entries()) {
+    assert.throws(
+      () => store.demigodOffers.create('commons', 'owner', profileInput(`bad-score-${i}`, {
+        vettingRubric: [{ criterionId: 'c1', description: 'Works end to end', maxScore }],
+      })),
+      error => error.code === 'invalid_demigod_offer', JSON.stringify(maxScore));
+  }
+  assert.equal(store.demigodOffers.list('commons').profiles.length, 0);
+  for (const [i, maxScore] of ['5', '5.5', '5.00', '0.50'].entries()) {
+    const saved = store.demigodOffers.create('commons', 'owner', profileInput(`good-score-${i}`, {
+      vettingRubric: [{ criterionId: 'c1', description: 'Works end to end', maxScore }],
+    }));
+    assert.equal(saved.vettingRubric[0].maxScore, maxScore);
+  }
+});
+
 test('present then accept requires the exact revision; a stale revision is rejected', t => {
   // Contract: compare-and-swap acceptance — the buyer accepts the exact
   // terms they read. Regression: buyer accepts terms the room changed after

@@ -37,23 +37,15 @@ test("Start a room: sign in lands inside a new room", { timeout: 60000 }, async 
   assert.doesNotMatch(page.url(), /start=room/, "the intent leaves the address bar");
 
   const email = "start-room@example.invalid";
-  await openMagicSignin(page);
-  const form = page.locator('#auth-signin-ui [data-signin-form="magic-request"]');
+  await openMagicSignin(page, email);
+  const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.locator('[name="email"]').fill(email);
   const delivered = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/magic/request");
   await form.locator('button[type="submit"]').click();
   assert.equal((await delivered).status(), 200);
   await page.goto(sent.at(-1).link, { waitUntil: "networkidle" });
 
-  // Setup asks for a name only, before the room is made, so the owner joins
-  // under that name instead of "Owner".
-  const setup = page.locator("#account-setup-dialog");
-  await setup.waitFor({ state: "visible" });
-  assert.equal(await setup.getByRole("button", { name: "Set up later" }).count(), 0);
-  assert.equal(f.store.db.prepare("SELECT count(*) n FROM member_accounts WHERE room_id LIKE 'personal-%'").get().n, 0, "no room before the name");
-  await page.locator("#setup-name").fill("Rae");
-  await setup.getByRole("button", { name: "Done", exact: true }).click();
-  await setup.waitFor({ state: "hidden" });
+  assert.equal(await page.locator('#account-setup-dialog').count(), 0, 'email setup is not part of room creation');
 
   try { await page.locator("#main").waitFor({ state: "visible" }); }
   catch (error) {
@@ -64,8 +56,9 @@ test("Start a room: sign in lands inside a new room", { timeout: 60000 }, async 
   const rooms = f.store.db.prepare("SELECT room_id FROM member_accounts WHERE room_id LIKE 'personal-%'").all();
   assert.equal(rooms.length, 1, "exactly one room was created");
   const members = Object.values(f.store.room(rooms[0].room_id).state.members);
-  assert.deepEqual(members.map(m => m.displayName), ["Rae"]);
+  assert.equal(members.length, 1);
+  assert.ok(members[0].displayName, "room owner has a display name");
   assert.equal(await page.evaluate(() => sessionStorage.getItem("pr-start-room")), null, "the intent is used once");
-  assert.equal(await setup.isVisible(), false, "setup does not come back inside the room");
+  assert.equal(await page.locator("#account-setup-dialog").count(), 0);
   assert.deepEqual(errors, []);
 });

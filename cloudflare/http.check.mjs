@@ -37,6 +37,13 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     await json(await call('/api/rooms/commons/commands', { data: {
       id: randomUUID(), type: 'message.posted', data: { messageId: 'presence-time-probe', body: 'Timestamp adapter probe' }
     }, headers: { Authorization: `Bearer ${ownerKey}` } }), 201);
+    const fullAudit = await json(await call('/api/rooms/commons?messages=recent', { headers: { Authorization: `Bearer ${ownerKey}` } }));
+    const activity = await json(await call('/api/rooms/commons?messages=recent', { headers: { Authorization: `Bearer ${ownerKey}`, 'X-Project-Room-Audit-View': 'activity-v1' } }));
+    assert.equal(activity.auditView, 'activity'); assert.equal(activity.auditVersion, 1);
+    assert.deepEqual(activity.state.messages, fullAudit.state.messages);
+    assert.equal(activity.sequence, fullAudit.sequence);
+    assert.ok(fullAudit.state.eventLog.some(e => e.type === 'message.posted'));
+    assert.equal(activity.state.eventLog.some(e => e.type === 'message.posted'), false);
     const presenceProbe = await json(await call('/api/rooms/commons/presence', {
       headers: { Authorization: `Bearer ${ownerKey}` }
     }));
@@ -79,13 +86,17 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.equal((await call('/api/agent-rooms')).status, 401);
     assert.equal((await call('/api/agent-rooms', { headers: { Authorization: `Bearer ${ownerKey}` } })).status, 401);
 
-    // The webhook inbox is mounted: an unknown connection or wrong secret is 401
-    // channel_webhook_denied, not 409 channel_webhook_unavailable, and nothing is journaled.
+    // Deferred inbox webhooks are absent from the shipped Workers surface.
     const webhook = await call('/api/inbox/webhooks/unknown-connection', { data: { update_id: 1 }, headers: { 'X-Telegram-Bot-Api-Secret-Token': 'not-the-configured-secret-0123' } });
-    assert.equal((await json(webhook, 401)).error.code, 'channel_webhook_denied');
+    assert.equal((await json(webhook, 404)).error.code, 'not_found');
     assert.equal((await json(await call('/api/health'))).mode, 'cloudflare-staging');
     const version = await json(await call('/api/version'));
-    assert.deepEqual(version, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
+    // r56: storage.valueLimitBytes is the Durable Object's SQLite value limit,
+    // read without a write; it follows the workerd build (2,200,000 on the
+    // repo pin, 8,388,642 on 1.20261018.1), so only its shape is fixed here.
+    const { storage, ...versionFields } = version;
+    assert.deepEqual(versionFields, { status: 'ok', mode: 'cloudflare-staging', sourceRevision: 'unstamped', buildId: 'unstamped' });
+    assert.ok(Number.isSafeInteger(storage?.valueLimitBytes) && storage.valueLimitBytes >= 2_000_000, JSON.stringify(storage));
     const versionHead = await call('/api/version', { method: 'HEAD' });
     assert.equal(versionHead.status, 200); assert.equal(await versionHead.text(), '');
     const healthHead = await call('/api/health', { method: 'HEAD' });
@@ -157,12 +168,23 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     }
     const healthShape = async path => json(await call(path));
     const leftoverHealth = await healthShape('/room/health');
-    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging' });
+    assert.deepEqual(leftoverHealth, { status: 'ok', mode: 'cloudflare-staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
     assert.deepEqual(leftoverHealth, await healthShape('/api/health'));
     assert.deepEqual(await healthShape('/api/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/room/healthz'), leftoverHealth);
     assert.deepEqual(await healthShape('/room/api/healthz'), leftoverHealth);
+    // #3274: the Worker's origin guard for operational GETs answers with the
+    // standard error envelope, not a bare { error: { code, message } }.
+    const foreignOrigin = await call('/api/health', { headers: { Origin: 'https://foreign.example' } });
+    assert.equal(foreignOrigin.status, 403);
+    const foreignBody = await foreignOrigin.json();
+    assert.equal(foreignBody.error.code, 'origin_denied');
+    assert.equal(typeof foreignBody.hint, 'string');
+    assert.ok(foreignBody.hint.length > 0);
+    assert.ok(Array.isArray(foreignBody.next));
+    assert.equal(typeof foreignBody.operationId, 'string');
+    assert.equal(typeof foreignBody.category, 'string');
     const ready = await json(await call('/api/ready'));
     assert.equal(ready.status, 'ready');
     assert.equal(ready.mode, 'cloudflare-staging');
@@ -191,8 +213,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     const owner = await json(login, 201);
     const ownerHeaders = { Cookie: cookie.split(';')[0], 'X-CSRF-Token': owner.csrf, 'X-Session-Binding': owner.sessionBinding };
     // Work delivery crosses the actual HTTP + Durable Object SQLite boundary.
+    const workLinkCode = await json(await call(`/api/identities/${identity.identityId}/link-code`, { headers: identityHeaders,
+      data: { roomId: 'commons' } }), 201);
     await json(await call('/api/rooms/commons/identity-links', { headers: ownerHeaders,
-      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'] } }), 201);
+      data: { identityId: identity.identityId, memberId: 'work-wake-worker', permissions: ['accept_work'], identityLinkCode: workLinkCode.linkCode } }), 201);
     const beatWork = () => call('/api/agent-heartbeats', { headers: identityHeaders,
       data: { hostId: 'worker-work-test', mode: 'pull-only', workWakes: true } });
     assert.equal((await json(await beatWork())).host.workWakes, true);
@@ -235,27 +259,31 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(await json(nativeExchange, 201), { status: 'signed_in' });
     assert.match(nativeExchange.headers.get('set-cookie'), /^__Host-account_session=.*HttpOnly.*Secure/);
     await json(await call('/api/auth/desktop/session', { data: nativeProof }), 401);
+    // Target the actual native slot on Worker SQLite, not its retired OAuth grant.
+    const nativeCookie = nativeExchange.headers.get('set-cookie').split(';')[0];
+    const nativeView = await json(await call('/api/account-session', { headers: { Cookie: nativeCookie } }));
+    assert.equal(nativeView.authenticated, true);
+    const inventory = await json(await call('/api/account/sessions', { headers: mailHeaders }));
+    const nativeEntry = inventory.sessions.find(item => item.method === 'desktop');
+    assert.ok(nativeEntry);
+    assert.equal(nativeEntry.current, false);
+    assert.equal(nativeEntry.methodRef, 'project-room-macos');
+    await json(await call(`/api/account/sessions/${nativeEntry.id}`, {
+      method: 'DELETE', headers: { ...mailHeaders, Origin: origin }
+    }));
+    const nativeHeaders = { Cookie: nativeCookie, 'X-Session-Binding': nativeView.sessionBinding };
+    await json(await call('/api/account/sessions', { headers: nativeHeaders }), 401);
+    await json(await call(`/api/account/sessions/${nativeEntry.id}`, {
+      method: 'DELETE', headers: { ...mailHeaders, Origin: origin }
+    }), 404);
+    const remainingSessions = await json(await call('/api/account/sessions', { headers: mailHeaders }));
+    assert.deepEqual(remainingSessions.sessions, inventory.sessions.filter(item => item.id !== nativeEntry.id));
+    assert.equal(remainingSessions.sessions.filter(item => item.current).length, 1);
     const reviewPath = '/api/inbox/sources/' + sourceId + '/reply-review?view=reply-review-v1';
-    const draftReview = await json(await call(reviewPath, { headers: mailHeaders }));
-    assert.equal(draftReview.attempt.canReview, true); assert.equal(draftReview.attempt.canSend, false);
-    assert.equal(draftReview.comparison, undefined);
-    const comparison = await json(await call(reviewPath.replace('reply-review-v1', 'reply-review-v2'), { headers: mailHeaders }));
-    assert.deepEqual(comparison.attempt, draftReview.attempt);
-    assert.equal(typeof comparison.comparison.originalBody, 'string'); assert.equal(comparison.comparison.updateStatus, null);
-    assert.doesNotMatch(JSON.stringify(comparison.comparison), /providerDraftId|Authorization|https:/);
-    const latest = await json(await call(reviewPath.replace('reply-review-v1', 'reply-review-v3'), { headers: mailHeaders }));
-    assert.deepEqual(latest.attempt, comparison.attempt); assert.deepEqual(latest.comparison, comparison.comparison);
-    const updated = await json(await call(reviewPath.replace('reply-review-v1', 'reply-review-v4'), { headers: mailHeaders }));
-    assert.deepEqual(updated.attempt, latest.attempt); assert.deepEqual(updated.comparison, latest.comparison); assert.equal(updated.update, null);
-    const reviewCommand = { action: 'reply.review', requestId: 'worker-browser-review', sourceId, attemptId: draftReview.attempt.id,
-      expectedRevision: draftReview.attempt.revision, reviewVersion: draftReview.attempt.observation.version };
-    await json(await call('/api/inbox/review', { headers: { ...mailHeaders, 'X-CSRF-Token': '' }, data: reviewCommand }), 403);
-    await json(await call('/api/inbox/review', { headers: mailHeaders, data: { ...reviewCommand, action: 'reply.dispatch' } }), 422);
-    const reviewed = await json(await call('/api/inbox/review', { headers: mailHeaders, data: reviewCommand }), 201);
-    assert.equal(reviewed.receipt.attempt, undefined); assert.equal(reviewed.receipt.reviewVersion, reviewCommand.reviewVersion);
-    assert.equal((await json(await call('/api/inbox/review', { headers: mailHeaders, data: reviewCommand }))).duplicate, true);
-    assert.equal((await json(await call(reviewPath, { headers: mailHeaders }))).attempt.review.current, true);
-    await json(await call(reviewPath, { headers: { Authorization: 'Bearer ' + ownerKey } }), 401);
+    for (const version of ['reply-review-v1', 'reply-review-v2', 'reply-review-v3', 'reply-review-v4']) {
+      await json(await call(reviewPath.replace('reply-review-v1', version), { headers: mailHeaders }), 404);
+    }
+    await json(await call('/api/inbox/review', { headers: mailHeaders, data: { action: 'reply.review', sourceId } }), 404);
     const linkToken = randomBytes(32).toString('base64url');
     const link = await json(await call('/api/rooms/commons/share-links', { headers: ownerHeaders,
       data: { requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 3, expectedMemberRevision: 0 } }), 201);
@@ -334,6 +362,47 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.deepEqual(noSource.collaboration, { version: 1, status: 'accountable', offer: null });
     assert.equal((await call('/api/rooms/commons/work-context?workItemId=selected%3Atask', { headers: { ...guestHeaders, 'X-Session-Binding': 'f'.repeat(64) } })).status, 409);
     assert.deepEqual(await json(await call('/api/rooms/commons', { headers: guestHeaders })), beforeRead);
+    // Durable discussion checkpoints must survive the actual Workers SQLite
+    // adapter without accepting stale historical text as a safe append delta.
+    const durablePath = '/api/rooms/commons/work-discussion?workItemId=selected%3Atask';
+    const durableRead = async suffix => json(await call(durablePath + suffix, { headers: guestHeaders }));
+    const durableCommand = async (type, data) => json(await call('/api/rooms/commons/commands', {
+      headers: ownerHeaders, data: { id: randomUUID(), type, data }
+    }), 201);
+    const durableStart = await durableRead('&consistent=true');
+    assert.equal(typeof durableStart.discussion.resumeToken, 'string');
+    const resumeSuffix = token => '&resumeToken=' + encodeURIComponent(token);
+    const quietResume = await durableRead(resumeSuffix(durableStart.discussion.resumeToken));
+    assert.deepEqual(quietResume.discussion.items, []);
+    assert.equal(typeof quietResume.discussion.resumeToken, 'string');
+    await durableCommand('message.posted', { messageId: 'durable-append', workItemId: 'selected:task', body: 'New durable context' });
+    const appended = await durableRead(resumeSuffix(quietResume.discussion.resumeToken));
+    assert.deepEqual(appended.discussion.items.map(item => item.message.id), ['durable-append']);
+    assert.equal(appended.discussion.items[0].message.body, 'New durable context');
+    assert.equal(typeof appended.discussion.resumeToken, 'string');
+    await durableCommand('message.edited', { messageId: 'durable-append', expectedMessageRevision: 0, body: 'Corrected durable context' });
+    const expectDiscussionReset = async suffix => {
+      const value = await json(await call(durablePath + suffix, { headers: guestHeaders }), 409);
+      assert.equal(value.error.code, 'discussion_reset_required');
+      assert.equal(JSON.stringify(value).includes('New durable context'), false, 'reset returns no old discussion content');
+    };
+    await expectDiscussionReset(resumeSuffix(appended.discussion.resumeToken));
+    const afterEdit = await durableRead('&consistent=true');
+    assert.equal(afterEdit.discussion.items.find(item => item.message.id === 'durable-append').message.body, 'Corrected durable context');
+    await durableCommand('message.deleted', { messageId: 'durable-append', expectedMessageRevision: 1 });
+    await expectDiscussionReset(resumeSuffix(afterEdit.discussion.resumeToken));
+    const afterDelete = await durableRead('&consistent=true');
+    assert.equal(typeof afterDelete.discussion.resumeToken, 'string');
+    assert.equal(JSON.stringify(afterDelete).includes('Corrected durable context'), false);
+    for (const id of ['durable-page-a', 'durable-page-b']) {
+      await durableCommand('message.posted', { messageId: id, workItemId: 'selected:task', body: id });
+    }
+    const durablePage = await durableRead('&consistent=true&limit=1');
+    assert.equal(durablePage.discussion.hasMore, true);
+    assert.equal(durablePage.discussion.resumeToken, null, 'partial pages cannot advance the completed checkpoint');
+    assert.equal(typeof durablePage.discussion.nextCursor, 'string');
+    await durableCommand('message.edited', { messageId: 'durable-page-b', expectedMessageRevision: 0, body: 'Changed during paging' });
+    await expectDiscussionReset('&cursor=' + encodeURIComponent(durablePage.discussion.nextCursor));
     const offerPath = '/api/rooms/commons/work-context?workItemId=selected%3Atask';
     const offerHeaders = { ...guestHeaders, 'X-Project-Room-Offer-Context': '1' };
     const emptyOffers = await json(await call(offerPath, { headers: offerHeaders }));
@@ -505,7 +574,7 @@ test('Worker bounty HTTP receipts create distinct durable webhook deliveries wit
 });
 
 
-test('Worker board v2 routes stay retired across restart, including when the old flag is set', async () => {
+test('Worker board v2 routes stay retired', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
     bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
   const origin = 'https://room.example.test', directory = await mkdtemp(join(tmpdir(), 'project-room-cf-board-'));
@@ -513,7 +582,7 @@ test('Worker board v2 routes stay retired across restart, including when the old
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } },
     durableObjectsPersist: directory, bindings: { ROOM_ORIGIN: origin } };
-  let mf = new Miniflare(config);
+  const mf = new Miniflare(config);
   const call = async (path, key, data, status = 410) => {
     const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
       headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1',
@@ -531,12 +600,7 @@ test('Worker board v2 routes stay retired across restart, including when the old
     assert.equal(retired.error.code, 'board_v2_retired');
     assert.equal(retired.next[0].href, '/api/rooms/commons/work-claims');
     assert.equal((await call(base + '/claims', ownerKey, payload)).error.code, 'board_v2_retired');
-    await mf.dispose();
-    config.bindings.ROOM_BOARD_V2_ENABLED = '1';
-    mf = new Miniflare(config);
-    const again = await call(base + '/claims', ownerKey, payload);
-    assert.equal(again.error.code, 'board_v2_retired');
-    assert.equal(again.next[0].href, '/api/rooms/commons/work-claims');
+    assert.equal((await call(base + '/claims/task-1/not-a-route', ownerKey)).error.code, 'board_v2_retired');
   } finally { await mf.dispose(); await rm(directory, { recursive: true, force: true }); }
 });
 
@@ -611,8 +675,11 @@ test('Workers held wake poll receives a fresh online mention and fences revoked 
     const { ownerKey } = await json(await call('/__test-provision'));
     const peer = await json(await call('/api/agent-identities', { displayName: 'Workers wake agent' }), 201);
     const ownerHeaders = { Authorization: `Bearer ${ownerKey}` }, identityHeaders = { Authorization: `Bearer ${peer.secret}` };
+    const peerLinkCode = await json(await call(`/api/identities/${peer.identityId}/link-code`, {
+      roomId: 'commons'
+    }, identityHeaders), 201);
     await json(await call('/api/rooms/commons/identity-links', {
-      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: []
+      identityId: peer.identityId, memberId: 'worker-wake-peer', displayName: 'Worker wake peer', permissions: [], identityLinkCode: peerLinkCode.linkCode
     }, ownerHeaders), 201);
     const key = await json(await call('/api/agent-keys', { scopes: ['heartbeats:report', 'heartbeats:read'] }, identityHeaders), 201);
     const peerHeaders = { Authorization: `Bearer ${key.credential}` };

@@ -38,7 +38,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync, statSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -265,6 +265,16 @@ function pidAlive(pid) {
  * by a dead pid is treated as stale and cleared; a live holder makes this
  * call throw with code STATE_LOCKED (callers exit gracefully).
  */
+/**
+ * Grace window for a lockfile whose owner pid cannot be parsed (#2888).
+ * acquire() creates the lockfile with openSync('wx') and writes the pid in
+ * a separate syscall, so a live holder's lock is briefly EMPTY. An empty /
+ * unparseable lockfile younger than this is a writer mid-creation, never
+ * stale; only once it is older (holder crashed between create and write)
+ * may a contender clear it.
+ */
+export const STATE_LOCK_WRITE_GRACE_MS = 5000;
+
 export function withStateLock(statePath, fn) {
   const lockPath = `${statePath}.lock`;
   const acquire = (allowStaleClear) => {
@@ -274,18 +284,54 @@ export function withStateLock(statePath, fn) {
       return fd;
     } catch (e) {
       if (e.code !== 'EEXIST') throw e;
+      // Snapshot the lockfile before reading it, so the stale decision and
+      // the unlink below can be tied to this exact file (see re-check).
+      let before = null;
+      try { before = statSync(lockPath); } catch { /* vanished: owner read fails too, handled below */ }
       let owner = NaN;
-      try { owner = parseInt(readFileSync(lockPath, 'utf8').trim(), 10); } catch { /* unreadable: treat as stale */ }
+      try {
+        const raw = readFileSync(lockPath, 'utf8').trim();
+        // Only a pure pid counts as an owner; '' (not yet written) and any
+        // truncated/garbled content are unparseable.
+        if (/^\d+$/.test(raw)) owner = parseInt(raw, 10);
+      } catch { /* unreadable: fall through to the age check below */ }
       // Stale only when the owner pid is gone. Our own pid is never stale —
       // re-entrant acquisition must fail closed, not steal the outer lock.
       // (A lockfile from a dead previous incarnation reusing our pid is
       // indistinguishable from re-entrancy; it fails closed with STATE_LOCKED,
       // which is the safe direction.)
-      const stale = !Number.isInteger(owner) || !pidAlive(owner);
+      // #2888: an unparseable lockfile is stale ONLY when it is older than
+      // the write-grace window. A just-created, not-yet-written lock belongs
+      // to a live holder between create and pid-write; treating NaN as stale
+      // unlinked that live lock and let both ticks into the critical section.
+      // If the file vanished before we could stat it (before is null), it is
+      // likewise not provably stale: fail closed with STATE_LOCKED and let
+      // the next tick retry — the safe direction either way.
+      const stale = Number.isInteger(owner)
+        ? !pidAlive(owner)
+        : before !== null && (Date.now() - before.mtimeMs) >= STATE_LOCK_WRITE_GRACE_MS;
       if (!stale || !allowStaleClear) {
         const err = new Error(`ralph-loop: state lock held by pid ${Number.isInteger(owner) ? owner : '?'} (${lockPath})`);
         err.code = 'STATE_LOCKED';
         throw err;
+      }
+      // Re-check before unlinking: if the file changed since the snapshot
+      // (a new holder replaced the stale lock, or the writer finished), it
+      // is no longer the file we judged stale — fail closed, never unlink a
+      // lock we did not examine.
+      if (before !== null) {
+        try {
+          const now = statSync(lockPath);
+          if (now.ino !== before.ino || now.mtimeMs !== before.mtimeMs || now.size !== before.size) {
+            const err = new Error(`ralph-loop: state lock changed while being examined (${lockPath})`);
+            err.code = 'STATE_LOCKED';
+            throw err;
+          }
+        } catch (e2) {
+          if (e2.code === 'STATE_LOCKED') throw e2;
+          if (e2.code === 'ENOENT') return acquire(false); // holder released; race to create
+          throw e2;
+        }
       }
       try { unlinkSync(lockPath); } catch { /* lost the race; retry anyway */ }
       return acquire(false);

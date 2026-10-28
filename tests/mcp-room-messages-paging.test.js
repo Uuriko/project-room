@@ -36,8 +36,8 @@ function fixture(t) {
     data: { messageId, body: body ?? messageId } });
   const react = (messageId, n) => {
     for (let i = 0; i < n; i++) {
-      send("owner", { id: `react-${messageId}-${i}`, type: "message.reaction_set",
-        data: { messageId, reaction: "👍", active: true } });
+      send("owner", { id: `edit-${messageId}-${i}`, type: "message.edited",
+        data: { messageId, body: `${messageId} v${i + 1}`, expectedMessageRevision: i } });
     }
   };
   const server = createRoomServer({ store });
@@ -150,7 +150,7 @@ test("latest:true backward windows tile with no boundary gaps (unit, dense 301)"
 test("latest:true over several scan windows returns the newest N with none skipped (hosted)", async t => {
   const f = fixture(t);
   await f.ready;
-  // 25 messages, each followed by 9 reactions: 250 events, so the backward
+  // 25 messages, each followed by 9 edits: 250 events, so the backward
   // scan crosses three windows, and with the old bound a window edge landed
   // on a message (head - 99 = an earlier message) and dropped it.
   const ids = Array.from({ length: 25 }, (_, i) => `w${i}`);
@@ -158,5 +158,19 @@ test("latest:true over several scan windows returns the newest N with none skipp
   for (const limit of [12, 25]) {
     const page = await f.hosted({ latest: true, limit });
     assert.deepEqual(page.messages.map(m => m.messageId), ids.slice(-limit), `latest ${limit}`);
+  }
+});
+
+test("latest:true is a snapshot, so following next as after does not repeat the page", async t => {
+  const f = fixture(t);
+  await f.ready;
+  for (const id of ["a", "b", "c", "d"]) f.post(id, id);
+  await f.ready;
+  for (const read of [args => f.hosted(args), args => f.clientFor("worker1").roomMessages(args)]) {
+    const page = await read({ latest: true, limit: 3 });
+    assert.deepEqual(page.messages.map(m => m.messageId), ["b", "c", "d"]);
+    assert.equal(page.hasMore, true);
+    const again = await read({ latest: true, limit: 3, after: page.next });
+    assert.deepEqual(again.messages.map(m => m.messageId), []);
   }
 });

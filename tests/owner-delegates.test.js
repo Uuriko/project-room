@@ -14,14 +14,15 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
-import { randomUUID, randomBytes } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { createRoomServer } from "../server/http.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX } from "../server/guest-agent-links.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+import { guestAgentMemberId } from "../server/guest-agent-links.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
-const guestToken = () => GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url");
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-owner-delegates-"));
@@ -51,10 +52,7 @@ async function serve(t) {
 // active member — the grant binds to the identity, never to a bare secret.
 function makeLinkedAgent(store, ownerKey, name = "Delegate Agent") {
   const agent = store.identities.create(name);
-  const linked = store.identities.link(ownerKey, "commons", {
-    identityId: agent.identityId, displayName: name,
-    permissions: ["accept_work", "complete_work", "steer", "verify"]
-  });
+  const linked = linkWithProof(store, ownerKey, "commons", agent, { displayName: name, permissions: ["accept_work", "complete_work", "steer", "verify"] });
   setTier(store.db, "commons", linked.memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   return { ...agent, memberId: linked.memberId };
 }
@@ -302,7 +300,8 @@ test("deactivating the delegate's member link ends delegated authority", async t
   const res = await ctx.request("/api/rooms/commons/guest-invites", {
     method: "POST", token: agent.secret, data: mintBody(store)
   });
-  assert.equal(res.status, 401, "inactive link no longer resolves the grant");
+  assert.equal(res.status, 403, "inactive link no longer resolves the grant");
+  assert.equal((await res.json()).error.code, "no_access");
 });
 
 // Behavior: grants are room-scoped.
@@ -343,17 +342,17 @@ test("delegate expiry sweep attributes to the owner with delegation provenance",
   const { store } = ctx;
   const agent = makeLinkedAgent(store, ctx.ownerKey);
   await grant(ctx, agent.identityId);
-  // A real guest member: the owner mints a guest-agent link.
-  const linkToken = guestToken();
-  const minted = await ctx.request("/api/rooms/commons/guest-agent-links", {
-    method: "POST", token: ctx.ownerKey,
-    data: { requestId: randomUUID(), linkToken, expectedOwnerRevision: ownerRevision(store) }
+  // A real guest seat, in the state a redeemed guest invite leaves behind:
+  // a guest-agent member plus its (here, already expired) access credential.
+  // Seeded directly — the v0 mint route that used to create this state was
+  // cut in #3216; the sweep under test consumes only member + credential.
+  const guestMemberId = guestAgentMemberId("account-owner", randomUUID());
+  store.command(ctx.ownerKey, "commons", {
+    id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: guestMemberId, displayName: "Guest agent", kind: "agent", permissions: [], accountableHumanId: "owner" }
   });
-  if (minted.status !== 201) assert.fail(`guest link mint rejected: ${await minted.text()}`);
-  const guestMemberId = (await minted.json()).member.id;
-  // Expire the guest credential directly.
-  store.db.prepare("UPDATE credentials SET expires_at=0 WHERE room_id=? AND member_id=?")
-    .run("commons", guestMemberId);
+  store.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,0,NULL,NULL)")
+    .run(createHash("sha256").update(`ga1.${randomBytes(32).toString("base64url")}`).digest("hex"), "commons", guestMemberId);
   // The delegate runs the mechanical sweep on their own secret.
   store.guestAgentLinks.sweepExpired(agent.secret, "commons", null);
   assert.equal(store.room("commons").state.members[guestMemberId].active, false, "guest member swept");

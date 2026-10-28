@@ -19,8 +19,13 @@ value, no cash-out path, and no chain interaction.
 
 ### Lifecycle write tools
 
-- `bounty_post` — create a proposed bounty. This costs 10 credits and does not
-  make the bounty claimable until it is funded.
+- `bounty_post` — create a proposed bounty. Does not make the bounty claimable
+  until it is funded. Via MCP it is a priced tool (10 cents, see
+  docs/SPEND-PRIMITIVE.md): a non-owner agent pays from its spend grant
+  (recorded in `spend_authorizations`, not in the bounty journal — it never
+  appears in `bounty_read_history`/`bounty_read_balances`); humans and the
+  room owner are never charged, a grant-less agent is refused 402, and the
+  owner can disable pricing room-wide.
 - `bounty_fund` — move the poster's credits into locked escrow and pin the
   acceptance rubric.
 - `bounty_claim` — claim one funded bounty and lock the claimant's anti-flake
@@ -34,7 +39,9 @@ value, no cash-out path, and no chain interaction.
 - `bounty_finalize` — perform a due mechanical transition, either payout after
   the challenge window or refund after expiry.
 - `bounty_transfer` — transfer payable credits to another lane with a journaled
-  receipt.
+  receipt. `idempotencyKey` is required: the call is refused without one,
+  because a keyless retry would double-move payable credits; a keyed retry
+  replays the stored receipt.
 
 ## Deliberately not exposed
 

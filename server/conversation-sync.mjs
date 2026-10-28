@@ -1,9 +1,13 @@
+import { messageRepository } from './message-repository.mjs';
 import { createHash, createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { hydrateRecordText } from "./projection-at-rest.mjs"; // Phase 1a
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { validId, DEFAULT_CHANNEL_ID } from "../src/events.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
 import { messageInHistory } from "./history-visibility.mjs";
+import { archiveMarker } from "./messages-store.mjs";
+import { identityNamesForRoom, resolveMentionTargetsInText } from "./mention-lifecycle.mjs";
+import { squadMentionTargets } from "./squads.mjs";
 
 const keys = new WeakMap();
 const MAX_BYTES = 512 * 1024;
@@ -32,6 +36,21 @@ function signer(store) {
       } catch { return null; }
     }
   };
+}
+
+function archivedConversationRows(store,roomId,{viewerId,channelId,messageId,floor,limit,afterId}) {
+  const repository=messageRepository(store,roomId,store.room(roomId,{verifyBodyHashes:true}).state);
+  const candidates=messageId===null ? repository.records({descending:true,afterId,visibility:{viewerId,channelId,floor}}) : [repository.get(messageId)];
+  const rows=[];
+  for(const message of candidates) {
+    if(!message || message.toMemberId && message.authorId!==viewerId && message.toMemberId!==viewerId)continue;
+    if(channelId!==null && (message.toMemberId || (message.channelId||DEFAULT_CHANNEL_ID)!==channelId))continue;
+    if(floor&&!messageInHistory(message,floor))continue;
+    const {editHistory:_history,...record}=message;
+    rows.push({position:0,messageId:message.id,body:JSON.stringify(record)});
+    if(rows.length >= (messageId===null ? limit+1 : 1))break;
+  }
+  return rows;
 }
 
 // Current records, never raw event replay: edits, reactions and deletion
@@ -67,17 +86,26 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     const indexed = Boolean(store.db.prepare(`SELECT 1 FROM messages_backfill_cursor
       WHERE room_id=? AND applied_seq=? AND parity_at_seq=? AND applied_event_id=?`)
       .get(roomId, head.sequence, head.sequence, anchor ?? ""));
+    const marker=indexed ? null : archiveMarker(store.db,roomId);
+    const archiveMerged=Boolean(marker?.throughSeq);
+    if(cursor!==null && (Boolean(saved.archiveMerged)!==archiveMerged
+      || archiveMerged&&typeof saved.beforeMessageId!=='string'))return reset();
     // Array offsets and posting sequences are distinct opaque cursor domains.
     // Reset when a replay/certification switches the domain without a mutation.
     if (cursor !== null && (Boolean(saved.indexed) !== indexed
       || indexed && typeof saved.beforeId !== "string")) return reset();
-    const before = cursor !== null ? saved.before : Number.MAX_SAFE_INTEGER;
+    const before=cursor!==null ? saved.before : Number.MAX_SAFE_INTEGER;
     // PRIV-2: a since_join reader pages only messages from their join onward.
     const floor = store.historyFloor(roomId, auth.member.id);
     // One JSON parameter keeps complete same-instant exclusions within Worker
     // SQLite's bind limit even for large imported equal-timestamp histories.
     const exclusions = JSON.stringify([...(floor?.sameInstant ?? [])]);
-    const rows = (indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
+    // Only reference-bearing fallback projections consult entity rows. Ordinary
+    // uncertified projections must never treat the unqualified mirror as truth.
+    const entityRefs = !indexed && !archiveMerged && Boolean(store.db.prepare("SELECT instr(projection, '\"_entity\":1') AS refs FROM rooms WHERE id=?").get(roomId)?.refs);
+    const rows = (archiveMerged
+      ? archivedConversationRows(store,roomId,{viewerId:auth.member.id,channelId,messageId,floor,limit,afterId:cursor===null?null:saved.beforeMessageId})
+      : indexed ? store.db.prepare(`SELECT seq AS position, message_id AS messageId, record_json AS body
       FROM messages WHERE room_id=? AND (seq<? OR (seq=? AND message_id<?))
         AND (to_member_id IS NULL OR to_member_id='' OR author_id=? OR to_member_id=?)
         AND (? IS NULL OR (COALESCE(NULLIF(channel_id,''),?)=? AND (to_member_id IS NULL OR to_member_id='')))
@@ -89,8 +117,14 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
         channelId, DEFAULT_CHANNEL_ID, channelId, messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1)
       : store.db.prepare(`SELECT CAST(m.key AS INTEGER) AS position, json_remove(m.value, '$.editHistory') AS body
-      FROM rooms r, json_each(r.projection, '$.messages') m
-      WHERE r.id=? AND CAST(m.key AS INTEGER)<?
+      FROM (
+        SELECT r.id AS room_id, m.key AS key,
+          ${entityRefs ? `CASE WHEN json_extract(m.value,'$._entity')=1 THEN (
+            SELECT record_json FROM messages WHERE room_id=r.id AND message_id=json_extract(m.value,'$.id')
+          ) ELSE m.value END` : 'm.value'} AS value
+        FROM rooms r, json_each(r.projection,'$.messages') m
+      ) m
+      WHERE m.room_id=? AND CAST(m.key AS INTEGER)<?
         AND (json_extract(m.value,'$.toMemberId') IS NULL OR json_extract(m.value,'$.toMemberId')=''
           OR json_extract(m.value,'$.authorId')=? OR json_extract(m.value,'$.toMemberId')=?)
         AND (? IS NULL OR (
@@ -104,8 +138,11 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       .all(roomId, before, auth.member.id, auth.member.id, channelId, DEFAULT_CHANNEL_ID, channelId,
         messageId, messageId, floor?.at ?? null, floor?.at ?? null,
         floor?.at ?? null, floor?.at ?? null, exclusions, messageId === null ? limit + 1 : 1))
-      .map(row => indexed ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body,
-        id => store.room(roomId).state.messages.find(message => message.id === id)?.body) })
+      .map(row => indexed || archiveMerged ? row : { ...row, body: hydrateRecordText(store.db, roomId, row.body,
+        // The recovery source must itself verify: a hot-path room() read
+        // trusts the content-addressed body key (WRITE-PATH-WINS win 3)
+        // and would hand the tampered bytes straight back.
+        id => store.room(roomId, { verifyBodyHashes: true }).state.messages.find(message => message.id === id)?.body) })
       .filter(row => !floor || messageInHistory(JSON.parse(row.body), floor));
     if (messageId !== null && !rows.length) fail(404, "message_not_found", "Message not found");
     const selected = [];
@@ -119,8 +156,21 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       selected.push(row); bytes += size;
     }
     const messages = selected.map(row => JSON.parse(row.body)).reverse();
+    // Selected-message consumers distinguish an explicit address from a reply
+    // notification with the same canonical names/ambiguity rules as delivery.
+    // This is observed context, not execution permission; page reads do no
+    // extra mention work and an implicit reply needs no roster/alias lookup.
+    const addressing = messageId === null ? null : { explicitlyMentioned: false };
+    if (addressing && typeof messages[0]?.body === "string" && messages[0].body.includes("@")) {
+      const message = messages[0], members = store.room(roomId).state.members;
+      addressing.explicitlyMentioned = ((!message.toMemberId || message.toMemberId === auth.member.id)
+        && resolveMentionTargetsInText(members, identityNamesForRoom(store.db, roomId), message.body, message.authorId).includes(auth.member.id))
+        || squadMentionTargets(store.db, roomId, message.body, message.authorId, members, message.toMemberId).includes(auth.member.id);
+    }
     const nextCursor = rows.length > selected.length ? signed.encode({ kind: "page", scope, sequence: head.sequence, anchor,
-      before: selected.at(-1).position, indexed, ...(indexed ? { beforeId: selected.at(-1).messageId } : {}) }) : null;
+      before: selected.at(-1).position, indexed, archiveMerged,
+      ...(indexed ? { beforeId: selected.at(-1).messageId } : {}),
+      ...(archiveMerged ? {beforeMessageId:selected.at(-1).messageId} : {}) }) : null;
     // Include sequence/anchor: any intervening room mutation invalidates older
     // cached pages, even if the changed message is outside this latest window.
     const version = digest([head.sequence, anchor, messages]);
@@ -128,6 +178,7 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     if (since !== null && saved.version === version) return { ...base, mode: "not_modified", nextCursor, checkpoint };
     return withContentTrust({
       ...base, mode: "replace",
+      ...(addressing ? { addressing } : {}),
       messages: messages.map(message => markIfOther(message, auth.member.id, message.authorId)),
       nextCursor, checkpoint, messageBytes: bytes
     });

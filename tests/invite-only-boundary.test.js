@@ -19,6 +19,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { openRoutes, openapiOperations, routeCandidates, routeKey } from "../scripts/open-routes.mjs";
 import { pluginRouteTemplates, nextActionsRouteTemplates } from "../scripts/route-docs-check.mjs";
 import { ROUTES } from "../server/routes/table.mjs";
+import { HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
 
 const read = path => readFileSync(new URL(path, import.meta.url), "utf8");
 const openapi = read("../docs/openapi.yaml");
@@ -39,6 +40,10 @@ const SERVED_CANDIDATES = [
   // server/http.mjs. All four routes 401 for anonymous callers, so they are
   // guarded, never served open.
   ...nextActionsRouteTemplates(read("../server/next-actions-routes.mjs")),
+  // The health aliases are path constants (server/agent-discovery.mjs),
+  // served by the same http.mjs branch as /api/health but invisible to the
+  // literal/regex extractors above. Only the /api members join this sweep.
+  ...new Set(HEALTH_ALIAS_PATHS.filter(path => path.startsWith("/api/")).map(path => path.replace(/\/+$/, ""))),
 ];
 assert.ok(DECLARED_OPEN.length >= 10, "openapi open-route parse sanity");
 assert.ok(SERVED_CANDIDATES.length >= 60 && SERVED_CANDIDATES.includes("/api/health") && SERVED_CANDIDATES.includes("/api/rooms/{id}/commands"),
@@ -50,15 +55,18 @@ const token = () => randomBytes(32).toString("base64url");
 const PROBES = {
   "GET /demo": [undefined, 200],
   "HEAD /demo": [undefined, 200],
+  "GET /download": [undefined, 200],
+  "HEAD /download": [undefined, 200],
   // Native login starts/callbacks require PKCE query shape. The exchange is
   // publicly reachable but an invented one-time code cannot establish a session.
   "GET /api/auth/desktop/start": [undefined, 422],
   "GET /api/auth/desktop/callback": [undefined, 422],
   "POST /api/auth/desktop/session": [{ code: `oac_${"A".repeat(32)}`, verifier: "A".repeat(43) }, 401],
   "HEAD /api/health": [undefined, 200],
+  "GET /api/healthz": [undefined, 200],
+  "HEAD /api/healthz": [undefined, 200],
   "HEAD /api/version": [undefined, 200],
   "HEAD /api/ready": [undefined, 200],
-  "HEAD /api/guest-agent-links": [undefined, 200],
   "HEAD /api/guest-invites": [undefined, 200],
   "HEAD /api/public/receipts": [undefined, 200],
   "HEAD /api/agent-identities/{}/keys": [undefined, 404],
@@ -81,6 +89,7 @@ const PROBES = {
   "GET /api/project-offers/{}/brief.md": [undefined, 404],
   "HEAD /api/project-offers/{}/brief.md": [undefined, 404],
   "GET /api/auth/gmail/callback": [undefined, 200],
+  "GET /api/auth/signin-options": [undefined, 200],
   "GET /api/health": [undefined, 200],
   "GET /api/health/jobs": [undefined, 200],
   "HEAD /api/health/jobs": [undefined, 200],
@@ -106,14 +115,12 @@ const PROBES = {
   "GET /api/agents/{}/card": [undefined, 404],
   // Plug-in manifest: public discovery document, no room data.
   "GET /api/agent-manifest": [undefined, 200],
-  "GET /api/guest-agent-links": [undefined, 200],
   "GET /api/guest-invites": [undefined, 200],
   // GX guest-invite preview: public-safe; unknown code is 410 (not an oracle).
   "POST /api/guest-invites/preview": [{ inviteCode: "GX-00000000000000000000000000000000" }, 410],
-  // Self-serve guest entry (RC-2026-09-25-912): open by design; the signed
-  // agent card in the body is the entire credential. A body without a card
-  // is 422 card_invalid (never an oracle about rooms or keys).
-  "POST /api/guest-invites/request": [{}, 422],
+  // The self-serve guest door was removed (#3219): the route is not open,
+  // not declared, and answers plain 404 — pinned by
+  // tests/guest-selfserve-cut.test.js.
   // Agent public-key registry (integration map slice 9): public key rows are
   // public; an unknown identity id is a bare 404 without revealing anything.
   "GET /api/agent-identities/{}/keys": [undefined, 404],
@@ -128,23 +135,38 @@ const PROBES = {
   // Public read-only face: unknown codes 404 as face_not_found (never plain
   // not_found), so the sweep above counts these as served-open.
   "GET /api/public/rooms/{}": [undefined, 404],
+  // Public agent page: flag off answers 404 agent_page_unavailable (served,
+  // not a plain not_found), so these count as open while the flag is off.
+  "GET /u/{}": [undefined, 404],
+  "GET /api/public/agents/{}": [undefined, 404],
+  "POST /api/public/agents/{}/asks": [{ question: "hello" }, 404],
+  "GET /api/public/agents/{}/asks/{}": [undefined, 404],
   "GET /api/public/rooms/{}/feed": [undefined, 404],
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.
   "GET /api/public/rooms/directory": [undefined, 200],
+  // Public door funnel (DOOR-FUNNEL-READ): counts-only weekly joins/mints
+  // aggregates; public by design, answers 200 with honest zeros on an
+  // empty store.
+  "GET /api/public/door-funnel": [undefined, 200],
   // Public run-receipts aggregate: measured work from the receipt board,
   // public by design; answers 200 with the checked-in snapshot.
   "GET /api/public/receipts": [undefined, 200],
+  // Front-door facts feed (EXP-7 Variant B): counters computed per request
+  // from the public receipts themselves; public by design, answers 200 with
+  // honest zeros on an empty store.
+  "GET /api/public/front-door": [undefined, 200],
+  "HEAD /api/public/front-door": [undefined, 200],
   // Public opportunity feed (v2): read-only open-work discovery across
   // owner opt-in directory-listed rooms, decoupled from admission; an
   // empty directory answers 200 with no opportunities.
   "GET /api/opportunities.json": [undefined, 200],
-  // Self-serve access request: shape-valid body, unknown identity -> 404 without revealing anything.
-  // "read" is not a room permission and never was; a later vocabulary check
-  // started refusing it with 422, so this probe stopped reaching the thing it
-  // is here to prove - that an unknown identity gets a bare 404 that says
-  // nothing about whether the identity or the room exists.
-  "POST /api/access-requests": [{ roomId: "commons", identityId: "no-such-identity", displayName: "Boundary probe", requestedPermissions: ["steer"], note: "probe", requestId: "probe-request-1" }, 404],
+  // Self-serve access request is NOT an open route since issue #2912: it
+  // requires the filing identity's secret as Bearer, so it carries no
+  // anonymous probe here. Its shape-valid anonymous behavior (unknown
+  // identity and unknown room answer the identical bare 404, before any
+  // credential is consulted) is pinned by tests/discoverability.test.js
+  // ("cold access request 404") and tests/access-request-identity-proof.test.js.
   // Verification tier: a public read by design, so an agent can gate on another
   // agent's tier before working with it. An unknown id is not a 404 - it answers
   // 200 with level "unverified", which is the same answer a real-but-unattested
@@ -153,22 +175,25 @@ const PROBES = {
   // Access-request status: identityId query param is required, so a bare probe gets 422.
   "GET /api/access-requests/{}": [undefined, 422],
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 404],
-  // Invite preview: shape-valid code probe gets 404 invite_unavailable; a bare
-  // probe (no code query param) gets 422 invalid_invite.
-  "GET /api/agent-invites/preview": [undefined, 422],
+  "GET /api/agent-invites/redeem": [undefined, 200],
+  "GET /api/pair": [undefined, 422],
+  "POST /api/pair": [{}, 422],
+  "GET /pair": [undefined, 422],
+  "GET /pair/{}": [undefined, 200],
+  // Invite preview (#3259: POST-only, code in the body): a bare probe (no
+  // code) gets 422 invalid_invite. The retired GET form is not an open
+  // route and so has no probe here; its 405 is pinned in
+  // tests/agent-invite-preview-post.test.js.
+  "POST /api/agent-invites/preview": [{}, 422],
   // Referral invite preview/redeem: a forged token is indistinguishable from
   // an unknown one — 404 invite_unavailable, never an oracle.
   "POST /api/referral-invites/preview": [{ token: "ref1.probe.probe" }, 404],
   "POST /api/referral-invites/redeem": [{ token: "ref1.probe.probe" }, 404],
   "POST /api/share-links/preview": [{ linkToken: token() }, 410],
   "POST /api/invitations/preview": [{ invitationToken: token() }, 404],
-  "POST /api/guest-agent-links/preview": [{ linkToken: `gt_${token()}` }, 410],
-  "POST /api/guest-agent-links/join": [{ linkToken: `gt_${token()}` }, 410],
-  // v0 self-service refresh: a forged token is indistinguishable from an
-  // unknown one — 410 link_unavailable, never an oracle. (Expired-real,
-  // revoked, v1-seat, swept, and live tokens take the 200/409/410 branches
-  // covered in tests/guest-agent-refresh.test.mjs.)
-  "POST /api/guest-agent-links/refresh": [{ linkToken: `gt_${token()}` }, 410],
+  // The v0 guest-agent-links exchange was removed (#3216): its routes are
+  // not open, not declared, and answer plain 404 — pinned by
+  // tests/guest-agent-links-cut.test.js.
   "POST /api/session": [{ accessKey: token() }, 401],
   // Provider webhook: per-connection secret header is the credential; 409 until a webhook inbox is wired.
   "POST /api/inbox/webhooks/{}": [{ update_id: 1 }, 409],
@@ -197,7 +222,7 @@ async function serve(t) {
   store.initialize(initialRoom("commons"));
   store.bindHumanAccount("commons", "owner", "account-owner");
   const ownerKey = store.issueAccessKey("commons", "owner");
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ enableDeferredInbox: true, store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
   return { store, origin: `http://127.0.0.1:${server.address().port}`, ownerKey };

@@ -87,7 +87,11 @@ export function checkPasswordPolicy(password) {
 // never reveals whether the email is registered.
 //
 // This is a fixed string literal (not minted at module load) because the
-// Workers runtime forbids random generation during module evaluation; the
-// value is a real scrypt verifier for an unguessable placeholder, so it
-// behaves identically to a minted one.
-export const DUMMY_PASSWORD_VERIFIER = "scrypt$16384$8$1$TQ4ug3qQaXHk4bKZFJ5Dlw$m2yyt62ODf_PX6D77r-zd8oDuFchuzwdfF9TXBDsjuY";
+// Workers runtime forbids random generation during module evaluation. The
+// plaintext behind it was a one-time random value, discarded when this
+// constant was minted, so no known password verifies against it. (The
+// previous literal's plaintext was a published string; anyone could pass
+// the credential check for an unknown account with it.) Callers must still
+// never treat a dummy verification as authentication: the login routes
+// reject accounts with no real verifier outright, dummy match or not.
+export const DUMMY_PASSWORD_VERIFIER = "scrypt$16384$8$1$ELEvQeGCci9SY6-cLctoAw$1NJtbqrVPptGeIV_qv5EzZQ1ruPu4EFUwPIVJd9tHok";

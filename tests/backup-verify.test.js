@@ -14,6 +14,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { parseSchedule, nextRunAfter, scheduleIsDue, runBackupCycle, verifyRestoredBackup } from "../scripts/backup-verify.mjs";
+import { reconcileRestoredAuthority } from "../server/backup.mjs";
 
 const execFileAsync = promisify(execFile);
 const checkout = fileURLToPath(new URL("..", import.meta.url));
@@ -144,6 +145,29 @@ test("verifyRestoredBackup: missing watermark fails fast", async () => {
   const report = await verifyRestoredBackup({ backupFilename: "/nonexistent.sqlite", watermarkPath: "/nonexistent.json" });
   assert.equal(report.ok, false);
   assert.equal(report.checks[0].name, "watermark-readable");
+});
+
+test("reconcileRestoredAuthority: a restored room deleted from the current store is reported, not a crash", (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "bv-reconcile-deleted-room-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const restored = new RoomStore(join(dir, "restored.sqlite"));
+  const current = new RoomStore(join(dir, "current.sqlite"));
+  t.after(() => { restored.close(); current.close(); });
+  restored.initialize(initialRoom());
+  current.initialize(initialRoom());
+  // The room was deleted from the current store after the backup (the
+  // resurrection case): RoomStore.room() now throws 404 room_not_found for
+  // it, which used to abort the whole reconciliation.
+  current.db.exec("PRAGMA foreign_keys=OFF");
+  current.db.prepare("DELETE FROM rooms WHERE id = ?").run("commons");
+  current.db.exec("PRAGMA foreign_keys=ON");
+  assert.throws(() => current.room("commons"), /Room not found/);
+  let report;
+  assert.doesNotThrow(() => { report = reconcileRestoredAuthority(restored, current); });
+  assert.equal(report.checked.rooms, 1);
+  assert.deepEqual(report.stale, [
+    { kind: "member", id: "commons/owner", detail: "active membership unknown to the current store" },
+  ], "every active member of the deleted room is named stale");
 });
 
 test("cli: --print-cron emits a usable crontab line", async (t) => {

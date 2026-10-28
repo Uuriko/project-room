@@ -4,12 +4,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } f
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
-import { browserPlan, parseShard } from "../scripts/browser-shards.mjs";
+import { browserPlan, parseShard, verifyBrowserShards } from "../scripts/browser-shards.mjs";
+import { canonicalBrowserScript } from "../scripts/browser-suites.mjs";
 
 // Real Node tests, real wrapper and real CLI gate: covers omission/duplication,
 // lost child exit codes, missing matrix jobs and stale success artifacts.
 // No production flags or mocked execution are needed.
-test("four CLI shards execute each canonical test once and aggregate only complete current success", t => {
+test("six CLI shards execute each canonical test once and aggregate only complete current success", t => {
   const dir = mkdtempSync(join(tmpdir(), "browser-shards-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, "scripts"));
@@ -20,11 +21,11 @@ test("four CLI shards execute each canonical test once and aggregate only comple
   const env = { ...process.env, GITHUB_SHA: "fixture-revision", GITHUB_RUN_ID: "fixture-run", GITHUB_RUN_ATTEMPT: "1", BROWSER_MATRIX_RESULT: "success" };
   delete env.NODE_TEST_CONTEXT; // The fixture launches an independent test runner, not a nested test file.
   const invoke = (file, args = [], more = {}) => spawnSync(process.execPath, [file, ...args], { cwd: dir, env: { ...env, ...more }, encoding: "utf8", timeout: 30000 });
-  for (const invalid of ["--shard=0/4", "--shard=5/4", "--shard=1/0", "--shard=1/3", "--shard=NaN/4", "--unknown"]) assert.notEqual(invoke("scripts/browser-ci.mjs", [invalid]).status, 0, invalid);
-  for (let index = 1; index <= 4; index++) {
-    const run = invoke("scripts/browser-ci.mjs", [`--shard=${index}/4`]);
+  for (const invalid of ["--shard=0/6", "--shard=7/6", "--shard=1/0", "--shard=1/3", "--shard=NaN/6", "--unknown"]) assert.notEqual(invoke("scripts/browser-ci.mjs", [invalid]).status, 0, invalid);
+  for (let index = 1; index <= 6; index++) {
+    const run = invoke("scripts/browser-ci.mjs", [`--shard=${index}/6`]);
     assert.equal(run.status, 0, run.stdout + run.stderr);
-    assert.match(readFileSync(join(dir, `test-results/browser-junit-${index}-of-4.xml`), "utf8"), /<testcase /);
+    assert.match(readFileSync(join(dir, `test-results/browser-junit-${index}-of-6.xml`), "utf8"), /<testcase /);
     assert.match(run.stdout, /Browser gate durations/);
   }
   assert.deepEqual(readFileSync(join(dir, "executed.txt"), "utf8").trim().split("\n").map(Number).sort((a,b) => a-b), [...files.keys()]);
@@ -33,7 +34,7 @@ test("four CLI shards execute each canonical test once and aggregate only comple
   for (const state of ["failure", "cancelled", "skipped", ""]) assert.notEqual(gate({ BROWSER_MATRIX_RESULT: state }).status, 0, state);
   assert.notEqual(gate({ GITHUB_SHA: "different-revision" }).status, 0);
   assert.equal(gate({ GITHUB_RUN_ATTEMPT: "2" }).status, 0, "earlier-attempt receipts accepted by a re-run aggregator");
-  const receiptPath = join(dir, "test-results/browser-shard-4-of-4-attempt-1.json");
+  const receiptPath = join(dir, "test-results/browser-shard-6-of-6-attempt-1.json");
   const receipt = readFileSync(receiptPath, "utf8");
   rmSync(receiptPath); assert.notEqual(gate().status, 0, "missing successful shard fails closed");
   writeFileSync(receiptPath, receipt);
@@ -42,7 +43,7 @@ test("four CLI shards execute each canonical test once and aggregate only comple
   writeFileSync(receiptPath, receipt);
   const plan = browserPlan(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts["test:browser"]);
   const failingShard = plan.shards.find(shard => shard.files.includes(files[0]));
-  const failed = invoke("scripts/browser-ci.mjs", [`--shard=${failingShard.index}/4`], { FAIL_CASE: "0" });
+  const failed = invoke("scripts/browser-ci.mjs", [`--shard=${failingShard.index}/6`], { FAIL_CASE: "0" });
   assert.notEqual(failed.status, 0, "child failure propagates");
   assert.match(failed.stdout, /intentional child failure/);
   assert.notEqual(gate().status, 0, "stale success is replaced by failure receipt");
@@ -59,13 +60,13 @@ test("single-shard re-run: latest attempt per shard wins, untouched shards keep 
   const base = { ...process.env, GITHUB_SHA: "rerun-revision", GITHUB_RUN_ID: "rerun-run", BROWSER_MATRIX_RESULT: "success" };
   delete base.NODE_TEST_CONTEXT;
   const invoke = (args = [], more = {}) => spawnSync(process.execPath, ["scripts/browser-ci.mjs", ...args], { cwd: dir, env: { ...base, ...more }, encoding: "utf8", timeout: 30000 });
-  // Attempt 1: all four shards pass.
-  for (let index = 1; index <= 4; index++) assert.equal(invoke([`--shard=${index}/4`], { GITHUB_RUN_ATTEMPT: "1" }).status, 0);
+  // Attempt 1: all six shards pass.
+  for (let index = 1; index <= 6; index++) assert.equal(invoke([`--shard=${index}/6`], { GITHUB_RUN_ATTEMPT: "1" }).status, 0);
   const gate = (more = {}) => spawnSync(process.execPath, ["scripts/browser-shards-check.mjs", "test-results"], { cwd: dir, env: { ...base, GITHUB_RUN_ATTEMPT: "1", ...more }, encoding: "utf8", timeout: 30000 });
   assert.equal(gate().status, 0);
   const plan = browserPlan(JSON.parse(readFileSync(join(dir, "package.json"), "utf8")).scripts["test:browser"]);
   const target = plan.shards.find(shard => shard.files.includes("scripts/check-1.mjs"));
-  const shardArg = `--shard=${target.index}/4`;
+  const shardArg = `--shard=${target.index}/6`;
   // Attempt 2: the target shard is re-run and fails. The aggregator (also
   // attempt 2) sees the failure receipt as the shard's latest and fails
   // closed, even though an attempt-1 success receipt still exists.
@@ -78,13 +79,13 @@ test("single-shard re-run: latest attempt per shard wins, untouched shards keep 
   assert.equal(invoke([shardArg], { GITHUB_RUN_ATTEMPT: "2" }).status, 0);
   assert.equal(gate2().status, 0, "mixed-attempt success passes");
   // A receipt from a different run fails closed even at a higher attempt.
-  writeFileSync(join(dir, "test-results/browser-shard-1-of-4-attempt-9.json"),
-    JSON.stringify({ index: 1, total: 4, files: [], planHash: "nope", status: 0, signal: null, revision: "rerun-revision", runId: "other-run", runAttempt: "9" }));
+  writeFileSync(join(dir, "test-results/browser-shard-1-of-6-attempt-9.json"),
+    JSON.stringify({ index: 1, total: 6, files: [], planHash: "nope", status: 0, signal: null, revision: "rerun-revision", runId: "other-run", runAttempt: "9" }));
   assert.notEqual(gate2().status, 0, "foreign runId receipt fails closed");
 });
 
 test("canonical suite partition is complete and deterministic with bounded timing estimates", () => {
-  const script = JSON.parse(readFileSync("package.json", "utf8")).scripts["test:browser"];
+  const script = canonicalBrowserScript();
   const plan = browserPlan(script);
   assert.deepEqual(browserPlan(script), plan);
   assert.deepEqual(plan.shards.flatMap(shard => shard.files).sort(), plan.files.toSorted());
@@ -92,7 +93,7 @@ test("canonical suite partition is complete and deterministic with bounded timin
   for (const shard of plan.shards) assert.ok(shard.files.length > 0 && shard.estimatedMs > 0);
   assert.throws(() => browserPlan("node --test scripts/a.mjs scripts/a.mjs"), /unique/);
   assert.throws(() => browserPlan("node --test scripts/*.mjs"), /explicit/);
-  assert.throws(() => parseShard("1/4 trailing"), /Shard/);
+  assert.throws(() => parseShard("1/6 trailing"), /Shard/);
 });
 
 test("browser shard plan is balanced on measured runtimes: full timing coverage, no shard over 30%", () => {
@@ -101,7 +102,7 @@ test("browser shard plan is balanced on measured runtimes: full timing coverage,
   // data: an unmeasured file falls back to a 10s guess and the greedy
   // partition optimizes fiction (28 of 123 files were unmeasured, and the two
   // slowest measured shards ran ~1.5x their estimate).
-  const script = JSON.parse(readFileSync("package.json", "utf8")).scripts["test:browser"];
+  const script = canonicalBrowserScript();
   const measured = JSON.parse(readFileSync("scripts/browser-ci-durations.json", "utf8")).milliseconds;
   const plan = browserPlan(script);
   const unmeasured = plan.files.filter(file => !(Number.isFinite(measured[file]) && measured[file] > 0));
@@ -111,4 +112,18 @@ test("browser shard plan is balanced on measured runtimes: full timing coverage,
     const share = shard.estimatedMs / total;
     assert.ok(share <= 0.30, `browser shard ${shard.index} holds ${(100 * share).toFixed(1)}% of measured runtime (cap 30%)`);
   }
+});
+
+test("an affected plan may leave a shard empty when its receipt lists the same files", () => {
+  const script = canonicalBrowserScript();
+  const plan = browserPlan(script, { only: browserPlan(script).files.slice(0, 2) });
+  assert.ok(plan.shards.some(shard => shard.files.length === 0));
+  const identity = { matrixResult: "success", revision: "rev", runId: "run", runAttempt: "1" };
+  const receipts = plan.shards.map(shard => ({
+    index: shard.index, total: 6, files: shard.files, planHash: plan.planHash,
+    status: 0, signal: null, revision: "rev", runId: "run", runAttempt: "1",
+  }));
+  assert.equal(verifyBrowserShards(plan, receipts, identity).shards, 6);
+  receipts[0] = { ...receipts[0], files: ["scripts/not-in-the-plan.mjs"] };
+  assert.throws(() => verifyBrowserShards(plan, receipts, identity), /mismatched evidence/);
 });

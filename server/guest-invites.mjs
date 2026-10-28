@@ -15,8 +15,7 @@ import { PILOT_LIMITS, activeMemberCount } from "./store.mjs";
 import { createHash, randomBytes } from "node:crypto";
 import { EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, event, validId } from "../src/events.js";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
-import { verifyCardSignature, isValidPublicKey } from "./agent-card-signing.mjs";
-import { createRateLimiter } from "./identity-ratelimit.mjs";
+import { verifyCardSignature } from "./agent-card-signing.mjs";
 import {
   GUEST_AGENT_TOKEN_PREFIX,
   GUEST_AGENT_TOKEN_PATTERN,
@@ -24,6 +23,7 @@ import {
   guestAgentMemberId,
   isGuestAgentMemberId,
 } from "./guest-agent-links.mjs";
+import { guestHistoryAccessLead } from "./history-visibility.mjs";
 
 class GuestInviteError extends Error {
   constructor(status, code, message) { super(message); this.status = status; this.code = code; }
@@ -50,16 +50,10 @@ export const GUEST_INVITE_TIERS = Object.freeze({
 export const GUEST_CREDENTIAL_TTL_DEFAULT_MS = 72 * 60 * 60 * 1000;
 export const GUEST_CREDENTIAL_TTL_MIN_MS = 60 * 60 * 1000;
 export const GUEST_CREDENTIAL_TTL_MAX_MS = 14 * 24 * 60 * 60 * 1000;
-// Self-serve (RC-2026-09-25-912): no owner mints anything, so the pass is
-// short on purpose — 24h, renewable, ejectable. The card signature must be
-// fresh (10 min) so a captured request cannot be replayed later.
-export const GUEST_SELF_SERVE_TTL_MS = 24 * 60 * 60 * 1000;
-export const GUEST_SELF_SERVE_FRESHNESS_MS = 10 * 60 * 1000;
-export const GUEST_SELF_SERVE_SKEW_MS = 2 * 60 * 1000;
-// Historical accumulation cap (RC-2026-09-25-912 resolutions): a room may
-// hold at most this many self-serve guest seats; when a new guest would
-// exceed it, the least-recently-active seat is evicted to make room.
-export const GUEST_SELF_SERVE_MAX_SEATS_PER_ROOM = 500;
+// Self-serve guest entry (RC-2026-09-25-912) was removed in #3219: guests
+// are owner-issued trial seats only. The guest_selfserve tables below stay
+// as inert legacy — existing seats expire naturally and no data is
+// deleted — but no code reads or writes them now.
 export const GUEST_INVITE_REDEEM_DEFAULT_MS = 24 * 60 * 60 * 1000;
 export const GUEST_INVITE_REDEEM_MIN_MS = 60 * 60 * 1000;
 export const GUEST_INVITE_REDEEM_MAX_MS = 7 * 24 * 60 * 60 * 1000;
@@ -67,6 +61,19 @@ export const GUEST_INVITE_REDEEM_MAX_MS = 7 * 24 * 60 * 60 * 1000;
 // (GUEST_AGENT_MAX_JOINS = 10) stays as the absolute member cap.
 export const GUEST_INVITE_MAX_ACTIVE_PER_ROOM = 5;
 const GUEST_ACCESS_TEXT = "Read the room and its history, post messages, and react. Drafts only with the contributor tier. No work lifecycle, invites, polls, or administration.";
+
+// Trial-seat guidance handed to a redeeming guest (#3214): the join
+// responses are where the guest ceiling must be disclosed — claiming work
+// returns 403 guest_scope_denied and the credential cannot be renewed —
+// together with the paths to full membership and the orientation surface.
+// Mirrors the `next` arrays the identity mint and agent-invite redeem
+// already return.
+const guestTrialNext = (roomId, expiresAt) => [
+  `Orient: GET /api/rooms/${roomId}/activation-pack`,
+  "Trial seat: claiming work is reserved for full members — guest claim attempts return 403 guest_scope_denied",
+  `Your guest credential expires at ${new Date(expiresAt).toISOString()} and cannot be renewed; the room owner can issue a fresh invite`,
+  "For full membership, ask the room owner to upgrade this guest seat or send you an agent invite, then redeem it: POST /api/agent-invites/redeem"
+];
 
 const RESERVED_GUEST_NAMES = ["guest", "guest agent", "owner", "room owner", "admin", "administrator", "system", "moderator"];
 
@@ -141,6 +148,31 @@ export const guestSelfServeSchema = `
   );
 `;
 
+// Issuing-authority provenance for guest invites (F-5). Kept as a SEPARATE
+// schema string from guestInviteSchema, the guestSelfServeSchema pattern:
+// the invite row itself predates provenance, and a delegate mint stores
+// minted_by_account_id = NULL by design (delegates are accountless), which
+// left delegate-minted invites invisible to account deletion's by-account
+// revocation. Each row names the account the mint's authority traces to —
+// the minter's own account, or for a delegate the room owner's account —
+// and whether the mint rode a delegation grant. Deletion revokes invites
+// whose authority account is deleted; redemption re-checks that the
+// authority still stands (the share-link issuer-liveness pattern). The
+// authority member id is the accountable human for the redemption event:
+// the member reducer requires an accountable HUMAN sponsor, and a
+// delegate minter is an agent — without the granting owner recorded here,
+// a delegate-minted invite could never redeem at all.
+export const guestInviteAuthoritySchema = `
+  CREATE TABLE IF NOT EXISTS guest_invite_authority (
+    invite_id TEXT PRIMARY KEY REFERENCES guest_invites(id),
+    room_id TEXT NOT NULL REFERENCES rooms(id),
+    authority_account_id TEXT,
+    authority_member_id TEXT,
+    minted_via_delegate INTEGER NOT NULL DEFAULT 0 CHECK(minted_via_delegate IN (0,1))
+  );
+  CREATE INDEX IF NOT EXISTS guest_invite_authority_account ON guest_invite_authority(authority_account_id, invite_id);
+`;
+
 function verifySchemaText(db, schemaText, label) {
   return ({ allowAbsent = false } = {}) => {
     const normalize = sql => sql?.trim().replace(/;$/, "").replace(/IF NOT EXISTS /g, "").replace(/\s+/g, " ");
@@ -170,6 +202,11 @@ export function guestInviteContract() {
   return {
     status: "live",
     mint: "owner_only",
+    // #3432: "owner_only" alone taught a door agent owners cannot open.
+    // The minter must carry the owner's account (signed-in account
+    // session) or an owner delegate granted by that account — an agent
+    // identity bearer cannot mint, even as the room's owner.
+    mintRequires: "owner_account_session_or_delegate",
     tiers: {
       observer: [...GUEST_INVITE_TIERS.observer],
       contributor: [...GUEST_INVITE_TIERS.contributor],
@@ -225,13 +262,8 @@ function assertCardShape(card) {
 }
 
 export class GuestInvites {
-  constructor(store, { selfServeIpLimiter, selfServeKeyLimiter } = {}) {
+  constructor(store) {
     this.store = store; this.db = store.db;
-    // Self-serve abuse gates: 5 requests/hour per IP, 3/day per card key.
-    // Injected for tests; the production defaults are process-local, the
-    // same trade server/http.mjs makes for its own rate families.
-    this.selfServeIpLimiter = selfServeIpLimiter ?? createRateLimiter({ capacity: 5, refillPerSecond: 5 / 3600, maxKeys: 4000 });
-    this.selfServeKeyLimiter = selfServeKeyLimiter ?? createRateLimiter({ capacity: 3, refillPerSecond: 3 / 86400, maxKeys: 4000 });
   }
 
   verifySchema(opts) {
@@ -242,6 +274,41 @@ export class GuestInvites {
     return verifySchemaText(this.db, guestSelfServeSchema, "Guest self-serve")(opts);
   }
 
+  verifyAuthoritySchema(opts) {
+    return verifySchemaText(this.db, guestInviteAuthoritySchema, "Guest invite authority")(opts);
+  }
+
+  // F-5: an invite stands on its issuing authority for its whole redeem
+  // window. If that authority is gone — the granting account deleted or
+  // deactivated, or the delegation a delegate minted under has lapsed —
+  // the invite fails closed, the same issuer-liveness recheck share links
+  // perform on every use. Invites minted before provenance was recorded
+  // carry no authority row and keep the invite-row-only behavior.
+  provenanceOf(inviteId) {
+    return this.db.prepare("SELECT * FROM guest_invite_authority WHERE invite_id=?").get(inviteId);
+  }
+
+  assertIssuingAuthorityLive(row) {
+    const provenance = this.provenanceOf(row.id);
+    if (!provenance) return;
+    if (provenance.authority_account_id) {
+      const account = this.db.prepare("SELECT active FROM accounts WHERE id=?").get(provenance.authority_account_id);
+      if (!account || account.active !== 1) fail(410, "invite_unavailable", "This guest invite is not valid.");
+    }
+    if (provenance.minted_via_delegate) {
+      // The minter's authority was a delegation grant. It stands only
+      // while the grant stands — unless the minter has since become the
+      // room owner, in which case the authority is their own.
+      const ownerId = this.store.room(row.room_id).state.room?.ownerId;
+      if (row.minted_by_member_id !== ownerId) {
+        const identityId = this.store.identities.identityIdForMember(row.room_id, row.minted_by_member_id);
+        if (!identityId || !this.store.ownerDelegates.hasGrant(row.room_id, identityId)) {
+          fail(410, "invite_unavailable", "This guest invite is not valid.");
+        }
+      }
+    }
+  }
+
   // Owner-only gate. v1 keeps the human owner as the single trust anchor;
   // delegating mint to lanes is a later decision, not a code gap.
   ownerGate(token, roomId, binding) {
@@ -250,7 +317,13 @@ export class GuestInvites {
     // accountless by design: their authority comes from the owner's
     // persisted grant (server/owner-delegates.mjs), not a signed-in account
     // session.
-    if (!auth.account && !auth.delegate) fail(403, "account_session_required", "Minting a guest invite requires a signed-in account session");
+    // #3432: this refusal gets its own registry-born code
+    // (guest_invite_account_session_required, src/agent-error.mjs). Every
+    // caller who reaches it IS the owner or their delegate, so the shared
+    // account_session_required envelope — whose generic 403 recovery is
+    // "Ask the owner to mint a guest invite" — was a self-loop for them.
+    // The registry entry addresses the owner and names the real remedies.
+    if (!auth.account && !auth.delegate) fail(403, "guest_invite_account_session_required", "Guest invites are managed from the room owner's signed-in account session");
     return auth;
   }
 
@@ -331,7 +404,7 @@ export class GuestInvites {
     this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, member.id);
     this.store.reminders.retireMember(roomId, member.id);
     const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     return { sequence, state };
   }
@@ -346,49 +419,17 @@ export class GuestInvites {
   sweepExpiredGuests(roomId, room, actorMemberId) {
     for (const member of Object.values(room.state.members)) {
       if (!isGuestAgentMemberId(member.id) || member.kind !== "agent" || member.active === false) continue;
-      const cred = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access'")
+      // Guests accumulate credential rows (rotation and renewal revoke the
+      // old row and insert a fresh one), so judge the seat by an unrevoked
+      // row only: an arbitrary row may be a revoked predecessor whose live
+      // successor must keep the seat. Mirrors GuestAgentLinks#sweepExpired.
+      const cred = this.db.prepare("SELECT hash,revoked,expires_at FROM credentials WHERE room_id=? AND member_id=? AND kind='access' AND revoked=0")
         .get(roomId, member.id);
       if (cred && cred.revoked === 0 && cred.expires_at > this.store.now()) continue;
       const eventId = `guest-agent-end-${hash(`${member.id}:${cred?.hash || "none"}`).slice(0, 40)}`;
       room = this.deactivateGuestSeat(roomId, room, actorMemberId, member, eventId);
     }
     return room;
-  }
-
-  // LRU accumulation-cap eviction (RC-2026-09-25-912): when a room already
-  // holds GUEST_SELF_SERVE_MAX_SEATS_PER_ROOM self-serve seats, the
-  // least-recently-active seat is evicted to make room for the newcomer —
-  // deactivated (journaled, owner as actor), credentials revoked, seat and
-  // idempotency records dropped. Returns the refreshed room.
-  evictLruSelfServeSeat(roomId, room, ownerId, now) {
-    const victim = this.db.prepare(
-      "SELECT member_id FROM guest_selfserve WHERE room_id=? ORDER BY last_active_at ASC, created_at ASC LIMIT 1"
-    ).get(roomId);
-    if (!victim) fail(429, "rate_limited", "This room is at its guest seat limit; ask the owner to disconnect a guest");
-    const member = room.state.members[victim.member_id];
-    if (member && member.kind === "agent" && member.active !== false && isGuestAgentMemberId(member.id)) {
-      const eventId = `guest-selfserve-evict-${hash(`${member.id}:${now}`).slice(0, 40)}`;
-      room = this.deactivateGuestSeat(roomId, room, ownerId, member, eventId);
-    }
-    this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, victim.member_id);
-    this.db.prepare("DELETE FROM guest_selfserve_idem WHERE member_id=?").run(victim.member_id);
-    this.db.prepare("DELETE FROM guest_selfserve WHERE member_id=?").run(victim.member_id);
-    return room;
-  }
-
-  // Seat bookkeeping for the LRU accumulation cap. Upsert: seats created
-  // before this table existed gain their row on next use.
-  touchSelfServeSeat(roomId, memberId, keyHash, now) {
-    this.db.prepare(`INSERT INTO guest_selfserve(member_id, room_id, key_hash, created_at, last_active_at)
-      VALUES(?,?,?,?,?)
-      ON CONFLICT(member_id) DO UPDATE SET last_active_at=excluded.last_active_at`)
-      .run(memberId, roomId, keyHash, now, now);
-  }
-
-  idemRecord(roomId, keyHash, requestId) {
-    return this.db.prepare(
-      "SELECT token_hash, member_id, expires_at, renewed FROM guest_selfserve_idem WHERE room_id=? AND key_hash=? AND request_id=?"
-    ).get(roomId, keyHash, requestId);
   }
 
   // Identity-bound seat reactivation for a returning guest whose seat was
@@ -418,7 +459,7 @@ export class GuestInvites {
       state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
     } catch (error) { fail(422, "command_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
     // Rebind the seat to the redeeming invite; the tier is owner-set and
@@ -428,6 +469,9 @@ export class GuestInvites {
   }
 
   mint(token, roomId, details, binding) {
+    // Authz before input checks: a non-owner with an empty body gets 403,
+    // not a field-validation 422 that describes the owner's form.
+    this.ownerGate(token, roomId, binding);
     if (!details || Array.isArray(details) || typeof details !== "object") fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
     const allowed = ["requestId", "roomId", "guestLabel", "tier", "credentialTtlMs", "redeemWindowMs", "expectedOwnerRevision"];
     if (Object.keys(details).some(key => !allowed.includes(key))) fail(422, "invalid_guest_invite", "Supply the guest invite mint fields");
@@ -478,6 +522,17 @@ export class GuestInvites {
         VALUES(?,?,?,?,?,?,?,?,?,?,?, 'active')`)
         .run(inviteId, hash(code), roomId, tier, credentialTtlMs, guestLabel.trim(),
           auth.member.id, auth.account?.id ?? null, requestId, now, now + redeemWindowMs);
+      // F-5 provenance: record the authority this mint stood on, in the
+      // same transaction. An account mint stands on the minter's account;
+      // a delegate mint (accountless by design) stands on the room owner's
+      // account, resolved through the owner's member binding — without it,
+      // deletion's by-account revocation could never find these invites.
+      const authorityAccountId = auth.account?.id
+        ?? this.db.prepare("SELECT account_id AS accountId FROM member_accounts WHERE room_id=? AND member_id=?")
+          .get(roomId, authority.ownerId)?.accountId ?? null;
+      this.db.prepare(`INSERT INTO guest_invite_authority(invite_id, room_id, authority_account_id, authority_member_id, minted_via_delegate)
+        VALUES(?,?,?,?,?)`)
+        .run(inviteId, roomId, authorityAccountId, authority.ownerId, auth.delegate ? 1 : 0);
       const row = this.inviteRow(hash(code));
       return { ...this.issued(row, roomId, code), duplicate: false };
     });
@@ -494,6 +549,9 @@ export class GuestInvites {
       guestLabel: row.guest_label,
       hashPath: GUEST_INVITE_HASH_PATH,
       account: false,
+      // #3214: the minting owner sees the trial terms they are issuing —
+      // the same access text the contract and the invite preview serve.
+      access: GUEST_ACCESS_TEXT,
     };
     // The code is shown once, at mint. It is public-safe: single-use,
     // stored as a hash, grants nothing by itself.
@@ -506,13 +564,14 @@ export class GuestInvites {
     return this.store.readTransaction(() => {
       const row = this.inviteRow(hash(code));
       if (!this.liveInvite(row)) fail(410, "invite_unavailable", "This guest invite is not valid.");
+      this.assertIssuingAuthorityLive(row);
       const room = this.store.room(row.room_id).state.room;
       return {
         room: { id: room.id, title: room.title },
         kind: "guest-invite",
         tier: row.tier,
         scopes: [...GUEST_INVITE_TIERS[row.tier]],
-        access: GUEST_ACCESS_TEXT,
+        access: `${guestHistoryAccessLead(room)}, post messages, and react. Drafts only with the contributor tier. No work lifecycle, invites, polls, or administration.`,
         credentialTtlMs: row.credential_ttl_ms,
         redeemBy: row.redeem_by,
         hashPath: GUEST_INVITE_HASH_PATH,
@@ -541,6 +600,7 @@ export class GuestInvites {
       const roomId = row.room_id;
       let room = this.store.room(roomId);
       refuseArchivedWrite(room.state);
+      this.assertIssuingAuthorityLive(row);
       // Sweep expired guest seats before any capacity decision: an expired
       // membership must not consume the concurrent-guest cap, and the seat
       // logic below must see a consistent state.
@@ -598,7 +658,11 @@ export class GuestInvites {
             kind: "agent",
             permissions: [],
             identityId: identity.identityId,
-            accountableHumanId: row.minted_by_member_id,
+            // F-5: for a delegate-minted invite the accountable human is
+            // the granting owner recorded in the provenance row — the
+            // delegate is an agent and cannot be its own accountable
+            // sponsor (the reducer refuses a non-human sponsor).
+            accountableHumanId: this.provenanceOf(row.id)?.authority_member_id ?? row.minted_by_member_id,
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
           },
         });
@@ -607,7 +671,7 @@ export class GuestInvites {
           state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
         } catch (error) { fail(422, "command_rejected", error.message); }
         const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-        if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached");
+        if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
         this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, eventId, JSON.stringify(incoming));
         this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
         this.db.prepare("INSERT INTO guest_members(member_id, room_id, guest_identity_id, tier, invite_id, created_at) VALUES(?,?,?,?,?,?)")
@@ -617,7 +681,6 @@ export class GuestInvites {
       this.db.prepare("UPDATE guest_invites SET status='redeemed', redeemed_at=?, redeemed_by_identity_id=?, redeemed_member_id=? WHERE id=? AND status='active'")
         .run(this.store.now(), identity.identityId, memberId, row.id);
       const token = newGuestToken();
-      this.store.guestAgentLinks.conflict(hash(token));
       const expiresAt = this.store.now() + row.credential_ttl_ms;
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
         .run(hash(token), roomId, memberId, expiresAt);
@@ -632,210 +695,11 @@ export class GuestInvites {
         hashPath: GUEST_INVITE_HASH_PATH,
         account: false,
         duplicate,
-      };
-    });
-  }
-
-  // Self-serve guest entry (RC-2026-09-25-912): no invite code, no owner in
-  // the loop. An outside agent presents a self-signed agent card whose
-  // joinRequest binds this exact room + requestId; a valid signature gets a
-  // read/chat guest pass automatically.
-  //
-  // Identity is the card's Ed25519 key, not a pre-registered ai_… identity:
-  // member ids derive deterministically from the key, so one key holds one
-  // live pass per room, structurally. An identical retry (same requestId)
-  // returns the originally issued credential with no rotation and no quota
-  // consumed; only a NEW requestId triggers renewal (fresh credential, old
-  // one revoked). The owner can disconnect any guest or revoke them all.
-  // Guests land at the observer tier (guest:read + guest:post) — the
-  // per-request command gate defaults seat-less guest members to observer,
-  // so drafts/claims/spending/polls stay out of reach without owner action.
-  requestSelfServe(cardInput, clientIp) {
-    if (!cardInput || Array.isArray(cardInput) || typeof cardInput !== "object") {
-      fail(422, "card_invalid", "Supply a signed agent card with a joinRequest");
-    }
-    const { agentId, publicKey, signature, joinRequest } = cardInput;
-    if (typeof agentId !== "string" || !agentId.trim() || agentId.length > 128) {
-      fail(422, "card_invalid", "The agent card must name an agentId");
-    }
-    if (!isValidPublicKey(publicKey)) {
-      fail(422, "card_invalid", "The agent card must carry a valid Ed25519 publicKey");
-    }
-    if (typeof signature !== "string" || !signature) {
-      fail(422, "card_invalid", "The agent card must carry a signature");
-    }
-    // Cheap per-IP gate before any crypto. The per-key gate runs AFTER
-    // signature verification, so a bad signature can't burn someone
-    // else's key quota.
-    const ipGate = this.selfServeIpLimiter.check(`guest-join:${clientIp || "unknown"}`);
-    if (!ipGate.allowed) fail(429, "rate_limited", "Too many guest join requests from this address; try again later");
-    const keyHash = hash(publicKey);
-    // The joinRequest binds the signature to this room and this request, so
-    // a captured card cannot be replayed elsewhere or later.
-    if (!joinRequest || Array.isArray(joinRequest) || typeof joinRequest !== "object") {
-      fail(422, "card_invalid", "The agent card must carry a joinRequest binding this request");
-    }
-    const { roomId, requestId, issuedAt } = joinRequest;
-    if (typeof roomId !== "string" || !validId(roomId)) fail(422, "card_invalid", "joinRequest.roomId must name a room");
-    if (typeof requestId !== "string" || !validId(requestId)) {
-      fail(422, "card_invalid", "joinRequest.requestId must be a client-generated idempotency key");
-    }
-    const now = this.store.now();
-    if (typeof issuedAt !== "number" || !Number.isFinite(issuedAt)
-      || issuedAt > now + GUEST_SELF_SERVE_SKEW_MS || now - issuedAt > GUEST_SELF_SERVE_FRESHNESS_MS) {
-      fail(422, "stale_card", "The card signature is stale; sign a fresh joinRequest");
-    }
-    // Verify against the exact bytes the guest signed — joinRequest included,
-    // so the binding above is cryptographically enforced, not just asserted.
-    if (!verifyCardSignature({ agentId, card: cardInput, publicKey, signature })) {
-      fail(401, "card_invalid", "The agent card signature did not verify");
-    }
-    // Per-key abuse gate, after the signature is known good.
-    return this.store.transaction(() => {
-      // True request-ID idempotency: an identical retry (same room, same
-      // card key, same requestId) returns the issuance metadata with
-      // replayed:true, but NEVER the Bearer <redacted> again — the client
-      // must persist the token from the first response. The lookup runs
-      // after signature verification. The per-key rate gate below never
-      // sees a replay.
-      const prior = this.idemRecord(roomId, keyHash, requestId);
-      if (prior) {
-        const live = this.db.prepare(
-          "SELECT 1 FROM credentials WHERE hash=? AND room_id=? AND member_id=? AND kind='access' AND revoked=0 AND expires_at>?"
-        ).get(prior.token_hash, roomId, prior.member_id, now);
-        const replayMember = live && this.store.room(roomId).state.members[prior.member_id];
-        // The seat must still be a live guest agent seat: if the owner has
-        // repurposed the member (non-agent kind, non-guest id), the stale
-        // record drops and the fresh path below fails 409 instead of
-        // handing a guest token for a changed seat.
-        if (replayMember && replayMember.active !== false
-          && replayMember.kind === "agent" && isGuestAgentMemberId(replayMember.id)) {
-          this.touchSelfServeSeat(roomId, prior.member_id, keyHash, now);
-          return {
-            // No token: the Bearer <redacted> was returned once, in the
-            // original response. A replayed signed request must not
-            // disclose it (Burs-IA review).
-            member: { id: replayMember.id, kind: replayMember.kind, permissions: [...replayMember.permissions], displayName: replayMember.displayName, expiresAt: prior.expires_at },
-            room: { id: roomId },
-            tier: "observer",
-            scopes: [...GUEST_INVITE_TIERS.observer],
-            expiresAt: prior.expires_at,
-            hashPath: GUEST_INVITE_HASH_PATH,
-            account: false,
-            selfServed: true,
-            renewed: prior.renewed === 1,
-            replayed: true,
-          };
-        }
-        // Superseded (rotated, revoked, or expired since issuance): drop the
-        // stale record and fall through to a fresh issuance below.
-        this.db.prepare("DELETE FROM guest_selfserve_idem WHERE room_id=? AND key_hash=? AND request_id=?")
-          .run(roomId, keyHash, requestId);
-      }
-      // Per-key abuse gate, after the signature is known good. Idempotent
-      // replays above never reach this gate.
-      const keyGate = this.selfServeKeyLimiter.check(`guest-join:key:${keyHash}`);
-      if (!keyGate.allowed) fail(429, "rate_limited", "Too many guest join requests for this agent card; try again tomorrow");
-      const { card } = assertCardShape(cardInput);
-      let room = this.store.room(roomId);
-      refuseArchivedWrite(room.state);
-      const ownerId = room.state.room.ownerId;
-      // Sweep expired guest seats before any capacity decision.
-      room = this.sweepExpiredGuests(roomId, room, ownerId);
-      // One live pass per card key per room: the member id is deterministic
-      // in the key, so a second request for the same key finds its member.
-      // (identityId caps at 64 chars, so the fingerprint is truncated —
-      // the member id hashes it anyway.)
-      const identityId = `key:${keyHash.slice(0, 32)}`;
-      const memberId = guestAgentMemberId(identityId, roomId);
-      const existing = room.state.members[memberId];
-      let isNewMember = false;
-      if (existing) {
-        if (existing.kind !== "agent" || !isGuestAgentMemberId(existing.id)) {
-          fail(409, "seat_taken", "This agent card already holds a different seat in this room");
-        }
-        if (existing.active === false) {
-          // Each reactivation needs a unique event id: reactivateGuestSeat
-          // derives it from (member, inviteId), and a repeated id would be
-          // deduped as a no-op by the journal. The guest_members rebind is
-          // a harmless no-op for self-serve members (they have no row).
-          room = this.reactivateGuestSeat(roomId, room, ownerId, `selfserve-${keyHash.slice(0, 16)}-${now}`, existing);
-        }
-      } else {
-        const name = this.checkedGuestName(room.state, card.name);
-        if (this.store.guestAgentLinks.liveCount(roomId) >= GUEST_AGENT_MAX_JOINS) {
-          fail(429, "rate_limited", "This room is at its guest limit; ask the owner to disconnect a guest");
-        }
-        // Historical accumulation cap: at most GUEST_SELF_SERVE_MAX_SEATS_PER_ROOM
-        // self-serve seats per room. Beyond it, the least-recently-active
-        // seat is evicted to make room — inactive history can never
-        // accumulate unboundedly.
-        if (this.db.prepare("SELECT COUNT(*) n FROM guest_selfserve WHERE room_id=?").get(roomId).n >= GUEST_SELF_SERVE_MAX_SEATS_PER_ROOM) {
-          room = this.evictLruSelfServeSeat(roomId, room, ownerId, now);
-        }
-        this.admissionBudget(room);
-        const incoming = event({
-          id: `guest-selfserve-${keyHash.slice(0, 40)}`,
-          idempotencyKey: `guest-selfserve-${keyHash.slice(0, 40)}`,
-          roomId, actorId: ownerId,
-          type: T.MEMBER_ADDED, at: new Date(now).toISOString(),
-          data: {
-            memberId,
-            displayName: `${name}${GUEST_BADGE_SUFFIX}`,
-            kind: "agent",
-            permissions: [],
-            identityId,
-            accountableHumanId: ownerId,
-            authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
-          },
-        });
-        let state;
-        try {
-          state = { ...applyEventWithGrowth(room.state, incoming, growthCollector).state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} };
-        } catch (error) { fail(422, "command_rejected", error.message); }
-        const projection = this.store.storedProjection(roomId, state), sequence = room.sequence + 1;
-        if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room storage limit reached");
-        this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
-        this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
-        isNewMember = true;
-      }
-      // A NEW requestId always mints a fresh pass (renewals included): revoke
-      // any prior credential for this member, then issue. The idempotency
-      // record is what makes an identical retry return the original
-      // credential instead of rotating.
-      this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=? AND kind='access'")
-        .run(roomId, memberId);
-      const token = newGuestToken();
-      this.store.guestAgentLinks.conflict(hash(token));
-      const expiresAt = now + GUEST_SELF_SERVE_TTL_MS;
-      // parent_hash stays NULL: the key hash is not a credential, and the
-      // FK points at credentials(hash). Key provenance lives on the member
-      // (identityId = key:<fingerprint>).
-      this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
-        .run(hash(token), roomId, memberId, expiresAt);
-      // Record this (room, key, requestId) -> token hash so an identical
-      // retry is recognized as a replay. The plaintext token is never
-      // stored — only the hash, which is enough to verify the credential
-      // is still live. Older records for the key are superseded by this
-      // rotation and are dropped.
-      this.db.prepare("DELETE FROM guest_selfserve_idem WHERE room_id=? AND key_hash=?").run(roomId, keyHash);
-      this.db.prepare("INSERT INTO guest_selfserve_idem(room_id, key_hash, request_id, token_hash, member_id, expires_at, renewed, created_at) VALUES(?,?,?,?,?,?,?,?)")
-        .run(roomId, keyHash, requestId, hash(token), memberId, expiresAt, isNewMember ? 0 : 1, now);
-      // Seat bookkeeping for the LRU accumulation cap (upsert: seats created
-      // before this table existed gain their row on next use).
-      this.touchSelfServeSeat(roomId, memberId, keyHash, now);
-      const member = this.store.room(roomId).state.members[memberId];
-      return {
-        token,
-        member: { id: member.id, kind: member.kind, permissions: [...member.permissions], displayName: member.displayName, expiresAt },
-        room: { id: roomId },
-        tier: "observer",
-        scopes: [...GUEST_INVITE_TIERS.observer],
-        expiresAt,
-        hashPath: GUEST_INVITE_HASH_PATH,
-        account: false,
-        selfServed: true,
-        renewed: !isNewMember,
+        // #3214: disclose the trial scope and the way forward at join
+        // time, not at the first 403: same access text as the contract
+        // and preview, plus the guest-facing next steps.
+        access: GUEST_ACCESS_TEXT,
+        next: guestTrialNext(roomId, expiresAt),
       };
     });
   }
@@ -1013,7 +877,6 @@ export class GuestInvites {
         fail(410, "invite_unavailable", "This guest credential is not valid.");
       }
       const token = newGuestToken();
-      this.store.guestAgentLinks.conflict(hash(token));
       this.db.prepare("INSERT INTO credentials(hash,room_id,member_id,kind,parent_hash,expires_at,account_id,account_auth_epoch) VALUES(?,?,?,'access',NULL,?,NULL,NULL)")
         .run(hash(token), roomId, member.id, row.expires_at);
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE hash=?").run(hash(guestToken));

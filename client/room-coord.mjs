@@ -113,8 +113,8 @@ const claimsOf = value => {
   return claims;
 };
 
-// Files the given member may not touch: every path covered by another
-// member's live claim. Sorted by file, then claim id, for stable output.
+// Files the given member may not touch: a live claim that covers a wanted
+// path, or a wanted path that covers a live file. Sorted by file, then claim id.
 export function guardConflicts(claims, files, { memberId, now } = {}) {
   const at = nowFrom({ now });
   const me = memberId ?? null;
@@ -124,7 +124,7 @@ export function guardConflicts(claims, files, { memberId, now } = {}) {
     if (!isLiveClaim(claim, at) || claim.owner === me) continue;
     for (const held of claimFiles(claim)) {
       for (const file of wanted) {
-        if (covers(held, file)) {
+        if (covers(held, file) || covers(file, held)) {
           conflicts.push({ file, heldPath: normalizePath(held), claimId: claim.id, owner: claim.owner,
             title: claim.title ?? null, leaseExpiresAt: claim.leaseExpiresAt ?? null });
         }
@@ -204,6 +204,14 @@ export function verifyClaim(record, { memberId, now } = {}) {
   return claim;
 }
 
+// The claim round a release binds to (E5/D4, QA-200 2026-10-08): the
+// exact claimedAt plus the full history length (stored entries plus any
+// omitted), mirroring the server's claimHistoryLength.
+const claimRound = claim => ({
+  expectedClaimedAt: claim?.claimedAt,
+  expectedHistoryLength: (claim?.history?.length ?? 0) + (claim?.historyOmitted ?? 0),
+});
+
 // Claim (creating the item if it is new), then read it back and verify.
 // Conflicting live claims on the same files fail before anything is written
 // unless allowOverlap is set.
@@ -246,7 +254,8 @@ export async function claimAndVerify(client, id, { memberId, title, files, lease
     if (conflicts.length) {
       let released = false;
       try {
-        await client.releaseWorkItem(claimId, { note: "released after a conflicting claim won the race", signal });
+        await client.releaseWorkItem(claimId, { note: "released after a conflicting claim won the race",
+          ...claimRound(claim), signal });
         released = true;
       } catch { released = false; }
       throw new CoordError("claim_conflict", "Another member holds a live claim on these files", { conflicts, released });
@@ -285,8 +294,8 @@ export async function handoff(client, id, { to, toHandle, summary, next, now, si
   const receiver = assertId(to, "Receiver member id");
   const done = assertId(summary, "Handoff summary");
   const at = nowFrom({ now });
-  verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { now: at });
-  await callRoom(() => client.reassignWorkItem(claimId, { newOwner: receiver, note: done, signal }));
+  const before = verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { now: at });
+  await callRoom(() => client.reassignWorkItem(claimId, { newOwner: receiver, note: done, ...claimRound(before), signal }));
   const claim = verifyClaim(await callRoom(() => client.workClaimGet(claimId, { signal })), { memberId: receiver, now: at });
   const lines = [
     `Handoff ${claimId} to ${toHandle ? `@${toHandle.replace(/^@/, "")}` : receiver}`,
@@ -304,7 +313,8 @@ export async function handoff(client, id, { to, toHandle, summary, next, now, si
 export async function releaseAndVerify(client, id, { note, signal } = {}) {
   assertClient(client, ["releaseWorkItem", "workClaimGet"]);
   const claimId = assertId(id, "Claim id");
-  await callRoom(() => client.releaseWorkItem(claimId, { note, signal }));
+  const before = await callRoom(() => client.workClaimGet(claimId, { signal }));
+  await callRoom(() => client.releaseWorkItem(claimId, { note, ...claimRound(before?.claim ?? before), signal }));
   const record = await callRoom(() => client.workClaimGet(claimId, { signal }));
   const claim = record?.claim ?? record;
   if (claim?.state !== "unclaimed") throw new CoordError("claim_not_verified", "Room did not confirm the release", { claim: claim ?? null });

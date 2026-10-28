@@ -16,8 +16,8 @@
 // (or pin the whole ceremony to one process); otherwise a finish posted to
 // a different process than the options call answers 401.
 
-import { randomBytes } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { createHash, randomBytes } from "node:crypto";
+import { ServiceError } from "./service-error.mjs";
 import {
   createRegistrationOptions, verifyRegistrationResponse, createAuthenticationOptions, verifyAuthenticationAssertion
 } from "../src/passkey-login.mjs";
@@ -100,6 +100,25 @@ export function resolvePasskeyParams(expectedOriginValue, rpIdOverride = process
   return { origin: url.origin, rpId };
 }
 
+// Name shown in the passkey picker at every sign-in. Account ids for email
+// accounts are "email:<sha256 hex>", which made every picker entry look the
+// same and unreadable, so show the verified email first, then any email, then
+// the profile display name. An account with none of them gets a plain label.
+export const PASSKEY_RP_NAME = "Project Room";
+export const PASSKEY_FALLBACK_USER = "Project Room account";
+export function passkeyUserLabel(store, accountId) {
+  try {
+    const methods = store.accountLogins.listMethods(accountId).filter(method => !method.disabled && isNonEmptyString(method.email));
+    const best = methods.find(method => method.verifiedAt) ?? methods[0];
+    if (best) return best.email;
+  } catch { /* fall through to the profile */ }
+  try {
+    const name = store.accountProfile(accountId).displayName;
+    if (isNonEmptyString(name)) return name;
+  } catch { /* account has no profile row */ }
+  return PASSKEY_FALLBACK_USER;
+}
+
 // Wiring around the model. `store` is the RoomStore (store.accountLogins,
 // store.loginAccountSessionWithMethod, store.db). `challenges` defaults to a
 // fresh in-memory store; the HTTP layer creates one per server instance and
@@ -132,10 +151,17 @@ export function createPasskeyAuth({ store, challenges = createChallengeStore({ n
     const { options } = verifiers.createRegistrationOptions({
       rpId,
       rpName: isNonEmptyString(rpName) ? rpName : rpId,
-      user: { id: accountId, name: userName, displayName: userName },
+      // WebAuthn caps user.id at 64 bytes and wants an opaque handle, not an
+      // identifier: email:<sha256 hex> account ids are 70 bytes and made every
+      // email account's registration fail in the browser. A 32-byte digest is
+      // stable per account and never exposes the id.
+      user: { id: createHash("sha256").update(accountId, "utf8").digest(), name: userName, displayName: userName },
       challenge: issued.challenge,
       excludeCredentials,
-      ...(authenticatorSelection !== undefined ? { authenticatorSelection } : {})
+      // Login is discoverable-only (beginAuthentication sends no
+      // allowCredentials), so a registered credential is useless unless it
+      // is discoverable: force resident keys no matter what the caller asked.
+      authenticatorSelection: { ...authenticatorSelection, residentKey: "required", requireResidentKey: true }
     });
     return { ...options, challengeId: issued.id };
   }

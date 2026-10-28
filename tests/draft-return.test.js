@@ -4,7 +4,7 @@ import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { confirmsWorkReturn } from "../src/workflow.js";
-import { retryUnconfirmed } from "../src/client.js";
+import { draftRefused, retryUnconfirmed } from "../src/client.js";
 
 test("draft return confirms only an exact owned stable-message receipt", t => {
   const f = createAcceptanceFixture();
@@ -43,4 +43,21 @@ test("unknown draft commits stay locked across pre-ledger errors and conflicts",
   }
   assert.equal(retryUnconfirmed({ status: 413, code: "too_large" }, false), false);
   assert.equal(retryUnconfirmed({ status: 422, code: "invalid_command" }, false), false);
+});
+
+test("composer retry forgets a draft command only on refusals issued after the exact-operation lookup", () => {
+  // First send: any definitive 4xx refusal frees the draft for a fresh command.
+  for (const status of [400, 404, 409, 413, 422]) assert.equal(draftRefused({ status, code: "anything" }, false), true, String(status));
+  for (const error of [new Error("lost"), { status: 500 }, { status: 429, code: "rate_limited" }, { status: 403, code: "access_denied" }]) {
+    assert.equal(draftRefused(error, false), false, JSON.stringify(error));
+  }
+  // Retry of an uncertain send: only proof the original was never written frees it.
+  for (const error of [{ status: 409, code: "command_rejected" }, { status: 422, code: "command_rejected" },
+    // #3520: posting into an archived channel is the documented 409 channel_archived.
+    { status: 409, code: "channel_archived" }]) assert.equal(draftRefused(error, true), true, JSON.stringify(error));
+  for (const error of [new Error("lost"), { status: 500 }, { status: 500, code: "command_rejected" }, { status: 429, code: "rate_limited" },
+    { status: 413, code: "too_large" }, { status: 422, code: "invalid_command" }, { status: 409, code: "idempotency_conflict" },
+    { status: 422, code: "channel_archived" }, { status: 500, code: "channel_archived" }, { status: 403, code: "access_denied" }]) {
+    assert.equal(draftRefused(error, true), false, JSON.stringify(error));
+  }
 });

@@ -8,9 +8,9 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, accessRequestSchema } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 
-// POST /api/access-requests is unauthenticated: an identity that is not a member
-// yet asks to join. docs/ROUTE-AUTH-TABLE.md says it "is rate limited per
-// identity (5/hour)".
+// POST /api/access-requests: an identity that is not a member yet asks to
+// join, proving its identity secret (issue #2912). docs/ROUTE-AUTH-TABLE.md
+// says it "is rate limited per identity (5/hour)".
 //
 // That bound was keyed on the caller-supplied identityId, and checked BEFORE
 // the identity was proven to exist, so changing one character per request
@@ -33,9 +33,14 @@ function setup(t, { capacity = 5, refillPerSecond = 5 / 3600, maxKeys } = {}) {
   return { store, requests, buckets };
 }
 
-const ask = (requests, identityId, requestId, roomId = "commons") => {
+// `identity` is an { identityId, secret } pair for a real identity, or a
+// bare identityId string for an invented one (which must 404 on the
+// existence check, before any secret proof is consulted).
+const ask = (requests, identity, requestId, roomId = "commons") => {
+  const identityId = typeof identity === "string" ? identity : identity.identityId;
+  const secret = typeof identity === "string" ? null : identity.secret;
   try {
-    return { ok: true, result: requests.request(roomId, { identityId, displayName: "Asker", requestedPermissions: ["steer"], note: "please", requestId }) };
+    return { ok: true, result: requests.request(roomId, { identityId, displayName: "Asker", requestedPermissions: ["steer"], note: "please", requestId }, secret) };
   } catch (error) { return { ok: false, status: error.status, code: error.code }; }
 };
 
@@ -60,7 +65,7 @@ test("a real identity is still bounded at its documented budget", t => {
   }
   const answers = [];
   for (let index = 0; index < 7; index += 1) {
-    answers.push(ask(requests, identity.identityId, `req-${index}`, `room-${index % 5}`));
+    answers.push(ask(requests, identity, `req-${index}`, `room-${index % 5}`));
   }
   assert.ok(answers.some(answer => !answer.ok && answer.status === 429), "the budget still refuses");
   assert.equal(buckets.size, 1, "one real identity, one bucket");
@@ -70,15 +75,15 @@ test("the bucket map is bounded and evicts the least recently used", t => {
   const { store, requests, buckets } = setup(t, { maxKeys: 3 });
   const identities = [];
   for (let index = 0; index < 5; index += 1) {
-    identities.push(store.identities.create(`Agent ${index}`).identityId);
+    identities.push(store.identities.create(`Agent ${index}`));
     store.initialize(initialRoom(`room-${index}`));
   }
-  for (const [index, identityId] of identities.entries()) ask(requests, identityId, `req-${index}`, `room-${index}`);
+  for (const [index, identity] of identities.entries()) ask(requests, identity, `req-${index}`, `room-${index}`);
 
   assert.ok(buckets.size <= 3, `bounded at 3, saw ${buckets.size}`);
   // The two oldest keys are the ones that went.
-  assert.ok(!buckets.has(`access-request:${identities[0]}`));
-  assert.ok(buckets.has(`access-request:${identities[4]}`), "the most recent survives");
+  assert.ok(!buckets.has(`access-request:${identities[0].identityId}`));
+  assert.ok(buckets.has(`access-request:${identities[4].identityId}`), "the most recent survives");
 });
 
 test("eviction is by recency of use, not of creation", t => {

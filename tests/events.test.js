@@ -128,6 +128,22 @@ test("a stale revision fails without mutating the projection or event log", () =
   assert.deepEqual(state, before);
 });
 
+test("applyEvent leaves the input state untouched, including its bookkeeping containers", () => {
+  const state = baseState();
+  const before = structuredClone(state);
+  const next = applyEvent(state, fixedEvent("isolation-post", EVENT_TYPES.MESSAGE_POSTED, "potter", { body: "Isolated" }));
+  // The applied event landed in the returned state's bookkeeping only.
+  assert.equal(next.eventLog.length, before.eventLog.length + 1);
+  assert.deepEqual(state, before);
+  // #3408: the returned state's eventLog / seen maps are fresh shallow
+  // copies, not the input's containers. Mutating them must not leak back.
+  next.eventLog.push({ id: "forged" });
+  next.seenEvents.forged = "forged";
+  next.seenIdempotencyKeys.forged = "forged";
+  assert.deepEqual(state, before);
+  assert.equal(state.eventLog.length, before.eventLog.length);
+});
+
 test("read-only work starts without a claim", () => {
   let state = baseState();
   state = applyEvent(state, proposal("read-proposed", "work-read", "codex", "instinct", "read"));
@@ -667,4 +683,25 @@ test("M-38: decision.recorded rejects deleted and private messages as decision s
   assert.doesNotThrow(() => applyEvent(state, fixedEvent("m38-dec3", EVENT_TYPES.DECISION_RECORDED, "potter", {
     sourceMessageId: msgId, statement: "we ship it"
   })));
+});
+
+test("receipt_card messages project the rc_<claimId> receipt link", () => {
+  let state = baseState();
+  // New-style card: the event carries receiptId (the run-receipt link contract).
+  state = applyEvent(state, fixedEvent("rc-card-new", EVENT_TYPES.MESSAGE_POSTED, "potter", {
+    messageId: "rc-card-new", body: "card-one closed as result.", kind: "receipt_card",
+    claimId: "card-one", receiptId: "rc_card-one", title: "Card one",
+    closedBy: "potter", deliveryMode: "result", evidence: "Shipped."
+  }));
+  const carried = state.messages.find(m => m.id === "rc-card-new");
+  assert.equal(carried.receiptId, "rc_card-one");
+  // Legacy card: posted before receiptId existed on the event; the
+  // projection derives rc_<claimId> so every card carries the link.
+  state = applyEvent(state, fixedEvent("rc-card-old", EVENT_TYPES.MESSAGE_POSTED, "potter", {
+    messageId: "rc-card-old", body: "card-two closed as merged.", kind: "receipt_card",
+    claimId: "card-two", title: "Card two",
+    closedBy: "potter", deliveryMode: "merged", evidence: "Merged."
+  }));
+  const legacy = state.messages.find(m => m.id === "rc-card-old");
+  assert.equal(legacy.receiptId, "rc_card-two");
 });

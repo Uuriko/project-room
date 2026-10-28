@@ -3,7 +3,7 @@
 // end-to-end checks; the qa2-agent-eval workflow sets it).
 import { spawn, execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { constants, tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -30,13 +30,29 @@ export async function startServer() {
   return { origin, stop: () => { child.kill("SIGTERM"); rmSync(dir, { recursive: true, force: true }); }, log: () => log };
 }
 
-// Runs node scripts/qa2/<script> with args plus --json <tmp>; resolves { code, stdout, report }.
+// Map an execFile error to the checker's truthful outcome. A signal-killed
+// child (OOM, timeout kill) arrives as error.code === null with error.signal
+// set; the old `error?.code ?? 0` turned that into success. Surface signals as
+// the conventional 128+signo code and expose the signal name, and map any
+// other failure (e.g. a string spawn-error code like ENOENT) to 1.
+export function checkerOutcome(error) {
+  if (!error) return { code: 0, signal: null };
+  const signal = error.signal ?? null;
+  if (typeof error.code === "number") return { code: error.code, signal };
+  if (signal) {
+    const signo = constants.signals[signal];
+    return { code: signo ? 128 + signo : 1, signal };
+  }
+  return { code: 1, signal };
+}
+
+// Runs node scripts/qa2/<script> with args plus --json <tmp>; resolves { code, signal, stdout, report }.
 export function runChecker(script, args, { timeout = 15 * 60_000 } = {}) {
   const out = join(mkdtempSync(join(tmpdir(), "qa2-out-")), "report.json");
   return new Promise(resolve => {
     execFile(process.execPath, [join(ROOT, "scripts/qa2", script), ...args, "--json", out], { cwd: ROOT, timeout, maxBuffer: 16 << 20 }, (error, stdout, stderr) => {
       let report = null; try { report = JSON.parse(readFileSync(out, "utf8")); } catch {}
-      resolve({ code: error?.code ?? 0, stdout: `${stdout}${stderr}`, report });
+      resolve({ ...checkerOutcome(error), stdout: `${stdout}${stderr}`, report });
     });
   });
 }

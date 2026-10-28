@@ -65,6 +65,29 @@ test("path normalization catches ./ and // variants of the same file", () => {
   assert.equal(collisions[0].file, "server/x.mjs");
 });
 
+test("a parent segment is the same file as the path it climbs to", () => {
+  const collisions = findClaimCollisions([
+    claim("lane-a", ["src/app.js"]),
+    claim("lane-b", ["src/foo/../app.js"]),
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].file, "src/app.js");
+  assert.deepEqual([...collisions[0].claims], ["lane-a", "lane-b"]);
+  assert.equal(findClaimCollisions([
+    claim("lane-a", ["app.js"]),
+    claim("lane-b", ["../app.js"]),
+  ]).length, 0, "a path that climbs out of the repo is not the root file");
+});
+
+test("a dot segment is the same file as the path without it", () => {
+  const collisions = findClaimCollisions([
+    claim("lane-a", ["src/app.js"]),
+    claim("lane-b", ["src/./app.js"]),
+  ]);
+  assert.equal(collisions.length, 1);
+  assert.equal(collisions[0].file, "src/app.js");
+});
+
 test("empty input and disjoint claims are collision-free", () => {
   assert.deepEqual(findClaimCollisions([]), []);
   assert.ok(claimsAreCollisionFree([

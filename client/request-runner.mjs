@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, openSync, closeSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { RoomAgentClient } from "./room-agent.mjs";
+import { createWorkBrief } from "./work-brief.mjs";
 
 // The caller selects a private local file and one configured host. This is not
 // a watcher or permission to run arbitrary room messages. SQLite serializes
@@ -25,12 +26,18 @@ export function openRequestJournal(filename) {
 // execute receives no connection secret: only the selected conversation and
 // preparation. It returns { body, codeResult? }, not commands. Room validates the exact
 // original answer basis on delivery; no automatic rebase after clarification.
-export async function runRequestOnce({ connection, requestMessageId, db, execute, signal }) {
+export async function runRequestOnce({ connection, requestMessageId, db, execute, preflight, signal, allowRequest }) {
   if (typeof execute !== "function" || !connection.memberId) throw new Error("A configured host and pinned member are required");
+  if (allowRequest !== undefined && typeof allowRequest !== "function") throw new Error("Request selection must be a function");
+  const checkSelection = request => {
+    if (allowRequest && allowRequest(request) !== true)
+      throw Object.assign(new Error("Requester is not enabled for this host"), { code: "requester_not_allowed" });
+  };
   const client = new RoomAgentClient(connection);
   let context = await client.replyContext(requestMessageId, { limit: 50, signal });
   if (context.viewerId !== connection.memberId || context.request.recipientId !== connection.memberId)
     throw new Error("Request must be addressed to the configured member");
+  checkSelection(context.request);
   const id = "host-" + createHash("sha256").update(JSON.stringify([
     connection.origin, connection.roomId, connection.memberId, requestMessageId,
     context.roomCreatedEventId, context.request.openingEventId
@@ -67,9 +74,24 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       throw new Error("Request identity changed while preparing");
     messages.push(...context.page.items);
   }
+  checkSelection(context.request);
   if (!context.current.answerBasis || !context.preparation) throw new Error("Request is not ready or service lacks prepared context");
+  if (context.preparation.work && context.request.workItemId) {
+    const selected = await client.workContext(context.request.workItemId, { signal });
+    if (selected.viewer.id !== connection.memberId || selected.roomId !== connection.roomId
+      || selected.work.id !== context.request.workItemId) throw new Error("Linked work context identity changed");
+    context = { ...context, preparation: { ...context.preparation, work: selected.work, workBrief: await createWorkBrief(selected),
+      workBriefBoundary: "Separately observed linked work context. This conversation does not authorize work transitions; revalidate work before acting." } };
+  }
   if (Buffer.byteLength(JSON.stringify({ messages, preparation: context.preparation })) > 262144)
     throw new Error("Request exceeds the automatic preparation limit; inspect it directly");
+  // Recovery above needs only the saved answer. Check execution dependencies
+  // before recording a new intent, so unavailable tools cannot strand a request.
+  await preflight?.();
+  signal?.throwIfAborted();
+  // Preparation is only for new work: a saved answer must remain deliverable
+  // even when its original execution backend is no longer available.
+  if (execute.prepare) await execute.prepare({ signal });
   signal?.throwIfAborted();
   const attemptId = randomUUID();
   const claimed = db.prepare("INSERT OR IGNORE INTO request_runs(id,attempt_id) VALUES (?,?)").run(id, attemptId).changes;
@@ -92,12 +114,24 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
   const timer = setInterval(() => {
     if (heartbeat) return;
     heartbeat = report(attemptId, "working", basis, AbortSignal.timeout(10000))
-      .catch(error => controller.abort(error)).finally(() => { heartbeat = null; });
+      .catch(error => {
+        // Only a definite service refusal (the request changed, paused or
+        // closed) stops the host. A transient report failure — network
+        // drop, timeout, 5xx, or throttling (408/429) — must not: aborting
+        // here kills healthy work and leaves the journal row without an
+        // outcome, which every later run then refuses as unknown. Other
+        // report sites tolerate failures the same way.
+        if (error?.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429)
+          controller.abort(error);
+      }).finally(() => { heartbeat = null; });
   }, 30000);
   try {
     controller.signal.throwIfAborted();
     const result = await execute({ requestId: id, request: structuredClone(context.request), messages,
-      preparation: context.preparation, signal: controller.signal });
+      preparation: context.preparation, signal: controller.signal }, { binding: Object.freeze({
+        origin: connection.origin, roomId: connection.roomId, memberId: connection.memberId,
+        requestMessageId, requestId: id, attemptId, roomCreatedEventId: context.roomCreatedEventId,
+        openingEventId: context.request.openingEventId, ...basis }) });
     controller.signal.throwIfAborted();
     const body = hostReplyBody(result);
     const response = { requestId: id, responseToRequestId: requestMessageId,
@@ -105,7 +139,13 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
       workItemId: context.request.workItemId, body };
     db.prepare("UPDATE request_runs SET response=? WHERE id=?").run(JSON.stringify(response), id);
     clearInterval(timer); await heartbeat;
-    await report(attemptId, "result_ready");
+    try { await report(attemptId, "result_ready"); }
+    catch (error) {
+      // The answer is already durable. A transient status outage must not
+      // prevent its authenticated, revision-checked delivery. Definite
+      // refusals still stop here; delivery never rebases or reruns the host.
+      if (error?.status !== undefined && error.status !== 408 && error.status !== 429 && error.status < 500) throw error;
+    }
     const delivered = await deliver({ response: JSON.stringify(response), attempt_id: attemptId });
     return { ...delivered, hostExecuted: true };
   } catch (error) {
@@ -126,37 +166,41 @@ export async function runRequestOnce({ connection, requestMessageId, db, execute
  * Whether a reply request is eligible to be (re)run. The second disjunct
  * covers retrying a locally-saved response — it must still require the
  * request to be open, or closed/cancelled requests would be re-run (G-L2).
+ * Standing blockers suppress new work only; saved delivery still revalidates
+ * through the service and must not be stranded by an execution-only pause.
  */
-export function isRequestEligible(request, { owned, runState, hasPendingDelivery }) {
+export function isRequestEligible(request, { owned, runState, hasPendingDelivery, blocked = false }) {
   if (request?.status !== "open") return false;
-  if (!owned) return true;
+  if (!owned) return !blocked;
   return runState !== "needs_attention" && hasPendingDelivery;
 }
 
-export async function runRequestQueue({ connection, db, execute, signal, emit = () => {}, intervalMs = 10000, stream = true }) {
+export async function runRequestQueue({ connection, db, execute, preflight, signal, emit = () => {}, intervalMs = 10000, stream = true, allowRequest, onPoll = () => {} }) {
   if (!Number.isInteger(intervalMs) || intervalMs < 1000 || intervalMs > 60000) throw new Error("Invalid polling interval");
   const client = new RoomAgentClient(connection);
-  let delay = intervalMs, connectionUnavailable = false;
+  let delay = intervalMs, connectionUnavailable = false, pendingStatement;
+  const pending = request => (pendingStatement ??= db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?")).get(request.id);
   while (!signal?.aborted) {
     let cursor = null;
     try {
-      const { requests, evaluatedThrough } = await client.replyRequests({ status: "all", signal });
+      const { requests, evaluatedThrough, runs, blockedBy = {} } = await client.agentWork({ signal });
+      onPoll();
       cursor = evaluatedThrough;
-      const { runs } = await client.requestRuns(undefined, { signal });
-      const pending = request => db.prepare("SELECT 1 FROM request_runs WHERE delivered=0 AND json_extract(response,'$.responseToRequestId')=?").get(request.id);
       const owned = request => Object.hasOwn(runs, request.id);
-      const eligible = requests.filter(request => isRequestEligible(request, {
+      const eligible = requests.filter(request => (!allowRequest || allowRequest(request) === true) && isRequestEligible(request, {
         owned: owned(request),
+        blocked: Object.hasOwn(blockedBy, request.id),
         runState: runs[request.id]?.state,
-        hasPendingDelivery: Boolean(pending(request)),
+        hasPendingDelivery: owned(request) && runs[request.id]?.state !== "needs_attention" && Boolean(pending(request)),
       }));
       for (const request of eligible.slice(0, 50)) {
         signal?.throwIfAborted();
         // A saved response may be retried only by its original local journal.
         // Another host's ownership is never a lease that can be stolen.
         if (owned(request) && !pending(request)) continue;
-        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, signal })); }
+        try { emit(await runRequestOnce({ connection, requestMessageId: request.id, db, execute, preflight, signal, allowRequest })); }
         catch (error) {
+          if (error?.code === "host_isolation_unavailable") throw error;
           emit({ status: "needs_attention", requestMessageId: request.id });
           if ([401, 429].includes(error?.status) || error?.status >= 500
             || ["TypeError", "TimeoutError"].includes(error?.name)) throw error;
@@ -164,7 +208,8 @@ export async function runRequestQueue({ connection, db, execute, signal, emit = 
       }
       delay = intervalMs;
       connectionUnavailable = false;
-    } catch {
+    } catch (error) {
+      if (error?.code === "host_isolation_unavailable") throw error;
       if (!signal?.aborted && !connectionUnavailable) emit({ status: "connection_unavailable" });
       connectionUnavailable = true;
       delay = Math.min(delay * 2, 60000);

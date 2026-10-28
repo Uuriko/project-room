@@ -25,6 +25,7 @@ import {
   appendSpill,
   clearSpill,
   truncationPlan,
+  walkRoomEvents,
   renderDigest,
 } from "../scripts/weekly-learnings.mjs";
 
@@ -318,6 +319,106 @@ describe("spill round-trip", () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("walkRoomEvents", () => {
+  const SINCE_MS = Date.parse("2026-10-05T00:00:00Z");
+  const AT = "2026-10-06T09:00:00Z";
+  const msg = (sequence, body, at = AT) => ({
+    sequence,
+    event: { type: "message.posted", at, data: { body } },
+  });
+
+  // The events API scans 100 log rows per page but returns only the
+  // viewer-visible subset; `next`/`hasMore` describe what was SCANNED.
+  // A page can therefore be empty (or end well past its last visible
+  // event) while more signals sit beyond the filtered rows. The walk
+  // must follow `next`, never the last visible sequence, and must not
+  // stop at an empty visible page.
+  it("follows next past empty visible pages instead of dropping later signals", async () => {
+    const calls = [];
+    const pages = new Map([
+      [0, { events: [msg(1, "DONE: first")], next: 3, hasMore: true }],
+      // Scanned 4..6, all filtered out for this viewer: empty page,
+      // but the scan cursor still advanced to 6 and more remain.
+      [3, { events: [], next: 6, hasMore: true }],
+      [6, { events: [msg(7, "BUG CONFIRMED: second")], next: 7, hasMore: false }],
+    ]);
+    const fetchPage = async (after) => {
+      calls.push(after);
+      const page = pages.get(after);
+      if (!page) throw new Error(`unexpected cursor ${after}`);
+      return page;
+    };
+    const { events, head, truncated } = await walkRoomEvents(fetchPage, SINCE_MS, 0);
+    assert.deepEqual(calls, [0, 3, 6]);
+    assert.deepEqual(
+      events.map((e) => e.sequence),
+      [1, 7]
+    );
+    assert.deepEqual(
+      events.map((e) => e.body),
+      ["DONE: first", "BUG CONFIRMED: second"]
+    );
+    assert.equal(head, 7);
+    assert.equal(truncated, false);
+  });
+
+  it("still filters by type and window while advancing by the scanned cursor", async () => {
+    const pages = new Map([
+      [
+        0,
+        {
+          events: [
+            { sequence: 1, event: { type: "member.joined", at: AT, data: {} } },
+            msg(2, "DONE: too old", "2026-10-01T09:00:00Z"),
+            msg(3, "DONE: in window"),
+          ],
+          next: 3,
+          hasMore: false,
+        },
+      ],
+    ]);
+    const fetchPage = async (after) => pages.get(after);
+    const { events, head } = await walkRoomEvents(fetchPage, SINCE_MS, 0);
+    assert.deepEqual(
+      events.map((e) => e.sequence),
+      [3]
+    );
+    assert.equal(head, 3);
+  });
+
+  it("falls back to the last visible sequence when a page carries no next", async () => {
+    const fetchPage = async () => ({ events: [msg(5, "DONE: legacy")], hasMore: false });
+    const { events, head, truncated } = await walkRoomEvents(fetchPage, SINCE_MS, 0);
+    assert.deepEqual(
+      events.map((e) => e.sequence),
+      [5]
+    );
+    assert.equal(head, 5);
+    assert.equal(truncated, false);
+  });
+
+  it("fails closed when hasMore is true but the cursor does not advance", async () => {
+    const fetchPage = async () => ({ events: [], next: 0, hasMore: true });
+    await assert.rejects(
+      () => walkRoomEvents(fetchPage, SINCE_MS, 0),
+      /did not advance/
+    );
+  });
+
+  it("reports truncation at the page cap with the head at the scanned cursor", async () => {
+    let calls = 0;
+    const fetchPage = async (after) => {
+      calls += 1;
+      return { events: [], next: after + 1, hasMore: true };
+    };
+    const { events, head, truncated } = await walkRoomEvents(fetchPage, SINCE_MS, 0);
+    assert.deepEqual(events, []);
+    assert.equal(calls, 200);
+    assert.equal(head, 200);
+    assert.equal(truncated, true);
   });
 });
 

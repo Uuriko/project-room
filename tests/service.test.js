@@ -359,7 +359,7 @@ test("v2 migration preserves credentials and never merges matching Room member i
 
   let store = new RoomStore(filename);
   const alpha = store.authenticate(tokens[0]), beta = store.authenticate(tokens[1]);
-  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 38);
+  assert.equal(store.db.prepare("PRAGMA user_version").get().user_version, 42);
   assert.notEqual(alpha.account.id, beta.account.id, "matching legacy member ids are not identity proof across Rooms");
   assert.equal(alpha.account.authEpoch, 0); assert.equal(beta.account.authEpoch, 0);
   assert.equal(store.authenticate(sessions[0]).account.id, alpha.account.id);
@@ -402,7 +402,10 @@ test("simultaneous HTTP work requests admit one winner without a partial audit e
   const before = store.snapshot(owner, "commons").sequence;
   const requests = await Promise.all([1, 2].map(() => request("/api/rooms/commons/commands", { token: human, method: "POST", data: command(T.WORK_ACCEPTED, { workItemId: "race", expectedRevision: 0 }) })));
   assert.deepEqual(requests.map(r => r.status).sort(), [201, 409]);
-  assert.equal(store.snapshot(owner, "commons").sequence, before + 1);
+  // Decision #10 cutover: the winner's accept records two events — the
+  // work.accepted itself and the board card's "created" (work_claim.updated).
+  // The loser still records nothing: no partial audit event.
+  assert.equal(store.snapshot(owner, "commons").sequence, before + 2);
 });
 
 test("an exact-scope write claim can be released at event and projection capacity", t => {
@@ -506,8 +509,24 @@ test("the service rejects independent verification by a receipt's reported produ
 test("HTTP rate limits report backoff without creating extra room events", async t => {
   const { request, store, owner } = await http(t);
   const c = command(T.MESSAGE_POSTED, { body: "Idempotent request" });
-  for (let i = 0; i < 60; i++) assert.ok([200, 201].includes((await request("/api/rooms/commons/commands", { method: "POST", data: c })).status));
-  const result = await request("/api/rooms/commons/commands", { method: "POST", data: c });
-  assert.equal(result.status, 429); assert.equal(result.headers.get("retry-after"), "60");
+  // The write burst is 40 and refills slowly. Identical posts still count,
+  // and a refusal must not store a second message.
+  let limited = null;
+  let accepted = 0;
+  for (let i = 0; i < 80 && limited === null; i += 1) {
+    const res = await request("/api/rooms/commons/commands", { method: "POST", data: c });
+    if (res.status === 429) limited = res;
+    else {
+      assert.ok([200, 201].includes(res.status), String(res.status));
+      accepted += 1;
+      await res.text().catch(() => {});
+    }
+  }
+  assert.ok(accepted > 0, "the first identical post lands");
+  assert.ok(limited, "further identical posts spend the write burst");
+  assert.equal(limited.headers.get("x-ratelimit-limit"), "40");
+  assert.equal(limited.headers.get("x-ratelimit-bucket"), "write");
+  assert.ok(Number(limited.headers.get("retry-after")) >= 1);
+  assert.equal((await limited.json()).error.code, "rate_limited");
   assert.equal(store.snapshot(owner, "commons").state.messages.length, 1);
 });

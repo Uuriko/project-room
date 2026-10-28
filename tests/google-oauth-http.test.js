@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { clientId, clientSecret, sub, googleAuth } from "../scripts/helpers/google-oauth-fixture.mjs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPES } from "../server/google-oauth.mjs";
+import { GOOGLE_START_PATH, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPES, googleCallbackResumePage } from "../server/google-oauth.mjs";
 import * as T from "../src/events.js";
 
 async function startServer(t, f, options = {}) {
@@ -163,23 +163,26 @@ test("callback success without rooms lands on the account home, session establis
 test("callback with a state mismatch provisions no account", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
-  await beginFlow(origin);
-  const bad = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${"x".repeat(43)}&code=code-fixture`, { redirect: "manual" });
+  const { slotCookie } = await beginFlow(origin);
+  const bad = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${"x".repeat(43)}&code=code-fixture`, { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
   assert.equal(bad.status, 200);
   assert.match(await bad.text(), /url=\/\?google=error/);
   assert.equal(bad.headers.get("set-cookie") || "", "");
+  // Internal stage and schema hints stay in the server log, never on the response.
+  assert.equal(bad.headers.get("X-Room-Auth-Diagnostic"), null);
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
 });
 
 test("callback with a provider denial provisions no account", async t => {
   const f = createAcceptanceFixture();
   const origin = await startServer(t, f, { googleAuth: googleAuth() });
-  const { authorize } = await beginFlow(origin);
+  const { authorize, slotCookie } = await beginFlow(origin);
   const denied = await fetch(
     `${origin}${GOOGLE_CALLBACK_PATH}?state=${authorize.searchParams.get("state")}&error=access_denied`,
-    { redirect: "manual" });
+    { redirect: "manual", headers: { Cookie: `account_session=${slotCookie}` } });
   assert.equal(denied.status, 200);
   assert.match(await denied.text(), /url=\/\?google=error/);
+  assert.equal(denied.headers.get("X-Room-Auth-Diagnostic"), null);
   assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
 });
 
@@ -281,10 +284,73 @@ for (const stale of ["missing", "expired", "malformed"]) test(`Google start repl
   const flow = await beginFlow(origin, `account_session=${old}`);
   assert.ok(flow.slotCookie);
   assert.notEqual(flow.slotCookie, old);
-  const callback = await fetch(origin + GOOGLE_CALLBACK_PATH + "?state=" + flow.authorize.searchParams.get("state") + "&code=fixture", { redirect: "manual" });
+  // A real browser sends back the cookie the start response set; the callback
+  // must carry the same session slot the flow's state was issued for.
+  const callback = await fetch(origin + GOOGLE_CALLBACK_PATH + "?state=" + flow.authorize.searchParams.get("state") + "&code=fixture",
+    { redirect: "manual", headers: { Cookie: `account_session=${flow.slotCookie}` } });
   assert.equal(callback.headers.get("X-Room-Auth-Failure"), null);
   const token = accountCookie(callback);
   assert.ok(token);
   const session = await fetch(origin + "/api/account-session", { headers: { Cookie: `account_session=${token}` } });
   assert.equal((await session.json()).authenticated, true);
+});
+
+// Login-CSRF: the OAuth state is issued for the browser session that started
+// the flow (RFC 6749 section 10.12). An attacker who starts a flow, completes
+// Google's consent themselves, and tricks a victim into loading the captured
+// callback URL must not land the victim in the attacker's session.
+test("callback completing a state issued to another browser fails closed (login CSRF)", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  // Attacker starts the flow in their own browser and completes Google's
+  // consent, capturing the callback URL for their state.
+  const attacker = await beginFlow(origin);
+  const attackerState = attacker.authorize.searchParams.get("state");
+  // The victim has their own unrelated session slot.
+  const victim = await beginFlow(origin);
+  // The victim is tricked into loading the attacker's callback URL.
+  const attack = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture`,
+    { redirect: "manual", headers: { Cookie: `account_session=${victim.slotCookie}` } });
+  assert.equal(attack.status, 200);
+  // Fail closed: the victim must not be authenticated, and no Google account
+  // may be provisioned from the cross-session completion.
+  assert.match(await attack.text(), /url=\/\?google=error/);
+  assert.equal(attack.headers.get("set-cookie") || "", "");
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
+});
+
+test("callback with a valid state but no session cookie fails closed", async t => {
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f, { googleAuth: googleAuth() });
+  const attacker = await beginFlow(origin);
+  const attackerState = attacker.authorize.searchParams.get("state");
+  // A browser carrying no session cookie cannot be the one that started the
+  // flow, so the completion must fail rather than adopting the state's slot.
+  const attack = await fetch(
+    `${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture`,
+    { redirect: "manual" });
+  assert.equal(attack.status, 200);
+  const bridge = await attack.text();
+  assert.match(bridge, /room_oauth_resume=1/);
+  assert.equal(attack.headers.get("referrer-policy"), "no-referrer");
+  const refused = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture&room_oauth_resume=1`);
+  assert.match(await refused.text(), /url=\/\?google=error/);
+  assert.equal(attack.headers.get("set-cookie") || "", "");
+  assert.equal(f.store.db.prepare("SELECT count(*) AS n FROM accounts WHERE id LIKE 'google:%'").get().n, 0);
+  // A missing browser cookie never adopts or consumes the saved state's slot.
+  const legitimate = await fetch(`${origin}${GOOGLE_CALLBACK_PATH}?state=${attackerState}&code=code-fixture&room_oauth_resume=1`, {headers:{Cookie:`account_session=${attacker.slotCookie}`}});
+  assert.equal(legitimate.headers.get("x-room-auth-failure"), null);
+
+});
+
+
+test("Google callback bridge is bounded, local and escapes provider query data", () => {
+  const html = googleCallbackResumePage('https://room.example/api/auth/google/callback?state=x&code=%22%3E%3Cscript%3E&next=https://evil.example');
+  assert.match(html, /url=\/api\/auth\/google\/callback\?/);
+  assert.match(html, /room_oauth_resume=1/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /name="referrer" content="no-referrer"/);
+  assert.throws(() => googleCallbackResumePage('https://room.example/evil?state=x'), {code:'google_callback_invalid'});
+  assert.throws(() => googleCallbackResumePage('https://room.example/api/auth/google/callback?code='+'x'.repeat(16385)), {code:'google_callback_invalid'});
 });

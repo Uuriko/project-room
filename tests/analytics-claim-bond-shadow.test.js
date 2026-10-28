@@ -245,6 +245,72 @@ test("openBonds counts a claim that was released and re-claimed as open", () => 
   db.close();
 });
 
+function roomRow(roomId, seq, claimId, action, data = {}) {
+  return {
+    roomId,
+    seq,
+    atMs: T0 + seq * 60_000,
+    data: { workClaim: claimId, action, claimState: "claimed", ownerId: "lane-a", ...data }
+  };
+}
+
+test("same-named claims in different rooms keep separate bonds", () => {
+  // Regression (#2839): claim ids are per-room — every room has a 'starter'.
+  // Keyed by claimId alone, room-b's claim was invisible (room-a's bond was
+  // already open), room-a's release closed the shared entry, and room-b's
+  // lease expiry then recorded a flake with bond_posted=0 and no forfeit.
+  const entries = deriveShadowEntries([
+    roomRow("room-a", 1, "starter", "claimed", { ownerId: "lane-a" }),
+    roomRow("room-b", 1, "starter", "claimed", { ownerId: "lane-b" }),
+    roomRow("room-a", 2, "starter", "released", { claimState: "unclaimed", ownerId: null }),
+    roomRow("room-b", 2, "starter", "lease_expired", { claimState: "unclaimed", ownerId: null, previousOwnerId: "lane-b" })
+  ]);
+  assert.deepEqual(kinds(entries), ["bond-locked", "bond-locked", "bond-released", "flake-recorded", "bond-forfeited"]);
+  assert.equal(entries[0].roomId, "room-a");
+  assert.equal(entries[1].roomId, "room-b");
+  assert.notEqual(entries[0].id, entries[1].id, "entry ids must not collide across rooms");
+  const flake = entries.find(e => e.kind === "flake-recorded");
+  assert.equal(flake.roomId, "room-b");
+  assert.equal(flake.ownerId, "lane-b");
+  assert.equal(flake.bondPosted, 1, "room-b's bond was open when its lease expired");
+  assert.equal(entries.find(e => e.kind === "bond-forfeited").ownerId, "lane-b");
+});
+
+function insertEventInRoom(db, roomId, seq, claimId, action, data = {}) {
+  const body = JSON.stringify({
+    id: `e-${roomId}-${seq}`,
+    type: "work_claim.updated",
+    actorId: "lane-a",
+    at: new Date(T0 + seq * 60_000).toISOString(),
+    roomId,
+    data: { workClaim: claimId, action, claimState: "claimed", ownerId: "lane-a", ...data }
+  });
+  db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, seq, `e-${roomId}-${seq}`, body);
+}
+
+test("sync over all rooms journals both rooms' same-named claims and stays idempotent", () => {
+  // Regression (#2839): with claim-only entry ids, room-b's bond-locked row
+  // collided with room-a's (same claim, kind and per-room seq) and INSERT OR
+  // IGNORE silently dropped it from the journal.
+  const db = seedDb();
+  insertEventInRoom(db, "room-a", 1, "starter", "claimed", { ownerId: "lane-a" });
+  insertEventInRoom(db, "room-a", 2, "starter", "released", { claimState: "unclaimed", ownerId: null });
+  insertEventInRoom(db, "room-b", 1, "starter", "claimed", { ownerId: "lane-b" });
+  const first = syncShadowJournal(db);
+  assert.equal(first.eventsRead, 3);
+  assert.equal(first.entriesWritten, 3);
+  const ids = db.prepare("SELECT id FROM claim_bond_shadow").all().map(r => r.id);
+  assert.equal(new Set(ids).size, 3);
+  assert.ok(ids.some(id => id.includes("room-b")), "room-b's entries are in the journal");
+  const second = syncShadowJournal(db);
+  assert.equal(second.entriesWritten, 0, "re-run stays idempotent with room-scoped ids");
+  const report = shadowReport(db);
+  assert.equal(report.locked, 2);
+  assert.equal(report.released, 1);
+  assert.equal(report.openBonds, 1, "room-b's bond is still open; room-a's release closed only its own");
+  db.close();
+});
+
 test("openBonds is 0 when every bond closed and counts a carried bond as open", () => {
   const db = seedDb();
   let seq = 0;

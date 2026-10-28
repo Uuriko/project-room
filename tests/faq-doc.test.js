@@ -85,3 +85,18 @@ test("FAQ deletion answer names the self-serve Delete account path", () => {
   assert.ok(section.includes("Delete account"),
     "FAQ deletion answer should name the in-app Delete account control");
 });
+
+// Honest-product rule: every money-adjacent human surface carries the honest
+// sentence ("today this pays in reputation receipts; cash comes later" in
+// spirit). The FAQ's bounty answer mentions escrow and fund release, so it
+// must also say credits are valueless with no cash payout path yet —
+// otherwise a human reader can infer real money is on the table.
+test("FAQ bounty answer carries the honest money framing", () => {
+  const path = join(root, "docs", "FAQ.md");
+  const content = readFileSync(path, "utf8");
+  const answer = content.split("### How do bounties work?")[1].split("## ")[0];
+  assert.ok(answer.toLowerCase().includes("reputation receipt"),
+    "FAQ bounty answer must mention reputation receipts");
+  assert.ok(/no cash-?out/i.test(answer),
+    "FAQ bounty answer must say there is no cash-out");
+});

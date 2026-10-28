@@ -13,18 +13,24 @@ import { applicationTables } from "../server/writer-fence.mjs";
 // Empty in the recovery fixture: cron tables, and update marks that exist only
 // after a member reads, finishes, or clears an item. Same exceptions as the recovery audit.
 const EMPTY_UNTIL_CRON = new Set([
+  "message_replay_snapshots", // Staging is empty outside an unfinished replay.
   "membership_delegation_pending",
   "room_access_auto_approve",
   "integrity_snapshot",
   "integrity_job_cursor",
   "integrity_room_state",
-  // A public room page stays empty until an owner opts in. The backfill
-  // cursor is written by cron. Same exceptions as the recovery audit.
+  // A public room page stays empty until an owner opts in, and the recorded
+  // receipts setting is written only when an owner opts in or out. The
+  // backfill cursor is written by cron. Same exceptions as the recovery audit.
   "public_rooms",
   "public_read_model_backfill",
+  "room_public_receipts_setting",
   "private_update_marks",
   "private_update_commands",
   "messages_backfill_cursor",
+  "messages_backfill_blocks",
+  // Replay state parts exist only while a state is over one row.
+  "messages_backfill_state",
   "agent_wants_work",
   // Code drops exist only after an agent shares a patch.
   "room_code_drops",
@@ -36,7 +42,22 @@ const EMPTY_UNTIL_CRON = new Set([
   // Spend grants and authorizations exist only after an owner issues a grant.
   "spend_grant_terms",
   "spend_authorizations",
-  "spend_room_reservations"
+  "spend_room_reservations",
+  // Claim-history spill rows exist only once a claim's history passes the
+  // 200-stamp SEC-2 cap; seeded coverage never trims a claim. Same
+  // exception as the recovery audit.
+  "work_claim_history",
+  // GA-2 link exchange records exist only after a guest joins via a single-use link.
+  "guest_link_exchanges",
+  // Invite authority provenance is recorded when an invite is minted; the
+  // fixture seeds its invite rows directly. Same exception as the recovery audit.
+  "guest_invite_authority",
+  // Settlement links exist only once a paid public task is enabled
+  // (First Shift settlement rail).
+  "public_work_settlements",
+  // A public agent page and its questions stay empty until an owner opts in.
+  "agent_public_pages",
+  "agent_public_asks"
 ]);
 
 const EVENTS = 200_000;
@@ -144,7 +165,7 @@ test("reopen still repairs a legacy channel and a missing proposer", () => {
     store.initialize(initialRoom());
     const legacy = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
     delete legacy.channels;
-    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed" } };
+    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed", revision: 0 } };
     const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
     store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
     store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(
@@ -170,7 +191,7 @@ test("deferred open leaves a legacy projection until the integrity job repairs i
     store.initialize(initialRoom());
     const legacy = JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection);
     delete legacy.channels;
-    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed" } };
+    legacy.workItems = { "legacy-job": { id: "legacy-job", title: "Legacy", state: "proposed", revision: 0 } };
     const sequence = store.db.prepare("SELECT sequence FROM rooms WHERE id='commons'").get().sequence;
     store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(JSON.stringify(legacy));
     store.db.prepare("INSERT INTO events(room_id, sequence, id, body) VALUES(?,?,?,?)").run(

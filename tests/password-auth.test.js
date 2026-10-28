@@ -121,5 +121,7 @@ test("checkPasswordPolicy enforces length boundaries honestly", () => {
 test("DUMMY_PASSWORD_VERIFIER is well-formed and never matches", () => {
   assert.match(DUMMY_PASSWORD_VERIFIER, VERIFIER_PATTERN);
   assert.equal(verifyPassword("anything-at-all", DUMMY_PASSWORD_VERIFIER), false);
-  assert.equal(verifyPassword("dummy-password-verifier-placeholder", DUMMY_PASSWORD_VERIFIER), true);
+  // Regression pin: the previous literal's plaintext was this published
+  // string, so it verified — an enumeration oracle on the login route.
+  assert.equal(verifyPassword("dummy-password-verifier-placeholder", DUMMY_PASSWORD_VERIFIER), false);
 });

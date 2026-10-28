@@ -5,15 +5,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
-import { roomEntry } from "../deploy/room-entry.mjs";
+import { roomEntry } from "../server/room-entry.mjs";
 import {
-  agentCard, llmsTxt, llmsFullTxt, kitsTxt, agentCardJson, agentsJson, discoveryDoc, DISCOVERY_PATHS,
+  agentCard, llmsTxt, llmsFullTxt, skillMd, kitsTxt, agentCardJson, agentsJson, aiCatalog, discoveryDoc, DISCOVERY_PATHS, JOIN_TIERS,
   AFTER_PASTE_SECTION, joinPrompt, JOIN_HOSTS, JOIN_PROMPT_PATH, SHORT_PACKET_FILES, SHORT_PACKET_SYNONYMS, AGENT_CARD_SYNONYMS, HEALTH_ALIAS_PATHS,
   KITS_CATALOG_PATH, KITS_CATALOG_SYNONYMS, KITS_CATALOG_FILES, AGENTS_JSON_PATH,
   isHealthAliasPath, rewriteRoomApiPrefix, edgeDoorApiPath, DISCOVERY_PROTOCOL_VERSION, AGENT_CARD_A2A_PATH,
   ROOM_ORIGIN, ROOM_DOOR, ROOM_PUBLIC_WWW, COMPUTE_DOOR, ROOM_DOCS,
   EDGE_DOOR_HOSTS, isEdgeDoorUrl
-} from "../deploy/agent-discovery.mjs";
+} from "../server/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer (?!<saved-identity-secret>|<room-mcp-token>)|ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
@@ -52,7 +52,7 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(card.join.find(row => row.id === "enrolled-key").status, "live");
   assert.equal(card.join.find(row => row.id === "hosted-mcp").status, "live");
   assert.deepEqual(card.firstTools.map(row => row.name), ["room_check_access", "orient"]);
-  assert.equal(card.capabilities["guest-agent-links"], true);
+  assert.equal(card.capabilities["guest-agent-links"], false);
   assert.equal(card.capabilities["agent-keys"], true);
   assert.equal(card.capabilities["agent-rooms"], true);
   assert.match(card.description, /Work Items/);
@@ -72,31 +72,31 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.equal(DISCOVERY_PATHS.includes("/room/mcp"), false);
   assert.match(text, new RegExp(ROOM_PUBLIC_WWW.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.equal(text.includes("lobby.getdasha.com"), false); // dead door, never advertised
-  assert.match(text, /Humans: open this invite link/);
-  assert.match(text, /https:\/\/www\.getdasha\.com\/room\/#join\//);
-  assert.match(text, /#room\/\{roomId\} is not an invite/);
-  assert.match(text, /Agent invite code \/ redeem-invite is labeled below/);
-  assert.match(text, /packet \(live, no account\)/);
-  assert.match(text, /paste-prompt \(live, no account\)/);
-  assert.match(text, /GET \/join\.txt/);
-  assert.match(text, /guest-agent-link \(live, owner-issued\)/);
-  assert.match(text, /agent-room-create \(live, no account\)/);
-  assert.match(text, /bootstrap-agent-room/);
-  assert.match(text, /cli, not a live HTTP POST/);
-  assert.match(text, /no POST \/api\/bootstrap-agent-room/);
-  assert.match(text, /\/room\/api\/agent-identities/);
-  assert.match(text, /\/room\/api\/agent-rooms/);
-  assert.match(text, /\/room\/api\/agent-invites\/redeem/);
-  assert.match(text, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
-  assert.match(text, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
+  assert.match(full, /Humans: open this invite link/);
+  assert.match(full, /https:\/\/room\.trydemigod\.com\/#join\//);
+  assert.match(full, /#room\/\{roomId\} is not an invite/);
+  assert.match(full, /Agent invite code \/ redeem-invite is labeled below/);
+  assert.match(full, /packet \(live, no account\)/);
+  assert.match(full, /paste-prompt \(live, no account\)/);
+  assert.match(full, /GET \/join\.txt/);
+  assert.match(full, /guest-agent-link \(live, owner-issued\)/);
+  assert.match(full, /agent-room-create \(live, no account\)/);
+  assert.match(full, /bootstrap-agent-room/);
+  assert.match(full, /cli, not a live HTTP POST/);
+  assert.match(full, /no POST \/api\/bootstrap-agent-room/);
+  assert.match(full, /\/room\/api\/agent-identities/);
+  assert.match(full, /\/room\/api\/agent-rooms/);
+  assert.match(full, /\/room\/api\/agent-invites\/redeem/);
+  assert.match(full, /POST \/api\/rooms\/\{roomId\}\/agent-invites/);
+  assert.match(full, /\{"profile":"chat\|contribute\|review\|collaborate"\}/);
   assert.equal(card.endpoints.invite_mint, `${ROOM_ORIGIN}/api/rooms/{roomId}/agent-invites`);
-  assert.match(text, /hosted-mcp \(live, no account\)/);
-  assert.match(text, /https:\/\/www\.getdasha\.com\/room\/mcp/);
-  assert.doesNotMatch(text, /human-join-code \(live\)/);
-  assert.match(text, /www.getdasha.com \(no \/room path\)/);
+  assert.match(full, /hosted-mcp \(live, no account\)/);
+  assert.match(text, /https:\/\/room\.trydemigod\.com\/mcp/);
+  assert.doesNotMatch(full, /human-join-code \(live\)/);
+  assert.match(full, /www.getdasha.com \(no \/room path\)/);
   assert.match(text, /room_check_access/);
   assert.match(text, /orient/);
-  assert.match(text, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  assert.match(full, new RegExp(ROOM_DOCS.client.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   assert.match(full, /queued \/ processing \/ active/);
   assert.match(full, /Compute is a separate/);
   assert.match(text, /\/kits\.txt/);
@@ -125,23 +125,41 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.match(AFTER_PASTE_SECTION, /POST \/api\/share-links\/join-agent/);
   assert.match(AFTER_PASTE_SECTION, /GET \/api\/rooms\/ROOM_ID\/activation-pack/);
   assert.doesNotMatch(AFTER_PASTE_SECTION, /#join\/ ≠ agent auth|Waiting for Paste AI draft/);
-  for (const packet of [text, full]) {
-    const joinAt = packet.indexOf("## Join\n");
-    const afterAt = packet.indexOf(AFTER_PASTE_SECTION);
-    const routesAt = packet.indexOf("## Routes\n");
-    assert.ok(joinAt >= 0, "Join present");
-    assert.ok(afterAt > joinAt, "After paste follows Join");
-    assert.ok(routesAt > afterAt, "Routes follow After paste");
-    assert.equal(packet.includes(AFTER_PASTE_SECTION), true);
-    assert.match(packet, /Humans: open this invite link \(https:\/\/www\.getdasha\.com\/room\/#join\/…\)/);
-    assert.match(packet, /#room\/\{roomId\} is not an invite/);
-  }
+  const joinAt = full.indexOf("## Join\n");
+  const afterAt = full.indexOf(AFTER_PASTE_SECTION);
+  const routesAt = full.indexOf("## Routes\n");
+  assert.ok(joinAt >= 0, "Join present");
+  assert.ok(afterAt > joinAt, "After paste follows Join");
+  assert.ok(routesAt > afterAt, "Routes follow After paste");
+  assert.equal(full.includes(AFTER_PASTE_SECTION), true);
+  assert.match(full, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
+  assert.match(full, /#room\/\{roomId\} is not an invite/);
+  assert.match(text, /\[Full agent packet\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
+  assert.equal(text.includes(AFTER_PASTE_SECTION), false, "the short index points at the full packet instead of embedding After paste");
   assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
   assert.equal(kitsTxt().includes("## After paste"), false);
   const packetSkill = agentCard().skills.find(row => row.id === "packet");
   assert.match(packetSkill.description, /After paste/);
   assert.match(packetSkill.description, /shared invitation/);
   assert.doesNotMatch(agentCardJson(), FORBIDDEN);
+});
+
+test("both packets disclose the trial-seat mint requirement where they teach guest-agent-link (#3432)", () => {
+  // The guest door was taught as plain "owner-issued" while the mint gate
+  // requires the owner's signed-in account session — agent owners followed
+  // the packet into a 403 whose advice looped back at them. The disclosure
+  // rides the same sentence that presents the door, in both packets, and
+  // in the JOIN_TIERS summary agents read first.
+  for (const packet of [llmsFullTxt()]) {
+    const line = packet.split("\n").find(l => l.startsWith("- guest-agent-link"));
+    assert.ok(line, "guest-agent-link join line present");
+    assert.match(line, /signed-in account session/);
+    assert.match(line, /agent identity cannot mint/);
+    assert.match(line, /Add agent/);
+  }
+  const tier = JOIN_TIERS.find(row => row.id === "guest-agent-link");
+  assert.match(tier.summary, /signed-in account session/);
+  assert.match(tier.summary, /agent identity cannot mint/);
 });
 
 test("join prompt is one paste, secret-free, and served at /join.txt", () => {
@@ -280,9 +298,39 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.match(skill.type, /text\/markdown/, "served as markdown");
   assert.ok(skill.body.startsWith("---\nname: work-in-project-room"), "skill frontmatter names the skill");
   assert.ok(skill.body.includes("## Step 1"), "skill walks setup steps");
+  assert.ok(skill.body.includes("Step 5"), "skill walks a listening step: setup ends in a verified wake loop");
+  assert.ok(skill.body.includes("/api/agent-wakes/poll"), "skill teaches the wake poll endpoint");
+  assert.ok(skill.body.includes("/api/agent-heartbeats"), "skill teaches host heartbeat registration");
+  assert.ok(skill.body.includes("not done until"), "skill names the listening done-condition: never claim setup done before the first verified poll");
   assert.ok(skill.body.includes("/api/public-work/match"), "skill covers finding work");
   assert.ok(skill.body.includes("/api/project-offers"), "skill covers paid bounties");
   assert.ok(skill.body.includes("Money honesty"), "skill carries the money-honesty section");
+  // Stranger-onboarding recovery contract (qa200-AO-02): /SKILL.md is the whole
+  // onboarding for a first-contact agent, so it must document the two dead
+  // ends a stranger can hit before earning anything: a 429 on the identity
+  // mint (network budget) and an empty recommendations list.
+  assert.ok(skill.body.includes("Identity mint network budget reached"), "skill names the mint budget limit");
+  assert.ok(skill.body.includes("Retry-After"), "skill documents the mint 429 recovery interval");
+  // ch-2041 challenge: the budget refills on a rolling 24h window, not after
+  // Retry-After, and the server always sends Retry-After: 3600 for this tier —
+  // the doc must not promise recovery after 60 seconds.
+  assert.ok(skill.body.includes("rolling 24-hour window"), "skill states the true mint-budget recovery window");
+  assert.ok(!skill.body.includes("60 seconds if the header is absent"), "skill drops the false 60s fallback");
+  // ch-2041 challenge: an empty match is caused by everything claimed or by a
+  // non-volunteer reward request — interests only sort, never filter — so the
+  // doc must name those causes and not advise "try other interests".
+  assert.ok(skill.body.includes("supportedRewards"), "skill names the reward-class empty-match cause");
+  assert.ok(!skill.body.includes("Try other interests"), "skill drops the ineffective empty-match advice");
+  // Stranger dead-end recovery map (qa200-GP-05/FINDINGS): four dead ends a
+  // first-contact agent hits that the onboarding text above does not cover —
+  // Cloudflare 403 on stock library user-agents, zstd content-encoding
+  // breaking naive clients, the "Unknown error '<code>'" fallthrough hint,
+  // and a 401/rooms: [] right after a successful mint. Each must carry its
+  // exact recovery, verified live against production.
+  assert.ok(skill.body.includes("error code: 1010"), "skill names the Cloudflare 1010 user-agent dead end");
+  assert.ok(skill.body.includes("Content-Encoding: zstd"), "skill documents the zstd dead end and recovery");
+  assert.ok(skill.body.includes("Unknown error"), "skill documents the unknown-error fallthrough recovery");
+  assert.ok(skill.body.includes("rooms: []"), "skill documents the fresh-mint 401 / rooms dead end");
   assert.ok(!FORBIDDEN.test(skill.body), "skill stays secret-free");
   for (const path of ["/room/SKILL.md", "/project-room/SKILL.md"]) {
     assert.ok(DISCOVERY_PATHS.includes(path), path);
@@ -296,6 +344,39 @@ test("uppercase /SKILL.md serves the agent skill, distinct from the llms.txt pac
   assert.equal(await get.text(), skill.body);
   // The lowercase alias is untouched: still the short packet.
   assert.equal(discoveryDoc("/skill.md").body, packet.body, "lowercase /skill.md still aliases llms.txt");
+});
+
+// The rendered onboarding requests are a copy/paste contract. These checks
+// catch malformed bodies and missing transport headers without source greps.
+for (const [path, expectedBody, originRequired] of [
+  ["/api/access-requests", { roomId: "muse-room", identityId: "<your identityId>", displayName: "Your agent name", requestedPermissions: [], requestId: "YOUR-STABLE-ID-3" }, false],
+  ["/api/share-links/join-agent", { linkToken: "TOKEN", displayName: "Your agent name" }, false],
+  ["/api/auth/agent/rooms", { identityId: "<your identityId>" }, true],
+]) {
+  test(`onboarding skill gives a complete JSON request for ${path}`, () => {
+    const blocks = [...discoveryDoc("/SKILL.md").body.matchAll(/```\n([\s\S]*?)```/g)].map(match => match[1]);
+    const request = blocks.find(block => block.startsWith(`POST ${ROOM_ORIGIN}${path}\n`));
+    assert.ok(request, `${path} has a copyable request`);
+    assert.match(request, /^Authorization: Bearer <saved-identity-secret>$/m);
+    assert.match(request, /^Content-Type: application\/json$/m);
+    if (originRequired) assert.ok(request.includes(`Origin: ${ROOM_ORIGIN}\n`));
+    assert.deepEqual(JSON.parse(request.slice(request.indexOf("{"))), expectedBody);
+  });
+}
+
+test("onboarding skill labels every JSON POST example", () => {
+  const text = discoveryDoc("/SKILL.md").body;
+  const requests = [...text.matchAll(/```\n(POST [\s\S]*?)```/g)].map(match => match[1]);
+  for (const request of requests) assert.match(request, /^Content-Type: application\/json$/m, request.split("\n")[0]);
+});
+
+test("onboarding skill explains read/chat approval limits", () => {
+  const text = discoveryDoc("/SKILL.md").body;
+  const step4 = text.slice(text.indexOf("## Step 4"), text.indexOf("## Money honesty"));
+  assert.match(step4, /empty `requestedPermissions` asks for read and chat access/);
+  assert.match(step4, /read\/chat request waits until the room owner approves it/);
+  assert.match(step4, /non-empty permission request may be auto-approved[\s\S]*covered by the room's standing rule/);
+  assert.match(step4, /Reuse the same `requestId` when you retry/);
 });
 
 test("www leftover synonyms serve the short packet or agent card, not 404", async t => {
@@ -603,10 +684,10 @@ test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D
   assert.match(text, /One canonical MCP URL: paste https:\/\/room\.trydemigod\.com\/mcp/);
 });
 
-test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
-  const text = llmsTxt();
-  // The short packet must name the board endpoints so an agent can
-  // coordinate machine work without reading the full packet or openapi.
+test("llms-full.txt documents the work-claims REST contract (issue #1529)", () => {
+  const text = llmsFullTxt();
+  // The full packet names the board endpoints so an agent can
+  // coordinate machine work without reading openapi. The short index points there.
   assert.match(text, /^## Work-claim board$/m);
   const section = text.slice(text.indexOf("## Work-claim board"));
   assert.match(section, /GET \/api\/rooms\/{roomId}\/work-claims/);
@@ -615,4 +696,142 @@ test("llms.txt documents the work-claims REST contract (issue #1529)", () => {
   assert.match(section, /\/work-claims\/{claimId}\/update/);
   assert.match(section, /\/work-claims\/{claimId}\/release/);
   assert.match(section, /first claim wins/i);
+});
+
+// PRODUCT-200 B1: the served /openapi.json is the curated in-scope machine
+// surface (generated from DISCOVERABILITY_ROUTES), not every route. Its own
+// info.description says "treat it as documentation, not a live route table",
+// and scripts/openapi-served-exclusions.json inventories the out-of-scope
+// routes with reasons. The packets must state that coverage rule honestly;
+// an "every route" sentence is docs/live drift the moment it ships.
+// #3022: the short packet's two Board-wakes paragraphs told agents to poll
+// GET /api/agent-wakes/poll with no parameters and no prerequisites; the
+// literal call returns 422 invalid_wake_poll (hostId is required) and then
+// 404 agent_not_registered (a heartbeat must come first). Both paragraphs
+// now interpolate the one WAKE_POLL_INSTRUCTION sentence from the generator,
+// and this test fails if any wake-poll mention in any packet loses the
+// heartbeat-first + hostId shape again — or if a bare poll URL reappears.
+test("every packet wake-poll mention teaches heartbeat-first with hostId (#3022)", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()]]) {
+    assert.ok(!text.includes("/api/agent-wakes/poll`"), `${name}: no bare poll URL presented as the instruction`);
+    assert.ok(!text.includes("/api/agent-wakes/poll\n"), `${name}: no bare poll URL at line end`);
+    for (const line of text.split("\n").filter(l => l.includes("Board wakes"))) {
+      assert.ok(line.includes("/api/agent-heartbeats"), `${name}: Board-wakes line names the heartbeat-first step`);
+      assert.ok(line.includes("agent-wakes/poll?hostId="), `${name}: Board-wakes line polls with ?hostId=`);
+      assert.ok(line.includes("invalid_wake_poll"), `${name}: Board-wakes line names the 422 for a missing hostId`);
+      assert.ok(line.includes("agent_not_registered"), `${name}: Board-wakes line names the 404 before any heartbeat`);
+    }
+  }
+  const wakesLines = llmsFullTxt().split("\n").filter(l => l.includes("Board wakes"));
+  assert.equal(wakesLines.length, 2, "llms-full.txt keeps exactly its two Board-wakes paragraphs");
+});
+
+// The packet golden path (PUBLIC_WORK_SECTION, shared by llms.txt and
+// llms-full.txt) hardcoded termsVersion 3 / generation 7-8 in its worked
+// example while live tasks are termsVersion 1 / generation 1 — a literal
+// follower's finish call failed as stale. PR #3026 fixed the same literals
+// in the docs; the packet now shows live-shaped response examples and
+// TERMS_VERSION/GENERATION placeholders in the finish request.
+test("packet golden path carries no stale termsVersion/generation literals", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!text.includes("\"termsVersion\":3"), `${name}: no termsVersion 3 literal`);
+    assert.ok(!text.includes("\"expectedTermsVersion\":3"), `${name}: finish example sends no literal expectedTermsVersion`);
+    assert.ok(!text.includes("\"generation\":8"), `${name}: no generation 8 literal`);
+  }
+  const full = llmsFullTxt();
+  assert.ok(full.includes("\"expectedTermsVersion\":TERMS_VERSION"), "llms-full.txt finish example uses the TERMS_VERSION placeholder");
+  assert.ok(full.includes("\"generation\":GENERATION"), "llms-full.txt finish example uses the GENERATION placeholder");
+  assert.match(full, /copy both, never invent them/, "llms-full.txt finish example says to copy both values from the claim response");
+});
+
+// Canonical MCP origin (John's decision, 2026-10-13): room.trydemigod.com/mcp.
+// The packet used to point at the getdasha door for the MCP server card while
+// the code constant (src/room-mcp-join.js ROOM_MCP_PUBLIC_URL) named getdasha
+// as the pasteable URL — two origins for one endpoint (J1 finding C1). Every
+// generated discovery surface now advertises the one canonical origin.
+test("discovery surfaces advertise only the canonical MCP origin", () => {
+  for (const [name, text] of [["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()], ["kits.txt", kitsTxt()], ["agents.json", agentsJson()], ["ai-catalog", aiCatalog()]]) {
+    assert.ok(!text.includes("getdasha.com/room/mcp"), `${name}: no getdasha MCP pointer`);
+    assert.ok(!text.includes("getdasha.com/mcp"), `${name}: no getdasha MCP URL`);
+  }
+  // llms.txt may keep the www door documented as an alias (llms-accuracy
+  // pins that honesty), but the alias must never be the instructed URL:
+  // every getdasha MCP mention in the packet is the documented-alias line.
+  for (const line of llmsTxt().split("\n").filter(l => l.includes("getdasha.com/room/mcp") || l.includes("getdasha.com/mcp"))) {
+    assert.ok(line.includes("is an alias"), `llms.txt: getdasha MCP mention is documented-alias only: ${line.slice(0, 80)}`);
+  }
+  assert.ok(llmsTxt().includes(`One canonical MCP URL: paste ${ROOM_ORIGIN}/mcp`), "llms.txt names the canonical MCP URL");
+  assert.ok(llmsTxt().includes(`Hosted MCP server card: ${ROOM_ORIGIN}/room/mcp/server-card`), "llms.txt server-card URL is on the canonical origin");
+});
+
+// llms.txt is the single front door (John's decision, 2026-10-13): its first
+// screen states the path and names the activation pack as the connected
+// proof + work menu an agent reads right after joining.
+test("llms.txt first screen routes to the activation pack as connected proof", () => {
+  const firstScreen = llmsTxt().split("\n").slice(0, 20).join("\n");
+  assert.match(firstScreen, /this packet is the front door/, "first screen names the single front door");
+  assert.ok(firstScreen.includes("/activation-pack"), "first screen names the activation pack");
+  assert.match(firstScreen, /proves you are connected/, "first screen frames the pack as connected proof");
+});
+
+// Guest door demotion (John's decision, 2026-10-13): the packet presents
+// guest access only as an owner-issued trial seat, never as a self-serve
+// signup path, and points at identity mint for ongoing access.
+test("packet presents guest access only as an owner-issued trial seat", () => {
+  const text = llmsTxt();
+  for (const line of text.split("\n").filter(l => l.includes("guest-agent-link"))) {
+    assert.match(line, /owner-issued/i, "guest bullet is framed owner-issued");
+    assert.match(line, /trial seat/i, "guest bullet is framed as a trial seat");
+    assert.match(line, /identity-mint/, "guest bullet points at full signup");
+  }
+  assert.match(agentCard().description, /trial seat is not membership/, "agent card frames the guest seat as trial-only");
+});
+
+// The packet names AGENT-START-HERE "the one agent doc"; the ARD catalog and
+// agents.json must not crown a second doc ("The one agent guide" for
+// SWARM-PLUG-IN) — two "one" guides is the entry-doc sprawl in miniature.
+test("discovery surfaces name only one 'one' guide", () => {
+  assert.ok(!aiCatalog().includes("one agent guide"), "ai-catalog: no second 'one' guide");
+  assert.ok(!agentsJson().includes("one agent guide"), "agents.json: no second 'one' guide");
+});
+
+test("llms packets describe /openapi.json as the curated machine surface, not every route", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["skill.md", skillMd()]]) {
+    assert.ok(!text.includes("Every route is in"), `${name}: no 'Every route is in' overclaim`);
+    assert.ok(!text.includes("(every route)"), `${name}: no '(every route)' overclaim`);
+    assert.match(text, /curated machine[ -]surface/, `${name}: states the actual coverage rule`);
+  }
+});
+
+// AEO Lane 3 (2026-10-17): the money truth after the settlement rail landed.
+// The packets and card once said volunteer/reputation-only; funded work now
+// settles in ledger credits through escrow. Pin the new truth and the
+// llms-full superset so the stale lines cannot return silently.
+test("packets and card state the funded-work truth, never the stale volunteer-only line", () => {
+  for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!text.includes("Only volunteer work is executable here"), `${name}: stale volunteer-only line`);
+    assert.ok(text.includes("locked in escrow"), `${name}: escrow funding stated`);
+    assert.ok(text.includes("not cash"), `${name}: credits-not-cash stated`);
+  }
+  const card = agentCard();
+  assert.ok(!card.description.includes("reputation receipts only"), "card: stale reputation-only line");
+  assert.ok(card.description.includes("ledger credits"), "card: ledger credits stated");
+  assert.ok(card.description.includes("not cash"), "card: credits-not-cash stated");
+});
+
+test("llms-full.txt is a section superset of llms.txt and no smaller", () => {
+  const text = llmsTxt(), full = llmsFullTxt();
+  const headings = packet => [...packet.matchAll(/^## .+$/gm)].map(match => match[0]);
+  for (const heading of headings(text)) {
+    assert.ok(headings(full).includes(heading), `llms-full.txt missing section: ${heading}`);
+  }
+  assert.ok(full.length >= text.length, `llms-full.txt (${full.length}) must not be smaller than llms.txt (${text.length})`);
+});
+
+test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extended", async t => {
+  const origin = await serve(t);
+  const robots = await (await fetch(`${origin}/robots.txt`)).text();
+  for (const bot of ["Google-Extended", "CCBot", "Applebot-Extended"]) {
+    assert.ok(robots.includes(`User-agent: ${bot}\nAllow: /`), `robots.txt must explicitly allow ${bot}`);
+  }
 });

@@ -12,9 +12,16 @@ const checkColumns = columns => {
     typeof c.header === "string" && c.header.length > 0),
     "every column must have a non-empty key and header");
 };
-// Escape a single CSV field per RFC 4180.
+// A string field whose first non-whitespace character is =, +, - or @ is a
+// live formula when a spreadsheet app opens the export (CSV injection);
+// quoting alone does not neutralize it. Prefix such fields with a single
+// quote, which forces spreadsheet apps to treat the cell as text. Genuine
+// numbers are not strings and keep their bare numeric form.
+const FORMULA_LEADING = /^[\s]*[=+\-@]/;
+// Escape a single CSV field per RFC 4180, after formula neutralization.
 export function escapeField(value) {
-  const text = value === null || value === undefined ? "" : String(value);
+  let text = value === null || value === undefined ? "" : String(value);
+  if (typeof value === "string" && FORMULA_LEADING.test(text)) text = `'${text}`;
   if (text.includes('"') || text.includes(",") || text.includes("\n") || text.includes("\r")) {
     return `"${text.replace(/"/g, '""')}"`;
   }

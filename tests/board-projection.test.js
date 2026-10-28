@@ -53,3 +53,20 @@ test("board projects every work item into exactly one column with handoff and ha
   assert.deepEqual(clean.halts, []);
   assert.equal(clean.columns.handoff.length, 0);
 });
+
+test("board cards carry the replacement pointer and the blocker record", () => {
+  // A superseded card whose next step says "Continue in the replacement work
+  // item" must name the replacement; a blocked card must say why it is blocked.
+  const blocked = { ...base, id: "b9", title: "Blocked nine", state: "blocked",
+    blocker: { reason: "Waiting on API", nextAction: "Ping Sam", eventId: "e9" } };
+  const replaced = { ...base, id: "s9", title: "Replaced nine", state: "superseded", supersededBy: "b9" };
+  const board = projectBoard({ workItems: { b9: blocked, s9: replaced } }, Date.now());
+  const blockedCard = board.columns.blocked.find(card => card.id === "b9");
+  assert.ok(blockedCard, "blocked item lands in the blocked column");
+  assert.equal(blockedCard.blocker.reason, "Waiting on API");
+  assert.equal(blockedCard.blocker.nextAction, "Ping Sam");
+  assert.equal(blockedCard.blocker.eventId, "e9");
+  const supersededCard = board.columns.superseded.find(card => card.id === "s9");
+  assert.ok(supersededCard, "superseded item lands in the superseded column");
+  assert.equal(supersededCard.supersededBy, "b9");
+});

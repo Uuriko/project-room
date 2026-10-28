@@ -38,7 +38,7 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // an owner notification. These imports follow the agent-invites.mjs
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
-import { event, EVENT_TYPES as T, isRoomArchived, memberCan } from "../src/events.js";
+import { event, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember } from "../src/events.js";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -77,6 +77,9 @@ export const accessRequestSchema = `
   );
   CREATE INDEX IF NOT EXISTS access_requests_room ON access_requests(room_id, status);
   CREATE INDEX IF NOT EXISTS access_requests_identity ON access_requests(identity_id);
+  -- PRODUCT-200 B10: covering index for the room-scoped idempotency replay
+  -- lookup (WHERE request_id=? AND room_id=?).
+  CREATE INDEX IF NOT EXISTS access_requests_room_request ON access_requests(room_id, request_id);
   -- Self-serve admission (RC-2026-09-29-3603): a room's standing auto-approve
   -- rule. When set, incoming requests whose permissions are a non-empty subset
   -- of this list are approved and linked inline, with no human in the loop.
@@ -164,8 +167,10 @@ export class AccessRequests {
     return this.memberPermissions.request(token, roomId, input, binding);
   }
 
-  // Admission is public. Upgrades require the current identity secret as
-  // proof of the requester's identity, then an authorized reviewed decision.
+  // Admission requires the identity's current secret as proof of the
+  // requester's identity (issue #2912): a caller-chosen identityId alone
+  // never files a request in that identity's name. Upgrades additionally
+  // require an authorized reviewed decision.
   // requestId is the caller's idempotency key: retries with the same id
   // return the original request instead of creating a duplicate.
   request(roomId, { identityId, displayName, requestedPermissions, note, referredBy, requestId }, secret = null) {
@@ -199,7 +204,13 @@ export class AccessRequests {
     if (!REQUEST_ID_PATTERN.test(rid)) fail(422, "invalid_request", "requestId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
 
     return this.store.transaction(() => {
-      const existing = this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(rid);
+      // PRODUCT-200 B10: scope the idempotency replay to the room. The old
+      // unscoped lookup (WHERE request_id=?) let a client-supplied key minted
+      // in room A replay room A's request when retried in room B — a
+      // cross-room replay of another room's request (QA200-MUT-14 design
+      // question; bounty-escrow fixed the same class in #1000 by scoping).
+      const existing = this.db.prepare(
+        "SELECT * FROM access_requests WHERE request_id=? AND room_id=?").get(rid, roomId);
       if (existing) {
         // Idempotent retry: only the original identity may observe it.
         if (existing.identity_id !== identityId) fail(409, "request_conflict", "requestId is already in use");
@@ -219,13 +230,27 @@ export class AccessRequests {
         }
         return retryLive;
       }
+      // The key exists but belongs to a different room. request_id is a
+      // global PRIMARY KEY, so this key can never be re-created here; fail
+      // honestly with the same 409 the cross-identity collision uses
+      // instead of leaking or shadowing the other room's request.
+      const elsewhere = this.db.prepare(
+        "SELECT 1 FROM access_requests WHERE request_id=?").get(rid);
+      if (elsewhere) fail(409, "request_conflict", "requestId is already in use");
       // The identity must exist (minted via identity-create). We do not
       // reveal anything else: a missing identity and a bad room look the
       // same to the caller.
       const identity = this.db.prepare("SELECT 1 FROM agent_identities WHERE identity_id=?").get(identityId);
       if (!identity) fail(404, "not_found", "No such room or identity");
+      // The room existence check stays ahead of the secret proof (and of
+      // the rate limiter) so a missing identity and a bad room keep
+      // looking identical to the caller — the 404 is the same one this
+      // route always gave before any credential was consulted, and no
+      // state changes until after proof below.
+      const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId);
+      if (!roomExists) fail(404, "not_found", "No such room or identity");
       // Past the idempotent retry and past the existence check, deliberately.
-      // identityId is caller-supplied on an unauthenticated route, so keying
+      // identityId is caller-supplied, so keying
       // the limiter on it before proving the identity exists let one address
       // void the documented 5/hour bound by changing a character per request,
       // and allocated a bucket per made-up value that was never released.
@@ -237,14 +262,22 @@ export class AccessRequests {
         // member name or which permissions it holds to an anonymous probe.
         if (!secret) fail(409, "already_member", "This identity is already linked to this room; present its current identity secret as Bearer to request additional permissions");
         this.store.identities.authenticateIdentitySecret(identityId, secret);
+      } else {
+        // Issue #2912: a fresh join must prove it holds the identity's
+        // secret. Without this, anyone who learned an identityId could
+        // file requests in that identity's name — spending its rate-limit
+        // bucket and pending-request cap, choosing its display name, and,
+        // in a room with an auto-approve rule, being admitted as that
+        // identity with no human review. Proof is checked here, before
+        // the rate limiter, so invalid proofs never spend the real
+        // holder's quota (the same ordering the upgrade path uses).
+        this.store.identities.authenticateIdentitySecret(identityId, secret);
       }
       // Invalid upgrade proofs must not spend the real holder's request quota.
       const limit = this.rateLimiter.check(`access-request:${identityId}`);
       if (!limit.allowed) fail(429, "rate_limited", limit.message);
-      const roomExists = this.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId);
-      if (!roomExists) fail(404, "not_found", "No such room or identity");
       const room = this.store.room(roomId);
-      const member = linked && Object.hasOwn(room.state.members, linked.memberId) ? room.state.members[linked.memberId] : null;
+      const member = linked ? ownMember(room.state.members, linked.memberId) ?? null : null;
       if (linked) {
         if (!member || member.active === false || member.identityId !== identityId || this.store.identities.secretRevoked(identityId)) {
           fail(409, "stale_membership", "Current active membership required; ask a room owner to review access");
@@ -254,6 +287,11 @@ export class AccessRequests {
         }
         if (isRoomArchived(room.state)) fail(409, "room_archived", "This room is archived; access cannot be upgraded");
       }
+      // #3745: expiry is lazy, so this identity's lapsed rows may still be
+      // stored 'pending' in a room nobody reads. Materialize them before
+      // the cap counts — the same flip list() performs for the room — or
+      // dead rows consume the cap forever.
+      this.expireOld(roomId, identityId);
       const pending = this.db.prepare(
         "SELECT count(*) AS n FROM access_requests WHERE room_id=? AND identity_id=? AND status IN ('pending', 'pending_upgrade')").get(roomId, identityId).n;
       if (pending >= MAX_PENDING_PER_IDENTITY_ROOM) {
@@ -347,7 +385,7 @@ export class AccessRequests {
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "access_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -561,7 +599,7 @@ export class AccessRequests {
       memberId,
       grantedPermissions: Object.freeze([...grants]),
       next: Object.freeze([
-        Object.freeze({ action: "orient", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/orient`,
+        Object.freeze({ action: "activation-pack", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/activation-pack`,
           description: "You are a member now. Orient to the room: members, open work items, and how to claim work." }),
         Object.freeze({ action: "see-membership", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/presence`,
           description: "Confirm your membership and granted permissions in the room's member list." }),
@@ -669,7 +707,7 @@ export class AccessRequests {
         this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
           .run(now, auth.member.id, "already a member; request closed without a second grant", requestId);
         const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
-        const held = authority.members[existingLink.memberId]?.permissions ?? [];
+        const held = ownMember(authority.members, existingLink.memberId)?.permissions ?? [];
         return Object.freeze({
           ...updated,
           memberId: existingLink.memberId,
@@ -692,15 +730,27 @@ export class AccessRequests {
       // member display names. A unique match attributes the join; anything
       // else joins with no referrer and the approval proceeds unchanged.
       const referrerMemberId = this.store.referrals.matchReferrer(roomId, row.referred_by);
+      // SECURITY-FIX C3 (#942): record the approval BEFORE driving
+      // link(). link() treats an approved access request on record as the
+      // holder proof for the binding (filing was secret-proven under
+      // #2912), so the flip must land first for that exemption to fire.
+      // Flip and link stay inside this one transaction — the pair is
+      // still atomic, and a failed link rolls the approval back too.
+      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
+        .run(now, auth.member.id, requestId);
       const linked = identities.link(token, roomId, {
         identityId: row.identity_id,
         displayName: row.display_name,
         permissions: grants,
         settleAccessRequests: false,
+        // S2-1: name the request this link executes, so link()'s
+        // holder-proof gate treats it as the decision's own act
+        // (decider present and sovereign) rather than a later direct
+        // link leaning on the standing approved row, which is bounded
+        // by what the request asked for.
+        decidedRequestId: requestId,
         ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
-      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
-        .run(now, auth.member.id, requestId);
       // Journal the completed referral in the same transaction, after the
       // new member exists. Exactly-once per referee via the referrals
       // primary key, so a retried approval cannot double-count.
@@ -754,9 +804,17 @@ export class AccessRequests {
     return row;
   }
 
-  expireOld(roomId) {
+  // Lazy expiry, materialized on contact: rows past the TTL flip to
+  // 'expired', so stored state matches what readers already assume. The
+  // room-wide form serves the owner's list(); the identity-scoped form
+  // serves the create paths, where the pending cap must measure only the
+  // caller's own live requests (#3745) and no other identity's rows are
+  // flipped as a side effect of someone else's create.
+  expireOld(roomId, identityId = null) {
     const cutoff = this.store.now() - REQUEST_TTL_MS;
-    this.db.prepare("UPDATE access_requests SET status='expired' WHERE room_id=? AND status IN ('pending', 'pending_upgrade') AND created_at<?")
-      .run(roomId, cutoff);
+    const scoped = identityId !== null;
+    this.db.prepare(`UPDATE access_requests SET status='expired'
+      WHERE room_id=?${scoped ? " AND identity_id=?" : ""} AND status IN ('pending', 'pending_upgrade') AND created_at<?`)
+      .run(...(scoped ? [roomId, identityId, cutoff] : [roomId, cutoff]));
   }
 }

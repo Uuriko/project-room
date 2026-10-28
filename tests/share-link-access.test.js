@@ -8,7 +8,8 @@ import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
-import { EVENT_TYPES as T, PERMISSIONS } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, NEVER_GRANT } from "../src/events.js";
+import { linkPermissions } from "../server/share-links.mjs";
 
 function fixture(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-link-access-"));
@@ -42,24 +43,37 @@ test("a link without access is the same guest link as before", t => {
   assert.equal(link.role, "guest"); assert.equal(link.access, "guest"); assert.deepEqual(link.permissions, []);
 });
 
-test("a co-admin link gives every permission to the agents and people who join", t => {
+test("linkPermissions caps every tier at the invite ceiling (NEVER_GRANT)", () => {
+  for (const access of ["guest", "member", "co_admin"]) {
+    assert.ok(linkPermissions(access).every(permission => !NEVER_GRANT.includes(permission)), `${access} must not grant ${NEVER_GRANT.join("/")}`);
+  }
+  assert.deepEqual(linkPermissions("co_admin"), PERMISSIONS.filter(permission => !NEVER_GRANT.includes(permission)));
+  assert.deepEqual(linkPermissions("member"), ["accept_work", "complete_work", "verify"]);
+  assert.deepEqual(linkPermissions("guest"), []);
+});
+
+test("a co-admin link grants every grantable permission — never the NEVER_GRANT three (#3549)", t => {
   const f = fixture(t), { linkToken, link } = f.mint("co_admin");
-  assert.equal(link.access, "co_admin"); assert.deepEqual(link.permissions, [...PERMISSIONS]);
-  assert.match(f.store.shareLinks.preview(linkToken).access, /Every room permission/);
+  const grantable = PERMISSIONS.filter(permission => !NEVER_GRANT.includes(permission));
+  assert.equal(link.access, "co_admin"); assert.deepEqual(link.permissions, grantable);
+  assert.match(f.store.shareLinks.preview(linkToken).access, /Every working permission/);
+  assert.doesNotMatch(f.store.shareLinks.preview(linkToken).access, /Every room permission/);
 
   const agent = f.store.identities.create("Helper agent");
   const joined = f.store.shareLinks.joinAgent(agent.secret, linkToken, "Helper agent");
-  assert.deepEqual(joined.permissions, [...PERMISSIONS]);
-  assert.deepEqual(f.member(agent.identityId).permissions, [...PERMISSIONS]);
-  assert.equal(f.member(agent.identityId).delegatedAdmin, true);
+  assert.deepEqual(joined.permissions, grantable);
+  assert.deepEqual(f.member(agent.identityId).permissions, grantable);
+  // The grant carries no manage_members/decide, so the reducer never stamps
+  // the joiner as an owner-delegated administrator.
+  assert.ok(!f.member(agent.identityId).delegatedAdmin);
 
   const human = f.joinHuman(linkToken, f.signedIn(), "Co admin");
-  assert.deepEqual(f.member(human.session.member.id).permissions, [...PERMISSIONS]);
+  assert.deepEqual(f.member(human.session.member.id).permissions, grantable);
 
-  // Joiners can do what the creator can: mint links and change access.
-  const minted = f.store.shareLinks.create(agent.secret, "commons", { requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url"),
-    expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: f.member(agent.identityId).revision }, null);
-  assert.equal(minted.link.status, "active");
+  // The escalation the ceiling closes: a link joiner cannot turn around and
+  // mint further links (that needs manage_members, which no link confers).
+  assert.throws(() => f.store.shareLinks.create(agent.secret, "commons", { requestId: randomUUID(), linkToken: randomBytes(32).toString("base64url"),
+    expiresAt: Date.now() + 3600000, maxJoins: 2, expectedMemberRevision: f.member(agent.identityId).revision }, null), { code: "access_denied" });
   assert.equal(f.store.verifyInvitationAudit().consistent, true);
   assert.doesNotThrow(() => f.store.shareLinks.verify());
   auditRecovery(f.store);

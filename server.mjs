@@ -9,12 +9,11 @@ import { wireNodeJobs } from "./server/jobs.mjs";
 import { deploymentConfig } from "./server/deployment.mjs";
 import { createServer } from "node:http";
 import { maintenanceEnabled, maintenanceReply } from "./server/maintenance.mjs";
+import { SOURCE_REVISION, BUILD_ID } from "./server/version.mjs";
 import { growthCollector } from "./src/growth-emit.js";
 import { loadFromFile, saveToFile } from "./src/growth-persistence.js";
 import { createGrowthHttp } from "./src/growth-http.js";
 import { acquireInstanceLock } from "./server/instance-lock.mjs";
-import { validateCriticalConfig } from "./server/boot-config.mjs";
-import { agentCardSignatureState } from "./deploy/agent-discovery.mjs";
 
 const { host, port, origin, filename, production, streamInterval } = deploymentConfig();
 const paused = maintenanceEnabled(process.env.ROOM_MAINTENANCE);
@@ -25,13 +24,12 @@ catch (error) { if (error?.code !== "ENOENT") throw error; }
 if (!paused && production && !havePilotDb) throw new Error("Provision a persistent pilot database before startup");
 // Fail-loud config gate (RC-2026-09-27-2732): missing/invalid critical
 // config throws a member-facing error naming the fix, never silently
-// degrades. Runs before any side effect (locks, dirs, sockets). Dev-mode
-// warnings go to stderr so the stdout "server ready" first line (C13) is
-// untouched.
-if (!paused) {
-  const { warnings } = validateCriticalConfig({ production, cardSignature: agentCardSignatureState() });
-  for (const warning of warnings) console.error(`[boot-config] ${warning}`);
-}
+// degrades. BG-1 moved the gate into the shared boot path — it runs at
+// the top of createRoomServer (server/http.mjs), which this entry, the
+// Worker entry and every fixture boot all converge on; this entry passes
+// `production` through defaultServerArgs below. It still runs before
+// listen(); dev-mode warnings go to stderr so the stdout "server ready"
+// first line (C13) is untouched.
 if (!paused) mkdirSync(dirname(filename), { recursive: true, mode: 0o700 });
 // Single-instance lock: one server process per database. SQLite serializes
 // store writes, but the growth snapshot is a plain JSON file — a second
@@ -51,7 +49,10 @@ try {
 // blocks the request path — the drain runs on a microtask and failures
 // stay in the durable retry queue. The same scheduler retries webhooks,
 // polls the land queue and linked claims, and runs retention and integrity.
-if (store) store.landQueue.configure({ env: process.env });
+if (store) {
+  store.featureEnv = process.env;
+  store.landQueue.configure({ env: process.env });
+}
 // Track C C13/C14 — growth scheduler state. Declared before the server is
 // created so the C14 read-only HTTP surface can close over live status via
 // a getter evaluated per request (the scheduler itself starts after listen).
@@ -70,12 +71,20 @@ const growthHttp = paused ? null : createGrowthHttp({
     ? { running: nodeJobs.isRunning(), tickCount: nodeJobs.getGrowthTickCount(), intervalMs: growthIntervalMs }
     : { running: false, tickCount: 0, intervalMs: growthIntervalMs }
 });
-const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp });
+const serverArgs = paused ? null : defaultServerArgs({ store, origin, streamInterval, trustedLocalProxy: production, telegram: telegramConfig(process.env), growth: growthHttp, production });
 const server = paused ? createServer((req, res) => {
   try {
     const url = new URL(req.url, origin);
     if (url.origin !== origin || req.headers.host !== new URL(origin).host) {
       res.writeHead(403, { "Cache-Control": "no-store" }); res.end(); return;
+    }
+    // REL-22: the release receipt stays readable while paused, like the
+    // Workers /api/version/worker door. Module constants only: no storage,
+    // no cookie, no store. Health, ready, reads and writes stay 503.
+    if (url.pathname === "/api/version" && (req.method === "GET" || req.method === "HEAD")) {
+      const body = JSON.stringify({ status: "paused", mode: "maintenance", sourceRevision: SOURCE_REVISION, buildId: BUILD_ID });
+      res.writeHead(200, { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" });
+      res.end(req.method === "HEAD" ? undefined : body); return;
     }
     const reply = maintenanceReply(url.pathname);
     res.writeHead(reply.status, reply.headers); res.end(req.method === "HEAD" ? undefined : reply.body);

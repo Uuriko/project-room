@@ -131,6 +131,30 @@ test("parseDiff scans added lines only, with paths and new line numbers", () => 
   );
 });
 
+test("parseDiff keeps an added secret when git quotes the +++ path", () => {
+  const stripe = fakeStripe();
+  const diff = [
+    'diff --git "a/server/caf\\303\\251.mjs" "b/server/caf\\303\\251.mjs"',
+    '--- "a/server/caf\\303\\251.mjs"',
+    '+++ "b/server/caf\\303\\251.mjs"',
+    "@@ -1,0 +2 @@ x",
+    `+${stripe}`,
+    'diff --git "a/server/my\\tfile.mjs" "b/server/my\\tfile.mjs"',
+    '+++ "b/server/my\\tfile.mjs"',
+    "@@ -0,0 +1 @@",
+    `+${stripe}`,
+  ].join("\n");
+  const units = parseDiff(diff);
+  assert.deepEqual(units.map((unit) => [unit.path, unit.line, unit.text]), [
+    ["server/café.mjs", 2, stripe],
+    ["server/my\tfile.mjs", 1, stripe],
+  ]);
+  const findings = scanAddedUnits(units, []);
+  assert.equal(findings.length, 2);
+  assert.match(findings[0], /^server\/café\.mjs:2 \[stripe-key\]/);
+  assert.match(findings[1], /^server\/my\tfile\.mjs:1 \[stripe-key\]/);
+});
+
 test("parseDiff skips deleted files and binary diffs", () => {
   const diff = [
     "diff --git a/gone.txt b/gone.txt",

@@ -158,7 +158,8 @@ test("http: channel lifecycle through /commands and per-channel posting", async 
   assert.equal(res.status, 201);
   res = await send(f.keys.guest, { id: randomUUID(), type: T.MESSAGE_POSTED,
     data: { messageId: randomUUID(), body: "too late", channelId: created.id } });
-  assert.equal(res.status, 422, "archived channel rejects posts");
+  assert.equal(res.status, 409, "archived channel rejects posts with the documented conflict");
+  assert.equal((await res.json()).error.code, "channel_archived");
 });
 
 test("replies pin to their thread root's channel and can't drift across channels", () => {

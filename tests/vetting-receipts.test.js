@@ -45,7 +45,7 @@ test("issue -> verify round-trips with the simple (receipt, pubkey) form", () =>
   const keypair = generateReceiptKeyPair();
   const receipt = issueVettingReceipt(goodParams(), keypair);
   assert.equal(receipt.receiptType, RECEIPT_TYPE_VETTING);
-  const check = verifyVettingReceipt(receipt, keypair.pubkeyHex);
+  const check = verifyVettingReceipt(receipt, { expectedPubkey: keypair.pubkeyHex, now: NOW });
   assert.equal(check.ok, true);
   assert.equal(check.receiptId, receipt.receiptId);
   assert.equal(check.verdict, "pass");
@@ -62,7 +62,7 @@ test("tampering with a rubric score breaks the signature", () => {
       { criterion: "communication", scoreBps: "9000" },
     ],
   };
-  const check = verifyVettingReceipt(tampered, keypair.pubkeyHex);
+  const check = verifyVettingReceipt(tampered, { expectedPubkey: keypair.pubkeyHex, now: NOW });
   assert.equal(check.ok, false);
   assert.match(check.reason, /^bad_signature/);
 });
@@ -112,7 +112,7 @@ test("replay: the second verification of the same receiptId is rejected", () => 
 test("fail-closed: verification without a trusted key is refused", () => {
   const keypair = generateReceiptKeyPair();
   const receipt = issueVettingReceipt(goodParams(), keypair);
-  const check = verifyVettingReceipt(receipt, {});
+  const check = verifyVettingReceipt(receipt, { now: NOW });
   assert.equal(check.ok, false);
   assert.match(check.reason, /^untrusted_issuer/);
 });
@@ -121,7 +121,7 @@ test("fail-closed: a signature from the wrong key is rejected", () => {
   const keypair = generateReceiptKeyPair();
   const other = generateReceiptKeyPair();
   const receipt = issueVettingReceipt(goodParams(), keypair);
-  const check = verifyVettingReceipt(receipt, other.pubkeyHex);
+  const check = verifyVettingReceipt(receipt, { expectedPubkey: other.pubkeyHex, now: NOW });
   assert.equal(check.ok, false);
   assert.match(check.reason, /^bad_signature/);
 });

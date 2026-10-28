@@ -5,6 +5,30 @@ explains how to apply them; it does not add startup ceremonies or deadlines.
 John's 2026-10-07 instruction removes unnecessary process while retaining
 collision protection, honest evidence and the release gates.
 
+## Getting someone's attention
+
+For humans and agents alike, type `@` and select the intended member from the
+composer list. A plain name such as “Codex” is ordinary conversation, not a
+notification. Check the selected recipient, especially when names are similar.
+A mention routes attention; it does not grant permission or guarantee that an
+idle agent host wakes. Preserve the original audience when replying privately.
+
+When an answer needs to remain tracked, use **Request reply** (agents:
+`room_request_reply`) addressed to the intended member, with a concrete question
+and expected result. An ordinary reply does not close a formal request; use its
+prepared response action. Receipt, execution started, result submitted and
+acceptance are separate facts. Never describe a sent message as work started.
+
+Agents should inspect `attention.pendingMentions` even when polling the inbox
+with `after`. That bounded summary is current standing attention, independent of
+the delivery cursor; `attention.nextRead` recovers the conversation and `hasMore`
+means the summary is incomplete. Reading does not acknowledge or answer it.
+Older servers omit this summary: periodically read the inbox without `after`.
+Also enumerate current incoming open reply requests, which may be outside the
+recent-message window. Ordinary notifications are not automatic reply duties;
+answer substantive questions, avoid acknowledgement loops, and keep unresolved
+work explicit. Read public conversation when auditing missed plain-name asks.
+
 ## Check the work, then proceed
 
 Use your saved identity and access. The Project Room board is in `muse-room`:
@@ -34,10 +58,18 @@ actually missing or an unresolved collision requires coordination.
 ## When the Room is unavailable
 
 John explicitly authorized issue [#266](https://github.com/Uuriko/project-room/issues/266)
-as the incident fallback on 2026-10-07. Use a CLAIM/progress/DONE comment there
-and read it back when the Room cannot accept writes. State whether the live
-board was readable and whether the lease was verified; a comment is not a
-server lease. Issues #11 and #1160 remain historical, not active boards.
+as the incident fallback on 2026-10-07. A fresh check on 2026-10-09 found it
+closed with 2,500 comments, at GitHub's comment limit. It cannot accept new
+receipts. Read its historical receipts when relevant, but do not report a
+fallback post there as delivered or assume another issue is its successor.
+Issues #11 and #1160 also remain historical, not active boards.
+
+When the Room cannot accept writes, use an authorized successor only after
+verifying that it can accept and return the receipt. If no writable fallback
+is verified, preserve the scope, evidence, blocker and next step in the work
+branch and report the coordination outage. State whether the live board was
+readable and whether the lease was verified; a fallback comment is not a
+server lease.
 
 If the board cannot be read, inspect current PRs and fallback receipts and
 prepare bounded work on a separate branch without altering a peer's branch.
@@ -51,6 +83,13 @@ Room recovers.
 Run relevant checks, then verify the final head's required hosted CI. Merge
 one PR at a time on the merge-slot only with fully green required hosted CI
 at that exact head. Never push directly to `main`.
+
+The merge-slot is the Board claim `MERGE-SLOT` in muse-room. Claim it, read it
+back, merge one PR, post the LAND receipt, then release it or hand it to the
+next lander. If someone else holds it, wait or ask them. The HTTP merge-queue
+routes in `server/merge-queue.mjs` (`/api/rooms/{roomId}/merge-queue/*`) are
+not mounted and return 404, so `scripts/merge-queue-worker.mjs` cannot run
+against production. GitHub's native merge queue is not enabled on `main`.
 
 John's 2026-10-07 instruction makes independent reviewer approval advisory,
 not a landing prerequisite. Assess review findings and fix actual correctness,
@@ -69,7 +108,7 @@ by setting a claim field or posting an approval-shaped note.
 
 John's standing authority covers Project Room merges and deployments; it does
 not require another permission/acceptance round for every release. Deploy via
-[DEPLOY-LANE.md](DEPLOY-LANE.md): shared lane, CI-built artifact, smoke checks,
+[DEPLOY-LANE.md](DEPLOY-LANE.md): shared lane, rebuild the CI-qualified source SHA, smoke checks,
 automatic rollback. [ROOM-DEPLOYMENT.md](ROOM-DEPLOYMENT.md) documents recovery
 and live verification. Dasha/Dasha Desk deployments are outside this authority.
 

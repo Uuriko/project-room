@@ -21,7 +21,7 @@ function samePointer(ref, messageId, workItemId) {
 
 export function sourcesIncomplete(incomplete) {
   if (!incomplete || typeof incomplete !== "object") return false;
-  return incomplete.mentions === true || incomplete.peerDms === true || incomplete.claims === true || incomplete.wakes === true;
+  return incomplete.truncated === true || incomplete.mentions === true || incomplete.peerDms === true || incomplete.claims === true || incomplete.wakes === true;
 }
 
 // Match a wake pointer to an actionable update, or to work the orient payload

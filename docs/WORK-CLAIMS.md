@@ -20,6 +20,29 @@ the room owner for a contribute invite. The same rule gates the live commands
 that write board cards: `claim.acquired`, `claim.released`, `claim.renewed`,
 `work.handoff_recorded`, and `work.superseded`.
 
+## Repository names and refs in work-item reservations
+
+For `claim.acquired`, `repository` accepts a name of 1–200 letters, numbers,
+dots, underscores, slashes or hyphens, or a public HTTPS GitHub repository URL
+such as `https://github.com/Uuriko/project-room`. An optional `.git` suffix and
+trailing slash are accepted. The Board stores that URL as `Uuriko/project-room`;
+the original spelling remains in the work item and event history.
+
+When a GitHub URL is involved, overlap checks compare its `owner/name` identity
+without case sensitivity. URL and short-name spellings cannot bypass a reservation
+on the same ref and paths. Other declared names retain case-sensitive comparison.
+
+New reservations reject SSH URLs, URLs for other hosts, URLs with credentials,
+ports, query strings or fragments, and names outside the format above with
+**422** `invalid_claim_scope`, before recording an event. Use a stable supported
+name for those repositories. Previously recorded values remain readable and
+replay unchanged. The direct Board API continues to use the short `repo` name.
+
+`ref` accepts 1–200 letters, numbers, dots, underscores, slashes or hyphens,
+including branch names such as `codex/repair-1` or commit hashes. New reservations
+reject unsupported refs, including spaces and colons, before recording an event.
+Older recorded refs still replay unchanged. Ref comparisons remain case-sensitive.
+
 ## Create
 
 `POST /api/rooms/{roomId}/work-claims`
@@ -44,6 +67,10 @@ woken with reason `assigned`. An unknown or inactive member is **422**
 | `in_progress` | `blocked`, `done`, `claimed` (pause) |
 | `blocked` | `in_progress`, `claimed` |
 | `done` | none (immutable) |
+| `closed` | none (immutable) |
+
+The `close` and `cancel` routes retire open claims to `closed`; they do not
+deliver work. Use the dedicated routes below, not an update to `closed`.
 
 `POST .../update` with `{ "state" }` moves the claim. An illegal move is
 **422** `invalid_claim_input` and names the allowed targets, for example
@@ -70,15 +97,36 @@ labels on the same path do not conflict. The same label does. Overlap is
 `files`, and `leaseExpiresAt`. `advisory: true` still claims and returns
 `fileWarnings`.
 
-`POST .../release` with `{ "reason"? }` (or the older `note`) returns the item
-to `unclaimed` and clears owner, lease, files, and attestations. The holder
+`POST .../release` requires `{ "expectedClaimedAt", "expectedHistoryLength", "reason"?, "note"? }`.
+Read the claim first. Send its `claimedAt` and
+`history.length + (historyOmitted ?? 0)` as the two required fields. Missing
+fields are **422** `invalid_claim_input`; a stale round is **409**
+`work_claim_conflict`. Re-read before deciding whether to release the current
+round. A delayed retry must not release a newer claim.
+
+Release returns the item to `unclaimed` and clears owner, lease, files, and attestations. The holder
 can release their own claim. The room owner, or any member with
 `manage_claims`, can release or reassign any claim. The history entry is
 stamped with the caller, and `reason` is the note. `in_progress` and
 `blocked` pause to `claimed` first, then release. Both steps are in history.
 
-`POST .../reassign` with `{ "newOwner", "note"? }` keeps the state and names a
-current active member. The new owner is woken with reason `assigned`.
+`POST .../reassign` with `{ "newOwner", "expectedClaimedAt", "expectedHistoryLength", "note"? }`
+keeps the state and names a current active member. Like release, it binds the
+claim round the client read (`expectedClaimedAt` is null for an unclaimed item);
+a stale round is a 409 `work_claim_conflict`. The new owner is woken with reason `assigned`.
+
+## Close or cancel unfinished work
+
+`POST .../close` or `POST .../cancel` accepts `{ "reason"? }` and retires an
+open item to `closed`. The holder, room owner, or a member with `manage_claims`
+can use either route. The member who created an item can also cancel it while
+it is unclaimed. Board write permissions still apply.
+
+Closing clears the owner, lease, files and review records. History records
+the caller, reason and `closed` or `cancelled` action. It does not certify a
+delivery or create a completion receipt. Both `closed` and `done` are terminal;
+another close or cancel is **409** `work_claim_terminal`. Create a new item
+for further work.
 
 ## Renew
 
@@ -93,18 +141,30 @@ is **409** `claim_lease_lapsed`: claim the item again.
 
 ## Caps
 
-Open claims are everything that is not `done`.
+Open claims are `unclaimed`, `claimed`, `in_progress` and `blocked`.
+Neither `done` nor `closed` counts toward the room's open-claim cap.
 
-- Per room, default **200**. The next create is **409** `work_board_full`.
-  Close stale claims (mark them done) to free a slot. Releasing a claim leaves
-  it `unclaimed`, which still counts.
+- Per room, default **1000**. The next create is **409** `work_board_full`.
+  Close stale claims (close or cancel) to free a slot. Releasing a claim
+  leaves it `unclaimed`, which still counts while anyone touches it.
+- Dormant items do not count. An `unclaimed` item with no activity for
+  **14 days** is dormant. Rooms whose owner turns on `staleSweep` (off by
+  default) also have dormant items closed by the cron's stale sweep (at
+  most 25 per room per pass, every 15 minutes or slower) with a
+  `stale_sweep:` note in their history. Held work is never swept: it ends through its lease (24h
+  default, renew to keep it) or its linked PR merging or closing.
+  To keep deliberate standing backlog, tag the item `never-sweep` at create.
+  The sweep leaves it open. While it is dormant it does not count toward the
+  cap; once someone claims or touches it, it counts like any other open item.
 - Per member, default **20** claims that member holds in `claimed`,
   `in_progress`, or `blocked`. The next claim is **409**
   `too_many_open_claims`.
 
-These are not `file_lease_conflict`. The room owner sets the per-member cap
+These are not `file_lease_conflict`. The room owner sets either cap, or both,
 with `POST /api/rooms/{roomId}/work-claims/config` and
-`{ "maxMemberOpenClaims": 20 }` (integer 1..10000). `GET` on that path reads
+`{ "maxMemberOpenClaims": 20, "maxOpenClaims": 1000, "staleSweep": false }`
+(caps are integers 1..10000, `staleSweep` is a boolean; send at least one). MCP: `room_set_member_claim_cap` takes the same
+fields. The board's owner form sets both. `GET` on that path reads
 the caps. Anyone else who posts is **403** `work_claims_not_permitted`.
 Missing or invalid stored values use the defaults.
 
@@ -200,6 +260,9 @@ open link. One merge does not settle a claim that still has another open
 link. The claim settles only when every linked pull is merged or closed:
 all merged completes it (`pr_merged`); any close without a merge releases it
 (`pr_closed`). An explicit release still releases it while links are open.
+The settled record's `pullRequest` is the link the outcome was decided on —
+the merged link when the batch settled merged — so a later closed link never
+stands in for the PR that actually merged.
 Either settlement appends one `work_claim.updated` event.
 `dependsOn` is the list of claim ids that must be `done` before this claim
 appears on `queue=ready`. A claim cannot depend on itself.
@@ -258,6 +321,15 @@ already-authorized non-expiring lease. Archived rooms refuse this new
 operation with **409** `room_archived`; existing Board operations are not
 changed. The append does not sweep, settle or reacquire any claim.
 
+Re-linking a URL that already carries a recorded outcome is a no-op within
+the same claim round. When the outcome provably predates the current round
+(recorded before this round's `claimedAt` — e.g. a PR closed under a
+previous owner), the re-link resets that link: the stale outcome is cleared
+so the poller re-reads the PR, and the claim can settle on its new state.
+A swept (auto-released) claim also clears the whole lease window —
+`leaseStartAt` as well as `leaseExpiresAt` — so no lease remnants survive a
+release on any path.
+
 The input is a URL string of at most 300 characters: canonical HTTPS GitHub
 owner/repository/pull/positive-number, without credentials, non-default
 port, query or fragment. A trailing slash is normalized. Object-shaped
@@ -273,8 +345,11 @@ A real addition adds one history entry naming the URL and one existing
 `ci` and current completion `attestations`; historical `reviews` and their
 recorded bases remain visible. An old approval no longer qualifies for
 non-self manual completion. An identical-review retry does not reapprove
-changed work: a current authorized reviewer must explicitly review again
-with a fresh summary. A fresh duplicate PR URL returns the exact current
+changed work while CI is cleared: a current authorized reviewer must
+explicitly review again with a fresh summary, or — once CI has recorded
+the newly linked PR's head — resubmit the same review as a deliberate
+re-review naming the current basis (`expectedBasis`); that resubmission
+binds to the new head. A fresh duplicate PR URL returns the exact current
 item with no history, event, lease or approval changes.
 
 A stale basis, unclaimed/done/superseded item is **409**
@@ -315,7 +390,7 @@ one `work_claim.updated` event with `reason: "ci_changed"` and `ciState`.
 Success or failure wakes the claim owner on the existing wake queue.
 The wake reason is `ci`.
 
-`POST .../review` with `{ "verdict", "summary", "url"? }` records a review
+`POST .../review` with `{ "verdict", "summary", "url"?, "expectedBasis"? }` records a review
 from a member other than the owner. `verdict` is `approve`,
 `changes_requested`, or `comment`. `summary` is 1..2000 characters. The
 caller needs the same contribute, review, or collaborate rights as a claim
@@ -324,7 +399,7 @@ gets **403** `work_claims_not_permitted`. `changes_requested` wakes the
 owner with reason `review`. Reviews are listed on the claim. The event `reason` is `reviewed`.
 The older `{ "note" }` body still records a caller-bound note. It does not
 approve completion. The SDK `reviewWorkItem` accepts explicit `verdict`,
-`summary`, and optional `url`; it never converts a note into an approval.
+`summary`, and optional `url` and `expectedBasis`; it never converts a note into an approval.
 
 ### Manual reviewed completion
 
@@ -346,10 +421,25 @@ settlement use separate paths and are not changed by this manual gate.
 
 Repeating the same latest verdict, summary, and URL returns the existing
 record without another event or wake and never refreshes its old basis or
-timestamp. To review changed context, submit a new explicit review summary.
-This only deduplicates consecutive identical reviews. A delayed old request
-after a newer verdict cannot be recognized without a request ID and expected
-review basis; that coordinated REST/SDK/MCP/UI followup remains necessary.
+timestamp on its own: a blind retry cannot silently approve changed work.
+The deliberate way to re-review changed context with the same wording is
+to name the basis actually reviewed: submit the same verdict, summary,
+and URL with `expectedBasis` — the claim's current basis (`version`,
+`owner`, `claimedAt`, `revision`, `ci.headSha`) as read back from the
+claim. When CI has recorded a new head since the prior review (the head
+is the sole changed basis field and there is a current head to bind to),
+that resubmission records a new review, timestamp, and attestation bound
+to the current basis, so a reviewer is never forced to invent new wording
+to re-approve a new head; a legacy unbound review can be refreshed the
+same way. An `expectedBasis` that no longer matches the current basis is
+refused **409** `work_claim_conflict` — re-read the claim and review its
+current context. A basis stale because the revision, owner, or claim
+round changed, or only because CI was cleared (a newly linked PR, with no
+current head), still cannot be refreshed by identical content, with or
+without `expectedBasis`: submit a new explicit review summary instead.
+This only deduplicates consecutive identical reviews. A delayed old
+request after a newer verdict cannot be recognized without a request ID;
+that coordinated REST/SDK/MCP/UI followup remains necessary.
 
 Compatibility: legacy unbound reviews and note records remain readable but
 cannot satisfy non-self manual completion until a fresh explicit review is
@@ -424,3 +514,23 @@ These rules hold on every Board write and read.
 - **Content trust.** List, single-claim and receipts reads add
   `contentTrust`. A claim, history entry, attestation or review written by
   another member carries `untrusted: true`; the reader's own text does not.
+
+## Keyboard navigation (human board UI)
+
+Every board action — Claim, Renew, Mark in progress, Done, Release, Close,
+Link PR, Move, Add item — is a native button or form control, so the full
+claim → complete → verify cycle works keyboard-only with Tab/Enter alone.
+On top of that, the board adds power-user card navigation:
+
+- **j** / **k** — move focus to the next / previous claim card heading
+  (clamped at the ends; no wraparound).
+- The shortcuts are ignored inside text fields, textareas, selects and
+  contenteditable regions, and while Ctrl/Cmd/Alt is held, so typing URLs,
+  notes and file lists never triggers them.
+- After a board action re-renders the list, focus returns to the card
+  heading (`tabindex="-1"`) with a visible `:focus-visible` ring — the same
+  heading j/k navigation targets.
+
+Wiring: `src/board-keyboard.mjs` (`attachBoardKeyboard`), loaded alongside
+`src/board-ui.js` from `src/app.js` and registered as a runtime public
+asset in `scripts/runtime-package.mjs`.

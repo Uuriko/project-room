@@ -111,6 +111,24 @@ test("mentionSpikeRule triggers for a watched agent at/over threshold", () => {
   assert.equal(hitUnknown.triggered, false);
 });
 
+test("mentionSpikeRule triggers for a watched agent ranked outside the summary top-10", () => {
+  // Regression for #2975: 10 agents at 30 mentions fill the default
+  // top-10, so the watched agent at 25 ranks 11th and never appears in
+  // topMentionedAgents — yet its spike must still fire.
+  const events = [];
+  for (let i = 0; i < 10; i += 1) {
+    events.push(ev("agent.mentioned", { roomId: "r1", messageId: `m-top-${i}`, mentionedAgentId: `agent-top-${i}`, mentionCount: 30 }, "2026-09-11T10:00:00Z"));
+  }
+  events.push(ev("agent.mentioned", { roomId: "r1", messageId: "m-watched", mentionedAgentId: "agent-watched", mentionCount: 25 }, "2026-09-11T11:00:00Z"));
+  const summary = summarize(recordAll(events));
+  assert.equal(summary.topMentionedAgents.length, 10);
+  assert.equal(summary.topMentionedAgents.some(entry => entry.agentId === "agent-watched"), false);
+  const rule = mentionSpikeRule({ agentIds: ["agent-watched"], countThreshold: 25 });
+  const [hit] = evaluateAlerts([rule], { summary });
+  assert.equal(hit.triggered, true);
+  assert.ok(hit.detail.includes("agent-watched=25"));
+});
+
 test("mentionSpikeRule sees agents from the comparison movers too", () => {
   const { current, comparison } = fixtures();
   // agent-3 only appears in the previous window; current mentions are 0.

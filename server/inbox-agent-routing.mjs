@@ -35,7 +35,13 @@ export function extractAgentMentions(text) {
   check(text.length <= 20000, "routing_invalid", "text must be at most 20000 characters");
   const seen = new Set(), mentions = [];
   for (const match of text.matchAll(mentionPattern)) {
-    if (!seen.has(match[1])) { seen.add(match[1]); mentions.push(match[1]); }
+    // A sentence colon is not part of the handle. "@Grok:" is Grok.
+    // An interior colon stays, so "@codex-bot:1" is unchanged.
+    // A trailing period is a different miss and is left as matched.
+    const handle = match[1].replace(/:+$/, "");
+    if (!handle || seen.has(handle)) continue;
+    seen.add(handle);
+    mentions.push(handle);
   }
   return Object.freeze(mentions);
 }

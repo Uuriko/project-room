@@ -8,7 +8,7 @@ import {
   catalogById, catalogSelection, catalogJoinAnchor, catalogDoorHtml,
   isCatalogAgentType, rosterSelection, routeFromDisplayName
 } from "../src/room-roster.js";
-import { publicRoomDoorHtml } from "../deploy/room-entry.mjs";
+import { publicRoomDoorHtml } from "../server/room-entry.mjs";
 import { randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";

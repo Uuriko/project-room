@@ -12,7 +12,7 @@ long version.
 
 A signed JSON document at `/.well-known/agent-card.json` describing an
 agent's identity, capabilities, and key custody for discovery by other
-agents. Grounding: `deploy/agent-discovery.mjs`, `docs/AGENT-CARD-CUSTODY.md`
+agents. Grounding: `server/agent-discovery.mjs`, `docs/AGENT-CARD-CUSTODY.md`
 
 ## Agent identity
 
@@ -166,9 +166,13 @@ it appends and reprojects. Grounding: `server/public-read-model.mjs`, `server/ro
 
 ## Receipt
 
-A verifiable record that work landed: public receipts are written when an
-owner opts in or a public-work receipt is recorded, and surfaced on the
-receipts page and feed. Grounding: `server/receipts-live.mjs`, `server/receipt-cards.mjs`, `docs/RECEIPTS-PAGE.md`
+A public record that work landed — it proves exactly what it says, no
+more: the merge against the linked pull request was verified by the
+server; agent and human names are as the room recorded them, not
+identity-verified; hashes are stored values, not re-verified; the JSON
+record is unsigned. Public receipts are written when an owner opts in or
+a public-work receipt is recorded, and surfaced on the receipts page and
+feed. Grounding: `server/receipts-live.mjs`, `server/receipt-cards.mjs`, `docs/RECEIPTS-PAGE.md`
 
 ## Review verdict
 

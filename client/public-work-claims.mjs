@@ -1,7 +1,7 @@
 // Explicit public-task actions. No admission, automatic renewal or model launch.
 import { createHash } from 'node:crypto';
 import { assertServiceOrigin, RoomClientError } from './room-agent.mjs';
-import { edgeDoorApiPath } from '../deploy/agent-discovery.mjs';
+import { edgeDoorApiPath } from '../src/service-origin.js';
 import { validId } from '../src/events.js';
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 const invalid = () => new RoomClientError(200, 'invalid_response', 'Unsupported public work response');
@@ -13,21 +13,42 @@ function packet(value, taskId) {
     || typeof value.repositoryRef !== 'string' || typeof value.title !== 'string'
     || !Array.isArray(value.acceptanceCriteria) || !value.acceptanceCriteria.every(item => typeof item === 'string')
     || !Array.isArray(value.files) || !value.files.every(item => typeof item === 'string') || !object(value.claim)
-    || !['unclaimed', 'claimed', 'submitted'].includes(value.claim.state)
+    || !['unclaimed', 'claimed', 'submitted', 'verified'].includes(value.claim.state)
     || !Number.isSafeInteger(value.claim.generation) || value.claim.generation < 0
     || value.claim.identityId !== null && !validId(value.claim.identityId)
     || value.claim.leaseExpiresAt !== null && !date(value.claim.leaseExpiresAt)
     || value.claim.submittedReceiptId !== null && !validId(value.claim.submittedReceiptId)) throw invalid();
   return value;
 }
+// The stored receipt is minted as "submitted"; the canonical read
+// composes the review outcome onto it (#3733). Acceptance is the
+// settlement train's stamp, so an accepted review reads with state
+// "verified"; a rejection or revision request (which never stamp the
+// record) reads as the decision itself; a pending review leaves the
+// minted state. Exactly these five review fields are public — the
+// reviewer id, reason and fingerprint never project — and the state must
+// agree with the review, so a composed read that contradicts its own
+// review block is refused.
+function receiptReview(value) {
+  const review = value.review;
+  if (review === undefined) return ['submitted', 'verified'].includes(value.state);
+  if (!object(review) || Object.keys(review).length !== 5
+    || !['pending', 'accepted', 'rejected', 'revision_requested'].includes(review.state)
+    || review.verificationVerdict !== null && !['PASS', 'FAIL'].includes(review.verificationVerdict)
+    || review.verificationReviewerKind !== null && !['human', 'agent'].includes(review.verificationReviewerKind)
+    || review.verifiedAt !== null && !date(review.verifiedAt)
+    || review.decidedAt !== null && !date(review.decidedAt)) return false;
+  return value.state === { pending: 'submitted', accepted: 'verified', rejected: 'rejected', revision_requested: 'revision_requested' }[review.state];
+}
 function receipt(value, receiptId) {
   if (!object(value) || value.schema !== 'public-work-receipt/1' || !validId(value.receiptId)
     || receiptId !== undefined && value.receiptId !== receiptId || !validId(value.taskId) || !validId(value.namespaceId)
     || !positive(value.termsVersion) || !positive(value.generation) || !validId(value.identityId)
-    || value.state !== 'submitted' || value.verification !== 'hash_only' || !date(value.createdAt)
+    || !['submitted', 'verified', 'rejected', 'revision_requested'].includes(value.state) || !['hash_only', 'system_checked'].includes(value.verification) || !date(value.createdAt)
     || !object(value.artifact) || !/^[a-f0-9]{64}$/.test(value.artifact.sha256)
     || !Number.isSafeInteger(value.artifact.bytes) || value.artifact.bytes < 0 || value.artifact.bytes > 65536
-    || !Array.isArray(value.checksReported) || !value.checksReported.every(item => typeof item === 'string')) throw invalid();
+    || !Array.isArray(value.checksReported) || !value.checksReported.every(item => typeof item === 'string')
+    || !receiptReview(value)) throw invalid();
   return value;
 }
 export class PublicWorkClaimsClient {
@@ -134,5 +155,77 @@ export class PublicWorkClaimsClient {
     if (raw.byteLength !== checked.artifact.bytes || sha256 !== checked.artifact.sha256) throw new RoomClientError(200, 'artifact_mismatch', 'Artifact bytes do not match the submitted receipt');
     let text; try { text = new TextDecoder('utf-8', { fatal: true }).decode(raw); } catch { throw invalid(); }
     return { text, sha256, bytes: raw.byteLength, verification: 'hash_only' };
+  }
+}
+
+// Canonical client retry discipline for claim mutations (FIX-6).
+// Blind retry-until-200 is the bug: it double-applies mutations, spins forever
+// on refusals, and lets a stale duplicate release race a fresh re-claim.
+// The discipline, enforced here:
+//   1. Every 4xx is terminal — never retried, surfaced after exactly one attempt.
+//   2. After an ambiguous outcome (dropped connection/timeout, 5xx, or a 200
+//      the client could not parse — the mutation may have applied), READ the
+//      current task state before deciding anything.
+//   3. Already applied -> return the read; not applied -> retry with the SAME
+//      requestId and exact input (the server journal replays the stored
+//      outcome instead of applying twice); state moved on -> stop, terminal.
+//   4. Attempts are bounded by maxAttempts; exhaustion is a terminal error.
+// Returns the action outcome plus { attempts, replayed }: replayed is true
+// when the outcome was reconciled from the confirming read rather than a
+// fresh 200. For a reconciled finish, read the receipt via
+// packet.claim.submittedReceiptId.
+const retryableActions = ['claim', 'renew', 'release', 'finish'];
+const retryActionNames = { claim: 'claimed', renew: 'renewed', release: 'released', finish: 'submitted' };
+const ambiguousOutcome = error => error instanceof RoomClientError
+  && (error.status === 0 && error.code === 'service_unavailable'
+    || error.status >= 500 && error.status <= 599
+    || error.status === 200 && error.code === 'invalid_response');
+function reconcileRetry(action, input, claim, identityId) {
+  const mine = claim.state === 'claimed' && claim.identityId === identityId && claim.generation === input.generation;
+  switch (action) {
+    case 'claim':
+      if (claim.state === 'claimed' && claim.identityId === identityId) return 'applied';
+      return claim.state === 'claimed' ? 'conflict' : 'retry';
+    case 'renew':
+      return mine ? 'retry' : 'conflict';
+    case 'release':
+      // My claim is gone — released by me (possibly followed by someone
+      // else's fresh re-claim), lapsed, or submitted. Re-sending a release now
+      // could only strike another holder's claim, so it is never re-sent.
+      return mine ? 'retry' : 'applied';
+    case 'finish':
+      if (claim.state === 'submitted') return 'applied';
+      return mine ? 'retry' : 'conflict';
+    default:
+      throw new RoomClientError(0, 'invalid_input', 'Retryable action must be claim, renew, release or finish');
+  }
+}
+export async function withClaimRetryDiscipline(client, taskId, action, input, { identityId, maxAttempts = 3, signal } = {}) {
+  if (!(client instanceof PublicWorkClaimsClient)) throw new RoomClientError(0, 'invalid_input', 'withClaimRetryDiscipline needs a PublicWorkClaimsClient');
+  if (!retryableActions.includes(action)) throw new RoomClientError(0, 'invalid_input', 'Retryable action must be claim, renew, release or finish');
+  if (!validId(identityId)) throw new RoomClientError(0, 'invalid_input', 'Pass your own identity id so an ambiguous outcome can be reconciled against the read');
+  if (!Number.isInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 10) throw new RoomClientError(0, 'invalid_input', 'maxAttempts must be an integer from 1 to 10');
+  let attempts = 0;
+  for (;;) {
+    attempts++;
+    try {
+      const outcome = await client[action](taskId, input, { signal });
+      return { ...outcome, attempts, replayed: false };
+    } catch (error) {
+      if (!ambiguousOutcome(error)) throw error;
+      let packet;
+      try {
+        packet = await client.read(taskId, { signal });
+      } catch (readError) {
+        if (readError instanceof RoomClientError && readError.status >= 400 && readError.status <= 499) throw readError;
+        throw new RoomClientError(0, 'retry_unknown', `${action} outcome unknown and the confirming read failed (${readError.code ?? 'unknown'}); read the task before acting`);
+      }
+      const decision = reconcileRetry(action, input, packet.claim, identityId);
+      if (decision === 'applied') return { action: retryActionNames[action], task: packet, attempts, replayed: true };
+      if (decision === 'conflict') throw new RoomClientError(409, 'retry_state_conflict',
+        `Not retrying ${action}: the task now reads ${packet.claim.state}${packet.claim.identityId ? ` held by ${packet.claim.identityId === identityId ? 'you' : 'another agent'}` : ''} at generation ${packet.claim.generation}`);
+      if (attempts >= maxAttempts) throw new RoomClientError(0, 'retry_exhausted',
+        `${action} outcome still ambiguous after ${attempts} attempts with the same request id; read the task before acting`);
+    }
   }
 }

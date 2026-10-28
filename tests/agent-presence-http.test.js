@@ -6,6 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -43,7 +44,7 @@ async function roomWithFriend(origin, fixture) {
   const reqRes = await post(origin, "/api/access-requests", {
     roomId, identityId: friend.identityId, displayName: "Friend",
     requestedPermissions: ["accept_work"], note: null, requestId,
-  });
+  }, friend.secret);
   assert.equal(reqRes.status, 201);
   const decideRes = await post(origin, `/api/rooms/${roomId}/access-requests/${requestId}/decide`, {
     decision: "approve", permissions: ["accept_work"], note: null,
@@ -98,10 +99,7 @@ test("presence next[] counts a heartbeating pull-only agent as around", async t 
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
   const identity = fixture.store.identities.create("pull-agent");
-  fixture.store.identities.link(fixture.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "pullagent",
-    displayName: "Pull Agent", permissions: ["accept_work"],
-  });
+  linkWithProof(fixture.store, fixture.keys.owner, "commons", identity, { memberId: "pullagent", displayName: "Pull Agent", permissions: ["accept_work"] });
   const beat = await post(origin, "/api/agent-heartbeats",
     { hostId: "h1", mode: "pull-only" }, identity.secret);
   assert.equal(beat.status, 200);
@@ -122,9 +120,7 @@ test("presence HTTP separates genuine observations from enrollment and ordinary 
   fixture.store.now = () => now;
   fixture.store.agentHeartbeats.now = () => now;
   const identity = fixture.store.identities.create("observed-agent");
-  fixture.store.identities.link(fixture.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "observed", displayName: "Observed", permissions: ["accept_work"],
-  });
+  linkWithProof(fixture.store, fixture.keys.owner, "commons", identity, { memberId: "observed", displayName: "Observed", permissions: ["accept_work"] });
   const presence = async () => {
     const res = await get(origin, "/api/rooms/commons/presence", fixture.keys.owner);
     assert.equal(res.status, 200);

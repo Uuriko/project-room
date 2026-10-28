@@ -312,6 +312,52 @@ test("split: link scope removes one source, identity scope denies the key; reaso
   db.close();
 });
 
+test("revoked split survives re-import: exact linking honors stitch_revocations", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(inboxStitchSchema);
+  db.exec(`CREATE TABLE private_inbox_sources(account_id TEXT, id TEXT, revision INTEGER, created_at INTEGER, updated_at INTEGER);
+           CREATE TABLE private_inbox_versions(account_id TEXT, source_id TEXT, revision INTEGER, data_json TEXT);`);
+  const stitcher = new InboxStitchStore(db, stitchCfg());
+  const acct = "acct-revoked-exact";
+  stitcher.indexEnvelope(acct, tgEnv({ id: "tg-u1" }, 0), { sourceId: "tg-1", suggest: false, backfill: false });
+  const key = stitcher.linksForSources(acct, ["tg-1"]).get("tg-1").stitchKey;
+  const split = stitcher.split(acct, { stitchKey: key, reason: "opt_out", scope: "identity" });
+  assert.equal(split.removedLinks, 1);
+  assert.equal(stitcher.linksForSources(acct, ["tg-1"]).size, 0);
+  // Re-import of the same participant (existing and brand-new sources) must
+  // not re-form links under the revoked key.
+  stitcher.indexEnvelope(acct, tgEnv({ id: "tg-u1" }, 1000), { sourceId: "tg-1", suggest: false, backfill: false });
+  stitcher.indexEnvelope(acct, tgEnv({ id: "tg-u1" }, 2000), { sourceId: "tg-2", suggest: false, backfill: false });
+  assert.equal(stitcher.linksForSources(acct, ["tg-1"]).size, 0, "re-import does not resurrect a split source");
+  assert.equal(stitcher.linksForSources(acct, ["tg-2"]).size, 0, "a new source does not link under a revoked key");
+  // A different, unrevoked identity still links normally.
+  stitcher.indexEnvelope(acct, tgEnv({ id: "tg-u9", handle: "@carol", displayName: "Carol Danvers" }, 3000), { sourceId: "tg-9", suggest: false, backfill: false });
+  assert.equal(stitcher.linksForSources(acct, ["tg-9"]).size, 1, "unrevoked identities are unaffected");
+  db.close();
+});
+
+test("revoked split survives backfill: link-scope denial blocks the journaled source", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(inboxStitchSchema);
+  db.exec(`CREATE TABLE private_inbox_sources(account_id TEXT, id TEXT, revision INTEGER, created_at INTEGER, updated_at INTEGER);
+           CREATE TABLE private_inbox_versions(account_id TEXT, source_id TEXT, revision INTEGER, data_json TEXT);`);
+  const stitcher = new InboxStitchStore(db, stitchCfg());
+  const acct = "acct-revoked-backfill";
+  // tg-2 is journaled but never indexed; tg-1 establishes the key.
+  putVersion(db, acct, "tg-1", tgEnv({ id: "tg-u1" }, 0));
+  putVersion(db, acct, "tg-2", tgEnv({ id: "tg-u1" }, 1000));
+  stitcher.indexEnvelope(acct, tgEnv({ id: "tg-u1" }, 0), { sourceId: "tg-1", suggest: false, backfill: false });
+  const key = stitcher.linksForSources(acct, ["tg-1"]).get("tg-1").stitchKey;
+  assert.equal(stitcher.linksForSources(acct, ["tg-2"]).size, 0);
+  // Owner denies tg-2 under this key (link scope) before it ever links.
+  stitcher.split(acct, { stitchKey: key, sourceId: "tg-2", channel: "telegram", reason: "wrong_person", scope: "link" });
+  // A later import runs backfill: tg-2 would normally be linked retroactively.
+  stitcher.indexEnvelope(acct, tgEnv({ id: "tg-u1" }, 2000), { sourceId: "tg-3", suggest: false, backfill: true });
+  assert.equal(stitcher.linksForSources(acct, ["tg-3"]).size, 1, "the importing source itself links");
+  assert.equal(stitcher.linksForSources(acct, ["tg-2"]).size, 0, "backfill does not link a revoked source");
+  db.close();
+});
+
 test("conflict: divergent display name on one key quarantines it", () => {
   const db = new DatabaseSync(":memory:");
   db.exec(inboxStitchSchema);

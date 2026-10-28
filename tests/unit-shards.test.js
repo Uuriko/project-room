@@ -15,7 +15,7 @@ test("unit shards execute each test file once and aggregate only complete curren
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   mkdirSync(join(dir, "scripts"));
   mkdirSync(join(dir, "tests"));
-  for (const name of ["check-deps.mjs", "unit-ci.mjs", "unit-ci-durations.json", "unit-shards.mjs", "unit-shards-check.mjs"]) {
+  for (const name of ["check-deps.mjs", "failing-tests.mjs", "unit-ci.mjs", "unit-ci-durations.json", "unit-shards.mjs", "unit-shards-check.mjs"]) {
     cpSync(join("scripts", name), join(dir, "scripts", name));
   }
   writeFileSync(join(dir, "package.json"), JSON.stringify({type:"module"}));
@@ -38,6 +38,17 @@ test("unit shards execute each test file once and aggregate only complete curren
     const run = invoke("scripts/unit-ci.mjs", [`--shard=${index}/${SHARD_COUNT}`]);
     assert.equal(run.status, 0, run.stdout + run.stderr);
     assert.match(run.stdout, new RegExp(`unit-ci: shard ${index}/${SHARD_COUNT}`));
+    // Receipts carry per-file measured runtimes from the actual run, for
+    // scripts/refresh-unit-ci-durations.mjs to rebuild the durations table.
+    const shardReceipt = JSON.parse(readFileSync(join(dir, `test-results/unit-shard-${index}-of-${SHARD_COUNT}-attempt-1.json`), "utf8"));
+    assert.ok(shardReceipt.fileDurationsMs && typeof shardReceipt.fileDurationsMs === "object",
+      `shard ${index} receipt carries fileDurationsMs`);
+    assert.ok(Object.keys(shardReceipt.fileDurationsMs).length > 0,
+      `shard ${index} receipt fileDurationsMs is non-empty`);
+    for (const [file, ms] of Object.entries(shardReceipt.fileDurationsMs)) {
+      assert.ok(shardReceipt.files.includes(file), `fileDurationsMs key ${file} is one of the shard's files`);
+      assert.ok(Number.isFinite(ms) && ms >= 0, `fileDurationsMs[${file}] is a finite non-negative number`);
+    }
   }
   assert.deepEqual(readFileSync(join(dir, "executed.txt"), "utf8").trim().split("\n").map(Number).sort((a, b) => a - b), [...files.keys()]);
   const gate = (more = {}) => invoke("scripts/unit-shards-check.mjs", ["test-results"], more);
@@ -63,6 +74,12 @@ test("unit shards execute each test file once and aggregate only complete curren
   assert.equal(existsSync(customScratch), true);
   assert.equal(existsSync(join(dir, ".tmp")), true, "repository-local owners retain scratch with custom TMPDIR");
   assert.equal(gate().status, 0, "scratch setup retains exact successful receipts");
+  rmSync(join(dir, "executed.txt"), { force: true });
+  const all = invoke("scripts/unit-ci.mjs", ["--all"]);
+  assert.equal(all.status, 0, all.stdout + all.stderr);
+  assert.match(all.stdout, /unit-ci: all, 9 test files/);
+  assert.deepEqual(readFileSync(join(dir, "executed.txt"), "utf8").trim().split("\n").map(Number).sort((a, b) => a - b), [...files.keys()]);
+  assert.equal(gate().status, 0, "the single-job receipt is not a shard receipt");
 });
 
 test("unit shard plan is complete, deterministic, and balanced on measured runtimes", () => {
@@ -73,10 +90,19 @@ test("unit shard plan is complete, deterministic, and balanced on measured runti
   for (const shard of plan.shards) assert.ok(shard.files.length > 0 && shard.estimatedMs > 0);
   assert.throws(() => parseShard("1/4 trailing"), /Shard/);
   assert.throws(() => parseShard(`2/${SHARD_COUNT + 1}`), /Shard/);
-  // Balance is only real when every suite file carries measured timing data.
+  // A new test file without a measurement is planned at the conservative
+  // default (unitPlan's estimate: the median of the measured durations,
+  // floored at 5000ms), so it never breaks the plan or the gate. Requiring
+  // a durations entry per new file failed every test-adding PR and made
+  // scripts/unit-ci-durations.json the repo's top merge-conflict hotspot.
+  // The unmeasured count is REPORTED, never failed on (#3292): the count is
+  // repo-global state that no single PR controls, and the durations table
+  // is now refreshed automatically from hosted shard receipts
+  // (scripts/refresh-unit-ci-durations.mjs), so a large unmeasured set is
+  // a freshness signal for that automation, not a gate on unrelated PRs.
   const measured = JSON.parse(readFileSync("scripts/unit-ci-durations.json", "utf8")).milliseconds;
   const unmeasured = plan.files.filter((file) => !(Number.isFinite(measured[file]) && measured[file] > 0));
-  assert.deepEqual(unmeasured, [], `unit shard balance needs measured durations for: ${unmeasured.join(", ")}`);
+  console.log(`unit shard plan: ${unmeasured.length} of ${plan.files.length} unit files lack measured durations (reported only, #3292)${unmeasured.length ? `: ${unmeasured.join(", ")}` : ""}`);
   const total = plan.shards.reduce((sum, shard) => sum + shard.estimatedMs, 0);
   for (const shard of plan.shards) {
     const share = shard.estimatedMs / total;

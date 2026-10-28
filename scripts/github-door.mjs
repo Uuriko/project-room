@@ -98,11 +98,14 @@ async function gh(path, { token, method = "GET", body, fetchImpl = globalThis.fe
   return response.status === 204 ? null : response.json();
 }
 
-async function allComments(repo, issue, token, fetchImpl) {
+// GitHub's issue-specific comments endpoint is always ascending by ID.
+// Read every page: an early trusted marker cannot establish the latest cursor.
+// readCursor independently selects the maximum trusted marker and ignores forgeries.
+async function cursorComments(repo, issue, token, fetchImpl) {
   const out = [];
-  for (let page = 1; page <= 30; page++) {
+  for (let page = 1; ; page++) {
     const batch = await gh(`/repos/${repo}/issues/${issue}/comments?per_page=100&page=${page}`, { token, fetchImpl });
-    out.push(...batch);
+    out.push(...batch.filter(c => c.body?.includes(OUT_MARKER)));
     if (batch.length < 100) break;
   }
   return out;
@@ -121,7 +124,7 @@ export async function runInbound({ event, repo, client, allow, doorIssue }) {
 }
 
 export async function runOutbound({ repo, doorIssue, token, client, roomId, selfMemberId, fetchImpl = globalThis.fetch }) {
-  const cursor = readCursor((await allComments(repo, doorIssue, token, fetchImpl)).filter(c => c.body?.includes(OUT_MARKER)));
+  const cursor = readCursor(await cursorComments(repo, doorIssue, token, fetchImpl));
   const messages = []; let after = cursor;
   for (let i = 0; i < 20; i++) {
     const page = await client.roomMessages({ after, limit: 100 });
@@ -174,6 +177,12 @@ export async function resolveConfig(env, { fetchImpl = globalThis.fetch, listRoo
 export async function main(env = process.env, argv = process.argv) {
   const mode = argv[2];
   if (!["in", "out"].includes(mode)) throw new Error("usage: github-door.mjs in|out");
+  // Room-visible conversation is not necessarily authorized for public GitHub.
+  // Publishing requires a separate owner opt-in, even when inbound is enabled.
+  if (mode === "out" && env.ROOM_DOOR_PUBLISH !== "true") {
+    console.log(JSON.stringify({ ok: true, skipped: "outbound publication disabled; set ROOM_DOOR_PUBLISH=true only for a room approved for public mirroring" }));
+    return;
+  }
   const config = await resolveConfig(env);
   if (config.skipped) {
     console.log(JSON.stringify({ ok: false, skipped: config.skipped }));

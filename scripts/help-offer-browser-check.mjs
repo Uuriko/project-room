@@ -156,12 +156,16 @@ for (const broken of ["legacy", "malformed"]) test("human offers do not infer su
   const f = await setup(t), guest = await f.open("guest");
   await f.agentOffer(); f.update("agent-offer", "selected");
   if (broken === "legacy") f.help("withdrawn");
-  await guest.page.route("**/api/rooms/commons", async route => {
+  // Match the path: the stream-open re-read asks for ?messages=recent.
+  await guest.page.route(url => url.pathname === "/api/rooms/commons", async route => {
     const response = await route.fetch(), body = await response.json();
     if (broken === "legacy") delete body.offerContextVersion; else body.state.helpOffers = [];
     return route.fulfill({ response, json: body });
   });
   await guest.page.reload(); await guest.page.locator("#main").waitFor({ state: "visible" });
+  // The warm boot paint renders first; wait for the network read's render
+  // before opening, or a re-render closes the details again.
+  await guest.card.locator(".work-help .form-hint", { hasText: "Offers unavailable." }).waitFor({ state: "attached" });
   await guest.card.locator(".work-help").evaluate(node => { node.open = true; });
   assert.equal(await guest.card.locator('[data-action="offer-help"]').count(), 0);
   assert.equal(await guest.card.getByText("Offers unavailable.", { exact: true }).isVisible(), true);

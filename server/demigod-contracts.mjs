@@ -12,7 +12,7 @@ import {railActor,railFail} from "./trial-task-store.mjs";
 // vetting receipt itself is issued by the trial-task lane (#1623); this
 // contract cites it, never fabricates it.
 import { canonicalJson } from '../src/audit-receipts.mjs';
-import { validId } from '../src/events.js';
+import { validId, ownMember } from '../src/events.js';
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, code, message) => { if (!ok) fail(422, code, message); };
@@ -107,7 +107,10 @@ export class DemigodContracts {
     const offerProfileId = identifier(input.offerProfileId);
     check(Number.isSafeInteger(input.expectedRevision) && input.expectedRevision > 0, 'invalid_demigod_contract', 'Expected revision required');
     const workerId = input.workerId == null ? null : identifier(input.workerId);
-    if (workerId && (!state.members[workerId] || state.members[workerId].active === false || workerId === state.room.ownerId || workerId === state.members[actorId]?.id)) railFail(422,"invalid_contract_worker","Worker must be a distinct active member");
+    // #1004 follow-up: own-property lookup — an inherited Object.prototype
+    // name must never satisfy "distinct active member".
+    const worker = workerId ? ownMember(state.members, workerId) : null;
+    if (workerId && (!worker || worker.active === false || workerId === state.room.ownerId || workerId === state.members[actorId]?.id)) railFail(422,"invalid_contract_worker","Worker must be a distinct active member");
     return this.request(roomId, actorId, { action: 'create', ...input }, () => {
       const offer = this.db.prepare('SELECT * FROM demigod_offer_profiles WHERE profile_id=? AND room_id=?').get(offerProfileId, roomId);
       if (!offer) fail(404, 'demigod_offer_not_found', 'Offer profile not found');

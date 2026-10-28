@@ -28,6 +28,7 @@ const fakeHelpers = () => {
 // Route-level harness (same shape as tests/lease-renewal.test.js): the stub
 // store carries a live member list so W3's membership validation has real
 // data to check against.
+const roundOfItem = item => ({ expectedClaimedAt: item?.claimedAt ?? null, expectedHistoryLength: (item?.history?.length ?? 0) + (Number(item?.historyOmitted) || 0) });
 const runRoute = async ({ route, id, body = {}, memberId = "quill", registry, storeMessages = [] }) => {
   const helpers = fakeHelpers();
   const store = {
@@ -107,7 +108,9 @@ test("W2: release from in_progress pauses internally and returns the item to the
   const registry = await claimedRegistry();
   const started = await runRoute({ route: "update", id: "w1", body: { state: "in_progress" }, registry });
   assert.equal(started.error, null);
-  const { out, error } = await runRoute({ route: "release", id: "w1", body: { note: "done for now" }, registry });
+  const item = registry.get("room1", "w1");
+  const { out, error } = await runRoute({ route: "release", id: "w1", body: { note: "done for now",
+    expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length }, registry });
   assert.equal(error, null);
   assert.equal(out.status, 200);
   assert.equal(out.value.state, "unclaimed");
@@ -121,14 +124,18 @@ test("W2: release from blocked also routes through the pause transition", async 
   const registry = await claimedRegistry();
   const blocked = await runRoute({ route: "update", id: "w1", body: { state: "blocked" }, registry });
   assert.equal(blocked.error, null);
-  const { out, error } = await runRoute({ route: "release", id: "w1", body: {}, registry });
+  const item = registry.get("room1", "w1");
+  const { out, error } = await runRoute({ route: "release", id: "w1", body: {
+    expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length }, registry });
   assert.equal(error, null);
   assert.equal(out.value.state, "unclaimed");
 });
 
 test("W2: release from claimed still works as before", async () => {
   const registry = await claimedRegistry();
-  const { out, error } = await runRoute({ route: "release", id: "w1", body: {}, registry });
+  const item = registry.get("room1", "w1");
+  const { out, error } = await runRoute({ route: "release", id: "w1", body: {
+    expectedClaimedAt: item.claimedAt, expectedHistoryLength: item.history.length }, registry });
   assert.equal(error, null);
   assert.equal(out.value.state, "unclaimed");
   assert.equal(out.value.history.filter(entry => entry.action === "state:claimed").length, 0);
@@ -139,7 +146,7 @@ test("W2: release from claimed still works as before", async () => {
 // ---------------------------------------------------------------------------
 test("W3: reassign to a nonexistent member is refused with 422", async () => {
   const registry = await claimedRegistry();
-  const { out, error } = await runRoute({ route: "reassign", id: "w1", body: { newOwner: "ghost-member-123" }, registry });
+  const { out, error } = await runRoute({ route: "reassign", id: "w1", body: { newOwner: "ghost-member-123", ...roundOfItem(registry.get("room1", "w1")) }, registry });
   assert.equal(out, null);
   assert.equal(error.status, 422);
   assert.equal(error.code, "work_reassign_unknown_member");
@@ -149,13 +156,13 @@ test("W3: reassign to a nonexistent member is refused with 422", async () => {
 
 test("W3: reassign to an inactive member is refused", async () => {
   const registry = await claimedRegistry();
-  const { error } = await runRoute({ route: "reassign", id: "w1", body: { newOwner: "sleepy" }, registry });
+  const { error } = await runRoute({ route: "reassign", id: "w1", body: { newOwner: "sleepy", ...roundOfItem(registry.get("room1", "w1")) }, registry });
   assert.equal(error.code, "work_reassign_unknown_member");
 });
 
 test("W3: reassign to a real active member still works", async () => {
   const registry = await claimedRegistry();
-  const { out, error } = await runRoute({ route: "reassign", id: "w1", body: { newOwner: "grok", note: "your turn" }, registry });
+  const { out, error } = await runRoute({ route: "reassign", id: "w1", body: { newOwner: "grok", note: "your turn", ...roundOfItem(registry.get("room1", "w1")) }, registry });
   assert.equal(error, null);
   assert.equal(out.value.owner, "grok");
 });

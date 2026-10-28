@@ -107,6 +107,16 @@ export class InboxStitchStore {
   // thread:stitch:* counters. Labels never carry hashed keys or identifier
   // material; the {reason} slot carries only the fixed defer-reason codes.
   snapshot() { return Object.fromEntries(this.counters); }
+  // Revocation check for the automatic linking paths. A split writes either
+  // a key-wide deny row (source_id NULL: no source may link under the key)
+  // or a per-source deny row. Both must be honored by every exact-link
+  // insert, or the next import silently undoes the owner's split; only an
+  // explicit owner action (confirm) may re-link a revoked key/source.
+  #linkRevoked(accountId, key, sourceId) {
+    return Boolean(this.#db.prepare(
+      "SELECT 1 FROM stitch_revocations WHERE account_id=? AND stitch_key=? AND (source_id IS NULL OR source_id=?) LIMIT 1")
+      .get(accountId, key, sourceId));
+  }
   verifySchema({ allowAbsent = false } = {}) {
     const missing = [];
     for (const table of ["stitch_identities", "stitch_links", "stitch_revocations", "stitch_suggestions", "stitch_receipts"]) {
@@ -154,7 +164,7 @@ export class InboxStitchStore {
           conflicted = true;
         }
       }
-      const inserted = this.#db.prepare(
+      const inserted = this.#linkRevoked(accountId, key, sourceId) ? 0 : this.#db.prepare(
         "INSERT OR IGNORE INTO stitch_links(account_id,stitch_key,channel,source_id,linked_at,link_rule,link_score) VALUES(?,?,?,?,?,?,NULL)")
         .run(accountId, key, channel, sourceId, iso, conflicted ? "quarantined" : "exact").changes;
       if (inserted && !conflicted) { this.#count("thread:stitch:exact:formed"); formed.push({ key, rule: "exact" }); }
@@ -201,6 +211,7 @@ export class InboxStitchStore {
       if (!peer || String(peer.id) !== String(participant.id)) continue;
       const keys = candidateKeys({ salt: this.salt, epoch: this.epoch, channel, participant: peer });
       for (const { key } of keys) {
+        if (this.#linkRevoked(accountId, key, sourceId)) continue;
         const done = this.#db.prepare("INSERT OR IGNORE INTO stitch_links(account_id,stitch_key,channel,source_id,linked_at,link_rule,link_score) VALUES(?,?,?,?,?,?,NULL)")
           .run(accountId, key, channel, sourceId, iso, "exact").changes;
         if (done) { linked++; this.#count("thread:stitch:exact:formed"); }
@@ -233,6 +244,7 @@ export class InboxStitchStore {
       for (const sourceId of members) {
         if (have.has(sourceId)) continue;
         for (const { key } of keys) {
+          if (this.#linkRevoked(accountId, key, sourceId)) continue;
           if (this.#db.prepare("INSERT OR IGNORE INTO stitch_links(account_id,stitch_key,channel,source_id,linked_at,link_rule,link_score) VALUES(?,?,?,?,?,?,NULL)")
             .run(accountId, key, channel, sourceId, iso, "exact").changes) linked++;
         }

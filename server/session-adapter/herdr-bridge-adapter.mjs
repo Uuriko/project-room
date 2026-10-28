@@ -303,20 +303,30 @@ function breakerRecord(store, bridgeId) {
  * Gate a call: closed → pass; open → fail fast unless the half-open window
  * elapsed (then exactly one ping probe passes); half-open → only the ping
  * probe passes until it resolves.
+ *
+ * `peek` computes the same verdict WITHOUT consuming the half-open probe —
+ * for callers that only decide whether an attempt is worth making and let
+ * the real call spend the probe (connectSession's pre-check; its adapter's
+ * connect() ping is the probe).
  */
-function breakerGate(store, bridgeId, adapterMethod, nowMs, openMs) {
+function breakerGate(store, bridgeId, adapterMethod, nowMs, openMs, { peek = false } = {}) {
   const rec = breakerRecord(store, bridgeId);
-  if (rec.state === 'open') {
+  let state = rec.state;
+  let probeSent = rec.probeSent;
+  if (state === 'open') {
     if (nowMs - rec.openedAt >= openMs) {
-      rec.state = 'half-open';
-      rec.probeSent = false;
+      state = 'half-open';
+      probeSent = false;
     } else {
       return { ok: false };
     }
   }
-  if (rec.state === 'half-open') {
-    if (adapterMethod !== 'ping' || rec.probeSent) return { ok: false };
-    rec.probeSent = true;
+  if (state === 'half-open') {
+    if (adapterMethod !== 'ping' || probeSent) return { ok: false };
+    if (!peek) {
+      rec.state = 'half-open';
+      rec.probeSent = true;
+    }
     return { ok: true, probe: true };
   }
   return { ok: true };
@@ -937,9 +947,11 @@ export class HerdrBridgeAdapter {
 
   /**
    * Single HTTP round-trip. Throws typed SessionAdapterErrors. Errors carry
-   * two internal flags: `noResponse` (timeout / connection reset — nothing
-   * came back) and `emptyBody5xx` (5xx with an empty body). Writes retry only
-   * when one of those is set; everything else is final.
+   * three internal flags: `noResponse` (timeout / connection reset — nothing
+   * came back), `emptyBody5xx` (5xx with an empty body), and `callerAborted`
+   * (the caller's AbortSignal fired — the resulting TimeoutError("aborted")
+   * is the caller cancelling, not a bridge timeout). Writes retry only
+   * when one of the first two is set; a caller abort is never retried.
    */
   async _fetchOnce({ adapterMethod, path, query, timeoutMs, write, idempotencyKey, body, signal }) {
     const ctx = { backend: BRIDGE_BACKEND, bridgeId: this._bridge.id, adapterMethod };
@@ -949,7 +961,9 @@ export class HerdrBridgeAdapter {
     if (signal) {
       if (signal.aborted) {
         clearTimeout(timer);
-        throw new TimeoutError(`${adapterMethod}: aborted`, { ...ctx, timeoutMs });
+        const t = new TimeoutError(`${adapterMethod}: aborted`, { ...ctx, timeoutMs });
+        t.callerAborted = true;
+        throw t;
       }
       onCallerAbort = () => controller.abort();
       signal.addEventListener('abort', onCallerAbort, { once: true });
@@ -1001,7 +1015,9 @@ export class HerdrBridgeAdapter {
       // Anything else is a transport failure (timeout abort, reset, DNS…).
       const abortedByCaller = signal?.aborted === true;
       if (abortedByCaller) {
-        throw new TimeoutError(`${adapterMethod}: aborted`, { ...ctx, timeoutMs });
+        const t = new TimeoutError(`${adapterMethod}: aborted`, { ...ctx, timeoutMs });
+        t.callerAborted = true;
+        throw t;
       }
       if (controller.signal.aborted) {
         const t = new TimeoutError(`${adapterMethod}: timed out after ${timeoutMs}ms`, { ...ctx, timeoutMs });
@@ -1264,7 +1280,10 @@ export async function connectSession(opts = {}) {
     );
   }
 
-  const gate = breakerGate(store, route.id, 'ping', nowFn(), openMs);
+  // Pre-check only (peek): the half-open probe itself is spent by
+  // adapter.connect()'s ping below — consuming it here would leave that
+  // ping refused, so a tripped bridge could never recover via this path.
+  const gate = breakerGate(store, route.id, 'ping', nowFn(), openMs, { peek: true });
   if (!gate.ok) return fallback('circuit_open', `breaker open for bridge ${route.id}`);
 
   const adapter = new HerdrBridgeAdapter({
@@ -1322,7 +1341,17 @@ function isRetryable(err, write) {
     if (write) return err.noResponse === true || err.emptyBody5xx === true;
     return true;
   }
-  if (err instanceof TimeoutError) return true; // fresh attempt inside the budget
+  if (err instanceof TimeoutError) {
+    // A caller abort surfaces as TimeoutError("aborted") but is a
+    // cancellation, not a bridge timeout: never retry it — the caller
+    // asked to stop, so surface it on the first attempt.
+    if (err.callerAborted === true) return false;
+    // Writes follow the same rule as every other error type: retry only
+    // when no response was received (the internal-timeout branch of
+    // _fetchOnce is the one that sets noResponse).
+    if (write) return err.noResponse === true;
+    return true; // reads: fresh attempt inside the budget
+  }
   return false;
 }
 

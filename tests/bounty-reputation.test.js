@@ -509,3 +509,41 @@ test("non-verdict lifecycle events flow no reputation signals", () => {
     { eventType: "bounty.paid", agent: GROK, type: "payout_released" },
   ]);
 });
+
+test("keeper timeout-default dispute settlement emits bounty.decided and applies its signals (#2920)", () => {
+  const { escrow } = makeEscrow();
+  const bounty = post(escrow, { amount: 10, verifierId: INSTINCT });
+  escrow.fundBounty(ROOM, bounty.bountyId, { funder: JILL });
+  escrow.claimBounty(ROOM, bounty.bountyId, { claimant: GROK });
+  escrow.submitWork(ROOM, bounty.bountyId, { claimant: GROK,
+    evidence: { evidenceUrl: "https://example.com/pr/timeout-default", summary: "solid" } });
+  escrow.acceptWork(ROOM, bounty.bountyId, { acceptor: JILL,
+    verifierAttestation: { at: new Date(nowMs).toISOString(), note: "lgtm", citations: [{ criterionId: "c1", verdict: "pass" }] } });
+  escrow.disputeBounty(ROOM, bounty.bountyId, { challenger: CODEX, bond: 2.5, grounds: "nitpick" });
+  // Nobody rules: past the 14-day dispute timeout the keeper defaults to RELEASE.
+  tick(15 * 24 * 3_600_000);
+  const { action } = escrow.finalizeBounty(ROOM, bounty.bountyId, {});
+  assert.equal(action, "released");
+  const settled = escrow.getBounty(ROOM, bounty.bountyId);
+  assert.equal(settled.resolution.outcome, "timeout-default");
+  // The settlement must land on the event stream as exactly one
+  // bounty.decided carrying the lanes the projector reads.
+  const decided = escrow.listEvents(ROOM).filter(e => e.type === "bounty.decided");
+  assert.equal(decided.length, 1, "timeout-default settlement emits exactly one bounty.decided");
+  assert.equal(decided[0].data.outcome, "timeout-default");
+  assert.equal(decided[0].data.claimant, GROK);
+  assert.equal(decided[0].data.challenger, CODEX);
+  assert.equal(decided[0].data.disputeId, settled.disputeId);
+  assert.equal(decided[0].data.resolution.outcome, "timeout-default");
+  // And the projector applies the timeout-default signals: the challenge
+  // died unresolved, so the challenger loses and the claimant is vindicated.
+  // (The +4 acceptance signal is 15 days old at settlement, so it has
+  // decayed by half a 30-day half-life; the fresh dispute_won is undecayed.)
+  const grokSignals = reputationSummary(escrow, ROOM, GROK, { nowMs }).signals.map(s => s.type).sort();
+  assert.deepEqual(grokSignals, ["dispute_won", "submission_accepted"]);
+  assert.ok(Math.abs(scoreOf(escrow, GROK)
+    - (BOUNTY_SIGNAL_WEIGHTS.submission_accepted * Math.SQRT1_2 + BOUNTY_SIGNAL_WEIGHTS.dispute_won)) < 1e-9,
+    `expected ~4.83, got ${scoreOf(escrow, GROK)}`);
+  assert.equal(scoreOf(escrow, CODEX), BOUNTY_SIGNAL_WEIGHTS.dispute_lost); // -12
+  expectConserved(escrow);
+});

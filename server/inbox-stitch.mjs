@@ -241,6 +241,18 @@ export function scorePair(a = {}, b = {}) {
   return { score, bucket, components: Object.freeze({ ...components }) };
 }
 
+// REL-17: order by instant, not by string. "10:00:00Z" and "03:00:00-07:00"
+// are the same instant; a string compare puts them hours apart. Unparseable
+// or missing times sort first. Ties break on channel, then sourceId, so the
+// timeline does not depend on the order the importer saw the messages.
+const instantOf = value => { const at = Date.parse(value ?? ""); return Number.isFinite(at) ? at : -Infinity; };
+const compareText = (a, b) => { const x = String(a ?? ""), y = String(b ?? ""); return x < y ? -1 : x > y ? 1 : 0; };
+function byTimeThenId(x, y) {
+  const a = instantOf(x.occurredAt), b = instantOf(y.occurredAt);
+  if (a !== b) return a < b ? -1 : 1;
+  return compareText(x.channel, y.channel) || compareText(x.sourceId, y.sourceId);
+}
+
 // Pure stitched-timeline merge. threads: [{ threadId, entries }] where each
 // entry is either the buildThreads shape { message: { id, occurredAt },
 // depth } or the flattened store shape { sourceId, occurredAt }.
@@ -265,22 +277,27 @@ export function stitchThreads(threads, { linkOf, channelOf } = {}) {
       try { key = linkOf(sourceId); } catch { continue; }
       if (!key) continue;
       let group = groups.get(key);
-      if (!group) { group = { stitchKey: key, entries: [] }; groups.set(key, group); }
+      if (!group) { group = { stitchKey: key, entries: [], bySource: new Map() }; groups.set(key, group); }
       let channel = null;
       try { channel = channelOf(sourceId); } catch { /* unknown channel */ }
-      group.entries.push({ sourceId, occurredAt: entry.message?.occurredAt ?? entry.occurredAt ?? null, channel,
-        depth: 0, stitched: true, sourceThreadId: thread.threadId ?? null });
+      const stitched = { sourceId, occurredAt: entry.message?.occurredAt ?? entry.occurredAt ?? null, channel,
+        depth: 0, stitched: true, sourceThreadId: thread.threadId ?? null };
+      // REL-17: a message delivered twice (same thread or re-delivered thread)
+      // appears once. The kept copy is chosen by content, not arrival order.
+      const seen = group.bySource.get(sourceId);
+      if (!seen) { group.bySource.set(sourceId, stitched); group.entries.push(stitched); }
+      else if (String(stitched.sourceThreadId ?? "") < String(seen.sourceThreadId ?? "")) Object.assign(seen, stitched);
     }
   }
   const result = [];
   for (const group of groups.values()) {
     const channels = [...new Set(group.entries.map(e => e.channel).filter(Boolean))].sort();
     if (channels.length < 2) continue; // single channel: stays native
-    group.entries.sort((x, y) => String(x.occurredAt ?? "").localeCompare(String(y.occurredAt ?? "")));
+    group.entries.sort(byTimeThenId);
     result.push({ stitchKey: group.stitchKey, channels,
       sources: group.entries.map(e => e.sourceId), provisional: false, entries: group.entries });
   }
-  result.sort((a, b) => String(a.entries[0]?.occurredAt ?? "").localeCompare(String(b.entries[0]?.occurredAt ?? "")));
+  result.sort((a, b) => byTimeThenId(a.entries[0] ?? {}, b.entries[0] ?? {}) || compareText(a.stitchKey, b.stitchKey));
   return result;
 }
 

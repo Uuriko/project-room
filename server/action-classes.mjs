@@ -32,7 +32,7 @@ export const ACTION_CLASSES = Object.freeze({
     T.ROOM_PUBLIC_PAGE_SET, T.ROOM_JOIN_LINK_SET, T.MEMBER_PUBLIC_NAME_SET, T.WORK_PUBLIC_SET,
     // --- end GR2 ---
     T.ROOM_ARCHIVED, T.MEMBER_ADDED, T.MEMBER_ACCESS_CHANGED, T.MEMBER_STATUS_UPDATED,
-    T.MESSAGE_POSTED, T.MESSAGE_EDITED, T.MESSAGE_DELETED, T.MESSAGE_REACTION_SET, T.MESSAGE_PINNED, T.MESSAGE_UNPINNED,
+    T.MESSAGE_POSTED, T.MESSAGE_EDITED, T.MESSAGE_DELETED, T.POLL_VOTED, T.MESSAGE_PINNED, T.MESSAGE_UNPINNED,
     T.CHANNEL_CREATED, T.CHANNEL_RENAMED, T.CHANNEL_ARCHIVED,
     T.REPLY_REQUEST_CANCELLED, HELP_OFFER_OPENED, HELP_OFFER_UPDATED,
     T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_HELP_UPDATED, T.WORK_STARTED, T.WORK_BLOCKED,
@@ -56,7 +56,6 @@ export const SURFACE_CLASSES = Object.freeze({
   "inbox-reply-sends": "act",        // server/inbox-transport.mjs: external send authority
   "email-import.mjs": "act",             // server/email-import.mjs: writes imported content into the room
   "share-links": "act",              // server/share-links.mjs: mints access-granting links
-  "guest-agent-links": "act",        // server/guest-agent-links.mjs: mints credentials
   "agent-access": "act",             // server/agent-connections|identities|invites.mjs: grants agent access
   "dispatch-journal": "act",         // server/dispatch-journal.mjs: launches jobs
   "operator-reads": "observe",       // backup/diagnostics/version/maintenance/recovery reads

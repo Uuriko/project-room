@@ -9,30 +9,19 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const GRANDFATHERED = [
   // Captured 2026-09-25 (15 modules). Remove entries as tests land; never add
-  // NEW modules here.
-  "agent-key-registry.mjs",
-  "channel-adapters/telegram-rotation.mjs",
-  "gmail-content.mjs",
+  // NEW modules here. agent-key-registry.mjs left with IR-1
+  // (tests/restore-reconcile-coverage.test.js). sla-breach-journal.mjs left
+  // when tests/journal-roundtrip.test.js imported it.
   "inbox-collab-routes.mjs",
-  "inbox-collab-store.mjs",
   "ip-blocklist.mjs",
   "members-directory.mjs",
   "quarantine-thread-splits.mjs",
-  "sla-breach-journal.mjs",
-  "vendor/gmail-html-sanitizer.mjs",
   // 2026-09-30 (M-57): the old substring check falsely counted these as
   // tested (e.g. needle "activity" matching "activity-feed"). They predate
   // the gate and are covered via HTTP-boundary tests; recording them here
   // corrects the baseline so the now-precise check does not flag legacy
   // modules as new gaps. Still never add NEW modules.
-  "activity.mjs",
-  "attention.mjs",
-  "opportunities.mjs",
-  "project-offers.mjs",
-  "request-runs.mjs",
-  "return-brief.mjs",
-  "share-links.mjs",
-  "work-help.mjs"
+  "request-runs.mjs"
 ];
 
 const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

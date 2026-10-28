@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
 // and clear are private marks keyed to the source revision; a new revision
@@ -8,16 +9,16 @@
 // and are empty until a work_claim.updated event carries an attention field.
 
 import { createHash } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { nextWorkStep } from "../src/workflow.js";
-import { validId } from "../src/events.js";
+import { canInviteMembers, validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 const ACTIONABLE = new Set(["unread", "read"]);
 export const UPDATE_KINDS = Object.freeze([
   "request", "mention", "dm", "review_requested", "handoff",
   "claim_lease_expiring", "claim_ci_failed", "claim_changes_requested",
-  "invite_pending", "access_request"
+  "invite_pending", "access_request", "agent_joined", "pair_request"
 ]);
 const CLAIM_ATTENTION = Object.freeze({
   lease_expiring: "claim_lease_expiring",
@@ -156,7 +157,7 @@ function ackedWakes(store, roomId, memberId, flags) {
   return wakes;
 }
 
-function projectRoom(store, roomId, memberId, identityId) {
+function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false } = {}) {
   const flags = { mentions: false, peerDms: false, claims: false, invites: false, accessRequests: false, wakes: false };
   const room = store.room(roomId);
   const state = room.state;
@@ -167,8 +168,7 @@ function projectRoom(store, roomId, memberId, identityId) {
   const now = store.now();
   const items = [];
   const requests = state.replyRequests ?? {};
-  const messages = state.messages ?? [];
-  const byId = new Map(messages.map(message => [message.id, message]));
+  const byId = messageRepository(store, roomId, state);
 
   for (const request of Object.values(requests)) {
     if (!request || request.recipientId !== memberId) continue;
@@ -217,8 +217,7 @@ function projectRoom(store, roomId, memberId, identityId) {
     flags.mentions = true;
   }
 
-  const replied = new Set(messages.filter(message => message.authorId === memberId && message.replyToId).map(message => message.replyToId));
-  for (const message of messages) {
+  for (const message of byId.receivedBy(memberId)) {
     if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
     if (requestIds.has(message.id)) continue;
     const at = iso(message.createdAt);
@@ -226,7 +225,7 @@ function projectRoom(store, roomId, memberId, identityId) {
       kind: "dm", roomId, key: `dm|${message.id}`,
       title: clip(message.body || "Direct message"), actor: message.authorId, createdAt: at, updatedAt: at,
       basis: message.id, sourceRef: { messageId: message.id },
-      terminal: replied.has(message.id) ? "answered" : null,
+      terminal: byId.hasReply(memberId, message.id) ? "answered" : null,
       next: { method: "POST", path: `/api/rooms/${encodeURIComponent(roomId)}/commands` }
     }));
   }
@@ -283,7 +282,8 @@ function projectRoom(store, roomId, memberId, identityId) {
     }));
   }
 
-  try {
+  // Retirement only consumes requests, mentions, DMs and handoffs.
+  if (!needsMeOnly) try {
     const rows = store.db.prepare(
       `SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='work_claim.updated' ORDER BY sequence DESC LIMIT 200`
     ).all(roomId);
@@ -294,7 +294,30 @@ function projectRoom(store, roomId, memberId, identityId) {
     flags.claims = true;
   }
 
-  if (owner) {
+  // An agent redeemed a one-time code this member minted. Private to the minter; the event
+  // is in the shared log, so the viewer check is here, not in the event.
+  if (!needsMeOnly) try {
+    const rows = store.db.prepare(
+      `SELECT body FROM events WHERE room_id=? AND json_extract(body,'$.type')='member.added'
+         AND json_extract(body,'$.data.joinedVia')='one-time-code' AND json_extract(body,'$.data.referredBy')=? ORDER BY sequence DESC LIMIT 20`
+    ).all(roomId, memberId);
+    for (const row of rows) {
+      const event = JSON.parse(row.body), data = event.data ?? {};
+      const joined = state.members?.[data.memberId];
+      if (!joined || joined.active === false) continue;
+      const at = iso(event.at);
+      items.push(draft({
+        kind: "agent_joined", roomId, key: `joined|${data.memberId}`,
+        title: clip(`${joined.displayName} joined with a one-time code`), actor: data.memberId, createdAt: at, updatedAt: at,
+        basis: data.memberId, sourceRef: { memberId: data.memberId },
+        next: null
+      }));
+    }
+  } catch (error) {
+    if (!tableMissing(error)) throw error;
+  }
+
+  if (owner && !needsMeOnly) {
     try {
       const rows = store.db.prepare(
         `SELECT id, intended_display_name AS name, created_at AS createdAt, issuer_member_id AS actor
@@ -313,16 +336,38 @@ function projectRoom(store, roomId, memberId, identityId) {
       if (!tableMissing(error)) throw error;
       flags.invites = true;
     }
+  }
+  if (canInviteMembers(state, memberId) && !needsMeOnly) {
     try {
       const rows = store.db.prepare(
-        `SELECT request_id AS requestId, display_name AS name, created_at AS createdAt, identity_id AS actor
-         FROM access_requests WHERE room_id=? AND status='pending'`
+        `SELECT pair_id AS pairId, display_name AS name, created_at AS createdAt, duplicate_member_id AS duplicateMemberId
+         FROM pairs WHERE room_id=? AND status='pending' AND expires_at>?`
+      ).all(roomId, now);
+      for (const row of rows) {
+        const at = iso(row.createdAt);
+        items.push(draft({
+          kind: "pair_request", roomId, key: `pair|${row.pairId}`,
+          title: clip(row.duplicateMemberId ? `${row.name} may already be here` : `${row.name} asks to pair`),
+          actor: row.pairId, createdAt: at, updatedAt: at,
+          basis: row.pairId, sourceRef: { pairId: row.pairId },
+          next: { method: "POST", path: `/api/rooms/${encodeURIComponent(roomId)}/pairs/${encodeURIComponent(row.pairId)}/decide` }
+        }));
+      }
+    } catch (error) {
+      if (!tableMissing(error)) throw error;
+    }
+  }
+  if (member.permissions?.includes("manage_members") && !needsMeOnly) {
+    try {
+      const rows = store.db.prepare(
+        `SELECT request_id AS requestId, display_name AS name, status, created_at AS createdAt, identity_id AS actor
+         FROM access_requests WHERE room_id=? AND status IN ('pending', 'pending_upgrade')`
       ).all(roomId);
       for (const row of rows) {
         const at = iso(row.createdAt);
         items.push(draft({
           kind: "access_request", roomId, key: `access|${row.requestId}`,
-          title: clip(`${row.name} asks to join`), actor: row.actor, createdAt: at, updatedAt: at,
+          title: clip(row.status === "pending_upgrade" ? `${row.name} wants more permissions` : `${row.name} asks to join`), actor: row.actor, createdAt: at, updatedAt: at,
           basis: row.requestId, sourceRef: { requestId: row.requestId },
           next: { method: "POST", path: `/api/rooms/${encodeURIComponent(roomId)}/access-requests/${encodeURIComponent(row.requestId)}/decide` }
         }));
@@ -601,7 +646,7 @@ export function markUpdate(store, token, roomId, itemId, action, requestId, bind
 
 export function retiredNeedsMeKeys(store, roomId, memberId) {
   try {
-    const projected = projectRoom(store, roomId, memberId, null);
+    const projected = projectRoom(store, roomId, memberId, null, { needsMeOnly: true });
     const keys = new Set();
     for (const item of projected.items) {
       if (ACTIONABLE.has(item.state)) continue;

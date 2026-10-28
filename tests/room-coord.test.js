@@ -8,7 +8,7 @@ import { RoomLandClient } from '../client/room-land.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { CoordError, claimAndVerify, closeClaim, coordStatus, digest, handoff, isLiveClaim, land, pathCovers, renewWithProgress, verifyClaim } from '../client/room-coord.mjs';
+import { CoordError, claimAndVerify, claimOverlaps, closeClaim, coordStatus, digest, guardConflicts, handoff, isLiveClaim, land, pathCovers, renewWithProgress, verifyClaim } from '../client/room-coord.mjs';
 import { parseArgs, run } from '../scripts/room-coord.mjs';
 
 const PR_SHA = 'd'.repeat(40);
@@ -52,6 +52,28 @@ test('a directory claim covers the files beneath it and nothing beside it', () =
     ['docs', 'docs-site/index.md', false]
   ]) assert.equal(pathCovers(held, file), covered, `${held} vs ${file}`);
   assert.throws(() => pathCovers('../outside', 'server/a.mjs'), coded('invalid_path'));
+});
+
+test('a wanted parent path conflicts with a live file lease beneath it', () => {
+  const now = Date.parse('2026-10-10T03:00:00.000Z');
+  const claims = [{
+    id: 'file-hold',
+    state: 'claimed',
+    owner: 'holder',
+    leaseExpiresAt: '2026-10-10T06:00:00.000Z',
+    files: ['server/http.mjs'],
+    title: 'file lease',
+  }];
+  const conflicts = guardConflicts(claims, ['server'], { memberId: 'other', now });
+  assert.equal(conflicts.length, 1);
+  assert.equal(conflicts[0].file, 'server');
+  assert.equal(conflicts[0].heldPath, 'server/http.mjs');
+  assert.equal(conflicts[0].claimId, 'file-hold');
+  assert.equal(guardConflicts(claims, ['server2/http.mjs'], { memberId: 'other', now }).length, 0);
+  assert.equal(claimOverlaps(claims.concat([{
+    id: 'dir-hold', state: 'claimed', owner: 'other',
+    leaseExpiresAt: '2026-10-10T06:00:00.000Z', files: ['server'],
+  }]), { now }).length, 1);
 });
 
 test('claims are confirmed by reading the room record back, and held files refuse a second member', async t => {
@@ -136,8 +158,10 @@ test('done closes a claimed or blocked item by moving it through in progress', a
 
   await owner.workClaimCreate({ id: 'needs-review', reviewPolicy: 'distinct_member' });
   await claimAndVerify(owner, 'needs-review', { memberId: 'owner', leaseHours: 1 });
+  // #3546: the close command cannot finish reviewed work — it must be
+  // delivered, then verified by its reviewer.
   await assert.rejects(closeClaim(owner, 'needs-review', { memberId: 'owner', note: 'shipped' }),
-    error => error instanceof CoordError && error.code === 'work_review_rejected');
+    error => error instanceof CoordError && error.code === 'work_not_delivered');
   assert.equal((await owner.workClaimGet('needs-review')).state, 'in_progress');
 });
 
@@ -181,7 +205,11 @@ test('handoff moves the lease to the receiver and leaves an actionable handoff p
   assert.match(body, /\nNext: wire the guard into CI(\n|$)/);
   assert.match(body, /\nFiles: client\/room-coord\.mjs(\n|$)/);
   assert.equal((await peer.updateWorkItem('baton', { state: 'in_progress' })).state, 'in_progress');
-  const released = await owner.releaseWorkItem('baton', { reason: 'owner closed the lane' });
+  // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+  const held = await owner.workClaimGet('baton');
+  const released = await owner.releaseWorkItem('baton', { reason: 'owner closed the lane',
+    expectedClaimedAt: held.claimedAt,
+    expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) });
   assert.equal(released.state, 'unclaimed');
   assert.equal(released.history.at(-1).agentId, 'owner');
   assert.equal(released.history.at(-1).note, 'owner closed the lane');

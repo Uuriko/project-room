@@ -172,6 +172,38 @@ test("malformed trust records are rejected; non-function trust option throws", t
   const dir3 = bad({ approvedAt: -5 });
   assert.throws(() => publishSigned(dir3, { agentId: "x" }), DirectoryError);
   assert.throws(() => createAgentDirectory({ trust: 42 }), DirectoryError);
+  // ch-2061 challenge (sibling of the reach array-fabrication fix): an array
+  // passed the typeof-object entry check and was normalized to a fabricated
+  // record — worse, the fabricated record defaults status to "active", an
+  // affirmative trust claim the host never made. Arrays must throw.
+  for (const record of [[], ["active"]]) {
+    const dirN = bad(record);
+    assert.throws(() => publishSigned(dirN, { agentId: "x" }), DirectoryError, JSON.stringify(record));
+  }
+});
+
+test("malformed presence records are rejected; arrays are not records", t => {
+  // ch-2061 challenge (sibling of the reach array-fabrication fix):
+  // presence() returning [] passed the typeof-object entry check and was
+  // normalized to a fabricated {status:"unregistered",...} record instead
+  // of throwing per the "must return an object or null" contract.
+  const bad = record => createAgentDirectory({
+    clock: () => 1_700_000_000_000,
+    presence: () => record,
+  });
+  for (const record of [[], ["online"], "not-an-object", { status: "napping" }, { hosts: -1 }]) {
+    const dir = bad(record);
+    assert.throws(() => publishSigned(dir, { agentId: "x" }), DirectoryError, JSON.stringify(record));
+  }
+  // Legit presence records (full and partial) still validate — the guard
+  // only rejects arrays, it never narrows the record contract.
+  const ok = createAgentDirectory({
+    clock: () => 1_700_000_000_000,
+    presence: () => ({ status: "online", lastSeenAt: 1_700_000_000_000, hosts: 2 }),
+  });
+  const { doc } = publishSigned(ok, { agentId: "ok" });
+  assert.equal(doc.presence.status, "online");
+  assert.equal(doc.presence.hosts, 2);
 });
 
 test("publish accepts a null card url (matches the signing guide default)", t => {

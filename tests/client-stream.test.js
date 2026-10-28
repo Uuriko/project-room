@@ -98,10 +98,23 @@ test('a queued reconnect rechecks account ownership without signing out the repl
   assert.equal(account.session, replacement);
 });
 
+test('a stream error while the browser is still retrying does not read; open does', async t => {
+  const { client, streams } = fixture(t);
+  let reads = 0; const healthy = client.fetcher;
+  client.fetcher = async (...args) => { reads++; return healthy(...args); };
+  client.connect(); streams[0].emit('error', 0);
+  await Promise.resolve();
+  assert.equal(reads, 0);
+  assert.equal(client.flight ?? null, null);
+  streams[0].emit('open', 1); await client.flight?.promise;
+  assert.ok(reads > 0);
+});
+
 test('a late stream-refresh rejection cannot clear a replacement session', async t => {
   const { client, streams } = fixture(t);
   client.fetcher = async () => ({ ok: false, status: 401, json: async () => ({ error: { message: 'Old session ended' } }) });
-  client.connect(); streams[0].emit('error', 0);
+  // An HTTP refusal leaves EventSource CLOSED (2); that error is the one that reads.
+  client.connect(); streams[0].emit('error', 2);
   const oldFlight = client.flight.promise;
   // Let request/refresh reject, but switch identity before the stream's outer catch.
   await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
@@ -133,4 +146,85 @@ test('a transient unavailable stream and failed refresh preserve identity and re
   await emit('open', 1);
   assert.equal(client.session, session);
   assert.equal(ended, 0);
+});
+
+function followUpSnapshot(client, sequence) {
+  return {
+    ok: true,
+    json: async () => ({
+      sequence, roomId: 'commons', viewerId: 'human',
+      viewerAccountId: client.session.account.id, viewerAuthEpoch: 0,
+      viewerSessionBinding: client.session.sessionBinding,
+      state: { messages: [{ id: `m-${sequence}` }] },
+    }),
+  };
+}
+
+function postEvent(stream, sequence) {
+  stream.readyState = 1;
+  stream.dispatchEvent(new MessageEvent('room-event', {
+    data: JSON.stringify({ sequence, event: { type: 'message.posted', roomId: 'commons' } }),
+  }));
+}
+
+test('a later successful read clears an interrupted open stream without replacing it', async t => {
+  const { client, streams, statuses, emit } = fixture(t);
+  client.connect();
+  await emit('open', 1);
+  client.fetcher = async () => ({ ok: false, status: 503, json: async () => ({ error: { code: 'storage_unavailable', message: 'Temporarily unavailable' } }) });
+  postEvent(streams[0], 8);
+  await client.flight.promise.catch(() => {});
+  assert.match(statuses.at(-1), /Connection interrupted/);
+  assert.equal(client.sequence, 7);
+  client.fetcher = async () => followUpSnapshot(client, 9);
+  postEvent(streams[0], 9);
+  await client.flight.promise;
+  assert.equal(streams.length, 1, 'the live stream stays open');
+  assert.equal(client.sequence, 9);
+  assert.match(statuses.at(-1), /^Connected/);
+});
+
+test('a failed follow-up read on an open stream is retried without replacing the stream', async t => {
+  const { client, streams, statuses, emit } = fixture(t);
+  client.connect();
+  await emit('open', 1);
+  let reads = 0;
+  client.fetcher = async () => {
+    reads += 1;
+    if (reads === 1) return { ok: false, status: 503, json: async () => ({ error: { code: 'storage_unavailable', message: 'Temporarily unavailable' } }) };
+    return followUpSnapshot(client, 8);
+  };
+  postEvent(streams[0], 8);
+  await client.flight.promise.catch(() => {});
+  assert.equal(reads, 1);
+  assert.equal(client.sequence, 7);
+  assert.equal(streams.length, 1);
+  assert.equal(streams[0].readyState, 1);
+  assert.match(statuses.at(-1), /Connection interrupted/);
+  t.mock.timers.tick(1000);
+  await client.flight?.promise;
+  assert.equal(reads, 2, 'the failed read is retried while the stream stays open');
+  assert.equal(streams.length, 1);
+  assert.equal(client.sequence, 8);
+  assert.match(statuses.at(-1), /^Connected/);
+});
+
+test('a dm.consent_changed stream receipt fires onConsentChange; other receipts do not', async t => {
+  const { client, streams, emit } = fixture(t);
+  const fires = [];
+  client.onConsentChange = () => fires.push(1);
+  client.connect();
+  await emit('open', 1);
+  client.fetcher = async () => followUpSnapshot(client, 8);
+  streams[0].dispatchEvent(new MessageEvent('room-event', {
+    data: JSON.stringify({ sequence: 8, event: { type: 'dm.consent_changed', roomId: 'commons' } }),
+  }));
+  await client.flight.promise.catch(() => {});
+  assert.equal(fires.length, 1, 'the consent receipt fires the hook');
+  client.fetcher = async () => followUpSnapshot(client, 9);
+  streams[0].dispatchEvent(new MessageEvent('room-event', {
+    data: JSON.stringify({ sequence: 9, event: { type: 'message.posted', roomId: 'commons' } }),
+  }));
+  await client.flight.promise.catch(() => {});
+  assert.equal(fires.length, 1, 'other receipts leave the hook alone');
 });

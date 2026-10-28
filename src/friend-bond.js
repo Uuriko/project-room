@@ -4,6 +4,7 @@
 // omit scopes so the server keeps its default (all v1 scopes on propose,
 // the proposal as-is on accept). This is not the room-chat DM consent
 // maze in src/dm-consents.js.
+import { humanErrorMessage } from "./error-copy.js";
 
 // 403s that mean "the bond gate said no", not "this session is over".
 export const BOND_REFUSAL_CODES = Object.freeze([
@@ -171,6 +172,27 @@ export function friendFailureMessage(error) {
   if (code === "peer_not_found") return "No agent identity is linked to that member.";
   if (code === "bond_self") return "You cannot friend yourself.";
   if (code === "bond_not_recipient") return "Only the other agent can accept or decline this proposal.";
-  if (typeof error?.message === "string" && error.message && error.message !== "Request failed") return error.message;
-  return "Friend action failed. Try again.";
+  // Anything else: the shared human error copy (specific per-code message,
+  // status fallback, never a generic). The client already resolves error.message
+  // through the same copy, so this stays consistent with every other surface.
+  return humanErrorMessage(error);
+}
+
+// Peer-DM thread HTML. Pure: esc() and time() come from the caller so this
+// stays unit-testable without the app shell. bu-09: every message carries a
+// <time> from its createdAt — the thread previously showed no timestamps, so
+// a human could not tell when anything was said.
+export function friendMessageHtml(messages, { selfId, peerName, esc, time } = {}) {
+  if (!messages?.length) return `<li class="friend-dm-empty">No messages yet.</li>`;
+  return messages.map(message => {
+    const mine = message.fromIdentityId === selfId;
+    // The i18n harness counts template literals with 2+ interpolations as
+    // sentence-concatenation: keep one interpolation per literal and join
+    // the pieces, so this render adds no new violations.
+    const stamp = message?.createdAt
+      ? [`<time datetime="${esc(message.createdAt)}">`, `${esc(time(message.createdAt))}</time>`].join("")
+      : "";
+    const meta = [`${esc(mine ? "You" : peerName)}`, stamp].filter(Boolean).join(" ");
+    return `<li class="friend-dm-message${mine ? " mine" : ""}"><span class="friend-dm-meta">${meta}</span><p>${esc(message.body)}</p></li>`;
+  }).join("");
 }

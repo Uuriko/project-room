@@ -25,7 +25,7 @@
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
 
 import { isUnpublished } from "./legal-store.mjs";
-import { refreshListedRoom } from "./public-read-model.mjs";
+import { refreshListedRoom, refreshDirectoryForRoom } from "./public-read-model.mjs";
 
 class ServiceError extends Error {
   constructor(status, code, message, headers = null) { super(message); this.status = status; this.code = code; this.headers = headers; }
@@ -61,6 +61,12 @@ export const DIRECTORY_PAGE_LIMIT = 100;
 export const DIRECTORY_DEFAULT_LIMIT = 50;
 const MAX_TITLE_CHARS = 120;
 const MAX_PURPOSE_CHARS = 1000;
+
+// The ECMAScript String.trim character set (WhiteSpace + LineTerminator,
+// including the Unicode space separators), for the SQL title leg in
+// RoomDirectory.list: SQLite's TRIM with no second argument removes
+// only U+0020, so the set is named here once, explicitly.
+const JS_TRIM_CHARS = " \t\n\v\f\r\u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff";
 
 const nowMs = () => Date.now();
 
@@ -183,8 +189,26 @@ export class RoomDirectory {
           ON CONFLICT(room_id) DO UPDATE SET public_receipts=excluded.public_receipts,
             updated_at=excluded.updated_at`)
         .run(roomId, nowMs(), enabled ? 1 : 0);
+      // Directory receipt counts apply the visibility predicate, so
+      // this flip changes what affected cards may count — re-sync them
+      // now rather than at the next projection.
+      refreshDirectoryForRoom(this.store, roomId);
       return { roomId, publicReceipts: enabled };
     });
+  }
+
+  // Whether rooms.projection can be read here. Minimal stores (and any
+  // store predating the column) lack it: the title leg below then stays
+  // out of the SQL and _publicEntry's JS check remains the authority for
+  // that leg, exactly as the probe discipline in public-visibility.mjs
+  // degrades its owner leg on a predating schema. The read path probes
+  // and never writes.
+  _roomsProjectionReadable() {
+    try {
+      return this.db.prepare("PRAGMA table_info(rooms)").all().some(column => column.name === "projection");
+    } catch {
+      return false;
+    }
   }
 
   // ---- public listing ------------------------------------------------------
@@ -193,11 +217,41 @@ export class RoomDirectory {
     const n = limit == null || limit === "" ? NaN : Number(limit);
     const pageSize = Number.isFinite(n) ? Math.min(Math.max(Math.floor(n), 1), DIRECTORY_PAGE_LIMIT) : DIRECTORY_DEFAULT_LIMIT;
     if (after != null && (typeof after !== "string" || after.length > 384)) fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
+    // F-C5-1: both _publicEntry filter legs run in SQL, BEFORE the LIMIT —
+    // filtering in JS after the LIMIT let suppressed listings consume the
+    // window, so a short page (and its cursor) revealed how many listings
+    // in the window had been suppressed (the #3595 shape, for rooms).
+    //   (a) Operator unpublish: unconditional NOT EXISTS over
+    //       public_unpublish, mirroring OPERATOR_HIDDEN_RECEIPT_SQL in
+    //       public-visibility.mjs (kind 'room' naming this room).
+    //   (b) Title: json_extract of the projection's room title must
+    //       TRIM to non-empty — gated on the projection probe above,
+    //       because a minimal store has no projection column to read.
+    //       The SQL form mirrors cleanText exactly, so the two forms
+    //       cannot drift into a window leak: json_valid first (a
+    //       quarantined corrupt projection, #4126, must skip — never
+    //       throw the whole list — the json_valid-guard shape the
+    //       store's own scans use), json_type 'text' (cleanText rejects
+    //       non-strings), and TRIM over the JS String.trim character
+    //       set (bare SQLite TRIM removes only spaces, so a tab- or
+    //       NBSP-only title would otherwise pass SQL and be dropped
+    //       by JS after consuming window).
+    // _publicEntry's JS checks stay in place below as the final
+    // authority (defence in depth, and the minimal-store fallback path).
+    const titleFilter = this._roomsProjectionReadable()
+      ? `AND json_valid(r.projection)
+          AND json_type(r.projection, '$.room.title') = 'text'
+          AND TRIM(json_extract(r.projection, '$.room.title'), '${JS_TRIM_CHARS}') <> ''`
+      : "";
     const rows = this.db.prepare(`
         SELECT s.room_id AS roomId, s.listed_at AS listedAt
         FROM room_directory_settings s
         JOIN rooms r ON r.id = s.room_id
         WHERE s.discoverable = 1 AND r.archived_at IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM public_unpublish u
+            WHERE u.kind = 'room' AND u.target = s.room_id)
+          ${titleFilter}
           AND (? IS NULL OR s.room_id > ?)
         ORDER BY s.room_id ASC
         LIMIT ?`).all(after ?? null, after ?? null, pageSize + 1);

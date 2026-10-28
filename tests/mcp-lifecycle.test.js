@@ -152,7 +152,7 @@ test("separate MCP processes serialize overlapping claims, hand off, and never r
   const before = f.store.room("commons").sequence;
   const raced = await Promise.all(pair.map((mcp, index) => mcp.call("room_acquire_claim", claims[index])));
   const winner = raced.findIndex(result => result.result.structuredContent.status === "recorded"), loser = 1 - winner;
-  assert.equal(raced[loser].result.structuredContent.code, "claim_conflict"); assert.equal(f.store.room("commons").sequence, before + 2);
+  assert.equal(raced[loser].result.structuredContent.code, "claim_conflict"); assert.equal(f.store.room("commons").sequence, before + 2); // claim + its board event; the board create happened at accept (decision #10 cutover), inside `before`
   const first = raced[winner].result.structuredContent;
   await recorded(pair[winner], "room_release_claim", { requestId: "release", workItemId: work(winner), expectedRevision: 2 });
   const newClaim = await recorded(pair[loser], "room_acquire_claim", claims[loser]); assert.equal(newClaim.duplicate, false);
@@ -205,6 +205,21 @@ test("authorized coordinator proposes and supersedes work without transferring a
   const { untrusted: stillUntrusted, ...againWork } = again;
   assert.equal(stillUntrusted, true);
   assert.deepEqual(againWork, originalReplacement);
+});
+
+test("canonical room_claim drives take, renew and release while legacy names report their successor", { timeout: 30000 }, async t => {
+  const f = await fixture(t), a = await f.open(f.participants[0].configDirectory), workItemId = "work-agent-a";
+  await recorded(a, "room_accept_work", { requestId: "canonical-accept", workItemId, expectedRevision: 0 });
+  const expiresAt = new Date(Date.now() + 7200000).toISOString();
+  await recorded(a, "room_claim", { requestId: "canonical-take", workItemId, expectedRevision: 1, action: "take", ...f.manifest.scope });
+  assert.equal((await read(a, workItemId)).work.claim.holderId, "agent-a");
+  await recorded(a, "room_claim", { requestId: "canonical-renew", workItemId, expectedRevision: 2, action: "renew", expiresAt });
+  assert.equal((await read(a, workItemId)).work.claim.expiresAt, expiresAt);
+  await recorded(a, "room_claim", { requestId: "canonical-release", workItemId, expectedRevision: 3, action: "release" });
+  assert.equal((await read(a, workItemId)).work.claim.status, "released");
+  const legacy = await recorded(a, "room_acquire_claim", { requestId: "legacy-re-take", workItemId, expectedRevision: 4, ...f.manifest.scope });
+  assert.equal(legacy.successor, "room_claim");
+  assert.deepEqual(legacy.deprecated, { successor: "room_claim", action: "take", message: 'Use room_claim with action="take".' });
 });
 
 test("expired claim rejects new work while its original successful acquisition remains retryable without renewal", { timeout: 30000 }, async t => {

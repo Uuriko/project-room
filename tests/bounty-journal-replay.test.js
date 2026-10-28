@@ -93,7 +93,9 @@ function phaseA(escrow) {
   escrow.submitWork(ROOM, b2, { claimant: CODEX, evidence: EVIDENCE });
   escrow.acceptWork(ROOM, b1, { acceptor: JILL, verifierAttestation: attest() });
   escrow.acceptWork(ROOM, b2, { acceptor: JILL, verifierAttestation: attest() });
-  // b4: pre-accept dispute, challenge rejected -> award vests (release).
+  // b4: post-accept dispute (#3726: disputes open only on accepted work),
+  // challenge rejected -> award vests (release).
+  escrow.acceptWork(ROOM, b4, { acceptor: INSTINCT, verifierAttestation: attest() });
   escrow.disputeBounty(ROOM, b4, { challenger: JILL, bond: 1, grounds: "looks off" });
   escrow.decideDispute(ROOM, b4, { decider: CODEX, outcome: "rejected", reasonCodes: ["evidence-insufficient"] });
   // b5: accept, then post-accept dispute -> split (half vests, half refunds).
@@ -108,6 +110,7 @@ function phaseA(escrow) {
   const b6 = postFund(escrow, { poster: JILL, amount: 8, verifier: INSTINCT });
   escrow.claimBounty(ROOM, b6, { claimant: GROK });
   escrow.submitWork(ROOM, b6, { claimant: GROK, evidence: EVIDENCE });
+  escrow.acceptWork(ROOM, b6, { acceptor: JILL, verifierAttestation: attest() });
   escrow.disputeBounty(ROOM, b6, { challenger: CODEX, bond: 2, grounds: "plagiarized" });
   escrow.decideDispute(ROOM, b6, { decider: INSTINCT, outcome: "upheld", reasonCodes: ["criterion-unmet"] });
   // b7: proposed, never funded.

@@ -49,7 +49,7 @@ test("README points cold agents at the primary start-here doc", () => {
 });
 
 test("generated /llms.txt Start here links the primary doc, not SWARM-PLUG-IN as the one enrollment doc", async () => {
-  const { llmsTxt } = await import("../deploy/agent-discovery.mjs");
+  const { llmsTxt } = await import("../server/agent-discovery.mjs");
   const txt = llmsTxt();
   const startHere = txt.slice(txt.indexOf("## Start here"));
   assert.ok(
@@ -63,7 +63,7 @@ test("generated /llms.txt Start here links the primary doc, not SWARM-PLUG-IN as
 });
 
 test("generated /llms-full.txt links the primary doc too (G2 superset parity)", async () => {
-  const { llmsFullTxt } = await import("../deploy/agent-discovery.mjs");
+  const { llmsFullTxt } = await import("../server/agent-discovery.mjs");
   const txt = llmsFullTxt();
   assert.ok(
     txt.includes("docs/AGENT-START-HERE.md"),

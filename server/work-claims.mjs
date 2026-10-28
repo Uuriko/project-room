@@ -22,6 +22,21 @@
 // { result, merged, production } — how the work was delivered — persisted on
 // the item and stamped into history.
 //
+// Delivered → verified (#3546/#3547): finish lands in `delivered`, a real
+// state the work occupies with its delivery bundle recorded; only a verify
+// transition moves it to `done`, and a reviewer's changes_requested sends it
+// back to `in_progress`. Under `self_attested` a single done call collapses
+// the two steps, but the item still records `verification` — self-attested
+// and independently verified completions are distinguishable facts, never
+// silently equivalent. The verify step runs the platform's own executed
+// checks over the frozen bundle (bundle_integrity, criteria_coverage,
+// ci_settlement) and records their results on the verification fact; a
+// failing executed check blocks a non-self-attested verify. The delivery
+// bundle is { artifact, checks, criteria } (see deliveryOf); it is required
+// — artifact + at least one passing check + a full criteria mapping — when
+// the item carries acceptanceCriteria or a non-self_attested review policy,
+// and optional-but-recorded otherwise.
+//
 // Receipt tags and blobs (RC-2026-09-24-205): the done transition also
 // accepts free-form { tags } (labels that converge from real use, no fixed
 // taxonomy) and { blobs } (sha256:<hex> content pointers for evidence).
@@ -33,18 +48,38 @@
 // reviewer authority supplied by the HTTP layer. self_attested is unchanged.
 // Note-only attestations remain caller-bound records but cannot approve work.
 // This does not gate automatic PR/land/deploy settlement or bind artifact bytes.
+import { createHash } from "node:crypto";
 import { parsePullRequestUrl } from "./claim-coordination.mjs";
-const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "done"];
+const STATES = ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"];
 const CLAIM_KINDS = ["work", "land", "deploy"];
 const CI_STATES = ["pending", "success", "failure", "neutral"];
 const REVIEW_VERDICTS = ["approve", "changes_requested", "comment"];
-const TRANSITIONS = {
-  unclaimed: ["claimed"],
-  claimed: ["in_progress", "blocked", "unclaimed"], // unclaimed = release
-  in_progress: ["blocked", "done", "claimed"],       // claimed = pause
-  blocked: ["in_progress", "claimed"],
-  done: [],
-};
+// Claim lifecycle: one explicit table, state x verb -> next state. Anything
+// not listed is refused. done and closed are terminal: done means the work
+// was delivered; closed means it was retired without delivery (close by the
+// room's claim managers, cancel by whoever opened or holds it). Only open
+// (non-terminal) items count against the room's open-claim cap.
+const CLAIM_LIFECYCLE = Object.freeze({
+  unclaimed: Object.freeze({ claim: "claimed", close: "closed", cancel: "closed" }),
+  claimed: Object.freeze({ start: "in_progress", block: "blocked", release: "unclaimed", close: "closed", cancel: "closed" }),
+  in_progress: Object.freeze({ block: "blocked", finish: "delivered", pause: "claimed", close: "closed", cancel: "closed" }),
+  blocked: Object.freeze({ start: "in_progress", pause: "claimed", close: "closed", cancel: "closed" }),
+  delivered: Object.freeze({ verify: "done", changes_requested: "in_progress", release: "unclaimed", close: "closed", cancel: "closed" }),
+  done: Object.freeze({}),
+  closed: Object.freeze({}),
+});
+const CLAIM_VERBS = Object.freeze(["claim", "start", "block", "release", "pause", "finish", "verify", "changes_requested", "close", "cancel"]);
+const TERMINAL_CLAIM_STATES = Object.freeze(["done", "closed"]);
+const isTerminalClaimState = state => TERMINAL_CLAIM_STATES.includes(state);
+// The next state for a verb, or null when the table refuses it.
+function nextClaimState(state, verb) {
+  const row = Object.hasOwn(CLAIM_LIFECYCLE, state) ? CLAIM_LIFECYCLE[state] : null;
+  return row && Object.hasOwn(row, verb) ? row[verb] : null;
+}
+// The /update state moves, derived from the table (close and cancel have
+// their own routes so a retire always records who and why).
+const TRANSITIONS = Object.freeze(Object.fromEntries(Object.entries(CLAIM_LIFECYCLE).map(([state, row]) =>
+  [state, Object.freeze(Object.entries(row).filter(([verb]) => verb !== "close" && verb !== "cancel").map(([, next]) => next))])));
 const DELIVERY_MODES = ["result", "merged", "production"];
 const REVIEW_POLICIES = ["self_attested", "distinct_member", "independent_principal"];
 // Receipt tags (RC-2026-09-24-205): free-form labels recorded when work is
@@ -111,11 +146,21 @@ const repoOf = value => {
   check(typeof value === "string" && NAME_PATTERN.test(value), "repo must be 1..200 characters of letters, numbers, or . _ / -");
   return value;
 };
+// Canonical work keeps the caller's repository spelling for replay. The Board
+// and live conflict checks share this identity conversion for public GitHub URLs.
+export function normalizeClaimRepository(value) {
+  if (typeof value !== "string") return value;
+  const match = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/i.exec(value);
+  return match ? `${match[1]}/${match[2]}` : value;
+}
+export { repoOf as claimRepositoryOf };
+
 const branchOf = value => {
   if (value === undefined || value === null || value === "") return null;
   check(typeof value === "string" && NAME_PATTERN.test(value), "branch must be 1..200 characters of letters, numbers, or . _ / -");
   return value;
 };
+export { branchOf as claimBranchOf };
 const MAX_PULLS = 16;
 const MAX_CHAIN = 20;
 const DEPENDS_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
@@ -186,6 +231,7 @@ const pullRequestOf = value => {
   let rateLimitedUntil = null;
   let pollBackoffMs = null;
   let ciCursor = null;
+  let ciStatus = null;
   if (value !== null && typeof value === "object") {
     if (value.outcome !== undefined && value.outcome !== null) {
       check(value.outcome === "merged" || value.outcome === "closed", "pullRequest outcome must be merged or closed");
@@ -215,10 +261,25 @@ const pullRequestOf = value => {
       check(value.ciCursor === "status" || value.ciCursor === "checks" || value.ciCursor === "done", "pullRequest ciCursor must be status, checks, or done");
       ciCursor = value.ciCursor;
     }
+    if (value.ciStatus !== undefined && value.ciStatus !== null) {
+      // The digest of a combined status fetched by a split CI read (#2841):
+      // it rides with ciCursor "checks" so the resumed read can roll it up.
+      // Without whitelisting it here, any state-machine write between the
+      // two ticks would drop it and resurrect the split-read bug.
+      check(value.ciStatus !== null && typeof value.ciStatus === "object" && !Array.isArray(value.ciStatus), "pullRequest ciStatus must be an object");
+      check(value.ciStatus.state === undefined || value.ciStatus.state === null || (typeof value.ciStatus.state === "string" && value.ciStatus.state.length <= 64), "pullRequest ciStatus state must be a short string");
+      check(typeof value.ciStatus.totalCount === "number" && Number.isFinite(value.ciStatus.totalCount) && value.ciStatus.totalCount >= 0, "pullRequest ciStatus totalCount must be a non-negative number");
+      check(value.ciStatus.targetUrl === undefined || value.ciStatus.targetUrl === null || (typeof value.ciStatus.targetUrl === "string" && value.ciStatus.targetUrl.startsWith("https://") && value.ciStatus.targetUrl.length <= 2048), "pullRequest ciStatus targetUrl must be an https URL");
+      ciStatus = Object.freeze({
+        state: typeof value.ciStatus.state === "string" ? value.ciStatus.state : null,
+        totalCount: value.ciStatus.totalCount,
+        targetUrl: typeof value.ciStatus.targetUrl === "string" ? value.ciStatus.targetUrl : null
+      });
+    }
   }
   return Object.freeze({
     url: parsed.url, repo: parsed.repo, number: parsed.number, outcome, syncedAt, nextPollAt,
-    etag, rateLimitedUntil, pollBackoffMs, ciCursor
+    etag, rateLimitedUntil, pollBackoffMs, ciCursor, ciStatus
   });
 };
 const pullRequestsOf = value => {
@@ -263,13 +324,155 @@ const blobsOf = value => {
 // Predicate for query-time tag filters (the route validates `tag=` params
 // against the same shape stored tags must have).
 export const isReceiptTag = value => typeof value === "string" && TAG_PATTERN.test(value);
+// Acceptance criteria (#3547): the item-level criteria a delivery bundle
+// maps against. Offers and bounties already carried criteria; work items
+// gain the same field so a finish can be checked against stated criteria
+// instead of a prose note.
+const MAX_ACCEPTANCE_CRITERIA = 32;
+const acceptanceCriteriaOf = value => {
+  if (value === undefined || value === null) return Object.freeze([]);
+  check(Array.isArray(value), "acceptanceCriteria must be an array");
+  check(value.length <= MAX_ACCEPTANCE_CRITERIA, `acceptanceCriteria must hold at most ${MAX_ACCEPTANCE_CRITERIA} criteria`);
+  return Object.freeze(value.map(criterion => {
+    check(typeof criterion === "string" && criterion.length > 0 && criterion.length <= 500,
+      "each acceptance criterion must be 1..500 characters");
+    return criterion;
+  }));
+};
+// The delivery bundle (#3547): what finish hands over — one artifact, the
+// checks the deliverer ran (caller-reported results; the platform's own
+// executed checks at verify time are a separate record), and a per-criterion
+// mapping. The kernel freezes the bundle with the delivered state and stamps
+// its digest; the digest covers exactly { artifact, checks, criteria }.
+const DELIVERY_CHECK_RESULTS = ["pass", "fail", "error", "skipped"];
+const DELIVERY_CRITERION_STATUSES = ["met", "not_met", "na"];
+const MAX_DELIVERY_CHECKS = 50;
+const MAX_DELIVERY_CRITERIA = 64;
+const artifactShaOf = value => {
+  const bare = typeof value === "string" && value.startsWith("sha256:") ? value.slice(7) : value;
+  check(typeof bare === "string" && /^[0-9a-f]{64}$/.test(bare), "artifact sha256 must be 64 lowercase hex characters");
+  return bare;
+};
+const deliveryOf = value => {
+  if (value === undefined || value === null) return null;
+  check(value !== null && typeof value === "object" && !Array.isArray(value), "delivery must be an object");
+  let artifact = null;
+  if (value.artifact !== undefined && value.artifact !== null) {
+    check(typeof value.artifact === "object" && !Array.isArray(value.artifact), "delivery artifact must be an object");
+    check(typeof value.artifact.kind === "string" && value.artifact.kind.length > 0 && value.artifact.kind.length <= 64,
+      "delivery artifact kind must be 1..64 characters");
+    check(typeof value.artifact.ref === "string" && value.artifact.ref.length > 0 && value.artifact.ref.length <= 512,
+      "delivery artifact ref must be 1..512 characters");
+    artifact = Object.freeze({ kind: value.artifact.kind, ref: value.artifact.ref, sha256: artifactShaOf(value.artifact.sha256) });
+  }
+  const checks = value.checks === undefined || value.checks === null ? [] : value.checks;
+  check(Array.isArray(checks) && checks.length <= MAX_DELIVERY_CHECKS, `delivery checks must hold at most ${MAX_DELIVERY_CHECKS} entries`);
+  const checkRows = checks.map(entry => {
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each delivery check must be an object");
+    check(typeof entry.name === "string" && entry.name.length > 0 && entry.name.length <= 200,
+      "each delivery check name must be 1..200 characters");
+    check(DELIVERY_CHECK_RESULTS.includes(entry.result), `each delivery check result must be one of ${DELIVERY_CHECK_RESULTS.join(", ")}`);
+    if (entry.command !== undefined && entry.command !== null)
+      check(typeof entry.command === "string" && entry.command.length <= 500, "delivery check command must be at most 500 characters");
+    return Object.freeze({ name: entry.name, result: entry.result, ...(entry.command != null ? { command: entry.command } : {}) });
+  });
+  const criteria = value.criteria === undefined || value.criteria === null ? [] : value.criteria;
+  check(Array.isArray(criteria) && criteria.length <= MAX_DELIVERY_CRITERIA, `delivery criteria must hold at most ${MAX_DELIVERY_CRITERIA} entries`);
+  const seenCriteria = new Set();
+  const criteriaRows = criteria.map(entry => {
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each delivery criterion must be an object");
+    check(typeof entry.criterion === "string" && entry.criterion.length > 0 && entry.criterion.length <= 500,
+      "each delivery criterion must be 1..500 characters");
+    check(!seenCriteria.has(entry.criterion), `delivery criteria maps criterion "${entry.criterion}" twice`);
+    seenCriteria.add(entry.criterion);
+    check(DELIVERY_CRITERION_STATUSES.includes(entry.status), `each delivery criterion status must be one of ${DELIVERY_CRITERION_STATUSES.join(", ")}`);
+    let evidenceRef;
+    if (entry.evidenceRef !== undefined && entry.evidenceRef !== null) evidenceRef = evidenceRefsOf([entry.evidenceRef])[0];
+    return Object.freeze({ criterion: entry.criterion, status: entry.status, ...(evidenceRef !== undefined ? { evidenceRef } : {}) });
+  });
+  return Object.freeze({ artifact, checks: Object.freeze(checkRows), criteria: Object.freeze(criteriaRows) });
+};
+// The verification fact (#3546): written only by the verify step (or the
+// self-attested collapse, or a changes_requested send-back). executedChecks
+// are the platform's own results, recorded beside — never merged with — the
+// bundle's caller-reported checks.
+const VERIFICATION_STATES = ["self_attested", "verified", "changes_requested"];
+const EXECUTED_CHECK_RESULTS = ["pass", "fail", "skipped"];
+const executedChecksOf = value => {
+  if (value === undefined || value === null) return Object.freeze([]);
+  check(Array.isArray(value) && value.length <= 16, "executedChecks must hold at most 16 entries");
+  return Object.freeze(value.map(entry => {
+    check(entry !== null && typeof entry === "object" && !Array.isArray(entry), "each executed check must be an object");
+    check(typeof entry.name === "string" && entry.name.length > 0 && entry.name.length <= 100,
+      "each executed check name must be 1..100 characters");
+    check(EXECUTED_CHECK_RESULTS.includes(entry.result), `each executed check result must be one of ${EXECUTED_CHECK_RESULTS.join(", ")}`);
+    if (entry.detail !== undefined && entry.detail !== null)
+      check(typeof entry.detail === "string" && entry.detail.length <= 500, "executed check detail must be at most 500 characters");
+    return Object.freeze({ name: entry.name, result: entry.result, ...(entry.detail != null ? { detail: entry.detail } : {}) });
+  }));
+};
+const verificationOf = value => {
+  if (value === undefined || value === null) return null;
+  check(value !== null && typeof value === "object" && !Array.isArray(value), "verification must be an object");
+  check(VERIFICATION_STATES.includes(value.state), `verification state must be one of ${VERIFICATION_STATES.join(", ")}`);
+  if (value.by !== undefined && value.by !== null)
+    check(typeof value.by === "string" && value.by.length > 0 && value.by.length <= 128, "verification by must be 1..128 characters");
+  check(typeof value.at === "string" && Number.isFinite(Date.parse(value.at)), "verification at must be an ISO timestamp");
+  const basis = reviewBasisOf(value.basis);
+  let jev;
+  if (value.jev !== undefined && value.jev !== null) {
+    check(typeof value.jev === "object" && !Array.isArray(value.jev), "verification jev must be an object");
+    check(typeof value.jev.verdict === "string" && value.jev.verdict.length > 0 && value.jev.verdict.length <= 64,
+      "verification jev verdict must be 1..64 characters");
+    check(typeof value.jev.score === "number" && Number.isFinite(value.jev.score), "verification jev score must be a number");
+    jev = Object.freeze({ verdict: value.jev.verdict, score: value.jev.score });
+  }
+  return Object.freeze({ state: value.state, by: value.by ?? null, at: value.at, basis,
+    executedChecks: executedChecksOf(value.executedChecks), ...(jev ? { jev } : {}) });
+};
+// A delivery as stored on the item: the validated bundle plus the stamp the
+// finish transition froze onto it (digest + who delivered + when).
+const storedDeliveryOf = value => {
+  if (value === undefined || value === null) return null;
+  const bundle = deliveryOf(value);
+  check(bundle !== null, "delivery must be an object");
+  check(typeof value.digest === "string" && /^[0-9a-f]{64}$/.test(value.digest), "delivery digest must be 64 lowercase hex characters");
+  check(typeof value.deliveredBy === "string" && value.deliveredBy.length > 0 && value.deliveredBy.length <= 128,
+    "delivery deliveredBy must be 1..128 characters");
+  check(typeof value.deliveredAt === "string" && Number.isFinite(Date.parse(value.deliveredAt)),
+    "delivery deliveredAt must be an ISO timestamp");
+  return Object.freeze({ ...bundle, digest: value.digest, deliveredBy: value.deliveredBy, deliveredAt: value.deliveredAt });
+};
 const DEFAULT_LEASE_HOURS = 24;
 const MAX_LEASE_HOURS = 168;
-export const DEFAULT_MAX_OPEN_CLAIMS = 200;
+// Board cleanup 2026-10-09: 200 jammed muse-room with an idle backlog while
+// only ~13 claims were live. The room cap now counts live items only (see
+// countsTowardOpenCap) and defaults to 1000; the per-member cap still bounds
+// what any one member can hold.
+export const DEFAULT_MAX_OPEN_CLAIMS = 1000;
 export const DEFAULT_MAX_MEMBER_OPEN_CLAIMS = 20;
 const CONFIG_CAP_CEILING = 10000;
 const DEFAULT_REVIEW_POLICY = "self_attested";
 const ACTIVE_CLAIM_STATES = ["claimed", "in_progress", "blocked"];
+// States a reviewer may record a review or attestation against: the active
+// states (reviewing work in flight) plus delivered (reviewing the delivery
+// itself — the record the verify transition gates on). Delivered work is
+// deliberately NOT an active claim state: its lease no longer lapses and
+// the stale sweep never releases a delivery awaiting verification.
+const REVIEWABLE_CLAIM_STATES = Object.freeze([...ACTIVE_CLAIM_STATES, "delivered"]);
+// An unclaimed item nobody has touched for STALE_UNCLAIMED_DAYS is dormant.
+// Dormant items do not count against the room's open-claim cap. When the room
+// owner turns on workClaims.staleSweep (off by default), the cron's stale
+// sweep (server/claim-pr-sync.mjs) also retires them, at most
+// STALE_SWEEP_BATCH per room per pass, as closed with reason stale_sweep.
+// Items with no readable timestamp are never dormant: unknown age counts.
+export const STALE_UNCLAIMED_DAYS = 14;
+export const STALE_SWEEP_BATCH = 25;
+export const STALE_SWEEP_REASON = `stale_sweep: unclaimed with no activity for ${STALE_UNCLAIMED_DAYS} days. Open a new claim if the work is still wanted.`;
+// History actions that end a claim round (the item can be claimed again after
+// each of these). Used by appendWorkPullRequest to prove a previous round
+// existed when an outcome timestamp ties the current round's claimedAt.
+const ROUND_ENDED_ACTIONS = new Set(["pr_closed", "pr_merged", "state:unclaimed", "lease_expired"]);
 class ClaimError extends Error { constructor(code, message) { super(message); this.name = "ClaimError"; this.code = code; } }
 const fail = (code, message) => { throw new ClaimError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_claim_input", message); };
@@ -303,11 +506,17 @@ const ciOf = value => {
   check(CI_STATES.includes(value.state), `ci.state must be one of ${CI_STATES.join(", ")}`);
   check(value.url == null || (typeof value.url === "string" && value.url.length > 0 && value.url.length <= 300), "ci.url must be a short string or null");
   check(value.headSha == null || (typeof value.headSha === "string" && /^[0-9a-f]{40}$/.test(value.headSha)), "ci.headSha must be a 40-character commit sha or null");
+  // #3685: the settlement is bound to the delivery it was made against —
+  // the digest of the delivery current when recordCi stamped it, or null
+  // when the round had no delivery yet. Records predating the binding
+  // carry no stamp and read as null (settled within the round).
+  check(value.deliveryDigest == null || (typeof value.deliveryDigest === "string" && /^[0-9a-f]{64}$/.test(value.deliveryDigest)), "ci.deliveryDigest must be a 64-character delivery digest or null");
   check(typeof value.checkedAt === "string" && Number.isFinite(Date.parse(value.checkedAt)), "ci.checkedAt must be an ISO timestamp");
   return Object.freeze({
     state: value.state,
     url: value.url ?? null,
     headSha: value.headSha ?? null,
+    deliveryDigest: value.deliveryDigest ?? null,
     checkedAt: value.checkedAt
   });
 };
@@ -320,14 +529,36 @@ const reviewBasisOf = value => {
   check(value.claimedAt === null || typeof value.claimedAt === "string" && Number.isFinite(Date.parse(value.claimedAt)), "review basis claimedAt must be an ISO timestamp or null");
   check(value.revision === null || typeof value.revision === "string" && value.revision.length > 0 && value.revision.length <= 200, "review basis revision must be a short string or null");
   check(value.headSha === null || typeof value.headSha === "string" && /^[0-9a-f]{40}$/.test(value.headSha), "review basis headSha must be a commit SHA or null");
-  return Object.freeze({ version: 1, owner: value.owner, claimedAt: value.claimedAt, revision: value.revision, headSha: value.headSha });
+  // #3684: the basis also binds the delivery the review was recorded
+  // against — its digest, and the claim's delivery generation at record
+  // time (0 before any delivery exists). Bases written before the
+  // binding carry neither and normalize to null/0, i.e. they read as
+  // in-flight approvals (see currentReviewBasis for what those cover).
+  check(value.deliveryDigest === undefined || value.deliveryDigest === null
+    || typeof value.deliveryDigest === "string" && /^[0-9a-f]{64}$/.test(value.deliveryDigest), "review basis deliveryDigest must be a delivery digest or null");
+  check(value.deliveryGeneration === undefined || value.deliveryGeneration === null
+    || Number.isSafeInteger(value.deliveryGeneration) && value.deliveryGeneration >= 0, "review basis deliveryGeneration must be a non-negative integer");
+  return Object.freeze({ version: 1, owner: value.owner, claimedAt: value.claimedAt, revision: value.revision, headSha: value.headSha,
+    deliveryDigest: value.deliveryDigest ?? null, deliveryGeneration: value.deliveryGeneration ?? 0 });
 };
 const reviewBasisFor = item => Object.freeze({ version: 1, owner: item.owner, claimedAt: item.claimedAt,
-  revision: item.revision ?? null, headSha: item.ci?.headSha ?? null });
+  revision: item.revision ?? null, headSha: item.ci?.headSha ?? null,
+  deliveryDigest: item.delivery?.digest ?? null, deliveryGeneration: item.deliveryGeneration ?? 0 });
 const sameBasis = (left, right) => Boolean(left && right) && Object.keys(right).every(key => left[key] === right[key]);
 const currentReviewBasis = (review, item) => {
   const basis = review?.basis, current = reviewBasisFor(item);
-  return basis && Object.keys(current).every(key => basis[key] === current[key]);
+  if (!basis) return false;
+  // #3684 delivery binding: an approval recorded while a delivery
+  // existed counts only for that delivery's digest — a re-delivery
+  // stales it exactly like a CI head move. An approval recorded before
+  // any delivery (generation 0) attests the work in flight and counts
+  // only for the round's FIRST delivery (generation 1); a replacement
+  // delivery is outside what it attested and stales it too.
+  const deliveryCurrent = basis.deliveryDigest !== null && basis.deliveryDigest !== undefined
+    ? basis.deliveryDigest === current.deliveryDigest
+    : (basis.deliveryGeneration ?? 0) === 0 && current.deliveryGeneration <= 1;
+  return deliveryCurrent
+    && ["version", "owner", "claimedAt", "revision", "headSha"].every(key => basis[key] === current[key]);
 };
 
 const reviewRecordOf = value => {
@@ -374,7 +605,262 @@ const readingAcksOf = value => {
   }
   return Object.freeze(out);
 };
-const workOf = value => {
+// PRODUCT-200 A4 (QA-200 AQ-HI-06): opt-in idempotency keys for updates. A
+// requestId that already landed on the claim replays the stored outcome
+// instead of appending another history entry — retry must not duplicate.
+// The map rides on the work item so it survives the durable registry
+// round-trip (restart/deploy); it is capped at MAX_REQUEST_OUTCOMES
+// entries, oldest first.
+//
+// #2965: each record also binds the requestId to a digest of the update
+// payload it carried. A retry re-sends the identical payload, so a seen
+// requestId whose digest differs is not a retry — it is a new update
+// riding an old id, and it is refused (work_claim_conflict) instead of
+// being silently swallowed behind a success response. Records written
+// before the binding existed are bare timestamp strings; their payload is
+// unknowable, so they keep replaying, but every new record is bound.
+export const MAX_REQUEST_OUTCOMES = 256;
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+export const requestIdOf = value => {
+  check(typeof value === "string" && REQUEST_ID_PATTERN.test(value),
+    "requestId must be 1..128 characters [A-Za-z0-9_-]");
+  return value;
+};
+// Canonical serialization for the payload digest: object keys sorted and
+// undefined spelled out, so two sends of the same update digest alike
+// regardless of key order, while absent and null stay distinct (they mean
+// different things to updateWork for several fields).
+const canonicalPayload = value => {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "undefined";
+  if (Array.isArray(value)) return `[${value.map(canonicalPayload).join(",")}]`;
+  return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalPayload(value[key])}`).join(",")}}`;
+};
+// The digest binding a requestId to the update it carried: every field
+// updateWork can apply, and nothing else (now/requestId itself excluded —
+// a retry is stamped later and re-uses the id by definition).
+export const updateRequestDigest = ({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery } = {}) =>
+  createHash("sha256").update(canonicalPayload({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery }), "utf8").digest("hex");
+// The bundle digest frozen at finish: sha256 over exactly the bundle's
+// content fields, so the verify step can prove the bundle it checks is the
+// bundle that was delivered (any later mutation of the stored row fails
+// bundle_integrity instead of silently passing).
+export const deliveryDigest = bundle => createHash("sha256").update(canonicalPayload({
+  artifact: bundle?.artifact ?? null,
+  checks: bundle?.checks ?? [],
+  criteria: bundle?.criteria ?? [],
+}), "utf8").digest("hex");
+// An na criterion's evidenceRef counts as evidence only when it resolves
+// to the delivery itself: the ref must name the bundle's own artifact
+// (sha256:<artifact digest> — the one ref form the bundle codec admits
+// that the platform can resolve against the frozen bundle). A ref to a
+// blob that is not this delivery is a caller assertion, not evidence
+// (#3683).
+const naEvidenceResolves = (delivery, evidenceRef) => {
+  if (typeof evidenceRef !== "string" || evidenceRef.length === 0) return false;
+  const artifact = delivery?.artifact ?? null;
+  return artifact !== null && evidenceRef === `sha256:${artifact.sha256}`;
+};
+// The platform's own executed checks over a delivered item (#3547: a
+// checker re-runs rather than re-reads). Pure over the item: the bundle's
+// stored digest is recomputed, the criteria mapping is re-validated against
+// the item's criteria, and the platform-settled CI record (written by the
+// claim-pr poller from the forge, never by the deliverer) is read back.
+// Caller-reported check results are never consulted here.
+export function executeDeliveryChecks(item) {
+  const results = [];
+  const delivery = item?.delivery ?? null;
+  if (delivery) {
+    const recomputed = deliveryDigest(delivery);
+    results.push(Object.freeze({ name: "bundle_integrity",
+      result: recomputed === delivery.digest ? "pass" : "fail",
+      detail: recomputed === delivery.digest
+        ? "stored bundle matches the digest frozen at finish"
+        : "stored bundle no longer matches the digest frozen at finish" }));
+    const criteria = item?.acceptanceCriteria ?? [];
+    if (criteria.length > 0) {
+      const mapped = new Map((delivery.criteria ?? []).map(entry => [entry.criterion, entry]));
+      const missing = criteria.filter(criterion => !mapped.has(criterion));
+      // #3683: coverage reads the mapping's own statuses, not just its
+      // names. A criterion the delivery itself declares not_met fails the
+      // check, and an na counts only with an evidenceRef that resolves to
+      // the delivered artifact itself (naEvidenceResolves).
+      const notMet = criteria.filter(criterion => mapped.get(criterion)?.status === "not_met");
+      const unbackedNa = criteria.filter(criterion => {
+        const entry = mapped.get(criterion);
+        return entry?.status === "na" && !naEvidenceResolves(delivery, entry.evidenceRef);
+      });
+      const problems = [
+        ...(missing.length > 0 ? [`criteria with no mapping: ${missing.join("; ")}`] : []),
+        ...(notMet.length > 0 ? [`criteria the delivery declares not_met: ${notMet.join("; ")}`] : []),
+        ...(unbackedNa.length > 0 ? [`criteria declared na without evidence resolving to the delivered artifact: ${unbackedNa.join("; ")}`] : []),
+      ];
+      results.push(Object.freeze({ name: "criteria_coverage",
+        result: problems.length > 0 ? "fail" : "pass",
+        detail: problems.length > 0 ? problems.join("; ") : `all ${criteria.length} criteria mapped and met` }));
+    }
+  }
+  const ci = item?.ci ?? null;
+  if (ci && (ci.state === "success" || ci.state === "failure")) {
+    // #3685: a settlement counts only for the delivery round it was made
+    // in. recordCi stamps the digest of the delivery current at settle
+    // time (null when the round had no delivery yet); a stamp naming a
+    // different delivery is stale evidence and fails closed — the poller
+    // re-settles against the current delivery. (Re-delivery, release and
+    // re-claim also clear the record outright; this is the second lock.)
+    const bound = ci.deliveryDigest == null || (delivery !== null && ci.deliveryDigest === delivery.digest);
+    results.push(Object.freeze({ name: "ci_settlement",
+      result: bound && ci.state === "success" ? "pass" : "fail",
+      detail: bound
+        ? `platform-settled CI is ${ci.state}${ci.headSha ? ` at ${ci.headSha}` : ""}`
+        : `platform-settled CI is ${ci.state}${ci.headSha ? ` at ${ci.headSha}` : ""} but was settled against a different delivery — fresh settlement required` }));
+  }
+  return Object.freeze(results);
+}
+// The finish-time bundle contract (#3547): when a bundle is required
+// (criteria-bearing item or non-self-attested policy) it must carry an
+// artifact, at least one check, no failing checks, and — when the item
+// carries criteria — a mapping covering every criterion. Each refusal names
+// the missing part. When a bundle is supplied voluntarily the same shape
+// rules apply to what was supplied.
+const requireBundleComplete = (item, bundle, { required }) => {
+  if (!bundle) {
+    if (required) fail("delivery_incomplete",
+      `finishing "${item.id}" requires a delivery bundle { artifact, checks, criteria } — none was supplied`);
+    return;
+  }
+  if (required && !bundle.artifact) fail("delivery_incomplete",
+    `delivery bundle for "${item.id}" is missing its artifact — an artifact { kind, ref, sha256 } is required`);
+  if (required && bundle.checks.length === 0) fail("delivery_incomplete",
+    `delivery bundle for "${item.id}" is missing checks — at least one check with a result is required`);
+  const failing = bundle.checks.find(entry => entry.result === "fail" || entry.result === "error");
+  if (failing) fail("delivery_incomplete",
+    `delivery bundle for "${item.id}" reports a failing check "${failing.name}" — a delivery cannot carry a failed check into verification`);
+  const criteria = item.acceptanceCriteria ?? [];
+  if (criteria.length > 0) {
+    const mapped = new Set(bundle.criteria.map(entry => entry.criterion));
+    const missing = criteria.find(criterion => !mapped.has(criterion));
+    if (missing !== undefined) fail("delivery_incomplete",
+      `delivery bundle for "${item.id}" does not map criterion "${missing}" — the criteria mapping must cover every acceptance criterion`);
+  }
+};
+// How a stored replay record answers a new update under the same
+// requestId: "replay" when the record binds this payload (or predates the
+// binding), "conflict" when it binds a different payload, null when the
+// requestId has not landed on this claim. B4/H2: a record stamped with a
+// DIFFERENT claim round than the current one answers null — it landed in
+// an earlier round, so in this round the id is simply unused (the update
+// applies as this round's own operation, whatever its payload). Records
+// without a round stamp predate the binding and keep their old verdict.
+export const requestReplayVerdict = (outcomes, requestId, digest, round) => {
+  if (!outcomes || !Object.hasOwn(outcomes, requestId)) return null;
+  const record = outcomes[requestId];
+  if (typeof record === "string") return "replay";
+  if (Number.isSafeInteger(record?.round) && Number.isSafeInteger(round) && record.round !== round) return null;
+  return record.digest === digest ? "replay" : "conflict";
+};
+const requestOutcomeRecordOf = record => {
+  // Legacy records are bare ISO timestamps; bound records are { at, digest }.
+  if (typeof record === "string") return Number.isFinite(Date.parse(record)) ? record : undefined;
+  if (record === null || typeof record !== "object" || Array.isArray(record)) return undefined;
+  if (typeof record.at !== "string" || !Number.isFinite(Date.parse(record.at))) return undefined;
+  if (typeof record.digest !== "string" || !/^[0-9a-f]{64}$/.test(record.digest)) return undefined;
+  // Reviewer replay authority is never inferred from legacy timestamps or
+  // digest-only records. Malformed provenance loses only this extra authority.
+  let reviewer;
+  const value = record.reviewer;
+  if (value && typeof value === "object" && !Array.isArray(value)
+    && typeof value.actorId === "string" && value.actorId.length > 0 && value.actorId.length <= 128
+    && ["done", "in_progress"].includes(value.state)
+    && Number.isSafeInteger(value.historyLength) && value.historyLength > 0
+    && typeof value.readingAckDigest === "string" && /^[0-9a-f]{64}$/.test(value.readingAckDigest)
+    && value.basis && Object.hasOwn(value.basis, "deliveryDigest") && Object.hasOwn(value.basis, "deliveryGeneration")) {
+    try {
+      reviewer = Object.freeze({ actorId: value.actorId, state: value.state, historyLength: value.historyLength,
+        basis: reviewBasisOf(value.basis), readingAckDigest: value.readingAckDigest });
+    } catch { /* old or malformed provenance cannot authorize reviewer replay */ }
+  }
+  // B4/H2: the round stamp survives normalization when it is well-formed;
+  // a malformed stamp is dropped (the record then replays as a legacy
+  // unstamped record rather than gaining cross-round authority).
+  const round = Number.isSafeInteger(record.round) && record.round >= 0 ? record.round : undefined;
+  return Object.freeze({ at: record.at, digest: record.digest,
+    ...(round !== undefined ? { round } : {}), ...(reviewer ? { reviewer } : {}) });
+};
+const requestOutcomesOf = value => {
+  if (value === undefined || value === null) return null;
+  check(typeof value === "object" && !Array.isArray(value), "requestOutcomes must be an object");
+  const kept = Object.entries(value)
+    .map(([key, record]) => [key, requestOutcomeRecordOf(record)])
+    .filter(([key, record]) => REQUEST_ID_PATTERN.test(key) && record !== undefined);
+  // String-key insertion order is oldest-first: drop the oldest beyond the cap.
+  return Object.freeze(Object.fromEntries(kept.slice(Math.max(0, kept.length - MAX_REQUEST_OUTCOMES))));
+};
+const recordRequestOutcome = (current, key, at, digest, round) => requestOutcomesOf({
+  // Reserve the new record's slot before adding it: integer-like ids sort
+  // ahead of string keys and must not be evicted by the normalization cap.
+  ...Object.fromEntries(Object.entries(current ?? {}).filter(([id]) => id !== key).slice(-(MAX_REQUEST_OUTCOMES - 1))),
+  [key]: { at, digest, ...(Number.isSafeInteger(round) && round >= 0 ? { round } : {}) },
+});
+// B4/H2: recorded request outcomes are bound to the claim ROUND that
+// landed them, the way #3829 bound reviewer outcomes. Each record is
+// stamped with the item's claimRound (a counter every fresh claim /
+// fresh assignment advances); the replay verdict consults the stamp, so
+// an outcome from an earlier round neither replays into nor conflicts
+// with a later round — a release resets deliveryGeneration to 0, so a
+// same-owner re-claim used to derive round 1's exact deliver requestId
+// and its recorded outcome silently swallowed the round-2 delivery
+// (identical payload) or refused it as id reuse (changed payload). The
+// records themselves are RETAINED across rounds: they are also the
+// tombstone the routes use to refuse a stale reviewer requestId
+// re-presented as fresh authority in a new round (#3829). Records
+// written before the binding existed carry no stamp and keep replaying,
+// like the legacy bare-timestamp records.
+// The route seals a successful reviewer exit after all same-request writes
+// (including readingAck). This metadata is server-created, never request input.
+// Lifetime history length makes the binding exact even if a release/reclaim
+// uses the same timestamp and identical delivery bytes. Later edits fail closed.
+const readingAckDigest = value => createHash("sha256").update(canonicalPayload(value), "utf8").digest("hex");
+export function bindReviewerRequestOutcome(before, work, actorId, requestId, readingAck) {
+  const item = workOf(work), prior = workOf(before), actor = agentOf(actorId), key = requestIdOf(requestId);
+  const record = item.requestOutcomes?.[key];
+  check(prior.state === "delivered" && prior.owner !== actor
+    && !Object.hasOwn(prior.requestOutcomes ?? {}, key)
+    && prior.id === item.id && sameBasis(reviewBasisFor(prior), reviewBasisFor(item))
+    && record && typeof record === "object" && item.owner !== actor
+    && item.verification?.by === actor && item.verification.at === record.at
+    && ((item.state === "done" && item.verification.state === "verified")
+      || (item.state === "in_progress" && item.verification.state === "changes_requested")),
+  "reviewer request outcome must describe a successful reviewer exit");
+  const reviewer = Object.freeze({ actorId: actor, state: item.state, historyLength: claimHistoryLength(item),
+    basis: reviewBasisFor(item), readingAckDigest: readingAckDigest(readingAck) });
+  return Object.freeze({ ...work, requestOutcomes: requestOutcomesOf({ ...item.requestOutcomes, [key]: { ...record, reviewer } }) });
+}
+// Provenance is necessary, never sufficient: the route must also recheck live
+// membership and the current review policy before returning a stored outcome.
+export function reviewerRequestOutcome(work, requestId, actorId) {
+  const record = work.requestOutcomes && Object.hasOwn(work.requestOutcomes, requestId)
+    ? requestOutcomeRecordOf(work.requestOutcomes[requestId]) : undefined;
+  const bound = record?.reviewer, verification = work.verification;
+  // B4/H2: a reviewer outcome stamped in an earlier claim round binds
+  // nothing in this one, however the other fields line up.
+  if (record && Number.isSafeInteger(record.round) && Number.isSafeInteger(work.claimRound)
+    && record.round !== work.claimRound) return null;
+  return bound && bound.actorId === actorId && bound.state === work.state
+    && bound.historyLength === claimHistoryLength(work)
+    && sameBasis(bound.basis, reviewBasisFor(work))
+    && verification?.by === actorId && verification.at === record.at
+    && sameBasis(verification.basis, bound.basis)
+    && verification.state === (bound.state === "done" ? "verified" : "changes_requested")
+    ? bound : null;
+}
+export const reviewerReadingAckMatches = (outcome, readingAck) => outcome.readingAckDigest === readingAckDigest(readingAck);
+
+// Exported so writer paths that build claim rows outside the state machine
+// (the work-item-board backfill, #3465) validate a row BEFORE storing it:
+// the durable registry's codec decodes without validation, so a row stored
+// unvalidated is readable but throws on its first state-machine touch.
+export const workOf = value => {
   check(value !== null && typeof value === "object" && !Array.isArray(value), "work must be an object");
   check(typeof value.id === "string" && value.id.length > 0 && value.id.length <= 256, "work id must be 1..256 characters");
   check(value.state === undefined || STATES.includes(value.state), `state must be one of ${STATES.join(", ")}`);
@@ -397,6 +883,9 @@ const workOf = value => {
   const parentClaimId = parentClaimIdOf(value.parentClaimId, value.id);
   const evidenceRefs = evidenceRefsOf(value.evidenceRefs);
   const premiseFlag = premiseFlagOf(value.premiseFlag);
+  const acceptanceCriteria = acceptanceCriteriaOf(value.acceptanceCriteria);
+  const delivery = storedDeliveryOf(value.delivery);
+  const verification = verificationOf(value.verification);
   const listedPulls = Array.isArray(value.pullRequests) && value.pullRequests.length
     ? pullRequestsOf(value.pullRequests)
     : (value.pullRequest ? Object.freeze([pullRequestOf(value.pullRequest)]) : Object.freeze([]));
@@ -406,15 +895,29 @@ const workOf = value => {
   if (kind === "deploy") check(revision, "a deploy claim needs a revision");
   const historyOmitted = historyOmittedOf(value.historyOmitted);
   const readingAcks = readingAcksOf(value.readingAcks);
+  const requestOutcomes = requestOutcomesOf(value.requestOutcomes);
   return { id: value.id, title: value.title ?? value.id, state: value.state ?? "unclaimed",
     owner: value.owner ?? null, history: Array.isArray(value.history) ? value.history : [],
     readingAcks,
+    ...(requestOutcomes !== null ? { requestOutcomes } : {}),
     ...(historyOmitted > 0 ? { historyOmitted } : {}),
     claimedAt: value.claimedAt ?? null, leaseStartAt: value.leaseStartAt ?? null, leaseExpiresAt: value.leaseExpiresAt ?? null,
     deliveryMode: value.deliveryMode ?? null, reviewPolicy: value.reviewPolicy ?? null,
     reviewedBy: value.reviewedBy ?? null, attestations: Object.freeze(attestations),
     tags, files, fileBlocks, blobs, dependsOn, pullRequest, pullRequests: listedPulls,
     parentClaimId, evidenceRefs, premiseFlag,
+    acceptanceCriteria, delivery, verification,
+    // #3684: how many deliveries this claim round has frozen (0 = none
+    // yet). In-flight approvals (basis generation 0) cover only the
+    // round's first delivery; the counter is what makes "first" a fact
+    // the kernel can check rather than a narrative.
+    deliveryGeneration: Number.isSafeInteger(value.deliveryGeneration) && value.deliveryGeneration > 0 ? value.deliveryGeneration : 0,
+    // B4/H2: the claim-round counter request outcomes are bound to. A
+    // fresh claim or fresh assignment advances it; nothing else does, so
+    // a round is exactly one ownership spell — including a same-owner
+    // re-claim after a release, which reuses claimedAt at the same
+    // millisecond in the worst case but never reuses this counter.
+    claimRound: Number.isSafeInteger(value.claimRound) && value.claimRound > 0 ? value.claimRound : 0,
     repo: repoOf(value.repo), branch: branchOf(value.branch),
     chain: chainOf(value.chain), supersededBy: optionalId(value.supersededBy, "supersededBy"),
     workItemId: optionalId(value.workItemId, "workItemId"),
@@ -465,22 +968,63 @@ export function claimUpdatedAt(item) {
   const stored = typeof item?.updatedAt === "string" ? item.updatedAt : "";
   return historyAt > stored ? historyAt : (stored || historyAt);
 }
+export function isDormantClaim(item, now) {
+  if (!item || item.state !== "unclaimed") return false;
+  const at = Date.parse(claimUpdatedAt(item));
+  if (!Number.isFinite(at)) return false;
+  return nowMsOf(now) - at >= STALE_UNCLAIMED_DAYS * 24 * 3600 * 1000;
+}
+// What the room's open-claim cap counts: non-terminal, non-dormant items.
+export function countsTowardOpenCap(item, now) {
+  return !!item && !isTerminalClaimState(item.state) && !isDormantClaim(item, now);
+}
+export function openClaimCount(items, now) {
+  let open = 0;
+  for (const item of items ?? []) if (countsTowardOpenCap(item, now)) open += 1;
+  return open;
+}
+// Retire dormant unclaimed items, oldest first, at most `limit`. Pure: returns
+// [before, closed] pairs; the caller writes them and emits the events.
+// Never-sweep pin (follow-up to #2341): a room can keep deliberate standing
+// backlog by tagging the item "never-sweep" at create. A pinned item still
+// goes dormant (so it never jams the open-claim cap) but the stale sweep
+// leaves it open.
+export const NEVER_SWEEP_TAG = "never-sweep";
+export function isSweepPinned(item) {
+  return (item?.tags ?? []).some(tag => typeof tag === "string" && tag.toLowerCase() === NEVER_SWEEP_TAG);
+}
+export function closeStaleUnclaimed(items, now, { limit = STALE_SWEEP_BATCH } = {}) {
+  const atMs = nowMsOf(now);
+  return (items ?? [])
+    .filter(item => isDormantClaim(item, atMs) && !isSweepPinned(item))
+    .sort((a, b) => claimUpdatedAt(a).localeCompare(claimUpdatedAt(b)))
+    .slice(0, Math.max(0, limit))
+    .map(before => [before, closeWork(before, "system", { verb: "close", reason: STALE_SWEEP_REASON, now: atMs, authority: true })]);
+}
 const positiveCap = (value, fallback) =>
   Number.isSafeInteger(value) && value >= 1 && value <= CONFIG_CAP_CEILING ? value : fallback;
 // Room config hook: resolve per-room work-claim defaults from an optional
 // room object. Rooms opt in by carrying workClaims = { defaultLeaseHours,
-// reviewPolicy, maxOpenClaims, maxMemberOpenClaims }; anything missing or
-// invalid falls back to the defaults.
+// reviewPolicy, maxOpenClaims, maxMemberOpenClaims, staleSweep }; anything
+// missing or invalid falls back to the defaults (staleSweep: off).
 export function roomWorkClaimConfig(room) {
   const raw = room?.workClaims ?? {};
   const defaultLeaseHours = typeof raw.defaultLeaseHours === "number" && raw.defaultLeaseHours > 0 && raw.defaultLeaseHours <= MAX_LEASE_HOURS
     ? raw.defaultLeaseHours : DEFAULT_LEASE_HOURS;
   const reviewPolicy = REVIEW_POLICIES.includes(raw.reviewPolicy) ? raw.reviewPolicy : DEFAULT_REVIEW_POLICY;
+  // CD-01 verdict inbox orphan interval (REV §3 req 2): a delivered claim
+  // whose attention set stays empty past this interval auto-adds the room
+  // owner. Room-configured in ms; anything invalid falls back to 24h.
+  const verdictOrphanAfterMs = typeof raw.verdictOrphanAfterMs === "number" && Number.isFinite(raw.verdictOrphanAfterMs)
+    && raw.verdictOrphanAfterMs >= 0 && raw.verdictOrphanAfterMs <= 30 * 24 * 3600 * 1000
+    ? raw.verdictOrphanAfterMs : 24 * 3600 * 1000;
   return Object.freeze({
     defaultLeaseHours,
     reviewPolicy,
+    verdictOrphanAfterMs,
     maxOpenClaims: positiveCap(raw.maxOpenClaims, DEFAULT_MAX_OPEN_CLAIMS),
     maxMemberOpenClaims: positiveCap(raw.maxMemberOpenClaims, DEFAULT_MAX_MEMBER_OPEN_CLAIMS),
+    staleSweep: raw.staleSweep === true,
   });
 }
 const leaseHoursOf = value => {
@@ -501,7 +1045,7 @@ const pullList = (pullRequest, pullRequests) => {
 // claiming an unknown id is refused so claims always reference real work.
 // `tags` may be supplied up front (free-form, recorded on the item); blobs
 // are evidence pointers and are only recorded on the done transition.
-export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId } = {}, { now, agentId } = {}) {
+export function createWork({ id, title, reviewPolicy, note, tags, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, workItemId, kind, revision, squadId, acceptanceCriteria } = {}, { now, agentId } = {}) {
   const atMs = nowMsOf(now);
   idOf(id, "work id", 256);
   if (title !== undefined) check(typeof title === "string" && title.length > 0 && title.length <= 512, "title must be 1..512 characters");
@@ -526,6 +1070,9 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
     parentClaimId: parentClaimIdOf(parentClaimId, id),
     evidenceRefs: evidenceRefsOf(evidenceRefs),
     premiseFlag: null,
+    acceptanceCriteria: acceptanceCriteriaOf(acceptanceCriteria),
+    delivery: null,
+    verification: null,
     pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null,
     pullRequests: links,
     repo: repoOf(repo), branch: branchOf(branch),
@@ -540,7 +1087,15 @@ export function createWork({ id, title, reviewPolicy, note, tags, files, depends
 // defaultLeaseHours, else 24h); null opts out — the claim never expires.
 export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, parentClaimId, evidenceRefs, pullRequest, pullRequests, repo, branch, fileBlocks, room, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  check(item.state === "unclaimed", `work "${item.id}" is already ${item.state} — release it first`);
+  // H4 (QA-200 2026-10-08): distinguish self re-claim from a foreign holder in
+  // the message — "release it first" was destructive for the holder and
+  // unactionable for anyone else, and it never named the holder. The code
+  // stays invalid_claim_input (internal callers pin it).
+  check(item.state === "unclaimed", item.state !== "claimed"
+    ? `work "${item.id}" is already ${item.state}`
+    : item.owner === agent
+      ? `work "${item.id}" is already claimed by you — no new claim was saved; read the item to confirm`
+      : `work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
   // QA D-1: the 4000-char bound applies to every note stored on a history
   // stamp, not just create — an unbounded claim note is the same
   // storage/amplification vector the SEC2 create cap closed.
@@ -561,6 +1116,15 @@ export function claimWork(work, agentId, { note, leaseHours, files, dependsOn, p
     pullRequest: links ? (links.find(pull => !pull.outcome) ?? links[links.length - 1] ?? null) : item.pullRequest,
     repo: repo === undefined ? item.repo : repoOf(repo),
     branch: branch === undefined ? item.branch : branchOf(branch),
+    // #3685: a fresh claim opens a fresh delivery round — no CI
+    // settlement from a previous round may be cited for this one, and
+    // the delivery generation restarts with the round (#3684).
+    // The round's delivery and verification fact restart too: every
+    // release path clears them when a round ends, and the claim refuses
+    // to inherit any residue that reached the pool anyway (bug sweep
+    // 2026-10-16 F1 — the lease sweep once leaked exactly this).
+    ci: null, deliveryGeneration: 0, delivery: null, verification: null,
+    claimRound: (item.claimRound ?? 0) + 1,
     leaseStartAt: effective === null ? null : isoOf(atMs),
     leaseExpiresAt: effective === null ? null : isoOf(atMs + effective * 3600 * 1000) };
   return withHistory(claimed, atMs, agent, "claimed",
@@ -594,8 +1158,14 @@ export function renewWork(work, agentId, { note, leaseHours, room, now } = {}) {
     note ?? (effective === null ? "lease removed" : `lease: ${effective}h`));
 }
 // Append one URL to the current claim round without replacing its lease or
-// evidence. A fresh duplicate is a byte-identical no-op; stale replay must
-// read back before deciding whether the link was already recorded.
+// evidence. A fresh duplicate in the same round is a byte-identical no-op;
+// stale replay must read back before deciding whether the link was already
+// recorded. A link whose recorded outcome provably predates the current
+// claim round (syncedAt older than claimedAt) belongs to a previous round:
+// re-linking it re-asserts the PR for the current round, so the link is
+// reset (outcome cleared) and the poller re-reads it — without the reset
+// the stale outcome would veto every future poll of the reopened PR.
+// A same-round duplicate stays a byte-identical no-op.
 export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClaimedAt, expectedHistoryLength, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(typeof pullRequest === "string" && pullRequest.length <= 300, "pullRequest must be a URL string of at most 300 characters");
@@ -611,37 +1181,102 @@ export function appendWorkPullRequest(work, agentId, { pullRequest, expectedClai
   if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
     fail("work_claim_conflict", "The claim changed since it was read");
   }
-  if (item.pullRequests.some(pull => pull.url === parsed.url)) return work;
+  const settledLink = item.pullRequests.find(pull => pull.url === parsed.url) ?? null;
+  // A recorded outcome is stale only when it provably predates the current
+  // claim round (recorded before this round's claimedAt — the poller always
+  // stamps syncedAt when it records). A same-round duplicate stays a
+  // byte-identical no-op: the link's observations are current-round truth.
+  // An outcome stamped at or before the round start is stale: a settled
+  // outcome releases the claim, so a same-millisecond outcome and re-claim
+  // can only mean the outcome ended the previous round (equality counts as
+  // stale, so the decision does not depend on millisecond-strict ordering).
+  // When the round is not provable either way, the no-op wins.
+  const outcomeMs = typeof settledLink?.syncedAt === "string" ? Date.parse(settledLink.syncedAt) : NaN;
+  const roundStartMs = typeof item.claimedAt === "string" ? Date.parse(item.claimedAt) : NaN;
+  // At the exact same millisecond the timestamps cannot order the outcome
+  // against the round start. Equality counts as stale only when the claim's
+  // own history shows an earlier round; a link settled in the same tick as
+  // the first claim is current-round truth.
+  //
+  // A previous round provably ended when the history carries a round-ending
+  // stamp: pr_closed/pr_merged (the auto-settler), state:unclaimed (a manual
+  // release), or lease_expired (the sweep). Counting "claimed" stamps alone
+  // undercounts: a round that began via reassign stamps "reassigned:<target>"
+  // instead of "claimed", and history trimming (MAX_CLAIM_HISTORY) can drop
+  // early "claimed" stamps. Either gap misreads the tie as first-round
+  // truth, and the stale outcome then vetoes every future poll of the
+  // reopened PR. The two-"claimed"-stamps check stays as a backstop.
+  const history = item.history ?? [];
+  const priorRoundRecorded = history.some(entry => ROUND_ENDED_ACTIONS.has(entry?.action))
+    || history.filter(entry => entry?.action === "claimed").length >= 2;
+  const staleOutcome = Boolean(settledLink?.outcome)
+    && Number.isFinite(outcomeMs) && Number.isFinite(roundStartMs)
+    && (outcomeMs < roundStartMs || (outcomeMs === roundStartMs && priorRoundRecorded));
+  if (settledLink && !staleOutcome) return work;
   check(item.pullRequests.length < MAX_PULLS, `pullRequests must list at most ${MAX_PULLS} pull requests`);
   // Keep the existing observations verbatim; only the server's poller may
   // fill in the new link's outcome, polling metadata, or CI.
   const prior = Array.isArray(work.pullRequests) && work.pullRequests.length ? work.pullRequests
     : (work.pullRequest ? [work.pullRequest] : []);
-  const links = Object.freeze([...prior, pullRequestOf(parsed.url)]);
+  const canonicalUrl = entry => {
+    const raw = typeof entry === "string" ? entry : entry?.url;
+    return typeof raw === "string" ? parsePullRequestUrl(raw)?.url ?? null : null;
+  };
+  const fresh = pullRequestOf(parsed.url);
+  const links = settledLink
+    ? Object.freeze(prior.map(entry => (canonicalUrl(entry) === parsed.url ? fresh : entry)))
+    : Object.freeze([...prior, fresh]);
   return withHistory({ ...work, pullRequests: links,
     pullRequest: links.find(pull => !pull.outcome) ?? links[links.length - 1],
     ci: null, attestations: Object.freeze([]) }, atMs, agent, "pr_linked", `Linked pull request ${parsed.url}`);
 }
-// Update claimed work: move state or add a note. Only the owner may update.
-// The done transition accepts deliveryMode (how the work was delivered),
-// reviewedBy (the attesting member, per the item's review policy), tags
-// (free-form receipt labels) and blobs (sha256 evidence pointers) — all
-// four are recorded on the item and then frozen with the done state. tags
-// and blobs are only meaningful on the done transition and are refused
-// anywhere else.
-export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, now, authority = false } = {}) {
+// Update claimed work: move state or add a note. Only the owner may update
+// (authority callers — the verify step by a reviewer — are the exception).
+// The finish transition (in_progress -> delivered) accepts deliveryMode,
+// tags, blobs and the delivery bundle — recorded on the item and frozen
+// with the delivered state. The verify transition (delivered -> done)
+// accepts reviewedBy and records the verification fact. A done call on
+// in_progress work under self_attested collapses finish+verify into one
+// step; under a reviewed policy it is refused (work_not_delivered) — the
+// work must occupy delivered and be verified by its reviewer.
+export function updateWork(work, agentId, { state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery, policy, jev, requestId, now, authority = false } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  // PRODUCT-200 A4 (QA-200 AQ-HI-06): idempotent retry. A requestId that
+  // already landed on this claim replays the stored outcome — the update
+  // applied exactly once, so the identical retry appends nothing.
+  // #2965: the replay is bound to the payload digest — a seen requestId
+  // carrying a different update is refused, never silently swallowed.
+  const key = requestId === undefined ? undefined : requestIdOf(requestId);
+  const digest = key === undefined ? undefined
+    : updateRequestDigest({ state, note, deliveryMode, reviewedBy, tags, blobs, parentClaimId, evidenceRefs, delivery });
+  if (key !== undefined) {
+    const verdict = requestReplayVerdict(item.requestOutcomes, key, digest, item.claimRound);
+    if (verdict === "replay") return item;
+    if (verdict === "conflict") fail("work_claim_conflict",
+      `requestId "${key}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
+  }
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can update it`);
-  check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  // The effective review policy for this transition: the caller (route)
+  // resolves the room default and passes it in; the item's own policy is
+  // what the digest of record says when no override is supplied.
+  if (policy !== undefined && policy !== null) check(REVIEW_POLICIES.includes(policy), `policy must be one of ${REVIEW_POLICIES.join(", ")}`);
+  const effectivePolicy = policy ?? item.reviewPolicy ?? DEFAULT_REVIEW_POLICY;
+  const collapse = state === "done" && item.state === "in_progress";
+  if (collapse && effectivePolicy !== "self_attested") {
+    fail("work_not_delivered",
+      `work "${item.id}" is under review policy "${effectivePolicy}" — finish it to "delivered" first; its reviewer then verifies it to "done"`);
+  }
   if (state !== undefined) {
     check(STATES.includes(state), `state must be one of ${STATES.join(", ")}`);
     const allowed = TRANSITIONS[item.state] ?? [];
     const allowedLabel = next => next === "unclaimed" ? "released" : next;
-    check(allowed.includes(state),
+    check(allowed.includes(state) || collapse,
       `cannot move "${item.id}" from ${item.state} to ${state} — allowed: ${item.state} -> ${allowed.map(allowedLabel).join("|") || "none"}`);
   }
+  const finishing = state === "delivered" || collapse;
   if (deliveryMode !== undefined && deliveryMode !== null) {
-    check(state === "done", "deliveryMode is only recorded on the done transition");
+    check(finishing || state === "done", "deliveryMode is only recorded on the finish/verify transitions");
     check(DELIVERY_MODES.includes(deliveryMode), `deliveryMode must be one of ${DELIVERY_MODES.join(", ")}`);
   }
   if (reviewedBy !== undefined && reviewedBy !== null) {
@@ -649,12 +1284,24 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     agentOf(reviewedBy);
   }
   if (tags !== undefined && tags !== null) {
-    check(state === "done", "tags are only recorded on the done transition");
+    check(finishing || state === "done", "tags are only recorded on the finish/verify transitions");
     tagsOf(tags);
   }
   if (blobs !== undefined && blobs !== null) {
-    check(state === "done", "blobs are only recorded on the done transition");
+    check(finishing || state === "done", "blobs are only recorded on the finish/verify transitions");
     blobsOf(blobs);
+  }
+  if (delivery !== undefined && delivery !== null) {
+    check(finishing, "a delivery bundle is only recorded on the finish transition");
+    deliveryOf(delivery);
+  }
+  let jevRecord;
+  if (jev !== undefined && jev !== null) {
+    check(state === "done", "jev is only recorded on the verify transition");
+    check(typeof jev === "object" && !Array.isArray(jev)
+      && typeof jev.verdict === "string" && jev.verdict.length > 0 && jev.verdict.length <= 64
+      && typeof jev.score === "number" && Number.isFinite(jev.score), "jev must be { verdict, score }");
+    jevRecord = Object.freeze({ verdict: jev.verdict, score: jev.score });
   }
   // QA D-1: same 4000-char bound as create — see claimWork.
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 4000, "note must be a string of at most 4000 characters");
@@ -666,6 +1313,67 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     parentClaimId: parentClaimId === undefined ? item.parentClaimId : parentClaimIdOf(parentClaimId, item.id),
     evidenceRefs: evidenceRefs === undefined ? item.evidenceRefs : evidenceRefsOf(evidenceRefs),
   };
+  // Finish step: validate the bundle against the item's contract and freeze
+  // it (with its digest) onto the item. A fresh delivery clears any earlier
+  // verification fact — the new bundle awaits a new verdict.
+  let deliveredItem = item;
+  if (finishing) {
+    const bundle = delivery === undefined ? item.delivery : deliveryOf(delivery);
+    requireBundleComplete(item, bundle, {
+      required: (item.acceptanceCriteria?.length ?? 0) > 0 || effectivePolicy !== "self_attested",
+    });
+    deliveredItem = bundle
+      ? { ...item, delivery: Object.freeze({ ...bundle, digest: deliveryDigest(bundle), deliveredBy: agent, deliveredAt: isoOf(atMs) }),
+        // #3684: every frozen delivery advances the round's generation —
+        // approvals bound to an earlier generation's delivery go stale.
+        deliveryGeneration: (item.deliveryGeneration ?? 0) + 1 }
+      : { ...item, delivery: null };
+  }
+  // #3685: a finish that REPLACES an existing delivery opens a new
+  // delivery round — the previous round's CI settlement is invalidated
+  // with the old delivery, and fresh evidence must settle against the
+  // new one. A round's first finish keeps the settlement the round
+  // already earned. (Review approvals stale on their own: the basis
+  // binds the delivery digest — #3684.)
+  const replacesDelivery = finishing && item.delivery != null;
+  if (replacesDelivery) deliveredItem = { ...deliveredItem, ci: null };
+  // Verify step: the platform's executed checks run over the delivered
+  // bundle. A failing executed check blocks a reviewed verify outright; on
+  // a self-attested collapse the results are recorded on the verification
+  // fact instead (visible, never hidden, but the owner's call stands).
+  let verification = item.verification;
+  if (state === "done") {
+    // Defense in depth (bug sweep 2026-10-16 F2): under a reviewed
+    // policy the executed checks run over the delivered bundle — a
+    // claim carrying no delivery has nothing to verify, and an empty
+    // executed-checks list must never be stamped "verified". Finish
+    // requires the bundle under exactly these policies; verify now
+    // refuses its absence outright instead of trusting that every road
+    // into `delivered` supplied one.
+    if (effectivePolicy !== "self_attested" && !deliveredItem.delivery) {
+      fail("delivery_incomplete",
+        `verifying "${item.id}" under review policy "${effectivePolicy}" requires a recorded delivery bundle — the claim carries none`);
+    }
+    const executedChecks = executeDeliveryChecks(deliveredItem);
+    const failed = executedChecks.find(entry => entry.result === "fail");
+    if (failed && effectivePolicy !== "self_attested") {
+      fail("delivery_check_failed",
+        `executed check "${failed.name}" failed for "${item.id}" — ${failed.detail ?? "the delivery does not pass system verification"}`);
+    }
+    verification = Object.freeze({
+      state: effectivePolicy === "self_attested" ? "self_attested" : "verified",
+      by: reviewedBy ?? agent, at: isoOf(atMs), basis: reviewBasisFor(deliveredItem),
+      executedChecks, ...(jevRecord ? { jev: jevRecord } : {}),
+    });
+  } else if (state === "in_progress" && item.state === "delivered") {
+    // changes_requested: the delivery stays as the record of what was
+    // handed over; the verification fact records who sent it back.
+    verification = Object.freeze({ state: "changes_requested", by: agent, at: isoOf(atMs),
+      basis: reviewBasisFor(item), executedChecks: Object.freeze([]) });
+  } else if (finishing) {
+    verification = null;
+  }
+  if (released) verification = null;
   const next = state === undefined ? { ...item, ...withProvenance } : { ...item, state,
     owner: released ? null : item.owner,
     leaseStartAt: released ? null : item.leaseStartAt, // a released claim holds no lease
@@ -678,19 +1386,87 @@ export function updateWork(work, agentId, { state, note, deliveryMode, reviewedB
     // inherit the previous owner's file declarations
     files: released ? Object.freeze([]) : item.files,
     fileBlocks: released ? Object.freeze({}) : item.fileBlocks,
-    deliveryMode: state === "done" && deliveryMode != null ? deliveryMode : item.deliveryMode,
-    reviewedBy: state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
-    tags: state === "done" && tags != null ? tagsOf(tags) : item.tags,
-    blobs: state === "done" && blobs != null ? blobsOf(blobs) : item.blobs,
+    deliveryMode: (finishing || state === "done") && deliveryMode != null ? deliveryMode : item.deliveryMode,
+    // a verify from delivered stamps the verifying reviewer even when the
+    // caller did not restate their own id in reviewedBy — the receipt's
+    // reviewer is the member whose session performed the verify
+    reviewedBy: state === "done" && item.state === "delivered" ? verification.by
+      : state === "done" && reviewedBy != null ? reviewedBy : item.reviewedBy,
+    tags: (finishing || state === "done") && tags != null ? tagsOf(tags) : item.tags,
+    blobs: (finishing || state === "done") && blobs != null ? blobsOf(blobs) : item.blobs,
+    // the delivery belongs to the owner's round: a release clears it (and
+    // its verification fact) exactly like the round's reviews
+    delivery: released ? null : deliveredItem.delivery,
+    // #3685: the CI settlement belongs to the delivery round too — a
+    // release or a replacement delivery clears it (see replacesDelivery)
+    ci: released || replacesDelivery ? null : item.ci,
+    // A release ends the round, so its delivery generation ends with
+    // it — the same reset releaseExpired and reassignWork apply, so no
+    // round-ending path leaves a different residue than another.
+    deliveryGeneration: released ? 0 : deliveredItem.deliveryGeneration ?? item.deliveryGeneration ?? 0,
+    verification,
     ...withProvenance };
-  return withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note);
+  return key === undefined ? withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note)
+    : Object.freeze({ ...withHistory(next, atMs, agent, state === undefined ? "noted" : `state:${state}`, note),
+      requestOutcomes: recordRequestOutcome(item.requestOutcomes, key, isoOf(atMs), digest, item.claimRound) });
+}
+// Release a claim, bound to the claim round the caller read (E5/D4, QA-200
+// 2026-10-08): expectedClaimedAt + expectedHistoryLength must match the
+// current item, so a stale replay (timed-out retry) or a delayed duplicate
+// landing after an intervening release + re-claim is refused instead of
+// silently destroying the fresh claim. Mirrors appendWorkPullRequest's
+// round check — the history length also discriminates same-millisecond
+// re-claims, which keep the previous round's claimedAt. Claims held
+// in_progress/blocked are routed through the internal pause transition
+// first (W2); both steps are stamped in history.
+export function releaseWork(work, agentId, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim timestamp");
+  check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+  if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
+    fail("work_claim_conflict", "The claim changed since it was read");
+  }
+  let current = item;
+  if (current.state === "in_progress" || current.state === "blocked") {
+    current = updateWork(current, agent, { state: "claimed", note: "paused for release", now: atMs, authority });
+  }
+  return updateWork(current, agent, { state: "unclaimed", note, now: atMs, authority });
+}
+// Retire open work without delivering it. close: the room's claim managers
+// (authority) or the current holder. cancel: whoever opened the item while
+// it is still unclaimed, or the current holder; authority may also cancel.
+// The item lands in the terminal closed state with no owner and no lease;
+// the history stamp ("closed" | "cancelled") names who retired it and why.
+export function closeWork(work, agentId, { verb = "close", reason, now, authority = false } = {}) {
+  const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
+  check(verb === "close" || verb === "cancel", "verb must be close or cancel");
+  if (reason !== undefined && reason !== null) check(typeof reason === "string" && reason.length <= 4000, "reason must be a string of at most 4000 characters");
+  const next = nextClaimState(item.state, verb);
+  if (next === null) fail("work_claim_terminal", `Cannot ${verb} "${item.id}": it is already ${item.state}`);
+  const holder = item.owner !== null && item.owner === agent;
+  const opener = item.state === "unclaimed" && item.owner === null && creatorOf(item) === agent;
+  const allowed = authority === true || holder || (verb === "cancel" && opener);
+  if (!allowed) {
+    fail("work_not_owner", verb === "cancel"
+      ? `Only the member who opened "${item.id}" (while unclaimed), its holder, or a claim manager can cancel it`
+      : `Only the holder of "${item.id}" or a claim manager (room owner or manage_claims) can close it`);
+  }
+  const closed = { ...item, state: next, owner: null, leaseStartAt: null, leaseExpiresAt: null,
+    attestations: Object.freeze([]), reviews: Object.freeze([]),
+    files: Object.freeze([]), fileBlocks: Object.freeze({}) };
+  return withHistory(closed, atMs, agent, verb === "cancel" ? "cancelled" : "closed", reason);
+}
+// The member who created the item, when the creation stamp is still in history.
+export function creatorOf(work) {
+  const first = Array.isArray(work?.history) && !work.historyOmitted ? work.history[0] : null;
+  return first && first.action === "created" && typeof first.agentId === "string" && first.agentId !== "system" ? first.agentId : null;
 }
 // Record a note from the caller's own authenticated session. A new note
 // supersedes that member's active verdict but cannot approve reviewed completion.
 // Refused on unclaimed work (nothing to review) and on done work (immutable).
 export function attestWork(work, agentId, { note, now } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
-  check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be reviewed`);
+  check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
   if (note !== undefined && note !== null) check(typeof note === "string" && note.length <= 512, "note must be at most 512 characters");
   const prior = item.attestations.find(entry => entry.memberId === agent);
   const explicit = item.reviews.some(entry => entry.memberId === agent);
@@ -716,10 +1492,10 @@ export function attestWork(work, agentId, { note, now } = {}) {
 // A review record from someone other than the owner. Latest record per member
 // wins. Only approve also records the caller-bound attestation used by the
 // manual done policy. The owner cannot review their own claim.
-export function recordReview(work, agentId, { verdict, summary, url, now } = {}) {
+export function recordReview(work, agentId, { verdict, summary, url, now, expectedBasis } = {}) {
   const item = workOf(work), agent = agentOf(agentId), atMs = nowMsOf(now);
   check(item.owner !== agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — the owner cannot review it`);
-  check(ACTIVE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active claims can be reviewed`);
+  check(REVIEWABLE_CLAIM_STATES.includes(item.state), `work "${item.id}" is ${item.state} — only active or delivered claims can be reviewed`);
   check(REVIEW_VERDICTS.includes(verdict), `verdict must be one of ${REVIEW_VERDICTS.join(", ")}`);
   check(typeof summary === "string" && summary.length > 0 && summary.length <= 2000, "summary must be 1..2000 characters");
   let reviewUrl = null;
@@ -731,9 +1507,42 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
     reviewUrl = url;
   }
   const prior = item.reviews.find(entry => entry.memberId === agent);
-  // Replaying the latest identical content never refreshes its old binding.
-  // A request ID is still needed to distinguish delayed retries after a newer verdict.
-  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) return Object.freeze(item);
+  // #2966, revised: an identical resubmission is ambiguous — it can be a
+  // blind retry of the request that already landed, or a deliberate
+  // re-review of changed context with the same wording ("LGTM" on a new CI
+  // head). The two must not be conflated: a blind retry never refreshes
+  // the old binding, or it would silently approve changed work (the
+  // approval-binding invariant), yet a reviewer must not be forced to
+  // invent new wording to re-approve a new head, or reviewed completion
+  // deadlocks. `expectedBasis` is the distinguishing signal: the caller
+  // names the current basis (owner, claimedAt, revision, ci.headSha) they
+  // actually reviewed, as read back from the claim. A supplied basis that
+  // no longer matches is a conflict, not a review of the current context.
+  const currentBasis = reviewBasisFor(item);
+  let namedBasis = null;
+  if (expectedBasis !== undefined && expectedBasis !== null) {
+    namedBasis = reviewBasisOf(expectedBasis);
+    if (!sameBasis(namedBasis, currentBasis)) {
+      fail("work_claim_conflict", `expected review basis does not match the current basis of work "${item.id}"`);
+    }
+  }
+  if (prior && prior.verdict === verdict && prior.summary === summary && prior.url === reviewUrl) {
+    // A true replay on the still-current basis changes nothing.
+    if (currentReviewBasis(prior, item)) return Object.freeze(item);
+    // The prior basis is stale (or the record predates bases). Only a
+    // deliberate re-review — one naming the current basis — may refresh
+    // it, and only for the #2966 case: CI recorded a new head (headSha is
+    // the sole changed basis field and there is a current head to bind
+    // to), or the prior record is a legacy unbound review. A basis stale
+    // because the revision, owner or claim round changed, or because CI
+    // was cleared with no current head (a newly linked PR), still cannot
+    // be refreshed by identical content — that takes a fresh summary.
+    const soleHeadMove = prior.basis !== null && prior.basis !== undefined && currentBasis.headSha !== null
+      && prior.basis.headSha !== currentBasis.headSha
+      && ["version", "owner", "claimedAt", "revision", "deliveryDigest", "deliveryGeneration"].every(key => prior.basis[key] === currentBasis[key]);
+    const deliberateRefresh = namedBasis !== null && (soleHeadMove || !prior.basis);
+    if (!deliberateRefresh) return Object.freeze(item);
+  }
   const at = isoOf(atMs);
   const review = Object.freeze({ memberId: agent, verdict, summary, url: reviewUrl, at, basis: reviewBasisFor(item) });
   const reviews = Object.freeze([...item.reviews.filter(entry => entry.memberId !== agent), review]);
@@ -749,7 +1558,7 @@ export function recordReview(work, agentId, { verdict, summary, url, now } = {})
 export function closeWhenLive(work, liveRevision, now) {
   const item = workOf(work);
   if (item.kind !== "land" && item.kind !== "deploy") return null;
-  if (item.state === "done" || typeof liveRevision !== "string" || liveRevision.length === 0) return null;
+  if (isTerminalClaimState(item.state) || typeof liveRevision !== "string" || liveRevision.length === 0) return null;
   const head = item.ci?.headSha ?? null;
   if (item.revision !== liveRevision && head !== liveRevision) return null;
   const atMs = nowMsOf(now);
@@ -761,7 +1570,11 @@ export function closeWhenLive(work, liveRevision, now) {
 export function recordCi(work, ci, now) {
   const item = workOf(work);
   const atMs = nowMsOf(now);
-  const next = ciOf({ ...ci, checkedAt: ci?.checkedAt ?? isoOf(atMs) });
+  // #3685: stamp the settlement with the delivery it was made against —
+  // the digest of the delivery current now, or null when this round has
+  // no delivery yet. The stamp is computed here, never caller-supplied,
+  // so a settlement can never claim a delivery it did not settle under.
+  const next = ciOf({ ...ci, deliveryDigest: item.delivery?.digest ?? null, checkedAt: ci?.checkedAt ?? isoOf(atMs) });
   const changed = (item.ci?.state ?? null) !== next.state;
   const updated = { ...item, ci: next };
   return { changed, item: changed ? withHistory(updated, atMs, item.owner ?? "system", "ci", next.state) : updated };
@@ -779,12 +1592,37 @@ export function notePullMerged(work, mergedSha, now) {
   });
   return { ...item, revision, pullRequest };
 }
-// Reassign: the owner hands work to another agent (stays in the same state).
-// Attestations are cleared — reviews belong to the previous owner's round.
-export function reassignWork(work, agentId, newOwner, { note, now, authority = false, room } = {}) {
+// Reassign: the owner hands work to another agent. Attestations and
+// reviews are cleared — they belong to the previous owner's round of
+// review. The round's DELIVERY state (delivery, verification, ci,
+// deliveryGeneration) belongs to the round, not the owner, and follows
+// the round semantics below (bug sweep 2026-10-16 F2):
+//  - a fresh assignment from unclaimed opens a new round: cleared.
+//  - a live round (claimed / in_progress / blocked) changes hands
+//    intact — a delivery retained by a send-back is the record of what
+//    was handed over and survives the handover.
+//  - a delivered claim never changes hands in `delivered`: nulling its
+//    bundle while keeping the state stranded it where verify could
+//    stamp it "verified" with zero executed checks. The handover
+//    instead reopens the round to in_progress — the state a reviewer's
+//    send-back produces — with the delivery retained as the round's
+//    record and no verdict standing (verification clears with the
+//    reviews). The new owner re-finishes and a reviewer verifies.
+export function reassignWork(work, agentId, newOwner, { expectedClaimedAt, expectedHistoryLength, note, now, authority = false, room } = {}) {
   const item = workOf(work), agent = agentOf(agentId), target = agentOf(newOwner), atMs = nowMsOf(now);
   check(authority === true || item.owner === agent, `work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can reassign it`);
-  check(item.state !== "done", `work "${item.id}" is done and immutable`);
+  check(!isTerminalClaimState(item.state), `work "${item.id}" is ${item.state} and immutable`);
+  // E5/D4 follow-up: the HTTP route requires the claim round the client read
+  // (claimedAt + history length), like release. In-process callers may omit
+  // both; when either is given both are validated and compared. An unclaimed
+  // item has claimedAt null, so null is its valid round token.
+  if (expectedClaimedAt !== undefined || expectedHistoryLength !== undefined) {
+    check(expectedClaimedAt === null || typeof expectedClaimedAt === "string" && expectedClaimedAt.length <= 100 && Number.isFinite(Date.parse(expectedClaimedAt)), "expectedClaimedAt must be the current claim time (ISO string) or null for an unclaimed item");
+    check(Number.isSafeInteger(expectedHistoryLength) && expectedHistoryLength >= 0, "expectedHistoryLength must be a non-negative integer");
+    if (item.claimedAt !== expectedClaimedAt || claimHistoryLength(item) !== expectedHistoryLength) {
+      fail("work_claim_conflict", "The claim changed since it was read");
+    }
+  }
   // Assigning an unclaimed item hands it over as a claim: state claimed with
   // a fresh lease (room default), the same shape create-with-assignee gives.
   // Before this, the owner was set but the state stayed "unclaimed" with no
@@ -792,9 +1630,21 @@ export function reassignWork(work, agentId, newOwner, { note, now, authority = f
   const fresh = item.state === "unclaimed";
   const hours = fresh ? roomWorkClaimConfig(room).defaultLeaseHours : null;
   const claim = fresh ? { state: "claimed", claimedAt: isoOf(atMs),
+    claimRound: (item.claimRound ?? 0) + 1,
     leaseStartAt: hours === null ? null : isoOf(atMs),
     leaseExpiresAt: hours === null ? null : isoOf(atMs + hours * 3600 * 1000) } : {};
-  return withHistory({ ...item, ...claim, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) }, atMs, agent, `reassigned:${target}`, note);
+  // A fresh assignment opens a fresh round (delivery state cleared,
+  // exactly like a claim). A live round keeps its delivery state. A
+  // delivered claim reopens to in_progress with its delivery retained
+  // and its verification fact cleared — no verdict recorded against the
+  // previous owner stands over the new owner's round.
+  const round = fresh
+    ? { delivery: null, verification: null, ci: null, deliveryGeneration: 0 }
+    : item.state === "delivered"
+      ? { state: "in_progress", verification: null }
+      : {};
+  return withHistory({ ...item, ...claim, ...round, owner: target, attestations: Object.freeze([]), reviews: Object.freeze([]) },
+    atMs, agent, `reassigned:${target}`, note);
 }
 // True when the item holds an active claim whose lease has lapsed. Items
 // without a lease, and items not under claim, never expire.
@@ -817,7 +1667,16 @@ export function releaseExpired(items, now) {
     // 2026-09-30 (phase-2 gap audit L-P2-8): mirrors updateWork, where a
     // released claim drops its reviews too (attestations belong to the
     // lapsed owner's round of work, never to whoever claims next).
-    const released = { ...item, state: "unclaimed", owner: null, leaseExpiresAt: null,
+    // The round's delivery state goes with it (bug sweep 2026-10-16 F1):
+    // a claim sent back to in_progress keeps its delivery as the record
+    // of what was handed over, so a lease lapse after a send-back used
+    // to leave the frozen bundle, its verification fact, and its
+    // generation on the unclaimed item — and the next claimant's
+    // bundle-less finish then froze that bundle as THEIR delivery.
+    // Every round-ending path now clears the same set: delivery,
+    // verification, ci, and the delivery generation.
+    const released = { ...item, state: "unclaimed", owner: null, leaseStartAt: null, leaseExpiresAt: null, ci: null,
+      delivery: null, verification: null, deliveryGeneration: 0,
       files: Object.freeze([]), fileBlocks: Object.freeze({}), attestations: Object.freeze([]), reviews: Object.freeze([]) };
     return withHistory(released, atMs, item.owner ?? "system", "lease_expired",
       `claim by ${item.owner ?? "nobody"} lapsed at ${item.leaseExpiresAt} — auto-released`);
@@ -834,7 +1693,7 @@ export function canCloseWork(work, reviewerId, { policy, verifyMembers, reviewMe
   const item = workOf(work);
   const effective = policy ?? item.reviewPolicy ?? DEFAULT_REVIEW_POLICY;
   check(REVIEW_POLICIES.includes(effective), `policy must be one of ${REVIEW_POLICIES.join(", ")}`);
-  if (item.state === "done" || item.state === "unclaimed" || item.owner === null) return false;
+  if (isTerminalClaimState(item.state) || item.state === "unclaimed" || item.owner === null) return false;
   if (typeof reviewerId !== "string" || reviewerId.length === 0) return false;
   if (effective === "self_attested") return reviewerId === item.owner;
   if (reviewerId === item.owner || item.supersededBy) return false;
@@ -885,7 +1744,7 @@ export function hasCurrentReview(item, memberId) {
 export function workOwnedBy(items, agentId) {
   check(Array.isArray(items), "items must be a list");
   const agent = agentOf(agentId);
-  return items.map(workOf).filter(item => item.owner === agent && item.state !== "done");
+  return items.map(workOf).filter(item => item.owner === agent && !isTerminalClaimState(item.state));
 }
 export function unclaimedWork(items) {
   check(Array.isArray(items), "items must be a list");
@@ -955,4 +1814,4 @@ export function clearPremiseFlag(work, { byMemberId, note, now } = {}) {
   const { premiseFlag: _dropped, ...rest } = item;
   return withHistory({ ...rest, premiseFlag: null }, atMs, agent, "premise_cleared", note ?? null);
 }
-export { ClaimError, STATES, TRANSITIONS, DELIVERY_MODES, REVIEW_POLICIES, REVIEW_VERDICTS, CLAIM_KINDS, CI_STATES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS, ACTIVE_CLAIM_STATES };
+export { ClaimError, STATES, TRANSITIONS, CLAIM_LIFECYCLE, CLAIM_VERBS, TERMINAL_CLAIM_STATES, isTerminalClaimState, nextClaimState, DELIVERY_MODES, REVIEW_POLICIES, REVIEW_VERDICTS, CLAIM_KINDS, CI_STATES, DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS, ACTIVE_CLAIM_STATES };

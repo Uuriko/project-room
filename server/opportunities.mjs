@@ -1,3 +1,7 @@
+import { hydrateWorkItems } from "./work-repository.mjs";
+import { createHash } from "node:crypto";
+import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
+
 // Public opportunity feed (v2).
 //
 // Read-only discovery of open work across opt-in rooms. This is the safer
@@ -53,6 +57,18 @@ class ServiceError extends Error {
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
+// #932: the feed is an open read path — JSON-parsing every listed room's
+// projection on every request is its dominant cost. Memoize parsed
+// projections keyed by a hash of the projection bytes: byte-identical rows
+// share one parsed object, and any byte change re-parses. The key IS the
+// content, so the memo can never serve stale data (this matters because the
+// repair paths rewrite projections without bumping the room sequence).
+// Bounded: one entry per room, oversized projections bypass the memo.
+const PROJECTION_MEMO_MAX_BYTES = 1_000_000;
+const PROJECTION_MEMO_MAX_ROOMS = 500;
+const projectionMemo = new Map(); // roomId -> { hash, projection }
+const hashProjection = bytes => createHash("sha256").update(bytes).digest("hex");
+
 export const OPPORTUNITIES_DEFAULT_LIMIT = 50;
 export const OPPORTUNITIES_MAX_LIMIT = 100;
 const MAX_TEXT_CHARS = 500;
@@ -86,7 +102,8 @@ const parseSince = value => {
 
 const TERMINAL_WORK_STATES = new Set(["completed", "superseded"]);
 
-// Listed, feed-enabled, non-archived rooms only.
+// Listed, feed-enabled, non-archived rooms only — and never a room the
+// operator unpublished: that takedown overrides the owner's listing here too.
 function listedRoomIds(db, roomId) {
   if (roomId != null) {
     if (typeof roomId !== "string" || !roomId || roomId.length > 128) fail(422, "invalid_room", "room must be a room id");
@@ -95,26 +112,41 @@ function listedRoomIds(db, roomId) {
         FROM room_directory_settings s
         JOIN rooms r ON r.id = s.room_id
         WHERE s.discoverable = 1 AND s.opportunities_enabled = 1 AND r.archived_at IS NULL AND s.room_id = ?`).get(roomId);
-    return row ? [row.roomId] : [];
+    return row && !isUnpublished(db, "room", row.roomId) ? [row.roomId] : [];
   }
   return db.prepare(`
       SELECT s.room_id AS roomId
       FROM room_directory_settings s
       JOIN rooms r ON r.id = s.room_id
       WHERE s.discoverable = 1 AND s.opportunities_enabled = 1 AND r.archived_at IS NULL
-      ORDER BY s.room_id ASC`).all().map(r => r.roomId);
+      ORDER BY s.room_id ASC`).all().map(r => r.roomId).filter(id => !isUnpublished(db, "room", id));
 }
 
 function roomProjection(db, roomId) {
   const row = db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
-  if (!row?.projection) return null;
-  try {
-    const projection = JSON.parse(row.projection);
-    if (!projection || typeof projection !== "object") return null;
-    return projection;
-  } catch {
-    return null;
+  if (!row?.projection) { projectionMemo.delete(roomId); return null; }
+  const bytes = row.projection;
+  // Oversized projections bypass the memo: re-parsing a huge room on a rare
+  // request is cheaper than pinning its object graph in memory.
+  if (bytes.length > PROJECTION_MEMO_MAX_BYTES) {
+    try {
+      const projection = hydrateWorkItems(db, roomId, JSON.parse(bytes));
+      return projection && typeof projection === "object" ? projection : null;
+    } catch { return null; }
   }
+  const hash = hashProjection(bytes);
+  const cached = projectionMemo.get(roomId);
+  if (cached && cached.hash === hash) return cached.projection;
+  let projection = null;
+  try {
+    projection = hydrateWorkItems(db, roomId, JSON.parse(bytes));
+    if (!projection || typeof projection !== "object") projection = null;
+  } catch { projection = null; }
+  if (!projectionMemo.has(roomId) && projectionMemo.size >= PROJECTION_MEMO_MAX_ROOMS) {
+    projectionMemo.delete(projectionMemo.keys().next().value); // FIFO: evict oldest room
+  }
+  projectionMemo.set(roomId, { hash, projection });
+  return projection;
 }
 
 const roomPath = roomId => `/?room=${encodeURIComponent(roomId)}`;

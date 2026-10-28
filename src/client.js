@@ -1,7 +1,13 @@
+import { accountSessionError, sameAccountSession } from "./account-client.js";
+export { AccountClient, IDENTITY_MINT_POW_BITS, IDENTITY_MINT_POW_WINDOW_MS, IDENTITY_MINT_POW_ESCALATION_BITS, escalatedIdentityMintPowBits, solveIdentityMintProof, submitIdentityMint } from "./account-client.js";
+import { applyEvent } from "./events.js";
+import { uiText } from "./strings.js";
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
 import { DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { BOND_REFUSAL_CODES } from "./friend-bond.js";
+import { humanErrorMessage } from "./error-copy.js";
+import { requestFailureMessage } from "./share-links.js";
 
 // C2: the read-only "what this agent can access" preview must describe exactly the
 // selected work the browser asked about and repeat the server's own omission list;
@@ -27,268 +33,112 @@ export function verifyAccessSummary(value, { roomId, workItemId }) {
   return summary;
 }
 
-export const IDENTITY_MINT_POW_BITS = 12;
-export const IDENTITY_MINT_POW_WINDOW_MS = 10 * 60 * 1000;
-
-// Same challenge as server/agent-identities.mjs solveIdentityMintProof:
-// sha256(`${bucket}:${trim(displayName)}:${nonce}`) with bucket = floor(now / window).
-export async function solveIdentityMintProof(displayName, now = Date.now(), bits = IDENTITY_MINT_POW_BITS) {
-  const name = typeof displayName === "string" ? displayName.trim() : "";
-  const bucket = Math.floor(now / IDENTITY_MINT_POW_WINDOW_MS);
-  const prefix = "0".repeat(bits / 4);
-  const encoder = new TextEncoder();
-  for (let i = 0; i < 1_000_000; i++) {
-    const nonce = i.toString(36);
-    const digest = await crypto.subtle.digest("SHA-256", encoder.encode(`${bucket}:${name}:${nonce}`));
-    const hex = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2, "0")).join("");
-    if (hex.startsWith(prefix)) return nonce;
+// Room events that only append: they never change a message already held, so
+// a live refresh for them can read `?messages=recent` and keep older history.
+const RECENT_REFRESH_EVENTS = new Set(["message.posted", "dm.posted", "work_claim.updated"]);
+// Delta sync: message mutations whose stream event carries everything the
+// shared reducer needs to advance the held snapshot locally — no refetch.
+// Any other event type, and any covered event whose preconditions fail,
+// keeps the refresh() read path below (see tryDelta).
+const DELTA_EVENT_TYPES = new Set(["message.posted", "message.edited", "message.deleted", "message.redacted"]);
+// The server's activity audit tail (store.snapshot): the last 100 events,
+// filtered to decisions and work-bearing events. Mirrored so a locally
+// advanced snapshot carries the same Record tail a fresh read would serve.
+const ACTIVITY_TAIL_TYPES = /^(work\.|work_claim\.|verification\.|owner_decision\.)/;
+const activityTailEvent = event => event?.type === "decision.recorded" || ACTIVITY_TAIL_TYPES.test(event?.type ?? "") || event?.data?.workItemId !== undefined;
+// Mirror of the server's read-time redaction for the one message a delta
+// touched (server/redact-read.mjs): edit-history bodies never ride a served
+// record, and earlier log entries for the message show only its current
+// body (null once deleted or redacted). Entries are replaced, not mutated.
+function deltaReadModel(state, tail, event) {
+  const data = event?.data ?? {};
+  const messageId = event?.type === "message.posted" ? (typeof data.messageId === "string" ? data.messageId : event.id) : data.messageId;
+  if (typeof messageId !== "string" || !Array.isArray(state.messages)) return;
+  const record = state.messages.find(message => message.id === messageId);
+  if (record && Array.isArray(record.editHistory)) {
+    record.editHistory = record.editHistory.map(entry => {
+      if (!entry || typeof entry !== "object" || !Object.hasOwn(entry, "body")) return entry;
+      const { body, ...rest } = entry;
+      return rest;
+    });
   }
-  throw new Error("proof search exhausted");
-}
-
-const accountSessionError = message => {
-  const error = new Error(message);
-  error.status = 401;
-  error.code = "account_session_required";
-  return error;
-};
-
-const sameAccountSession = (candidate, owner) => Boolean(candidate?.account && owner?.account)
-  && candidate.account.id === owner.account.id
-  && candidate.account.authEpoch === owner.account.authEpoch
-  && candidate.sessionRevision === owner.sessionRevision
-  && candidate.sessionBinding === owner.sessionBinding;
-
-export class AccountClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis) } = {}) {
-    this.fetcher = fetcher;
-    this.session = null;
-    this.generation = 0;
-  }
-  async request(path, { method = "GET", data, credentials = "same-origin", session = null } = {}) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10000);
-    try {
-      const response = await this.fetcher(path, { method, credentials, signal: controller.signal,
-        headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(session?.csrf ? { "X-CSRF-Token": session.csrf } : {}), ...(session?.sessionBinding ? { "X-Session-Binding": session.sessionBinding } : {}) },
-        ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-      const body = await response.json();
-      if (!response.ok) { const error = new Error(body.error?.message || "Request failed"); error.status = response.status; error.code = body.error?.code; throw error; }
-      return body;
-    } finally { clearTimeout(timer); }
-  }
-  owns(generation, session) { return generation === this.generation && this.session === session; }
-  invalidate(generation, session) {
-    if (!this.owns(generation, session)) return false;
-    this.generation++;
-    this.session = null;
-    return true;
-  }
-  currentSession(action, { authenticated = false } = {}) {
-    const session = this.session;
-    if (!session || !Number.isSafeInteger(session.sessionRevision) || typeof session.csrf !== "string" || typeof session.sessionBinding !== "string"
-      || (authenticated && (!session.authenticated || !session.account))) {
-      throw accountSessionError(`Restore${authenticated ? " and sign in to" : ""} the account session before ${action}`);
-    }
-    return session;
-  }
-  async restore() {
-    const generation = ++this.generation;
-    this.session = null;
-    try {
-      const restored = await this.request("/api/account-session");
-      if (generation !== this.generation) return null;
-      this.session = restored;
-      return restored;
-    } catch (error) {
-      if (generation !== this.generation) return null;
-      throw error;
-    }
-  }
-  async login(accountAccessKey) {
-    const session = this.currentSession("signing in");
-    const generation = ++this.generation;
-    try {
-      const loggedIn = await this.request("/api/account-session", { method: "POST", session,
-        data: { accountAccessKey, expectedSessionRevision: session.sessionRevision } });
-      if (!this.owns(generation, session)) return null;
-      if (!loggedIn?.authenticated || !loggedIn.account || loggedIn.sessionRevision !== session.sessionRevision + 1) {
-        this.invalidate(generation, session);
-        return null;
-      }
-      this.session = loggedIn;
-      return loggedIn;
-    } catch (error) {
-      if (!this.owns(generation, session)) return null;
-      // A transport failure can follow a committed identity switch. Do not retain an
-      // identity view whose browser slot outcome is unknown; an HTTP rejection did not
-      // mutate the slot and may be retried with the same revision.
-      if (!Number.isSafeInteger(error.status) || ["stale_session_revision", "session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code)) {
-        this.invalidate(generation, session);
-      }
-      throw error;
-    }
-  }
-  async confirm() {
-    const session = this.currentSession("confirming access", { authenticated: true }), generation = this.generation;
-    let value;
-    try {
-      // Name the session this read is checking: a delayed confirmation must
-      // never mint a slot, rotate a cookie, or clobber a newer sign-in.
-      value = await this.request("/api/account-session", { session });
-    } catch (error) {
-      // A response that lands after a newer session replaced this one is
-      // obsolete: never let it touch the replacement, whatever it reports.
-      if (!this.owns(generation, session)) return null;
-      // Ownership ended (signed out, revoked, binding rotated): retire the
-      // view instead of throwing. Uncertain failures (5xx, offline) keep
-      // the session so the caller can retry.
-      if (error?.status === 401 || error?.status === 403 || error?.status === 409
-        || ["unauthenticated", "access_denied", "session_binding_changed"].includes(error?.code)) {
-        this.invalidate(generation, session);
-        return false;
-      }
-      throw error;
-    }
-    if (!this.owns(generation, session)) return null;
-    if (!value?.authenticated || !sameAccountSession(value, session)) { this.invalidate(generation, session); return false; }
-    return true; // Keep object identity and generation: Room and Inbox own these.
-  }
-  async rooms(after = null) {
-    const session = this.currentSession("listing rooms", { authenticated: true }), generation = this.generation;
-    let value;
-    try { value = await this.request("/api/account-rooms" + (after === null ? "" : "?after=" + encodeURIComponent(after)), { session }); }
-    catch (error) {
-      if (!this.owns(generation, session)) return null;
-      if (error.status === 401 || ["session_binding_changed", "account_session_required"].includes(error.code)) this.invalidate(generation, session);
-      throw error;
-    }
-    if (!this.owns(generation, session)) return null;
-    const v = value?.viewer;
-    if (value?.contractVersion !== 1 || v?.accountId !== session.account.id || v.authEpoch !== session.account.authEpoch
-      || v.sessionRevision !== session.sessionRevision || v.sessionBinding !== session.sessionBinding) {
-      this.invalidate(generation, session); throw accountSessionError("Account changed");
-    }
-    const id = value => typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(value);
-    if (!Array.isArray(value.rooms) || value.rooms.length > 50 || !value.rooms.every(r => id(r?.id) && id(r.memberId) && typeof r.title === "string")
-      || (value.nextCursor !== null && !id(value.nextCursor))) throw new Error("Room list could not be confirmed");
-    let previous = after ?? "";
-    for (const room of value.rooms) { if (room.id <= previous) throw new Error("Room list order could not be confirmed"); previous = room.id; }
-    if (value.nextCursor !== null && (value.nextCursor <= (after ?? "") || value.nextCursor < previous)) throw new Error("Room continuation could not be confirmed");
-    return value;
-  }
-  async logout() {
-    const session = this.currentSession("signing out");
-    const generation = ++this.generation;
-    try {
-      const loggedOut = await this.request("/api/account-session", { method: "DELETE", session,
-        data: { expectedSessionRevision: session.sessionRevision } });
-      if (!this.owns(generation, session)) return null;
-      if (loggedOut?.authenticated !== false || loggedOut.account !== null || loggedOut.sessionRevision !== session.sessionRevision + 1) {
-        this.invalidate(generation, session);
-        return null;
-      }
-      this.session = loggedOut;
-      return loggedOut;
-    } catch (error) {
-      if (!this.owns(generation, session)) return null;
-      if (!Number.isSafeInteger(error.status) || ["stale_session_revision", "csrf_denied", "account_session_required", "unauthenticated"].includes(error.code)) {
-        this.invalidate(generation, session);
-      }
-      throw error;
-    }
-  }
-  previewInvitation(invitationToken) {
-    // Preview deliberately sends neither the current account cookie nor its CSRF/binding.
-    return this.request("/api/invitations/preview", { method: "POST", credentials: "omit", data: { invitationToken } });
-  }
-  // RC-2026-09-19-071 (QAJ-001): the request-access door. A stranger with a
-  // dead invitation mints a self-serve identity (an identity alone grants
-  // nothing) and files an access request the room owner can approve or
-  // deny. Both calls are unauthenticated by design; credentials omitted.
-  async mintAccessIdentity(displayName) {
-    const proof = await solveIdentityMintProof(displayName);
-    return this.request("/api/agent-identities", { method: "POST", credentials: "omit", data: { displayName, proof } });
-  }
-  submitAccessRequest({ roomId, identityId, displayName, requestedPermissions, note, referredBy, requestId }) {
-    return this.request("/api/access-requests", { method: "POST", credentials: "omit",
-      data: { roomId, identityId, displayName, requestedPermissions, note, referredBy: referredBy ?? null, requestId } });
-  }
-  async joinShareLink({ linkToken, displayName, redemptionId }) {
-    const session = this.currentSession("joining a room");
-    // An authenticated join adds membership, not a new browser identity. Keep
-    // existing Room ownership intact just as targeted acceptance does.
-    const generation = session.authenticated ? this.generation : ++this.generation;
-    try {
-      const result = await this.request("/api/share-links/join", { method: "POST", session,
-        data: { linkToken, displayName, redemptionId, expectedSessionRevision: session.sessionRevision } });
-      if (!this.owns(generation, session)) return null;
-      if (result.roomMode === true) return result;
-      const next = result.session;
-      const valid = next?.account && next.roomId === result.roomId && next.member?.kind === "human"
-        && (session.authenticated ? sameAccountSession(next, session) : next.sessionRevision === session.sessionRevision + 1);
-      if (!valid) { this.invalidate(generation, session); return null; }
-      if (!session.authenticated) this.session = { ...next, authenticated: true };
-      return result;
-    } catch (error) {
-      if (!this.owns(generation, session)) return null;
-      // Anonymous joins may switch identity even if their response was lost.
-      // Authenticated joins cannot switch identity; a rejected link must not
-      // discard the unrelated open Room's ownership and private drafts.
-      if (!session.authenticated || error.status === 401
-        || ["session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code)) this.invalidate(generation, session);
-      throw error;
-    }
-  }
-  async prepareShareLink(linkToken) {
-    let preview;
-    try {
-      preview = await this.request("/api/share-links/preview", { method: "POST", credentials: "omit", data: { linkToken } });
-    } catch (error) {
-      if (error.code !== "link_unavailable") throw error;
-      const session = this.session ?? await this.restore();
-      if (!session?.authenticated) throw error;
-      const generation = this.generation;
-      // Closed invitations cannot admit anyone new, but remain a door for an
-      // existing member. The server checks membership without redeeming a place.
-      preview = await this.request("/api/share-links/preview", { method: "POST", session, data: { linkToken } });
-      if (!this.owns(generation, session)) return { preview, session: null };
-    }
-    // Preview/cancel is not consent to replace an already-open account context.
-    const session = this.session ?? await this.restore();
-    return { preview, session };
-  }
-  async acceptInvitation({ invitationToken, redemptionId, expectedRevision }) {
-    const session = this.currentSession("accepting an invitation", { authenticated: true });
-    const generation = this.generation;
-    try {
-      const accepted = await this.request("/api/invitations/accept", { method: "POST", session,
-        data: { invitationToken, redemptionId, expectedRevision } });
-      if (!this.owns(generation, session)) return null;
-      if (!sameAccountSession(accepted?.session, session)) {
-        this.invalidate(generation, session);
-        return null;
-      }
-      return accepted;
-    } catch (error) {
-      if (!this.owns(generation, session)) return null;
-      if (error.status === 401 || ["stale_session_revision", "session_binding_changed", "csrf_denied", "account_session_required"].includes(error.code)) {
-        this.invalidate(generation, session);
-      }
-      throw error;
-    }
+  const current = !record || record.deletedAt || record.body == null ? null : record.body;
+  for (let i = 0; i < tail.length; i++) {
+    const logged = tail[i];
+    if (!logged || !["message.posted", "message.edited"].includes(logged.type) || !logged.data || !Object.hasOwn(logged.data, "body")) continue;
+    const loggedId = typeof logged.data.messageId === "string" ? logged.data.messageId : logged.type === "message.posted" ? logged.id : null;
+    if (loggedId === messageId && logged.data.body !== current) tail[i] = { ...logged, data: { ...logged.data, body: current } };
   }
 }
-
+// Join held history with a `?messages=recent` window. The window must start on
+// a held message with exactly `omitted` messages before it; anything else
+// returns null and the caller reads the full snapshot.
+function mergeRecentMessages(held, read) {
+  const window = read?.messagesWindow, recent = read?.state?.messages;
+  if (!window || window.mode !== "recent" || !Number.isSafeInteger(window.omitted) || window.omitted < 0 || !Array.isArray(recent)) return null;
+  const { messagesWindow, ...snapshot } = read;
+  if (window.omitted === 0) return snapshot;
+  const start = recent.length ? held.findIndex(message => message?.id === recent[0]?.id) : -1;
+  if (start !== window.omitted) return null;
+  return { ...snapshot, state: { ...snapshot.state, messages: [...held.slice(0, start), ...recent] } };
+}
+// A fresh client holds no history, so its first read used to be the whole room
+// (muse-room: 4+ MB, ~7s on prod, 3s short of the 10s read timeout). It now
+// reads the newest window first and fills the rest in the background; `partial`
+// marks held history that is only that window.
+const FILL_DELAY_MS = 250;
+// Lazy history (opt-in, `lazyHistory: true`): the first windowed read is not
+// followed by the background fill. Older history loads when the reader asks
+// for it (loadHistory(): scrolling up, "Show earlier messages", search, a
+// deep link to an older message). Until then every covered event re-reads the
+// cheap window instead of applying a delta, so after this many windowed reads
+// on a partial window the fill runs anyway: past it, holding full history
+// (and applying deltas) costs less than re-reading windows.
+const LAZY_FILL_AFTER_READS = 24;
+// Session liveness under delta sync: a covered event applies locally with no
+// read, so the snapshot read's second job — noticing a dead room credential
+// (401/403) — needs its own cadence while connected. The probe in
+// probeSession() re-reads on this interval whenever no snapshot read has just
+// done it. Worst case, a credential that dies just after a successful read is
+// detected one interval plus one probe round trip later.
+const LIVENESS_INTERVAL_MS = 10000;
+function firstWindow(read) {
+  const window = read?.messagesWindow;
+  if (!window || window.mode !== "recent" || !Number.isSafeInteger(window.omitted) || window.omitted < 0 || !Array.isArray(read?.state?.messages)) return null;
+  const { messagesWindow, ...snapshot } = read;
+  return { snapshot, partial: window.omitted > 0 };
+}
+// Single source for the connected status line; app.js matches this exact text.
+const CONNECTED_STATUS = "Connected to room service · no peer read or processing receipt";
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {} } = {}) {
-    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping });
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
+    if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
+    this.auditView = auditView;
+    Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange, onOptimistic, onSendSettled });
+    this.getFlights = new Map();
+    this.paging = false;
     this.session = null;
     this.sequence = 0;
     this.generation = 0;
     this.accountOwnership = null;
     this.streamRetryDelay = 1000;
     this.lastTypingSent = 0;
+    // Delta sync: the last snapshot handed to the app (any completeness),
+    // the raw event tail it carried, and the apply/fallback counters.
+    this.live = null;
+    this.rawTail = [];
+    this.windowOmitted = null;
+    this.backfilling = false;
+    this.lazyHistory = Boolean(lazyHistory);
+    this.historyWanted = false;
+    this.partialReads = 0;
+    this.deltaStats = { applied: 0, fallback: 0, reasons: {} };
+    // Liveness: when the last snapshot-path read proved the credential, and
+    // the pending probe timer (see scheduleLiveness). The interval is an
+    // instance field so tests can shorten it.
+    this.lastReadAt = 0;
+    this.livenessTimer = null;
+    this.livenessInterval = LIVENESS_INTERVAL_MS;
   }
   setAccountClient(accountClient) {
     if (this.accountClient === accountClient) return this;
@@ -301,17 +151,50 @@ export class RoomClient {
     if (hadSession) this.onAccessEnded();
     return this;
   }
-  async request(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false } = {}) {
+  async request(path, options = {}) {
+    const method = options.method ?? "GET";
+    // A write makes every read already in flight stale: later reads must not join them.
+    if (method !== "GET") this.getFlights.clear();
+    if (method !== "GET" || options.fresh === true) return this.performRequest(path, options);
+    const key = [path, options.authMode ?? this.session?.authMode ?? "", options.offerContext ? "1" : "", options.auditView ?? "", options.authSession?.sessionBinding ?? this.session?.sessionBinding ?? ""].join("\n");
+    const pending = this.getFlights.get(key);
+    if (pending) return pending;
+    const run = this.performRequest(path, options);
+    this.getFlights.set(key, run);
+    // finally() returns its own promise. Swallow that one so a failed read
+    // still rejects for the caller without an unhandled rejection beside it.
+    const tracked = run.finally(() => { if (this.getFlights.get(key) === run) this.getFlights.delete(key); });
+    void tracked.catch(() => {});
+    return run;
+  }
+  unconfirmed(status) {
+    const error = new Error(requestFailureMessage(new SyntaxError("html")));
+    error.code = "unconfirmed";
+    error.status = status;
+    return error;
+  }
+  async performRequest(path, { method = "GET", data, authMode = this.session?.authMode, authSession = this.session, offerContext = false, auditView = "full" } = {}) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
     try {
       const response = await this.fetcher(path, { method, credentials: "same-origin", signal: controller.signal,
         headers: { ...(data === undefined ? {} : { "Content-Type": "application/json" }), ...(authSession?.csrf ? { "X-CSRF-Token": authSession.csrf } : {}),
           ...(offerContext ? { "X-Project-Room-Offer-Context": "1" } : {}),
+          ...(auditView === "activity" ? { "X-Project-Room-Audit-View": "activity-v1" } : {}),
           ...(authMode === "account" ? { "X-Project-Room-Auth": "account", ...(authSession?.sessionBinding ? { "X-Session-Binding": authSession.sessionBinding } : {}) } : {}) },
         ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
-      const body = await response.json();
-      if (!response.ok) { const error = new Error(body.error?.message || "Request failed"); error.status = response.status; error.code = body.error?.code; throw error; }
+      const type = response.headers?.get?.("content-type") ?? "";
+      if (type && !/json/i.test(type)) {
+        if (typeof response.text === "function") await response.text().catch(() => {});
+        throw this.unconfirmed(response.status);
+      }
+      let body;
+      try { body = await response.json(); }
+      catch (error) {
+        if (!(error instanceof SyntaxError)) throw error;
+        throw this.unconfirmed(response.status);
+      }
+      if (!response.ok) { const serverError = body?.error ?? {}; const error = new Error(humanErrorMessage({ status: response.status, code: serverError.code, message: serverError.message })); error.status = response.status; error.code = serverError.code; throw error; }
       return body;
     } finally { clearTimeout(timer); }
   }
@@ -327,7 +210,8 @@ export class RoomClient {
     }
     try {
       const restored = await this.request(accountMode ? `/api/session?room=${encodeURIComponent(roomId)}` : "/api/session",
-        accountMode ? { authMode: "account", authSession: accountSession } : {});
+        // Each restore revalidates the session; it never joins an earlier check.
+        accountMode ? { authMode: "account", authSession: accountSession, fresh: true } : { fresh: true });
       if (generation !== this.generation) return null;
       if (accountMode && (accountClient !== this.accountClient || accountGeneration !== accountClient.generation || accountSession !== accountClient.session
         || restored?.authMode !== "account" || restored.roomId !== roomId || !sameAccountSession(restored, accountSession))) return null;
@@ -335,6 +219,9 @@ export class RoomClient {
       if (accountMode) this.accountOwnership = { client: accountClient, generation: accountGeneration, session: accountSession };
       await this.refresh();
       if (generation !== this.generation || this.session !== restored) return null;
+      // A 200 session proves we are signed in. Drop any stale "sign in required" line
+      // left by an earlier anonymous probe; the stream's open event then says Connected.
+      this.onStatus(uiText("connection.connecting"));
       this.connect(); return this.session;
     } catch (error) {
       if (generation !== this.generation) return null;
@@ -434,43 +321,440 @@ export class RoomClient {
       && payload.viewerSessionBinding === session.sessionBinding
       && (!Number.isSafeInteger(session.sessionRevision) || payload.viewerSessionRevision === session.sessionRevision);
   }
-  refresh(receipt = null) {
+  // `revalidate`: a stream (re)open or error. It must re-read (access and the
+  // newest messages), but the stream replays every event after the held
+  // sequence, so older history is corrected by those events' own reads.
+  refresh(receipt = null, { revalidate = false, fill = false } = {}) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return Promise.resolve(); }
+    // Delta sync: a covered message event that continues the held snapshot
+    // exactly is applied locally; tryDelta declines (and counts) anything
+    // else, and the read path below handles it as before.
+    if (receipt && this.tryDelta(receipt)) return Promise.resolve();
     // Only sequenced room events can prove a snapshot already contains a change.
     // Reconnects, explicit refreshes and non-event receipts always revalidate access.
     const sequence = receipt?.event?.roomId === this.session?.roomId && Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0
       ? receipt.sequence : null;
-    if (sequence !== null && sequence <= this.sequence) return Promise.resolve();
+    // A new message or claim receipt cannot change older messages, so it may
+    // re-read only the newest ones. Anything else needs a full read at or past
+    // its own sequence, even when a newer windowed read already landed.
+    // A background fill is always a full read; a fresh client's first read is windowed.
+    // Lazy history: while only a window is held, any covered change re-reads
+    // the window (it serves current records); older messages are not held, so
+    // nothing older needs correcting until the fill reads them fresh.
+    const windowed = fill ? false : sequence === null ? (revalidate || !this.heldMessages())
+      : RECENT_REFRESH_EVENTS.has(receipt.event.type) || (this.lazyHistory && Boolean(this.heldMessages()?.partial));
+    const held = this.heldMessages(), fullSequence = held?.fullSequence ?? this.sequence;
+    if (sequence !== null && sequence <= (windowed ? this.sequence : fullSequence)) return Promise.resolve();
     const generation = this.generation;
     if (this.flight?.generation === generation) {
-      if (sequence === null) this.flight.again = true;
-      else this.flight.sequence = Math.max(this.flight.sequence, sequence);
+      if (sequence === null) { if (revalidate) this.flight.revisit = true; else this.flight.again = true; }
+      else {
+        this.flight.sequence = Math.max(this.flight.sequence, sequence);
+        if (!windowed) this.flight.fullSequence = Math.max(this.flight.fullSequence, sequence);
+      }
       return this.flight.promise;
     }
-    const flight = { generation, again: false, sequence: 0 };
+    const flight = { generation, again: false, revisit: false, sequence: 0, fullSequence: 0, fullNow: !windowed };
+    if (fill) flight.fill = true;
     this.flight = flight;
     flight.promise = (async () => {
       try {
+        if (typeof indexedDB !== "undefined" && !this.heldMessages() && this.sequence === 0) await this.paintBoot();
+        let covered = held?.fullSequence ?? 0;
         do {
-          flight.again = false; flight.sequence = 0;
-          const snapshot = await this.request(this.path(), { offerContext: true });
+          const session = this.session, holding = this.heldMessages();
+          // With nothing held, read the newest window first (the background fill brings the rest).
+          const full = flight.again || flight.fullNow || flight.fullSequence > covered;
+          flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
+          const auditView = this.auditView;
+          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView, fresh: true });
           if (generation !== this.generation || !this.session) return;
-          if (!this.ownsResponse(snapshot)) { this.endAccess(); return; }
-          if (snapshot.sequence >= this.sequence) { this.sequence = snapshot.sequence; this.onSnapshot(snapshot, this.session); }
-        } while (flight.again || flight.sequence > this.sequence);
+          if (!this.ownsResponse(read)) { this.endAccess(); return; }
+          this.lastReadAt = Date.now();
+          // A mode change during this read must not display a partial Record.
+          if (auditView !== this.auditView) { flight.revisit = true; continue; }
+          if (read.auditView !== undefined && (read.auditView !== "activity" || read.auditVersion !== 1 || auditView !== "activity"))
+            throw new Error(uiText("record.invalidView"));
+          // A server without the recent view ignores the parameter and answers in full.
+          // A window on the unqueried path means the unbounded document is retired:
+          // hold the window and do not ask for it again.
+          const bounded = Object.hasOwn(read, "messagesWindow");
+          const whole = !bounded;
+          // The unqueried read is the same window. Do not ask for it again
+          // hoping for the retired unbounded document.
+          const stopFill = Boolean(full && bounded);
+          if (!whole && read.messagesWindow?.mode === "recent" && Number.isSafeInteger(read.messagesWindow.omitted)) this.windowOmitted = read.messagesWindow.omitted;
+          let snapshot, partial = false, complete = whole;
+          if (whole) snapshot = read;
+          else if (!holding || holding.partial) {
+            // First window (or a newer window while only a window is held): used as is.
+            const first = firstWindow(read);
+            snapshot = first?.snapshot ?? null; partial = Boolean(first?.partial); complete = Boolean(first) && !partial;
+          } else {
+            snapshot = mergeRecentMessages(holding.messages, read);
+            // The unqueried path will not return a larger document. A window
+            // that merges onto history already held is that history, so the
+            // next message can apply locally. A recent-only read stays partial
+            // until a full read, and the stream resumes from that full read.
+            if (snapshot && stopFill) { partial = false; complete = true; }
+          }
+          if (!snapshot) {
+            // A recent window that does not line up still asks for the full
+            // document once. The unqueried path answering with a window is
+            // the document; hold it instead of asking again.
+            if (stopFill) {
+              const first = firstWindow(read);
+              if (first) { snapshot = first.snapshot; partial = first.partial; complete = !partial; }
+            }
+            if (!snapshot) { flight.fullNow = true; continue; }
+          }
+          if (complete) covered = Math.max(covered, read.sequence);
+          if (stopFill) {
+            flight.retiredFullReads = (flight.retiredFullReads ?? 0) + 1;
+            if (flight.retiredFullReads >= 2 && covered < flight.fullSequence) covered = flight.fullSequence;
+          }
+          if (partial && holding?.partial) this.partialReads++;
+          if (snapshot.sequence >= this.sequence) {
+            this.sequence = snapshot.sequence;
+            this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
+              fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
+              partial, owesFull: stopFill ? false : (!complete && (partial || Boolean(holding?.owesFull))) };
+            void this.rememberBoot(snapshot);
+            this.live = { generation, session, snapshot };
+            this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
+            this.onSnapshot(snapshot, this.session);
+          }
+        } while (flight.again || flight.revisit || flight.fullNow || flight.sequence > this.sequence || flight.fullSequence > covered);
+        if (this.heldMessages()?.owesFull && this.fillWanted()) this.scheduleFill();
       } catch (error) {
         if (generation !== this.generation) return;
+        // A failed read may have owed a full one; the stream will not replay
+        // its event. Keep what is held (a retry stays a cheap windowed read) and
+        // owe a background full read instead of forcing the next read to be full.
+        const kept = this.heldMessages();
+        this.held = kept ? { ...kept, owesFull: true } : null;
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
         throw error;
       }
     })().finally(() => { if (this.flight === flight) this.flight = null; });
     return flight.promise;
   }
+  // Whether the owed fill should run now. Eager clients always fill; a lazy
+  // client fills a partial window only once the reader asked for history or
+  // re-reading windows has cost more than the fill would. Owed history over
+  // a full held one (a failed read) always fills: deltas wait on it.
+  fillWanted() {
+    const held = this.heldMessages();
+    return !this.lazyHistory || !held?.partial || this.historyWanted || this.partialReads >= LAZY_FILL_AFTER_READS;
+  }
+  // True while a lazy client holds only the newest window of the room.
+  get owesHistory() {
+    const held = this.heldMessages();
+    if (!held?.partial) return false;
+    if (held.owesFull) return true;
+    return Boolean(this.live?.snapshot?.messagesPage?.hasMore);
+  }
+  // Ask for older history now (a reader gesture). Returns whether a fill was
+  // owed; repeated calls while one runs are no-ops.
+  loadHistory() {
+    if (!this.owesHistory) return false;
+    this.historyWanted = true;
+    const held = this.heldMessages();
+    if (held?.partial && !held.owesFull && this.live?.snapshot?.messagesPage?.hasMore) {
+      if (!this.paging) {
+        this.paging = true;
+        this.pageOlder().catch(error => {
+          if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") this.handleFailure(error);
+        }).finally(() => { this.paging = false; });
+      }
+      return true;
+    }
+    if (!this.flight) this.scheduleFill(0);
+    return true;
+  }
+  setAuditView(view) {
+    if (!["full", "activity"].includes(view)) throw new RangeError(uiText("record.invalidView"));
+    if (this.auditView === view) return this.flight?.promise ?? Promise.resolve();
+    this.auditView = view;
+    return this.session ? this.refresh(null, { revalidate: true }) : Promise.resolve();
+  }
+  // Background full read after a windowed first read (or a failed read). It never
+  // changes the status line: the page is already usable. A failure retries quietly
+  // with backoff; only an ended session (401/403) is surfaced.
+  scheduleFill(delay = FILL_DELAY_MS) {
+    if (this.fillTimer || this.backfilling) return;
+    const generation = this.generation, session = this.session;
+    this.fillTimer = setTimeout(() => {
+      this.fillTimer = null;
+      if (generation !== this.generation || this.session !== session || !this.heldMessages()?.owesFull || this.backfilling) return;
+      this.backfilling = true;
+      (async () => {
+        try {
+          // Paged history first; the legacy full read is the fallback
+          // whenever paging cannot prove a contiguous merge (backfill()).
+          if (!await this.backfill()) await this.refresh(null, { fill: true });
+        } finally { if (generation === this.generation) this.backfilling = false; }
+      })().then(() => { this.fillDelay = 1000; }, error => {
+        if (generation !== this.generation || this.session !== session) return;
+        if ([401, 403].includes(error.status) || error.code === "session_binding_changed") { this.handleFailure(error); return; }
+        const next = this.fillDelay || 1000;
+        this.fillDelay = Math.min(next * 2, 30000);
+        this.scheduleFill(next + Math.random() * next / 4);
+      });
+    }, delay);
+  }
+  // Session liveness while connected (see LIVENESS_INTERVAL_MS): covered
+  // stream events apply locally, so a room credential can die without any
+  // read ever noticing — the room would stay open on it indefinitely. This
+  // loop revalidates the credential on the interval whenever no snapshot
+  // read has just done it; it runs only while a stream is held, because
+  // manual-refresh mode has no live deltas to protect and reads on demand.
+  scheduleLiveness(delay = this.livenessInterval) {
+    if (this.livenessTimer) return;
+    const generation = this.generation, session = this.session;
+    this.livenessTimer = setTimeout(() => {
+      this.livenessTimer = null;
+      if (generation !== this.generation || this.session !== session || !this.stream) return;
+      const sinceRead = Date.now() - this.lastReadAt;
+      if (sinceRead < this.livenessInterval) { this.scheduleLiveness(this.livenessInterval - sinceRead); return; }
+      this.probeSession().then(() => this.scheduleLiveness(), () => this.scheduleLiveness());
+    }, delay);
+  }
+  // One liveness probe: a work-view read on the snapshot path. It carries
+  // the path's authentication and the viewer binding ownsResponse() checks
+  // on every snapshot, at a fraction of a message window's bytes; the
+  // payload itself is discarded — only the binding verdict is used. An
+  // authentication verdict (401/403, or a changed account-session binding)
+  // ends access through handleFailure, exactly as a failed refresh read
+  // does. Any other failure is inconclusive — the credential may be fine
+  // and the network down — so access stands and the next interval retries.
+  async probeSession() {
+    const generation = this.generation, session = this.session;
+    if (!session) return;
+    if (session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
+    try {
+      const read = await this.request(this.path("?view=work"), { fresh: true });
+      if (generation !== this.generation || this.session !== session) return;
+      if (!this.ownsResponse(read, session)) { this.endAccess(); return; }
+      this.lastReadAt = Date.now();
+    } catch (error) {
+      if (generation !== this.generation || this.session !== session) return;
+      if ([401, 403].includes(error.status) || (session.authMode === "account" && error.code === "session_binding_changed")) this.handleFailure(error);
+    }
+  }
+  // Paged history backfill over /conversation: walk the cursor chain from
+  // the newest page down to the floor and merge the older segment in front
+  // of the held recent window. The merge is accepted only when the segment
+  // is exactly the window's `omitted` count and id-disjoint from the window.
+  // The head page anchors the chain: it must overlap the window, and messages
+  // before that overlap were shed by the byte budget so they count toward
+  // `omitted`. A short continuation still fails the count. Cursor chains
+  // are head-anchored, so a mutation mid-walk restarts the chain (bounded)
+  // instead of splicing two heads. The records are the server's history
+  // read model, the same surface the recent window serves (edit-history
+  // bodies ride neither). Returns false — the legacy full read takes over —
+  // whenever contiguity cannot be proved; auth failures throw, like
+  // refresh()'s reads.
+  async backfill() {
+    const generation = this.generation, session = this.session;
+    const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
+    const held0 = this.heldMessages();
+    if (!held0?.partial || !anchored()) return false;
+    const expected = this.windowOmitted;
+    if (!Number.isSafeInteger(expected) || expected <= 0) return false;
+    const windowIds = () => held0.messages.map(message => message.id);
+    let seen = new Set(windowIds());
+    let older = [], bridge = [], cursor = null, resets = 0, headPage = true;
+    const resetWalk = () => { seen = new Set(windowIds()); older = []; bridge = []; cursor = null; headPage = true; };
+    for (let page = 0; page < 1000 && older.length < expected; page++) {
+      let result;
+      try { result = await this.conversation({ limit: 100, cursor }); }
+      catch (error) {
+        // A server without the history endpoint (or a garbled page) is a
+        // paging failure, not a fill failure: the legacy read takes over.
+        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") throw error;
+        return false;
+      }
+      if (generation !== this.generation || this.session !== session) return false;
+      if (result.mode === "reset") { if (++resets > 3) return false; resetWalk(); continue; }
+      if (headPage) {
+        // The chain's first page is the anchor: it must overlap the held
+        // window. Messages before that overlap were shed by the byte budget
+        // (they are older than the window). Messages after it arrived later
+        // and are not part of this older segment.
+        const overlapAt = result.messages.findIndex(message => seen.has(message?.id));
+        if (overlapAt < 0) { if (++resets > 3) return false; resetWalk(); continue; }
+        bridge = result.messages.slice(0, overlapAt).filter(message => message?.id && !seen.has(message.id));
+        for (const message of bridge) seen.add(message.id);
+      } else {
+        const batch = [];
+        for (const message of result.messages) if (message?.id && !seen.has(message.id)) { seen.add(message.id); batch.push(message); }
+        older = [...batch, ...older];
+      }
+      headPage = false;
+      if (result.nextCursor == null) break;
+      cursor = result.nextCursor;
+    }
+    const heldNow = this.heldMessages(), live = anchored();
+    if (!heldNow || !live) return false;
+    if (!heldNow.partial) return true; // a full read completed history meanwhile
+    const prefix = [...older, ...bridge];
+    if (prefix.length !== expected || this.windowOmitted !== expected) return false;
+    const state = { ...live.snapshot.state, messages: [...prefix, ...heldNow.messages] };
+    const snapshot = { ...live.snapshot, state };
+    this.held = { ...heldNow, messages: state.messages.slice(), partial: false, owesFull: false, fullSequence: live.snapshot.sequence };
+    this.live = { generation, session, snapshot };
+    this.onSnapshot(snapshot, session);
+    return true;
+  }
+  // History held from this session's last snapshot, for windowed refreshes.
+  heldMessages() {
+    const held = this.held;
+    return held && held.generation === this.generation && held.session === this.session && Array.isArray(held.messages) ? held : null;
+  }
+  // Delta sync: advance the held snapshot with one stream/command receipt
+  // instead of re-reading the room. Only a covered message mutation that
+  // continues the held history exactly — next sequence, complete non-partial
+  // history, no read already in flight, same audit view — is applied, through
+  // the shared reducer, so derived state (thread roots, pins, receipt
+  // withdrawals) matches the server by construction. Anything else returns
+  // false and the caller falls back to refresh()'s reads; every decline of a
+  // covered type is counted in deltaStats for diagnosis.
+  tryDelta(receipt) {
+    const event = receipt?.event;
+    if (!event || !DELTA_EVENT_TYPES.has(event.type)) return false;
+    const decline = reason => { this.deltaStats.fallback++; const reasons = this.deltaStats.reasons; reasons[reason] = (reasons[reason] ?? 0) + 1; return false; };
+    if (this.flight) return decline("flight");
+    const held = this.heldMessages();
+    if (!held || held.partial || held.owesFull || held.fullSequence !== this.sequence) return decline("held");
+    const live = this.live;
+    if (!live || live.generation !== this.generation || live.session !== this.session || live.snapshot.sequence !== this.sequence) return decline("live");
+    if ((live.snapshot.auditView ?? "full") !== this.auditView) return decline("view");
+    if (!Number.isSafeInteger(receipt.sequence) || receipt.sequence !== this.sequence + 1 || event.roomId !== this.session?.roomId) return decline("gap");
+    let state;
+    try { state = applyEvent(live.snapshot.state, event); } catch { return decline("reducer"); }
+    // The stored projection keeps no replay bookkeeping; match its shape so
+    // the next delta (or the app's own reads) sees the served form.
+    state.seenEvents = {}; state.seenIdempotencyKeys = {};
+    // The event tail: the last 100 raw events, from our own copy of the
+    // stream event (a snapshot's log never carries the stream-only mention
+    // chips), presented with the same activity filter a fresh read applies.
+    const { mentions, ...logged } = event;
+    const tail = [...this.rawTail, logged].slice(-100);
+    deltaReadModel(state, tail, event);
+    this.rawTail = tail;
+    state.eventLog = this.auditView === "activity" ? tail.filter(activityTailEvent) : tail.slice();
+    const snapshot = { ...live.snapshot, sequence: receipt.sequence, state };
+    // R28-1 mirror: a read-derived snapshot carries the server's
+    // catchUpCursor — the stored cursor extended past the viewer's own
+    // unbroken run of events (store.catchUpCursor). A delta carries no
+    // fresh cursor fields, so extend the boundary locally under exactly
+    // the server's rule: the event is the viewer's own and the boundary
+    // already reached the held head, i.e. the run continues unbroken.
+    // Any other event, or a boundary behind the head, leaves it as the
+    // last read reported it — never past someone else's event.
+    if (Number.isSafeInteger(live.snapshot.catchUpCursor) && live.snapshot.catchUpCursor === this.sequence
+      && event.actorId === this.session?.member?.id) snapshot.catchUpCursor = receipt.sequence;
+    this.sequence = receipt.sequence;
+    this.held = { ...held, messages: Array.isArray(state.messages) ? state.messages.slice() : null, fullSequence: receipt.sequence };
+    this.live = { generation: this.generation, session: this.session, snapshot };
+    this.deltaStats.applied++;
+    this.onSnapshot(snapshot, this.session);
+    return true;
+  }
+  async pageOlder() {
+    const generation = this.generation, session = this.session;
+    const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
+    let before = anchored()?.snapshot?.messagesPage?.before;
+    const held0 = this.heldMessages();
+    if (!held0?.partial || !Number.isSafeInteger(before)) return false;
+    let older = [], more = false;
+    const seen = new Set(held0.messages.map(message => message.id));
+    for (let pageIndex = 0; pageIndex < 40; pageIndex++) {
+      const page = await this.request(this.path(`/messages?before=${before}&limit=100`), { fresh: true });
+      if (generation !== this.generation || this.session !== session) return false;
+      if (!this.ownsResponse(page, session)) { this.endAccess(); throw new Error(uiText("error.connection_changed")); }
+      const batch = [];
+      for (const message of page.messages ?? []) if (message?.id && !seen.has(message.id)) { seen.add(message.id); batch.push(message); }
+      older = [...batch, ...older];
+      const next = page.messagesPage?.before;
+      more = Boolean(page.messagesPage?.hasMore);
+      if (!more || !Number.isSafeInteger(next) || next === before) {
+        if (Number.isSafeInteger(next)) before = next;
+        more = false;
+        break;
+      }
+      before = next;
+    }
+    const heldNow = this.heldMessages(), live = anchored();
+    if (!heldNow || !live) return false;
+    const messages = [...older, ...heldNow.messages];
+    const snapshot = { ...live.snapshot, state: { ...live.snapshot.state, messages }, messagesPage: { ...(live.snapshot.messagesPage ?? {}), before, hasMore: more } };
+    this.held = { ...heldNow, messages: messages.slice(), partial: more, owesFull: false, fullSequence: live.snapshot.sequence };
+    this.live = { generation, session, snapshot };
+    this.onSnapshot(snapshot, session);
+    return true;
+  }
+  async bootstrap() {
+    return this.request(this.path("/bootstrap"), { fresh: true });
+  }
+  async paintBoot() {
+    if (typeof indexedDB === "undefined" || !this.session) return;
+    try {
+      const cached = await readBootSnapshot(this.session.roomId);
+      if (!cached || cached.viewerId !== this.session.member?.id) return;
+      if (this.sequence !== 0 || this.heldMessages()) return;
+      // A warm paint cannot vouch for offer support: the fresh read decides it.
+      const { offerContextVersion: _stale, ...warm } = cached;
+      this.onSnapshot(warm, this.session);
+    } catch { /* a missing warm snapshot still loads from the network */ }
+  }
+  async rememberBoot(snapshot) {
+    if (typeof indexedDB === "undefined" || !this.session || !snapshot || snapshot.viewerId !== this.session.member?.id) return;
+    try { await writeBootSnapshot(this.session.roomId, snapshot); } catch { /* the network snapshot already painted */ }
+  }
+  outboxKey() { return `room-outbox:${this.session?.roomId ?? ""}`; }
+  storageArea() {
+    try { return globalThis.localStorage ?? null; } catch { return null; }
+  }
+  rememberOutbox(command) {
+    const store = this.storageArea();
+    if (!store || !this.session?.roomId || !command?.id) return;
+    let items = [];
+    try { items = JSON.parse(store.getItem(this.outboxKey()) || "[]"); } catch { items = []; }
+    if (!Array.isArray(items)) items = [];
+    items = [...items.filter(item => item?.id !== command.id), { id: command.id, command }];
+    try { store.setItem(this.outboxKey(), JSON.stringify(items.slice(-20))); } catch { /* private mode keeps the optimistic row only */ }
+  }
+  forgetOutbox(command) {
+    const store = this.storageArea();
+    if (!store || !this.session?.roomId) return;
+    let items = [];
+    try { items = JSON.parse(store.getItem(this.outboxKey()) || "[]"); } catch { return; }
+    if (!Array.isArray(items)) return;
+    try { store.setItem(this.outboxKey(), JSON.stringify(items.filter(item => item?.id !== command?.id))); } catch { /* private mode */ }
+  }
+  outbox() {
+    const store = this.storageArea();
+    if (!store || !this.session?.roomId) return [];
+    try {
+      const items = JSON.parse(store.getItem(this.outboxKey()) || "[]");
+      return Array.isArray(items) ? items : [];
+    } catch { return []; }
+  }
   async send(command) {
     if (this.session?.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); throw accountSessionError("Account session changed; reopen the Room before sending"); }
     const generation = this.generation;
+    const durable = command?.type === "message.posted" || command?.type === "dm.posted";
+    if (durable) {
+      this.rememberOutbox(command);
+      if (typeof this.onOptimistic === "function") this.onOptimistic(command);
+    }
+    const settle = (ok, maybeSaved) => { if (typeof this.onSendSettled === "function") this.onSendSettled({ command, ok, maybeSaved }); };
     try {
       const receipt = await this.request(this.path("/commands"), { method: "POST", data: command });
+      if (durable) this.forgetOutbox(command);
+      settle(true, false);
       // A committed receipt remains a success even when the subsequent snapshot fetch fails.
       if (generation === this.generation && this.session) {
         if (!this.ownsAccountSession()) this.endAccess();
@@ -480,6 +764,10 @@ export class RoomClient {
       }
       return receipt;
     } catch (error) {
+      const unconfirmed = error?.code === "unconfirmed" || error?.name === "AbortError";
+      if (durable && unconfirmed) error.maybeSaved = true;
+      else if (durable) this.forgetOutbox(command);
+      settle(false, Boolean(error.maybeSaved));
       if (generation === this.generation) {
         if (this.session?.authMode === "account" && !this.ownsAccountSession()) this.endAccess();
         // Gate refusals are 403s but the session is still valid — ending
@@ -802,7 +1090,7 @@ export class RoomClient {
     if (completionEventId !== null) params.set("completionEventId", completionEventId);
     if (draftMessageId !== null) params.set("draftMessageId", draftMessageId);
     try {
-      const value = await this.request(this.path(`/work-result?${params}`));
+      const value = await this.request(this.path(`/work-result?${params}`), { fresh: true });
       if (generation !== this.generation || session !== this.session) return null;
       if (!this.ownsResponse(value, session)) { this.endAccess(); return null; }
       await verifyWorkResult(value, { roomId: session.roomId, workItemId, completionEventId, draftMessageId });
@@ -854,24 +1142,49 @@ export class RoomClient {
   }
   connect() {
     clearTimeout(this.streamRetry); this.streamRetry = null;
+    clearTimeout(this.refreshRetry); this.refreshRetry = null;
+    clearTimeout(this.livenessTimer); this.livenessTimer = null;
     this.stream?.close();
     if (!this.events || !this.session) { this.onStatus("Manual refresh available; live updates unavailable"); return; }
     if (this.session.authMode === "account" && !this.ownsAccountSession()) { this.endAccess(); return; }
     const generation = this.generation, session = this.session;
-    const stream = new this.events(`${this.path("/stream")}?after=${this.sequence}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
+    // Resume from the last FULL read, not the newest windowed one: a windowed read
+    // can pass an event (an edit of an older message) that it did not carry, and
+    // the stream must replay that event so it triggers its own full read.
+    // Only a window is held: the background fill reads everything, so resume from the newest.
+    const heldNow = this.heldMessages();
+    const resumeAfter = heldNow && !heldNow.partial ? heldNow.fullSequence : this.sequence;
+    const stream = new this.events(`${this.path("/stream")}?after=${resumeAfter}${this.session.authMode === "account" ? `&auth=account&binding=${encodeURIComponent(this.session.sessionBinding)}` : ""}`);
     this.stream = stream;
+    this.scheduleLiveness();
     const ownsStream = () => this.stream === stream && this.generation === generation && this.session === session;
-    const refreshStream = receipt => this.refresh(receipt).catch(error => { if (ownsStream()) this.handleFailure(error); });
+    const markRecovered = () => {
+      if (!ownsStream() || !this.refreshInterrupted) return;
+      this.refreshInterrupted = false;
+      clearTimeout(this.refreshRetry); this.refreshRetry = null;
+      this.refreshRetryDelay = 1000;
+      this.onStatus(CONNECTED_STATUS);
+    };
+    const refreshStream = (receipt, options) => this.refresh(receipt, options).then(value => {
+      markRecovered();
+      return value;
+    }, error => { if (ownsStream()) this.handleFailure(error); });
     stream.addEventListener("open", () => {
       if (!ownsStream()) return;
       this.streamRetryDelay = 1000;
-      this.onStatus("Connected to room service · no peer read or processing receipt");
-      refreshStream();
+      this.refreshRetryDelay = 1000;
+      clearTimeout(this.refreshRetry); this.refreshRetry = null;
+      this.refreshInterrupted = false;
+      this.onStatus(CONNECTED_STATUS);
+      refreshStream(null, { revalidate: true });
     });
     stream.addEventListener("room-event", message => {
       if (!ownsStream()) return;
       let receipt;
       try { receipt = JSON.parse(message.data); } catch { /* Unknown notifications still force a read. */ }
+      // Consent state is not part of the room projection, so a snapshot render
+      // alone cannot refresh it; the panel refetches on a consent change.
+      if (receipt?.event?.type === "dm.consent_changed") this.onConsentChange?.();
       refreshStream(receipt);
     });
     stream.addEventListener("typing", message => {
@@ -885,7 +1198,11 @@ export class RoomClient {
     stream.addEventListener("error", () => {
       if (!ownsStream()) return;
       this.onStatus("Reconnecting · displayed history may be stale");
-      refreshStream();
+      // While the browser retries on its own (CONNECTING) the "open" handler
+      // revalidates once it is back, so a read here only adds load to a room
+      // that is already struggling. A CLOSED stream (HTTP refusal) still reads
+      // now: that read is how an ended session is noticed.
+      if (stream.readyState === 2) refreshStream(null, { revalidate: true });
       // Native retry handles CONNECTING, but HTTP refusals leave EventSource CLOSED.
       // Replace only that stream, with backoff and the same session ownership.
       if (ownsStream() && stream.readyState === 2 && !this.streamRetry) {
@@ -898,14 +1215,64 @@ export class RoomClient {
     });
   }
   handleFailure(error) {
-    if ([401, 403].includes(error.status) || (this.session?.authMode === "account" && error.code === "session_binding_changed")) this.endAccess();
-    else this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
+    if ([401, 403].includes(error.status) || (this.session?.authMode === "account" && error.code === "session_binding_changed")) {
+      this.endAccess();
+      return;
+    }
+    this.onStatus("Connection interrupted · refresh to recover; no peer activity inferred");
+    // A closed stream already reconnects. An open stream does not, so a failed
+    // follow-up read would otherwise stay stale until some later event.
+    if (!this.stream || this.stream.readyState !== 1 || this.refreshRetry) return;
+    this.refreshInterrupted = true;
+    const delay = this.refreshRetryDelay || 1000;
+    this.refreshRetry = setTimeout(() => {
+      this.refreshRetry = null;
+      if (!this.stream || this.stream.readyState !== 1 || !this.session) return;
+      this.refresh(null, { revalidate: true }).then(() => {
+        if (!this.stream || this.stream.readyState !== 1 || !this.session) return;
+        this.refreshInterrupted = false;
+        this.refreshRetryDelay = 1000;
+        this.onStatus(CONNECTED_STATUS);
+      }).catch(retryError => {
+        if (this.stream && this.stream.readyState === 1 && this.session) this.handleFailure(retryError);
+      });
+    }, delay + Math.random() * delay / 4);
+    this.refreshRetryDelay = Math.min(delay * 2, 30000);
   }
   disconnect() {
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
+    clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
+    clearTimeout(this.fillTimer); this.fillTimer = null; this.fillDelay = 1000;
+    this.historyWanted = false; this.partialReads = 0;
+    clearTimeout(this.livenessTimer); this.livenessTimer = null;
+    this.refreshInterrupted = false;
     this.stream?.close(); this.stream = null;
   }
   endAccess() { this.disconnect(); this.session = null; this.sequence = 0; this.accountOwnership = null; this.onAccessEnded(); }
+}
+
+function openBootDb() {
+  return new Promise((resolve, reject) => {
+    const open = indexedDB.open("room-boot", 1);
+    open.onupgradeneeded = () => { if (!open.result.objectStoreNames.contains("snapshots")) open.result.createObjectStore("snapshots"); };
+    open.onsuccess = () => resolve(open.result);
+    open.onerror = () => reject(open.error);
+  });
+}
+function readBootSnapshot(roomId) {
+  return openBootDb().then(db => new Promise((resolve, reject) => {
+    const request = db.transaction("snapshots", "readonly").objectStore("snapshots").get(roomId);
+    request.onsuccess = () => resolve(request.result ?? null);
+    request.onerror = () => reject(request.error);
+  }));
+}
+function writeBootSnapshot(roomId, snapshot) {
+  return openBootDb().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction("snapshots", "readwrite");
+    tx.objectStore("snapshots").put(snapshot, roomId);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
 }
 
 // The explicit name documents the legacy room-key session transport while RoomClient
@@ -923,6 +1290,18 @@ export function retryUnconfirmed(error, wasUnconfirmed = false) {
   const originalRejected = ([409, 422].includes(error.status) && error.code === "command_rejected")
     || (error.status === 422 && error.code === "invalid_cause") || (error.status === 409 && error.code === "pilot_limit");
   return !(scopeRejected || (wasUnconfirmed ? originalRejected : rejected));
+}
+
+// A composer draft's command may be forgotten (so the next send mints a new
+// one) only when the refusal proves the original was never written. The server
+// answers command_rejected and channel_archived after the exact-operation
+// lookup, so a retry of an already-written command gets its duplicate receipt
+// instead. Transport and pre-ledger size/rate errors cannot unlock an earlier
+// uncertain operation.
+export function draftRefused(error, hadPending = false) {
+  if (!hadPending && [400, 404, 409, 413, 422].includes(error?.status)) return true;
+  return (error?.code === "command_rejected" && [409, 422].includes(error.status))
+    || (error?.code === "channel_archived" && error.status === 409);
 }
 
 export function draftCommand(previous, type, data, causationId = null) {

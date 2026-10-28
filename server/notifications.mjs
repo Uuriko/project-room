@@ -1,17 +1,19 @@
+import { messageRepository } from "./message-repository.mjs";
 // B4: per-member notification feed, derived at read time from the event tail
 // after the member's own room cursor. Read model only: it writes nothing,
 // enqueues no wake. Human browser push is a separate path
 // (server/human-push.mjs) and does not read this feed. Every read re-authenticates, so a member
 // whose access ended gets 401/403 and never a stale list.
-import { EVENT_TYPES as T, defaultNotificationPreferences } from "../src/events.js";
+import { EVENT_TYPES as T, canInviteMembers, defaultNotificationPreferences } from "../src/events.js";
 import { messageAddressesMember } from "../src/conversation.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { mutedEvent } from "./moderation.mjs";
 import { permissionDecisionMessages } from "./member-permission-requests.mjs";
+import { rowInHistory } from "./history-visibility.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
-export const NOTIFICATION_KINDS = Object.freeze(["mention", "reply", "assignment", "work_update", "access_request", "access_decision"]);
+export const NOTIFICATION_KINDS = Object.freeze(["mention", "reply", "assignment", "work_update", "access_request", "access_decision", "pair_request"]);
 // Bounded tail: the feed never scans unbounded history. Older unread events
 // stay reachable through the return brief; the response says where it started.
 export const NOTIFICATION_TAIL = 500;
@@ -21,10 +23,6 @@ const WORK_UPDATE_TYPES = new Set([
   T.WORK_ACCEPTED, T.WORK_STARTED, T.WORK_BLOCKED, T.WORK_BLOCKER_RESOLVED, T.WORK_COMPLETED, T.WORK_SUPERSEDED,
   T.VERIFICATION_RECORDED, T.OWNER_DECISION_RECORDED, T.WORK_HANDOFF_RECORDED, T.WORK_HALT_CLEARED
 ]);
-// Tag acknowledgment (2026-09-23): the one-tap reaction the client offers on
-// pending mention items. "like" is the 👍 reaction key in src/conversation.js
-// (REACTIONS); a bare react on the mentioning message counts as a response.
-export const SUGGESTED_ACK_REACTION = "like";
 // RC-2026-09-19-063: session enforcement events. A round-limit pause or a
 // budget stop is a work control firing — the room owner is told even when
 // they are not the accountable/verifier on the card, because the pause
@@ -41,9 +39,9 @@ const involvedIn = (item, memberId) => Boolean(item) && (ROLE_FIELDS.some(field 
 // and deletions are honoured without a second store. `mutedThreadIds` is the
 // member's muted thread-root ids (a Set); items from muted threads are
 // skipped at read time, so unmuting restores them on the next read.
-export function deriveNotifications({ events, state, member, mutedThreadIds = null, accessDecisions = new Map() }) {
+export function deriveNotifications({ events, state, member, mutedThreadIds = null, accessDecisions = new Map(), messageRecords = null }) {
   const preferences = { ...defaultNotificationPreferences(), ...(member.notificationPreferences ?? {}) };
-  const messages = new Map((state.messages ?? []).map(message => [message.id, message]));
+  const messages = messageRecords ?? new Map((state.messages ?? []).map(message => [message.id, message]));
   const muted = mutedThreadIds instanceof Set ? mutedThreadIds : new Set();
   // A message's thread root: itself when top-level. Walk the reply chain so
   // a mute on the thread hides every reply in it, not just the root.
@@ -75,7 +73,7 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     if (decision && decision.memberId === member.id) {
       const current = messages.get(event.data.messageId);
       if (current?.deletedAt) continue;
-      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, outcome: decision.outcome,
+      put("access_decision", "requestId", decision.requestId, row, { eventId: event.id, messageId: event.data.messageId, outcome: decision.outcome,
         note: current?.body ?? `Permission request ${decision.outcome}` });
       continue;
     }
@@ -113,6 +111,18 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
     // access request. Approval is their explicit decision and nothing else
     // surfaces the queue, so this is not gated on work_updates preferences —
     // like the session-enforcement carve-out below, it waits on the owner.
+    if (event.type === T.PAIR_REQUESTED) {
+      if (canInviteMembers(state, member.id)) {
+        put("pair_request", "pairId", event.data.pairId, row, {
+          eventId: event.id,
+          displayName: event.data.displayName,
+          userCode: event.data.userCode,
+          duplicateMemberId: event.data.duplicateMemberId ?? null,
+          label: event.data.duplicateMemberId ? "may already be in the room" : "asks to pair"
+        });
+      }
+      continue;
+    }
     if (event.type === T.ACCESS_REQUESTED) {
       if (member.id === state.room?.ownerId || member.permissions?.includes("manage_members")) {
         put("access_request", "requestId", event.data.requestId, row, {
@@ -126,6 +136,18 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
             ? `wants: ${(event.data.permissions ?? []).join(", ")}` : "requests to join",
         });
       }
+      continue;
+    }
+    // RC-2026-09-19-063: the room owner hears about every enforcement pause
+    // or stop — a round-limit pause is specifically waiting on them. Like
+    // the access-request carve-out above, this is NOT gated on work_updates:
+    // it must run before the work_updates="none" gate below, or an owner
+    // who muted ordinary work updates would never see the pause waiting
+    // on their resume (issue #2943).
+    if (SESSION_ENFORCEMENT_TYPES.has(event.type) && event.data?.workItemId
+      && (event.data.suspendReason === "round_limit" || event.data.budgetEnforced === true)
+      && member.id === state.room?.ownerId) {
+      put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
       continue;
     }
     if (preferences.work_updates === "none") continue;
@@ -144,34 +166,19 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       if (ROLE_FIELDS.some(field => event.data[field] === member.id)) put("assignment", "workItemId", event.data.workItemId, row);
       continue;
     }
-    // RC-2026-09-19-063: the room owner hears about every enforcement pause
-    // or stop — a round-limit pause is specifically waiting on them.
-    if (SESSION_ENFORCEMENT_TYPES.has(event.type) && event.data?.workItemId
-      && (event.data.suspendReason === "round_limit" || event.data.budgetEnforced === true)
-      && member.id === state.room?.ownerId) {
-      put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
-      continue;
-    }
     if (preferences.work_updates !== "all") continue; // mentions_only keeps direct assignments only.
     if (WORK_UPDATE_TYPES.has(event.type) && event.data?.workItemId && involvedIn(state.workItems?.[event.data.workItemId], member.id)) {
       put("work_update", "workItemId", event.data.workItemId, row, { eventType: event.type });
     }
   }
   // Tag acknowledgment (2026-09-23): every mention item carries whether the
-  // tagged member has responded, derived at read time — a bare emoji react
-  // counts as a response. `ackState` flips to "acknowledged" when the member
-  // (a) has an active reaction on the mentioning message (their id appears
-  // in any `message.reactions[*]` member list), or (b) authored a message in
-  // the same thread (same thread root) with a later sequence than the
-  // mention. `suggestedAck` names the one-tap reaction the client offers
-  // ("like" = 👍). Existing scoping is untouched: this post-pass only reads
+  // tagged member has responded, derived at read time. `ackState` flips to
+  // "acknowledged" when the member authored a message in the same thread (same thread root) with a later sequence than the
+  // mention. Existing scoping is untouched: this post-pass only reads
   // items the loop above already admitted, so deleted messages, muted
   // threads, muted actors, DM filtering, and self-notify rules all hold.
   for (const item of items.values()) {
     if (item.kind !== "mention") continue;
-    const message = messages.get(item.messageId);
-    const reacted = Object.values(message?.reactions ?? {})
-      .some(ids => (ids ?? []).includes(member.id));
     const mentionRoot = threadRootOf(item.messageId);
     const replied = events.some(row => {
       if (row.sequence <= item.sequence) return false;
@@ -181,10 +188,42 @@ export function deriveNotifications({ events, state, member, mutedThreadIds = nu
       if (messages.get(replyId)?.deletedAt) return false;
       return threadRootOf(replyId) === mentionRoot;
     });
-    item.ackState = (reacted || replied) ? "acknowledged" : "pending";
-    item.suggestedAck = SUGGESTED_ACK_REACTION;
+    item.ackState = replied ? "acknowledged" : "pending";
   }
   return [...items.values()].sort((a, b) => b.sequence - a.sequence);
+}
+
+// Two-trigger discipline (lane B8): the consumption seam for lane B19's
+// canonical predicate. server/notify-classifier.mjs exports
+// shouldNotify(event, prefs) — a pure function returning true only for the
+// two triggers (question/blocked addressed to you; finish/done on something
+// you own or verify). It is injected, never imported, so this module cannot
+// fork the predicate: when B19 lands, callers pass the real implementation
+// against this exact (event, prefs) signature. `prefs` is opaque here —
+// B19's classifier defines its shape; callers forward the member's
+// notification preferences and context. Switch off: the item is returned
+// untouched (bit-for-bit legacy, the predicate is never consulted). Switch
+// on without a classifier: fail-closed to ambient — an interrupt is never
+// assumed. Pure; the returned item is frozen.
+export function classifyTwoTrigger({ item, event, prefs, shouldNotify, twoTrigger = false } = {}) {
+  if (!twoTrigger) return item;
+  const interrupt = typeof shouldNotify === "function" && Boolean(shouldNotify(event, prefs));
+  return Object.freeze({ ...item, class: interrupt ? "interrupt" : "ambient" });
+}
+
+// Two-trigger discipline (lane B8): the push gate. It lives here, next to
+// the feed classifier, rather than in the delivery-half modules
+// (server/push-subscriptions.mjs / server/human-push.mjs), which the
+// rich-push lane owns — the delivery half consumes the class stamped above
+// and applies this gate. With the switch off the gate stays permissive —
+// the legacy path had no per-arrival gate, so behavior is unchanged. With
+// the switch on (derived from the ROOM_HERDR_SESSIONS worker flag), only
+// interrupt-class items push; everything else is ambient. Pure; the
+// content-free payload rule (room + count, never bodies) is untouched.
+export function twoTriggerPushGate({ notification = null, twoTrigger = false } = {}) {
+  if (!twoTrigger) return Object.freeze({ push: true, reason: "two-trigger discipline off: legacy push path unchanged" });
+  if (notification?.class === "interrupt") return Object.freeze({ push: true, reason: "interrupt-class notification" });
+  return Object.freeze({ push: false, reason: "ambient under the two-trigger discipline: no push" });
 }
 
 export class Notifications {
@@ -206,7 +245,15 @@ export class Notifications {
       const rows = fetched.slice(0, tail).reverse().map(r => ({ sequence: r.sequence, event: JSON.parse(r.body) }));
       const member = room.state.members[auth.member.id] ?? auth.member;
       const mutedThreadIds = this.store.threadMutes.mutedThreadIds(roomId, auth.member.id);
-      const notifications = deriveNotifications({ events: rows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, rows) });
+      // PRIV-2: a since_join reader's feed follows the same floor as every
+      // other message read. A mention recorded before removal stays in the
+      // event tail after reactivation; it must not come back as unread.
+      // nextBefore still names the oldest scanned row so a hidden row cannot
+      // stall the older-page walk.
+      const floor = this.store.historyFloor(roomId, auth.member.id, room.sequence);
+      const floorMessages = floor ? messageRepository(this.store, roomId, room.state) : null;
+      const visibleRows = rows.filter(row => rowInHistory(row, floor, floorMessages));
+      const notifications = deriveNotifications({ events: visibleRows, state: room.state, member, mutedThreadIds, accessDecisions: permissionDecisionMessages(this.store, visibleRows), messageRecords: messageRepository(this.store, roomId, room.state) });
       const nextBefore = notifications.length > limit ? notifications[limit - 1].sequence
         : truncated ? rows[0].sequence : null;
       // Tag acknowledgment (2026-09-23): per-member mention ack rate over the

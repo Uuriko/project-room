@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { buildWorkCommand, confirmsAgentCommand, validWorkArguments, workTools, submitWorkAction, workActionRefusal } from "../client/work-actions.mjs";
+import { deriveRequestId } from "../client/request-id.mjs";
 
 const identity = { roomId: "commons", memberId: "agent" };
 const base = { requestId: "operation", workItemId: "work", expectedRevision: 2 };
@@ -27,7 +28,7 @@ const receipt = command => ({ sequence: 7, duplicate: false, event: { id: "saved
   idempotencyKey: createHash("sha256").update(`${identity.memberId}:${command.id}`).digest("hex") } });
 
 test("every lifecycle descriptor maps exactly to one existing command without new authority or defaults", async () => {
-  assert.equal(workTools.length, cases.length);
+  assert.equal(workTools.length, cases.length + 2, "room_claim and room_handoff are the only non-legacy work tools");
   for (const [action, type, args] of cases) {
     const name = "room_" + action, { requestId, ...data } = args, sent = [];
     const command = buildWorkCommand(name, args);
@@ -40,6 +41,31 @@ test("every lifecycle descriptor maps exactly to one existing command without ne
   }
   assert.throws(() => buildWorkCommand("room_record_owner_decision", base), { code: "invalid_work_action" });
   assert.throws(() => buildWorkCommand("room_add_member", base), { code: "invalid_work_action" });
+});
+
+test("room_claim and room_handoff delegate to the existing commands and old names point at them", async () => {
+  const claim = cases.find(([action]) => action === "acquire_claim")[2];
+  const take = { ...claim, action: "take" };
+  const released = { ...base, action: "release" };
+  const renewed = { ...cases.find(([action]) => action === "renew_claim")[2], action: "renew" };
+  for (const [args, type] of [[take, "claim.acquired"], [renewed, "claim.renewed"], [released, "claim.released"]]) {
+    const command = buildWorkCommand("room_claim", args);
+    assert.equal(command.type, type);
+    assert.equal(command.data.action, undefined, "action is a selector, not a command field");
+    const response = await submitWorkAction({ command: async value => receipt(value) }, identity, "room_claim", args);
+    assert.equal(response.action, "room_claim");
+    assert.equal(response.deprecated, undefined);
+  }
+  const handoff = cases.find(([action]) => action === "record_handoff")[2];
+  const command = buildWorkCommand("room_handoff", handoff);
+  assert.equal(command.type, "work.handoff_recorded");
+  assert.deepEqual(command.data, buildWorkCommand("room_record_handoff", handoff).data);
+  const old = await submitWorkAction({ command: async value => receipt(value) }, identity, "room_acquire_claim", claim);
+  assert.deepEqual(old.deprecated, { successor: "room_claim", action: "take",
+    message: 'Use room_claim with action="take".' });
+  assert.equal(old.successor, "room_claim");
+  assert.equal(validWorkArguments("room_claim", { ...take, action: "release" }), false);
+  assert.equal(validWorkArguments("room_claim", { ...released, action: "take" }), false);
 });
 
 test("strict action inputs preserve null/omission, reject extras and bound command bytes", () => {
@@ -58,6 +84,54 @@ test("strict action inputs preserve null/omission, reject extras and bound comma
   const claim = cases.find(([action]) => action === "acquire_claim")[2];
   assert.equal(validWorkArguments("room_acquire_claim", { ...claim, paths: ["a".repeat(512)] }), true);
   assert.equal(validWorkArguments("room_acquire_claim", { ...claim, paths: ["a".repeat(513)] }), false);
+});
+
+test("work actions derive an omitted requestId or require one without an actor", () => {
+  // Issue #2862 made requestId explicit so a retry after an uncertain result
+  // could not mint a second command. MCP now derives it from the tool, room,
+  // actor and unchanged input, then returns it. A direct caller without an
+  // actor still has no safe derivation and must supply its own stable id.
+  for (const tool of workTools) assert.equal(tool.inputSchema.required.includes("requestId"), false, `${tool.name} makes requestId optional`);
+  for (const [action, , args] of cases) {
+    const name = "room_" + action, omitted = structuredClone(args); delete omitted.requestId;
+    assert.equal(validWorkArguments(name, omitted), true, `${name} accepts a missing requestId`);
+    assert.throws(() => buildWorkCommand(name, omitted), { code: "missing_request_id" });
+    const derived = buildWorkCommand(name, omitted, identity);
+    assert.match(derived.id, /^mcp-[a-f0-9]{64}$/);
+    assert.deepEqual(buildWorkCommand(name, omitted, identity), derived);
+    const invalid = { ...args, requestId: "constructor" };
+    assert.equal(validWorkArguments(name, invalid), false, `${name} refuses an invalid requestId`);
+    assert.throws(() => buildWorkCommand(name, invalid, identity), { code: "missing_request_id" });
+    assert.deepEqual(buildWorkCommand(name, structuredClone(args), identity), buildWorkCommand(name, structuredClone(args), identity));
+  }
+});
+
+test("handoff aliases normalize before derivation and explicit expectedRevision wins", async () => {
+  const aliases = { workItemId: "work", done: "3 of 5 done", next: "Reassign the adapter", reason: "context exhausted" };
+  assert.equal(validWorkArguments("room_record_handoff", aliases), true);
+  assert.equal(validWorkArguments("room_record_handoff", { ...aliases, doneSummary: "both" }), false);
+  const command = buildWorkCommand("room_record_handoff", aliases, identity);
+  assert.equal(command.id, deriveRequestId("room_record_handoff", identity, {
+    workItemId: "work", doneSummary: "3 of 5 done", nextAction: "Reassign the adapter", limitReason: "context exhausted"
+  }));
+  assert.deepEqual(command.data, { workItemId: "work", doneSummary: "3 of 5 done", nextAction: "Reassign the adapter", limitReason: "context exhausted" });
+  assert.throws(() => buildWorkCommand("room_record_handoff", { ...aliases, nextAction: "both" }, identity), { code: "invalid_work_action" });
+
+  const reads = [];
+  const submitted = await submitWorkAction({
+    workContext: async workItemId => { reads.push(workItemId); return { work: { revision: 4 } }; },
+    command: async value => receipt(value)
+  }, identity, "room_record_handoff", aliases);
+  assert.equal(submitted.status, "recorded");
+  assert.deepEqual(reads, ["work"]);
+  assert.equal(submitted.requestId, command.id);
+
+  reads.length = 0;
+  await submitWorkAction({
+    workContext: async workItemId => { reads.push(workItemId); return { work: { revision: 99 } }; },
+    command: async value => receipt(value)
+  }, identity, "room_record_handoff", { ...aliases, expectedRevision: 2 });
+  assert.deepEqual(reads, []);
 });
 
 test("exact receipts bind operation fingerprint, event identity, cause, ordered arrays and omitted fields", () => {
@@ -193,4 +267,14 @@ test("room policy: only the room owner sets it, and the command shape is strict"
   assert.equal(f.state().room.policy, undefined);
   f.setPolicy("owner", on);
   assert.deepEqual(roomPolicy(f.state()), on);
+});
+
+test("room_claim and room_handoff derive requestId and take the supplied current revision", () => {
+  const identity = { roomId: "room-a", memberId: "member-a" };
+  const take = buildWorkCommand("room_claim", { workItemId: "w1", action: "release" }, identity, { expectedRevision: 3 });
+  assert.match(take.id, /^mcp-[0-9a-f]{64}$/);
+  assert.equal(take.data.expectedRevision, 3);
+  assert.equal(take.id, buildWorkCommand("room_claim", { workItemId: "w1", action: "release" }, identity, { expectedRevision: 3 }).id);
+  const handoff = buildWorkCommand("room_handoff", { workItemId: "w1", done: "a", next: "b", reason: "c" }, identity, { expectedRevision: 2 });
+  assert.deepEqual([handoff.data.doneSummary, handoff.data.nextAction, handoff.data.limitReason, handoff.data.expectedRevision], ["a", "b", "c", 2]);
 });

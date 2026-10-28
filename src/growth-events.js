@@ -203,7 +203,15 @@ const checkFields = (type, fields) => {
     if (values && !values.includes(fields[key])) throw new TypeError(`Event ${type} field "${key}" must be one of ${values.join(", ")}`);
   }
   for (const key of entry.required) {
-    if (!Object.hasOwn(fields, key)) throw new TypeError(`Event ${type} is missing required field "${key}"`);
+    // Presence alone is not enough for a required field: null passes the
+    // scalar check and "" is a string, so both would otherwise satisfy a
+    // required identifier while carrying no value. A required field with a
+    // null or empty/blank string value is missing its value. Optional
+    // fields keep admitting null (an explicit "no value").
+    const value = fields[key];
+    if (!Object.hasOwn(fields, key) || value === null || (typeof value === "string" && !value.trim())) {
+      throw new TypeError(`Event ${type} is missing required field "${key}"`);
+    }
   }
   return Object.freeze({ ...fields });
 };

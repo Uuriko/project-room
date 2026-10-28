@@ -54,6 +54,7 @@ the recovery; never "check access" for these:
 |---|---|---|
 | `storage_unavailable` | The store refused the write (disk full, read-only, I/O) and rolled it back | Wait for `Retry-After` (30s), retry the exact request, reconcile afterward; no success is claimed |
 | `mail_not_configured` | Email delivery is not configured on this server | Nothing was sent and retrying will not help — contact the room operator to configure it |
+| `room_unavailable` | Emitted by the Cloudflare edge/relay at the Durable Object transport boundary (never by the room server) when the backend cannot be reached; only on `/api/*`, `/room/api/*`, `/mcp`, `/room/mcp` paths | GET/HEAD: wait for `Retry-After` (30s), retry the exact request. Non-GET: the request outcome could not be confirmed — do NOT blindly replay a mutation; reconcile its status first (see rule 3). No backend details leak and no rollback is claimed. |
 
 **The `already_*` 409 family** — the action already happened; do not retry it.
 Re-read the current state to confirm instead of sending the same request again:

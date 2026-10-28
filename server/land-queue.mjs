@@ -19,10 +19,28 @@
 // reset header and the tick skips until then. A missing token does not fail
 // the tick. No new secret is added.
 
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomBytes, randomUUID, createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
-import { event, EVENT_TYPES, applyEvent, isRoomArchived, validId } from "../src/events.js";
-import { claimWork, createWork } from "./work-claims.mjs";
+import { event, EVENT_TYPES, applyEvent, isRoomArchived, ownMember, validId } from "../src/events.js";
+import { claimWork, createWork, reassignWork, isTerminalClaimState, ACTIVE_CLAIM_STATES, roomWorkClaimConfig } from "./work-claims.mjs";
+
+// Caller-supplied idempotency key, same shape as access-requests'
+// REQUEST_ID_PATTERN: retries with the same key replay the stored response.
+const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/;
+// A status=0 (in-flight) placeholder older than this belonged to a first
+// attempt that died between the key-claim INSERT and commit/abort (crash or
+// eviction): the retry reclaims the key instead of 409ing "already in flight"
+// forever. Ten minutes is generous — the longest keyed call (add's GitHub
+// refresh) completes in seconds under normal conditions.
+const STALE_INFLIGHT_MS = 10 * 60 * 1000;
+// #3255: per-fetch bound for GitHub reads. A keyed mutating call chains at
+// most five fetches (PR + status + up to three check-run pages), so its
+// worst case stays near 2.5 minutes — comfortably below STALE_INFLIGHT_MS,
+// which is what makes "the first attempt is still alive when the staleness
+// window passes" unreachable through a merely hung forge read. The claim
+// nonce in #requestKey is the correctness fence; this timeout keeps the
+// window honest.
+const GITHUB_FETCH_TIMEOUT_MS = 30 * 1000;
 
 export const LAND_CHECKS = Object.freeze(["pending", "green", "red"]);
 export const LAND_MERGEABLE = Object.freeze(["mergeable", "behind", "conflict", "unknown", "merged"]);
@@ -71,6 +89,22 @@ export const landQueueSchema = `
     UNIQUE (room_id, repo, pr_number)
   );
   CREATE INDEX IF NOT EXISTS land_queue_due ON land_queue(updated_at);
+  -- B6 idempotency audit: caller-supplied requestId ledger for the mutating
+  -- land-queue calls. Keyed on (room_id, request_id); a replay returns the
+  -- stored 2xx response byte-identical. status 0 = first call still running.
+  CREATE TABLE IF NOT EXISTS land_queue_idempotency (
+    room_id TEXT NOT NULL,
+    request_id TEXT NOT NULL,
+    op TEXT NOT NULL,
+    actor_member_id TEXT NOT NULL,
+    input_hash TEXT NOT NULL,
+    status INTEGER NOT NULL DEFAULT 0,
+    response TEXT,
+    claim_nonce TEXT,
+    created_at INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL,
+    PRIMARY KEY (room_id, request_id)
+  );
 `;
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -86,6 +120,15 @@ export function migrateLandQueueColumns(db) {
   if (!columns.has("backoff_ms")) db.exec("ALTER TABLE land_queue ADD COLUMN backoff_ms INTEGER NOT NULL DEFAULT 60000");
   if (!columns.has("poll_etag")) db.exec("ALTER TABLE land_queue ADD COLUMN poll_etag TEXT");
   if (!columns.has("rate_limited_until")) db.exec("ALTER TABLE land_queue ADD COLUMN rate_limited_until INTEGER");
+  // #3255: claim_nonce fences a superseded attempt's commit/abort (see
+  // LandQueue#requestKey). Additive, same pattern as the columns above;
+  // rows claimed before this column existed carry NULL and are only ever
+  // removed by the staleness-predicated takeover DELETE.
+  const idemExists = db.prepare("SELECT 1 AS ok FROM sqlite_master WHERE type='table' AND name='land_queue_idempotency'").get();
+  if (idemExists) {
+    const idemColumns = new Set(db.prepare("SELECT name FROM pragma_table_info('land_queue_idempotency')").all().map(row => row.name));
+    if (!idemColumns.has("claim_nonce")) db.exec("ALTER TABLE land_queue_idempotency ADD COLUMN claim_nonce TEXT");
+  }
 }
 
 export function nextPollBackoff(currentMs) {
@@ -278,13 +321,16 @@ function isRateLimitResponse(response, message) {
   return /rate limit/i.test(message);
 }
 
-async function githubFetch(fetchImpl, url, token, { etag = null, missingOk = false, now = Date.now() } = {}) {
+async function githubFetch(fetchImpl, url, token, { etag = null, missingOk = false, now = Date.now(), timeoutMs = GITHUB_FETCH_TIMEOUT_MS } = {}) {
   const headers = githubHeaders(token);
   const cached = usableEtag(etag);
   if (cached) headers["If-None-Match"] = cached;
   let response;
   try {
-    response = await fetchImpl(url, { headers });
+    // #3255: every forge read is time-bounded (the claim-pr-sync
+    // AbortSignal.timeout pattern). Without a signal a hung read could
+    // keep an idempotency attempt alive past STALE_INFLIGHT_MS.
+    response = await fetchImpl(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
     fail(502, "github_unavailable", "GitHub could not be reached");
   }
@@ -345,7 +391,7 @@ function slimRuns(runs) {
 // Latest attempt of every check run on the head SHA. One page is 100; a
 // further page is only requested when the first page says there are more.
 // filter=latest is the rollup set: a rerun replaces the earlier attempt.
-async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
+async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now, timeoutMs = GITHUB_FETCH_TIMEOUT_MS) {
   const runs = [];
   let etag = null;
   for (let page = 1; page <= CHECK_RUN_PAGES; page += 1) {
@@ -353,7 +399,8 @@ async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
     const result = await githubFetch(fetchImpl, url, token, {
       etag: page === 1 ? cached?.etag ?? null : null,
       missingOk: true,
-      now
+      now,
+      timeoutMs
     });
     if (page === 1) etag = result.etag ?? null;
     if (page === 1 && result.notModified) {
@@ -370,12 +417,12 @@ async function fetchCheckRuns(fetchImpl, base, sha, token, cached, now) {
   return { notModified: false, etag, runs, incomplete: true };
 }
 
-export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImpl = fetch, previous = null, now = Date.now() } = {}) {
+export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImpl = fetch, previous = null, now = Date.now(), timeoutMs = GITHUB_FETCH_TIMEOUT_MS } = {}) {
   const [owner, name] = parseRepo(repo).split("/");
   const base = `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   const cache = previous?.cache && typeof previous.cache === "object" ? previous.cache : null;
   const prResult = await githubFetch(fetchImpl, `${base}/pulls/${parsePrNumber(prNumber)}`, token, {
-    etag: cache?.etags?.pr ?? null, now
+    etag: cache?.etags?.pr ?? null, now, timeoutMs
   });
   let sha = null;
   let prFields = null;
@@ -396,12 +443,12 @@ export async function fetchPullSnapshot({ repo, prNumber, token = null, fetchImp
   if (sha) {
     const sameSha = cache?.sha === sha;
     const statusResult = await githubFetch(fetchImpl, `${base}/commits/${sha}/status`, token, {
-      etag: sameSha ? statusEtag : null, missingOk: true, now
+      etag: sameSha ? statusEtag : null, missingOk: true, now, timeoutMs
     });
     statusNotModified = statusResult.notModified === true;
     statusEtag = statusResult.etag ?? null;
     if (!statusNotModified) statusBody = statusResult.missing ? null : statusResult.body;
-    const checksResult = await fetchCheckRuns(fetchImpl, base, sha, token, sameSha ? { etag: checksEtag, runs } : null, now);
+    const checksResult = await fetchCheckRuns(fetchImpl, base, sha, token, sameSha ? { etag: checksEtag, runs } : null, now, timeoutMs);
     checksNotModified = checksResult.notModified === true;
     checksEtag = checksResult.etag ?? null;
     incomplete = checksResult.incomplete === true;
@@ -457,8 +504,45 @@ const viewFromClaim = (item, roomId) => {
   };
 };
 
+// Bring an existing mirrored claim's owner in line with the land_queue
+// row, which is the queue's source of truth for the claimant. Returns true
+// when the claim changed. A handoff consumes the new claimant's open-claim
+// slot just like the create mirror below, so an at-cap claimant fails here
+// (409 too_many_open_claims) — callers that must not commit a divergent row
+// run this inside the same transaction as the row write, and
+// migrateLandQueueClaims already swallows that code for its best-effort
+// pass. Terminal claims consume no slot and the state machine will not
+// reassign them, so only the mirrored owner field moves.
+function syncMirroredLandClaimOwner(store, row) {
+  if (!row.claimant_member_id || typeof store.workClaims.get !== "function") return false;
+  const existing = store.workClaims.get(row.room_id, row.item_id);
+  if (!existing || existing.owner === row.claimant_member_id) return false;
+  const url = `https://github.com/${row.repo}/pull/${row.pr_number}`;
+  const now = typeof store.now === "function" ? store.now() : row.updated_at ?? row.created_at;
+  let updated;
+  if (existing.state === "unclaimed") {
+    // Re-claim it the way the create mirror claims: no lease.
+    assertClaimantCap(store, row);
+    updated = claimWork(existing, row.claimant_member_id, { leaseHours: null, pullRequest: url, now });
+  } else if (isTerminalClaimState(existing.state)) {
+    updated = { ...existing, owner: row.claimant_member_id };
+  } else {
+    assertClaimantCap(store, row);
+    updated = reassignWork(existing, existing.owner ?? row.added_by_member_id, row.claimant_member_id,
+      { authority: true, now });
+  }
+  store.workClaims.set(row.room_id, updated);
+  return true;
+}
+
 function mirrorLandClaim(store, row) {
-  if (!row || !store?.workClaims || store.workClaims.has(row.room_id, row.item_id)) return false;
+  if (!row || !store?.workClaims) return false;
+  if (store.workClaims.has(row.room_id, row.item_id)) {
+    // The claim already exists: create nothing, but never leave its owner
+    // pointing at a previous claimant when the row has moved on.
+    syncMirroredLandClaimOwner(store, row);
+    return false;
+  }
   const url = `https://github.com/${row.repo}/pull/${row.pr_number}`;
   const revision = row.merged_sha || row.tip_source_revision || row.head_sha || null;
   const now = row.created_at;
@@ -470,10 +554,27 @@ function mirrorLandClaim(store, row) {
     revision
   }, { now, agentId: row.added_by_member_id });
   if (row.claimant_member_id) {
+    assertClaimantCap(store, row);
     item = claimWork(item, row.claimant_member_id, { leaseHours: null, pullRequest: url, now });
   }
   store.workClaims.set(row.room_id, item);
   return true;
+}
+
+// A land-queue mirror consumes the claimant's slot just like claim,
+// create-with-assignee, and reassign do; otherwise naming an at-cap claimant
+// (including another member) bypasses the per-member open-claim cap.
+function assertClaimantCap(store, row) {
+  const registry = store.workClaims;
+  const config = typeof registry.configFor === "function"
+    ? registry.configFor(row.room_id)
+    : roomWorkClaimConfig({});
+  const held = registry.list(row.room_id).filter(entry =>
+    entry.owner === row.claimant_member_id && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+  if (held >= config.maxMemberOpenClaims) {
+    fail(409, "too_many_open_claims",
+      `${row.claimant_member_id} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`);
+  }
 }
 
 // One-time, idempotent copy of land_queue rows into kind:"land" claims.
@@ -489,7 +590,15 @@ export function migrateLandQueueClaims(store) {
   }
   let copied = 0;
   for (const row of rows) {
-    if (mirrorLandClaim(store, row)) copied += 1;
+    try {
+      if (mirrorLandClaim(store, row)) copied += 1;
+    } catch (error) {
+      // An at-cap claimant skips this pass instead of breaking the list read;
+      // a later list() retries the mirror once the member is under cap.
+      // Anything else still throws.
+      if (error?.code === "too_many_open_claims") continue;
+      throw error;
+    }
   }
   return { copied };
 }
@@ -531,17 +640,23 @@ export class LandQueue {
     this.db = store.db;
     this.token = null;
     this.fetchImpl = (...args) => fetch(...args);
+    this.fetchTimeoutMs = GITHUB_FETCH_TIMEOUT_MS;
   }
 
-  configure({ env = null, token = undefined, fetchImpl = undefined } = {}) {
+  configure({ env = null, token = undefined, fetchImpl = undefined, fetchTimeoutMs = undefined } = {}) {
     if (token !== undefined) this.token = token || null;
     else if (env) this.token = githubAccessToken(env);
     if (fetchImpl) this.fetchImpl = fetchImpl;
+    if (Number.isFinite(fetchTimeoutMs) && fetchTimeoutMs > 0) this.fetchTimeoutMs = fetchTimeoutMs;
     return this;
   }
 
   #member(roomId, memberId) {
-    const member = this.store.room(roomId).state.members?.[memberId];
+    // Member projections are plain objects, so a raw members[memberId] index
+    // resolves inherited Object.prototype names ("toString", "constructor",
+    // ...) that pass validId but are not room members. Resolve through
+    // ownMember (Object.hasOwn) like src/events.js / server/grants.mjs.
+    const member = ownMember(this.store.room(roomId).state.members, memberId);
     if (!member || member.active === false) fail(422, "invalid_land_item", "claimant must be an active room member");
     return member;
   }
@@ -552,6 +667,90 @@ export class LandQueue {
 
   #byPr(roomId, repo, prNumber) {
     return this.db.prepare("SELECT * FROM land_queue WHERE room_id=? AND repo=? AND pr_number=?").get(roomId, repo, prNumber);
+  }
+
+  // Caller-supplied idempotency for the mutating land-queue calls. The key
+  // is (room_id, request_id): a retry with the same key, op, actor, and
+  // input replays the stored response instead of re-executing. Reuse for a
+  // different op, actor, or input is 409 idempotency_conflict (the
+  // store.command / access-requests / bounty-escrow convention), as is a
+  // key whose first call is still in flight. A status=0 placeholder older
+  // than STALE_INFLIGHT_MS is a dead first attempt (crash/eviction between
+  // key-claim and commit) and is reclaimed so the retry re-executes.
+  // Only 2xx outcomes are recorded:
+  // a failure deletes the placeholder so the retry re-executes fresh rather
+  // than replaying a stale error (e.g. a transient 503 github_unconfigured).
+  // Without a requestId the returned gate is a no-op and behavior is
+  // unchanged.
+  //
+  // #3255: every claim carries a fresh claim_nonce, and commit/abort are
+  // predicated on (status=0 AND claim_nonce = mine). The staleness
+  // takeover fences racing *reclaimers*, but before this fix it did not
+  // fence the original attempt: if attempt 1 was merely slow (a hung
+  // GitHub read — now also time-bounded, see GITHUB_FETCH_TIMEOUT_MS),
+  // its late commit overwrote the takeover's stored response and its late
+  // abort deleted the takeover's committed record. A superseded attempt's
+  // commit/abort now match nothing: the row belongs to its new owner, or
+  // is already committed and can no longer be aborted away.
+  #requestKey(roomId, memberId, op, requestId, invalidCode, input) {
+    const noop = { replay: false, commit() {}, abort() {} };
+    if (requestId === undefined || requestId === null) return noop;
+    if (typeof requestId !== "string" || !REQUEST_ID_PATTERN.test(requestId)) {
+      fail(422, invalidCode, "requestId must match [A-Za-z0-9][A-Za-z0-9_-]{0,63}");
+    }
+    const inputHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+    const now = this.store.now();
+    const claimNonce = randomBytes(16).toString("base64url");
+    const claimed = this.db.prepare(`INSERT OR IGNORE INTO land_queue_idempotency
+      (room_id, request_id, op, actor_member_id, input_hash, status, response, claim_nonce, created_at, updated_at)
+      VALUES (?,?,?,?,?,0,NULL,?,?,?)`)
+      .run(roomId, requestId, op, memberId, inputHash, claimNonce, now, now);
+    if (claimed.changes === 0) {
+      const prior = this.db.prepare(`SELECT op, actor_member_id AS actor, input_hash AS inputHash,
+        status, response, updated_at AS updatedAt FROM land_queue_idempotency WHERE room_id=? AND request_id=?`)
+        .get(roomId, requestId);
+      if (!prior || prior.op !== op || prior.actor !== memberId || prior.inputHash !== inputHash) {
+        fail(409, "idempotency_conflict", "requestId was already used for a different land queue operation");
+      }
+      if (prior.status === 0 && prior.updatedAt !== null && now - prior.updatedAt > STALE_INFLIGHT_MS) {
+        // Stale in-flight takeover: the first attempt died mid-flight, so its
+        // placeholder would otherwise brick this key forever. Reclaim it — the
+        // DELETE carries the staleness predicate itself, so it can only remove
+        // a row that was already stale when we read it; a racing reclaimer
+        // that re-claimed meanwhile leaves a fresh placeholder this DELETE
+        // cannot touch (its loss then shows up as a 0-changes INSERT below,
+        // followed by a correct 409 "already in flight").
+        this.db.prepare(`DELETE FROM land_queue_idempotency
+          WHERE room_id=? AND request_id=? AND status=0 AND updated_at<=?`)
+          .run(roomId, requestId, now - STALE_INFLIGHT_MS);
+        return this.#requestKey(roomId, memberId, op, requestId, invalidCode, input);
+      }
+      if (prior.status !== 1 || prior.response == null) {
+        fail(409, "idempotency_conflict", "requestId is already in flight for this room");
+      }
+      return { replay: true, body: JSON.parse(prior.response), commit() {}, abort() {} };
+    }
+    const db = this.db;
+    const store = this.store;
+    return {
+      replay: false,
+      commit(body) {
+        // #3255: only the claim's owner, while the claim is still
+        // in flight, may record the response. If a takeover superseded
+        // this attempt, the row carries the new owner's nonce (or is
+        // already committed) and this write lands nowhere.
+        db.prepare(`UPDATE land_queue_idempotency SET status=1, response=?, updated_at=?
+          WHERE room_id=? AND request_id=? AND status=0 AND claim_nonce=?`)
+          .run(JSON.stringify(body), store.now(), roomId, requestId, claimNonce);
+      },
+      abort() {
+        // #3255: an abort may only remove its OWN in-flight placeholder —
+        // never a takeover's placeholder, and never a committed record.
+        db.prepare(`DELETE FROM land_queue_idempotency
+          WHERE room_id=? AND request_id=? AND status=0 AND claim_nonce=?`)
+          .run(roomId, requestId, claimNonce);
+      }
+    };
   }
 
   list(roomId, memberId) {
@@ -565,22 +764,48 @@ export class LandQueue {
     return { roomId, items };
   }
 
-  async add(roomId, memberId, { repo, prNumber, claimantMemberId = null } = {}) {
+  async add(roomId, memberId, { repo, prNumber, claimantMemberId = null, requestId = null } = {}) {
     this.#member(roomId, memberId);
     const parsedRepo = parseRepo(repo);
     const parsedPr = parsePrNumber(prNumber);
     const claimant = claimantMemberId ?? memberId;
     if (!validId(claimant)) fail(422, "invalid_land_item", "claimant must be a member id");
     this.#member(roomId, claimant);
+    // requestId is the caller's idempotency key: a retry with the same key
+    // replays the stored response instead of re-executing.
+    const key = this.#requestKey(roomId, memberId, "add_land_item", requestId, "invalid_land_item",
+      { repo: parsedRepo, prNumber: parsedPr, claimantMemberId: claimant });
+    if (key.replay) return key.body;
+    let out;
+    try {
+      out = await this.#addExecute(roomId, memberId, parsedRepo, parsedPr, claimant);
+    } catch (error) { key.abort(); throw error; }
+    key.commit(out);
+    return out;
+  }
+
+  async #addExecute(roomId, memberId, parsedRepo, parsedPr, claimant) {
     const existing = this.#byPr(roomId, parsedRepo, parsedPr);
     if (existing) {
-      if (claimant !== existing.claimant_member_id) {
-        this.store.transaction(() => {
+      // The mirror sync runs inside the same transaction as the row write:
+      // a mirror failure (e.g. the new claimant is at the open-claim cap)
+      // rolls the reassignment and its receipt back instead of reporting an
+      // error for a change that already committed, and a mirrored claim
+      // that already exists has its owner moved to the new claimant rather
+      // than keeping the old one.
+      this.store.transaction(() => {
+        if (claimant !== existing.claimant_member_id) {
           this.db.prepare("UPDATE land_queue SET claimant_member_id=?, updated_at=? WHERE room_id=? AND item_id=?")
             .run(claimant, this.store.now(), roomId, existing.item_id);
-        });
-      }
-      mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
+        }
+        mirrorLandClaim(this.store, this.#row(roomId, existing.item_id));
+        if (claimant !== existing.claimant_member_id) {
+          // The claimant reassignment is a board write: it commits its
+          // land.updated receipt (changed ["reassigned"]) in the same
+          // transaction as the row, so the handoff is observable.
+          this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, existing.item_id)), ["reassigned"]);
+        }
+      });
       const item = viewFromRow(this.#row(roomId, existing.item_id));
       return this.#refreshRow(item, { duplicate: true });
     }
@@ -596,22 +821,43 @@ export class LandQueue {
         VALUES (?,?,?,?,?,?,NULL,NULL,'unknown',0,'pending',NULL,NULL,NULL,NULL,0,?,?)`)
         .run(roomId, itemId, parsedRepo, parsedPr, claimant, memberId, now, now);
       mirrorLandClaim(this.store, this.#row(roomId, itemId));
+      // Every board write is observable: the add commits its land.updated
+      // receipt (changed ["added"]) in the same transaction as the row, so
+      // event-replay can reconstruct the board. The GitHub refresh below may
+      // still 503 on an unreachable forge, but the write already happened.
+      this.#emitBoardReceipt(roomId, viewFromRow(this.#row(roomId, itemId)), ["added"]);
     });
     const item = viewFromRow(this.#row(roomId, itemId));
     return this.#refreshRow(item, { duplicate: false });
   }
 
-  remove(roomId, memberId, { itemId } = {}) {
+  remove(roomId, memberId, { itemId, requestId = null } = {}) {
     this.#member(roomId, memberId);
     if (!validId(itemId)) fail(422, "invalid_land_item", "itemId is required");
+    const key = this.#requestKey(roomId, memberId, "remove_land_item", requestId, "invalid_land_item", { itemId });
+    if (key.replay) return key.body;
+    let out;
+    try {
+      out = this.#removeExecute(roomId, memberId, itemId);
+    } catch (error) { key.abort(); throw error; }
+    key.commit(out);
+    return out;
+  }
+
+  #removeExecute(roomId, memberId, itemId) {
     const row = this.#row(roomId, itemId);
     if (!row) fail(404, "land_item_not_found", "Land queue item was not found");
+    const removed = viewFromRow(row);
     this.store.transaction(() => {
       const claim = typeof this.store.workClaims?.get === "function"
         ? this.store.workClaims.get(roomId, itemId)
         : null;
       const dependents = claim ? this.#dependentsOf(roomId, itemId) : [];
       this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(roomId, itemId);
+      // Every board write is observable: the delete commits its land.updated
+      // receipt (changed ["removed"]) in the same transaction as the row, so
+      // a removal never lands silently in the event log.
+      this.#emitBoardReceipt(roomId, removed, ["removed"]);
       if (typeof this.store.workClaims.delete === "function") {
         this.store.workClaims.delete(roomId, itemId);
         // Issue #1527: the mirrored claim is gone, so any claim that depended
@@ -623,7 +869,7 @@ export class LandQueue {
     return { roomId, itemId, removed: true };
   }
 
-  reportTip(roomId, memberId, { itemId, sourceRevision, buildId } = {}) {
+  reportTip(roomId, memberId, { itemId, sourceRevision, buildId, requestId = null } = {}) {
     this.#member(roomId, memberId);
     if (!validId(itemId)) fail(422, "invalid_land_item", "itemId is required");
     const source = parseTipField(sourceRevision, "sourceRevision");
@@ -631,6 +877,18 @@ export class LandQueue {
     if (source === undefined && build === undefined) {
       fail(422, "invalid_land_tip", "sourceRevision or buildId is required");
     }
+    const key = this.#requestKey(roomId, memberId, "report_tip", requestId, "invalid_land_tip",
+      { itemId, sourceRevision: source, buildId: build });
+    if (key.replay) return key.body;
+    let out;
+    try {
+      out = this.#reportTipExecute(roomId, memberId, itemId, source, build);
+    } catch (error) { key.abort(); throw error; }
+    key.commit(out);
+    return out;
+  }
+
+  #reportTipExecute(roomId, memberId, itemId, source, build) {
     const row = this.#row(roomId, itemId);
     if (!row) fail(404, "land_item_not_found", "Land queue item was not found");
     const previous = observedFromRow(row);
@@ -718,6 +976,7 @@ export class LandQueue {
         prNumber: item.prNumber,
         token: this.token,
         fetchImpl: this.fetchImpl,
+        timeoutMs: this.fetchTimeoutMs,
         now,
         previous: row ? {
           title: row.title ?? null,
@@ -747,6 +1006,9 @@ export class LandQueue {
             : null;
           const dependents = claim ? this.#dependentsOf(item.roomId, item.itemId) : [];
           this.db.prepare("DELETE FROM land_queue WHERE room_id=? AND item_id=?").run(item.roomId, item.itemId);
+          // Same board-write receipt as remove(): the auto-delete is a board
+          // mutation and commits its land.updated (changed ["removed"]) here.
+          this.#emitBoardReceipt(item.roomId, item, ["removed"]);
           if (typeof this.store.workClaims?.delete === "function") {
             this.store.workClaims.delete(item.roomId, item.itemId);
             // Issue #1527: same stranded-dependent receipt as remove().
@@ -830,7 +1092,7 @@ export class LandQueue {
     if (!this.store?.db || typeof this.store.room !== "function") return null;
     const room = this.store.room(roomId);
     if (isRoomArchived(room.state)) return null;
-    const member = room.state.members?.[actorId];
+    const member = ownMember(room.state.members, actorId);
     const incoming = event({
       id: randomUUID(),
       idempotencyKey: randomUUID(),
@@ -841,7 +1103,7 @@ export class LandQueue {
       data: {
         workClaim: claim.id,
         action: "deleted",
-        claimState: ["unclaimed", "claimed", "in_progress", "blocked", "done"].includes(claim.state)
+        claimState: ["unclaimed", "claimed", "in_progress", "blocked", "delivered", "done", "closed"].includes(claim.state)
           ? claim.state
           : "unclaimed",
         ownerId: claim.owner ?? null,
@@ -872,7 +1134,7 @@ export class LandQueue {
   #emit(roomId, item, changed) {
     const payload = landWakePayload(item, changed);
     const room = this.store.room(roomId);
-    const claimant = room.state.members?.[item.claimantMemberId];
+    const claimant = ownMember(room.state.members, item.claimantMemberId);
     const actorId = claimant && claimant.active !== false ? item.claimantMemberId : room.state.room.ownerId;
     const incoming = event({
       id: randomUUID(),
@@ -894,6 +1156,32 @@ export class LandQueue {
     return incoming;
   }
 
+  // Board-write receipts: a board write that records without waking anyone.
+  // Adding is the caller's own action and a removal needs no doorbell, so
+  // there is nobody to wake; the receipt exists so the write is observable
+  // in the event log. Runs inside the caller's board transaction so the row
+  // write and its event commit together.
+  #emitBoardReceipt(roomId, item, changed) {
+    const room = this.store.room(roomId);
+    if (isRoomArchived(room.state)) return null;
+    const claimant = ownMember(room.state.members, item.claimantMemberId);
+    const incoming = event({
+      id: randomUUID(),
+      idempotencyKey: randomUUID(),
+      type: EVENT_TYPES.LAND_UPDATED,
+      actorId: claimant && claimant.active !== false ? item.claimantMemberId : room.state.room.ownerId,
+      roomId,
+      at: new Date(this.store.now()).toISOString(),
+      data: {
+        itemId: item.itemId,
+        repo: item.repo,
+        claimantMemberId: item.claimantMemberId,
+        ...landWakePayload(item, changed)
+      }
+    });
+    return this.#appendRoomEvent(roomId, incoming);
+  }
+
   // Push the thin payload through the existing wake path: a pointer doorbell
   // for an offline claimant, plus an agent.wake delivery whose signal carries
   // pr, head, state, and what changed. Online claimants already see the room
@@ -910,6 +1198,12 @@ export class LandQueue {
     if (!status || status.status !== "offline") return null;
     this.store.agentHeartbeats.pushNotify({
       identityId, eventType: "land.updated", roomId, id: incoming.id, ts: this.store.now()
+    });
+    // #3257: the doorbell and the wake ping below are both fire-and-forget;
+    // enqueue the durable signal too, so the claimant's next heartbeat/poll
+    // carries the land update even when both misses. Coalesced per event id.
+    this.store.agentHeartbeats.enqueueWake({
+      agentId: identityId, kind: "land", roomId, messageId: incoming.id
     });
     const signal = {
       signalId: incoming.id,

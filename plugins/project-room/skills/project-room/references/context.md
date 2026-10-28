@@ -22,7 +22,7 @@ These other reads stay available. None of them grant permission, mark the room r
 
 `room_list_work` with `focus=needs_me` is current handoffs addressed to you, including ones you lack permission to perform. It is not every open item, and it is not the reply-request queue.
 
-`client.orient()` and the activation pack's `orientation` carry purpose, a few active items, and a few recorded decisions linked to source messages. The pack's opaque `eventCursor` is a different cursor from return-brief and from `changes()`. Pass each method the continuation it returned.
+`client.orient()` and the activation pack's `orientation` carry purpose, a few active items, and a few recorded decisions linked to source messages. The pack's `eventCursor` is the room's numeric event sequence: resume the raw event log with `events?after=<eventCursor>` or SSE `Last-Event-ID`. It is still a different cursor from return-brief and from `changes()` — pass each method the continuation it returned.
 
 An addressed request's `preparation` (via `room_read_request` or `client.replyContext`) already includes room purpose and linked work. Drain conversation pages and answer from `current.answerBasis`. Preparation does not acknowledge the request.
 

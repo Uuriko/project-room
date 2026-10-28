@@ -53,19 +53,20 @@ const fail = (status, code, message, extra) => { throw new WebFetchError(status,
 // Limits
 // ---------------------------------------------------------------------------
 export const WEB_RESEARCH_RATE_PER_MEMBER_PER_DAY = 50;
-export const WEB_RESEARCH_RATE_PER_ROOM_PER_DAY = 500;
-export const WEB_RESEARCH_RATE_WINDOW_MS = 86_400_000;
-export const WEB_RESEARCH_MAX_QUESTION_CHARS = 2000;
-export const WEB_RESEARCH_MAX_EVIDENCE = 20;
-export const WEB_RESEARCH_DEFAULT_EVIDENCE = 5;
-export const WEB_RESEARCH_MAX_URLS = 10;
-export const WEB_RESEARCH_MAX_TAGS = 20;
-export const WEB_RESEARCH_TAG_CHARS = 64;
-export const WEB_RESEARCH_SOURCES = ["room", "docs", "fetch", "provider"];
-export const WEB_RESEARCH_DOCS_MAX_FILES = 300;
-export const WEB_RESEARCH_DOCS_MAX_BYTES = 1024 * 1024;
-export const WEB_RESEARCH_DOCS_MAX_FILE_BYTES = 200 * 1024;
-export const WEB_RESEARCH_CACHE_SCAN_LIMIT = 200;
+const WEB_RESEARCH_RATE_PER_ROOM_PER_DAY = 500;
+const WEB_RESEARCH_RATE_WINDOW_MS = 86_400_000;
+const WEB_RESEARCH_MAX_QUESTION_CHARS = 2000;
+const WEB_RESEARCH_MAX_EVIDENCE = 20;
+const WEB_RESEARCH_DEFAULT_EVIDENCE = 5;
+const WEB_RESEARCH_MAX_URLS = 10;
+const WEB_RESEARCH_MAX_TAGS = 20;
+const WEB_RESEARCH_TAG_CHARS = 64;
+const WEB_RESEARCH_SOURCES = ["room", "docs", "fetch", "provider"];
+export const WEB_RESEARCH_DOCS_CACHE_TTL_MS = 60_000;
+const WEB_RESEARCH_DOCS_MAX_FILES = 300;
+const WEB_RESEARCH_DOCS_MAX_BYTES = 1024 * 1024;
+const WEB_RESEARCH_DOCS_MAX_FILE_BYTES = 200 * 1024;
+const WEB_RESEARCH_CACHE_SCAN_LIMIT = 200;
 
 const STOPWORDS = new Set(
   "a,an,the,and,or,but,of,to,in,on,for,with,by,from,at,as,is,are,was,were,be,been,being,have,has,had,do,does,did,will,would,can,could,should,what,when,where,which,who,whom,whose,why,how,this,that,these,those,it,its,they,them,their,there,here,not,no,yes,if,then,than,so,such,into,out,up,down,over,under,about,between,through,during,before,after,my,your,his,her,our,you,we,they,i,me,him,us,any,all,some,more,most,other,same,own,just,like,get,got,make,made,use,used,using,also,well,much,many,may,might,must,shall".split(",")
@@ -164,7 +165,25 @@ export function providerStatus(requested) {
 // ---------------------------------------------------------------------------
 // Docs corpus (Node only; lazy file list, capped)
 // ---------------------------------------------------------------------------
-let docsFileCache = null;
+// File lists are cached per corpus roots: keying by the roots keeps two
+// WebResearch instances with different docsRoots from silently searching
+// each other's corpus, and the TTL keeps the list from going permanently
+// stale — a doc added after the first research call becomes searchable
+// once the cached list for its roots expires.
+const docsFileCache = new Map();
+
+function docsFileCacheKey(roots) {
+  return JSON.stringify([roots.docsDir, roots.extraFiles ?? []]);
+}
+
+function listDocsFilesCached(roots, now) {
+  const key = docsFileCacheKey(roots);
+  const hit = docsFileCache.get(key);
+  if (hit && now - hit.listedAt < WEB_RESEARCH_DOCS_CACHE_TTL_MS) return hit.files;
+  const files = listCorpusFiles(roots.docsDir, roots.extraFiles ?? []);
+  docsFileCache.set(key, { files, listedAt: now });
+  return files;
+}
 
 function defaultCorpusRoots() {
   try {
@@ -460,10 +479,7 @@ export class WebResearch {
     if (isWorkersRuntime()) return [];
     const roots = this.opts.docsRoot ?? defaultCorpusRoots();
     if (!roots) return [];
-    if (docsFileCache === null) {
-      docsFileCache = listCorpusFiles(roots.docsDir, roots.extraFiles ?? []);
-    }
-    const files = this.opts.docsFiles ?? docsFileCache;
+    const files = this.opts.docsFiles ?? listDocsFilesCached(roots, now);
     const scored = [];
     let bytesRead = 0;
     for (const file of files) {

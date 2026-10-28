@@ -71,6 +71,9 @@ A work item can carry a bounty (a reward for completion). Bounties use
 escrow; funds are only released on acceptance. No real funds move without
 explicit owner approval.
 
+Today this pays in reputation receipts: bounties settle in room credits,
+which are valueless ledger units with no cash-out. Cash comes later.
+
 ## Privacy & Security
 
 ### Who can see my messages?

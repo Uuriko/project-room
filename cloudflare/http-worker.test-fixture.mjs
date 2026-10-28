@@ -5,6 +5,7 @@ import { initialRoom } from '../server/bootstrap.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { normalizeGraphEmail } from '../server/graph-email.mjs';
 import { seedRecordedReply } from '../scripts/reply-review-fixture.mjs';
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 export class HttpTestRoom extends ProjectRoom {
   async fetch(request) {
     const url = new URL(request.url);
@@ -20,7 +21,9 @@ export class HttpTestRoom extends ProjectRoom {
         command('message.posted', { messageId: 'private-before', body: 'hidden prejoin text' });
         // Non-chat writes avoid the real flood guard while testing a long
         // equal-timestamp import-shaped history and a large exclusion set.
-        for (let i = 0; i < 501; i++) command('channel.renamed', { channelId: 'general', name: `general-${i}` });
+        // (The main channel can't be renamed, so filler renames use a scratch channel.)
+        command('channel.created', { channelId: 'filler', name: 'filler' });
+        for (let i = 0; i < 501; i++) command('channel.renamed', { channelId: 'filler', name: `filler-${i}` });
         command('room.history_visibility_set', { historyVisibility: 'since_join' });
         command('member.added', { memberId: 'late', displayName: 'Late', kind: 'agent', permissions: [] });
         const readerKey = store.issueAccessKey(roomId, 'late');
@@ -52,7 +55,7 @@ export class HttpTestRoom extends ProjectRoom {
       this.store.initialize(initialRoom());
       const ownerKey = this.store.issueAccessKey('commons', 'owner');
       const identity = this.store.identities.create('Bounty observer');
-      this.store.identities.link(ownerKey, 'commons', { identityId: identity.identityId, permissions: [] });
+      linkWithProof(this.store, ownerKey, 'commons', identity, { permissions: [] });
       this.store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
         url: 'https://observer.example.test/hooks', events: ['*'] });
       return Response.json({ ownerKey });

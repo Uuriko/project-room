@@ -125,6 +125,38 @@ test("receipt capacity bounds requeue as well as enqueue", t => {
   assert.equal(f.enqueue({ requestId: first.receipt.requestId, maxAttempts: 1 }).duplicate, true, "an exact retry at the cap still returns its historical receipt");
 });
 
+test("active cap bounds enqueue recycling a done row and requeueing a dead row", t => {
+  const f = fixture(t);
+  const memberId = f.store.authenticate(f.keys.owner, "commons").member.id;
+  // Park one wake in 'done' and one in 'dead' while the queue is empty:
+  // neither counts as active, but each can be turned back into a pending
+  // wake by enqueue (done recycling) and requeue (dead) respectively.
+  f.enqueue({ queueKey: "recipe:done-cycle" });
+  const doneLease = randomUUID();
+  f.store.wakeQueue.lease("commons", memberId, "recipe:done-cycle", doneLease);
+  f.store.wakeQueue.complete("commons", memberId, "recipe:done-cycle", { requestId: randomUUID(), leaseOwner: doneLease });
+  f.enqueue({ queueKey: "recipe:dead-cycle", maxAttempts: 1 });
+  f.store.wakeQueue.lease("commons", memberId, "recipe:dead-cycle", "worker-dead");
+  assert.equal(f.store.wakeQueue.fail("commons", memberId, "recipe:dead-cycle", { leaseOwner: "worker-dead", error: "boom" }).state, "dead");
+  // Fill the queue to exactly the active cap with unrelated pending wakes.
+  for (let n = 0; n < wakeQueueLimits.active; n++) f.enqueue({ queueKey: `filler-${n}` });
+  const active = () => f.list().filter(w => w.state === "pending" || w.state === "leased").length;
+  const stateOf = key => f.list().find(w => w.queueKey === key)?.state;
+  assert.equal(active(), wakeQueueLimits.active);
+  // Coalescing an already-pending wake adds no active row, so it is still
+  // admitted at the cap.
+  assert.equal(f.enqueue({ queueKey: "filler-0" }).receipt.coalesced, true);
+  assert.equal(active(), wakeQueueLimits.active);
+  // Recycling the done row would create a new active row: refused at the cap.
+  assert.throws(() => f.enqueue({ queueKey: "recipe:done-cycle" }), { code: "wake_limit", status: 409 }, "enqueue recycling a done row at the active cap is refused");
+  assert.equal(stateOf("recipe:done-cycle"), "done", "the refused recycle left the done row done");
+  // Requeueing the dead row would likewise create a new active row.
+  assert.throws(() => f.store.wakeQueue.requeue(f.keys.owner, "commons", { requestId: randomUUID(), queueKey: "recipe:dead-cycle", dueAt: f.at() }),
+    { code: "wake_limit", status: 409 }, "requeue at the active cap is refused");
+  assert.equal(stateOf("recipe:dead-cycle"), "dead", "the refused requeue left the dead letter parked");
+  assert.equal(active(), wakeQueueLimits.active, "neither bypass raised the active count past the cap");
+});
+
 test("guest-agent members cannot enqueue or requeue wakes, and can pause their own", t => {
   const f = fixture(t);
   // Production guest admission mints member ids carrying the guest-agent-

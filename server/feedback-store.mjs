@@ -27,22 +27,22 @@ export const FEEDBACK_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 // Mark economics. Small on purpose: the price is a filter, not a toll.
 export const MARK_FILING_COST = 1;      // debited on every non-duplicate filing
 export const MARK_ACCEPT_REWARD = 5;    // credited when triage accepts as real
-export const MARK_JUNK_SUSPEND_AFTER = 20; // filings window for junk-rate check
-export const MARK_JUNK_SUSPEND_RATE = 0.5; // junk rate that suspends new filings
+const MARK_JUNK_SUSPEND_AFTER = 20; // filings window for junk-rate check
+const MARK_JUNK_SUSPEND_RATE = 0.5; // junk rate that suspends new filings
 
 // Filer lifecycle economics (see SPEC.md §7).
 export const MARK_MERGE_BONUS = 10;       // filer bonus when promoted feedback ships
 export const MARK_APPEAL_COST = 1;       // debited on appeal, refunded if overturned
 export const MARK_REVIEWER_CONFIRMED = 2; // reviewer reward per outcome-confirmed verdict
-export const MARK_REVIEWER_MISVERDICT = 3;// reviewer deduction per overturned verdict
+const MARK_REVIEWER_MISVERDICT = 3;// reviewer deduction per overturned verdict
 export const APPEAL_WINDOW_MS = 72 * 3600 * 1000;   // one appeal per filing, within 72h
-export const PROMOTED_STALE_MS = 60 * 24 * 3600 * 1000; // promoted, never shipped
-export const CLUSTER_FAST_TRACK_PER_DAY = 5;   // heat ≥ 5/day → triage fast-track
-export const CLUSTER_SEVERITY_BUMP_PER_DAY = 25; // heat ≥ 25/day → severity escalation
-export const CLUSTER_FILEDAT_CAP = 500;          // per-cluster filing timestamps kept
+const PROMOTED_STALE_MS = 60 * 24 * 3600 * 1000; // promoted, never shipped
+const CLUSTER_FAST_TRACK_PER_DAY = 5;   // heat ≥ 5/day → triage fast-track
+const CLUSTER_SEVERITY_BUMP_PER_DAY = 25; // heat ≥ 25/day → severity escalation
+const CLUSTER_FILEDAT_CAP = 500;          // per-cluster filing timestamps kept
 
 // Severity routing: not every real verdict is a bug task.
-export const ROUTE_FOR_SEVERITY = Object.freeze({
+const ROUTE_FOR_SEVERITY = Object.freeze({
   bug: "task", perf: "task", "missing-feature": "proposal", docs: "docs-fix",
 });
 export const routeForSeverity = s => ROUTE_FOR_SEVERITY[s] ?? "task";
@@ -473,11 +473,23 @@ export function createFeedbackStore({ now, isReviewer, isReleaseAuthority, verif
       check(verifyMergeRef(ref), "unverified_merge_ref", "ref did not verify against a merge record");
     }
     const at = new Date(clock()).toISOString();
-    const attributions = feedbackIds.map(id => {
+    // Pre-validate every id before mutating any: applying payouts inside
+    // the validation loop left earlier ids paid/transitioned when a later
+    // id failed, and the retry then failed on the already-transitioned
+    // first id — the paid outcome became unretryable (#2844). A repeated
+    // id can never satisfy the second occurrence (the first transitions
+    // it out of "promoted"), so duplicates fail here too.
+    const seen = new Set();
+    const resolved = feedbackIds.map(id => {
       const item = items.get(id);
       check(item, "not_found", `feedback id not found: ${id}`);
-      check(item.status === "promoted", "invalid_transition",
-        `cannot record outcome on feedback in status ${item.status}`);
+      check(!seen.has(id) && item.status === "promoted", "invalid_transition",
+        `cannot record outcome on feedback in status ${seen.has(id) ? "promoted (duplicate id)" : item.status}`);
+      seen.add(id);
+      return item;
+    });
+    const attributions = feedbackIds.map((id, index) => {
+      const item = resolved[index];
       const status = kind === "merged" ? "merged" : "adopted";
       const updated = Object.freeze({ ...item, status,
         outcome: Object.freeze({ kind, ref, recordedBy, at }) });

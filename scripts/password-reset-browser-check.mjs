@@ -13,7 +13,9 @@ async function setup(t) {
   const f = createAcceptanceFixture(), delivered = [];
   f.store.createAccount('reset-browser-account'); f.store.completeOnboarding('reset-browser-account');
   f.store.accountLogins.linkPasswordMethod('reset-browser-account', { email, verifier: hashPassword(oldPassword) });
-  const server = createRoomServer({ store: f.store, magicLinkMailer: { isConfigured: () => mailer.isConfigured(), sendMagicLink: p => mailer.sendMagicLink(p) } });
+  // createRoomServer asks isConfigured() at build time (#2463), before the mailer
+  // below exists (TDZ). The fixture always installs a configured synthetic sender.
+  const server = createRoomServer({ store: f.store, magicLinkMailer: { isConfigured: () => true, sendMagicLink: p => mailer.sendMagicLink(p) } });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const mailer = createMagicLinkMailer({ baseUrl: origin, send: async p => delivered.push(p) });
@@ -22,7 +24,7 @@ async function setup(t) {
   const page = await browser.newPage(); page.setDefaultTimeout(10000);
   const errors = []; page.on('pageerror', e => errors.push(e.message)); t.after(() => assert.deepEqual(errors, []));
   await page.goto(origin);
-  await page.locator('[data-password-mode="login"]').click();
+  await page.locator('[data-signin-form="password"]').waitFor({ state: 'visible' });
   return { ...f, origin, browser, page, delivered };
 }
 async function requestReset(f) {
@@ -106,7 +108,7 @@ test('foreign-account reset requires confirmed logout and fresh password entry w
   f.store.createAccount('foreign-reset-account'); f.store.completeOnboarding('foreign-reset-account');
   f.store.accountLogins.linkPasswordMethod('foreign-reset-account', { email: foreignEmail, verifier: hashPassword(oldPassword) });
   const page = await f.browser.newPage(); page.setDefaultTimeout(10000); await page.goto(f.origin);
-  await page.locator('[data-password-mode="login"]').click();
+  await page.locator('[data-signin-form="password"]').waitFor({ state: 'visible' });
   const login = page.locator('[data-signin-form="password"]'); await login.locator('[name="email"]').fill(foreignEmail); await login.locator('[name="password"]').fill(oldPassword);
   const signed = page.waitForResponse(r => new URL(r.url()).pathname === '/api/auth/password/login');
   await login.locator('button[type="submit"]').click(); await signed; await page.locator('#auth-panel').waitFor({ state: 'hidden' });
@@ -152,23 +154,22 @@ test('targeted invitation survives mailed reset and still requires explicit acce
   assert.equal(await page.locator('#main').isVisible(), false);
 });
 
-for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`direct reset form retains a quieter secondary magic-link action at ${viewport.width}px`, { timeout: 25000 }, async t => {
+for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 }]) test(`direct reset form hides unearned magic-link recovery at ${viewport.width}px`, { timeout: 25000 }, async t => {
   const f = await setup(t); await f.page.setViewportSize(viewport);
   await f.page.locator('[data-forgot-password]').click();
-  const primary = f.page.locator('[data-signin-form="reset-request"] button[type="submit"]'), secondary = f.page.locator('[data-email-method="magic"]');
-  const first = await primary.boundingBox(), second = await secondary.boundingBox();
-  assert.ok(first && second);
-  assert.ok(second.y >= first.y + first.height + 8, 'secondary recovery action is below primary with a real gap');
-  assert.ok(Math.abs(first.x - second.x) < 1 && Math.abs(first.width - second.width) < 1, 'recovery choices occupy the same single column');
-  assert.ok(first.height >= 44 && second.height >= 44, 'both remain usable touch targets');
-  const sizes = await f.page.evaluate(() => ['[data-signin-form="reset-request"] button[type="submit"]', '[data-email-method="magic"]'].map(selector => parseFloat(getComputedStyle(document.querySelector(selector)).fontSize)));
-  assert.ok(sizes[1] < sizes[0], `magic link must be smaller: primary=${sizes[0]}px secondary=${sizes[1]}px`);
+  const primary = f.page.locator('[data-signin-form="reset-request"] button[type="submit"]');
+  const first = await primary.boundingBox();
+  assert.ok(first && first.height >= 44, 'password reset remains a usable touch target');
+  assert.equal(await f.page.locator('[data-email-method="magic"]').count(), 0, 'reset navigation does not qualify for email sign-in recovery');
   assert.equal(await f.page.locator('#auth-link-error').isVisible(), false, 'empty error block consumes no visible spacer');
 });
 
-test('unconfigured Google button returns to usable sign-in with an announced unavailable message', { timeout: 25000 }, async t => {
+test('unconfigured Google entry is hidden and a direct provider URL returns to usable sign-in', { timeout: 25000 }, async t => {
   const f = await setup(t);
-  await f.page.locator('#google-signin').click();
+  // The password form mounts before the asynchronous provider settings arrive.
+  await f.page.locator('#google-signin').waitFor({ state: 'hidden' });
+  assert.equal(await f.page.locator('#google-signin').isVisible(), false);
+  await f.page.goto(new URL('/api/auth/google/start', f.page.url()).href);
   await f.page.locator('#auth-error').filter({ hasText: 'Google sign-in isn’t available' }).waitFor();
   assert.equal(new URL(f.page.url()).pathname, '/');
   assert.equal(new URL(f.page.url()).searchParams.has('google'), false, 'one-shot failure query is scrubbed');

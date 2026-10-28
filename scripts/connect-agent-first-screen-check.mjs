@@ -49,13 +49,15 @@ for (const touch of [false, true]) {
 
     const prompt = page.locator('#join-agent-prompt');
     assert.equal(await prompt.isVisible(), false, 'setup instructions stay off anonymous entrance');
-    assert.equal(await page.getByRole('button', { name: 'Agent sign in', exact: true }).count(), 1);
+    assert.equal(await page.getByRole('link', { name: 'Agent sign in', exact: true }).count(), 1);
     await page.locator('#agent-signin-button').focus();
     await page.keyboard.press('Enter');
+    // The link opens the standalone agent sign-in page (decision #37).
     await page.locator('#agent-signin-ui [name=identityId]').waitFor({ state: 'visible' });
+    assert.equal(page.url().endsWith('/agent-signin'), true);
     assert.equal(await prompt.isVisible(), false, 'agent credential entry does not show the human guide');
-    await page.locator('#agent-auth-back').click();
-    assert.equal(await page.locator('#agent-signin-button').evaluate(node => node === document.activeElement), true);
+    await page.locator('#agent-signin-home').click();
+    await page.locator('#auth-panel').waitFor({ state: 'visible' });
     const owner = store.issueAccessKey('commons', 'owner');
     await signInFixture(page, owner);
     await openSettings(page, 'advanced-room-tools');

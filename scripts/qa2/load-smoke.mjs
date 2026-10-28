@@ -3,7 +3,9 @@
 // Usage: node scripts/qa2/load-smoke.mjs --origin http://127.0.0.1:4173 [--vus 20] [--seconds 30] [--json out.json]
 // Mixes anonymous reads (/, /llms.txt, /api/health) with one authenticated agent reading events and posting
 // at a gentle rate. Only point at production with --vus <= 3 (single Durable Object; see QA2 findings).
-// Thresholds (fail exit 1): p95 static <= 500 ms, p95 API read <= 800 ms, p95 post <= 1200 ms, error rate < 1% (429 counted separately).
+// Thresholds (fail exit 1): p95 static <= 500 ms, p95 API read <= 800 ms, p95 post <= 1200 ms,
+// failure rate (errors + 429s) < 1%, and every scenario kind must produce at least one successful
+// latency sample — a run that is entirely rate-limited has measured nothing and must not pass.
 import { argv, exit } from "node:process";
 import { randomUUID } from "node:crypto";
 import { writeFileSync } from "node:fs";
@@ -42,9 +44,13 @@ await fetch(`${R}/commands`, { method: "POST", headers: auth, body: JSON.stringi
 await fetch(`${origin}/api/agent-identities/${ident.identityId}/revoke`, { method: "POST", headers: auth, body: JSON.stringify({ confirm: true }) });
 const pct = (a, p) => { if (!a.length) return null; const s = [...a].sort((x, y) => x - y); return Math.round(s[Math.min(s.length - 1, Math.floor(p / 100 * s.length))]); };
 const budget = { static: 500, read: 800, post: 1200 };
-const report = { origin, vus, seconds, total, rps: Math.round(total / seconds), errors, rateLimited: limited, errorRate: total ? errors / total : 0 };
-let failed = report.errorRate >= 0.01;
-for (const k of Object.keys(samples)) { report[k] = { n: samples[k].length, p50: pct(samples[k], 50), p95: pct(samples[k], 95), p99: pct(samples[k], 99), budgetP95: budget[k] }; if (report[k].p95 !== null && report[k].p95 > budget[k]) failed = true; }
+const report = { origin, vus, seconds, total, rps: Math.round(total / seconds), errors, rateLimited: limited, errorRate: total ? errors / total : 0, rateLimitedRate: total ? limited / total : 0, failureRate: total ? (errors + limited) / total : 1 };
+// 429s are failures for pass/fail purposes: a rate-limited request did no work and
+// produced no latency sample, so counting it as a success would let a fully
+// throttled run pass with errorRate 0 and every p95 null (skipped).
+let failed = total === 0 || report.failureRate >= 0.01;
+for (const k of Object.keys(samples)) { report[k] = { n: samples[k].length, p50: pct(samples[k], 50), p95: pct(samples[k], 95), p99: pct(samples[k], 99), budgetP95: budget[k] }; if (report[k].n === 0) failed = true; if (report[k].p95 !== null && report[k].p95 > budget[k]) failed = true; }
+report.noSampleKinds = Object.keys(samples).filter(k => samples[k].length === 0);
 report.pass = !failed;
 console.log(JSON.stringify(report, null, 1));
 if (arg("json")) writeFileSync(arg("json"), JSON.stringify(report, null, 2));

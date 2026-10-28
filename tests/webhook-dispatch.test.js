@@ -107,6 +107,25 @@ test("classifyHttpStatus: 2xx delivered, 429/5xx/0 retry, other 4xx dead", () =>
   assert.throws(() => classifyHttpStatus(-1), WebhookDispatchError);
 });
 
+test("classifyHttpStatus never retries terminal 4xx: 409 is dead, not retried", async () => {
+  // QA200-MUT-18 probe A: a mutant that returned "retry" for 409 (a terminal
+  // 4xx, e.g. work_claim_conflict) passed the suite uncaught. A receiver that
+  // understood the request and refused it will refuse the identical bytes
+  // again, so every non-retryable 4xx is pinned dead here — 429 stays the one
+  // retryable 4xx.
+  for (const status of [400, 401, 403, 404, 405, 409, 410, 413, 415, 422]) {
+    assert.equal(classifyHttpStatus(status), "dead", `HTTP ${status} must be terminal`);
+  }
+  assert.equal(classifyHttpStatus(429), "retry");
+  // End to end: a 409 from the receiver dead-letters the delivery; it must
+  // never come back classified "retry" and burn attempts against a verdict.
+  const conflicted = await postDelivery({ fetchImpl: async () => ({ status: 409, text: async () => "work_claim_conflict" }),
+    url: "https://hooks.example.test/agent", envelope: {}, headers: {}, dnsResolvers: publicDns });
+  assert.equal(conflicted.ok, false);
+  assert.equal(conflicted.classification, "dead");
+  assert.match(conflicted.error, /work_claim_conflict/);
+});
+
 test("postDelivery returns ok on 2xx without throwing", async () => {
   const seen = [];
   const result = await postDelivery({

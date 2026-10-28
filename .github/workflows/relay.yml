@@ -1,7 +1,15 @@
 name: relay
 
 on:
+  # PRs run relay checks only when the relay or the code its checks import
+  # changes. Main pushes stay unfiltered, so a regression is still caught.
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    paths:
+      - "relay/**"
+      - "machine/**"
+      - "server/work-claim*.mjs"
+      - ".github/workflows/relay.yml"
   push:
     branches: [main]
 
@@ -9,11 +17,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || github.run_id }}
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number || (github.event_name == 'push' && github.ref) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   relay:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -21,6 +30,8 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
       - run: npm ci --prefix relay
       - name: Relay workerd tests
         working-directory: relay

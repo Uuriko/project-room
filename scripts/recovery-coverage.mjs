@@ -1,4 +1,5 @@
 import {seedRecordRails} from "./record-rails-fixture.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 // The rows the recovery audit requires. Shared with the cold-start budget so
 // a wake is measured against a store that has every application table, not
 // only the event log. Disposable synthetic data only.
@@ -38,7 +39,8 @@ export async function seedRecoveryCoverage(f) {
   });
   f.store.db.prepare("INSERT INTO share_link_codes(code_hash,link_id,created_at) VALUES(?,?,?)")
     .run(createHash("sha256").update("ABCDEFGHJ").digest("hex"), f.link.link.id, f.now());
-  const { identityId } = f.store.identities.create("Recovery agent");
+  const recoveryAgent = f.store.identities.create("Recovery agent");
+  const { identityId } = recoveryAgent;
   // Opt-in public pages stay empty. The receipt and directory tables still
   // need a row so the recovery audit and the cold-start budget see them.
   const at = new Date(f.now()).toISOString();
@@ -48,8 +50,26 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO public_directory_entries
     (agent_id, name, description, skills_json, identity_id, receipt_count, room_count, updated_at)
     VALUES ('recovery-public-agent', 'Recovery agent', '', '[]', ?, 1, 1, ?)`).run(identityId, at);
-  f.store.identities.link(f.keys.owner, "commons", { identityId, permissions: ["steer"] });
+  linkWithProof(f.store, f.keys.owner, "commons", recoveryAgent, { permissions: ["steer"] });
   f.store.invites.create(f.keys.owner, "commons", { permissions: ["steer"] });
+  // Seed the pairing tables (a98c987d) through the real pairing flow so the
+  // capture comparison and the cold-start budget cover pairs,
+  // pair_code_locks, agent_member_keys and room_join_policy with
+  // production-shaped rows, not empty sidecars. The owner records the room's
+  // join policy explicitly, a key-carrying agent pairs and is approved
+  // (admission binds its key), and one wrong code afterwards leaves the
+  // failure-journal row a real room accumulates. The wrong code runs last:
+  // a successful decision clears the lock row.
+  f.store.pairing.setPolicy(f.keys.owner, "commons", "approve");
+  const pairKey = generateKeyPair();
+  const pairStart = f.store.pairing.start({ roomId: "commons", displayName: "Recovery pair agent", publicKey: pairKey.publicKey });
+  f.store.pairing.decide(f.keys.owner, "commons", { pairId: pairStart.pairId, decision: "approve", profile: "contribute" });
+  try {
+    f.store.pairing.decide(f.keys.owner, "commons", { userCode: "ZZZZ-ZZZZ", decision: "deny" });
+    throw new Error("a wrong pair code was accepted");
+  } catch (error) {
+    if (error.code !== "not_found") throw error;
+  }
   f.store.agentHeartbeats.heartbeat({ agentId: identityId, hostId: "recovery-work-host", mode: "pull-only", workWakes: true });
   f.store.command(f.keys.owner, "commons", { id: "recovery-work-command", type: "work.proposed", data: { workItemId: "recovery-work",
     title: "Recovery work", definitionOfDone: "Recovered", mode: "read", accountableMemberId: identityId } });
@@ -298,6 +318,8 @@ export async function seedRecoveryCoverage(f) {
   f.store.db.prepare(`INSERT INTO mention_states(room_id,message_event_id,mentioned_member_id,state,created_at,timeout_at,decided_at)
     VALUES('commons','recovery-mention-msg','agent','delivered',?,?,NULL)`)
     .run(f.now(), f.now() + 30 * 60 * 1000);
+  f.store.db.prepare(`INSERT INTO mention_observations(room_id,message_event_id,mentioned_member_id,acknowledged,acknowledged_at)
+    VALUES('commons','recovery-mention-msg','agent',1,?)`).run(f.now());
   f.store.db.prepare(`INSERT INTO room_mention_settings(room_id,timeout_ms,updated_at)
     VALUES('commons',?,?)`)
     .run(30 * 60 * 1000, f.now());
@@ -305,6 +327,11 @@ export async function seedRecoveryCoverage(f) {
   // activity_events, read_horizons, saved_messages, and thread_mutes.
   f.store.db.prepare(`INSERT INTO activity_events(room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at)
     VALUES('commons','mention','agent','Recovery agent','recovery-reported','','owner',?,NULL)`)
+    .run(f.now());
+  // Seed one pending fan-out failure journal row (#3261) so the capture
+  // comparison and cold-start coverage include activity_fanout_failures.
+  f.store.db.prepare(`INSERT INTO activity_fanout_failures(room_id,event_id,command_type,actor_id,payload,error,created_at,recovered_at)
+    VALUES('commons','recovery-reported','message.posted','agent','{}','synthetic fan-out failure',?,NULL)`)
     .run(f.now());
   f.store.db.prepare(`INSERT INTO read_horizons(room_id,member_id,thread_id,last_read_message_id,updated_at)
     VALUES('commons','owner','','recovery-reported',?)`)
@@ -392,6 +419,14 @@ export async function seedRecoveryCoverage(f) {
      mergeable, behind, checks_state, observed, created_at, updated_at)
     VALUES ('commons', 'lq_recovery', 'acme/widgets', 7, 'owner', 'owner', 'Recovery PR', ?, 'unknown', 0, 'pending', 1, ?, ?)`)
     .run("a".repeat(40), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO land_queue_idempotency
+    (room_id, request_id, op, actor_member_id, input_hash, status, response, created_at, updated_at)
+    VALUES ('commons', 'recovery-land-req', 'add_land_item', 'owner', ?, 1, '{"duplicate":false}', ?, ?)`)
+    .run("b".repeat(64), f.now(), f.now());
+  f.store.db.prepare(`INSERT INTO agent_invite_redeem_receipts
+    (request_id, code_hash, identity_id, room_id, member_id, display_name, permissions_json, created_at)
+    VALUES ('recovery-redeem-req', ?, ?, 'commons', 'owner', 'Recovery', '[]', ?)`)
+    .run("c".repeat(64), identityId, f.now());
   // telegram_live_status (durable Telegram live-delivery/send facts, task 10).
   // Synthetic data only: the recovery account received 3 updates and its last
   // send succeeded, so the capture covers the new table.

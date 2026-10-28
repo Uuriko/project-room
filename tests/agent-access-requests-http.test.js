@@ -59,7 +59,7 @@ test("access-requests next[] teaches decide-request for a pending request", asyn
   const reqRes = await post(origin, "/api/access-requests", {
     roomId, identityId: friend.identityId, displayName: "Friend",
     requestedPermissions: ["accept_work"], note: null, requestId: "ar-req-1",
-  });
+  }, friend.secret);
   assert.equal(reqRes.status, 201);
   const res = await get(origin, `/api/rooms/${roomId}/access-requests`, ownerSecret);
   assert.equal(res.status, 200);
@@ -73,10 +73,11 @@ test("access-requests next[] teaches decide-request for a pending request", asyn
   assert.ok(decide.description.includes("approve"), "decide-request shows the decision");
 });
 
-test("access-requests ignores an Authorization header on the public route (E2)", async t => {
+test("access-requests accepts the identity's own Authorization header (E2)", async t => {
   // QA 2026-09-28: agents attach a bearer everywhere (the packet tells them
-  // to send it on every MCP POST). POST /api/access-requests is documented
-  // "Public: no credential required" — a header must not turn into a 422.
+  // to send it on every MCP POST). POST /api/access-requests requires the
+  // filing identity's own secret as Bearer (issue #2912) — the header the
+  // packet already teaches must file the request, not turn into a 422.
   const fixture = createAcceptanceFixture();
   const origin = await startServer(t, fixture);
   const { roomId } = await ownerRoom(origin, fixture);
@@ -105,7 +106,7 @@ test("access-requests 422 names the missing field (RC-2026-09-28-3410)", async t
   const res = await post(origin, "/api/access-requests", {
     identityId: friend.identityId, displayName: "Missing",
     requestedPermissions: ["accept_work"], requestId: "ar-missing-1",
-  });
+  }, friend.secret);
   assert.equal(res.status, 422);
   const json = await res.json();
   assert.ok(json.error.message.includes("missing required field: roomId"), "422 names the missing field");
@@ -121,7 +122,7 @@ test("access-requests 422 names the unexpected field (RC-2026-09-28-3410)", asyn
     roomId, identityId: friend.identityId, displayName: "Unexpected",
     requestedPermissions: ["accept_work"], requestId: "ar-unexpected-1",
     zzzUnknown: true,
-  });
+  }, friend.secret);
   assert.equal(res.status, 422);
   const json = await res.json();
   assert.ok(json.error.message.includes("unexpected field: zzzUnknown"), "422 names the unexpected field");
@@ -135,7 +136,7 @@ test("access-requests 422 names the invalid field (RC-2026-09-28-3410)", async t
   const res = await post(origin, "/api/access-requests", {
     roomId, identityId: friend.identityId, displayName: "Invalid",
     requestedPermissions: "accept_work", requestId: "ar-invalid-1",
-  });
+  }, friend.secret);
   assert.equal(res.status, 422);
   const json = await res.json();
   assert.ok(json.error.message.includes("requestedPermissions: wrong type"), "422 names the invalid field and reason");
@@ -151,7 +152,7 @@ test("access-requests accepts the 4-required-field shape: note and requestId opt
   const res = await post(origin, "/api/access-requests", {
     roomId, identityId: friend.identityId, displayName: "Minimal",
     requestedPermissions: ["accept_work"],
-  });
+  }, friend.secret);
   assert.equal(res.status, 201);
   const json = await res.json();
   assert.ok(json.requestId, "server mints requestId when omitted");
@@ -170,7 +171,7 @@ test("access-requests still accepts the legacy 6- and 7-field shapes (RC-2026-09
     const res = await post(origin, "/api/access-requests", {
       roomId, identityId: friend.identityId, displayName: "Legacy",
       requestedPermissions: ["accept_work"], ...body,
-    });
+    }, friend.secret);
     assert.equal(res.status, 201, `${label} shape still files`);
   }
 });

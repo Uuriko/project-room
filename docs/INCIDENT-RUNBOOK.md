@@ -1,8 +1,8 @@
 # Incident Runbook — project-room
 
 How we declare, run, communicate, and learn from incidents. Companion docs:
-- `docs/history/SAFE-DIAGNOSTICS.md` — approved diagnostic commands
-- `docs/history/V8-RECOVERY-RUNBOOK.md` — disaster recovery (restore-from-backup procedures)
+- `archive/docs/history/SAFE-DIAGNOSTICS.md` — approved diagnostic commands
+- `archive/docs/history/V8-RECOVERY-RUNBOOK.md` — disaster recovery (restore-from-backup procedures)
 - `docs/SECRETS-ROTATION.md` — credential-leak response
 
 There is no external uptime monitor or paging integration: the monitoring we
@@ -95,7 +95,7 @@ go fix it. Do not run commands that mutate state until you've named a theory.
    Confirm suspected dependencies directly (is SQLite writable? is GitHub
    reachable?) instead of hunting a `checks[]` table that no longer exists.
 4. **Logs.** With a theory in hand, look at the app logs around the alert time
-   (see `docs/history/SAFE-DIAGNOSTICS.md` for the approved read-only commands). Never
+   (see `archive/docs/history/SAFE-DIAGNOSTICS.md` for the approved read-only commands). Never
    `tail -f` a SEV1 into confusion — sample a bounded window and paste the
    relevant lines into the incident log.
 5. **Stop and reassess.** If the first 30 minutes produce no theory, the IC

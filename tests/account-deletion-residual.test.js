@@ -152,3 +152,42 @@ test("deletion plan discloses the new purge categories", t => {
   }
   assert.match(RETENTION_POLICY.summary, /private inbox/i);
 });
+
+// WAVE-500 G1 (2026-10-10) added bounty_journal to self-serve deletion to
+// mirror the operator purge; #3550 reversed that for this table: every
+// journal entry is one leg of a two-account movement, so deleting the
+// account's legs orphaned counterparty legs and broke the journal's hash
+// chain / conservation audit. The journal is now retained under legal hold
+// like the inbox command receipts (see the acceptance coverage in
+// tests/account-deletion-bounty-journal.test.js for the full
+// fund -> settle -> delete -> chain-still-validates scenario).
+function seedAccountJournals(store, A) {
+  const db = store.db;
+  db.prepare(`INSERT INTO bounty_journal(room_id,entry_id,account_id,at,kind,amount,lot_state,prev_hash,hash,memo)
+    VALUES('commons','bj1',?,'2026-10-10','attributed',2500,'attributed','p','h','bounty payout')`).run(A);
+}
+
+test("bounty journal legs are retained (tombstoned) on self-serve account deletion", t => {
+  const { store, A } = setup(t);
+  seedAccountJournals(store, A);
+  const inventory = inventoryFromStore(store, A);
+  assert.equal(inventory.bounty_journal?.itemCount, 1, "bounty_journal counted in the deletion inventory");
+  assert.ok(inventory.bounty_journal.legalHold, "bounty_journal is a legal-hold (retained) category");
+  const result = deleteAccount(store, A);
+  const db = store.db;
+  assert.equal(db.prepare("SELECT count(*) AS n FROM bounty_journal WHERE account_id=?").get(A).n, 1,
+    "bounty journal legs stay in place (#3550)");
+  assert.ok(result.retained.some(r => r.category === "bounty_journal"), "deletion result reports the journal as retained");
+  assert.ok(!result.purged.some(r => r.category === "bounty_journal"), "deletion result does not report the journal as purged");
+});
+
+test("deletion plan and retention policy disclose the bounty journal retention", t => {
+  const { store, A } = setup(t);
+  seedAccountJournals(store, A);
+  const { plan } = planAccountDeletion(store, A);
+  assert.ok(plan.categories.includes("bounty_journal"), "plan includes bounty_journal");
+  const step = plan.steps.find(s => s.category === "bounty_journal");
+  assert.equal(step.action, "retain", "bounty_journal plan step retains, never purges");
+  assert.ok(RETENTION_POLICY.retained.some(e => e.category === "bounty_journal"), "retention policy discloses bounty_journal retention");
+  assert.ok(!RETENTION_POLICY.purged.some(e => e.category === "bounty_journal"), "retention policy no longer promises journal deletion");
+});

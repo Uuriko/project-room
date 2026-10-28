@@ -14,7 +14,7 @@ const http = readFileSync("server/http.mjs", "utf8");
 const worker = readFileSync("cloudflare/room.mjs", "utf8");
 const pluginRoutes = readFileSync("server/agent-plugin-routes.mjs", "utf8");
 const nextActionsRoutes = readFileSync("server/next-actions-routes.mjs", "utf8");
-const discovery = readFileSync("deploy/agent-discovery.mjs", "utf8");
+const discovery = readFileSync("server/agent-discovery.mjs", "utf8");
 const hostMatrix = readFileSync("docs/HOST-MATRIX.md", "utf8");
 const agentError = readFileSync("src/agent-error.mjs", "utf8");
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
@@ -47,7 +47,7 @@ test("every quickstart API example is an operation in the OpenAPI contract", () 
 test("non-API quickstart endpoints are served by the documented discovery surface", () => {
   const wellKnown = [...quickstart.matchAll(/^(GET) (\/.well-known\/\S+)/gm)].map(m => m[2]);
   assert.ok(wellKnown.length >= 1, "quickstart well-known sanity");
-  for (const path of wellKnown) assert.ok(discovery.includes(`"${path}"`), `${path} missing from deploy/agent-discovery.mjs`);
+  for (const path of wellKnown) assert.ok(discovery.includes(`"${path}"`), `${path} missing from server/agent-discovery.mjs`);
 });
 
 test("every OpenAPI path is a route template the server serves, and every served template is documented", () => {

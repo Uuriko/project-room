@@ -15,7 +15,7 @@
 // in server/writer-fence.mjs, advanced by the 0→34 migration chain in
 // server/store.mjs (recovery.mjs requires the version to equal it exactly).
 // This module owns the column and its data only — never PRAGMA user_version.
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, isReservedId, ROOM_KINDS, roomKind, isRoomArchived, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
 import { ServiceError, provisionalAccountPrefix } from "./store.mjs";
 import { accountRoomCredits, GROWTH_ROOM_ORIGIN } from "./growth-loop.mjs";
 import { getRoomTemplate } from "./templates.mjs";
@@ -38,7 +38,7 @@ const hasArchivedColumn = db => /\barchived_at\b/.test(db.prepare("SELECT sql FR
 export function migrateRoomLifecycleV28(store) {
   store.transaction(() => {
     if (!hasArchivedColumn(store.db)) store.db.exec("ALTER TABLE rooms ADD COLUMN archived_at TEXT");
-    store.db.prepare("UPDATE rooms SET archived_at=json_extract(projection,'$.room.archivedAt') WHERE archived_at IS NOT json_extract(projection,'$.room.archivedAt')").run();
+    store.db.prepare("UPDATE rooms SET archived_at=json_extract(projection,'$.room.archivedAt') WHERE json_valid(projection) AND archived_at IS NOT json_extract(projection,'$.room.archivedAt')").run();
   });
 }
 
@@ -46,7 +46,10 @@ export function migrateRoomLifecycleV28(store) {
 // and agrees with every projection. Read-only never migrates or repairs.
 export function verifyRoomLifecycle(store) {
   if (!hasArchivedColumn(store.db)) throw new Error("Room lifecycle schema requires operator reconciliation");
-  if (store.db.prepare("SELECT 1 FROM rooms WHERE archived_at IS NOT json_extract(projection,'$.room.archivedAt') LIMIT 1").get()) {
+  // #4126: a room whose projection is unreadable is quarantined at boot and
+  // named in the quarantine record; it cannot agree or disagree here, so it
+  // is excluded instead of throwing malformed JSON over the whole boot.
+  if (store.db.prepare("SELECT 1 FROM rooms WHERE json_valid(projection) AND archived_at IS NOT json_extract(projection,'$.room.archivedAt') LIMIT 1").get()) {
     throw new Error("Room lifecycle requires operator reconciliation");
   }
 }
@@ -85,6 +88,10 @@ export function createAccountRoom(store, token, binding, request) {
     fail(422, "invalid_room_request", "Supply roomId, title, purpose, kind and displayName");
   }
   const { roomId, kind } = request;
+  // #3013: a reserved prototype name (validId's denylist) is not a charset
+  // or length failure — name the real cause so API consumers are not told
+  // their letters/underscores are illegal characters.
+  if (isReservedId(roomId)) fail(422, "reserved_room_id", "Room id is reserved and cannot be used; choose a different room id");
   if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "Room id must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
   if (!text(request.title, 120)) fail(422, "invalid_room_request", "Room name must be 1 to 120 characters");
   if (!text(request.purpose, 1000, true)) fail(422, "invalid_room_request", "Room purpose must be 1 to 1000 characters");
@@ -122,7 +129,7 @@ export function createAccountRoom(store, token, binding, request) {
       const bound = store.db.prepare("SELECT member_id FROM member_accounts WHERE room_id=? AND account_id=?").get(roomId, accountId);
       const state = bound ? store.room(roomId).state : null;
       const same = state && state.room.ownerId === bound.member_id && state.room.title === title && state.room.purpose === purpose
-        && roomKind(state.room) === kind && state.members[bound.member_id]?.displayName === displayName;
+        && roomKind(state.room) === kind && ownMember(state.members, bound.member_id)?.displayName === displayName;
       if (!same) fail(409, "room_exists", "That room id is already in use");
       if (wantsStarter) seedStarterForNewAccount(store, accountId, { intent, templateSlug, roomId, ownerMemberId: bound.member_id, start });
       return view(bound.member_id, true);
@@ -134,20 +141,23 @@ export function createAccountRoom(store, token, binding, request) {
     if (memberships.length > 0) store.accountLogins.assertEmailVerified(accountId);
     // The same per-room check discovery uses (active human membership with its
     // invitation evidence intact), then owner or manage_members in that room.
-    // Zero memberships means a stranger's first room: always allowed, they
-    // become its owner. An account that already belongs to rooms keeps the
+    // No active memberships means a first room: allowed (an old, inactive
+    // audit binding is not current membership). An account still in rooms keeps the
     // administration requirement for additional rooms.
     // A growth-funded room does not count as administering one: owning it
     // must not unlock the ordinary 100-room allowance.
     let foundedWithGrowth = false;
-    const naturallyAdministers = memberships.length === 0 || memberships.some(({ room_id }) => {
-      const origin = store.db.prepare("SELECT origin FROM member_accounts WHERE room_id=? AND account_id=?").get(room_id, accountId)?.origin;
-      if (origin === GROWTH_ROOM_ORIGIN) return false;
+    let activeMemberships = 0;
+    const administers = memberships.some(({ room_id }) => {
       let member;
       try { member = store.authenticateAccountSession(token, room_id, binding).member; }
       catch (error) { if (error.status === 403) return false; throw error; }
+      activeMemberships += 1;
+      const origin = store.db.prepare("SELECT origin FROM member_accounts WHERE room_id=? AND account_id=?").get(room_id, accountId)?.origin;
+      if (origin === GROWTH_ROOM_ORIGIN) return false;
       return member.id === store.roomAuthority(room_id).ownerId || member.permissions.includes("manage_members");
     });
+    const naturallyAdministers = activeMemberships === 0 || administers;
     if (!naturallyAdministers) {
       const credits = accountRoomCredits(store, accountId);
       const growthRooms = store.db.prepare("SELECT count(*) AS n FROM member_accounts WHERE account_id=? AND origin=?").get(accountId, GROWTH_ROOM_ORIGIN).n;

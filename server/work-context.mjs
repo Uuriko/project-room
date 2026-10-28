@@ -4,6 +4,7 @@ import { validateHelp, workHelpContext } from "../src/work-help.js";
 import { workOffersContext } from "../src/help-offers.js";
 import { sessionRecord, budgetCard, presentedSessionStatus } from "../src/work-item-session.js";
 import { markIfOther, withContentTrust } from "./content-trust.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 
 // The exact omissions every selected read reports; the access summary repeats the same list.
 export const WORK_CONTEXT_OMISSIONS = Object.freeze(["other_work", "other_messages", "event_history", "prior_receipts_and_checks", "private_reminders", "read_marker"]);
@@ -84,13 +85,16 @@ export function accessSummary({ item, linked, participantIds }) {
 
 // An authenticated selected read, not the deliberately narrower portable export.
 // All input comes from one committed Room projection and one service clock.
-export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false }) {
+export function selectedWorkContext({ state, workItemId, viewerId, sequence, now, includeSource = false, includeOffers = false, floor = null, messageRecords = null }) {
   if (!Object.hasOwn(state.workItems, workItemId) || !Object.hasOwn(state.members, viewerId)) throw new RangeError("Choose existing work and membership");
   const item = state.workItems[workItemId], member = state.members[viewerId], work = currentWorkRecord(item);
   // Work assignment does not expand a targeted message's audience. Apply the
   // same participant boundary to delivered source, preview and inferred people.
-  const linked = item.sourceMessageId ? state.messages.find(message => message.id === item.sourceMessageId
-    && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId)) ?? null : null;
+  const candidate = item.sourceMessageId ? (messageRecords
+    ? messageRecords.get(item.sourceMessageId)
+    : state.messages.find(message => message.id === item.sourceMessageId)) : null;
+  const linked = candidate && (!candidate.toMemberId || candidate.authorId === viewerId || candidate.toMemberId === viewerId)
+    && messageInHistory(candidate, floor) ? candidate : null;
   const message = includeSource ? linked : null;
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };

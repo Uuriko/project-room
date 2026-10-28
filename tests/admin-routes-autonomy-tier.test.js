@@ -57,7 +57,7 @@ test("t1_readonly delegate cannot decide access requests; owner still can", asyn
   const requests = new AccessRequests(f.store, { rateLimiter: createRateLimiter({ capacity: 1000, refillPerSecond: 1000 }) });
   const ask = name => {
     const identity = f.store.identities.create(name);
-    return requests.request("commons", { identityId: identity.identityId, displayName: name, requestedPermissions: ["accept_work"], requestId: `ar_${name}` });
+    return requests.request("commons", { identityId: identity.identityId, displayName: name, requestedPermissions: ["accept_work"], requestId: `ar_${name}` }, identity.secret);
   };
   const first = ask("first"), second = ask("second");
   f.demote("agent");

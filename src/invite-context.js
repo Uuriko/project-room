@@ -11,11 +11,57 @@
 //
 // Side-effect-free: storage and location parts are passed in, so these are
 // unit-testable without a browser.
+import { normalizeShareInviteCode } from "./share-invite-code.js";
 
 export const PENDING_INVITE_KEY = "pr-pending-invite";
 
 const INVITE_FRAGMENT_PATTERN = /^#invite\/[A-Za-z0-9_-]{43}$/;
 const INVITE_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+
+// Agent-invite codes (RM- + Crockford base32, minted by the "invite agents"
+// UI and redeemed by src/join.js). The SPA's invitation dialog only speaks
+// #invite/<43-char human share-link token>; a #invite/RM-<code> fragment —
+ // e.g. pasted by a human who guessed the SPA's fragment form, or carried in
+// a magic-link destination — currently renders "This invitation link is
+// unavailable." before any API call, even though the code is perfectly
+// redeemable. agentInviteJoinPath() maps that dead-end fragment onto the
+// real join page so the SPA redirects instead of stranding the invitee.
+export const AGENT_INVITE_CODE_PATTERN = /^RM-[A-Z0-9]+$/;
+
+// A pasted or re-typed agent-invite code is not always the minted uppercase
+// shape: chat apps and humans lowercase it, paste it with whitespace or a
+// trailing slash, or append tracker junk after the fragment. The server
+// folds case and trims (server/agent-invites.mjs) and the /join page
+// uppercases (parseJoinCode), so the SPA's #invite/ detector must be at
+// least as tolerant — otherwise a redeemable code dead-ends on "This
+// invitation link is unavailable." before any API call.
+//
+// Pure: decode, trim, cut trailing query/fragment/slash junk, fold case,
+// and return the canonical RM- code, or null. The 43-char human tokens are
+// case-sensitive secrets and never pass through here.
+export function normalizeAgentInviteCode(candidate) {
+  let text = String(candidate ?? "");
+  try { text = decodeURIComponent(text); } catch { /* keep raw; the pattern rejects garbage */ }
+  text = text.trim().split(/[?#\s/]/)[0] ?? "";
+  // A 43-char human share-link token is case-sensitive and redeemable only
+  // by the SPA's invitation dialog — never hijack one that happens to start
+  // with "rm-" (base64url can produce that prefix).
+  if (/^[A-Za-z0-9_-]{43}$/.test(text)) return null;
+  const code = text.toUpperCase();
+  return AGENT_INVITE_CODE_PATTERN.test(code) ? code : null;
+}
+
+// Pure: returns the door-aware join path for a #invite/RM-<code> fragment,
+// or null for anything else. pathname selects the www-door /room prefix
+// (mirrors src/join.js serviceApiBase/parseJoinCode conventions).
+export function agentInviteJoinPath(hash, pathname) {
+  const raw = /^#invite\/([\s\S]*)$/.exec(String(hash ?? ""))?.[1];
+  const code = normalizeAgentInviteCode(raw);
+  if (!code) return null;
+  const p = String(pathname ?? "");
+  const door = (p === "/room" || p.startsWith("/room/")) ? "/room" : "";
+  return [door, "/join/", code].join("");
+}
 
 // Mirror the invitation secret at OAuth-start so the round-trip cannot drop
 // it. Called only from the OAuth entry points — never on invitation preview.
@@ -32,8 +78,13 @@ export function clearPendingInvite(storage) {
 
 // One-shot restore for boot: returns { valid: true, secret } when a stashed
 // invitation should be re-opened, else null. Always consumes the stash.
-// Never restores over an existing invite hash or an active room landing —
-// a member who lands in a room keeps their session undisturbed.
+// Never restores over an existing invite hash or a #room/ deep link.
+//
+// A ?room= search does NOT block the restore: the stash is written only at
+// OAuth start and consumed by the very next boot, and the Google/GitHub
+// callback lands every returning member who already has a room on
+// /?room=<first room>. Skipping ?room= dropped the friend's link for every
+// returning member (only brand-new accounts land on /?account=1).
 export function takeRestoredInvite({ storage, hash, search }) {
   let pending = null;
   try {
@@ -43,7 +94,6 @@ export function takeRestoredInvite({ storage, hash, search }) {
   if (typeof pending !== "string" || !INVITE_FRAGMENT_PATTERN.test(pending)) return null;
   if (typeof hash === "string" && hash.startsWith("#invite/")) return null;
   if (typeof hash === "string" && /^#room\/[A-Za-z0-9]/.test(hash)) return null;
-  if (typeof search === "string" && /(^|[?&])room=/.test(search)) return null;
   return { valid: true, secret: pending.slice("#invite/".length) };
 }
 
@@ -64,15 +114,21 @@ export function takeRestoredInvite({ storage, hash, search }) {
 
 export const PENDING_JOIN_KEY = "pr-pending-join";
 
-// #join/<43-char token> with the optional purpose focus (#join/<token>/work/<id>
+// #join/<token or legacy code> with optional purpose focus (#join/<token>/work/<id>
 // or /message/<id>). The fragment never leaves the browser, so the raw token
-// may touch sessionStorage only for the OAuth round-trip.
-const JOIN_FRAGMENT_PATTERN = /^#join\/[A-Za-z0-9_-]{43}(\/(work|message)\/[^/?#]+)?$/;
+// may touch sessionStorage only while a join attempt is live: the OAuth
+// round-trip, or the Join dialog before sign-in (mirrored at open, cleared
+// when the dialog settles; see share-links.js mirrorJoin).
+function isJoinFragment(value) {
+  const token = typeof value === "string" && /^#join\/([^/?#]+)(\/(work|message)\/[^/?#]+)?$/.exec(value)?.[1];
+  return Boolean(token && (INVITE_SECRET_PATTERN.test(token) || normalizeShareInviteCode(token)));
+}
 
-// Mirror the join fragment at OAuth-start so the round-trip cannot drop it.
-// Called only from the OAuth entry points — never on invitation preview.
+// Mirror the join fragment so a navigation that drops it cannot lose it:
+// at OAuth-start (the round-trip never carries the fragment) and while the
+// Join dialog holds the link before sign-in. Never on invitation preview.
 export function stashPendingJoin(storage, fragment) {
-  if (!storage || typeof fragment !== "string" || !JOIN_FRAGMENT_PATTERN.test(fragment)) return;
+  if (!storage || !isJoinFragment(fragment)) return;
   try { storage.setItem(PENDING_JOIN_KEY, fragment); } catch { /* storage unavailable */ }
 }
 
@@ -84,19 +140,19 @@ export function clearPendingJoin(storage) {
 
 // One-shot restore for boot: returns { valid: true, fragment } when a stashed
 // join link should be re-opened, else null. Always consumes the stash.
-// Never restores over a fresh #join/ or #invite/ hash or an active room
-// landing — a member who lands in a room keeps their session undisturbed, and
-// a freshly opened link always wins over a stale stash.
+// Never restores over a fresh #join/, #code/ or #invite/ hash or a #room/ deep link —
+// a freshly opened link always wins over a stale stash. A ?room= search does
+// not block it: that is the OAuth callback's landing for a returning member
+// (see takeRestoredInvite).
 export function takeRestoredJoin({ storage, hash, search }) {
   let pending = null;
   try {
     pending = storage?.getItem(PENDING_JOIN_KEY) ?? null;
     storage?.removeItem(PENDING_JOIN_KEY);
   } catch { return null; }
-  if (typeof pending !== "string" || !JOIN_FRAGMENT_PATTERN.test(pending)) return null;
-  if (typeof hash === "string" && (hash.startsWith("#join/") || hash.startsWith("#invite/"))) return null;
+  if (!isJoinFragment(pending)) return null;
+  if (typeof hash === "string" && (hash.startsWith("#join/") || hash.startsWith("#code/") || hash.startsWith("#invite/"))) return null;
   if (typeof hash === "string" && /^#room\/[A-Za-z0-9]/.test(hash)) return null;
-  if (typeof search === "string" && /(^|[?&])room=/.test(search)) return null;
   return { valid: true, fragment: pending };
 }
 
@@ -127,14 +183,12 @@ export function inviteRequestDoor(preview) {
   return { roomId: preview.roomId, roomTitle: preview.roomTitle || "Project Room" };
 }
 
-// The permissions a stranger asks for: what the dead invitation would have
-// granted, falling back to a minimal ask when the preview carries none. The
-// owner still chooses the final grant at decision time.
+// The permissions the consolidated request-access door asks for: a
+// minimal ask; the owner chooses the final grant at decision time.
+// (The dead-invite dialog used to ask for the dead invitation's own
+// permissions via a defaultRequestPermissions helper — retired with
+// its inline form in #3293 step 3: a dead grant is not a live intent.)
 export const FALLBACK_REQUEST_PERMISSIONS = Object.freeze(["accept_work"]);
-export function defaultRequestPermissions(preview) {
-  const fromInvite = Array.isArray(preview?.permissions) ? preview.permissions.filter(p => typeof p === "string" && p) : [];
-  return fromInvite.length ? fromInvite : [...FALLBACK_REQUEST_PERMISSIONS];
-}
 
 // Client-side mirror of the server's displayName/note limits, so the form
 // fails fast before any network call.

@@ -257,6 +257,42 @@ test("outcome recording pays the filer +10 and confirms the reviewer", () => {
   throwsCode(() => store.recordOutcome({ feedbackIds: [r.item.id], kind: "merged", ref: "PR #123", recordedBy: "reviewer-a" }), "invalid_transition");
 });
 
+test("recordOutcome validates every id before paying any: a bad later id leaves earlier ids untouched and retryable", () => {
+  const store = createFeedbackStore();
+  const r1 = store.submit(goodFiling());
+  store.triage(r1.item.id, "real", "reviewer-a");
+  // A second, never-triaged filing: a distinct bug, so its own cluster.
+  const other = goodFiling();
+  other.attempt.response = { status: 500, body: { code: "internal_error" } };
+  const r2 = store.submit(other);
+  const filerBefore = store.mark("jill").balance;
+  const reviewerBefore = store.mark("reviewer-a").balance;
+  store.drainNotifications("jill");
+  // Unknown second id: the whole call must fail before any payout.
+  throwsCode(
+    () => store.recordOutcome({ feedbackIds: [r1.item.id, "fb_missing"], kind: "merged", ref: "PR #123", recordedBy: "reviewer-a" }),
+    "not_found");
+  // Unpromoted second id: same, with invalid_transition.
+  throwsCode(
+    () => store.recordOutcome({ feedbackIds: [r1.item.id, r2.item.id], kind: "merged", ref: "PR #123", recordedBy: "reviewer-a" }),
+    "invalid_transition");
+  // Repeated id: the second occurrence can never be "promoted" once the
+  // first has transitioned, so it must also fail before any payout.
+  throwsCode(
+    () => store.recordOutcome({ feedbackIds: [r1.item.id, r1.item.id], kind: "merged", ref: "PR #123", recordedBy: "reviewer-a" }),
+    "invalid_transition");
+  assert.equal(store.get(r1.item.id).status, "promoted", "the valid first id was not transitioned by the failed calls");
+  assert.equal(store.mark("jill").balance, filerBefore, "no merge bonus was paid by the failed calls");
+  assert.equal(store.mark("reviewer-a").balance, reviewerBefore, "no reviewer confirmation was paid by the failed calls");
+  assert.ok(!store.drainNotifications("jill").some(n => n.type === "feedback-shipped"),
+    "no shipped notification was sent by the failed calls");
+  // The retry the bug used to break: the valid id alone now records cleanly.
+  const o = store.recordOutcome({ feedbackIds: [r1.item.id], kind: "merged", ref: "PR #123", recordedBy: "reviewer-a" });
+  assert.equal(o.attributions.length, 1);
+  assert.equal(store.get(r1.item.id).status, "merged");
+  assert.equal(store.mark("jill").balance, filerBefore + MARK_MERGE_BONUS);
+});
+
 test("promotions that never ship go stale (precision signal, no Mark penalty)", () => {
   let nowMs = Date.now();
   const store = createFeedbackStore({ now: () => nowMs });

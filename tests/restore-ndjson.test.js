@@ -1,0 +1,443 @@
+// H2 backup/DR: whole-store NDJSON restore into an already-open store.
+// The Durable Object cannot accept a sqlite file, so restore must replay the
+// NDJSON export (server/room-export.mjs format) through the store's own db
+// handle. replayNdjson (file-based, node-only) cannot cover that contract;
+// these tests own the into-an-open-store path plus the operator endpoint.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { RoomStore } from "../server/store.mjs";
+import { initialRoom } from "../server/bootstrap.mjs";
+import { exportNdjsonText } from "../server/room-export.mjs";
+import { replayNdjsonInto, operatorRestoreResponse, RESTORE_MAX_BYTES } from "../server/restore-ndjson.mjs";
+import { withPublicWorkClaimWriter } from "../server/public-work-claim-fence.mjs";
+import { createWork } from "../server/work-claims.mjs";
+import { EVENT_TYPES as T } from "../src/events.js";
+
+const OPERATOR_TOKEN = "operator-token-for-restore-tests";
+
+function openStore(t, name) {
+  const directory = mkdtempSync(join(tmpdir(), name));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { try { store.close(); } catch { /* already closed */ } rmSync(directory, { recursive: true, force: true }); });
+  return store;
+}
+
+function seed(t) {
+  const store = openStore(t, "restore-ndjson-seed-");
+  store.initialize(initialRoom());
+  const key = store.issueAccessKey("commons", "owner");
+  store.command(key, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+    data: { memberId: "agent", displayName: "Restore agent", kind: "agent", permissions: ["accept_work"] } });
+  store.command(key, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED,
+    data: { messageId: randomUUID(), body: "history that must survive the restore" } });
+  return { store, ndjson: exportNdjsonText(store.db) };
+}
+
+function fakeRequest({ method = "POST", body = "", token = OPERATOR_TOKEN, contentLength } = {}) {
+  const headers = new Headers({ "content-type": "application/x-ndjson" });
+  if (token !== null) headers.set("authorization", `Bearer ${token}`);
+  if (contentLength !== undefined) headers.set("content-length", String(contentLength));
+  return { method, url: "https://room.example/api/operator/restore", headers, text: async () => body };
+}
+
+test("replayNdjsonInto restores a whole-store export into an empty open store", t => {
+  const { ndjson, store: seeded } = seed(t);
+  const events = seeded.db.prepare("SELECT count(*) AS n FROM events").get().n;
+  const target = openStore(t, "restore-ndjson-target-"); // migrated schema, no rooms row
+  const result = replayNdjsonInto(ndjson, target);
+  assert.equal(result.verified, true);
+  assert.equal(result.events, events);
+  assert.equal(target.db.prepare("SELECT count(*) AS n FROM events").get().n, events);
+  const row = target.db.prepare("SELECT body FROM events WHERE body LIKE '%history that must survive the restore%'").get();
+  assert.ok(row, "restored history is readable");
+  assert.ok(target.room("commons").state.members.agent, "restored members are present");
+});
+
+test("replayNdjsonInto refuses a non-empty store — restore never overwrites live data", t => {
+  const { ndjson, store } = seed(t);
+  assert.throws(() => replayNdjsonInto(ndjson, store), /non-empty/);
+  // The refused store is untouched.
+  assert.ok(store.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "live store keeps its rooms row");
+});
+
+test("a truncated export fails the watermark check instead of restoring partial", t => {
+  const { ndjson } = seed(t);
+  const lines = ndjson.trim().split("\n");
+  const eventLine = lines.findIndex(line => line.includes('"table":"events"'));
+  assert.ok(eventLine > 0, "fixture export has event rows to truncate");
+  const truncated = [...lines.slice(0, eventLine), ...lines.slice(eventLine + 1)].join("\n") + "\n";
+  const target = openStore(t, "restore-ndjson-truncated-");
+  assert.throws(() => replayNdjsonInto(truncated, target), /watermark|torn/i);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "failed replay leaves the store empty");
+});
+
+test("per-table watermark counts catch truncation outside the event log", t => {
+  const { ndjson } = seed(t);
+  const lines = ndjson.trim().split("\n");
+  // Simulate a newer exporter that pins per-table counts, then corrupt one
+  // table's count (as a dropped row would): the replay must fail loudly even
+  // though the event-log count still matches.
+  const tables = {};
+  for (const line of lines.slice(1)) {
+    const record = JSON.parse(line);
+    tables[record.table] = (tables[record.table] ?? 0) + 1;
+  }
+  const victim = Object.keys(tables).find(name => name !== "events" && tables[name] > 0);
+  assert.ok(victim, "fixture export has non-event tables");
+  tables[victim] += 1;
+  const forged = lines.map(line => line.includes('"kind":"watermark"')
+    ? JSON.stringify({ ...JSON.parse(line), tables }) : line).join("\n") + "\n";
+  const target = openStore(t, "restore-ndjson-tables-");
+  assert.throws(() => replayNdjsonInto(forged, target), new RegExp(`watermark.*${victim}`, "i"));
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "failed replay leaves the store empty");
+});
+
+test("an export naming a table the store does not have is rejected", t => {
+  const { ndjson } = seed(t);
+  const forged = ndjson + JSON.stringify({ table: "nope_not_a_table", row: { id: 1 } }) + "\n";
+  const target = openStore(t, "restore-ndjson-forged-");
+  assert.throws(() => replayNdjsonInto(forged, target), /does not have/);
+});
+
+test("malformed NDJSON and a bad watermark are rejected", t => {
+  const target = openStore(t, "restore-ndjson-malformed-");
+  assert.throws(() => replayNdjsonInto("not json\n", target), /not JSON|empty/i);
+  assert.throws(() => replayNdjsonInto("", target), /empty/i);
+  const { ndjson } = seed(t);
+  const badVersion = ndjson.replace('"version":1', '"version":2');
+  assert.throws(() => replayNdjsonInto(badVersion, target), /watermark|torn/i);
+});
+
+test("operator restore stays closed until the backup token is set, then enforces auth and method", async t => {
+  const { ndjson } = seed(t);
+  const target = openStore(t, "restore-ndjson-gate-");
+  let response = await operatorRestoreResponse(fakeRequest({ body: ndjson }), undefined, target);
+  assert.equal(response.status, 404, "unconfigured token answers 404 like the export endpoint");
+  response = await operatorRestoreResponse(fakeRequest({ body: ndjson, token: "wrong-token-value-here" }), OPERATOR_TOKEN, target);
+  assert.equal(response.status, 401);
+  response = await operatorRestoreResponse(fakeRequest({ method: "GET", body: ndjson }), OPERATOR_TOKEN, target);
+  assert.equal(response.status, 405);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "denied attempts write nothing");
+});
+
+test("operator restore refuses a live store and oversized bodies", async t => {
+  const { ndjson, store } = seed(t);
+  const response = await operatorRestoreResponse(fakeRequest({ body: ndjson }), OPERATOR_TOKEN, store);
+  assert.equal(response.status, 409, "restore into a non-empty store is a conflict, never an overwrite");
+  const target = openStore(t, "restore-ndjson-413-");
+  const tooBig = await operatorRestoreResponse(
+    fakeRequest({ body: "x".repeat(10), contentLength: 64 * 1024 * 1024 + 1 }), OPERATOR_TOKEN, target);
+  assert.equal(tooBig.status, 413);
+});
+
+test("operator restore measures the body cap in bytes, not UTF-16 characters (#2949)", async t => {
+  // "é" is one UTF-16 code unit but two UTF-8 bytes: this body is under the
+  // cap in String.length yet over it in bytes, and a request without a
+  // Content-Length (chunked) skips the pre-read guard, so only a
+  // byte-accurate post-read cap can refuse it.
+  const target = openStore(t, "restore-ndjson-413-bytes-");
+  const body = "é".repeat(RESTORE_MAX_BYTES / 2 + 1);
+  assert.ok(body.length <= RESTORE_MAX_BYTES, "fixture is under the cap in characters");
+  assert.ok(Buffer.byteLength(body, "utf8") > RESTORE_MAX_BYTES, "fixture is over the cap in bytes");
+  const response = await operatorRestoreResponse(fakeRequest({ body }), OPERATOR_TOKEN, target);
+  assert.equal(response.status, 413);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "oversized restore writes nothing");
+});
+
+test("operator restore caps a chunked multibyte stream in bytes (#2949)", async t => {
+  const target = openStore(t, "restore-ndjson-413-stream-");
+  const encoder = new TextEncoder();
+  const chunk = encoder.encode("é".repeat(1_000_000)); // 1M characters, 2 MB
+  const stream = new ReadableStream({
+    start(controller) {
+      for (let i = 0; i < 40; i++) controller.enqueue(chunk);
+      controller.close();
+    },
+  });
+  const request = new Request("https://room.example/api/operator/restore", {
+    method: "POST",
+    headers: { authorization: `Bearer ${OPERATOR_TOKEN}` },
+    body: stream,
+    duplex: "half",
+  });
+  assert.equal(request.headers.get("content-length"), null, "chunked stream carries no Content-Length guard");
+  const response = await operatorRestoreResponse(request, OPERATOR_TOKEN, target);
+  assert.equal(response.status, 413);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "oversized restore writes nothing");
+});
+
+test("operator restore replays a valid export and reports the verified summary", async t => {
+  const { ndjson, store: seeded } = seed(t);
+  const events = seeded.db.prepare("SELECT count(*) AS n FROM events").get().n;
+  const target = openStore(t, "restore-ndjson-ok-");
+  const response = await operatorRestoreResponse(fakeRequest({ body: ndjson }), OPERATOR_TOKEN, target);
+  assert.equal(response.status, 200);
+  const summary = await response.json();
+  assert.equal(summary.verified, true);
+  assert.equal(summary.events, events);
+  assert.match(summary.note ?? "", /credential/i, "summary describes credential recovery");
+  assert.equal(target.db.prepare("SELECT count(*) AS n FROM events").get().n, events);
+});
+
+test("operator restore rejects a malformed export with 422 and leaves the store empty", async t => {
+  const target = openStore(t, "restore-ndjson-422-");
+  const response = await operatorRestoreResponse(fakeRequest({ body: "garbage\n" }), OPERATOR_TOKEN, target);
+  assert.equal(response.status, 422);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "failed restore leaves the store empty");
+});
+
+test("restore accepts the exporter's trailer and round-trips a binary attachment", t => {
+  const { ndjson: base, store: seeded } = seed(t);
+  const bytes = Buffer.from([0, 1, 2, 255, 254, 128, 0, 7]);
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const now = Date.now();
+  seeded.db.prepare(`INSERT INTO room_attachments(room_id,id,uploader_id,filename,media_type,byte_length,sha256,bytes,state,created_at,expires_at,message_id)
+    VALUES('commons','att-bin','owner','blob.bin','application/octet-stream',?,?,?,'staged',?,?,NULL)`).run(bytes.length, sha, bytes, now, now + 60000);
+  const ndjson = exportNdjsonText(seeded.db);
+  assert.match(ndjson, /"kind":"trailer"/, "the real exporter ends the stream with a trailer");
+  assert.match(ndjson, /"\$base64"/, "binary bytes leave as $base64");
+  assert.ok(base.length > 0);
+  const target = openStore(t, "restore-ndjson-bin-");
+  const result = replayNdjsonInto(ndjson, target);
+  assert.equal(result.verified, true);
+  assert.equal(result.trailer, "verified");
+  const row = target.db.prepare("SELECT bytes FROM room_attachments WHERE id='att-bin'").get();
+  assert.deepEqual(Buffer.from(row.bytes), bytes);
+});
+
+test("restore refuses a torn export (trailer disagrees with the event rows)", t => {
+  const { ndjson } = seed(t);
+  const lines = ndjson.trim().split("\n");
+  const torn = lines.filter((line, i) => !(line.includes('"table":"events"') && i === lines.findIndex(l => l.includes('"table":"events"')))).join("\n");
+  const target = openStore(t, "restore-ndjson-torn-");
+  assert.throws(() => replayNdjsonInto(torn, target), /torn|watermark/);
+});
+
+// #3324: an export from a store with PUBLIC board activity carries
+// public_work_tasks rows whose namespace makes the claim fence guard every
+// work_claims write. The file replay opens the target's own writer permit
+// for the bulk load; the into-store replay must do the same, or exactly the
+// production-shaped backups abort with "unsupported public claim writer".
+test("replayNdjsonInto restores an export carrying public-namespace claims (#3324)", t => {
+  const namespace = `public_${"ab".repeat(16)}`;
+  const seeded = openStore(t, "restore-ndjson-public-seed-");
+  seeded.initialize(initialRoom(namespace));
+  const now = Date.now();
+  seeded.db.prepare(`INSERT INTO public_work_tasks
+      (offer_id, namespace_key, room_id, terms_version, repository_url, repository_ref, files_json, generation, created_at)
+      VALUES (?,?,?,?,?,?,?,?,?)`)
+    .run("offer-1", namespace, namespace, 1, "https://github.com/Uuriko/project-room", "main", JSON.stringify(["README.md"]), 1, now);
+  // Claim writes in a public namespace go through the permit machinery;
+  // seed the claim the same way production writes it.
+  withPublicWorkClaimWriter(seeded, () => seeded.workClaims.set(namespace,
+    createWork({ id: "pub-claim", title: "Public task", repo: "Uuriko/project-room" }, now)));
+  const ndjson = exportNdjsonText(seeded.db);
+  assert.match(ndjson, /"table":"work_claims"/, "the export carries the public claim row");
+  const target = openStore(t, "restore-ndjson-public-target-");
+  const result = replayNdjsonInto(ndjson, target);
+  assert.equal(result.verified, true);
+  const claim = target.workClaims.get(namespace, "pub-claim");
+  assert.ok(claim, "the public claim row restored");
+  assert.equal((claim.data ?? claim).state, "unclaimed");
+  const permit = target.db.prepare("SELECT enabled FROM public_work_claim_writer_permit WHERE singleton=1").get();
+  assert.equal(permit.enabled, 0, "the target permit is closed at rest after the restore");
+});
+
+// #3324: the exported permit row is the SOURCE's authority and must never be
+// imported. A doctored export carrying enabled=1 used to restore
+// "verified" with the fence open, bricking the store at its next open.
+test("replayNdjsonInto never imports the exported writer permit row (#3324)", t => {
+  const { ndjson } = seed(t);
+  // The export carries the source's own (closed) permit row; doctor it open.
+  const doctored = ndjson.split("\n").map(line => line.includes('"table":"public_work_claim_writer_permit"')
+    ? line.replace('"enabled":0', '"enabled":1') : line).join("\n");
+  assert.match(doctored, /"table":"public_work_claim_writer_permit".*"enabled":1/, "the fixture really carries an open permit");
+  const directory = mkdtempSync(join(tmpdir(), "restore-ndjson-permit-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const target = new RoomStore(join(directory, "room.sqlite"));
+  const result = replayNdjsonInto(doctored, target);
+  assert.equal(result.verified, true);
+  assert.equal(result.skippedTables["public_work_claim_writer_permit"], 1, "the exported permit row is reported as skipped");
+  assert.equal(target.db.prepare("SELECT enabled FROM public_work_claim_writer_permit WHERE singleton=1").get().enabled, 0);
+  target.close();
+  // Reopening runs the closed-at-rest fence verification; an imported open
+  // permit would throw here.
+  const reopened = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { try { reopened.close(); } catch { /* already closed */ } });
+  assert.ok(reopened.room("commons"), "the restored store reopens with the fence closed");
+});
+
+// #3325: the trailer (version 2) pins every loadable table's content, so a
+// tampered non-event row — the issue's probe edits a credential's
+// expires_at by +10 years with every count and event hash still
+// consistent — must refuse instead of restoring verified.
+function tamperCredentialsExpiry(ndjson) {
+  let done = false;
+  const out = ndjson.split("\n").map(line => {
+    if (done || !line.includes('"table":"credentials"')) return line;
+    const record = JSON.parse(line);
+    if (typeof record.row.expires_at !== "number") return line;
+    record.row.expires_at += 315576000000;
+    done = true;
+    return JSON.stringify(record);
+  }).join("\n");
+  assert.ok(done, "fixture export has a credentials row with a numeric expires_at");
+  return out;
+}
+
+test("a tampered credentials row fails the table digest instead of restoring verified (#3325)", t => {
+  const { ndjson } = seed(t);
+  const target = openStore(t, "restore-ndjson-tampered-");
+  assert.throws(() => replayNdjsonInto(tamperCredentialsExpiry(ndjson), target), /table digest does not match for credentials/);
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "failed replay leaves the store empty");
+});
+
+test("a clean export reports full content verification (#3325)", t => {
+  const { ndjson } = seed(t);
+  const trailer = JSON.parse(ndjson.trim().split("\n").at(-1));
+  assert.equal(trailer.version, 2, "the exporter pins table digests in a version 2 trailer");
+  assert.ok(trailer.tables.credentials, "the credentials table is pinned");
+  const target = openStore(t, "restore-ndjson-full-");
+  const result = replayNdjsonInto(ndjson, target);
+  assert.equal(result.verified, true);
+  assert.equal(result.contentVerification, "full");
+});
+
+test("legacy exports restore at an explicitly weaker verification level (#3325)", t => {
+  const { ndjson } = seed(t);
+  const lines = ndjson.trim().split("\n");
+  const downgrade = lines.map(line => {
+    if (!line.includes('"kind":"trailer"')) return line;
+    const trailer = JSON.parse(line);
+    delete trailer.tables;
+    trailer.version = 1;
+    return JSON.stringify(trailer);
+  }).join("\n") + "\n";
+  const target = openStore(t, "restore-ndjson-legacy-");
+  const result = replayNdjsonInto(downgrade, target);
+  assert.equal(result.verified, true);
+  assert.equal(result.trailer, "verified");
+  assert.equal(result.contentVerification, "events-only", "a version 1 trailer pins only the event log and says so");
+  const noTrailer = lines.filter(line => !line.includes('"kind":"trailer"')).join("\n") + "\n";
+  const target2 = openStore(t, "restore-ndjson-notrailer-");
+  const result2 = replayNdjsonInto(noTrailer, target2);
+  assert.equal(result2.verified, true);
+  assert.equal(result2.contentVerification, "watermark-only");
+});
+
+// Bug sweep 2026-10-16 F1: a byte-valid backup whose stored projections
+// were written by older code can differ from current-reducer replay. The
+// file replay has an audit "report" mode for exactly this case; the
+// DO-native paths refused outright, with a generic 500. Strict stays the
+// default, but the refusal now names the drift (room + fields), and the
+// operator opt-in (audit: "report", ?audit=report) lands the data with
+// the drift as a named qualification on the result.
+function driftProjection(store, roomId) {
+  const row = store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId);
+  const state = JSON.parse(row.projection);
+  state.members.agent.displayName = "Drifted Name";
+  store.db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(state), roomId);
+}
+
+function seedDrifted(t, roomIds = ["commons"]) {
+  const store = openStore(t, "restore-ndjson-drift-seed-");
+  for (const roomId of roomIds) {
+    store.initialize(initialRoom(roomId));
+    const key = store.issueAccessKey(roomId, "owner");
+    store.command(key, roomId, { id: randomUUID(), type: T.MEMBER_ADDED,
+      data: { memberId: "agent", displayName: "Restore agent", kind: "agent", permissions: ["accept_work"] } });
+    store.command(key, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED,
+      data: { messageId: randomUUID(), body: "history that must survive the restore" } });
+    // Drift lives only in the stored projection; the export below is
+    // computed over the drifted tables, so counts, digests and trailer
+    // are all self-consistent — the "backup written by older code" case.
+    driftProjection(store, roomId);
+  }
+  return { store, ndjson: exportNdjsonText(store.db) };
+}
+
+test("strict replay of a drifted backup refuses and names the drifted room and field", t => {
+  const { ndjson } = seedDrifted(t);
+  const target = openStore(t, "restore-ndjson-drift-strict-");
+  assert.throws(() => replayNdjsonInto(ndjson, target), error => {
+    assert.match(error.message, /requires operator reconciliation/);
+    assert.match(error.message, /commons/);
+    assert.match(error.message, /displayName/);
+    assert.deepEqual(error.drift, [{ room: "commons", fields: ["state.members.agent.displayName"] }]);
+    return true;
+  });
+  assert.ok(!target.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "refused replay leaves the store empty");
+});
+
+test("report-mode replay lands a drifted backup with the drift as a named audit qualification", t => {
+  const { ndjson } = seedDrifted(t, ["commons", "annex"]);
+  const target = openStore(t, "restore-ndjson-drift-report-");
+  const result = replayNdjsonInto(ndjson, target, { audit: "report" });
+  assert.equal(result.verified, true);
+  assert.equal(result.contentVerification, "full");
+  assert.equal(result.recovery, null, "a failed audit has no recovery report to stand behind verified");
+  assert.equal(result.audit.ok, false);
+  assert.match(result.audit.error, /requires operator reconciliation/);
+  assert.deepEqual(result.audit.drift.map(entry => entry.room), ["annex", "commons"],
+    "every drifted room is enumerated, not just the first");
+  for (const entry of result.audit.drift) assert.ok(entry.fields.some(field => field.endsWith("displayName")));
+  assert.equal(target.room("commons").state.members.agent.displayName, "Drifted Name", "the drifted data landed as stored");
+  assert.equal(target.room("annex").state.members.agent.displayName, "Drifted Name");
+});
+
+test("a clean replay reports an unqualified audit result", t => {
+  const { ndjson } = seed(t);
+  const target = openStore(t, "restore-ndjson-drift-clean-");
+  const result = replayNdjsonInto(ndjson, target);
+  assert.deepEqual(result.audit, { ok: true });
+  assert.ok(result.recovery, "a passing audit returns its recovery report");
+});
+
+test("operator restore endpoint: strict drift refusal is a legible 422, report opt-in lands it", async t => {
+  const { ndjson } = seedDrifted(t);
+  const strictTarget = openStore(t, "restore-ndjson-drift-endpoint-strict-");
+  const refused = await operatorRestoreResponse(fakeRequest({ body: ndjson }), OPERATOR_TOKEN, strictTarget);
+  assert.equal(refused.status, 422, "the reconciliation refusal is operator-legible, not a generic 500");
+  const refusedPayload = await refused.json();
+  assert.equal(refusedPayload.error.code, "restore_verification_failed");
+  assert.match(refusedPayload.error.message, /commons/);
+  assert.match(refusedPayload.error.message, /displayName/);
+  assert.ok(!strictTarget.db.prepare("SELECT 1 FROM rooms LIMIT 1").get(), "refused restore leaves the store empty");
+
+  const reportTarget = openStore(t, "restore-ndjson-drift-endpoint-report-");
+  const headers = new Headers({ "content-type": "application/x-ndjson", authorization: `Bearer ${OPERATOR_TOKEN}` });
+  const landed = await operatorRestoreResponse(
+    { method: "POST", url: "https://room.example/api/operator/restore?audit=report", headers, text: async () => ndjson },
+    OPERATOR_TOKEN, reportTarget);
+  assert.equal(landed.status, 200);
+  const landedPayload = await landed.json();
+  assert.equal(landedPayload.verified, true);
+  assert.equal(landedPayload.audit.ok, false);
+  assert.deepEqual(landedPayload.audit.drift, [{ room: "commons", fields: ["state.members.agent.displayName"] }]);
+  assert.equal(reportTarget.room("commons").state.members.agent.displayName, "Drifted Name");
+
+  const badTarget = openStore(t, "restore-ndjson-drift-endpoint-bad-");
+  const bad = await operatorRestoreResponse(
+    { method: "POST", url: "https://room.example/api/operator/restore?audit=bogus", headers, text: async () => ndjson },
+    OPERATOR_TOKEN, badTarget);
+  assert.equal(bad.status, 422);
+  assert.equal((await bad.json()).error.code, "invalid_restore");
+});
+
+
+test("restore preserves credential verifiers and warns that old access keys may still authenticate", async t => {
+  const source = openStore(t, "restore-credential-source-");
+  source.initialize(initialRoom());
+  const originalKey = source.issueAccessKey("commons", "owner");
+  const target = openStore(t, "restore-credential-target-");
+  const response = await operatorRestoreResponse(fakeRequest({ body: exportNdjsonText(source.db) }), OPERATOR_TOKEN, target);
+  assert.equal(response.status, 200);
+  assert.doesNotThrow(() => target.authenticate(originalKey), "restore does not implicitly revoke an existing credential hash");
+  const result = await response.json();
+  assert.match(result.note, /existing credentials may still authenticate/);
+  assert.match(result.note, /Before reopening access, revoke and re-issue credentials/);
+});

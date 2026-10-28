@@ -155,3 +155,25 @@ test("live pin commands are stamped with the DM-party policy version", () => {
   assert.equal(receipt.event.data.pinDmPartyPolicyVersion, PIN_DM_PARTY_POLICY_VERSION,
     "store.command must stamp new pins at live admission");
 });
+
+test("a non-party cannot unpin a DM's pin; the parties can (muse-room agent audit)", () => {
+  const { aliceKey, bobKey, malloryKey, cmd } = storeFixture();
+  const dmId = cmd(aliceKey, T.MESSAGE_POSTED, { messageId: randomUUID(), body: "dm body", toMemberId: "bob" }).event.data.messageId;
+  setPin(store, aliceKey, "commons", { messageId: dmId, pinned: true });
+  const pinned = () => store.room("commons").state.pins.some(pin => pin.messageId === dmId);
+  assert.equal(pinned(), true);
+  assert.throws(() => setPin(store, malloryKey, "commons", { messageId: dmId, pinned: false }), error => error.status === 422 || error.status === 409);
+  assert.throws(() => cmd(malloryKey, T.MESSAGE_UNPINNED, { messageId: dmId }), error => error.status === 422 || error.status === 409);
+  assert.equal(pinned(), true, "a bystander's unpin must not remove the parties' pin");
+  setPin(store, bobKey, "commons", { messageId: dmId, pinned: false });
+  assert.equal(pinned(), false, "the recipient may unpin");
+});
+
+test("an unstamped historical unpin event from a non-party still replays", () => {
+  const { aliceKey, cmd } = storeFixture();
+  const dmId = cmd(aliceKey, T.MESSAGE_POSTED, { messageId: randomUUID(), body: "dm", toMemberId: "bob" }).event.data.messageId;
+  setPin(store, aliceKey, "commons", { messageId: dmId, pinned: true });
+  const state = structuredClone(store.room("commons").state);
+  const old = event({ type: T.MESSAGE_UNPINNED, roomId: "commons", actorId: "mallory", at: new Date().toISOString(), idempotencyKey: randomUUID(), data: { messageId: dmId } });
+  assert.doesNotThrow(() => applyEvent(state, old));
+});

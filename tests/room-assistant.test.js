@@ -7,6 +7,8 @@ import { createRoomServer } from '../server/http.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { join } from 'node:path';
 import { RoomAssistant } from '../server/room-assistant.mjs';
+import { linkWithProof } from './helpers/link-with-proof.mjs';
+import { demoteToReadonly } from '../server/autonomy-tiers.mjs';
 
 async function setup(t) {
   const f = createAcceptanceFixture({ dmConsent: true });
@@ -21,6 +23,80 @@ async function setup(t) {
   const message = (actor, id, body = 'Shared input', extra = {}) => f.store.command(f.keys[actor], 'commons', { id: randomUUID(), type: 'message.posted', data: { messageId: id, body, ...extra } });
   return { f, api, message, origin };
 }
+
+const grantSteer = (f, memberId) => {
+  const member = f.store.room('commons').state.members[memberId];
+  f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'member.access_changed', data: { memberId, expectedMemberRevision: member.revision ?? 0, permissions: [...new Set([...member.permissions, 'steer'])], active: true } });
+};
+
+test('a person without steer can post but cannot ask the room assistant (R301-n1)', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  assert.deepEqual(f.store.room('commons').state.members.guest.permissions, []);
+  message('guest', 'guest-ask', 'What is this room for?');
+  assert.ok(f.store.room('commons').state.messages.some(m => m.id === 'guest-ask'), 'posting stays allowed');
+  const refused = await api('guest', { action: 'invoke', runId: 'guest-run', sourceMessageId: 'guest-ask' }, 403);
+  assert.equal(refused.error.code, 'assistant_denied');
+  assert.match(refused.error.message, /steer/);
+  assert.equal((await api('owner')).runs.some(run => run.id === 'guest-run'), false, 'no run is queued for the agent');
+  grantSteer(f, 'guest');
+  const asked = await api('guest', { action: 'invoke', runId: 'guest-run', sourceMessageId: 'guest-ask' });
+  assert.equal(asked.result.status, 'queued');
+});
+
+test('direct invoke requires steer even when the authenticated human owns the room', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  message('owner', 'owner-without-steer', 'Please help.');
+  const assistant = new RoomAssistant(f.store);
+  const owner = f.store.authenticate(f.keys.owner, 'commons');
+  const input = { action: 'invoke', requestId: randomUUID(), runId: 'owner-needs-steer', sourceMessageId: 'owner-without-steer' };
+  // The authorization boundary supplies current permissions. Ownership alone
+  // must not bypass them, matching the atomic submit path's rule.
+  assert.throws(() => assistant.apply('commons', input, () => ({ ...owner, member: { ...owner.member, permissions: [] } })),
+    error => error.status === 403 && error.code === 'assistant_denied');
+  assert.equal((await api('owner')).runs.some(run => run.id === input.runId), false);
+  assert.equal(assistant.apply('commons', input, () => owner).result.status, 'queued');
+});
+
+test('unfinished assistant work stays discoverable after more than 100 newer terminal requests', async t => {
+  const { f, api, message } = await setup(t);
+  const assistant = new RoomAssistant(f.store);
+  let clock = f.store.now();
+  f.store.now = () => clock;
+  // Exercise production transitions to create history without exhausting the
+  // HTTP write limiter; the externally observable read uses the actual route.
+  const apply = (actor, input) => assistant.apply('commons', { requestId: randomUUID(), ...input }, () => f.store.authenticate(f.keys[actor], 'commons')).result;
+  apply('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  for (const id of ['queued', 'working', 'paused', 'needs-input', 'stopping']) {
+    message('owner', `prompt-${id}`);
+    apply('owner', { action: 'invoke', runId: id, sourceMessageId: `prompt-${id}` });
+    if (id === 'paused') apply('owner', { action: 'pause', runId: id, expectedRevision: 0 });
+    else if (id !== 'queued') {
+      apply('producer', { action: 'claim', runId: id, attemptId: `host-${id}`, expectedRevision: 0 });
+      if (id === 'needs-input') apply('producer', { action: 'report', runId: id, attemptId: `host-${id}`, expectedRevision: 1, state: 'needs_input', summary: 'Choose a direction.' });
+      if (id === 'stopping') apply('owner', { action: 'cancel', runId: id, expectedRevision: 1 });
+    }
+  }
+  for (let n = 0; n < 105; n++) {
+    clock += 2000; // Historical requests respect the normal chat refill budget.
+    message('owner', `terminal-prompt-${n}`);
+    apply('owner', { action: 'invoke', runId: `terminal-${n}`, sourceMessageId: `terminal-prompt-${n}` });
+    apply('owner', { action: 'cancel', runId: `terminal-${n}`, expectedRevision: 0 });
+  }
+  apply('producer', { action: 'report', runId: 'working', attemptId: 'host-working', expectedRevision: 1, state: 'working', summary: 'Still processing the original request.' });
+  const context = await api('owner');
+  const statuses = new Map(context.runs.map(run => [run.id, run.status]));
+  for (const [id, status] of [['queued', 'queued'], ['working', 'working'], ['paused', 'paused'], ['needs-input', 'needs_input'], ['stopping', 'cancel_requested']])
+    assert.equal(statuses.get(id), status, `older ${id} remains visible and actionable`);
+  assert.equal(context.runs.length, 100, 'history remains bounded');
+  assert.equal(statuses.get('terminal-104'), 'cancelled', 'recent outcomes remain available');
+  assert.equal(statuses.has('terminal-0'), false, 'older terminal history yields to unfinished work');
+  assert.equal(context.assistant.availability, 'connected', 'recent active host is not hidden by terminal history');
+  const pending = context.runs.find(run => run.id === 'queued');
+  const claimed = await api('producer', { action: 'claim', runId: pending.id, attemptId: 'recovered-host', expectedRevision: pending.revision });
+  assert.equal(claimed.result.status, 'working');
+});
 
 test('two humans share one durable run, host claims and publishes a real public result', async t => {
   const { f, api, message } = await setup(t);
@@ -82,6 +158,45 @@ test('completion accounts for late group contributions and refuses partial compl
   assert.deepEqual(done.result.inputs.map(i=>i.status),['applied','applied']);
   assert.deepEqual(await api('producer',corrected),done);
   assert.equal((await api('guest')).runs[0].activity.length,2);
+});
+
+test('shared assistant inputs and results stay in the originating channel and thread', async t => {
+  for (const scenario of [
+    { name: 'another channel', threaded: false, foreign: { channelId: 'design' } },
+    { name: 'another thread in the same channel', threaded: false, foreign: { replyToId: 'foreign-root' } },
+    { name: 'outside the originating thread', threaded: true, foreign: {} },
+    { name: 'another thread from a threaded request', threaded: true, foreign: { replyToId: 'foreign-root' } }
+  ]) await t.test(scenario.name, async t => {
+    const { f, api, message } = await setup(t);
+    await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+    f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'channel.created', data: { channelId: 'design', name: 'design' } });
+    message('owner', 'root'); message('owner', 'foreign-root');
+    message('owner', 'question', 'Help with this conversation', scenario.threaded ? { replyToId: 'root' } : {});
+    await api('owner', { action: 'invoke', runId: 'bound-run', sourceMessageId: 'question' });
+    message('guest', 'foreign-input', 'An unrelated conversation', scenario.foreign);
+    const refusal = await api('guest', { action: 'contribute', runId: 'bound-run', sourceMessageId: 'foreign-input', expectedRevision: 0 }, 409);
+    assert.equal(refusal.error.code, 'assistant_conversation_mismatch');
+    assert.equal((await api('owner')).runs[0].revision, 0);
+    assert.deepEqual((await api('owner')).runs[0].inputs.map(input => input.sourceMessageId), ['question']);
+    const replyToId = scenario.threaded ? 'root' : 'question';
+    message('guest', 'context', 'Relevant context', { replyToId: 'question' });
+    await api('guest', { action: 'contribute', runId: 'bound-run', sourceMessageId: 'context', expectedRevision: 0 });
+    await api('producer', { action: 'claim', runId: 'bound-run', attemptId: 'host', expectedRevision: 1 });
+    message('producer', 'foreign-result', 'Unrelated result', scenario.foreign);
+    const completion = { action: 'report', requestId: 'complete-bound-run', runId: 'bound-run', attemptId: 'host', expectedRevision: 2, state: 'done', summary: 'Result ready', resultMessageId: 'foreign-result', appliedInputMessageIds: ['question', 'context'] };
+    const rejected = await api('producer', completion, 409);
+    assert.equal(rejected.error.code, 'assistant_conversation_mismatch');
+    const unchanged = (await api('owner')).runs[0];
+    assert.equal(unchanged.status, 'working'); assert.equal(unchanged.revision, 2);
+    assert.equal(unchanged.resultMessageId, undefined);
+    assert.deepEqual(unchanged.inputs.map(input => input.status), ['pending', 'pending']);
+    message('producer', 'result', 'The actual answer', { replyToId });
+    // A refused completion never consumes the retry ID or changes the run.
+    const corrected = { ...completion, resultMessageId: 'result' };
+    const done = await api('producer', corrected);
+    assert.equal(done.result.status, 'done'); assert.equal(done.result.resultMessageId, 'result');
+    assert.deepEqual(await api('producer', corrected), done);
+  });
 });
 
 test('conflict is explicit, decision is authorized, and cancellation awaits host confirmation', async t => {
@@ -187,7 +302,7 @@ test('hosted MCP discovers scoped coordinator tools and executes the real public
   const { setTier }=await import('../server/autonomy-tiers.mjs');
   const identity=f.store.identities.create('Connected lead');
   const memberId=identity.identityId;
-  f.store.identities.link(f.keys.owner,'commons',{identityId:memberId,permissions:['accept_work','complete_work']});
+  linkWithProof(f.store,f.keys.owner,'commons',identity,{permissions:['accept_work','complete_work']});
   setTier(f.store.db,'commons',memberId,'t2_standard',{updatedBy:'owner',nowMs:f.store.now()});
   await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:memberId});
   await api('owner',{action:'invoke',runId:'mcp-shared',sourceMessageId:'test-welcome'});
@@ -199,7 +314,7 @@ test('hosted MCP discovers scoped coordinator tools and executes the real public
   const catalog=await rpc('tools/list',{focus:'work'});
   assert.ok(catalog.result.tools.some(tool=>tool.name==='room_assistant_context'));
   const action=catalog.result.tools.find(tool=>tool.name==='room_assistant_action');
-  assert.deepEqual(action.inputSchema.properties.action.enum,['claim','report']);
+  assert.deepEqual(action.inputSchema.properties.action.enum,['claim','report','publish','draft']);
   assert.equal(action.inputSchema.additionalProperties,false);
   assert.ok(action.inputSchema.allOf.length>0);
   const context=await call('room_assistant_context',{});
@@ -209,12 +324,16 @@ test('hosted MCP discovers scoped coordinator tools and executes the real public
   const claimed=await call('room_assistant_action',args);
   assert.equal(claimed.result.structuredContent.result.status,'working');
   assert.deepEqual((await call('room_assistant_action',args)).result.structuredContent,claimed.result.structuredContent);
+  const drafted=await call('room_assistant_action',{...args,action:'draft',requestId:'mcp-draft',expectedRevision:1,sequence:1,body:'A shared answer is forming.'});
+  assert.equal(drafted.result.structuredContent.result.answerDraft.body,'A shared answer is forming.');
+  assert.equal(drafted.result.structuredContent.result.revision,1);
   assert.ok((await call('room_assistant_action',{...args,action:'configure'})).error);
   assert.ok((await call('room_assistant_action',{...args,summary:'Cannot sneak report fields into claim'})).error);
   const posted=await call('room_post_message',{id:'shared-result-command',messageId:'mcp-result',body:'Combined shared answer.'});
   assert.notEqual(posted.result?.isError,true);
   const completed=await call('room_assistant_action',{action:'report',requestId:'mcp-complete',runId:'mcp-shared',attemptId:'saved-host-attempt',expectedRevision:1,state:'done',summary:'Shared answer ready.',resultMessageId:'mcp-result',appliedInputMessageIds:['test-welcome']});
   assert.equal(completed.result.structuredContent.result.status,'done');
+  assert.equal(completed.result.structuredContent.result.answerDraft,undefined);
   assert.equal((await api('guest')).runs[0].resultMessageId,'mcp-result');
   setTier(f.store.db,'commons',memberId,'t1_readonly',{updatedBy:'owner',nowMs:f.store.now()});
   const readonly=await rpc('tools/list',{focus:'work'});
@@ -268,6 +387,7 @@ for (const stopBeforeDelete of [false, true]) test(`deleted opening retains cont
   const { f, api, message, origin } = await setup(t);
   const erased = 'ERASED-OPENING-CONTENT';
   await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  grantSteer(f, 'guest'); // asking needs steer (R301-n1); the guest is a non-owner initiator here
   message('guest','deleted-opening',erased);
   await api('guest',{action:'invoke',runId:'deleted-run',sourceMessageId:'deleted-opening'});
   await api('producer',{action:'claim',runId:'deleted-run',attemptId:'reserved-host',expectedRevision:0});
@@ -323,6 +443,8 @@ test('deleted stop handles and historical receipts remain behind the original hi
   const claim={action:'claim',requestId:'old-claim',runId:'older-run',attemptId:'late-attempt',expectedRevision:0};
   await api('late-host',claim);
   command('room.history_visibility_set',{historyVisibility:'since_join'});
+  assert.equal((await api('late-host')).runs.length,0,'live pre-join source is outside the current history floor');
+  await api('late-host',claim,404);
   const response=await fetch(`${origin}/api/rooms/commons/commands`,{method:'POST',headers:{authorization:`Bearer ${f.keys.owner}`,'content-type':'application/json'},body:JSON.stringify({id:randomUUID(),type:'message.deleted',data:{messageId:'before-host',expectedMessageRevision:0}})});
   assert.equal(response.status,201,await response.text());
   assert.equal((await api('late-host')).runs.length,0,'reserved host does not gain access to pre-join source metadata');
@@ -350,4 +472,194 @@ test('completed historical report replay after deletion strips result links and 
   await api('producer',{...completed,requestId:'new-done',expectedRevision:2},404);
   await api('owner',{action:'resume',runId:'done-deleted',expectedRevision:2},404);
   assert.equal(JSON.parse(f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE run_id=?').get('done-deleted').value).revision,2);
+});
+
+test('publish posts the answer and completes the run atomically (SV-1 fence)', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','ask-opening','What should we build?');
+  await api('owner',{action:'invoke',runId:'fenced',sourceMessageId:'ask-opening'});
+  await api('producer',{action:'claim',runId:'fenced',attemptId:'host-1',expectedRevision:0});
+  const published = await api('producer',{action:'publish',requestId:'publish-once',runId:'fenced',attemptId:'host-1',expectedRevision:1,summary:'Answered.',body:'Build the fence.',appliedInputMessageIds:['ask-opening']});
+  assert.equal(published.result.status,'done');
+  assert.ok(published.result.resultMessageId);
+  const posted = f.store.room('commons').state.messages.find(m => m.id === published.result.resultMessageId);
+  assert.equal(posted?.body,'Build the fence.');
+  assert.equal(posted?.replyToId,'ask-opening');
+  assert.equal(posted?.authorId,'producer');
+  assert.deepEqual(published.result.inputs.map(i=>i.status),['applied']);
+  // An exact retry replays the recorded receipt: no second message is posted.
+  const replay = await api('producer',{action:'publish',requestId:'publish-once',runId:'fenced',attemptId:'host-1',expectedRevision:1,summary:'Answered.',body:'Build the fence.',appliedInputMessageIds:['ask-opening']});
+  assert.deepEqual(replay,published);
+  assert.equal(f.store.room('commons').state.messages.filter(m => m.body === 'Build the fence.').length,1);
+  assert.equal((await api('owner')).runs[0].status,'done');
+});
+
+test('a stop that lands before publish fences the answer out of chat (SV-1)', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','stop-opening','Work on this.');
+  await api('owner',{action:'invoke',runId:'stopped',sourceMessageId:'stop-opening'});
+  await api('producer',{action:'claim',runId:'stopped',attemptId:'host-1',expectedRevision:0});
+  const cancel = await api('owner',{action:'cancel',runId:'stopped',expectedRevision:1});
+  assert.equal(cancel.result.status,'cancel_requested');
+  await api('producer',{action:'publish',runId:'stopped',attemptId:'host-1',expectedRevision:2,summary:'Late answer.',body:'Too late.',appliedInputMessageIds:['stop-opening']},409);
+  assert.equal(f.store.room('commons').state.messages.some(m => m.body === 'Too late.'),false,'no answer may appear in chat after a stop');
+  assert.equal((await api('owner')).runs[0].status,'cancel_requested');
+});
+
+test('publish with a stale revision is rejected before anything is posted', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','rev-opening','Work on this.'); message('guest','rev-input','More context.');
+  await api('owner',{action:'invoke',runId:'revved',sourceMessageId:'rev-opening'});
+  await api('producer',{action:'claim',runId:'revved',attemptId:'host-1',expectedRevision:0});
+  await api('guest',{action:'contribute',runId:'revved',sourceMessageId:'rev-input',expectedRevision:1});
+  await api('producer',{action:'publish',runId:'revved',attemptId:'host-1',expectedRevision:1,summary:'Stale.',body:'Stale answer.',appliedInputMessageIds:['rev-opening','rev-input']},409);
+  assert.equal(f.store.room('commons').state.messages.some(m => m.body === 'Stale answer.'),false);
+  assert.equal((await api('owner')).runs[0].status,'working');
+});
+
+test('cancel on a silent host completes immediately and revokes the attempt (independent stop)', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','silent-opening','Work on this.');
+  await api('owner',{action:'invoke',runId:'silent',sourceMessageId:'silent-opening'});
+  await api('producer',{action:'claim',runId:'silent',attemptId:'host-1',expectedRevision:0});
+  const now = f.store.now(); f.store.now = () => now + 121000;
+  const stopped = await api('owner',{action:'cancel',runId:'silent',expectedRevision:1});
+  assert.equal(stopped.result.status,'cancelled');
+  assert.equal(stopped.result.attemptId,null);
+  assert.equal(stopped.result.stopOutcome,'attempt_revoked');
+  assert.equal((await api('owner')).runs[0].displayStatus,'unknown');
+  assert.match(stopped.result.activity.at(-1).summary,/execution could not be confirmed/i);
+  // The revoked attempt can no longer report or publish.
+  await api('producer',{action:'report',runId:'silent',attemptId:'host-1',expectedRevision:2,state:'cancelled',summary:'Late ack'},409);
+  await api('producer',{action:'publish',runId:'silent',attemptId:'host-1',expectedRevision:2,summary:'Late.',body:'Late answer.',appliedInputMessageIds:['silent-opening']},409);
+  assert.equal((await api('owner')).runs[0].status,'cancelled');
+});
+
+test('cancel on a live host still waits for host acknowledgment', async t => {
+  const { api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','live-opening','Work on this.');
+  await api('owner',{action:'invoke',runId:'live',sourceMessageId:'live-opening'});
+  await api('producer',{action:'claim',runId:'live',attemptId:'host-1',expectedRevision:0});
+  const requested = await api('owner',{action:'cancel',runId:'live',expectedRevision:1});
+  assert.equal(requested.result.status,'cancel_requested');
+  assert.equal(requested.result.attemptId,'host-1');
+  const ack = await api('producer',{action:'report',runId:'live',attemptId:'host-1',expectedRevision:2,state:'cancelled',summary:'Stopping.'});
+  assert.equal(ack.result.status,'cancelled');
+});
+
+test('ask card statuses: 10s-not-picked-up and 2min-stalled', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  message('owner','slow-prompt','Take your time.');
+  await api('owner',{action:'invoke',runId:'slow',sourceMessageId:'slow-prompt'});
+  message('owner','work-prompt','Do the thing.');
+  await api('owner',{action:'invoke',runId:'busy',sourceMessageId:'work-prompt'});
+  await api('producer',{action:'claim',runId:'busy',attemptId:'host-1',expectedRevision:0});
+  const statuses = async () => new Map((await api('owner')).runs.map(r => [r.id, r.displayStatus]));
+  const raw = async () => new Map((await api('owner')).runs.map(r => [r.id, r.status]));
+  assert.deepEqual([...await statuses()].sort(),[['busy','working'],['slow','queued']]);
+  const now = f.store.now(); f.store.now = () => now + 11000;
+  assert.equal((await statuses()).get('slow'),'not_picked_up','queued 11s with no claim reads not picked up');
+  assert.equal((await raw()).get('slow'),'queued','the raw status stays queued so a host can still claim it');
+  assert.equal((await statuses()).get('busy'),'working','claimed 11s ago with a fresh host report still reads working');
+  f.store.now = () => now + 121000;
+  assert.equal((await statuses()).get('slow'),'not_picked_up');
+  assert.equal((await statuses()).get('busy'),'stalled','working with no host update for 2min reads stalled');
+  assert.equal((await raw()).get('busy'),'unknown');
+  await api('producer',{action:'claim',runId:'slow',attemptId:'host-2',expectedRevision:0});
+  assert.equal((await raw()).get('slow'),'working','a long-unclaimed run is still claimable');
+  // A fresh host report clears the stall.
+  await api('producer',{action:'report',runId:'busy',attemptId:'host-1',expectedRevision:1,state:'working',summary:'Still on it.'});
+  assert.equal((await statuses()).get('busy'),'working');
+});
+
+// R36-2 (repro for the owner; expected behaviour, red on 1e8982e2). The
+// autonomy-tier contract says a read-only agent's stops always land
+// (server/autonomy-tiers.mjs T1_READONLY_ALLOWED_COMMANDS), but the shared
+// assistant refuses every coordinator report from a t1_readonly host, and
+// resume does not check the tier at all.
+const r36Paused = async (api, runId) => {
+  await api('owner',{action:'configure',expectedRevision:0,name:'Room',coordinatorMemberId:'producer'});
+  await api('owner',{action:'invoke',runId,sourceMessageId:'test-welcome'});
+  await api('producer',{action:'claim',runId,attemptId:'original',expectedRevision:0});
+};
+test('R36-2: a coordinator demoted to read-only can still acknowledge a stop', async t => {
+  const { f, api } = await setup(t);
+  await r36Paused(api, 'r36-stop');
+  demoteToReadonly(f.store.db, 'commons', 'producer', { updatedBy: 'owner' });
+  const stop = await api('owner',{action:'cancel',runId:'r36-stop',expectedRevision:1});
+  assert.equal(stop.result.status, 'cancel_requested');
+  await api('producer',{action:'report',runId:'r36-stop',attemptId:'original',expectedRevision:2,state:'cancelled',summary:'Stopped.'});
+});
+test('R36-2: resume is refused up front when the coordinator was demoted to read-only while paused', async t => {
+  const { f, api } = await setup(t);
+  await r36Paused(api, 'r36-resume');
+  await api('owner',{action:'pause',runId:'r36-resume',expectedRevision:1});
+  await api('producer',{action:'report',runId:'r36-resume',attemptId:'original',expectedRevision:2,state:'paused',summary:'Paused.'});
+  demoteToReadonly(f.store.db, 'commons', 'producer', { updatedBy: 'owner' });
+  await api('owner',{action:'resume',runId:'r36-resume',expectedRevision:3}, 409);
+});
+
+
+test('demoted Stop acknowledgment is exact-attempt and cannot acknowledge inputs or keep working', async t => {
+  const { f, api } = await setup(t);
+  await r36Paused(api, 'restricted-stop');
+  demoteToReadonly(f.store.db, 'commons', 'producer', { updatedBy: 'owner' });
+  const report={action:'report',runId:'restricted-stop',attemptId:'original',expectedRevision:1,state:'cancelled',summary:'Stopped.'};
+  await api('producer',report,403);
+  await api('owner',{action:'pause',runId:'restricted-stop',expectedRevision:1});
+  await api('producer',{...report,expectedRevision:2,attemptId:'foreign'},403);
+  await api('producer',{...report,expectedRevision:2,state:'working'},403);
+  await api('producer',{...report,expectedRevision:2,state:'paused',appliedInputMessageIds:['test-welcome']},403);
+  await api('producer',{...report,expectedRevision:2,state:'paused',resultMessageId:'test-welcome'},403);
+  await api('producer',{action:'draft',runId:'restricted-stop',attemptId:'original',expectedRevision:2,sequence:1,body:'Must not stream'},403);
+  const paused=await api('producer',{...report,expectedRevision:2,state:'paused'});
+  assert.equal(paused.result.status,'paused');
+  assert.equal(paused.result.inputs[0].status,'pending');
+  await api('owner',{action:'resume',runId:'restricted-stop',expectedRevision:3},409);
+});
+
+test('R366-1: a coordinator the owner paused reads paused, not awaiting a host', async t => {
+  const { f, api, message } = await setup(t);
+  await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+  assert.equal((await api('guest')).assistant.availability, 'awaiting_host');
+  f.store.wakeQueue.pause(f.keys.owner, 'commons', { requestId: randomUUID(), reason: 'away' }, null, { memberId: 'producer' });
+  message('owner', 'asked-while-paused');
+  assert.equal((await api('owner', { action: 'invoke', runId: 'while-paused', sourceMessageId: 'asked-while-paused' })).result.status, 'queued');
+  for (const actor of ['guest', 'owner']) assert.equal((await api(actor)).assistant.availability, 'paused', `${actor} sees the pause`);
+  const refused = await api('producer', { action: 'claim', runId: 'while-paused', attemptId: 'host-paused', expectedRevision: 0 }, 409);
+  assert.equal(refused.code ?? refused.error?.code ?? refused.error, 'assistant_host_paused');
+  f.store.wakeQueue.resume(f.keys.owner, 'commons', { requestId: randomUUID() }, null, { memberId: 'producer' });
+  assert.equal((await api('guest')).assistant.availability, 'awaiting_host', 'resume clears the paused reading');
+});
+
+
+test('room admins configure and control assistants; revocation removes access', async t => {
+  const { f, api, message } = await setup(t);
+  const grant = (id, permissions) => {
+    const m = f.store.room('commons').state.members[id];
+    f.store.command(f.keys.owner, 'commons', { id: randomUUID(), type: 'member.access_changed', data: { memberId: id, expectedMemberRevision: m.revision, permissions, active: true } });
+  };
+  const configure = { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' };
+  await api('guest', configure, 403);
+  const prior = f.store.room('commons').state.members.producer.permissions;
+  grant('producer', [...new Set([...prior, 'manage_members'])]);
+  await api('producer', configure);
+  grant('guest', ['manage_members']);
+  // Human room admins can ask without a second steer grant.
+  message('guest', 'admin-question');
+  await api('guest', {action:'invoke',runId:'admin-run',sourceMessageId:'admin-question'});
+  await api('producer', {action:'pause',runId:'admin-run',expectedRevision:0});
+  await api('guest', {action:'resume',runId:'admin-run',expectedRevision:1});
+  await api('producer', {action:'cancel',runId:'admin-run',expectedRevision:2});
+  grant('producer', prior);
+  await api('producer', {...configure, expectedRevision:1}, 403);
+  grant('guest', []);
+  await api('guest', {...configure, expectedRevision:1}, 403);
+  assert.equal((await api('owner')).assistant.revision, 1);
 });

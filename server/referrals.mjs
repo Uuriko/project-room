@@ -97,7 +97,7 @@ export class Referrals {
     try { state = compactState(applyEventWithGrowth(room.state, incoming, growthCollector).state); }
     catch (error) { fail(409, "referral_rejected", error.message); }
     const projection = this.store.storedProjection(roomId, state);
-    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed");
+    if (Buffer.byteLength(projection) > PILOT_LIMITS.projectionBytes) fail(409, "pilot_limit", "Room projection limit reached; no data was changed. Ask the room owner to have older messages archived to free space.");
     const sequence = room.sequence + 1;
     this.db.prepare("INSERT INTO events VALUES(?,?,?,?)").run(roomId, sequence, incoming.id, JSON.stringify(incoming));
     this.db.prepare("UPDATE rooms SET sequence=?,projection=? WHERE id=?").run(sequence, projection, roomId);
@@ -169,9 +169,13 @@ export class Referrals {
           };
         }
       }
+      // An unverified account gets no personal link (share-links email gate); say
+      // why, so the Invite dialog does not just show an empty link field.
+      const inviteBlocked = !invite && auth.account && this.store.accountLogins.emailGateBlocks(auth.account.id)
+        ? "email_unverified" : null;
       return {
         roomId, referrals, leaderboard, myReferralCount: myReferrals.length, myReferrals,
-        myActiveCount: reward.activeCount, reward, invite,
+        myActiveCount: reward.activeCount, reward, invite, ...(inviteBlocked ? { inviteBlocked } : {}),
       };
     });
   }

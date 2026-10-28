@@ -25,7 +25,9 @@ function directory(t) {
 function environment(values = {}) {
   const env = { ...process.env };
   for (const name of Object.keys(env)) if (name.startsWith("ROOM_AGENT_") || name === "NODE_OPTIONS") delete env[name];
-  return { ...env, ...values };
+  // The child's stderr is parsed as JSON, so a Node runtime warning (e.g. NO_COLOR
+  // ignored because FORCE_COLOR is set) must not land there. Same as room-listen.
+  return { ...env, NODE_NO_WARNINGS: "1", ...values };
 }
 async function cli(args, env) {
   try { return { ...(await promisify(execFile)(process.execPath, ["scripts/agent-inbox.mjs", ...args], {
@@ -201,6 +203,12 @@ test("real connection, CLI save/check/task/watch and revocation preserve room au
   const denied = await cli(["watch", "start", join(path, "denied-watch"), "--once"], { ROOM_AGENT_CONFIG: renewedPath });
   assert.equal(denied.status, 1); assert.equal(existsSync(join(path, "denied-watch")), false, "failed preflight creates no watcher state");
   assert.deepEqual(readAgentConnection(saved), { ...config, origin, token }, "failed access never rewrites the secret");
+});
+
+test("CLI JSON errors stay parseable when the caller's shell sets both FORCE_COLOR and NO_COLOR", async () => {
+  // Node warns on stderr when both are set; the helper must keep that out of the JSON the test reads.
+  const result = await cli(["unknown"], { FORCE_COLOR: "1", NO_COLOR: "1" });
+  assert.equal(result.status, 1); assert.equal(JSON.parse(result.stderr).code, "usage_error");
 });
 
 test("CLI help and invalid syntax are credential-free and expose no input text", async () => {

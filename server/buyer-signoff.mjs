@@ -19,8 +19,9 @@ import {railActor,railFail} from "./trial-task-store.mjs";
 // input, default 3.
 //
 // RECORD-ONLY: sign-off records review decisions. It never releases money.
+import { executeOnce } from "./run-once.mjs";
 import { canonicalJson } from '../src/audit-receipts.mjs';
-import { validId } from '../src/events.js';
+import { validId, ownMember } from '../src/events.js';
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, code, message) => { if (!ok) fail(422, code, message); };
@@ -112,14 +113,26 @@ export class BuyerSignoff {
     identifier(input.requestId);
     return this.store.transaction(() => {
       const fingerprint = canonicalJson(input);
-      const previous = this.db.prepare('SELECT * FROM buyer_signoff_requests WHERE room_id=? AND request_id=?').get(roomId, input.requestId);
-      if (previous) {
-        if (previous.actor_id !== actorId || previous.input !== fingerprint) fail(409, 'request_id_reused', 'Request ID already used with different input');
-        return JSON.parse(previous.outcome);
-      }
-      const outcome = action();
-      this.db.prepare('INSERT INTO buyer_signoff_requests VALUES (?,?,?,?,?)').run(roomId, input.requestId, actorId, fingerprint, JSON.stringify(outcome));
-      return outcome;
+      // Idempotency via the shared runOnce flow (server/run-once.mjs); the
+      // journal table and the pinned request_id_reused error shape stay
+      // exactly as before — the actor is folded into the fingerprint so a
+      // request ID replayed by a different actor conflicts, as it did when
+      // actor_id was compared separately.
+      const { result } = executeOnce({
+        fingerprint: `${actorId}\n${fingerprint}`,
+        conflictCode: 'request_id_reused',
+        conflictMessage: 'Request ID already used with different input',
+        throwError: fail,
+        find: () => {
+          const previous = this.db.prepare('SELECT * FROM buyer_signoff_requests WHERE room_id=? AND request_id=?').get(roomId, input.requestId);
+          return previous ? { fingerprint: `${previous.actor_id}\n${previous.input}`, result: JSON.parse(previous.outcome) } : null;
+        },
+        execute: action,
+        record: outcome => {
+          this.db.prepare('INSERT INTO buyer_signoff_requests VALUES (?,?,?,?,?)').run(roomId, input.requestId, actorId, fingerprint, JSON.stringify(outcome));
+        },
+      });
+      return result;
     });
   }
 
@@ -151,7 +164,10 @@ export class BuyerSignoff {
     const trialTaskId = identifier(input.trialTaskId);
     const buyerId = identifier(input.buyerId);
     const contractId = input.contractId == null ? null : identifier(input.contractId);
-    check(state.members[buyerId] && state.members[buyerId].active !== false, 'invalid_signoff', 'buyerId must be an active room member');
+    // #1004 follow-up: own-property lookup — an inherited Object.prototype
+    // name must never satisfy "active room member".
+    const buyer = ownMember(state.members, buyerId);
+    check(buyer && buyer.active !== false, 'invalid_signoff', 'buyerId must be an active room member');
     if (!this.isOwner(state, actorId) && actorId !== buyerId) fail(403, 'signoff_not_party', 'Only the buyer or the room owner may open a sign-off loop');
     return this.request(roomId, actorId, { action: 'create', ...input }, () => {
       const trial = this.store.trialTasks.raw(roomId, trialTaskId);

@@ -18,7 +18,7 @@ import {railActor} from "./trial-task-store.mjs";
 // buyer sign-off loop (server/buyer-signoff.mjs), which overlays a trial
 // task's `submitted` state without editing the trial-task state machine.
 import { canonicalJson } from '../src/audit-receipts.mjs';
-import { validId } from '../src/events.js';
+import { validId, ownMember } from '../src/events.js';
 
 const fail = (status, code, message) => { throw Object.assign(new Error(message), { status, code }); };
 const check = (ok, message) => { if (!ok) fail(422, 'invalid_demigod_offer', message); };
@@ -61,6 +61,15 @@ export const DEFAULT_FEE_POLICY_REF = 'demigod:placement-10pct/v1';
 export const PRICE_TYPES = ['fixed', 'hourly', 'trial_management_fee'];
 const DELIVERABLE_SHAPES = ['code-pr', 'markdown-report', 'design-mock', 'data-set', 'automation-run', 'other'];
 
+const maxScoreOf = value => {
+  // Contract completion (demigod-contracts) derives rubric weights from
+  // maxScore and hard-requires this exact numeric shape; accepting anything
+  // else here would mint offers whose contracts can never complete.
+  const maxScore = text(value, 16);
+  check(/^[0-9]+(\.[0-9]{1,2})?$/.test(maxScore), 'vettingRubric maxScore must be a number with at most two decimal places');
+  return maxScore;
+};
+
 function rubricOf(value) {
   check(Array.isArray(value) && value.length >= 1 && value.length <= 50, 'vettingRubric needs 1-50 criteria');
   return value.map(criterion => {
@@ -68,7 +77,7 @@ function rubricOf(value) {
     return {
       criterionId: identifier(criterion.criterionId),
       description: text(criterion.description, 1000),
-      maxScore: text(criterion.maxScore, 16),
+      maxScore: maxScoreOf(criterion.maxScore),
     };
   });
 }
@@ -115,7 +124,9 @@ export class DemigodOffers {
   }
 
   memberOf(state, memberId, what) {
-    const member = state.members[memberId];
+    // #1004 follow-up: own-property lookup — an inherited Object.prototype
+    // name must never satisfy "active room member".
+    const member = ownMember(state.members, memberId);
     check(member && member.active !== false, `${what} must be an active room member`);
     return member;
   }

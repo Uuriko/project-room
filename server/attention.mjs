@@ -7,7 +7,8 @@
 
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
+import { executeOnce } from "./run-once.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 export const attentionSchema = `
@@ -30,6 +31,24 @@ export const attentionSchema = `
 const MINUTES_PER_DAY = 1440;
 const prefsView = row => row ? { quietStart: row.quiet_start, quietEnd: row.quiet_end, delivery: row.delivery, digestHour: row.digest_hour, updatedAt: row.updated_at } : null;
 
+// Two-trigger discipline (lane B8): the quiet-window check shared by the
+// legacy heldUntil arithmetic and the interrupt delivery decision, so both
+// read the same window. Pure; prefs carry UTC minute offsets, may be null.
+const inQuietWindow = (prefs, at) => {
+  if (!prefs || prefs.quietStart === null || prefs.quietStart === undefined) return false;
+  const mod = Math.floor(at / 60000) % MINUTES_PER_DAY, s = prefs.quietStart, e = prefs.quietEnd;
+  return s < e ? mod >= s && mod < e : mod >= s || mod < e;
+};
+
+// Interrupt-class delivery (lane B8): interrupts are never held — inside
+// quiet hours they deliver silently (badge/count, no sound), outside they
+// deliver normally. The break-through bar (loud vs silent) is the
+// classifier's call; this is pure delivery arithmetic, and like heldUntil
+// it never mutates queue state. Additive; heldUntil below is untouched.
+export function interruptDelivery(prefs, at = Date.now()) {
+  return Object.freeze({ decision: "deliver", silent: inQuietWindow(prefs, at), heldUntil: null });
+}
+
 // Pure delivery arithmetic, in UTC minutes. A quiet window may wrap midnight
 // (start > end). heldUntil returns null when delivery is allowed at `at`,
 // otherwise the earliest later moment when delivery is allowed. Digest choice
@@ -38,11 +57,7 @@ const prefsView = row => row ? { quietStart: row.quiet_start, quietEnd: row.quie
 export function heldUntil(prefs, at) {
   if (!prefs) return null;
   const MIN = 60000, DAY = MINUTES_PER_DAY * MIN;
-  const inQuiet = ms => {
-    if (prefs.quietStart === null || prefs.quietStart === undefined) return false;
-    const mod = Math.floor(ms / MIN) % MINUTES_PER_DAY, s = prefs.quietStart, e = prefs.quietEnd;
-    return s < e ? mod >= s && mod < e : mod >= s || mod < e;
-  };
+  const inQuiet = ms => inQuietWindow(prefs, ms);
   const exitQuiet = ms => {
     if (!inQuiet(ms)) return ms;
     const s = prefs.quietStart, e = prefs.quietEnd;
@@ -98,18 +113,31 @@ export class Attention {
       if (request.delivery === "digest" && request.digestHour === null) fail(422, "invalid_attention", "Digest delivery needs a digest hour.");
       if (request.delivery === "immediate" && request.digestHour !== null) fail(422, "invalid_attention", "Immediate delivery takes no digest hour.");
       const fingerprint = createHash("sha256").update(JSON.stringify(Object.fromEntries(fields.sort().map(field => [field, request[field]])))).digest("hex");
-      const prior = this.db.prepare("SELECT fingerprint,response FROM private_attention_commands WHERE room_id=? AND member_id=? AND request_id=?").get(roomId, auth.member.id, request.requestId);
-      if (prior) {
-        if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Request ID already used for different attention settings");
-        return { ...this.list(token, roomId, binding), receipt: JSON.parse(prior.response), duplicate: true };
-      }
-      const now = this.store.now();
-      const receipt = { requestId: request.requestId, quietStart: request.quietStart, quietEnd: request.quietEnd, delivery: request.delivery, digestHour: request.digestHour };
-      this.db.prepare(`INSERT INTO private_attention_prefs (room_id,member_id,quiet_start,quiet_end,delivery,digest_hour,updated_at) VALUES(?,?,?,?,?,?,?)
-        ON CONFLICT(room_id,member_id) DO UPDATE SET quiet_start=excluded.quiet_start,quiet_end=excluded.quiet_end,delivery=excluded.delivery,digest_hour=excluded.digest_hour,updated_at=excluded.updated_at`)
-        .run(roomId, auth.member.id, request.quietStart, request.quietEnd, request.delivery, request.digestHour, now);
-      this.db.prepare("INSERT INTO private_attention_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(receipt));
-      return { ...this.list(token, roomId, binding), receipt, duplicate: false };
+      // Idempotency via the shared runOnce flow (server/run-once.mjs); the
+      // retained private_attention_commands journal keeps its own storage,
+      // immutability triggers and error shape — only the flow is shared.
+      const { result: receipt, replayed } = executeOnce({
+        fingerprint,
+        conflictCode: "idempotency_conflict",
+        conflictMessage: "Request ID already used for different attention settings",
+        throwError: fail,
+        find: () => {
+          const prior = this.db.prepare("SELECT fingerprint,response FROM private_attention_commands WHERE room_id=? AND member_id=? AND request_id=?").get(roomId, auth.member.id, request.requestId);
+          return prior ? { fingerprint: prior.fingerprint, result: JSON.parse(prior.response) } : null;
+        },
+        execute: () => {
+          const now = this.store.now();
+          const fresh = { requestId: request.requestId, quietStart: request.quietStart, quietEnd: request.quietEnd, delivery: request.delivery, digestHour: request.digestHour };
+          this.db.prepare(`INSERT INTO private_attention_prefs (room_id,member_id,quiet_start,quiet_end,delivery,digest_hour,updated_at) VALUES(?,?,?,?,?,?,?)
+            ON CONFLICT(room_id,member_id) DO UPDATE SET quiet_start=excluded.quiet_start,quiet_end=excluded.quiet_end,delivery=excluded.delivery,digest_hour=excluded.digest_hour,updated_at=excluded.updated_at`)
+            .run(roomId, auth.member.id, request.quietStart, request.quietEnd, request.delivery, request.digestHour, now);
+          return fresh;
+        },
+        record: result => {
+          this.db.prepare("INSERT INTO private_attention_commands VALUES(?,?,?,?,?)").run(roomId, auth.member.id, request.requestId, fingerprint, JSON.stringify(result));
+        },
+      });
+      return { ...this.list(token, roomId, binding), receipt, duplicate: replayed };
     });
   }
   // Due wakes filtered through the member's delivery preference. Held wakes
@@ -121,11 +149,25 @@ export class Attention {
       const now = this.store.now();
       const prefs = this.prefs(roomId, auth.member.id);
       const due = this.db.prepare("SELECT * FROM wake_queue WHERE room_id=? AND member_id=? AND state='pending' AND due_at<=? ORDER BY due_at,queue_key").all(roomId, auth.member.id, now);
-      const held = heldUntil(prefs, now);
+      // Each wake has its own delivery moment, computed from when it became
+      // due - not from now. heldUntil(prefs, due_at) answers "when does a
+      // wake due at due_at first become deliverable": for digest prefs that
+      // is the first digest boundary at/after due_at (moved out of quiet
+      // hours), so a wake due before today's digest hour is deliverable once
+      // that hour passes, instead of being re-held until tomorrow's just
+      // because the query happens later. A null hold means the wake was
+      // deliverable from its due moment.
+      const deliverNow = [], held = [];
+      for (const row of due) {
+        const wakeHeldUntil = heldUntil(prefs, row.due_at);
+        const deliverAt = wakeHeldUntil ?? row.due_at;
+        if (deliverAt <= now) deliverNow.push(row.queue_key);
+        else held.push({ queueKey: row.queue_key, dueAt: row.due_at, heldUntil: deliverAt, state: row.state });
+      }
       return {
-        roomId, viewerId: auth.member.id, evaluatedAt: now, preferences: prefs, heldUntil: held,
-        deliverNow: held === null ? due.map(row => row.queue_key) : [],
-        held: held === null ? [] : due.map(row => ({ queueKey: row.queue_key, dueAt: row.due_at, heldUntil: held, state: row.state }))
+        roomId, viewerId: auth.member.id, evaluatedAt: now, preferences: prefs,
+        heldUntil: held.length ? Math.min(...held.map(row => row.heldUntil)) : null,
+        deliverNow, held
       };
     });
   }

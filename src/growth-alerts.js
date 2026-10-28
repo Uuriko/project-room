@@ -151,20 +151,30 @@ const checkSummary = summary => {
   if (!isPlainObject(summary)) throw new TypeError("growth-alerts: summary must be a summary object");
   if (!isPlainObject(summary.totals)) throw new TypeError("growth-alerts: summary.totals must be an object");
   if (!isPlainObject(summary.engagement)) throw new TypeError("growth-alerts: summary.engagement must be an object");
-  if (!Array.isArray(summary.topMentionedAgents)) {
-    throw new TypeError("growth-alerts: summary.topMentionedAgents must be an array");
-  }
   for (const [type, count] of Object.entries(summary.totals)) {
     if (typeof count !== "number" || Number.isNaN(count)) {
       throw new TypeError(`growth-alerts: summary.totals["${type}"] must be a number`);
     }
   }
-  for (const entry of summary.topMentionedAgents) {
+  checkMentionedAgents(summary, "topMentionedAgents", true);
+  // allMentionedAgents (the untruncated ranking added to C5 summaries) is
+  // optional so summaries built before it existed still validate; when it
+  // is present it must be well-formed, since mention-spike reads it.
+  checkMentionedAgents(summary, "allMentionedAgents", false);
+  return summary;
+};
+
+const checkMentionedAgents = (summary, field, required) => {
+  const list = summary[field];
+  if (list === undefined && !required) return;
+  if (!Array.isArray(list)) {
+    throw new TypeError(`growth-alerts: summary.${field} must be an array`);
+  }
+  for (const entry of list) {
     if (!isPlainObject(entry) || typeof entry.agentId !== "string" || typeof entry.mentions !== "number") {
-      throw new TypeError("growth-alerts: summary.topMentionedAgents entries must be {agentId, mentions}");
+      throw new TypeError(`growth-alerts: summary.${field} entries must be {agentId, mentions}`);
     }
   }
-  return summary;
 };
 
 const checkComparison = comparison => {
@@ -200,7 +210,13 @@ const needsComparison = (ruleId, kind) =>
   ({ ruleId, kind, triggered: false, severity: undefined, detail: "needs comparison" });
 
 const mentionCounts = (summary, comparison) => {
-  const counts = new Map(summary.topMentionedAgents.map(entry => [entry.agentId, entry.mentions]));
+  // Prefer the untruncated ranking: topMentionedAgents is capped at the
+  // summary's topN (default 10), so a watched agent ranked outside it
+  // would default to 0 and its spike would silently never fire (#2975).
+  // Summaries built before allMentionedAgents existed fall back to the
+  // truncated list (plus any comparison movers below).
+  const ranked = summary.allMentionedAgents ?? summary.topMentionedAgents;
+  const counts = new Map(ranked.map(entry => [entry.agentId, entry.mentions]));
   if (comparison !== null) {
     for (const mover of comparison.topMentionedMovers) {
       if (!counts.has(mover.agentId)) counts.set(mover.agentId, mover.currentMentions);

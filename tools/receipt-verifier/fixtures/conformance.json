@@ -1,0 +1,181 @@
+{
+  "description": "Conformance fixtures for tools/receipt-verifier. Every signed fixture was produced by the repo's own server modules (server/bounty-receipts.mjs, server/vetting-receipts.mjs, server/signed-evidence.mjs) and every hash by the shipped code paths. TEST KEYS ONLY: the bounty key is the dasha-receipt/1 reference-vector key published in tests/bounty-receipts.test.js; the vetting and signed-evidence keys are throwaway test keys whose private halves were discarded at generation time. No production key material is present, requested, or implied.",
+  "testKeysOnly": true,
+  "bounty": {
+    "pubkeyHex": "b9ce0f24f866c0fa02ab7c1ff345f9bb7c73205b4c2ec76a77295ef16592dc0d",
+    "signerRef": "test-operator",
+    "journal": {
+      "ent_aaaaaaaaaaaaaaaa": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "ent_bbbbbbbbbbbbbbbb": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    "receipts": {
+      "escrow-locked": {
+        "schemaVersion": "room-bounty-receipt/1",
+        "receiptId": "room-bounty-receipt:el:4fcbd72668f5ae68d378d237407ed125",
+        "type": "escrow-locked",
+        "roomId": "room-test",
+        "bountyId": "ROOM-1",
+        "lotId": "lot_cccccccccccccccc",
+        "amountMillis": "10000",
+        "creditUnit": "milli-credit",
+        "actor": {
+          "kind": "agent",
+          "id": "id:agent/jill"
+        },
+        "issuer": {
+          "pubkey": "b9ce0f24f866c0fa02ab7c1ff345f9bb7c73205b4c2ec76a77295ef16592dc0d",
+          "role": "escrow-keeper",
+          "ref": "test-operator"
+        },
+        "issuedAt": "2026-09-22T12:00:00.000Z",
+        "payload": {
+          "entries": [
+            "ent_aaaaaaaaaaaaaaaa",
+            "ent_bbbbbbbbbbbbbbbb"
+          ],
+          "entryHashes": [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ],
+          "fromAccount": "id:agent/jill",
+          "fromLotState": "payable"
+        },
+        "signature": "f4c621c8d7220196024789a93a9c6151432551e59d21a9205eb5fed6ffac6211013cb91e760a836201517495fd5a6f77633cfe25764c42c366748c420d5db309"
+      },
+      "payout-released": {
+        "schemaVersion": "room-bounty-receipt/1",
+        "receiptId": "room-bounty-receipt:pr:e2a17f49d449afb711f54612d3c585d2",
+        "type": "payout-released",
+        "roomId": "room-test",
+        "bountyId": "ROOM-1",
+        "lotId": "lot_cccccccccccccccc",
+        "amountMillis": "9900",
+        "creditUnit": "milli-credit",
+        "actor": {
+          "kind": "agent",
+          "id": "id:agent/jill"
+        },
+        "issuer": {
+          "pubkey": "b9ce0f24f866c0fa02ab7c1ff345f9bb7c73205b4c2ec76a77295ef16592dc0d",
+          "role": "escrow-keeper",
+          "ref": "test-operator"
+        },
+        "issuedAt": "2026-09-22T12:00:00.000Z",
+        "payload": {
+          "entries": [
+            "ent_aaaaaaaaaaaaaaaa",
+            "ent_bbbbbbbbbbbbbbbb"
+          ],
+          "entryHashes": [
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          ],
+          "netAmountMillis": "9900",
+          "feeAmountMillis": "100",
+          "grossAmountMillis": "10000",
+          "paidTo": "id:agent/grokbot",
+          "poolAccount": "pool"
+        },
+        "signature": "6a6aa66cc139913871b4740389fcab4ec1f48c24456198779efeb21c14f32bb492f1136a26864072855d771f1a72f000da360dacb727b4819c891baed4d73004"
+      }
+    }
+  },
+  "vetting": {
+    "pubkeyHex": "92ab17359c00474ab012e086d03f0bba33d9725966f0095d762553fcfa83d9c1",
+    "now": "2026-10-06T00:30:00.000Z",
+    "receipt": {
+      "receiptType": "vetting/1",
+      "receiptId": "vetting-receipt:abababababababababababababababab",
+      "trialTaskId": "trial-7f3a",
+      "demigodReqId": "req-0042",
+      "candidateId": "agent:rivet",
+      "scope": {
+        "hoursMax": "8",
+        "deliverableShape": "a working prototype PR"
+      },
+      "rubricScores": [
+        {
+          "criterion": "correctness",
+          "scoreBps": "8500"
+        },
+        {
+          "criterion": "communication",
+          "scoreBps": "9000"
+        }
+      ],
+      "verdict": "pass",
+      "evaluator": {
+        "kind": "human",
+        "id": "reviewer:ada"
+      },
+      "issuedAt": "2026-10-06T00:30:00.000Z",
+      "signature": "f0db195198bb3ed840a203821cdffa1fba6104853a830ce4b8fbeb59f32cc7ca8359342993c3722b1d42023fef60d110373860b2f9937d094d45c2132a11ac0b"
+    }
+  },
+  "signedEvidence": {
+    "evidence": {
+      "schemaVersion": "room-signed-evidence/1",
+      "evidenceId": "room-evidence:ex:f08c3611d05d82513440137e020e190a",
+      "kind": "external",
+      "signerIdentityId": "ai_verifier_fixture",
+      "issuedAt": "2026-09-22T12:00:00Z",
+      "contentHash": "sha256:453c519f4003a1ba2cdeb3c600f9c8fe4cedeeb83bd785c45866ddd3c95648e9",
+      "label": "conformance fixture",
+      "signature": "dd99f394fdf90a6022223f179ea192457fd86b8ce24ffb89fc3892508d77a8c7a092cc9ef435e50a879b38cb5dd30bc0031291e67879de4029c49fade342c809"
+    },
+    "registry": {
+      "ai_verifier_fixture": [
+        {
+          "publicKey": "yB6keebHAhmwyKVQem9DqFc1bjGOu8y3LrP960HwadQ=",
+          "validFrom": 0,
+          "validUntil": null,
+          "revokedAt": null
+        }
+      ]
+    },
+    "revokedRegistry": {
+      "ai_verifier_fixture": [
+        {
+          "publicKey": "yB6keebHAhmwyKVQem9DqFc1bjGOu8y3LrP960HwadQ=",
+          "validFrom": 0,
+          "validUntil": null,
+          "revokedAt": 1790078400000
+        }
+      ]
+    },
+    "expiredRegistry": {
+      "ai_verifier_fixture": [
+        {
+          "publicKey": "yB6keebHAhmwyKVQem9DqFc1bjGOu8y3LrP960HwadQ=",
+          "validFrom": 0,
+          "validUntil": 1790074800000,
+          "revokedAt": null
+        }
+      ]
+    }
+  },
+  "publicWork": {
+    "artifactText": "Receipt verifier conformance fixture artifact.\n",
+    "receipt": {
+      "schema": "public-work-receipt/1",
+      "receiptId": "pwr_52fbaa7bae8d511043ecf0151deb71a7245de1b8324b7609a45a11cc870deeb4",
+      "taskId": "offer_fixture_1",
+      "title": "Conformance fixture task",
+      "termsVersion": 1,
+      "namespaceId": "public_fixture",
+      "generation": 1,
+      "identityId": "ai_fixture",
+      "agentName": "Fixture Agent",
+      "state": "submitted",
+      "artifact": {
+        "sha256": "afee4cf4c86d047eb91569e47a9bc00a563bba4eaa5f8847f7feea9102632ecf",
+        "bytes": 47
+      },
+      "checksReported": [
+        "fixture check passed"
+      ],
+      "verification": "hash_only",
+      "createdAt": "2026-10-13T00:00:00.000Z"
+    }
+  }
+}

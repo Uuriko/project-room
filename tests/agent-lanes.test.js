@@ -127,6 +127,30 @@ test("answers use the accept, decline, cancel vocabulary elicitation already def
     /accept, decline or cancel/);
 });
 
+test("an answer relayed after the decision's notAfter deadline is refused, not recorded", () => {
+  // decision() has notAfter = NOW + 60 minutes.
+  assert.throws(() => recordAnswer({
+    decision: decision(), courier: courier(), answer: "accept",
+    answeredBy: "jonathan", answeredAt: NOW + 61 * 60000,
+  }), /expired/);
+  // Exactly at the deadline the window has shut (routeDecision agrees:
+  // budgetMinutes <= 0 is expired), so an answer at notAfter is also late.
+  assert.throws(() => recordAnswer({
+    decision: decision(), courier: courier(), answer: "accept",
+    answeredBy: "jonathan", answeredAt: NOW + 60 * 60000,
+  }), (err) => err.code === "decision_expired");
+  // Just inside the window is still a valid answer.
+  assert.equal(recordAnswer({
+    decision: decision(), courier: courier(), answer: "accept",
+    answeredBy: "jonathan", answeredAt: NOW + 59 * 60000,
+  }).answeredAt, NOW + 59 * 60000);
+  // A decision with no deadline never expires.
+  assert.equal(recordAnswer({
+    decision: decision({ notAfter: null }), courier: courier(), answer: "decline",
+    answeredBy: "jonathan", answeredAt: NOW + 365 * 24 * 60 * 60000,
+  }).answer, "decline");
+});
+
 test("a receipt carries what the answer unblocks", () => {
   const receipt = recordAnswer({
     decision: decision({ blocking: ["pr-811", "deploy-hold"] }),

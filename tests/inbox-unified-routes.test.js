@@ -54,7 +54,7 @@ function fixture(t) {
     return f.inbox({ action: "send.reserve", requestId: "send-" + sourceId, sourceId, sourceRevision: 1, draftRevision: 1, previewVersion: preview.previewVersion }).receipt.send;
   };
   f.server = async (options = {}) => {
-    const server = createRoomServer({ store: f.store, resolveClientAddress: () => "203.0.113.5", ...options });
+    const server = createRoomServer({ enableDeferredInbox: true, store: f.store, resolveClientAddress: () => "203.0.113.5", ...options });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
     const origin = "http://127.0.0.1:" + server.address().port;
@@ -183,6 +183,9 @@ test("channel sends: a Telegram reply dispatches through the fixture sender when
   assert.equal(value.sends.length, 1); assert.equal(value.sends[0].revision, 2);
   response = await bare.post(path, { action: "dispatch", sourceId: tgId, sendId: send.id }); value = await response.json(); assert.equal(value.send.status, "accepted", "a second dispatch never sends again");
   response = await bare.post(path, { action: "reconcile", sourceId: tgId, sendId: send.id }); value = await response.json(); assert.equal(value.send.status, "accepted");
+  // flush is a retry for stuck-at-unknown attempts only: on a settled attempt it is a no-op, never a second send.
+  response = await bare.post(path, { action: "flush", sourceId: tgId, sendId: send.id }); value = await response.json();
+  assert.equal(response.status, 200, JSON.stringify(value)); assert.equal(value.send.status, "accepted"); assert.equal(value.send.revision, 2);
   response = await bare.get("/api/inbox/connections/" + f.telegram.connection.id); value = await response.json();
   assert.deepEqual({ outcome: value.live.lastSendResult.outcome, code: value.live.lastSendResult.code }, { outcome: "accepted", code: "fixture" });
   // A disconnected connection offers no transport.
@@ -231,5 +234,5 @@ test("channel sends: a Telegram reply dispatches through the fixture sender when
   const receipt = await rejecting.submit({ operationId: "op-1", envelope: { previewVersion: "v1" } });
   assert.deepEqual(receipt, { operationId: "op-1", previewVersion: "v1", outcome: "rejected", providerId: null, code: "fixture_rejected" });
   await assert.rejects(rejecting.submit({ operationId: "op-1", envelope: { previewVersion: "v2" } }), { code: "conflicting_inbox_observation" });
-  assert.throws(() => createRoomServer({ store: f.store, channelTransports: "telegram" }), /resolver/);
+  assert.throws(() => createRoomServer({ enableDeferredInbox: true, store: f.store, channelTransports: "telegram" }), /resolver/);
 });

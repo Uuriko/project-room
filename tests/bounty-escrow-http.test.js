@@ -11,6 +11,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { BountyEscrow } from "../server/bounty-escrow.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { ensureSpendGrantsSchema, issueSpendGrant } from "../server/spend-grants.mjs";
 
 async function startServer(t) {
   const fixture = createAcceptanceFixture();
@@ -26,6 +27,14 @@ async function startServer(t) {
         memo: "test seeding: 100 credits", actor: { kind: "rule", id: "test" } });
     }
   });
+  // #3269: bounty_post is a priced operation at every door now — a working
+  // producer/reviewer agent holds a spend grant, issued by the owner as in
+  // any deployment. Seeded db-level alongside the credit seeding above.
+  ensureSpendGrantsSchema(fixture.store.db);
+  for (const memberId of ["producer", "reviewer"]) {
+    issueSpendGrant(fixture.store.db, ROOM, memberId,
+      { grantedBy: "owner", capCents: "100000", perTxCapCents: "100000", nowMs: Date.now() });
+  }
   const server = createRoomServer({ store: fixture.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
@@ -125,6 +134,39 @@ test("post → fund → claim → submit → accept → epoch-close → balances
   const balances = (await balancesRes.json()).balances;
   assert.equal(balances.payable, 199, "100 seeded + 99 payout (1% fee) = 199; claim bond returned");
   assert.equal(balances.reputation.completedBounties, 1, "paid-only reputation accrues");
+});
+
+test("credit balances/history are scoped to the lane itself or the room owner (#3281)", async t => {
+  const { origin, keys } = await startServer(t);
+  // startServer seeds a genesis movement for the producer lane. A non-party
+  // member and a guest member must not read that lane's balances or its
+  // bilateral history (both legs of every movement producer touched).
+  for (const [label, key] of [["non-party member", keys.reviewer], ["guest member", keys.guest]]) {
+    for (const door of ["balances", "history"]) {
+      const res = await get(origin, `/api/rooms/${ROOM}/credits/${door}/producer`, key);
+      const parsed = await res.json();
+      assert.equal(res.status, 403, `${label} must not read producer ${door}`);
+      assert.equal(parsed.error.code, "not_authorized");
+      assert.equal(parsed.balances, undefined, "a refused balances read leaks no balances");
+      assert.equal(parsed.receipts, undefined, "a refused history read leaks no receipts");
+    }
+  }
+
+  // The lane itself (a party to its own movements) still succeeds.
+  const selfBalances = await get(origin, `/api/rooms/${ROOM}/credits/balances/producer`, keys.producer);
+  assert.equal(selfBalances.status, 200);
+  assert.equal((await selfBalances.json()).balances.payable, 100, "producer sees its own seeded balances");
+  const selfHistory = await get(origin, `/api/rooms/${ROOM}/credits/history/producer`, keys.producer);
+  assert.equal(selfHistory.status, 200);
+  assert.ok((await selfHistory.json()).receipts.length >= 1, "producer sees its own history");
+
+  // The room owner still succeeds for another lane.
+  const ownerBalances = await get(origin, `/api/rooms/${ROOM}/credits/balances/producer`, keys.owner);
+  assert.equal(ownerBalances.status, 200);
+  assert.equal((await ownerBalances.json()).balances.payable, 100);
+  const ownerHistory = await get(origin, `/api/rooms/${ROOM}/credits/history/producer`, keys.owner);
+  assert.equal(ownerHistory.status, 200);
+  assert.ok((await ownerHistory.json()).receipts.length >= 1);
 });
 
 test("triage quartet: decline, duplicate, snooze", async t => {
@@ -230,7 +272,9 @@ test("error mapping: unknown bounty, invalid input, unauthenticated", async t =>
 
 test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t => {
   const { origin, keys } = await startServer(t);
-  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ amount: 100 }), keys.owner);
+  // #3727: the dispute below can only open if a decider seats, so the bounty
+  // names its designated verifier (the reviewer) at posting.
+  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ amount: 100, verifierId: "reviewer" }), keys.owner);
   const bountyId = (await createRes.json()).bounty.bountyId;
   await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner);
   await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/claim`, {}, keys.producer);
@@ -249,10 +293,13 @@ test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t =
   }, keys.reviewer);
   assert.equal(badBond.status, 422);
 
-  // Exactly 25% opens the dispute.
+  // Exactly 25% opens the dispute. The challenger is a third member:
+  // the designated verifier (reviewer) cannot raise it — seating would
+  // refuse the designee-as-challenger dispute as unavailable (#3866),
+  // so a neutral member challenges and the reviewer seats as decider.
   const dispute = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/dispute`, {
     bond: 25, grounds: "deliverable incomplete",
-  }, keys.reviewer);
+  }, keys.guest);
   assert.equal(dispute.status, 201);
 
   // Credit history is movement-level with before/after and hash links.
@@ -263,6 +310,28 @@ test("dispute bond is exactly 25% and the dispute lifecycle resolves", async t =
   assert.ok(receipts.every(r => r.after && r.hash), "every receipt carries after and a hash link");
   assert.ok(receipts.every(r => r.kind === "genesis" || r.before),
     "every non-genesis movement receipt carries before");
+});
+
+test("#3726: dispute on submitted (unaccepted) work is refused 422 invalid_state over HTTP", async t => {
+  const { origin, keys } = await startServer(t);
+  const createRes = await post(origin, `/api/rooms/${ROOM}/bounties`, bountyBody({ amount: 100 }), keys.owner);
+  const bountyId = (await createRes.json()).bounty.bountyId;
+  await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/fund`, {}, keys.owner);
+  await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/claim`, {}, keys.producer);
+  await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/submit`, {
+    evidenceUrl: "https://room.example/receipts/2",
+    summary: "Done.",
+    producerId: "producer",
+  }, keys.producer);
+
+  // No acceptance yet: the dispute cannot open, whatever the bond.
+  const refused = await post(origin, `/api/rooms/${ROOM}/bounties/${bountyId}/dispute`, {
+    bond: 25, grounds: "deliverable incomplete",
+  }, keys.reviewer);
+  assert.equal(refused.status, 422);
+  const body = await refused.json();
+  assert.equal(body.error.code, "invalid_state");
+  assert.match(body.error.message, /only on accepted work/);
 });
 
 test("rubric route: post with rubric, re-pin pre-funding, frozen after fund", async t => {

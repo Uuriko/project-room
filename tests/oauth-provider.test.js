@@ -175,6 +175,26 @@ test("refresh rotates tokens", () => {
     OAuthProviderError);
 });
 
+test("refresh issuance failure does not consume the old refresh token (#2944)", () => {
+  const { provider } = setup();
+  const first = mkPair(provider, "alice");
+  // A non-object session makes issueTokenPair throw (normalizeSessionMeta)
+  // after the old ordering had already revoked — and persisted — the old
+  // token, leaving the client with no usable refresh token at all.
+  assert.throws(
+    () => provider.refresh({ refreshToken: first.refreshToken, clientId: "muse", session: "not-an-object" }),
+    /session must be an object/);
+  // The old token survives the failed issuance: a valid retry rotates it.
+  const second = provider.refresh({ refreshToken: first.refreshToken, clientId: "muse" });
+  assert.notEqual(second.refreshToken, first.refreshToken);
+  assert.ok(provider.verifyAccessToken(second.accessToken));
+  // Rotation is still single-use afterwards: replaying the old token is
+  // reuse, not a silent "revoked".
+  assert.throws(
+    () => provider.refresh({ refreshToken: first.refreshToken, clientId: "muse" }),
+    /reuse detected/);
+});
+
 test("revokes tokens (RFC 7009)", () => {
   const { provider } = setup();
   const verifier = "v-".padEnd(43, "f");

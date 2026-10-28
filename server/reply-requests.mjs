@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 import { randomUUID } from "node:crypto";
 import { buildReplyCommand } from "../client/reply-actions.mjs";
 import { charterContext } from "../src/room-charter.js";
@@ -98,7 +99,9 @@ export class ReplyRequests {
         const saved = decode(checkpoint, "checkpoint", binding);
         verifyAnchor(saved.throughSequence, saved.throughEventId); afterSequence = saved.throughSequence;
       }
-      const byMessage = new Map(state.messages.map(message => [message.id, message])), owners = replyContextOwners(state);
+      const records = messageRepository(this.store, roomId, state);
+      const byMessage = records.getMany ? records.getMany(rows.filter(row => row.type === 'message.posted').map(row => row.message_id || row.id)) : records;
+      const owners = replyContextOwners({ ...state, messages: records.records() });
       const byEvent = new Map(rows.map(row => [row.id, row])), terminals = new Map(), openings = new Map();
       for (const request of Object.values(requests)) {
         if (requestMessageId !== null ? request.id !== requestMessageId : !directionMatches(request, auth.member.id, direction)) continue;
@@ -247,7 +250,9 @@ function compare(actual, expected) {
 // Reconstruct only membership availability, work existence, messages and requests.
 // Unrelated historical work transitions may predate today's rules; do not replay
 // them to establish the request proof hidden behind a projection checkpoint.
-export function auditReplyRequests(state, history, checkpoint = null) {
+// archivedIds: messages moved out of the stored projection; the replay keeps them
+// (the checkpoint is a full copy) but the live state no longer does.
+export function auditReplyRequests(state, history, checkpoint = null, archivedIds = null) {
   const projected = { room: null, members: {}, workItems: {}, messages: [] }, posts = new Map(), ids = new Set();
   const ownMember = memberId => Object.hasOwn(projected.members, memberId) ? projected.members[memberId] : undefined;
   let checkpointChecked = !checkpoint;
@@ -330,5 +335,6 @@ export function auditReplyRequests(state, history, checkpoint = null) {
       compare(JSON.parse(checkpoint.projection), projected); checkpointChecked = true;
     }
   }
-  check(checkpointChecked); compare(state, projected);
+  check(checkpointChecked);
+  compare(state, archivedIds?.size ? { ...projected, messages: projected.messages.filter(message => !archivedIds.has(message.id)) } : projected);
 }

@@ -8,7 +8,6 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
-import { GUEST_AGENT_TOKEN_PREFIX } from "../server/guest-agent-links.mjs";
 
 // RC-2026-09-23-bearer-origin: public guest routes called checkOrigin(req,
 // true), demanding a browser Origin header. Bearer-authenticated agent
@@ -41,7 +40,7 @@ async function serve(t) {
     },
     ...(data === undefined ? {} : { body: JSON.stringify(data) })
   });
-  return { store, request, ownerKey };
+  return { store, request, ownerKey, origin };
 }
 
 async function mintInvite(request, ownerKey) {
@@ -104,18 +103,19 @@ test("share-link agent joins work with no Origin header", async t => {
   assert.equal(value.roomId, "commons");
 });
 
-test("owner bearer mints guest-agent links with no Origin header", async t => {
+test("owner bearer mints guest invites with no Origin header", async t => {
   const { request, ownerKey } = await serve(t);
-  const minted = await request("/api/guest-agent-links", {
+  const minted = await request("/api/rooms/commons/guest-invites", {
     method: "POST", token: ownerKey,
-    data: { roomId: "commons", requestId: randomUUID(), linkToken: GUEST_AGENT_TOKEN_PREFIX + randomBytes(32).toString("base64url"), expectedOwnerRevision: 0 },
+    data: { requestId: randomUUID(), guestLabel: "bearer-origin", expectedOwnerRevision: 0 },
   });
   assert.equal(minted.status, 201);
+  assert.match((await minted.json()).code, /^GX-[A-Za-z0-9_-]{32}$/);
 });
 
 test("www Origin on a JSON API is 403 origin_denied with an Origin hint", async t => {
-  const { request } = await serve(t);
-  const hint = "Use Origin: https://room.trydemigod.com or omit the Origin header.";
+  const { request, origin } = await serve(t);
+  const hint = "Use the configured service Origin or omit the Origin header.";
   for (const originHeader of ["https://www.getdasha.com", "https://www.getdasha.com/room"]) {
     const denied = await request("/api/health", { headers: { Origin: originHeader } });
     assert.equal(denied.status, 403, originHeader);
@@ -124,10 +124,28 @@ test("www Origin on a JSON API is 403 origin_denied with an Origin hint", async 
     assert.equal(body.hint, hint);
     assert.equal(JSON.stringify(body.next).includes("guest invite"), false);
     assert.equal(JSON.stringify(body.next).includes("Add agent"), false);
-    assert.ok(body.next.some(step => step.command?.includes("https://room.trydemigod.com")));
+    assert.ok(body.next.some(step => step.command?.includes("configured service Origin")));
+    assert.doesNotMatch(JSON.stringify({ hint: body.hint, next: body.next }), /room\.trydemigod\.com/);
   }
   const open = await request("/api/health");
   assert.equal(open.status, 200);
+  const sameOrigin = await request("/api/health", { origin });
+  assert.equal(sameOrigin.status, 200, "self-host Origin recovers without a production header");
+});
+
+test("required-Origin recovery uses the self-host service and preserves the gate", async t => {
+  const { request, origin } = await serve(t);
+  const options = { method: "POST", data: { inviteToken: "invalid" } };
+  const denied = await request("/api/guest-invites/redeem", options);
+  assert.equal(denied.status, 403);
+  const body = await denied.json();
+  assert.equal(body.error.code, "origin_denied");
+  assert.equal(body.hint, "Send the configured service Origin. This route requires an allowed Origin header.");
+  assert.ok(body.next.some(step => /Do not omit the Origin header/.test(step.command)));
+  assert.doesNotMatch(JSON.stringify({ hint: body.hint, next: body.next }), /room\.trydemigod\.com/);
+  const recovered = await request("/api/guest-invites/redeem", { ...options, origin });
+  assert.equal(recovered.status, 401, "the self-host Origin clears the gate and reaches authentication");
+  assert.equal((await recovered.json()).error.code, "unauthenticated");
 });
 
 test("no bearer, no Origin: the gate still bites", async t => {
@@ -141,7 +159,7 @@ test("no bearer, no Origin: the gate still bites", async t => {
   assert.equal(noAuth.status, 403);
   const noAuthBody = await noAuth.json();
   assert.equal(noAuthBody.error.code, "origin_denied");
-  assert.equal(noAuthBody.hint, "Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.");
+  assert.equal(noAuthBody.hint, "Send the configured service Origin. This route requires an allowed Origin header.");
   assert.equal(noAuthBody.hint.includes("omit"), false);
   assert.equal(JSON.stringify(noAuthBody.next).includes("Do not omit"), true);
   // Public preview keeps its Origin requirement: the exemption is for

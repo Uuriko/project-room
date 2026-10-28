@@ -7,6 +7,7 @@ import {
   ROOM_TO_GROWTH,
   growthTypeFor,
   growthCollector,
+  getGrowthFanout,
   getGrowthEmissionFailures,
   buildGrowthEvent,
   applyEventWithGrowth
@@ -22,13 +23,12 @@ const roomEvent = (id, type, actorId, data, n = 0) =>
 
 const lastEnvelope = collector => collector.query({ limit: 1 })[0];
 
-test("C3 ROOM_TO_GROWTH covers the nine mapped room event types and is frozen", () => {
+test("C3 ROOM_TO_GROWTH covers the eight mapped room event types and is frozen", () => {
   assert.deepEqual({ ...ROOM_TO_GROWTH }, {
     "room.created": "room.created",
     "member.added": "member.joined",
     "member.joined_via_invitation": "member.joined",
     "message.posted": "message.sent",
-    "message.reaction_set": "reaction.added",
     "message.pinned": "message.pinned",
     "work.proposed": "work.proposed",
     "work.completed": "work.completed",
@@ -117,15 +117,15 @@ test("C4 mention matching is exact and case-sensitive (C3 integration)", () => {
   assert.deepEqual(collector.query({}).map(e => e.type), ["message.sent"]);
 });
 
-test("C3 reaction.added and message.pinned project message identifiers", () => {
+test("C3 old reaction_set events emit nothing; message.pinned projects the message id", () => {
   const { state, collector } = fresh();
   let res = applyEventWithGrowth(state,
     roomEvent("ev-post", EVENT_TYPES.MESSAGE_POSTED, "maya", { messageId: "m-r", body: "react to me" }, 5), collector);
+  const before = collector.query({}).length;
   res = applyEventWithGrowth(res.state,
-    roomEvent("ev-react", EVENT_TYPES.MESSAGE_REACTION_SET, "codex",
+    roomEvent("ev-react", "message.reaction_set", "codex",
       { messageId: "m-r", reaction: "like", active: true }, 6), collector);
-  assert.equal(res.growthOk, true);
-  assert.deepEqual(lastEnvelope(collector).fields, { roomId: ROOM, messageId: "m-r", reaction: "like" });
+  assert.equal(collector.query({}).length, before);
   res = applyEventWithGrowth(res.state,
     roomEvent("ev-pin", EVENT_TYPES.MESSAGE_PINNED, "potter", { messageId: "m-r" }, 7), collector);
   assert.equal(res.growthOk, true);
@@ -219,4 +219,30 @@ test("C3 room apply failures still throw before any emission", () => {
     roomEvent("ev-bad", EVENT_TYPES.MESSAGE_POSTED, "stranger", { body: "nope" }, 17), collector),
     /Unknown member/);
   assert.equal(collector.stats().total, 0);
+});
+
+test("C3 duplicate room events are not re-recorded, re-notified, or re-projected", () => {
+  const { state, collector } = fresh();
+  const notified = [];
+  const subId = getGrowthFanout().subscribe(() => true, envelope => notified.push(envelope.type));
+  try {
+    const posted = roomEvent("ev-dup", EVENT_TYPES.MESSAGE_POSTED, "maya",
+      { messageId: "m-dup", body: "hey @Codex look" }, 18);
+    const first = applyEventWithGrowth(state, posted, collector);
+    assert.equal(first.growthOk, true);
+    assert.deepEqual(collector.query({}).map(e => e.type), ["agent.mentioned", "message.sent"]);
+    assert.deepEqual(notified, ["message.sent", "agent.mentioned"]);
+
+    // Replaying the identical event is a room-level no-op: applyEvent
+    // returns the projection unchanged, and no growth side effect may fire
+    // a second time (no record, no fan-out, no mention projection).
+    const replayed = applyEventWithGrowth(first.state, posted, collector);
+    assert.equal(replayed.growthOk, false);
+    assert.equal(replayed.growthReason, "duplicate-event");
+    assert.deepEqual(replayed.state, first.state);
+    assert.equal(collector.stats().total, 2);
+    assert.deepEqual(notified, ["message.sent", "agent.mentioned"]);
+  } finally {
+    getGrowthFanout().unsubscribe(subId);
+  }
 });

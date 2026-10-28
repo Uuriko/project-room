@@ -7,7 +7,7 @@ import { readFileSync } from "node:fs";
 
 const css = readFileSync(new URL("../src/board.css", import.meta.url), "utf8");
 const rule = selector => {
-  const match = css.match(new RegExp(`(?:^|\\n)${selector.replace(/[#:[\]]/g, m => `\\${m}`)}\\s*\\{([^}]*)\\}`));
+  const match = css.match(new RegExp(`(?:^|\\n)${selector.replace(/[#:[\]]/g, m => `\\${m}`)}\\s*[,{]([^}]*)\\}`));
   return match ? match[1] : null;
 };
 

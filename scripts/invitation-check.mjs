@@ -80,7 +80,10 @@ async function fixture(t) {
   });
 
   let mailer;
-  const deliveryProxy = { isConfigured: () => mailer.isConfigured(), sendMagicLink: payload => mailer.sendMagicLink(payload) };
+  // createRoomServer asks isConfigured() while it is built (#2463), before the
+  // mailer below exists. This fixture always installs a configured synthetic
+  // sender right after bind, so "configured" is the truthful answer now.
+  const deliveryProxy = { isConfigured: () => true, sendMagicLink: payload => mailer.sendMagicLink(payload) };
   const server = createRoomServer({ store, streamInterval: 30, magicLinkMailer: deliveryProxy });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -99,16 +102,36 @@ async function fixture(t) {
     revoke: () => store.revokeInvitation(ownerSlot.token, issued.invitation.id, { expectedRevision: 0, reason: "Offer withdrawn", expectedSessionBinding: ownerSession.sessionBinding }) };
 }
 
+async function requestInvitationEmail(page, email) {
+  const request = page.locator('#invitation-methods [data-signin-form="password"]');
+  await request.locator('[name="email"]').fill(email);
+  await request.locator('[name="password"]').fill("deliberately-wrong-recovery-password");
+  // Recovery is contextual: exercise the real credential rejection first.
+  // An invitation may warn before this attempt; later code-redemption consent
+  // remains owned by each test, including the explicit cancelled-switch case.
+  const acceptAttempt = async dialog => {
+    assert.match(dialog.message(), /clears.*unsent drafts/i);
+    await dialog.accept();
+  };
+  page.on("dialog", acceptAttempt);
+  try {
+    const rejected = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/password/login");
+    await request.locator('button[type="submit"]').click();
+    const response = await rejected;
+    assert.equal(response.status(), 401);
+    assert.equal((await response.json()).error.code, "invalid_credentials");
+  } finally { page.off("dialog", acceptAttempt); }
+  const issued = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/magic/request");
+  await request.locator('[name="method"][value="email"]').click();
+  assert.equal((await issued).status(), 200);
+  return page.locator('#invitation-methods [data-signin-form="magic-code"]');
+}
+
 async function fillInvitationEmail(page, fixtureKey) {
   const email = fixtureLogins.get(fixtureKey);
   assert.ok(email, "test account has a synthetic email login");
   await page.locator("#invitation-email").click();
-  await page.locator("#invitation-methods [data-forgot-password]").click();
-  await page.locator('#invitation-methods [data-email-method="magic"]').click();
-  const request = page.locator('#invitation-methods [data-signin-form="magic-request"]');
-  await request.locator('[name="email"]').fill(email);
-  await request.locator('button[type="submit"]').click();
-  const form = page.locator('#invitation-methods [data-signin-form="magic-code"]');
+  const form = await requestInvitationEmail(page, email);
   await form.locator('[data-magic-manual-code]').click();
   const delivery = fixtureDelivery.get(email);
   assert.ok(delivery?.code, "synthetic mailer captured a real issued verification code");
@@ -463,12 +486,8 @@ test("delivered email link opens its intended invitation in a fresh browser tab"
   const context = await f.browser.newContext(); const opener = await context.newPage();
   await opener.goto(`${f.origin}/#invite/${f.invitationToken}`);
   await opener.locator('#invitation-email').click();
-  await opener.locator('#invitation-methods [data-forgot-password]').click();
-  await opener.locator('#invitation-methods [data-email-method="magic"]').click();
-  const form = opener.locator('#invitation-methods [data-signin-form="magic-request"]');
   const email = fixtureLogins.get(f.targetAccountKey);
-  await form.locator('[name="email"]').fill(email);
-  await form.locator('button[type="submit"]').click();
+  await requestInvitationEmail(opener, email);
   await opener.locator('[data-magic-manual-code]').waitFor();
   const delivery = fixtureDelivery.get(email);
   assert.ok(delivery?.link, "configured synthetic mailer captures the actual delivered URL");
@@ -508,7 +527,7 @@ test("a shared invitation retains its pending account signup across Escape and n
   assert.equal(await page.locator("#join-account-auth").isVisible(), true);
   await page.locator("#join-account-google").evaluate(anchor => anchor.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })));
   assert.equal(new URL(page.url()).pathname, "/", "pending auth cannot start Google navigation");
-  assert.equal(await page.evaluate(() => sessionStorage.getItem("pr-pending-join")), null, "pending auth cannot stash another OAuth handoff");
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("pr-pending-join")), `#join/${token}`, "pending auth keeps this dialog's own link stashed");
   const another = secret();
   await page.evaluate(value => { location.hash = `#join/${value}`; }, another);
   await page.locator("#join-link-status").filter({ hasText: "Finish signing in" }).waitFor();

@@ -7,6 +7,11 @@ export const GOOGLE_SCOPES = 'openid email profile';
 const tokenEndpoint = 'https://oauth2.googleapis.com/token';
 const jwksEndpoint = 'https://www.googleapis.com/oauth2/v3/certs';
 const clientIdPattern = /^[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com$/;
+// Loopback hostnames (as URL.hostname reports them) may use plain http:
+// they are the local-dev origins googleConfig accepts, and GoogleSignIn
+// must accept the redirect URIs googleConfig mints for them.
+const loopbackHostnames = ['localhost', '127.0.0.1', '[::1]'];
+const isLoopbackHostname = hostname => loopbackHostnames.includes(hostname);
 const tokenPattern = /^[A-Za-z0-9_-]{43}$/;
 const opaque = value => typeof value === 'string' && value.length > 0 && value.length <= 8192 && !/[\s\x00-\x1f\x7f]/.test(value);
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -29,6 +34,17 @@ export function googlePostLoginPage(href) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
 }
 
+// The provider's cross-site return cannot carry the Strict account cookie.
+// Commit a same-origin document before asking for the bound session. This page
+// does not consume state or exchange a code; completion still verifies both.
+export function googleCallbackResumePage(callbackUrl) {
+  const url = new URL(callbackUrl);
+  if (url.pathname !== GOOGLE_CALLBACK_PATH || url.search.length > 16384) fail('google_callback_invalid');
+  url.searchParams.set('room_oauth_resume', '1');
+  const href = (url.pathname + url.search).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll("'", '&#39;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${href}"><title>Completing sign-in</title></head><body><p>Completing sign-in…</p><p><a href="${href}">Continue</a></p></body></html>`;
+}
+
 export function googleConfig(env = {}, origin) {
   const clientId = env.ROOM_GOOGLE_CLIENT_ID;
   const clientSecret = env.ROOM_GOOGLE_CLIENT_SECRET;
@@ -38,8 +54,7 @@ export function googleConfig(env = {}, origin) {
   let appUrl;
   try { appUrl = new URL(origin); } catch { invalid(); }
   if (appUrl.origin !== origin || !['http:', 'https:'].includes(appUrl.protocol)) invalid();
-  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(appUrl.hostname);
-  if (!loopback && appUrl.protocol !== 'https:') invalid();
+  if (!isLoopbackHostname(appUrl.hostname) && appUrl.protocol !== 'https:') invalid();
   const redirectUri = origin + GOOGLE_CALLBACK_PATH;
   return { clientId, clientSecret, redirectUri, issuer: GOOGLE_ISSUER };
 }
@@ -59,7 +74,7 @@ export class GoogleSignIn {
     try { redirect = new URL(redirectUri); } catch { fail('google_configuration_invalid'); }
     if (!clientIdPattern.test(clientId || '') || !opaque(clientSecret) || redirect.pathname !== GOOGLE_CALLBACK_PATH
       || redirect.search || redirect.hash || redirect.username || redirect.password
-      || !(redirect.protocol === 'https:' || redirect.protocol === 'http:' && redirect.hostname === '127.0.0.1'))
+      || !(redirect.protocol === 'https:' || redirect.protocol === 'http:' && isLoopbackHostname(redirect.hostname)))
       fail('google_configuration_invalid');
     this.#clientId = clientId;
     this.#clientSecret = clientSecret;
@@ -185,7 +200,7 @@ export class GoogleSignIn {
     return { iss: GOOGLE_ISSUER, sub: claims.sub, exp: claims.exp, iat: claims.iat, email };
   }
 
-  async complete({ callbackUrl }) {
+  async complete({ callbackUrl, expectedSlotToken = undefined }) {
     let url;
     try { url = new URL(callbackUrl); } catch { fail('google_callback_invalid'); }
     const expected = new URL(this.#redirectUri);
@@ -209,6 +224,14 @@ export class GoogleSignIn {
           return e;
         })();
     if (!entry) fail('google_state_invalid');
+    // RFC 6749 section 10.12: the state must be completed by the browser
+    // session that started the flow. Without this binding, an attacker can
+    // capture their own callback URL (state + code) and land a victim who
+    // loads it in the attacker's session (login CSRF). A callback whose
+    // session cookie differs from — or is missing for — the state's slot
+    // fails closed before any provider call. `undefined` keeps the old
+    // unchecked behavior for callers that do not bind a session.
+    if (expectedSlotToken !== undefined && expectedSlotToken !== entry.slotToken) fail('google_state_invalid');
     if (url.searchParams.has('error')) fail('google_consent_denied');
     const code = url.searchParams.get('code');
     if (!opaque(code)) fail('google_callback_invalid');

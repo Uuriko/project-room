@@ -150,6 +150,7 @@ export function createAgentApiKeys({ store, clock, random } = {}) {
     const secret = newSecret();
     record.keyHash = sha256(secret);
     record.lastUsedAt = null;
+    record.lastUsedUa = null; // rotation issues a fresh secret: old usage telemetry must not ride along
     return Object.freeze({ ...publicRecord(record), secret });
   };
 

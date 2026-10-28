@@ -495,6 +495,56 @@ test("quota exhaustion is 429 with Retry-After and retry info", async t => {
   assert.equal(owner.status, 200);
 });
 
+test("concurrent fetches cannot bypass the daily quota (#2963)", async t => {
+  process.env.WEB_FETCH_ALLOW_LOOPBACK = "1";
+  t.after(() => { delete process.env.WEB_FETCH_ALLOW_LOOPBACK; });
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  db.exec(webFetchSchema);
+  db.exec("CREATE TABLE IF NOT EXISTS rooms (id TEXT PRIMARY KEY)");
+  db.prepare("INSERT INTO rooms(id) VALUES('r1')").run();
+  // Seed 99 billed fetches for the member: exactly one slot left under the
+  // 100/day/member quota.
+  const insert = db.prepare(`INSERT INTO web_fetch_log
+    (request_id, room_id, member_id, host, cache_status, bytes, tags_json, created_at)
+    VALUES(?,?,?,?,?,?,?,?)`);
+  const seededAt = Date.now() - 1000;
+  for (let i = 0; i < 99; i++) {
+    insert.run(`wf_seed_${i}`, "r1", "m1", "example.com", "hit", 10, "[]", seededAt);
+  }
+  // Slow page server: every concurrent request stays in flight (past the
+  // old check-then-journal await) before any of them completes.
+  const page = createServer((req, res) => {
+    setTimeout(() => {
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(PAGE_HTML);
+    }, 250);
+  });
+  await new Promise(resolve => page.listen(0, "127.0.0.1", resolve));
+  t.after(() => new Promise(resolve => page.close(resolve)));
+  const store = {
+    db,
+    now: () => Date.now(),
+    transaction: fn => {
+      db.exec("BEGIN IMMEDIATE");
+      try { const value = fn(); db.exec("COMMIT"); return value; }
+      catch (error) { if (db.isTransaction) db.exec("ROLLBACK"); throw error; }
+    },
+  };
+  const svc = new WebFetch(store);
+  const url = `http://127.0.0.1:${page.address().port}/page`;
+  const results = await Promise.allSettled(
+    Array.from({ length: 5 }, () => svc.fetch("r1", "m1", { url, formats: { markdown: true } })));
+  const ok = results.filter(r => r.status === "fulfilled");
+  const limited = results.filter(r => r.status === "rejected" && r.reason?.code === "rate_limited");
+  assert.equal(ok.length, 1,
+    `expected exactly 1 of 5 concurrent fetches to take the last quota slot, got ${ok.length}`);
+  assert.equal(limited.length, 4, "the other four concurrent fetches must be rate_limited");
+  const billed = db.prepare(
+    "SELECT COUNT(*) AS n FROM web_fetch_log WHERE room_id='r1' AND member_id='m1' AND cache_status IN ('hit','miss')").get().n;
+  assert.equal(billed, 100, "journaled billed fetches must never exceed the daily quota");
+});
+
 test("migrateWebFetchLogColumns is a no-op when the table does not exist (L-P2-7)", t => {
   const directory = mkdtempSync(join(tmpdir(), "room-web-fetch-mig-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

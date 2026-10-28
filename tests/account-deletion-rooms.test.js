@@ -65,7 +65,7 @@ function createRoom(ctx, roomId, kind, title) {
 
 const SECRET = "secret-phrase-p2-11";
 
-test("a solely owned personal room is archived and its messages and files are purged", async t => {
+for (const entityProjection of [false, true]) test(`a solely owned personal room is archived and its messages and files are purged (entities=${entityProjection})`, async t => {
   const ctx = await deletionAccount(t, 1);
   const roomId = "solo-notes";
   const { key } = createRoom(ctx, roomId, "personal", "Solo notes");
@@ -74,10 +74,26 @@ test("a solely owned personal room is archived and its messages and files are pu
     id: "secret-file", filename: "secret.txt", mediaType: "text/plain",
     data: Buffer.from("secret-bytes-p211").toString("base64")
   });
+  const { pushProjectMap, recordProjectMapPull } = await import('../server/project-map-store.mjs');
+  await pushProjectMap(ctx.f.store, roomId, { repo: 'private/repo', revision: 'r1', files: [{ path: 'private.js', source: 'export const secret = 1;' }] });
+  recordProjectMapPull(ctx.f.store, roomId, { repo: 'private/repo', number: 1, files: ['private.js'] });
+  const { countPurge } = await import('../server/operator-purge.mjs');
+  assert.equal(countPurge(ctx.f.store, [{ kind: 'room', id: roomId }]).find(row => row.table === 'project_maps').rows, 1);
   // Distinct cleanup risk: private record-only rail notes and exact-retry
   // outputs must not survive personal-room account deletion.
   ctx.f.store.command(key,roomId,{id:randomUUID(),type:T.MEMBER_ADDED,data:{memberId:"rail-agent",displayName:"Rail agent",kind:"agent",permissions:["accept_work"]}});
   ctx.f.store.trialTasks.apply(roomId,"owner",{action:"create",requestId:"private-trial",taskId:"private-trial",candidateId:"rail-agent",buyerId:"owner",demigodReqId:"delete-room",title:SECRET,trialScope:{hoursMax:"1",deliverableShape:"other"},vettingRubric:[{criterion:"c1",weightBps:"10000"}],feePolicyRef:"record-only",budgetRecord:{note:SECRET}});
+  if (entityProjection) {
+    const store=ctx.f.store;
+    store.messageProjectionWindow=4;store.messageEntityProjection=true;store.maintainMessageCertification=true;
+    while(!store.backfillMessages({limit:1000}).done) {}
+    for(let i=0;i<40;i++) {
+      store.checkMessagesParity();
+      if(store.db.prepare("SELECT parity_at_seq FROM messages_backfill_cursor WHERE room_id=?").get(roomId)?.parity_at_seq===store.headSequence(roomId))break;
+    }
+    store.command(key,roomId,{id:randomUUID(),type:T.MESSAGE_EDITED,data:{messageId:"secret-note",body:SECRET+" revised",expectedMessageRevision:0}});
+    assert.ok(JSON.parse(store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection).messages.every(m=>m._entity===1));
+  }
   const audit = ctx.f.store.db.prepare("SELECT COALESCE(MAX(revision),0) AS revision FROM account_access_events WHERE account_id=?").get(ctx.accountId);
   ctx.f.store.db.prepare("INSERT INTO account_access_events(account_id,revision,active,auth_epoch,reason,at) VALUES(?,?,?,?,?,?)")
     .run(ctx.accountId, audit.revision + 1, 1, 0, "deletion-audit", Date.now());
@@ -99,6 +115,8 @@ test("a solely owned personal room is archived and its messages and files are pu
   const projection = ctx.f.store.db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection;
   assert.equal(logged.includes(SECRET), false);
   assert.equal(projection.includes(SECRET), false);
+  const normalized=ctx.f.store.db.prepare("SELECT body,record_json,reducer_extras_json FROM messages WHERE room_id=?").all(roomId);
+  assert.equal(JSON.stringify(normalized).includes(SECRET),false);
   const file = ctx.f.store.db.prepare("SELECT state, bytes, filename FROM room_attachments WHERE room_id=? AND id=?").get(roomId, "secret-file");
   assert.equal(file.state, "deleted");
   assert.equal(file.bytes, null);
@@ -110,6 +128,8 @@ test("a solely owned personal room is archived and its messages and files are pu
   const rebuilt = ctx.f.store.rebuildProjection(roomId);
   assert.equal(rebuilt.state.room.archivedAt, room.state.room.archivedAt);
   assert.equal(rebuilt.state.messages.find(message => message.id === "secret-note").body, null);
+  for (const table of ['project_maps', 'project_map_queue', 'project_map_pulls', 'project_map_notices'])
+    assert.equal(ctx.f.store.db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE room_id=?`).get(roomId).n, 0, `${table} purged`);
   for(const table of ["room_trial_tasks","room_trial_requests","room_vetting_keys","room_vetting_receipts","demigod_offer_profiles","demigod_offer_requests","demigod_contracts","demigod_contract_requests","buyer_signoff_loops","buyer_signoff_requests"]) assert.equal(ctx.f.store.db.prepare(`SELECT count(*) n FROM ${table} WHERE room_id=?`).get(roomId).n,0,`${table} personal data purged`);
 });
 
@@ -181,4 +201,56 @@ test("the confirmation token covers room contents, so a later message requires a
   const messages = ctx.f.store.room(roomId).state.messages;
   assert.equal(messages.find(message => message.id === "later-note").body, null);
   assert.equal(messages.find(message => message.id === "first-note").body, null);
+});
+
+test("an account that joined a room through a share link can delete itself (join receipts keep their slot)", async t => {
+  const { randomBytes } = await import("node:crypto");
+  const f = createAcceptanceFixture();
+  const origin = await startServer(t, f);
+  const ownerKey = f.store.issueAccessKey("commons", "owner");
+  const linkToken = randomBytes(32).toString("base64url");
+  f.store.shareLinks.create(ownerKey, "commons", {
+    requestId: randomUUID(), linkToken, expiresAt: Date.now() + 3600000, maxJoins: 5, expectedMemberRevision: 0
+  }, null);
+  const slot = f.store.createAccountSessionSlot();
+  const view = f.store.accountSessionSlot(slot.token);
+  const headers = { Origin: origin, Cookie: `account_session=${slot.token}`, "x-csrf-token": view.csrf, "x-session-binding": view.sessionBinding, "Content-Type": "application/json" };
+  const joined = await fetch(`${origin}/api/share-links/join`, { method: "POST", headers, body: JSON.stringify({
+    linkToken, displayName: "Link guest", redemptionId: randomUUID(), expectedSessionRevision: view.sessionRevision }) });
+  assert.equal(joined.status, 201, await joined.clone().text());
+  const receipts = () => f.store.db.prepare("SELECT count(*) AS n FROM share_link_joins").get().n, receiptsBefore = receipts();
+  const planned = await (await fetch(`${origin}/api/account/deletion/plan`, { headers: { Cookie: headers.Cookie } })).json();
+  const after = f.store.accountSessionSlot(slot.token);
+  const fresh = { ...headers, "x-csrf-token": after.csrf, "x-session-binding": after.sessionBinding };
+  const done = await fetch(`${origin}/api/account/delete`, { method: "POST", headers: fresh, body: JSON.stringify({ confirmationToken: planned.confirmationToken }) });
+  assert.equal(done.status, 200, await done.clone().text());
+  assert.equal(receipts(), receiptsBefore, "the immutable join receipt is kept");
+  const row = f.store.db.prepare("SELECT account_id, parent_credential_hash FROM account_session_slots WHERE expires_at<=?").get(f.store.now());
+  assert.ok(!row || (row.account_id === null && row.parent_credential_hash === null), "the kept slot is an unauthenticated tombstone");
+  const again = await fetch(`${origin}/api/account/deletion/plan`, { headers: { Cookie: headers.Cookie } });
+  assert.equal(again.status, 401, "the old cookie no longer authenticates");
+});
+
+test("account deletion also purges archived message rows that are no longer in the projection", async t => {
+  const ctx = await deletionAccount(t, 9);
+  const roomId = "solo-archived";
+  const { key } = createRoom(ctx, roomId, "personal", "Solo archived");
+  ctx.f.store.command(key, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "old-secret", body: SECRET } });
+  ctx.f.store.command(key, roomId, { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "new-note", body: "recent" } });
+  const db = ctx.f.store.db;
+  const through = db.prepare("SELECT seq FROM messages WHERE room_id=? AND message_id='old-secret'").get(roomId).seq;
+  const archivedIds = new Set(db.prepare("SELECT message_id FROM messages WHERE room_id=? AND seq<=?").all(roomId, through).map(row => row.message_id));
+  const projection = JSON.parse(db.prepare("SELECT projection FROM rooms WHERE id=?").get(roomId).projection);
+  projection.messages = projection.messages.filter(message => !archivedIds.has(message.id));
+  projection.messagesArchive = { throughSeq: through, count: archivedIds.size };
+  db.prepare("UPDATE rooms SET projection=? WHERE id=?").run(JSON.stringify(projection), roomId);
+  assert.ok(db.prepare("SELECT record_json FROM messages WHERE room_id=? AND message_id='old-secret'").get(roomId).record_json.includes(SECRET));
+
+  const planned = await (await get(ctx.origin, "/api/account/deletion/plan", ctx.creds.cookie)).json();
+  const res = await authedPost(ctx.origin, "/api/account/delete", { confirmationToken: planned.confirmationToken }, ctx.creds);
+  assert.equal(res.status, 200, await res.clone().text());
+
+  const rows = db.prepare("SELECT message_id, body, record_json FROM messages WHERE room_id=?").all(roomId);
+  assert.ok(rows.length > 0);
+  for (const row of rows) assert.equal(`${row.body}${row.record_json}`.includes(SECRET), false, `${row.message_id} keeps no secret text`);
 });

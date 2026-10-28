@@ -99,29 +99,39 @@ export function installHumanPush({ client, button, note, eligible, prefs = null 
   async function refresh() {
     if (eligible() && resolvedFor === (client.session?.member?.id ?? "")) return;
     const ticket = ++serial;
+    // Declared outside try so the catch can un-resolve this member on failure.
+    let sessionKey = null;
     try {
       if (!eligible()) { hide(); return; }
-      const sessionKey = client.session?.member?.id ?? "";
+      sessionKey = client.session?.member?.id ?? "";
       if (resolvedFor === sessionKey) return;
       const config = await client.humanPushConfig();
       if (ticket !== serial || !eligible()) return;
-      resolvedFor = sessionKey;
       showPrefs(config.preferences);
-      if (!config?.configured || typeof config.publicKey !== "string") { showNote(uiText("push.copy.007")); return; }
-      if (!globalThis.Notification || !navigator.serviceWorker) { showNote(uiText("push.copy.008")); return; }
+      // Only mark the member resolved once refresh reaches a definitive
+      // outcome. Marking it before subscribe() (the old behaviour) meant a
+      // transient subscribe() throw / saved:false left resolvedFor set, so
+      // every later refresh returned at the guard and never retried (#2977).
+      if (!config?.configured || typeof config.publicKey !== "string") { resolvedFor = sessionKey; showNote(uiText("push.copy.007")); return; }
+      if (!globalThis.Notification || !navigator.serviceWorker) { resolvedFor = sessionKey; showNote(uiText("push.copy.008")); return; }
       const permission = globalThis.Notification?.permission;
-      if (permission === "denied") { showNote(uiText("push.copy.009")); return; }
+      if (permission === "denied") { resolvedFor = sessionKey; showNote(uiText("push.copy.009")); return; }
       if (permission === "granted") {
         const saved = await subscribe(client, config.publicKey, () => ticket === serial && eligible());
         if (!saved || ticket !== serial || !eligible()) return;
+        resolvedFor = sessionKey;
         subscribed = true;
         showPrefs(config.preferences);
         showNote(subscribedNote(config.preferences));
         return;
       }
+      resolvedFor = sessionKey;
       showButton();
       showPrefs(config.preferences);
     } catch {
+      // A failed attempt is not a resolution: clear it so a later refresh
+      // for the same member can retry instead of hitting the guard above.
+      if (ticket === serial && sessionKey !== null && resolvedFor === sessionKey) resolvedFor = null;
       if (ticket === serial) showNote(uiText("push.copy.010"));
     }
   }

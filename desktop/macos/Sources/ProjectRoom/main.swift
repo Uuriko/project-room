@@ -10,7 +10,8 @@ import ProjectRoomKit
         let menu = NSMenu()
         let appItem = NSMenuItem(); menu.addItem(appItem)
         let appMenu = NSMenu(title: "Project Room"); appItem.submenu = appMenu
-        appMenu.addItem(withTitle: "About Project Room", action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: "")
+        let about = appMenu.addItem(withTitle: "About Project Room", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Project Room", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quit Project Room", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
@@ -33,6 +34,12 @@ import ProjectRoomKit
         room?.show()
     }
     func applicationWillTerminate(_ notification: Notification) { room?.stopLocalTools() }
+    @objc func showAbout() {
+        let revision = Bundle.main.object(forInfoDictionaryKey: "ProjectRoomSourceRevision") as? String
+        let dirty = Bundle.main.object(forInfoDictionaryKey: "ProjectRoomSourceDirty") as? Bool ?? false
+        let source = revision.map { "Source \($0.prefix(8))\(dirty ? " · local changes" : "")" } ?? "Development build"
+        NSApp.orderFrontStandardAboutPanel(options: [.version: source])
+    }
     @objc func openRoom() { room?.show() }
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { room?.show(); return true }
     func application(_ application: NSApplication, open urls: [URL]) {

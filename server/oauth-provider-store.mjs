@@ -25,7 +25,10 @@ const SCHEMA = `
     code_challenge TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     expires_at INTEGER NOT NULL,
-    used INTEGER NOT NULL CHECK(used IN (0,1))
+    used INTEGER NOT NULL CHECK(used IN (0,1)),
+    -- O1 (issue #941): the token family minted from this code, so a
+    -- replayed code revokes its tokens (RFC 6749 §10.5).
+    family_id TEXT
   );
   CREATE INDEX IF NOT EXISTS oauth_provider_codes_expires ON oauth_provider_codes(expires_at);
 
@@ -74,6 +77,11 @@ export function oauthProviderTablesPresent(db) {
 export function ensureOAuthProviderSchema(db) {
   if (ready.has(db)) return;
   db.exec(SCHEMA);
+  // O1 (issue #941): databases created before the family_id column existed
+  // gain it idempotently. CREATE TABLE IF NOT EXISTS alone cannot evolve
+  // the table, and the column is nullable so old rows stay valid.
+  const columns = db.prepare("PRAGMA table_info(oauth_provider_codes)").all().map(column => column.name);
+  if (!columns.includes("family_id")) db.exec("ALTER TABLE oauth_provider_codes ADD COLUMN family_id TEXT");
   ready.add(db);
 }
 
@@ -121,11 +129,11 @@ export function createOAuthProviderSqlite(db) {
        name=excluded.name, redirect_uris_json=excluded.redirect_uris_json, expires_at=excluded.expires_at`
   ).run(row.clientId, row.name, JSON.stringify(row.redirectUris), row.expiresAt);
   const saveCode = row => db.prepare(
-    `INSERT INTO oauth_provider_codes(code_hash,client_id,user_id,redirect_uri,scopes_json,code_challenge,created_at,expires_at,used)
-     VALUES(?,?,?,?,?,?,?,?,?)
-     ON CONFLICT(code_hash) DO UPDATE SET used=excluded.used`
+    `INSERT INTO oauth_provider_codes(code_hash,client_id,user_id,redirect_uri,scopes_json,code_challenge,created_at,expires_at,used,family_id)
+     VALUES(?,?,?,?,?,?,?,?,?,?)
+     ON CONFLICT(code_hash) DO UPDATE SET used=excluded.used, family_id=excluded.family_id`
   ).run(row.codeHash, row.clientId, row.userId, row.redirectUri, JSON.stringify(row.scopes),
-    row.codeChallenge, row.createdAt, row.expiresAt, flag(row.used));
+    row.codeChallenge, row.createdAt, row.expiresAt, flag(row.used), row.familyId ?? null);
   const saveAccess = row => db.prepare(
     `INSERT INTO oauth_provider_access_tokens(token_hash,client_id,user_id,scopes_json,family_id,created_at,expires_at,revoked,ip,user_agent)
      VALUES(?,?,?,?,?,?,?,?,?,?)
@@ -159,7 +167,7 @@ export function createOAuthProviderSqlite(db) {
       return watch({
         codeHash: row.code_hash, clientId: row.client_id, userId: row.user_id, redirectUri: row.redirect_uri,
         scopes: scopesOf(row.scopes_json), codeChallenge: row.code_challenge, createdAt: row.created_at,
-        expiresAt: row.expires_at, used: row.used === 1
+        expiresAt: row.expires_at, used: row.used === 1, familyId: row.family_id ?? null
       }, saveCode);
     },
     set(_codeHash, record) { touch(); saveCode(record); return this; },

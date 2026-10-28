@@ -10,8 +10,9 @@
 //    code are unchanged — only the message gains the next step).
 //  - The teaching message is guest-scoped: revoked guests and expired
 //    non-guest credentials keep the generic message.
-//  - Recovery: v1 re-redeem with a fresh code (same seat, reactivated),
-//    self-serve re-join with a fresh joinRequest (same member, renewed).
+//  - Recovery: v1 re-redeem with a fresh code (same seat, reactivated).
+//    The self-serve re-join was removed in #3219; legacy seats expire
+//    unrenewed, and the teaching message names only the invite recovery.
 //  - rotate after expiry 401s through authenticate (leak response only).
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -23,7 +24,6 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
-import { GUEST_SELF_SERVE_TTL_MS } from "../server/guest-invites.mjs";
 
 const ROOM = "commons";
 const ONE_HOUR = 3600 * 1000;
@@ -90,7 +90,7 @@ test("expired guest token 401s with a recovery-teaching message (v1 invite path)
   const body = await dead.json();
   assert.equal(body.error.code, "unauthenticated", "status code contract is unchanged");
   assert.match(body.error.message, /Guest credential expired/, "names the expiry");
-  assert.match(body.error.message, /\/api\/guest-invites\/request/, "teaches the self-serve recovery");
+  assert.doesNotMatch(body.error.message, /\/api\/guest-invites\/request/, "the removed self-serve door is not taught");
   assert.match(body.error.message, /\/api\/guest-invites\/redeem/, "teaches the invite recovery");
   assert.doesNotMatch(body.error.message, /Session or key expired or revoked/, "replaces the dead-end message");
 });
@@ -155,46 +155,4 @@ test("v1 recovery: fresh code + re-redeem after expiry reactivates the same seat
   const back = await postChat(request, value.token, "recovered");
   assert.equal(back.status, 201, "the fresh credential works");
   assert.equal(store.room(ROOM).state.members[memberId].active, true, "the swept seat is reactivated");
-});
-
-function signedSelfServeCard(roomId, { name, keyPair, issuedAt, requestId, agentId } = {}) {
-  const kp = keyPair ?? generateKeyPair();
-  const card = {
-    agentId: agentId ?? `ss-${randomUUID().slice(0, 8)}`,
-    name: name ?? "SelfServe",
-    capabilities: ["chat"],
-    publicKey: kp.publicKey,
-    joinRequest: { roomId, requestId: requestId ?? randomUUID(), issuedAt: issuedAt ?? Date.now() },
-  };
-  return { card: { ...card, signature: signCard({ agentId: card.agentId, card, privateKey: kp.privateKey }) }, keyPair: kp };
-}
-
-test("self-serve: expired credential 401s teaching, re-join renews the same member", async t => {
-  const { request, advance, now } = await serve(t);
-  const firstId = randomUUID();
-  const { card, keyPair } = signedSelfServeCard(ROOM, { name: "SelfServe", requestId: firstId, issuedAt: now() });
-  const first = await request("/api/guest-invites/request", { method: "POST", data: { card } });
-  assert.equal(first.status, 201);
-  const firstBody = await first.json();
-  const memberId = firstBody.member.id;
-
-  advance(GUEST_SELF_SERVE_TTL_MS + 1000);
-  const dead = await postChat(request, firstBody.token, "expired");
-  assert.equal(dead.status, 401);
-  const body = await dead.json();
-  assert.equal(body.error.code, "unauthenticated");
-  assert.match(body.error.message, /Guest credential expired/);
-  assert.match(body.error.message, /\/api\/guest-invites\/request/, "points at the self-serve re-join");
-
-  // Self-service recovery: a fresh signed joinRequest with a new requestId.
-  const { card: card2 } = signedSelfServeCard(ROOM, {
-    name: "SelfServe", keyPair, requestId: randomUUID(), agentId: card.agentId, issuedAt: now(),
-  });
-  const second = await request("/api/guest-invites/request", { method: "POST", data: { card: card2 } });
-  assert.equal(second.status, 200, "re-join after expiry renews");
-  const secondBody = await second.json();
-  assert.equal(secondBody.renewed, true);
-  assert.equal(secondBody.member.id, memberId, "same card key keeps the same member");
-  const back = await postChat(request, secondBody.token, "renewed");
-  assert.equal(back.status, 201, "the renewed credential works");
 });

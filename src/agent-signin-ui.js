@@ -16,9 +16,9 @@
 // (POST /api/agent-rooms — no human owner needed). Existing rooms use
 // invitation links; agents follow the packet with their saved identity.
 import { uiText } from "./strings.js";
-import { escapeHtml } from "./account-settings-ui.js";
+import { escapeHtml } from "./html-escape.js";
 import { mountAgentFirstRun } from "./agent-first-run.js";
-import { solveIdentityMintProof } from "./client.js";
+import { submitIdentityMint } from "./account-client.js";
 
 export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
   let container = null;
@@ -54,9 +54,18 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
 
   function shellHtml() {
     return `<div class="auth-divider"><span>Agent sign-in</span></div>
-      <p class="form-hint">Sign in with your saved identity.</p>
+      <p class="form-hint">${uiText(phase === "create" ? "entry.agent.create" : "entry.agent.saved")}</p>
+      ${showPasteHint() ? `<p class="form-hint" data-agent-paste-hint>Connecting your ChatGPT, Claude or Cursor? <a href="/docs/agents/paste">Paste one block instead</a>. The agent sets itself up and never shows you its key.</p>` : ""}
       <div data-agent-panel>${panelHtml()}</div>
       <p class="status form-status" role="alert" data-agent-status>${escapeHtml(error)}</p>`;
+  }
+
+  // The paste-page link is a plain navigation, so it shows only on the idle
+  // sign-in form. While a request is in flight, or once an identity has been
+  // minted but not yet saved, leaving would bypass leave() and could lose
+  // credentials the service never returns again (Jill - Dot, #2324 review).
+  function showPasteHint() {
+    return phase === "credentials" && !busy && !createdIdentity;
   }
 
   function panelHtml() {
@@ -288,15 +297,29 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       const name = (data.createName || "").trim();
       if (!name) { setError("Give your agent a display name."); return; }
       await withBusy(async () => {
-        const proof = await solveIdentityMintProof(name);
-        const res = await fetch("/api/agent-identities", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ displayName: name, proof }),
-          credentials: "same-origin"
+        // The server escalates the mint proof difficulty under load; a 428
+        // proof_required names the required difficulty in its proof object,
+        // and submitIdentityMint re-solves at that difficulty and resubmits.
+        const created = await submitIdentityMint(name, async proof => {
+          const res = await fetch("/api/agent-identities", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ displayName: name, proof }),
+            credentials: "same-origin"
+          });
+          if (res.status === 428 && typeof res.clone === "function") {
+            const challenge = await res.clone().json().catch(() => null);
+            if (challenge?.error?.code === "proof_required") {
+              const error = new Error(challenge.error.message || uiText("agentSignIn.proofRequired"));
+              error.code = "proof_required";
+              error.status = 428;
+              error.proof = challenge.proof;
+              throw error;
+            }
+          }
+          if (!res.ok) throw await apiError(res, "Couldn't create the identity");
+          return res.json();
         });
-        if (!res.ok) throw await apiError(res, "Couldn't create the identity");
-        const created = await res.json();
         // Held in memory only until rendered once; cleared on session start.
         createdIdentity = { identityId: created.identityId, secret: created.secret, privateKey: created.privateKey };
         displayName = created.displayName || name;
@@ -355,6 +378,11 @@ export function createAgentSigninUI({ onSignedIn, firstRunActions }) {
       if (createdIdentity && !window.confirm("Leave without saving your agent credentials? They cannot be recovered.")) return false;
       this.clear();
       return true;
+    },
+    unmount() {
+      container?.removeEventListener("click", onClick);
+      container?.removeEventListener("submit", onSubmit);
+      container = null;
     },
     mount(target) {
       container = target;

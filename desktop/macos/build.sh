@@ -14,6 +14,12 @@ iconutil -c icns build/ProjectRoom.iconset -o "$app/Contents/Resources/ProjectRo
 cp .build/release/ProjectRoom "$app/Contents/MacOS/ProjectRoom"
 cp .build/release/ProjectRoomTools "$app/Contents/MacOS/ProjectRoomTools"
 codesign --force --sign - "$app/Contents/MacOS/ProjectRoomTools"
+# Package only the parsed host/setup import closure, never a developer checkout.
+runtime_stage="$(mktemp -d "$PWD/build/runtime-stage.XXXXXX")"
+trap 'rm -rf "$runtime_stage"' EXIT
+node ../../scripts/package-mac-runtime.mjs "$runtime_stage/room-runtime"
+rm -rf "$app/Contents/Resources/room-runtime"
+mv "$runtime_stage/room-runtime" "$app/Contents/Resources/room-runtime"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -33,6 +39,11 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>NSAppTransportSecurity</key><dict><key>NSAllowsLocalNetworking</key><true/></dict>
 </dict></plist>
 PLIST
+plutil -insert ProjectRoomSourceRevision -string "$(git rev-parse HEAD)" "$app/Contents/Info.plist"
+source_dirty=false
+if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then source_dirty=true; fi
+plutil -insert ProjectRoomSourceDirty -bool "$source_dirty" "$app/Contents/Info.plist"
+plutil -replace CFBundleVersion -string "$(git rev-list --count HEAD)" "$app/Contents/Info.plist"
 codesign --force --sign - "$app"
 printf 'Local app: %s\n' "$app"
 printf 'Ad-hoc signed development build; distribution requires Developer ID and notarization.\n'

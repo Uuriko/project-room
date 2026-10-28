@@ -30,7 +30,7 @@ test("an empty journal lists nothing and exports header-only CSV", t => {
   const csv = exportDirectSends(db, "acc-1", { at: 1726617600000 });
   assert.equal(csv.format, "csv");
   assert.equal(csv.filename, "direct-channel-sends-2024-09-18.csv");
-  assert.equal(csv.text, "Send ID,Channel,Recipient,Subject,Thread ID,Status,Provider ID,Error,Created (UTC),Updated (UTC)\r\n");
+  assert.equal(csv.text, "Send ID,Channel,Recipient,Subject,Thread ID,Status,Provider ID,Error,Dispatch Started (UTC),Created (UTC),Updated (UTC)\r\n");
   const json = exportDirectSends(db, "acc-1", { format: "json", at: 1726617600000 });
   assert.equal(json.format, "json");
   assert.equal(json.filename, "direct-channel-sends-2024-09-18.json");
@@ -53,7 +53,7 @@ test("listing is newest-first and strictly account-scoped", t => {
   // Public shape only: recipient, subject, channel, status — never body content or hashes.
   for (const send of page.sends) {
     assert.deepEqual(Object.keys(send).sort(),
-      ["channel", "createdAt", "errorCode", "id", "providerId", "status", "subject", "threadId", "to", "updatedAt"]);
+      ["channel", "createdAt", "dispatchStartedAt", "errorCode", "id", "providerId", "status", "subject", "threadId", "to", "updatedAt"]);
   }
 });
 
@@ -131,9 +131,9 @@ test("csv export: exact rows, ISO timestamps, RFC 4180 quoting, no body content"
   completeDirectSend(db, gmail.id, { status: "failed", errorCode: "gmail_send_failed", at: 1726617780000 });
   const { text } = exportDirectSends(db, "acc-1", { at: 1726617800000 });
   assert.equal(text,
-    "Send ID,Channel,Recipient,Subject,Thread ID,Status,Provider ID,Error,Created (UTC),Updated (UTC)\r\n" +
-    `${tricky.id},telegram,987654321,"Re: ""launch"", tomorrow",,sent,tg-7,,2024-09-18T00:00:00.000Z,2024-09-18T00:01:00.000Z\r\n` +
-    `${gmail.id},gmail,maya@example.test,Plain,,failed,,gmail_send_failed,2024-09-18T00:02:00.000Z,2024-09-18T00:03:00.000Z\r\n`);
+    "Send ID,Channel,Recipient,Subject,Thread ID,Status,Provider ID,Error,Dispatch Started (UTC),Created (UTC),Updated (UTC)\r\n" +
+    `${tricky.id},telegram,987654321,"Re: ""launch"", tomorrow",,sent,tg-7,,,2024-09-18T00:00:00.000Z,2024-09-18T00:01:00.000Z\r\n` +
+    `${gmail.id},gmail,maya@example.test,Plain,,failed,,gmail_send_failed,,2024-09-18T00:02:00.000Z,2024-09-18T00:03:00.000Z\r\n`);
   assert.ok(!text.includes("never-exported body text"), "message body must never appear in the export");
   assert.ok(!text.includes(hash), "body hash must not appear in the export");
 });
@@ -151,7 +151,7 @@ test("json export carries exactly the same rows as csv", t => {
   assert.deepEqual(doc.rows, [directSendExportRow(settled)]);
   assert.deepEqual(doc.rows[0], {
     id: send.id, channel: "telegram", to: "123456", subject: "Hello", threadId: null,
-    status: "sent", providerId: "tg-9", errorCode: null,
+    status: "sent", providerId: "tg-9", errorCode: null, dispatchStartedAt: null,
     createdAt: "2024-09-18T00:00:00.000Z", updatedAt: "2024-09-18T00:01:00.000Z"
   });
   const csvRows = exportDirectSends(db, "acc-1", { at: 1726617800000 }).text.split("\r\n").slice(1, 2);

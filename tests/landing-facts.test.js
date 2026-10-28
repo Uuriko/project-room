@@ -1,5 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { attachRestCommitIds, landingFacts, pathLeases } from "../scripts/landing-facts.mjs";
 
 const MAIN = "a".repeat(40);
@@ -222,4 +226,54 @@ test("an approval with no commit id is unverifiable and is not a carry", async (
   assert.deepEqual(facts.pullRequest.approvalPatchMatches, []);
   assert.equal(facts.pullRequest.status, "unverifiable");
   assert.equal("ready" in facts.pullRequest, false);
+});
+
+test("a git-quoted name-only path still names the leased file", async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), "landing-facts-quote-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const git = (args) => execFileSync("git", ["-C", dir, "-c", "core.quotePath=true", "-c", "user.email=facts@example.com", "-c", "user.name=Facts", ...args], { encoding: "utf8" });
+  git(["init", "-q", "-b", "main"]);
+  mkdirSync(join(dir, "server"));
+  writeFileSync(join(dir, "server", "café.mjs"), "a\n");
+  git(["add", "server/café.mjs"]);
+  git(["commit", "-q", "-m", "base"]);
+  git(["update-ref", "refs/remotes/origin/main", "HEAD"]);
+  writeFileSync(join(dir, "server", "café.mjs"), "b\n");
+  git(["add", "server/café.mjs"]);
+  git(["commit", "-q", "-m", "edit"]);
+  const execImpl = (args, input) => {
+    const result = spawnSync("git", ["-C", dir, "-c", "core.quotePath=true", ...args], { input, encoding: "utf8" });
+    return { status: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
+  };
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ sourceRevision: null, buildId: "t", deployment: "production" }) });
+  const claimsImpl = async () => ({
+    truncated: false,
+    claims: [{ id: "held", state: "claimed", owner: "other", leaseExpiresAt: "2026-10-10T12:00:00.000Z", files: ["server/café.mjs"] }],
+  });
+  const facts = await landingFacts({ fetchImpl, execImpl, claimsImpl, nowMs: Date.parse("2026-10-10T03:50:00.000Z") });
+  assert.deepEqual(facts.touchedPaths, ["server/café.mjs"]);
+  assert.equal(facts.pathLeases.unavailable, false);
+  assert.equal(facts.pathLeases.paths[0].holders[0].claimId, "held");
+  assert.equal(facts.notMergeAuthorization, true);
+});
+
+test("a quoted tab in a name-only path still matches the lease", async () => {
+  const execImpl = (args) => {
+    const key = args.join(" ");
+    if (key === "rev-parse HEAD") return { status: 0, stdout: `${HEAD}\n`, stderr: "" };
+    if (key === "rev-parse origin/main") return { status: 0, stdout: `${MAIN}\n`, stderr: "" };
+    if (key.startsWith("rev-list")) return { status: 0, stdout: "1\n", stderr: "" };
+    if (key.startsWith("diff --name-only")) return { status: 0, stdout: '"server/tab\\tname.mjs"\n', stderr: "" };
+    if (key.startsWith("diff ")) return { status: 0, stdout: "diff local\n", stderr: "" };
+    if (key.startsWith("patch-id")) return { status: 0, stdout: `${HEAD} x\n`, stderr: "" };
+    return { status: 1, stdout: "", stderr: key };
+  };
+  const fetchImpl = async () => ({ ok: true, json: async () => ({ sourceRevision: PROD, buildId: "t", deployment: "production" }) });
+  const claimsImpl = async () => ({
+    truncated: false,
+    claims: [{ id: "held-tab", state: "claimed", owner: "other", leaseExpiresAt: "2026-10-10T12:00:00.000Z", files: ["server/tab\tname.mjs"] }],
+  });
+  const facts = await landingFacts({ fetchImpl, execImpl, claimsImpl, nowMs: Date.parse("2026-10-10T03:50:00.000Z") });
+  assert.deepEqual(facts.touchedPaths, ["server/tab\tname.mjs"]);
+  assert.equal(facts.pathLeases.paths[0].holders[0].claimId, "held-tab");
 });

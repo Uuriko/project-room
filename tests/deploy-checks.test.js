@@ -410,18 +410,46 @@ test("CLI --write refuses missing assets and rejects conflicting flags", async t
 });
 
 // Actual deployment recovery owner: no live credentials or writes in fixtures.
-import { rollbackDecision, recoverWorkers, recoveryDescription, observeWorker, schemaAt } from "../scripts/deploy-recovery.mjs";
+import { automaticRollbackDecision, recoverWorkers, recoveryDescription, observeWorker, schemaAt, withApiRetry, transientApiFailure, deploymentStatus, parseDeploymentStatus, restDeploymentStatus, allocation } from "../scripts/deploy-recovery.mjs";
 import { parse as parseYaml } from "yaml";
 const recoveryOld = "11111111-1111-4111-8111-111111111111";
 const recoveryNew = "22222222-2222-4222-8222-222222222222";
 const recoveryRevision = "a".repeat(40);
 const recoveryAllocation = id => ({ versions: [{ version_id: id, percentage: 100 }] });
-const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema });
+const fenceProof = (version, revision = "b".repeat(40), blob = "d".repeat(40)) => ({ version, revision, blob, definitions: `server/writer-fence.mjs@${blob}` });
+const previousWorker = schema => ({ known: true, versionId: recoveryOld, sourceRevision: recoveryRevision, codeSchemaVersion: schema, schemaSource: fenceProof(schema, recoveryRevision) });
+
+test("failed allocation subprocess exposes bounded API diagnostics without credentials and prevents snapshot", async t => {
+  const directory = tempDir(t, "recovery-command-");
+  const executable = join(directory, "pnpm");
+  writeFileSync(executable, `#!/usr/bin/env node
+process.stdout.write('allocation request account=' + process.env.CLOUDFLARE_ACCOUNT_ID + '\\n');
+process.stderr.write('Cloudflare API error 10000: Authentication error\\nBearer ' + process.env.CLOUDFLARE_API_TOKEN + '\\n' + 'x'.repeat(20000) + '\\nrequest trace: fixture-trace\\n');
+process.exit(17);
+`, { mode: 0o755 });
+  const cwd = fileURLToPath(new URL("..", import.meta.url));
+  const { stdout: revision } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd });
+  const snapshot = join(directory, "pre-deploy.json");
+  await assert.rejects(execFileAsync(process.execPath, ["scripts/deploy-recovery.mjs", "snapshot", snapshot], {
+    cwd, env: { ...process.env, PATH: `${directory}:${process.env.PATH}`, SHA: revision.trim(),
+      CLOUDFLARE_API_TOKEN: "fixture-sensitive-token", CLOUDFLARE_ACCOUNT_ID: "fixture-sensitive-account" }
+  }), error => {
+    assert.equal(error.code, 1);
+    assert.match(error.stderr, /wrangler deployments status --env production --json/);
+    assert.match(error.stderr, /failed \(17\)/);
+    assert.match(error.stderr, /Cloudflare API error 10000: Authentication error/);
+    assert.match(error.stderr, /fixture-trace/);
+    assert.doesNotMatch(error.stderr, /fixture-sensitive-token|fixture-sensitive-account/);
+    assert.ok(error.stderr.length < 12000, "subprocess diagnostics must be bounded");
+    return true;
+  });
+  assert.throws(() => readFileSync(snapshot), { code: "ENOENT" });
+});
 
 test("rollback schema gate rejects lower and unknown schemas without executing old code", async () => {
   for (const previous of [previousWorker(37), previousWorker(null), { ...previousWorker(38), known: false }, { ...previousWorker(38), sourceRevision: "unstamped" }]) {
     let calls = 0;
-    const report = await recoverWorkers({ targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, prod: previous, entry: previous }, { prod: true, entry: true }, {
+    const report = await recoverWorkers({ targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, candidateSchemaSource: fenceProof(38), prod: previous, entry: previous }, { prod: true, entry: true }, {
       status: async () => recoveryAllocation(recoveryNew), rollback: async () => { calls++; }, readVersion: async () => { throw new Error("must not read back unattempted rollback"); },
     });
     assert.equal(calls, 0);
@@ -429,12 +457,33 @@ test("rollback schema gate rejects lower and unknown schemas without executing o
     assert.equal(report.workers.prod.rollbackAttempted, false);
     assert.doesNotMatch(recoveryDescription(report), /rolled back|ROLLBACK VERIFIED/);
   }
-  assert.equal(rollbackDecision(previousWorker(38), 38).eligible, true);
-  assert.match(rollbackDecision(previousWorker(38), 38).reason, /compatibility is not established/);
+  assert.equal(automaticRollbackDecision(previousWorker(38), 38, fenceProof(38)).eligible, true);
+  assert.match(automaticRollbackDecision(previousWorker(38), 38, fenceProof(38)).reason, /compatibility is not established/);
+});
+
+test("rollback requires consistent exact source evidence, including same-schema changes", async () => {
+  const previous = previousWorker(42), candidate = fenceProof(42);
+  for (const proof of [undefined, {}, { ...candidate, blob: "invalid" }, { ...candidate, version: 41 },
+    { ...candidate, revision: "unknown" }, { ...candidate, blob: "e".repeat(40) }]) {
+    assert.equal(automaticRollbackDecision(previous, 42, proof).eligible, false);
+  }
+  for (const proof of [undefined, { ...previous.schemaSource, revision: "c".repeat(40) },
+    { ...previous.schemaSource, version: 41 }, { ...previous.schemaSource, blob: "invalid" }]) {
+    assert.equal(automaticRollbackDecision({ ...previous, schemaSource: proof }, 42, candidate).eligible, false);
+  }
+  assert.equal(automaticRollbackDecision(previous, 42, candidate).eligible, true);
+  let calls = 0;
+  const report = await recoverWorkers({ targetSha: "c".repeat(40), candidateCodeSchemaVersion: 42,
+    candidateSchemaSource: candidate, prod: previous, entry: previous }, { prod: true }, {
+    status: async () => recoveryAllocation(recoveryNew), rollback: async () => { calls++; },
+    readVersion: async () => { throw new Error("must not roll back mismatched candidate evidence"); }
+  });
+  assert.equal(calls, 0);
+  assert.equal(report.status, "ROLL FORWARD REQUIRED");
 });
 
 test("recovery distinguishes no upload, verified rollback and failed/unverified commands", async () => {
-  const snapshot = { targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, prod: previousWorker(38), entry: previousWorker(37) };
+  const snapshot = { targetSha: "b".repeat(40), candidateCodeSchemaVersion: 38, candidateSchemaSource: fenceProof(38), prod: previousWorker(38), entry: previousWorker(37) };
   let calls = 0;
   const noChange = await recoverWorkers(snapshot, { prod: true, entry: false }, {
     status: async () => recoveryAllocation(recoveryOld), rollback: async () => { calls++; }, readVersion: async () => { throw new Error("no upload needs no readback"); },
@@ -491,17 +540,18 @@ test("actual production workflow captures schemas before uploads and uses guarde
 });
 
 import { createServer } from "node:http";
-test("actual recovery CLI records independent exact source schemas and refuses a 37-to-38 fallback", async t => {
+for (const [previousVersion, candidateVersion] of [[37, 38], [42, 42]])
+test(`actual recovery CLI refuses ${previousVersion}-to-${candidateVersion} fallback with changed table definitions`, async t => {
   const dir = tempDir(t, "deploy-recovery-cli-");
   mkdirSync(join(dir, "server")); mkdirSync(join(dir, "cloudflare")); mkdirSync(join(dir, "bin"));
   // The extensionless fake pnpm is CommonJS even under repository-local TMPDIR.
   writeFileSync(join(dir, "package.json"), JSON.stringify({ type: "commonjs" }));
   const git = args => execFileAsync("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", ...args], { cwd: dir });
   await git(["init", "--quiet"]);
-  writeFileSync(join(dir, "server/writer-fence.mjs"), "export const STORE_SCHEMA_VERSION = 37;\n");
+  writeFileSync(join(dir, "server/writer-fence.mjs"), `export const STORE_SCHEMA_VERSION = ${previousVersion};\n`);
   await git(["add", "."]); await git(["commit", "--quiet", "-m", "previous37"]);
   const oldSha = (await git(["rev-parse", "HEAD"])).stdout.trim();
-  writeFileSync(join(dir, "server/writer-fence.mjs"), "export const STORE_SCHEMA_VERSION = 38;\n");
+  writeFileSync(join(dir, "server/writer-fence.mjs"), `export const STORE_SCHEMA_VERSION = ${candidateVersion};\nexport const addedTable = "mention_observations";\n`);
   await git(["add", "."]); await git(["commit", "--quiet", "-m", "candidate38"]);
   const targetSha = (await git(["rev-parse", "HEAD"])).stdout.trim();
   writeFileSync(join(dir, "bin/pnpm"), `#!/usr/bin/env node
@@ -521,13 +571,13 @@ const fs=require('node:fs'),a=process.argv.slice(2);fs.appendFileSync(process.en
   delete env.GITHUB_OUTPUT; delete env.GITHUB_STEP_SUMMARY;
   await execFileAsync(process.execPath, [cli, "snapshot", pre], { cwd: dir, env });
   const snapshot = JSON.parse(readFileSync(pre, "utf8"));
-  assert.equal(snapshot.candidateCodeSchemaVersion, 38);
+  assert.equal(snapshot.candidateCodeSchemaVersion, candidateVersion);
   assert.equal(snapshot.prod.versionId, recoveryOld);
   assert.equal(snapshot.prod.sourceRevision, oldSha);
-  assert.equal(snapshot.prod.codeSchemaVersion, 37);
+  assert.equal(snapshot.prod.codeSchemaVersion, previousVersion);
   assert.equal(snapshot.prod.automaticRollback.eligible, false);
   assert.equal(snapshot.entry.sourceRevision, targetSha);
-  assert.equal(snapshot.entry.codeSchemaVersion, 38);
+  assert.equal(snapshot.entry.codeSchemaVersion, candidateVersion);
   assert.ok(snapshot.prod.schemaSource.blob);
   await assert.rejects(execFileAsync(process.execPath, [cli, "recover", pre, recovery], { cwd: dir, env: { ...env, PROD_OUTCOME: "success", ENTRY_OUTCOME: "skipped", STATUS_PHASE: "new" } }), error => error.code === 1);
   const report = JSON.parse(readFileSync(recovery, "utf8"));
@@ -536,4 +586,108 @@ const fs=require('node:fs'),a=process.argv.slice(2);fs.appendFileSync(process.en
   assert.equal(report.workers.entry.disposition, "unchanged");
   assert.ok(requests.every(path => path.endsWith("/api/version/worker")), "predeployment probes must never instantiate room storage");
   assert.ok(!readFileSync(log, "utf8").includes('"rollback"'));
+});
+
+// Cloudflare sometimes answers a read with HTTP 200 and a body wrangler cannot
+// parse. That read is retried with backoff; every other failure stays fail-closed.
+const malformed = () => new Error("pnpm exec wrangler deployments status --env production --json failed (1)\nstderr: Received a malformed response from the API");
+const noWait = { sleep: async () => {}, log: () => {} };
+
+test("a malformed Cloudflare API response is retried with doubling backoff and then succeeds", async () => {
+  const waits = []; let calls = 0;
+  const value = await withApiRetry(async () => { if (++calls < 3) throw malformed(); return "ok"; }, { ...noWait, sleep: async ms => { waits.push(ms); } });
+  assert.equal(value, "ok");
+  assert.equal(calls, 3);
+  assert.deepEqual(waits, [2000, 4000]);
+});
+
+test("API retry fails closed: exhausted attempts and non-transient errors rethrow without further tries", async () => {
+  let calls = 0;
+  await assert.rejects(withApiRetry(async () => { calls++; throw malformed(); }, { ...noWait, attempts: 4 }), /malformed response/);
+  assert.equal(calls, 4);
+  calls = 0;
+  await assert.rejects(withApiRetry(async () => { calls++; throw new Error("Cloudflare API error 10000: Authentication error"); }, noWait), /Authentication error/);
+  assert.equal(calls, 1, "an authentication error is not retried");
+  assert.equal(transientApiFailure("Cloudflare API error 10000: Authentication error"), false);
+  assert.equal(transientApiFailure("Received a malformed response from the API"), true);
+});
+
+test("deploymentStatus retries the wrangler read and still refuses output that is not a JSON object", async () => {
+  let calls = 0;
+  const run = args => {
+    calls++;
+    assert.deepEqual(args.slice(0, 5), ["pnpm", "exec", "wrangler", "deployments", "status"]);
+    if (calls === 1) throw malformed();
+    return `banner\n${JSON.stringify(recoveryAllocation(recoveryOld))}`;
+  };
+  assert.deepEqual(await deploymentStatus("prod", run, noWait), recoveryAllocation(recoveryOld));
+  assert.equal(calls, 2);
+  assert.throws(() => parseDeploymentStatus("no json here"), /no JSON object/);
+  assert.throws(() => parseDeploymentStatus("{not json"), /unparseable JSON/);
+  await assert.rejects(deploymentStatus("entry", () => "", noWait), /no JSON object/);
+});
+
+// REST fallback, with a ~4KB deployments body like the one wrangler rejected.
+const restEnv = { CLOUDFLARE_API_TOKEN: "tok", CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef" };
+const restConfig = { name: "project-room-staging", env: { production: { name: "project-room" } } };
+const restDeployment = (id, versions) => ({ id: `d-${id}`, source: "wrangler", strategy: "percentage", created_on: "2026-10-12T09:55:00Z", annotations: { "workers/triggered_by": "deployment", note: "x".repeat(150) }, versions });
+const restBody = (deployments, success = true) => JSON.stringify({ success, errors: [], messages: [], result: { deployments } });
+const restFetch = (status, text, seen = []) => async (url, init) => { seen.push({ url, init }); return { status, text: async () => text }; };
+const fourKb = Array.from({ length: 12 }, (_, i) => restDeployment(i, [{ version_id: recoveryOld, percentage: 100 }]));
+
+test("REST fallback reads the newest deployment of the right script and returns the wrangler status shape", async () => {
+  const text = restBody(fourKb);
+  assert.ok(text.length > 3900, `fixture is ${text.length} bytes`);
+  const seen = [];
+  const status = await restDeploymentStatus("prod", { env: restEnv, config: restConfig, fetcher: restFetch(200, text, seen) });
+  assert.equal(seen[0].url, "https://api.cloudflare.com/client/v4/accounts/0123456789abcdef0123456789abcdef/workers/scripts/project-room/deployments");
+  assert.equal(seen[0].init.headers.authorization, "Bearer tok");
+  assert.deepEqual(allocation(status), { known: true, versions: [{ versionId: recoveryOld, percentage: 100 }], versionId: recoveryOld });
+  await restDeploymentStatus("entry", { env: restEnv, config: restConfig, fetcher: restFetch(200, text, seen) });
+  assert.match(seen[1].url, /workers\/scripts\/project-room-staging\/deployments$/);
+});
+
+test("REST fallback fails closed on every unusable answer", async () => {
+  const good = restBody(fourKb);
+  const cases = [["HTTP 502", 502, good], ["non-JSON", 200, "<html>504</html>"], ["truncated", 200, good.slice(0, 3000)], ["success false", 200, restBody(fourKb, false)],
+    ["no deployments", 200, restBody([])], ["split allocation", 200, restBody([restDeployment(1, [{ version_id: recoveryOld, percentage: 50 }, { version_id: recoveryNew, percentage: 40 }])])],
+    ["missing version id", 200, restBody([restDeployment(1, [{ percentage: 100 }])])]];
+  for (const [label, status, text] of cases) await assert.rejects(restDeploymentStatus("prod", { env: restEnv, config: restConfig, fetcher: restFetch(status, text) }), /REST/, label);
+  await assert.rejects(restDeploymentStatus("prod", { env: { CLOUDFLARE_API_TOKEN: "tok" }, config: restConfig, fetcher: restFetch(200, good) }), /needs CLOUDFLARE_API_TOKEN/);
+});
+
+test("deploymentStatus uses REST only after wrangler keeps returning a malformed response", async () => {
+  let runs = 0, rests = 0;
+  const rest = async () => { rests++; return recoveryAllocation(recoveryOld); };
+  assert.deepEqual(await deploymentStatus("prod", () => { runs++; throw malformed(); }, { ...noWait, attempts: 3 }, rest), recoveryAllocation(recoveryOld));
+  assert.deepEqual([runs, rests], [3, 1]);
+  runs = rests = 0;
+  await assert.rejects(deploymentStatus("prod", () => { runs++; throw new Error("Authentication error"); }, noWait, rest), /Authentication/);
+  assert.deepEqual([runs, rests], [1, 0], "other failures never fall back");
+  runs = rests = 0;
+  await assert.rejects(deploymentStatus("prod", () => { runs++; throw malformed(); }, { ...noWait, attempts: 2 }, async () => { throw new Error("Cloudflare deployments REST HTTP 502"); }), /REST HTTP 502/);
+});
+
+test("automatic rollback refuses when a table list imported by writer-fence changes but writer-fence itself does not", () => {
+  // writer-fence.mjs builds the recovery allowed-table set partly from imports
+  // (ABUSE_RATE_TABLES, OAUTH_PROVIDER_TABLES). A new table added there leaves
+  // the writer-fence blob identical while the prior build's recovery rejects it.
+  const fence = 'import { ABUSE_RATE_TABLES } from "./abuse-rate-buckets.mjs";\nexport const STORE_SCHEMA_VERSION = 42;\n';
+  const oldRev = "1".repeat(40), newRev = "2".repeat(40);
+  const blobs = { [`${oldRev}:server/writer-fence.mjs`]: "f".repeat(40), [`${newRev}:server/writer-fence.mjs`]: "f".repeat(40),
+    [`${oldRev}:server/abuse-rate-buckets.mjs`]: "3".repeat(40), [`${newRev}:server/abuse-rate-buckets.mjs`]: "4".repeat(40) };
+  const git = args => {
+    if (args[0] === "show") return fence;
+    if (args[0] === "rev-parse" && blobs[args[1]]) return `${blobs[args[1]]}\n`;
+    throw new Error(`unexpected git ${args.join(" ")}`);
+  };
+  const prior = schemaAt(oldRev, git), candidate = schemaAt(newRev, git);
+  assert.equal(prior.blob, candidate.blob, "fixture: writer-fence.mjs is byte-identical");
+  const previous = { known: true, versionId: recoveryOld, sourceRevision: oldRev, codeSchemaVersion: 42, schemaSource: prior };
+  const decision = automaticRollbackDecision(previous, 42, candidate);
+  assert.equal(decision.eligible, false);
+  assert.match(decision.reason, /definitions changed/);
+  // Same imported blobs on both sides stays eligible.
+  blobs[`${newRev}:server/abuse-rate-buckets.mjs`] = "3".repeat(40);
+  assert.equal(automaticRollbackDecision(previous, 42, schemaAt(newRev, git)).eligible, true);
 });

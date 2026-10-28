@@ -1,8 +1,5 @@
 import AxeBuilder from "@axe-core/playwright";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
-import { emailContractFixture } from "./email-contract-fixture.mjs";
-import { normalizeGraphEmail } from "../server/graph-email.mjs";
-import { openMagicSignin } from "./signin-browser-journey.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickChrome, clickWorkAction, enableHumanAdvanced } from "./room-chrome.mjs";
 // Cross-session return-brief isolation and bounded accessibility regressions.
@@ -76,13 +73,17 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   await page.keyboard.press("Enter");
   assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
 
-  // Email delivery failure has one local announcement owner through the
-  // actual email sign-in screen; this local fixture has no mail provider.
-  await openMagicSignin(page);
-  await page.locator('#auth-signin-ui [name=email]').fill("a11y@example.test");
-  await page.locator('#auth-signin-ui button[type=submit]').click();
+  // A sign-in failure has one local announcement owner. This used the
+  // email sign-in screen's delivery failure, but since #3430 a deployment
+  // with no mail provider (this fixture) no longer offers email sign-in at
+  // all — the password screen, present in every deployment, carries the
+  // same single-owner property.
+  const passwordForm = page.locator('#auth-signin-ui [data-signin-form="password"]');
+  await passwordForm.locator('[name="email"]').fill("a11y@example.test");
+  await passwordForm.locator('[name="password"]').fill("not-the-password");
+  await passwordForm.locator('button[type="submit"]').click();
   const emailError = page.locator('#auth-signin-ui [data-signin-status]');
-  await emailError.filter({ hasText: /not configured|isn.t configured/i }).waitFor();
+  await emailError.filter({ hasText: /Invalid email or password/i }).waitFor();
   assert.equal(await emailError.getAttribute("role"), "alert");
   assert.equal(await page.locator("#status").textContent(), "", "no duplicate global authentication alert");
   assert.equal(await page.locator("#auth-panel").isVisible(), true);
@@ -195,7 +196,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   holdOwnerBrief = false;
   if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
   await page.locator("#auth-panel").waitFor({ state: "visible" });
-  assert.equal(await page.getByRole("button", { name: "Create account", exact: true }).evaluate(node => node === document.activeElement), true, "access end moves focus to the first visible account entry");
+  assert.equal(await page.locator('[data-signin-form="password"] [name="email"]').evaluate(node => node === document.activeElement), true, "access end moves focus to the first visible account entry");
   assert.match(await page.locator("#auth-error").textContent(), /Session ended; private drafts were cleared/);
   assert.equal(await page.locator("#status").textContent(), "", "sign-out has one local announcement owner");
   await signInFixture(page, maya);
@@ -227,34 +228,6 @@ test("board, settings, and join error have no serious axe findings; pages do not
   const fixture = createAcceptanceFixture();
   const account = fixture.store.accountForMember("commons", "owner");
   const accountKey = fixture.store.issueAccountAccessKey(account.id);
-  const slot = fixture.store.createAccountSessionSlot();
-  const session = fixture.store.loginAccountSession(slot.token, accountKey, 0);
-  const raw = emailContractFixture();
-  raw.connection.accountId = account.id;
-  const apply = request => fixture.store.email.apply(slot.token, request, session.sessionBinding);
-  apply({ action: "connection.configure", requestId: crypto.randomUUID(), connectionId: raw.connection.id, expectedRevision: 0, profile: raw.connection });
-  const parent = structuredClone(raw.message);
-  parent.id = "AQMkCspParent="; parent.changeKey = "CQAAcsp-parent=";
-  parent.internetMessageId = "<csp-parent@example.test>"; parent.conversationId = "AAQkCspConv=";
-  parent.subject = "CSP thread"; parent.body.content = "Parent."; parent.internetMessageHeaders = [];
-  const parentOptions = structuredClone(raw.options);
-  parentOptions.attachmentObservation.messageId = parent.id;
-  parentOptions.attachmentObservation.messageRevision = parent.changeKey;
-  const importMessage = (message, options) => {
-    const envelope = normalizeGraphEmail(raw.connection, message, options);
-    const state = fixture.store.email.state(slot.token, raw.connection.id, message.parentFolderId, session.sessionBinding);
-    apply({ action: "page.apply", requestId: crypto.randomUUID(), connectionId: raw.connection.id, connectionRevision: 1,
-      folderId: message.parentFolderId, expectedRevision: state.folder?.revision ?? 0, expectedCursor: state.expectedCursor,
-      cursor: crypto.randomUUID(), complete: true, reset: state.needsReset, observations: [{ kind: "message", expectedSourceRevision: 0, envelope }] });
-    return envelope.sourceId;
-  };
-  const parentId = importMessage(parent, parentOptions);
-  const child = structuredClone(raw.message);
-  child.id = "AQMkCspChild="; child.changeKey = "CQAAcsp-child=";
-  child.internetMessageId = "<csp-child@example.test>"; child.conversationId = "AAQkCspConv=";
-  child.subject = "Re: CSP thread"; child.body.content = "Reply."; child.hasAttachments = false;
-  child.internetMessageHeaders = [{ name: "In-Reply-To", value: "<csp-parent@example.test>" }];
-  importMessage(child, { idType: "immutable", attachmentObservation: { messageId: child.id, messageRevision: child.changeKey, complete: true, items: [] } });
   const server = createRoomServer({ store: fixture.store, streamInterval: 40 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -289,10 +262,6 @@ test("board, settings, and join error have no serious axe findings; pages do not
   await page.locator("#board-dialog").waitFor({ state: "visible" });
   await seriousAxe(page, "#board-dialog");
   await page.locator("#board-close").click();
-  await clickChrome(page, "#nav-inbox");
-  await page.locator(`[data-source-id="${parentId}"]`).click();
-  await page.locator("#inbox-thread-toggle").click();
-  await page.locator("#inbox-thread-list button").first().waitFor();
   await page.goto(origin + "/join?code=x");
   await page.locator("#join-error").waitFor({ state: "visible" });
   await seriousAxe(page, "main");
@@ -383,4 +352,38 @@ test("light-theme chat divider keeps 4.5:1 and coarse pointers get 16px/44px con
   assert.ok(control.fontPx >= 16, `coarse-pointer input font-size ${control.fontPx}px does not trigger iOS zoom`);
   assert.ok(control.minHeightPx >= 44, `coarse-pointer input min-height ${control.minHeightPx}px meets the 44px target`);
   await coarse.close();
+});
+
+// R33-1: on a phone the Menu drawer covers the Menu button. Opening it must
+// move focus into the drawer; leaving focus on the covered button sends Tab
+// through the hidden chat behind the drawer first.
+test("phone Menu moves focus into the drawer and Escape brings it back", { timeout: 90000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const page = await (await browser.newContext({ viewport: { width: 390, height: 844 }, reducedMotion: "reduce" })).newPage();
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await page.locator("#sidebar-toggle").focus();
+  await page.keyboard.press("Enter");
+  await page.locator("#room-sidebar").waitFor({ state: "visible" });
+  const focusInDrawer = () => page.evaluate(() => {
+    const active = document.activeElement, rect = active.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return document.getElementById("room-sidebar").contains(active) && rect.width > 0 && Boolean(hit && (active === hit || active.contains(hit)));
+  });
+  assert.equal(await focusInDrawer(), true, "focus lands on a visible control inside the open drawer");
+  await page.keyboard.press("Tab");
+  assert.equal(await focusInDrawer(), true, "the next Tab stays in the drawer, not the chat behind it");
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.getElementById("main").classList.contains("sidebar-open"));
+  assert.equal(await page.evaluate(() => document.activeElement.id), "sidebar-toggle", "Escape returns focus to Menu");
 });

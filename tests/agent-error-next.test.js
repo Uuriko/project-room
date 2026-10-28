@@ -55,9 +55,9 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   assertAx(denied, { reason: "owner_required" });
   const wrongOrigin = agentErrorAx({ httpStatus: 403, code: "origin_denied", message: "Request origin is not allowed" });
   assertAx(wrongOrigin, { reason: "origin_denied" });
-  assert.equal(wrongOrigin.hint, "Use Origin: https://room.trydemigod.com or omit the Origin header.");
+  assert.equal(wrongOrigin.hint, "Use the configured service Origin or omit the Origin header.");
   const requiredOrigin = agentErrorAx({ httpStatus: 403, code: "origin_denied", message: "Origin header is required" });
-  assert.equal(requiredOrigin.hint, "Send Origin: https://room.trydemigod.com. This route does not accept a missing or different Origin header.");
+  assert.equal(requiredOrigin.hint, "Send the configured service Origin. This route requires an allowed Origin header.");
   assert.equal(requiredOrigin.hint.includes("omit"), false);
   assert.equal(JSON.stringify(requiredOrigin.next).includes("Do not omit"), true);
   assert.equal(JSON.stringify(wrongOrigin).includes("guest invite"), false);
@@ -109,6 +109,52 @@ test("shared mapper keeps error.code/message and adds status/reason/hint/next", 
   const leaky = agentErrorAx({ httpStatus: 404, code: "PRIVATE_DETAIL token", message: "do not paste" });
   assert.equal(leaky.reason, "request_failed");
   assert.doesNotMatch(JSON.stringify(leaky), /PRIVATE_DETAIL|do not paste|plugin\.jup\.ag/);
+  // QA 2026-10-07 (live fuzz): method_not_allowed 405 is a method problem,
+  // not an access problem — the hint must name the allowed-method fix
+  // instead of the unmapped-code "Unknown error ... re-check access" copy.
+  const wrongMethod = agentErrorAx({ httpStatus: 405, code: "method_not_allowed", message: "Method not allowed" });
+  assert.equal(wrongMethod.reason, "method_not_allowed");
+  assert.match(wrongMethod.hint, /does not accept that HTTP method/);
+  assert.match(wrongMethod.hint, /Allow header/);
+  assert.doesNotMatch(wrongMethod.hint, /Unknown error/);
+  // QA 2026-10-08 (stranger test AO-04, live): a 404 with code not_found
+  // (stale or mistyped task id on the onboarding surface) fell through to
+  // the unmapped-code branch — "Unknown error 'not_found' ... report to the
+  // room owner" strands a caller who simply used a wrong id. A 404 names
+  // the fix itself: re-list, use a current id, never guess one.
+  const unknownId = agentErrorAx({ httpStatus: 404, code: "not_found", message: "Not found" });
+  assertAx(unknownId, { reason: "not_found" });
+  assert.match(unknownId.hint, /does not exist/);
+  assert.match(unknownId.hint, /re-list/i);
+  assert.match(unknownId.hint, /do not guess/i);
+  assert.doesNotMatch(unknownId.hint, /Unknown error/);
+  assert.ok(unknownId.next.some(step => step.command?.includes("/api/public-work/tasks")));
+  // QA 2026-10-07: identity_already_linked is idempotent success (the link is
+  // live), not a failure — the hint must say so instead of "check access",
+  // or agents mint duplicate identities retrying the link create.
+  const alreadyLinked = agentErrorAx({ httpStatus: 409, code: "identity_already_linked", message: "This identity is already linked to this room" });
+  assert.equal(alreadyLinked.reason, "identity_already_linked");
+  assert.match(alreadyLinked.hint, /earlier link is live/);
+  assert.match(alreadyLinked.hint, /do not mint another identity/);
+  assert.ok(alreadyLinked.next.some(step => step.tool === "room_check_access"));
+});
+
+test("challenge ch-2031: 405 hint does not promise an Allow header that usually isn't there", () => {
+  // QA challenge 2026-10-08 vs #2031: the merged hint asserted "the 405
+  // response carries an Allow header naming them". But 60 of 106 server 405
+  // reject() sites omit Allow (verified live 2026-10-08: POST
+  // /api/public/rooms/directory and POST /api/opportunities.json both 405
+  // with no Allow header). Sending the agent to read a header that usually
+  // doesn't exist is a new flavor of misleading hint — the same class of bug
+  // #2031 fixed. The hint must hedge: point at the header only as a
+  // possibility, and always name the route docs fallback.
+  const ax = agentErrorAx({ httpStatus: 405, code: "method_not_allowed", message: "Method not allowed" });
+  assertAx(ax, { reason: "method_not_allowed" });
+  assert.doesNotMatch(ax.hint, /carries an Allow header/,
+    "hint must not assert the Allow header is always present");
+  assert.match(ax.hint, /Allow header/); // still a valid lead when present
+  assert.match(ax.hint, /route docs/);   // always-available fallback
+  assert.doesNotMatch(JSON.stringify(ax.next), /carries an Allow header/);
 });
 
 test("public-work 409s teach: conflict names holder+lease expiry, stale says changed-vs-expired", () => {

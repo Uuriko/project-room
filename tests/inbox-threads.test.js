@@ -23,6 +23,31 @@ test("groups by threadId and flattens oldest-first with depth", () => {
   const singleton = threads.find(t => t.threadId === "s1");
   assert.equal(singleton.messageCount, 1);
 });
+test("offset timestamps order by instant, not lexically, and equal instants tie on id", () => {
+  // '2026-01-01T09:00:00+02:00' is 07:00Z — earlier than 08:00Z even though
+  // it sorts later as a string.
+  const threads = buildThreads([
+    msg("z-later", "2026-01-01T08:00:00Z", { threadId: "t1" }),
+    msg("offset-earlier", "2026-01-01T09:00:00+02:00", { threadId: "t1" }),
+  ]);
+  assert.deepEqual(threads[0].entries.map(e => e.message.id), ["offset-earlier", "z-later"]);
+  assert.equal(threads[0].firstAt, "2026-01-01T09:00:00+02:00");
+  assert.equal(threads[0].lastAt, "2026-01-01T08:00:00Z");
+  // Two representations of the same instant (07:00Z) tie and fall back to id.
+  const tied = buildThreads([
+    msg("b-id", "2026-01-01T07:00:00Z", { threadId: "t2" }),
+    msg("a-id", "2026-01-01T09:00:00+02:00", { threadId: "t2" }),
+  ]);
+  assert.deepEqual(tied[0].entries.map(e => e.message.id), ["a-id", "b-id"]);
+});
+test("threads sort by lastAt instant, not lexically, and equal instants tie on threadId", () => {
+  const threads = buildThreads([
+    msg("a1", "2026-01-01T09:00:00+02:00", { threadId: "ta" }), // 07:00Z
+    msg("b1", "2026-01-01T08:00:00Z", { threadId: "tb" }), // 08:00Z — most recent
+    msg("c1", "2026-01-01T07:00:00Z", { threadId: "tc" }), // 07:00Z, ties with ta
+  ]);
+  assert.deepEqual(threads.map(t => t.threadId), ["tb", "ta", "tc"]);
+});
 test("threads sort by most recent activity", () => {
   const threads = buildThreads([
     msg("a1", "2026-09-16T08:00:00Z", { threadId: "ta" }),

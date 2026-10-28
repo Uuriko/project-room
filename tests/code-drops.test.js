@@ -65,6 +65,44 @@ test("summarizePatch reads commits, files, line counts and base from the bytes",
   assert.equal(bundle.base, "a".repeat(40));
 });
 
+test("summarizePatch splits a multi-file plain unified diff per file", () => {
+  // Regression for #2925: the second and later files' +++ headers used to be
+  // ignored once the first file was open, so all hunks landed on file one.
+  // The +++ line in the first hunk is added content whose text looks like a
+  // header — it must stay an add on first.txt, not open a new file. The
+  // second file uses bare diff -u headers with tab timestamps, and the third
+  // is a deletion, whose path comes from its --- line (its +++ is /dev/null).
+  const multi = [
+    "--- a/first.txt",
+    "+++ b/first.txt",
+    "@@ -1 +1,2 @@",
+    "-old",
+    "+new",
+    "+++ b/not-a-file.txt",
+    "--- second.txt\t2026-10-13 00:00:00",
+    "+++ second.txt\t2026-10-13 00:01:00",
+    "@@ -1,2 +1,3 @@",
+    " ctx",
+    "-old2",
+    "+new2",
+    "+extra",
+    "--- a/gone.txt",
+    "+++ /dev/null",
+    "@@ -1 +0,0 @@",
+    "-gone",
+    ""
+  ].join("\n");
+  const summary = summarizePatch("diff", Buffer.from(multi));
+  assert.deepEqual(summary.files, [
+    { path: "first.txt", adds: 2, dels: 1 },
+    { path: "second.txt", adds: 2, dels: 1 },
+    { path: "gone.txt", adds: 0, dels: 1 }
+  ]);
+  assert.equal(summary.fileCount, 3);
+  assert.equal(summary.adds, 4);
+  assert.equal(summary.dels, 3);
+});
+
 test("the card stays short however large the patch is", () => {
   const big = MBOX.replace("@@ -0,0 +1,2 @@\n+hello\n+room\n", `@@ -0,0 +1,20002 @@\n+hello\n+room\n${"+x\n".repeat(20000)}`);
   const summary = summarizePatch("mbox", Buffer.from(big));

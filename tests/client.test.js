@@ -165,7 +165,7 @@ test("a delayed restore cannot replace a newer explicit login", async () => {
     fetcher: async (path, options) => {
       if (path === "/api/session" && options.method === "GET") return oldRestore.promise;
       if (path === "/api/session" && options.method === "POST") return response(identity("other"), 201);
-      if (path === "/api/rooms/commons") return response(snapshot(7, "other"));
+      if (path.split("?")[0] === "/api/rooms/commons") return response(snapshot(7, "other"));
       throw new Error(`Unexpected request: ${options.method} ${path}`);
     },
     onSnapshot: (value, current) => seen.push([value.sequence, current.member.id])
@@ -383,7 +383,7 @@ function liveRefreshFixture(t, snapshotRead = async sequence => response(snapsho
   const seen = [];
   const client = new RoomClient({ events: Events, onSnapshot: value => seen.push(value.sequence), fetcher: async (url, options) => {
     if (url === '/api/rooms/commons/commands' && options.method === 'POST') return response(event(current));
-    assert.equal(url, '/api/rooms/commons', 'unexpected transport request');
+    assert.equal(url.split('?')[0], '/api/rooms/commons', 'unexpected transport request');
     assert.equal(options.method, 'GET');
     reads++;
     return snapshotRead(current, reads);
@@ -435,7 +435,12 @@ test('unknown event hints and reconnects still fetch snapshots even when room se
     f.notify(value); await f.client.flight.promise;
     assert.equal(f.reads(), before + 1);
   }
+  f.client.stream.readyState = 0;
+  const retryingReads = f.reads();
+  f.emit('error'); await Promise.resolve();
+  assert.equal(f.reads(), retryingReads, 'native CONNECTING retry waits for open');
   for (const type of ['open', 'error']) {
+    f.client.stream.readyState = type === 'error' ? 2 : 1;
     const before = f.reads(); f.emit(type); await f.client.flight.promise;
     assert.equal(f.reads(), before + 1, type);
   }

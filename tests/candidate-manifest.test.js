@@ -79,9 +79,23 @@ test("drift refuses malformed manifests without reading sections", () => {
 });
 
 test("frozen deployment manifest pins the recovery helper and production workflow bytes", () => {
-  const manifest = JSON.parse(readFileSync(new URL("../docs/CANDIDATE-MANIFEST.json", import.meta.url), "utf8"));
+  const manifest = JSON.parse(readFileSync(new URL("../scripts/CANDIDATE-MANIFEST.json", import.meta.url), "utf8"));
   const root = new URL("..", import.meta.url).pathname;
   const files = ["scripts/deploy-recovery.mjs", ".github/workflows/deploy-prod.yml"];
   const actual = pinFiles(root, files);
   for (const file of files) assert.equal(manifest.deployment[file], actual[file], file);
+});
+
+test("committed candidate manifest has zero drift from the tree", async () => {
+  // Bug sweep lane 14 F3 (#3902): before this test, only the two deployment
+  // files above tied the committed manifest to the tree; the other 150+
+  // pins drifted undetectably (17 stale at the time of the fix, including
+  // deployment:cloudflare/room.mjs). Rebuild from the real tree and require
+  // an exact match across every section. Repair drift with:
+  //   node scripts/candidate-manifest.mjs --write
+  const { buildCandidateManifest } = await import("../scripts/candidate-manifest.mjs");
+  const root = new URL("..", import.meta.url).pathname;
+  const committed = JSON.parse(readFileSync(join(root, "scripts/CANDIDATE-MANIFEST.json"), "utf8"));
+  const drift = manifestDrift(buildCandidateManifest(root), committed);
+  assert.deepEqual(drift, [], `candidate manifest drift (run: node scripts/candidate-manifest.mjs --write): ${drift.join(", ")}`);
 });

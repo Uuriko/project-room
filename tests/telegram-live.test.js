@@ -45,7 +45,7 @@ function fixture(t) {
     return { sourceId, sendId: reserved.receipt.send.id, reader, preview };
   };
   f.server = async (options = {}) => {
-    const server = createRoomServer({ store: f.store, ...options });
+    const server = createRoomServer({ enableDeferredInbox: true, store: f.store, ...options });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
     const origin = "http://127.0.0.1:" + server.address().port;
@@ -197,6 +197,34 @@ test("the live transport posts sendMessage once per outbox key, honors retry_aft
   run = await attempt(() => jsonResponse(401, { ok: false, error_code: 401, description: "Unauthorized" }));
   await assert.rejects(run.transport.submit({ operationId: "reply-401", envelope: preview }), { code: "channel_connection_unavailable", status: 409 });
   assert.equal(run.calls.length, 1);
+  // #2922: a definitive 403 (Telegram error envelope) still rejects permanently.
+  run = await attempt(() => jsonResponse(403, { ok: false, error_code: 403, description: "Forbidden: bot was blocked by the user" }));
+  const blocked = await run.transport.submit({ operationId: "reply-403", envelope: preview });
+  assert.deepEqual(blocked, { operationId: "reply-403", previewVersion: preview.previewVersion, outcome: "rejected", providerId: null, code: "forbidden_bot_was_blocked_by_the_user" });
+  assert.equal(run.calls.length, 1); assert.deepEqual(await run.transport.lookup({ operationId: "reply-403" }), blocked);
+  // #2922: non-definitive answers are NOT stored as permanent "rejected"
+  // receipts. Each is retried bounded, then reported unavailable (503) with
+  // nothing recorded, so the attempt stays unknown instead of replaying a
+  // rejection on retry: a 200 with an unparseable body, a 200 with
+  // ok!==true, a 200 with no usable message_id, intermediary 409/422
+  // answers (even with a Telegram-shaped error body), and a 400 without
+  // Telegram's error envelope.
+  const nonDefinitive = [
+    ["reply-200-garbage", () => new Response("not json", { status: 200, headers: { "Content-Type": "application/json" } })],
+    ["reply-200-not-ok", () => jsonResponse(200, { ok: false, error_code: 400, description: "Bad Request: chat not found" })],
+    ["reply-200-no-id", () => jsonResponse(200, { ok: true, result: {} })],
+    ["reply-409", () => jsonResponse(409, { ok: false, error_code: 409, description: "Conflict" })],
+    ["reply-422", () => jsonResponse(422, { ok: false, error_code: 422, description: "Unprocessable Entity" })],
+    ["reply-400-html", () => new Response("<html>Bad Request</html>", { status: 400, headers: { "Content-Type": "text/html" } })],
+    ["reply-400-mismatch", () => jsonResponse(400, { ok: false, error_code: 403, description: "Forbidden" })],
+  ];
+  for (const [operationId, responder] of nonDefinitive) {
+    run = await attempt(responder);
+    await assert.rejects(run.transport.submit({ operationId, envelope: preview }), { code: "channel_sending_unavailable", status: 503 }, operationId);
+    assert.equal(run.calls.length, 4, operationId + ": bounded retries, no immediate rejection");
+    assert.equal(await run.transport.lookup({ operationId }), null, operationId + ": no receipt is recorded for an uncertain attempt");
+    assert.notEqual(run.status.snapshot(f.auth.account.id, f.telegram.connection.id).lastSendResult.outcome, "rejected", operationId);
+  }
   assert.equal(reader.sent().length, 0, "the fixture bot never saw a live send");
   assert.doesNotThrow(() => f.store.inbox.verify());
 });
@@ -257,7 +285,7 @@ test("the owner-authenticated import trigger works off loopback, enforces sessio
   const local = await f.server({ channelWebhooks: webhooks });
   response = await local.post(trigger, { requestId: "local-1" }); value = await response.json();
   assert.equal(response.status, 201, JSON.stringify(value)); assert.equal(value.registered, false); assert.equal(value.imported, 0); assert.equal(value.live.state, "not_configured");
-  assert.throws(() => createRoomServer({ store: f.store, telegram: { token: FAKE_TOKEN } }), /telegramConfig/);
+  assert.throws(() => createRoomServer({ enableDeferredInbox: true, store: f.store, telegram: { token: FAKE_TOKEN } }), /telegramConfig/);
   // Email connections carry no live block and cannot be triggered.
   const { emailContractFixture } = await import("../scripts/email-contract-fixture.mjs");
   const email = emailContractFixture(); email.connection.accountId = f.auth.account.id; f.configure(email.connection);

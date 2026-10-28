@@ -14,6 +14,7 @@ import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function fixture(t, extra = []) {
   const store = new RoomStore(":memory:"); t.after(() => store.close());
@@ -144,7 +145,7 @@ test("request bundles reject missing, null, mixed, spoofed and proposal fields w
   assert.equal(auditRecovery(f.store).dataSha256, after);
 });
 
-test("ordinary clarification changes context, but reactions and independent request/work branches do not", t => {
+test("ordinary clarification changes context, but independent request/work branches do not", t => {
   const f = fixture(t), q = f.open(), subject = q.command.data.messageId;
   const clarification = f.post("guest", { messageId: "clarification", body: "Consider accessibility too.", replyToId: subject });
   assert.equal(f.state().replyRequests[subject].contextEventId, clarification.event.id);
@@ -155,7 +156,6 @@ test("ordinary clarification changes context, but reactions and independent requ
   f.send("owner", { id: "work", type: "work.proposed", data: { workItemId: "other-work", title: "Independent", definitionOfDone: "Text", accountableMemberId: "agent", mode: "read" } });
   f.post("owner", { messageId: "different-work", workItemId: "other-work", body: "Separate work", replyToId: subject });
   f.post("agent", { messageId: "different-work-child", body: "Still separate", replyToId: "different-work" });
-  f.send("owner", { id: "reaction", type: "message.reaction_set", data: { messageId: subject, reaction: "like", active: true } });
   let at = Date.now();
   f.store.now = () => at;
   for (let i = 0; i < 105; i++) { at += 2000; f.post("owner", { body: "Unrelated" }); }
@@ -548,7 +548,7 @@ test("hosted needs-me discovers private incoming requests without exposing their
   const f = fixture(t), owner = f.store.identities.create("Host"), peer = f.store.identities.create("Responder");
   const rooms = new AgentRooms(f.store);
   const created = rooms.create(owner.secret, { roomId: "hosted-replies", title: "Replies", purpose: "Answer questions", kind: "personal", displayName: "Host" });
-  f.store.identities.link(owner.secret, created.roomId, { identityId: peer.identityId, displayName: "Responder", permissions: [] });
+  linkWithProof(f.store, owner.secret, created.roomId, peer, { displayName: "Responder", permissions: [] });
   f.store.dmConsents.request(created.roomId, created.ownerMemberId, peer.identityId, "Fixture");
   f.store.dmConsents.decide(created.roomId, peer.identityId, created.ownerMemberId, "approve");
   const send = command => f.store.command(owner.secret, created.roomId, command);

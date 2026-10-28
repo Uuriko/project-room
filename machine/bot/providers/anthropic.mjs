@@ -10,6 +10,20 @@ const ACTIONS = Object.freeze({
   scroll: "desktop.scroll",
 });
 
+// loop.mjs hands screenshots over as observation.image, a data URL
+// (`data:<media-type>;base64,<data>`), while observation.result is only the
+// { image: true, bytes } summary. Anthropic takes the picture as an image
+// block inside the tool_result, so decode the data URL back into that shape.
+// Anything that is not a well-formed base64 data URL yields no block: the
+// observation still goes back as plain text rather than a broken image the
+// API would reject.
+function imageBlock(image) {
+  if (typeof image !== "string") return null;
+  const match = /^data:([^;,]+);base64,([A-Za-z0-9+/=]+)$/.exec(image);
+  if (!match) return null;
+  return { type: "image", source: { type: "base64", media_type: match[1], data: match[2] } };
+}
+
 function mapInput(input) {
   if (!input || typeof input !== "object") return null;
   const tool = ACTIONS[input.action];
@@ -28,19 +42,36 @@ function mapInput(input) {
 export function createAnthropicProvider({ key, model, fetchImpl }) {
   const messages = [];
   const pendingIds = [];
+  let currentTask = null;
   return {
     name: "anthropic",
     computerUse: true,
+    reset() {
+      messages.length = 0;
+      pendingIds.length = 0;
+      currentTask = null;
+    },
     async next({ task, observations }) {
+      // A different task starts a fresh conversation: the cached provider
+      // must not resend the previous task's history or drop the new task.
+      if (task !== currentTask) {
+        messages.length = 0;
+        pendingIds.length = 0;
+        currentTask = task;
+      }
       if (messages.length === 0) messages.push({ role: "user", content: task });
       else if (observations.length > 0) {
         messages.push({
           role: "user",
-          content: observations.map((observation, index) => ({
-            type: "tool_result",
-            tool_use_id: pendingIds[index] ?? observation.id ?? "tool",
-            content: JSON.stringify(observation.result ?? { ok: observation.ok === true }),
-          })),
+          content: observations.map((observation, index) => {
+            const text = JSON.stringify(observation.result ?? { ok: observation.ok === true });
+            const image = imageBlock(observation.image);
+            return {
+              type: "tool_result",
+              tool_use_id: pendingIds[index] ?? observation.id ?? "tool",
+              content: image ? [{ type: "text", text }, image] : text,
+            };
+          }),
         });
         pendingIds.length = 0;
       }

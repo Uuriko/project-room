@@ -60,7 +60,7 @@ Make collaboration visible while working: discuss a consequential plan before bu
 
 ## When a tool fails
 
-Follow the server's `error.code`, `hint`, and `next`. After an uncertain write, replay the same command id and the same body. Recovery for the common misses: `references/errors.md`.
+Follow the server's `error.code`, `hint`, and `next`. Over MCP the transport always answers JSON-RPC 200: a failed tool sets `result.isError` and embeds the status in `structuredContent` — the transport status tells you nothing. After an uncertain write, replay the same command id and the same body. Recovery for the common misses: `references/errors.md`.
 
 ## Optional deeper connection
 
@@ -74,6 +74,7 @@ Read one of these when the task needs it:
 - `references/context.md` — what to read for catch-up. `get_room_context` is the compact projection and never includes message or file bodies.
 - `references/bonds-dms.md` — Friend/Bond design (mutual accept, revoke, `peer.dm`) and today's consent-bound DMs.
 - `references/errors.md` — `origin_denied`, `data.body`, `room_text`, `no_bond`.
+- `references/errors-catalog.md` — the full error-code index: every `error.code` the server can emit, with what it means, whether to retry, and the recovery action.
 - `references/tools.md` — MCP and HTTP commands.
 
 First join (mint, invite, your own room) is the onboarding skill: `skills/project-room-onboarding/SKILL.md` and `docs/SWARM-PLUG-IN.md`.

@@ -10,6 +10,7 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 import { clickChrome, openSearch } from "./room-chrome.mjs";
+import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 
 async function openBoard(page) {
@@ -20,6 +21,7 @@ async function openBoard(page) {
 }
 
 const shots = process.env.ROOM_TEST_SCREENSHOT_DIR || "test-results/board";
+const browserLaunch = { headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) };
 
 function github() {
   const body = JSON.stringify({ sha: "c".repeat(40) });
@@ -29,6 +31,17 @@ function github() {
     headers: { get: () => null },
     text: async () => body,
     json: async () => JSON.parse(body)
+  });
+}
+
+// Opening the board refreshes claims, status and config together with the
+// room page. That fan-out is wider than the production bursts, so this
+// fixture keeps the previous 600-read and 60-write windows. Production
+// callers stay on the bursts.
+function boardServer(store) {
+  return createRoomServer({
+    store, streamInterval: 40, fetchPullRequest: github(),
+    credentialReadBurst: 600, credentialWriteBurst: 60,
   });
 }
 
@@ -64,7 +77,7 @@ test("Board route cleanup drains a held callback and preserves the original fail
     server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(() => browser.close());
   const page = await browser.newPage();
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -128,7 +141,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   mkdirSync(shots, { recursive: true });
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const errors = [];
@@ -140,7 +153,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     rmSync(fixture.directory, { recursive: true, force: true });
     assert.deepEqual(errors, []);
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
@@ -154,7 +167,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
   await page.locator(".board-empty").waitFor();
   assert.equal(await page.locator(".board-empty").innerText(), "Claim work here so people and agents don't collide.");
   assert.equal(await page.locator("#board-new-item").count(), 1);
-  assert.match(await page.locator(".live-chip").innerText(), /Deploy status unknown|Live matches main|Live is behind main/);
+  assert.match(await page.locator(".live-chip").innerText(), /Deploy status unknown|Live matches main|Live differs from main|Live is behind main/);
   await page.locator("#board-new-item [name=title]").fill("Fix login copy");
   await page.locator("#board-new-item [name=files]").fill("src/board-ui.js");
   await page.locator("#board-new-item button[type=submit]").click();
@@ -281,7 +294,7 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     assert.equal(new URL(page.url()).hash, canonicalHash);
     assert.equal(await dialog.evaluate(node => node.open), false, "the Board no longer traps focus over work");
     assert.equal(await record.locator("h3").innerText(), "Canonical work behind the Board card");
-    assert.equal(await record.locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await record.locator(".work-details").evaluate(node => node.open), false);
     assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to Board");
   };
   const assertBoardReturn = async (url, scrollTop) => {
@@ -300,13 +313,26 @@ test("board columns, keyboard claim, linked work returns, chat line, 390px, and 
     assert.equal(await linked.getAttribute("href"), canonicalHash);
     assert.equal(await linked.getAttribute("data-open-work"), workId);
     const boardUrl = page.url();
+    // #3795: a claim without a resolvable work item is not a fabricated WORK
+    // link — its title links to its own claim record instead. The journey
+    // stays on the Board (the record is the card, disclosure open, return
+    // control naming the Board), and going back restores the Board URL with
+    // the dialog still open and focus on the title link.
     for (const id of ["board-null", "board-dangling", "board-coincidence"]) {
-      const heading = page.locator(`article[data-claim-id='${id}'] h4`);
-      assert.equal(await heading.count(), 1);
-      assert.equal(await heading.locator("a, [data-open-work]").count(), 0, `${id} is not a fabricated work link`);
-      await heading.click();
-      assert.equal(page.url(), boardUrl);
+      const titleLink = page.locator(`article[data-claim-id='${id}'] h4 a[data-open-claim]`);
+      assert.equal(await titleLink.count(), 1, `${id} links to its own claim record`);
+      assert.equal(await titleLink.getAttribute("data-open-work"), id);
+      assert.equal(await titleLink.getAttribute("href"), `#pr-record/work/${id}`,
+        `${id} never links to a missing or coincidentally equal work item`);
+      await titleLink.click();
+      await page.waitForFunction(claimId => location.hash === `#pr-record/work/${claimId}`
+        && document.querySelector(`article[data-claim-id='${claimId}'] details[data-claim-record]`)?.open === true, id);
+      assert.equal(await page.locator("#work-navigation-return").innerText(), "Back to Board");
+      assert.equal(await dialog.evaluate(node => node.open), true, "the claim record is the Board card itself");
+      await page.goBack();
+      await page.waitForFunction(expected => location.href === expected, boardUrl);
       assert.equal(await dialog.evaluate(node => node.open), true);
+      assert.equal(await titleLink.evaluate(node => node === document.activeElement), true, "return restores the title link");
     }
     await page.locator("#board-close").focus();
     for (let step = 0; step < 100; step += 1) {
@@ -471,14 +497,19 @@ function seedClaim(store, item) {
 
 // Rendering, dependency navigation and readiness are the UI boundary here.
 // The projection matrix separately owns classification/old-completion filtering.
-// Quarantined flakes (tests/quarantine.json): both browser tests below fail
-// intermittently on green main. They run in the non-blocking lane
-// (`npm run test:quarantined`, QUARANTINE_RUN=1).
-const QUARANTINED_BOARD_FLAKES = process.env.QUARANTINE_RUN !== "1";
-test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
+// Both formerly quarantined board browser tests have been repaired and
+// re-admitted to the blocking suite (#3291 via PR #3338; the draft-PR
+// linking test via the #3290 repair), and tests/quarantine.json is empty.
+// Timeout budget: this journey makes two full viewport passes plus a
+// held-route refresh race. Measured on a CPU-oversubscribed runner (load
+// ~13 on 2 cores) completed passes take 79-103s and one run was censored by
+// the old 120s cap at 121s; on CI the whole test takes ~4s. 240s is ~2x the
+// worst measured loaded pass. It is a cap, not a wait: every in-page wait
+// keeps its original 8s default and no assertion changes.
+test("waiting prerequisites stay visible, link by keyboard, and become claimable only when ready", { timeout: 240000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const errors = [];
@@ -489,7 +520,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     rmSync(fixture.directory, { recursive: true, force: true });
     assert.deepEqual(errors, []);
   });
-  const workId = "waiting:prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
+  const workId = "prerequisite", missingId = `unavailable-${"prerequisite-".repeat(7)}`;
   fixture.store.command(fixture.keys.owner, "commons", {
     id: crypto.randomUUID(), type: "work.proposed",
     data: { workItemId: workId, title: "Prepare the handoff", definitionOfDone: "Record the prerequisite result.",
@@ -507,13 +538,17 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     { id: "old-completion", title: "Earlier completed prerequisite", state: "done", owner: "owner",
       updatedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString() }
   ]) seedClaim(fixture.store, { state: "unclaimed", updatedAt, ...item });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const page = await context.newPage();
   page.setDefaultTimeout(8000);
   page.on("pageerror", error => errors.push(error.message));
-  await page.goto(origin);
+  // Explicit navigation timeout: the 8s default timeout also governs goto,
+  // and a cold page boot under load exceeds it (measured: goto timed out at
+  // 8000ms on a loaded runner while the same boot completes in ~2s unloaded).
+  // 30s covers the boot only; every in-page wait below keeps the 8s default.
+  await page.goto(origin, { timeout: 30000 });
   await signInFixture(page, fixture.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
   const snapshot = () => ({
@@ -527,6 +562,9 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.keyboard.press("Control+k");
     await page.locator("#room-actions-query").waitFor({ state: "visible" });
     await page.locator("#room-actions-query").fill("board");
+    // Ensure the filter applied and Board is the actionable item before Enter;
+    // otherwise Enter can fire with a stale list and never open the dialog.
+    await page.locator('#room-actions-list button[data-room-action="board"]').waitFor({ state: "visible" });
     await page.locator('[data-room-action="board"]').press("Enter");
     await dialog.waitFor({ state: "visible" });
   };
@@ -545,7 +583,10 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     assert.match(await dependent.innerText(), /Prepare the handoff.*Unclaimed; needs an owner/);
     assert.equal(await dependent.locator("[data-claim-action='claim']").count(), 0);
     assert.match(await unknown.innerText(), /Not loaded or unavailable; status unknown/);
-    assert.equal(await unknown.locator("a, [data-claim-action='claim']").count(), 0);
+    // The missing prerequisite itself is never linked (its reference stays
+    // plain text) and the card offers no claim action; the card's own title
+    // record link (#3795) is the one anchor the card legitimately carries.
+    assert.equal(await unknown.locator(".claim-deps a, [data-claim-action='claim']").count(), 0);
     assert.deepEqual(await boardIds(), ["available", "dependent", "prerequisite", "unknown"]);
     assert.equal(await link.getAttribute("href"), `#pr-record/work/${encodeURIComponent(workId)}`);
     assert.equal(await dependent.locator(".claim-chain [data-open-work]").getAttribute("href"), await link.getAttribute("href"));
@@ -596,9 +637,19 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
     await page.locator("#board-close").click();
   }
   await openBoard();
-  await post(page, origin, "/work-claims/prerequisite/claim", {});
-  await post(page, origin, "/work-claims/prerequisite/update", { state: "in_progress" });
-  await post(page, origin, "/work-claims/prerequisite/update", { state: "done" });
+  const acceptance = page.locator('[data-focus-key="work-acceptance:prerequisite"]');
+  await acceptance.press("Enter");
+  await page.locator(`[data-work-record-id='${workId}']`).waitFor({ state: "visible" });
+  for (const [type, data] of [["work.accepted", {}], ["work.started", {}], ["work.completed", {
+    summary: "Handoff prepared", evidenceVersion: "v1", producerId: "owner", evidenceUrl: "https://example.com/handoff", nextAction: "Continue", signedEvidence: makeTestSigner(fixture.store)()
+  }]]) {
+    await post(page, origin, "/commands", { id: crypto.randomUUID(), type, data: {
+      workItemId: workId, expectedRevision: fixture.store.room("commons").state.workItems[workId].revision, ...data
+    } }, 201);
+  }
+  await page.locator("#work-navigation-return").press("Enter");
+  await dialog.waitFor({ state: "visible" });
+  await page.waitForFunction(() => document.activeElement?.dataset.focusKey === "work-acceptance:prerequisite");
   await page.locator("[aria-labelledby='board-col-ready'] article[data-claim-id='dependent']").waitFor();
   assert.equal(await dependent.locator(".claim-waiting").count(), 0);
   assert.equal(await page.locator("#board-col-blocked").innerText(), "Blocked · 1 waiting");
@@ -717,7 +768,7 @@ test("waiting prerequisites stay visible, link by keyboard, and become claimable
 // Authoring gate: the real browser owns form availability, approval copy and
 // submit/readback lifecycle. Core/route tests own append preservation and CAS;
 // these checks add no render-only exports or fabricated successful responses.
-test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000, skip: QUARANTINED_BOARD_FLAKES ? "quarantined: tests/quarantine.json (browser timing flake; repair by 2026-10-20)" : false }, async t => {
+test("owners link a draft PR, reconcile held responses, and refresh a changed claim without resending", { timeout: 120000 }, async t => {
   mkdirSync("test-results", { recursive: true });
   const fixture = createAcceptanceFixture();
   fixture.store.command(fixture.keys.owner, "commons", {
@@ -725,10 +776,10 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     data: { memberId: "pr-reviewer", displayName: "PR reviewer", kind: "human", permissions: ["verify"] }
   });
   const reviewerKey = fixture.store.issueAccessKey("commons", "pr-reviewer");
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   const errors = [];
   t.after(async () => {
     await browser.close(); server.closeStreams(); server.closeAllConnections();
@@ -824,6 +875,13 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     assert.equal(await card.evaluate(node => node.parentElement.getAttribute("aria-labelledby")), "board-col-review");
     assert.equal(await card.locator(".claim-pr a").getAttribute("href"), pullRequest);
     assert.match(await card.locator(".claim-reviews").innerText(), /previous approval.*does not qualify for current work/);
+    // Wait on the focus condition itself before asserting it, the same way
+    // the refreshed-claim assert below does. The 2026-10-06 CI failures
+    // (false !== true, ~2.1 s) were this snapshot race in the second phase:
+    // the status text can land while an SSE repaint has replaced the input
+    // node and focus restoration is still a beat behind, so a one-shot
+    // read — or a handle resolved before the repaint — samples the gap.
+    await page.waitForFunction(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement);
     // Query the current input and active element in one browser turn: SSE
     // refresh may replace an element handle while restoring focus correctly.
     assert.equal(await page.evaluate(() => document.querySelector("article[data-claim-id='link-draft'] [data-claim-link-pr] input") === document.activeElement), true);
@@ -855,7 +913,12 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
   };
   await page.route(listPattern, holdRefresh);
   try {
-    await post(page, origin, "/work-claims/link-draft/release", {});
+    // E5/D4 (QA-200 2026-10-08): /release binds the claim round — send the
+    // round the script read, like the board UI does.
+    const held = fixture.store.workClaims.get("commons", "link-draft");
+    await post(page, origin, "/work-claims/link-draft/release", {
+      expectedClaimedAt: held.claimedAt,
+      expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) });
     await refreshArrived.promise;
     await post(page, origin, "/work-claims/link-draft/claim", {});
     const newRound = fixture.store.workClaims.get("commons", "link-draft");
@@ -875,6 +938,11 @@ test("owners link a draft PR, reconcile held responses, and refresh a changed cl
     const delivered = page.waitForResponse(response => response.request() === heldRefresh);
     refreshRelease.resolve();
     await (await delivered).finished();
+    // One animation frame is a fixed wait, not proof the retired response
+    // was processed: under load its load continuation can run after the
+    // frame. Wait for the page's network to settle (the pattern the held
+    // Board retirement test uses), then a frame, before sampling focus.
+    await page.waitForLoadState("networkidle");
     await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
     assert.equal(await page.evaluate(() => document.activeElement?.id), "board-close", "retired refresh cannot steal focus");
     assert.equal(requests.length, 2, "a changed claim round does not trigger an automatic retry");
@@ -908,10 +976,10 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
   for (let index = 0; index < 201; index += 1) {
     seedClaim(fixture.store, { id: `retirement-${index}`, title: `Retirement fixture ${index}`, state: "done", owner: "owner", updatedAt });
   }
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => {
     await browser.close(); server.closeStreams(); server.closeAllConnections();
     await new Promise(resolve => server.close(resolve));
@@ -938,7 +1006,7 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
     });
     await page.goto(`${origin}/?account=1`);
     await signInFixture(page, accountKey);
-    await page.locator("#inbox-panel").waitFor({ state: "visible" });
+    await page.locator("#account-rooms-panel").waitFor({ state: "visible" });
     const chooseRoom = async roomId => {
       await clickChrome(page, await page.locator("#main").isVisible() ? "#choose-room" : "#nav-rooms");
       await page.locator(`[data-account-room="${roomId}"]`).click();
@@ -1029,7 +1097,7 @@ test("held Board reads and mutations retire on room switch and sign-out", { time
 
 test("first board open requests at most two list pages when most claims are old", { timeout: 60000 }, async t => {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   const recent = new Date().toISOString();
@@ -1042,7 +1110,7 @@ test("first board open requests at most two list pages when most claims are old"
     fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true });
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(8000);
@@ -1070,7 +1138,7 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
   const reader = fixture.store.issueAccessKey("commons", "reader");
   seedClaim(fixture.store, { id: "reader-held", title: "Previously held work", state: "claimed", owner: "reader",
     claimedAt: new Date().toISOString(), updatedAt: new Date().toISOString(), leaseExpiresAt: new Date(Date.now() + 3600000).toISOString() });
-  const server = createRoomServer({ store: fixture.store, streamInterval: 40, fetchPullRequest: github() });
+  const server = boardServer(fixture.store);
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   t.after(async () => {
@@ -1079,7 +1147,7 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
     fixture.store.close();
     rmSync(fixture.directory, { recursive: true, force: true });
   });
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch(browserLaunch);
   t.after(async () => { await browser.close(); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
   page.setDefaultTimeout(8000);
@@ -1092,4 +1160,200 @@ test("a read-only member does not see the new item form", { timeout: 60000 }, as
   assert.equal(await page.locator("#board-new-item").count(), 0);
   assert.equal(await page.locator("article[data-claim-id='reader-held']").count(), 1);
   assert.equal(await page.locator("[data-claim-link-pr]").count(), 0, "a held claim does not restore revoked Board-write authority");
+});
+
+// Real-browser guards for the two #2476 repairs. Unit tests model the
+// controller; these hold the actual GET list response in Chromium. On the
+// pre-#2476 board-ui.js both parts fail: focus falls off Save cap when the
+// first read repaints, and "Done" is announced over the stale lease.
+test("held Board reads keep Save cap focus and announce Done only after fresh claims", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = boardServer(fixture.store);
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch(browserLaunch);
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 860 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await post(page, origin, "/work-claims", { id: "held-done", title: "Finish behind a held read" }, 201);
+  await post(page, origin, "/work-claims/held-done/claim", {});
+  await post(page, origin, "/work-claims/held-done/update", { state: "in_progress" });
+
+  const isList = request => request.method() === "GET" && /\/api\/rooms\/commons\/work-claims$/.test(new URL(request.url()).pathname);
+  const holds = [];
+  const hold = () => {
+    const arrived = Promise.withResolvers(), release = Promise.withResolvers();
+    t.after(() => release.resolve());
+    holds.push({ arrived, release, captured: null });
+    return holds.at(-1);
+  };
+  await page.route("**/api/rooms/commons/work-claims*", async route => {
+    const current = holds.find(entry => !entry.captured);
+    if (!current || !isList(route.request())) return route.continue();
+    current.captured = route.request();
+    const response = await route.fetch();
+    current.arrived.resolve();
+    await current.release.promise;
+    await route.fulfill({ response });
+  });
+  try {
+    // 1. Keyboard focus on Save cap survives the first list read replacing it.
+    const first = hold();
+    await openBoard(page);
+    await first.arrived.promise;
+    assert.equal(await page.locator("article[data-claim-id='held-done']").count(), 0, "the first list read is still held");
+    for (let step = 0; step < 25; step += 1) {
+      if (await page.evaluate(() => document.activeElement?.matches("form[data-claim-cap] button[type='submit']"))) break;
+      await page.keyboard.press("Shift+Tab");
+    }
+    const onSaveCap = () => page.evaluate(() => document.activeElement?.matches("form[data-claim-cap] button[type='submit']") === true);
+    assert.equal(await onSaveCap(), true, "Shift+Tab reaches Save cap while the first read is held");
+    first.release.resolve();
+    await page.locator("article[data-claim-id='held-done'] .claim-lease").waitFor();
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
+    assert.equal(await onSaveCap(), true, "the first read's repaint keeps keyboard focus on Save cap");
+
+    // 2. "Done" is announced only once the refreshed claim (no lease) renders.
+    await page.evaluate(() => {
+      const dialog = document.querySelector("#board-dialog");
+      window.__boardDoneAnnounce = null;
+      new MutationObserver(() => {
+        const status = document.querySelector("#board-status")?.textContent;
+        if (window.__boardDoneAnnounce || status !== "Done 'Finish behind a held read'") return;
+        const card = document.querySelector("article[data-claim-id='held-done']");
+        window.__boardDoneAnnounce = { leases: card?.querySelectorAll(".claim-lease").length ?? -1,
+          column: card?.closest("[aria-labelledby]")?.getAttribute("aria-labelledby") ?? null };
+      }).observe(dialog, { childList: true, characterData: true, subtree: true });
+    });
+    const second = hold();
+    await page.locator("article[data-claim-id='held-done'] [data-claim-action='done']").click();
+    await second.arrived.promise;
+    await page.waitForTimeout(900);
+    assert.equal(await page.evaluate(() => window.__boardDoneAnnounce), null, "no Done announcement while the refreshed list is held");
+    second.release.resolve();
+    await page.waitForFunction(() => window.__boardDoneAnnounce !== null);
+    assert.deepEqual(await page.evaluate(() => window.__boardDoneAnnounce), { leases: 0, column: "board-col-landed" },
+      "Done is announced over the refreshed claim, not the stale lease");
+  } finally {
+    await drainBoardRoutes(page, ...holds.map(entry => entry.release));
+  }
+});
+
+// #3688: closing the board must hand keyboard focus to a stable anchor —
+// the element that opened it when that element survives, otherwise the
+// conversation title — never <body>. The native <dialog> return chain
+// bottoms out at <body> when the palette was opened from body focus, and
+// when the recorded opener is removed while the board is open.
+test("board close returns focus to the opener, else the conversation title", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = boardServer(fixture.store);
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close();
+    rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch(browserLaunch);
+  t.after(async () => { await browser.close(); });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  const dialog = page.locator("#board-dialog");
+  const focusLandsOn = id => page.waitForFunction(expected => document.activeElement?.id === expected, id);
+  const closeWithEscape = async () => {
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "hidden" });
+  };
+
+  // A backdrop click is not a close path: the dialog stays open.
+  await openBoard(page);
+  await page.mouse.click(8, 8);
+  assert.equal(await dialog.evaluate(node => node.open), true, "backdrop click does not close the board");
+  await closeWithEscape();
+
+  // Surviving opener: focus starts in the composer, the palette carries it
+  // into the board, and both close paths hand it back to the composer.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("message-input");
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.locator("#board-close").click();
+  await dialog.waitFor({ state: "hidden" });
+  await focusLandsOn("message-input");
+
+  // No opener: the palette was opened from body focus, so the fallback
+  // anchor — the conversation title — takes focus instead of <body>.
+  await page.evaluate(() => document.activeElement?.blur());
+  await openBoard(page);
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+
+  // Opener removed while the board is open: the same fallback applies.
+  await page.locator("#message-input").click();
+  await openBoard(page);
+  await page.evaluate(() => document.querySelector("#message-input").remove());
+  await closeWithEscape();
+  await focusLandsOn("conversation-title");
+});
+
+test("criteria delivery, send-back, redelivery and owner verification work from the board", { timeout: 60000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = boardServer(fixture.store);
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  t.after(async () => {
+    server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve));
+    fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true });
+  });
+  const browser = await chromium.launch(browserLaunch);
+  t.after(() => browser.close());
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  page.setDefaultTimeout(8000);
+  await page.goto(origin);
+  await signInFixture(page, fixture.keys.owner);
+  await page.locator("#main").waitFor({ state: "visible" });
+  await post(page, origin, "/work-claims", { id: "lifecycle", title: "Reviewable result", reviewPolicy: "self_attested", acceptanceCriteria: ["Result checked"] }, 201);
+  await post(page, origin, "/work-claims/lifecycle/claim", {});
+  await post(page, origin, "/work-claims/lifecycle/update", { state: "in_progress" });
+  await openBoard(page);
+  const card = page.locator('article[data-claim-id="lifecycle"]');
+  const form = card.locator('[data-claim-deliver="lifecycle"]');
+  await form.waitFor();
+  await form.locator('[name="artifactKind"]').fill("report");
+  await form.locator('[name="artifactRef"]').fill("room://artifacts/lifecycle");
+  await form.locator('[name="artifactSha256"]').fill("a".repeat(64));
+  await form.locator('[name="checkName"]').fill("Result checked");
+  await form.locator('button[type="submit"]').click();
+  await card.getByRole("button", { name: "Send back", exact: true }).waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").state, "delivered");
+  await card.getByRole("button", { name: "Send back", exact: true }).click();
+  await form.waitFor();
+  const sentBack = fixture.store.workClaims.get("commons", "lifecycle");
+  assert.equal(sentBack.state, "in_progress");
+  assert.equal(sentBack.verification.state, "changes_requested");
+  assert.ok(sentBack.delivery);
+  // The form retains the previous bundle. A new delivery creates a new
+  // review generation even when the artifact bytes are unchanged.
+  await form.locator('button[type="submit"]').click();
+  await card.getByRole("button", { name: "Verify", exact: true }).waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").deliveryGeneration, 2);
+  await card.getByRole("button", { name: "Verify", exact: true }).click();
+  await page.locator('[aria-labelledby="board-col-landed"] article[data-claim-id="lifecycle"]').waitFor();
+  assert.equal(fixture.store.workClaims.get("commons", "lifecycle").verification.state, "self_attested");
 });

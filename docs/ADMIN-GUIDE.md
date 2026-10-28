@@ -13,7 +13,7 @@ Grok Build lane — never deploy `main` to production without explicit
 authorization.
 
 1. Verify `main` is green (all hosted checks on the merge commit).
-2. Confirm the deploy target: `production` branch is the live Worker lineage.
+2. Confirm the deploy target: `main` is the live Worker lineage, deployed by dispatching `deploy-prod` with an explicit main sha. There is no `production` branch; `production` is the wrangler environment name.
 3. Run the deploy from an authorized lane only.
 
 ## Backup
@@ -30,9 +30,10 @@ authorization.
 Key configuration surfaces:
 
 - `cloudflare/` — Worker build, checks, and compatibility shims.
-- `deploy/` — deployment descriptors, including `deploy/agent-discovery.mjs`
-  (health aliases and key routes).
-- `docs/EMAIL-ROUTING-RUNBOOK.md` — inbound mail routing. **Activation is
+- `deploy/` — parked VPS-pilot operations descriptors (see
+  `deploy/README.md`); the discovery surface lives in
+  `server/agent-discovery.mjs` (health aliases and key routes).
+- `archive/docs/history/EMAIL-ROUTING-RUNBOOK.md` — inbound mail routing (archived runbook). **Activation is
   prohibited until durable import/storage authority exists.**
 - `docs/ROUTE-AUTH-TABLE.md` — which routes require which credentials.
 - `docs/INVITE-ONLY-CHECKLIST.md` — invite-only boundary verification.

@@ -3,6 +3,7 @@
 // It is never written to localStorage or a cookie. Every action goes through
 // the typed /api/operator/* endpoints; a purge is always find -> plan ->
 // review counts -> typed confirmation -> execute.
+import { humanErrorMessage } from "./error-copy.js";
 
 export const TOKEN_KEY = "roomOperatorToken";
 
@@ -17,8 +18,9 @@ export function describeFailure(status, body) {
   if (status === 404) return "The token was not accepted, or the operator surface is not configured on this deployment.";
   if (status === 429) return "Too many operator calls from this address. Wait a minute and try again.";
   if (status === 409 && body?.error?.code === "plan_changed") return "The data changed after this plan was made. Nothing was deleted. Plan again.";
-  const message = body?.error?.message;
-  return message ? `Refused (${status}): ${message}` : `Request failed with status ${status}.`;
+  // The shared human error copy resolves specific per-code messages, a
+  // status fallback, and a non-generic final fallthrough.
+  return humanErrorMessage({ status, code: body?.error?.code, message: body?.error?.message });
 }
 
 function el(tag, text, attrs = {}) {

@@ -27,7 +27,7 @@
 // follow-up slices; they all build on this model.
 
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -176,6 +176,21 @@ export class AccountLoginMethods {
     this.db = store.db;
     this.random = random;
     this.now = now ?? (() => store.now());
+    this.verificationUnachievable = () => false;
+  }
+
+  // The HTTP layer installs `() => !mailer.isConfigured()`. With no mailer no
+  // code can ever be delivered, so a verification gate would deadlock the
+  // account permanently rather than nudge it (agent-invites.create's escape
+  // hatch, applied to every email-verification gate).
+  setVerificationUnachievable(predicate) {
+    if (typeof predicate !== "function") throw new TypeError("predicate must be a function");
+    this.verificationUnachievable = predicate;
+  }
+
+  // True when the email gate should refuse this account right now.
+  emailGateBlocks(accountId) {
+    return this.emailStatus(accountId) === "unverified" && !this.verificationUnachievable();
   }
 
   #now() { return this.now(); }
@@ -247,7 +262,7 @@ export class AccountLoginMethods {
   }
 
   assertEmailVerified(accountId) {
-    if (this.emailStatus(accountId) === "unverified") {
+    if (this.emailGateBlocks(accountId)) {
       fail(403, "email_unverified", "Verify your email before this action");
     }
   }
@@ -464,7 +479,15 @@ export class AccountLoginMethods {
     const now = this.#now.bind(this);
     return {
       getCredential(credentialId) {
-        const row = db.prepare("SELECT * FROM account_passkey_credentials WHERE credential_id=? AND disabled=0").get(credentialId);
+        // Both disabled flags gate authentication: the credential row's own
+        // and the parent login method's. Disabling the passkey method
+        // (setMethodDisabled, POST /api/auth/methods/disable) flips only
+        // account_login_methods.disabled — nothing syncs the credential row —
+        // so the lookup must join the method or a disabled passkey still
+        // authenticates.
+        const row = db.prepare(`SELECT c.* FROM account_passkey_credentials c
+          JOIN account_login_methods m ON m.id = c.method_id
+          WHERE c.credential_id=? AND c.disabled=0 AND m.disabled=0`).get(credentialId);
         if (!row) return undefined;
         return {
           id: row.credential_id, rawId: row.credential_id, rpId: row.rp_id,
@@ -571,11 +594,13 @@ export class AccountLoginMethods {
     });
   }
 
-  consumeEmailVerifyCode({ accountId, code } = {}) {
+  // `email` is for an account that has no email method yet (guest upgrade):
+  // the code proves the inbox before anything is linked.
+  consumeEmailVerifyCode({ accountId, code, email = null } = {}) {
     this.#getAccount(accountId);
     if (typeof code !== "string" || !/^\d{6}$/.test(code)) fail(401, "invalid_email_code", "That code is not valid");
-    const emailRow = this.db.prepare(`SELECT email FROM account_login_methods
-      WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`).get(accountId);
+    const emailRow = email === null ? this.db.prepare(`SELECT email FROM account_login_methods
+      WHERE account_id=? AND type='password' AND disabled=0 AND email IS NOT NULL LIMIT 1`).get(accountId) : { email };
     const normalized = emailRow ? normalizeEmail(emailRow.email) : null;
     if (!normalized) fail(401, "invalid_email_code", "That code is not valid");
     const now = this.#now();

@@ -1,14 +1,15 @@
 import { spawnContext } from "./spawn.mjs";
 import { machineEnabled, DAEMON_VERSION } from "./flags.mjs";
 import {
-  APPROVAL_TTL_MS, DEADMAN_DEFAULT_SECONDS, ERROR, MUTATING_DESKTOP, PROTOCOL_VERSION,
+  APPROVAL_TTL_MS, CALL_ID_PATTERN, CLAIM_ID_PATTERN, DEADMAN_DEFAULT_SECONDS, ERROR, MUTATING_DESKTOP, PROTOCOL_VERSION,
   RECEIPT_BLOB_MAX, SCREENSHOT_MAX_BYTES, SLOTS, TAG_PATTERN, errorResult, okResult,
+  pauseUntilFromMinutes,
 } from "./protocol.mjs";
 import { configHome, loadConfig, saveConfig } from "./config.mjs";
 import { readSecret } from "./secrets.mjs";
 import { connectSocket } from "./ws.mjs";
 import { dispatchTool } from "./tools.mjs";
-import { approvalClass, requestApproval, takeApproval } from "./approvals.mjs";
+import { approvalClass, requestApproval, takeApproval, waitForDecision } from "./approvals.mjs";
 import {
   appendManifest, captureConsoleFrame, keyframes, manifestBytes, pruneRecordings, sha256, startFrameLoop,
 } from "./recording.mjs";
@@ -20,6 +21,10 @@ function machineTag(label) {
   const body = String(label || "host").toLowerCase().replace(/[^a-z0-9_-]/g, "").slice(0, 24) || "host";
   const tag = `machine-${body}`.slice(0, 32);
   return TAG_PATTERN.test(tag) ? tag : "machine-host";
+}
+
+function frameType(text) {
+  try { return JSON.parse(text)?.type ?? null; } catch { return null; }
 }
 
 function slotTag(slot) {
@@ -44,8 +49,24 @@ export class MachineDaemon {
     this.lastInbound = 0;
     this.socket = null;
     this.queue = Promise.resolve();
+    this.control = Promise.resolve();
     this.frameStops = new Map();
     this.connections = 0;
+  }
+
+  // The daemon is long-lived, and other writers (CLI `provider set` /
+  // `bot enable` / `bot disable`, `enroll`, `prepare-golden`) update
+  // config.json while it runs, each reloading first. This daemon owns only
+  // halted / pausedUntil / haltEpoch, so persisting those fields must reload
+  // the on-disk config and apply just them: saving the construction-time
+  // snapshot would revert everyone else's changes (#3030, the same
+  // stale-snapshot class as #2836). Adopting the fresh config also means
+  // later reads in this process see the concurrent changes.
+  persistControlFields(fields) {
+    const fresh = loadConfig(this.home);
+    Object.assign(fresh, fields);
+    this.config = fresh;
+    saveConfig(this.config, this.home);
   }
 
   featureOn() {
@@ -98,9 +119,7 @@ export class MachineDaemon {
               label: this.config.label, version: DAEMON_VERSION,
             }));
           },
-          onText: text => {
-            this.queue = this.queue.then(() => spawnContext.run({ env: this.env }, () => this.handleRaw(text))).catch(() => {});
-          },
+          onText: text => { this.receive(text); },
           onClose: done,
         });
       });
@@ -109,6 +128,22 @@ export class MachineDaemon {
       return step();
     };
     this.loop = step();
+  }
+
+  // Calls run one at a time, but control frames must not wait behind them: a
+  // call can take minutes (an owner approval wait, a slow guest command), and
+  // a Halt or Pause queued behind it lands only after that call has acted.
+  // Control frames get their own queue; a call still waits for the control
+  // frames that arrived before it, so a halt finishes before the next call.
+  receive(text) {
+    const run = () => spawnContext.run({ env: this.env }, () => this.handleRaw(text));
+    if (frameType(text) === "call") {
+      const control = this.control;
+      this.queue = this.queue.then(() => control).then(run).catch(() => {});
+      return this.queue;
+    }
+    this.control = this.control.then(run).catch(() => {});
+    return this.control;
   }
 
   async handleRaw(text) {
@@ -129,9 +164,10 @@ export class MachineDaemon {
     if (message.type === "halt") {
       this.state.halted = true;
       this.state.deadman = false;
-      this.config.halted = true;
-      this.config.haltEpoch = Number(message.epoch) || this.config.haltEpoch + 1;
-      saveConfig(this.config, this.home);
+      this.persistControlFields({
+        halted: true,
+        haltEpoch: Number(message.epoch) || this.config.haltEpoch + 1,
+      });
       await stopAllGuests(this.state);
       // The autonomous bot must stop too: its active execution is released
       // and it will not pick the work back up while halted.
@@ -139,21 +175,29 @@ export class MachineDaemon {
       return;
     }
     if (message.type === "pause") {
-      const minutes = Number(message.minutes) || 0;
-      this.state.pausedUntil = Date.now() + minutes * 60 * 1000;
+      const until = pauseUntilFromMinutes(message.minutes);
+      if (until == null) return;
+      this.holdPause(until);
       await suspendGuests(this.state);
       return;
     }
     if (message.type === "resume") {
       this.state.halted = false;
       this.state.pausedUntil = null;
-      this.config.halted = false;
-      saveConfig(this.config, this.home);
+      this.persistControlFields({ halted: false, pausedUntil: null });
       return;
     }
     if (message.type === "bye") return;
     if (message.type !== "call") return;
-    const result = await this.call(message);
+    // A call must always answer: receive() swallows handler errors, so an
+    // exception escaping call() (recording, approval, receipt, ...) would
+    // leave the relay caller hanging with no result frame at all (#2873).
+    let result;
+    try {
+      result = await this.call(message);
+    } catch {
+      result = errorResult(message.id, ERROR.UNAVAILABLE, "The machine call failed");
+    }
     const encoded = JSON.stringify(result);
     if (Buffer.byteLength(encoded) > SCREENSHOT_MAX_BYTES) {
       this.socket?.send(JSON.stringify(errorResult(message.id, ERROR.TOO_LARGE, "Result exceeds 4 MiB.")));
@@ -162,15 +206,29 @@ export class MachineDaemon {
     this.socket?.send(encoded);
   }
 
-  async call(message) {
-    const id = message.id;
-    if (!this.featureOn()) return errorResult(id, ERROR.DISABLED, "room-machine is off");
+  refusal(id) {
     if (this.state.halted) return errorResult(id, ERROR.HALTED, "This machine is halted");
     if (this.state.pausedUntil && Date.now() < this.state.pausedUntil) return errorResult(id, ERROR.PAUSED, "This machine is paused");
     if (this.state.deadman) return errorResult(id, ERROR.DEADMAN, "Relay link exceeded the dead-man window");
+    return null;
+  }
+
+  async call(message) {
+    const id = message.id;
+    // PROTOCOL.md: call ids match CALL_ID_PATTERN. Enforce it here — a
+    // result framed under any other id can never be correlated by the relay.
+    if (typeof id !== "string" || !CALL_ID_PATTERN.test(id)) {
+      return errorResult(typeof id === "string" ? id : null, ERROR.INVALID, "Call id must match [A-Za-z0-9_-]{1,64}");
+    }
+    if (!this.featureOn()) return errorResult(id, ERROR.DISABLED, "room-machine is off");
+    const refused = this.refusal(id);
+    if (refused) return refused;
     const caller = message.caller;
+    // claimId reaches the recordings filesystem (claimDir throws on any
+    // other shape), so refuse it here, before the slot is taken or any
+    // tool runs — not after dispatch, when the throw would strand the call.
     if (!caller || caller.verified !== true || typeof caller.identityId !== "string"
-      || typeof caller.claimId !== "string" || !SLOTS.includes(caller.slot)) {
+      || typeof caller.claimId !== "string" || !CLAIM_ID_PATTERN.test(caller.claimId) || !SLOTS.includes(caller.slot)) {
       return errorResult(id, ERROR.LEASE_REQUIRED, "A verified lease is required");
     }
     const held = this.state.slots[caller.slot];
@@ -184,6 +242,14 @@ export class MachineDaemon {
     const className = approvalClass({ tool, slot: caller.slot, args: message.args ?? {} });
     if (className) {
       const secret = await identitySecret(this.home);
+      // Research r7 (R327-1): registering first also reads the room Pause. A
+      // machine whose room member the owner paused starts no approval-class
+      // call (nothing is asked in the room), and a Pause that lands during
+      // the wait ends it at once: the server releases the held poll on pause.
+      const wakes = daemonWakeApi(this.config.roomOrigin, secret);
+      const registered = await wakes.register();
+      const ownerPaused = () => wakes.paused.some(p => p?.roomId === this.config.roomId && p?.heldBy !== "self");
+      if (ownerPaused()) return errorResult(id, ERROR.PAUSED, "The room owner paused this machine's member");
       const requested = await requestApproval({
         home: this.home, origin: this.config.roomOrigin, roomId: this.config.roomId, secret,
         ownerMemberId: this.config.ownerMemberId, className, detail: `${caller.identityId} ${className}`,
@@ -192,14 +258,23 @@ export class MachineDaemon {
       const waitMs = Number(this.env.ROOM_MACHINE_APPROVAL_WAIT_MS);
       const budget = Number.isFinite(waitMs) && waitMs >= 0 ? waitMs : APPROVAL_TTL_MS;
       const deadline = Date.now() + budget;
-      let taken = { ok: false, reason: ERROR.APPROVAL_REQUIRED };
-      while (Date.now() <= deadline) {
-        taken = await takeApproval({
+      // Research r6: the wait rides the identity's wake queue (its own host
+      // id, so the bot's held poll on "room-machine" is never displaced)
+      // instead of rereading the room every 40 ms. takeApproval still decides.
+      const scanMs = Number(this.env.ROOM_MACHINE_APPROVAL_SCAN_MS) || 5000;
+      const waited = await waitForDecision({
+        take: () => takeApproval({
           home: this.home, origin: this.config.roomOrigin, roomId: this.config.roomId, secret, code: requested.code,
-        });
-        if (taken.ok || taken.reason === ERROR.APPROVAL_DENIED) break;
-        await new Promise(resolve => setTimeout(resolve, 40));
-      }
+        }),
+        poll: registered ? (ms, after) => wakes.poll(ms, after) : null,
+        deadline, scanMs, stopped: () => Boolean(this.refusal(id)) || ownerPaused(),
+      });
+      const taken = waited.taken ?? { ok: false, reason: ERROR.APPROVAL_REQUIRED };
+      // A Halt, Pause or dead-man that landed during the wait outranks the
+      // approval: the relay already told the caller the call was stopped.
+      const late = this.refusal(id);
+      if (late) return late;
+      if (ownerPaused()) return errorResult(id, ERROR.PAUSED, "The room owner paused this machine's member");
       if (!taken.ok) return errorResult(id, taken.reason, "The owner has not approved this");
     }
     if (caller.slot && !this.frameStops.has(caller.claimId) && tool.startsWith("desktop.")) {
@@ -265,16 +340,24 @@ export class MachineDaemon {
   }
 
   async pause(minutes) {
-    this.state.pausedUntil = Date.now() + minutes * 60 * 1000;
+    const until = pauseUntilFromMinutes(minutes);
+    if (until == null) return { pausedUntil: this.state.pausedUntil };
+    this.holdPause(until);
     await suspendGuests(this.state);
     return { pausedUntil: this.state.pausedUntil };
+  }
+
+  // Like halt, a pause is written to config so a daemon restarted by launchd
+  // (crash, reboot) mid-pause comes back paused instead of quietly resuming.
+  holdPause(until) {
+    this.state.pausedUntil = until;
+    this.persistControlFields({ pausedUntil: until });
   }
 
   async resume() {
     this.state.halted = false;
     this.state.pausedUntil = null;
-    this.config.halted = false;
-    saveConfig(this.config, this.home);
+    this.persistControlFields({ halted: false, pausedUntil: null });
     return { halted: false };
   }
 
@@ -300,4 +383,41 @@ export class MachineDaemon {
       connections: this.connections,
     };
   }
+}
+
+// Research r6 (R327-1): the daemon's own wake channel for approval waits. A
+// separate host id keeps the bot's long-poll waiter (host "room-machine") in
+// place. `paused` carries the room Pause list from the last heartbeat or poll
+// reply ([] from a server that does not report it).
+export const DAEMON_APPROVAL_HOST_ID = "room-machine-approvals";
+export function daemonWakeApi(origin, secret, fetchImpl = globalThis.fetch) {
+  const call = async (path, init = {}) => {
+    try {
+      const headers = { accept: "application/json", origin, authorization: `Bearer ${secret}` };
+      if (init.body !== undefined) headers["content-type"] = "application/json";
+      const response = await fetchImpl(new URL(path, origin), { method: init.method ?? "GET", headers,
+        body: init.body === undefined ? undefined : JSON.stringify(init.body) });
+      const text = await response.text();
+      let value = null;
+      try { value = text ? JSON.parse(text) : null; } catch { value = null; }
+      return { ok: response.ok, status: response.status, value };
+    } catch { return { ok: false, status: 0, value: null }; }
+  };
+  const api = {
+    paused: [],
+    async register() {
+      if (!origin || !secret) return false;
+      const beat = await call("/api/agent-heartbeats", { method: "POST",
+        body: { hostId: DAEMON_APPROVAL_HOST_ID, mode: "wakeable", cadenceSeconds: 300 } });
+      if (beat.ok) api.paused = Array.isArray(beat.value?.paused) ? beat.value.paused : [];
+      return beat.ok;
+    },
+    async poll(waitMs, after = null) {
+      const cursor = typeof after === "string" && after ? `&after=${encodeURIComponent(after)}` : "";
+      const page = await call(`/api/agent-wakes/poll?hostId=${encodeURIComponent(DAEMON_APPROVAL_HOST_ID)}&waitMs=${Math.max(0, Math.floor(waitMs))}${cursor}`);
+      if (page.ok) api.paused = Array.isArray(page.value?.paused) ? page.value.paused : [];
+      return page;
+    },
+  };
+  return api;
 }

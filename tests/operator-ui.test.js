@@ -40,8 +40,11 @@ test("describeFailure: known statuses map to operator-readable messages", () => 
 });
 
 test("describeFailure: server errors surface the message or fall back to the status", () => {
-  assert.equal(describeFailure(500, { error: { message: "disk full" } }), "Refused (500): disk full");
-  assert.equal(describeFailure(409, { error: { message: "stale revision" } }), "Refused (409): stale revision");
-  assert.equal(describeFailure(503, null), "Request failed with status 503.");
-  assert.equal(describeFailure(500, {}), "Request failed with status 500.");
+  // BU-03: the fallthrough now resolves through the shared human error copy —
+  // specific server messages pass through, everything else gets a
+  // plain-language status sentence instead of "Refused (500): ...".
+  assert.equal(describeFailure(500, { error: { message: "disk full" } }), "disk full");
+  assert.equal(describeFailure(409, { error: { message: "stale revision" } }), "stale revision");
+  assert.equal(describeFailure(503, null), "The service is temporarily unavailable. Try again in a moment.");
+  assert.equal(describeFailure(500, {}), "Something went wrong on our side. Try again in a moment.");
 });

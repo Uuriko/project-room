@@ -9,6 +9,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { activityUnreadCount, listActivity } from "../server/activity.mjs";
 
 // Attention: activity feed fan-out, read horizons, saved messages, thread mutes.
 function setup(t) {
@@ -87,26 +88,6 @@ test("thread mutes suppress thread_reply events but not mentions", t => {
     "mute kills thread_reply; a direct reply to your own message and mentions still arrive");
 });
 
-test("reaction fan-out: reacting notifies the message author; unreacting retracts the pending event", t => {
-  const f = setup(t);
-  post(f, "agent", { messageId: "m1", body: "post" });
-  f.send("maya", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: true });
-  assert.deepEqual(eventsFor(f, "agent").map(e => [e.type, e.actorId]), [["reaction", "maya"]]);
-  f.send("maya", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: false });
-  assert.deepEqual(eventsFor(f, "agent"), [], "toggle-off removes the unread reaction event");
-});
-
-test("reactions to your own message and read-then-unreacted events are left alone", t => {
-  const f = setup(t);
-  post(f, "agent", { messageId: "m1", body: "post" });
-  f.send("agent", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: true });
-  assert.deepEqual(eventsFor(f, "agent"), [], "no self-events on reactions");
-  f.send("maya", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: true });
-  f.store.db.prepare("UPDATE activity_events SET read_at=1 WHERE user_id='agent'").run();
-  f.send("maya", T.MESSAGE_REACTION_SET, { messageId: "m1", reaction: "like", active: false });
-  assert.equal(eventsFor(f, "agent").length, 1, "a read event is history, not retracted");
-});
-
 test("replayed commands never duplicate activity events", t => {
   const f = setup(t);
   const id = randomUUID();
@@ -149,7 +130,7 @@ async function serve(t) {
 const seedActivity = f => {
   f.send(f.ownerKey, T.MESSAGE_POSTED, { messageId: "root", body: "hello @maya" });
   f.send(f.mayaKey, T.MESSAGE_POSTED, { messageId: "r1", body: "replying", replyToId: "root" });
-  f.send(f.ownerKey, T.MESSAGE_REACTION_SET, { messageId: "r1", reaction: "like", active: true });
+  f.send(f.ownerKey, T.MESSAGE_POSTED, { messageId: "r2", body: "thanks", replyToId: "r1" });
 };
 
 test("activity list: paging, type filter, and validation", async t => {
@@ -158,8 +139,8 @@ test("activity list: paging, type filter, and validation", async t => {
   const list = (token, query = "") => f.call(`/api/rooms/commons/activity${query}`, { token });
   const { status, body } = await list(f.mayaKey);
   assert.equal(status, 200);
-  assert.equal(body.items.length, 2, "mention + reaction for maya; the reply went to owner");
-  assert.deepEqual(body.items.map(i => i.type), ["reaction", "mention"], "newest first");
+  assert.equal(body.items.length, 2, "mention + reply for maya; maya's reply went to owner");
+  assert.deepEqual(body.items.map(i => i.type), ["reply", "mention"], "newest first");
   assert.ok(body.items.every(i => i.messageBody && i.actorId), "joined message view");
   const filtered = await list(f.mayaKey, "?type=mention");
   assert.deepEqual(filtered.body.items.map(i => i.type), ["mention"]);
@@ -173,6 +154,13 @@ test("activity list: paging, type filter, and validation", async t => {
   assert.equal((await list(f.mayaKey, "?limit=500")).status, 422);
   assert.equal((await list(f.mayaKey, "?before=nope")).status, 422);
   assert.equal((await f.call("/api/rooms/commons/activity")).status, 401, "no credential, no feed");
+});
+
+test("legacy reaction rows are skipped by the feed and unread count", async t => {
+  const f = await serve(t);
+  f.store.db.prepare("INSERT INTO activity_events(room_id,type,actor_id,actor_name,message_id,thread_id,user_id,created_at,read_at) VALUES('commons','reaction','owner','Owner','x','','maya',1,NULL)").run();
+  assert.deepEqual((await f.call("/api/rooms/commons/activity", { token: f.mayaKey })).body.items, []);
+  assert.equal((await f.call("/api/rooms/commons/activity-unread-count", { token: f.mayaKey })).body.total, 0);
 });
 
 test("marking 100 activity events read succeeds when SQL rejects more than 100 binds", async t => {
@@ -206,15 +194,15 @@ test("unread count, mark read, mark all read", async t => {
   const f = await serve(t);
   seedActivity(f);
   const count = () => f.call("/api/rooms/commons/activity-unread-count", { token: f.mayaKey }).then(r => r.body);
-  assert.deepEqual((await count()).byType, { mention: 1, reply: 0, thread_reply: 0, reaction: 1 });
+  assert.deepEqual((await count()).byType, { mention: 1, reply: 1, thread_reply: 0 });
   assert.equal((await count()).total, 2);
   const first = (await f.call("/api/rooms/commons/activity", { token: f.mayaKey })).body.items;
-  const reaction = first.find(i => i.type === "reaction");
-  const marked = await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.mayaKey, data: { ids: [reaction.id] } });
+  const reply = first.find(i => i.type === "reply");
+  const marked = await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.mayaKey, data: { ids: [reply.id] } });
   assert.equal(marked.status, 200);
   assert.equal(marked.body.read, 1);
   assert.equal((await count()).total, 1);
-  assert.equal((await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.ownerKey, data: { ids: [reaction.id] } })).body.read, 0, "cannot mark another member's events");
+  assert.equal((await f.call("/api/rooms/commons/activity-read", { method: "POST", token: f.ownerKey, data: { ids: [reply.id] } })).body.read, 0, "cannot mark another member's events");
   const all = await f.call("/api/rooms/commons/activity-read-all", { method: "POST", token: f.mayaKey, data: { type: "mention" } });
   assert.equal(all.body.read, 1);
   assert.equal((await count()).total, 0);
@@ -280,4 +268,143 @@ test("thread mutes: mute and unmute persist per member", async t => {
   assert.equal((await mute(f.mayaKey, { threadId: "missing", muted: true })).status, 404);
   assert.equal((await mute(f.mayaKey, { threadId: "root" })).status, 422);
   assert.equal((await f.call("/api/rooms/commons/thread-mutes", { method: "POST", data: { threadId: "root", muted: true } })).status, 401);
+});
+
+test("housekeeping writes have their own rate bucket; chat commands keep the 60/min budget", async t => {
+  const f = await serve(t);
+  seedActivity(f);
+  const set = data => f.call("/api/rooms/commons/read-horizon", { method: "POST", token: f.mayaKey, data });
+  for (let i = 0; i < 100; i++) assert.equal((await set({ lastReadMessageId: "root" })).status, 200, `read-horizon write ${i}`);
+  // 100 read markers did not spend the shared write budget.
+  const post = await f.call("/api/rooms/commons/commands", { method: "POST", token: f.mayaKey,
+    data: { id: randomUUID(), type: T.MESSAGE_POSTED, data: { messageId: "after-markers", body: "still allowed" } } });
+  assert.equal(post.status, 201);
+  // The housekeeping bucket is a limit, not a bypass.
+  let limited = 0;
+  for (let i = 0; i < 160; i++) if ((await set({ lastReadMessageId: "root" })).status === 429) limited++;
+  assert.ok(limited > 0, "housekeeping writes are still capped per minute");
+});
+
+test("pins stay in the shared 60/min write bucket", async t => {
+  const f = await serve(t);
+  seedActivity(f);
+  let limited = 0;
+  for (let i = 0; i < 80; i++) {
+    const res = await f.call("/api/rooms/commons/pins", { method: "POST", token: f.ownerKey, data: { messageId: "root", pinned: i % 2 === 0 } });
+    if (res.status === 429) limited++;
+  }
+  assert.ok(limited > 0, "a pin burst is capped at the 60/min write budget, not the 240/min housekeeping bucket");
+});
+
+test("a since_join reactivation hides the earlier mention from the activity feed", t => {
+  const directory = mkdtempSync(join(tmpdir(), "activity-history-floor-"));
+  const store = new RoomStore(join(directory, "room.sqlite"));
+  t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
+  store.initialize(initialRoom());
+  let now = Date.parse("2026-10-08T00:00:00.000Z");
+  store.now = () => (now += 1000);
+  const owner = store.issueAccessKey("commons", "owner");
+  const cmd = (type, data) => store.command(owner, "commons", { id: randomUUID(), type, data });
+  cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" });
+  cmd(T.MEMBER_ADDED, { memberId: "late", displayName: "Late", kind: "human", permissions: [] });
+  cmd(T.MESSAGE_POSTED, { messageId: "gap-msg", body: "gap secret for @late" });
+  const gapRevision = store.snapshot(owner, "commons").state.members.late.revision;
+  cmd(T.MEMBER_ACCESS_CHANGED, { memberId: "late", expectedMemberRevision: gapRevision, permissions: [], active: false });
+  const removedRevision = store.snapshot(owner, "commons").state.members.late.revision;
+  cmd(T.MEMBER_ACCESS_CHANGED, { memberId: "late", expectedMemberRevision: removedRevision, permissions: [], active: true });
+  const late = store.issueAccessKey("commons", "late");
+  cmd(T.MESSAGE_POSTED, { messageId: "after-msg", body: "welcome back @late" });
+
+  const feed = listActivity(store, late, "commons");
+  assert.deepEqual(feed.items.map(item => item.messageId), ["after-msg"]);
+  assert.equal(JSON.stringify(feed).includes("gap secret"), false);
+  const unread = activityUnreadCount(store, late, "commons");
+  assert.equal(unread.total, 1);
+  assert.equal(unread.byType.mention, 1);
+  assert.equal(JSON.stringify(unread).includes("gap secret"), false);
+
+  const ownerFeed = listActivity(store, owner, "commons");
+  assert.equal(ownerFeed.items.some(item => item.messageId === "gap-msg"), false, "the owner was not mentioned");
+});
+
+test("saved messages and the read horizon keep working for an archived message over HTTP, including both DELETE routes", async t => {
+  const f = await serve(t);
+  const sendAs = (token, data) => f.store.command(token, "commons", { id: randomUUID(), type: T.MESSAGE_POSTED, data });
+  sendAs(f.mayaKey, { messageId: "old", body: "old saved note" });
+  for (let i = 0; i < 6; i++) sendAs(f.ownerKey, { messageId: `pad-${i}`, body: `pad ${i}` });
+  const save = (data, method = "POST") => f.call("/api/rooms/commons/saved", { method, token: f.mayaKey, data });
+  const listed = async () => (await f.call("/api/rooms/commons/saved", { token: f.mayaKey })).body.items;
+  assert.equal((await save({ messageId: "old", saved: true })).status, 200);
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  assert.equal(f.store.room("commons").state.messages.some(m => m.id === "old"), false, "archived out of the projection");
+  assert.deepEqual((await listed()).map(i => [i.messageId, i.body]), [["old", "old saved note"]], "saved list still shows it");
+  assert.equal((await f.call("/api/rooms/commons/read-horizon", { method: "POST", token: f.mayaKey, data: { threadId: "", lastReadMessageId: "old" } })).status, 200);
+  assert.equal((await save({ messageId: "old" }, "DELETE")).status, 200, "DELETE /saved");
+  assert.equal((await listed()).length, 0);
+  assert.equal((await save({ messageId: "old", saved: true })).status, 200, "an archived message can be saved again");
+  assert.equal((await f.call("/api/rooms/commons/saved/old", { method: "DELETE", token: f.mayaKey })).status, 200, "DELETE /saved/:id");
+  assert.equal((await listed()).length, 0);
+  assert.equal((await save({ messageId: "missing" }, "DELETE")).status, 404);
+});
+
+// ---- Fan-out failure contract (#3261) ----
+// The fan-out must never lose events silently: failures are logged and
+// journaled durably, a failed fan-out leaves no partial recipient rows,
+// and a later successful command in the room replays the journal and
+// backfills the feed.
+
+function captureFanoutErrors(fn) {
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => { lines.push(args.map(String).join(" ")); };
+  try { fn(); } finally { console.error = original; }
+  return lines;
+}
+
+test("fan-out failure is atomic, logged, journaled, and backfilled by a later command (#3261)", t => {
+  const f = setup(t);
+  // Fault injection: the second recipient's insert aborts mid-loop.
+  f.store.db.exec(`CREATE TRIGGER fx4_fail_maya BEFORE INSERT ON activity_events
+    WHEN NEW.user_id='maya' BEGIN SELECT RAISE(ABORT, 'injected fan-out fault'); END`);
+  let result;
+  const lines = captureFanoutErrors(() => {
+    result = post(f, "owner", { messageId: "m-atomic", body: "hey @agent and @maya, look" });
+  });
+  assert.equal(result, "m-atomic", "the command itself still succeeds");
+  assert.deepEqual(eventsFor(f, "agent"), [], "no partial fan-out: the first recipient's row was compensated away");
+  assert.deepEqual(eventsFor(f, "maya"), []);
+  assert.ok(lines.some(line => /activity fan-out failed/.test(line)), "the failure was logged, not swallowed");
+  const journal = f.store.db.prepare("SELECT * FROM activity_fanout_failures WHERE room_id='commons'").all();
+  assert.equal(journal.length, 1, "the failure was journaled durably");
+  assert.equal(journal[0].recovered_at, null);
+  assert.match(journal[0].error, /injected fan-out fault/);
+  // Heal, then any later successful command in the room replays the journal.
+  f.store.db.exec("DROP TRIGGER fx4_fail_maya");
+  post(f, "owner", { messageId: "m-after", body: "plain follow-up" });
+  assert.deepEqual(eventsFor(f, "agent").map(e => [e.type, e.messageId]), [["mention", "m-atomic"]],
+    "the lost mention was backfilled");
+  assert.deepEqual(eventsFor(f, "maya").map(e => [e.type, e.messageId]), [["mention", "m-atomic"]]);
+  const healed = f.store.db.prepare("SELECT recovered_at FROM activity_fanout_failures WHERE room_id='commons'").get();
+  assert.ok(healed.recovered_at !== null, "the journal row is marked recovered");
+});
+
+test("fan-out with the activity table faulted still journals and later backfills (#3261)", t => {
+  const f = setup(t);
+  post(f, "owner", { messageId: "m-ok", body: "hey @agent" });
+  assert.equal(eventsFor(f, "agent").length, 1);
+  // D5's exact fault: schema skew — the fan-out's table is gone.
+  f.store.db.exec("ALTER TABLE activity_events RENAME TO activity_events_fault");
+  let lines = captureFanoutErrors(() => {
+    post(f, "owner", { messageId: "m-lost", body: "hey @agent, again" });
+  });
+  assert.ok(lines.some(line => /activity fan-out failed/.test(line)), "the failure was logged");
+  const journal = f.store.db.prepare("SELECT * FROM activity_fanout_failures WHERE room_id='commons'").all();
+  assert.equal(journal.length, 1, "journaled even while the fan-out table itself is faulted");
+  f.store.db.exec("ALTER TABLE activity_events_fault RENAME TO activity_events");
+  assert.deepEqual(eventsFor(f, "agent").map(e => e.messageId), ["m-ok"], "nothing backfilled before a retry runs");
+  post(f, "owner", { messageId: "m-next", body: "trigger the repair" });
+  assert.deepEqual(eventsFor(f, "agent").map(e => e.messageId), ["m-ok", "m-lost"],
+    "the next successful command backfilled the lost event");
 });

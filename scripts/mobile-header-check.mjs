@@ -49,7 +49,7 @@ async function assertMoreLabel(page) {
   assert.equal(new Set(lines).size, 1, `More must remain one readable line, not stacked characters (line tops: ${lines})`);
 }
 
-const headerControls = ["#sidebar-toggle", "#topbar-updates", "#topbar-search-toggle", "#topbar-catchup", "#room-more > summary", "#session-menu-button"];
+const headerControls = ["#sidebar-toggle", "#topbar-updates", "#topbar-search-toggle", "#room-more > summary", "#session-menu-button"];
 const longRoomName = "Project Room — A deliberately long research and delivery room name";
 
 async function assertReadableWords(page, selectors) {
@@ -73,7 +73,7 @@ async function assertReadableWords(page, selectors) {
 
 async function assertHeader(page, count) {
   await assertMoreLabel(page);
-  assert.equal(await page.getByRole("button", { name: `Catch up ${count}`, exact: true }).count(), 1, "the full count meaning remains in the accessible name");
+  assert.equal(await page.getByRole("button", { name: `Catch up ${count}`, exact: true, includeHidden: true }).count(), 1, "the full count meaning remains in the accessible name");
   const layout = await page.evaluate(selectors => ({
     name: document.querySelector("#mobile-room-name").textContent,
     boxes: selectors.map(selector => {
@@ -111,7 +111,7 @@ async function assertHeader(page, count) {
   }
   // Independently measure words, not CSS declarations: overflow can remain
   // contained even when a label or count has become a stack of characters.
-  await assertReadableWords(page, ["#topbar-updates", "#topbar-catchup"]);
+  await assertReadableWords(page, ["#topbar-updates"]);
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1), true, "no horizontal document overflow");
 }
 
@@ -129,6 +129,7 @@ async function exerciseHeader(page) {
       else await target.tap();
     };
     for (const [trigger, dialog] of [["#topbar-updates", "#updates-dialog"], ["#topbar-catchup", "#catchup-dialog"]]) {
+      if (trigger === "#topbar-catchup") await activate("#topbar-updates");
       await activate(trigger); await page.locator(dialog).waitFor({ state: "visible" });
       await page.keyboard.press("Escape"); await page.locator(dialog).waitFor({ state: "hidden" });
     }
@@ -140,7 +141,7 @@ async function exerciseHeader(page) {
     const menu = await page.locator(".room-more-actions").boundingBox();
     assert.ok(menu.x >= 0 && menu.x + menu.width <= page.viewportSize().width + 1, "More popover stays inside the narrow viewport");
     if (mode === "keyboard") {
-      for (const selector of ["#topbar-activity", "#topbar-later", "#room-actions-open", "#topbar-settings"]) {
+      for (const selector of ["#topbar-later", "#room-actions-open", "#topbar-settings"]) {
         await page.keyboard.press("Tab");
         assert.equal(await page.locator(selector).evaluate(node => node === document.activeElement), true, `More menu Tab reaches ${selector}`);
       }
@@ -176,7 +177,7 @@ async function exerciseHeader(page) {
 test("mobile header: session actions fold into an accessible menu, conversation stays close", { timeout: 90000 }, async t => {
   const { fixture, page, errors, server, context, origin } = await setup(t, { width: 390, height: 844 });
   await signIn(fixture, page, origin);
-  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "10 updates");
+  await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "4 updates"); // R28-1: the owner's own setup events are not news to the owner
   await assertMoreLabel(page);
   const layouts = async (name, count, { interact = false, recovery = false } = {}) => {
     for (const width of [390, 320]) for (const font of [100, 200]) {
@@ -217,7 +218,7 @@ test("mobile header: session actions fold into an accessible menu, conversation 
       await page.screenshot({ path: `test-results/mobile-header-${width}-${font}-${name}.png` });
     }
   };
-  await layouts("10-updates", "10 updates");
+  await layouts("4-updates", "4 updates");
   await openCatchUp(page);
   await page.waitForFunction(() => !document.querySelector("#rb-ack-button").disabled && Boolean(document.querySelector("#rb-ack-button").dataset.horizon));
   await page.locator("#rb-ack-button").click();
@@ -226,9 +227,11 @@ test("mobile header: session actions fold into an accessible menu, conversation 
   await layouts("0-updates", "No new updates");
   let now = Date.now(); fixture.store.now = () => now;
   const send = (type, data, key = fixture.keys.owner) => { now += 2100; return fixture.store.command(key, "commons", { id: crypto.randomUUID(), type, data }); };
+  // The guest's mention comes first: an unbroken run of the owner's own events right
+  // after the marker is not news to the owner (R28-1), so this keeps all 77 counted.
+  send(T.MESSAGE_POSTED, { messageId: "header-mention", body: "@owner Please check this synthetic header update." }, fixture.keys.guest);
   for (let n = 0; n < 7; n++) send(T.WORK_PROPOSED, { workItemId: `header-work-${n}`, title: `Synthetic header task ${n + 1}`, definitionOfDone: "Exercise the visible current-needs count.", accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
   for (let n = 0; n < 69; n++) send(T.MESSAGE_POSTED, { messageId: `header-message-${n}`, body: `Synthetic header update ${n + 1}.` });
-  send(T.MESSAGE_POSTED, { messageId: "header-mention", body: "@owner Please check this synthetic header update." }, fixture.keys.guest);
   await page.waitForFunction(() => document.querySelector("#catchup-count").textContent === "7 need you · 77 updates");
   // Catch-up proposals are not actionable Updates. Load a real mention so
   // the compact-row contract also exercises the Updates badge, not an empty span.

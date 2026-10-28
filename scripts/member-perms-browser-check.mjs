@@ -67,6 +67,7 @@ async function setup(t, { width = 1440 } = {}) {
     await page.goto(origin);
     await signInFixture(page, keys[memberId]);
     await page.locator("#main").waitFor({ state: "visible" });
+    if (["owner", "admin"].includes(memberId)) await page.locator("#topbar-updates").click();
     return page;
   };
   const api = async (path, memberId = "owner", data) => {
@@ -112,6 +113,8 @@ for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${
   const page = await f.login("requester");
   await openMemberProfile(page, "requester");
   assert.equal(await ownRow(page).getByRole("button", { name: "Ask to take work", exact: true }).count(), 1);
+  assert.equal((await ownRow(page).locator("[data-permission-request-status]").textContent()).trim(),
+    "Ask for: Accept work, Complete work. A room owner or admin reviews the request. Room permissions do not grant access to a computer or paid services.", "members see permission names, not ids");
   assert.equal(await ownRow(page, "other").getByRole("button", { name: "Ask to take work", exact: true }).count(), 0,
     "a member cannot file a request as somebody else");
   const request = await ask(page, "requester", { keyboard: true });
@@ -126,12 +129,12 @@ for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${
 
   const joiner = f.store.identities.create("Ordinary Joiner");
   f.access.request("commons", { identityId: joiner.identityId, displayName: "Ordinary Joiner",
-    requestedPermissions: [], requestId: "browser_join_request" });
+    requestedPermissions: [], requestId: "browser_join_request" }, joiner.secret);
   const owner = await f.login("owner"), row = attentionRow(owner);
   await row.waitFor();
   assert.equal(await row.locator(".attention-kind").textContent(), "Permission request");
-  assert.match(await row.locator(".attention-detail").textContent(), /accept_work/);
-  assert.match(await row.locator(".attention-detail").textContent(), /complete_work/);
+  assert.match(await row.locator(".attention-detail").textContent(), /Accept work/);
+  assert.match(await row.locator(".attention-detail").textContent(), /Complete work/);
   assert.equal(await attentionRow(owner, "Ordinary Joiner").locator(".attention-kind").textContent(), "Join request");
   assert.equal(await owner.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true, "review controls fit the viewport");
   await decide(owner, "Approve");
@@ -158,7 +161,7 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(await row.locator(".attention-kind").textContent(), "Permission request");
   assert.equal(await row.getByRole("button", { name: "Approve", exact: true }).isDisabled(), true,
     "an admin is not offered a grant it does not hold");
-  assert.match(await row.textContent(), /You cannot grant: complete_work/);
+  assert.match(await row.textContent(), /You cannot grant: Complete work/);
   assert.deepEqual(f.permissions("requester"), []);
   let writes = 0;
   admin.on("request", request => { if (request.method() === "POST" && /\/decide$/.test(new URL(request.url()).pathname)) writes++; });
@@ -167,9 +170,9 @@ test("an admin can cancel partial review, approve only selected permissions, and
   const selection = row.locator("fieldset");
   await selection.waitFor();
   assert.equal(await selection.getByRole("checkbox").count(), 2);
-  assert.equal(await selection.getByRole("checkbox", { name: "complete_work", exact: true }).isDisabled(), true);
-  assert.equal(await selection.getByRole("checkbox", { name: "complete_work", exact: true }).isChecked(), false);
-  await selection.getByRole("checkbox", { name: "accept_work", exact: true }).uncheck();
+  assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isDisabled(), true);
+  assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isChecked(), false);
+  await selection.getByRole("checkbox", { name: "Accept work", exact: true }).uncheck();
   assert.equal(await row.getByRole("button", { name: "Approve selected", exact: true }).isDisabled(), true);
   await row.getByRole("button", { name: "Cancel", exact: true }).click();
   await selection.waitFor({ state: "detached" });
@@ -180,7 +183,7 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(await partialButton.evaluate(node => node === document.activeElement), true, "Cancel returns focus to partial review");
 
   await partialButton.click();
-  await selection.getByRole("checkbox", { name: "accept_work", exact: true }).focus();
+  await selection.getByRole("checkbox", { name: "Accept work", exact: true }).focus();
   await admin.keyboard.press("Escape");
   await selection.waitFor({ state: "detached" });
   assert.equal(await partialButton.evaluate(node => node === document.activeElement), true, "Escape returns focus to partial review");
@@ -188,8 +191,8 @@ test("an admin can cancel partial review, approve only selected permissions, and
   assert.equal(f.store.room("commons").sequence, sequence, "Escape appends no room event");
 
   await partialButton.click();
-  await selection.getByRole("checkbox", { name: "accept_work", exact: true }).check();
-  assert.equal(await selection.getByRole("checkbox", { name: "complete_work", exact: true }).isChecked(), false);
+  await selection.getByRole("checkbox", { name: "Accept work", exact: true }).check();
+  assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isChecked(), false);
   const approved = await decide(admin, "Approve selected");
   await row.waitFor({ state: "detached" });
   assert.deepEqual(approved.grantedPermissions, ["accept_work"]);
@@ -201,8 +204,8 @@ test("an admin can cancel partial review, approve only selected permissions, and
   const remainder = await ask(member);
   assert.deepEqual(remainder.requestedPermissions, ["complete_work"], "the next request asks only for missing permissions");
   await row.waitFor();
-  assert.match(await row.locator(".attention-detail").textContent(), /complete_work/);
-  assert.doesNotMatch(await row.locator(".attention-detail").textContent(), /accept_work/);
+  assert.match(await row.locator(".attention-detail").textContent(), /Complete work/);
+  assert.doesNotMatch(await row.locator(".attention-detail").textContent(), /Accept work/);
   await decide(admin, "Decline");
   await row.waitFor({ state: "detached" });
   await member.locator("#message-list").getByText(new RegExp(`Declined permission request ${remainder.requestId}`)).waitFor();
@@ -385,6 +388,7 @@ test("stream-driven request refresh preserves action focus but never takes it ba
   await row.getByRole("button", { name: "Approve", exact: true }).focus();
   unrelatedMessage("The reader moves away during a pending refresh");
   await captured.promise;
+  await page.locator("#updates-close").click();
   const composer = page.locator("#message-input");
   await composer.focus();
   const delivered = page.waitForResponse(isQueue);

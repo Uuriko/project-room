@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { RoomDirectory, roomDirectorySchema, DIRECTORY_PAGE_LIMIT } from "../server/room-directory.mjs";
 import { roomPublicFaceSchema } from "../server/public-face.mjs";
 import { PUBLIC_READ_MODEL_SCHEMA } from "../server/public-read-model.mjs";
+import { publicUnpublishSchema } from "../server/legal-store.mjs";
 
 const member = (id, displayName, active = true) => ({ id, displayName, active, kind: "agent", permissions: [] });
 
@@ -12,6 +13,7 @@ function makeStore(states) {
   db.exec(roomDirectorySchema);
   db.exec(roomPublicFaceSchema);
   db.exec(PUBLIC_READ_MODEL_SCHEMA);
+  db.exec(publicUnpublishSchema);
   db.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY, archived_at TEXT)");
   const insertRoom = db.prepare("INSERT INTO rooms (id, archived_at) VALUES (?, ?)");
   for (const [id, { archived = false }] of Object.entries(states)) insertRoom.run(id, archived ? "2026-09-20" : null);
@@ -236,6 +238,97 @@ test("public receipts visibility defaults to public and is owner-only", () => {
   assert.deepEqual(dir.setReceiptsVisibility("r1", "owner", true), { roomId: "r1", publicReceipts: true });
   assert.equal(dir.publicReceiptsVisible("r1"), true);
   assert.equal(errOf(() => dir.receiptsVisibility("nope", "owner")).code, "room_not_found");
+});
+
+// ---- F-C5-1: hidden listings must not consume the LIMIT window ------------
+// A projection-backed store: rooms carries the projection column the real
+// store has, holding the same JSON the canned states describe (the real
+// store's room() reads its state back out of that projection).
+function makeProjectionStore(states) {
+  const db = new DatabaseSync(":memory:");
+  db.exec(roomDirectorySchema);
+  db.exec(roomPublicFaceSchema);
+  db.exec(PUBLIC_READ_MODEL_SCHEMA);
+  db.exec(publicUnpublishSchema);
+  db.exec("CREATE TABLE rooms (id TEXT PRIMARY KEY, archived_at TEXT, projection TEXT)");
+  const insertRoom = db.prepare("INSERT INTO rooms (id, archived_at, projection) VALUES (?, ?, ?)");
+  for (const [id, entry] of Object.entries(states)) {
+    insertRoom.run(id, entry.archived ? "2026-09-20" : null, JSON.stringify(entry.state));
+  }
+  return {
+    db,
+    transaction(fn) {
+      if (db.isTransaction) return fn();
+      db.exec("BEGIN IMMEDIATE");
+      try { const out = fn(); db.exec("COMMIT"); return out; }
+      catch (e) { if (db.isTransaction) db.exec("ROLLBACK"); throw e; }
+    },
+    room(id) {
+      const entry = states[id];
+      return entry ? { state: entry.state } : null;
+    }
+  };
+}
+
+const unpublishRoom = (store, roomId) =>
+  store.db.prepare("INSERT INTO public_unpublish (kind, target, at, by_account) VALUES ('room', ?, 1, 'operator')").run(roomId);
+
+test("F-C5-1: list filters unpublished and empty-title rooms before LIMIT, so windows never reveal suppressed counts", () => {
+  const store = makeProjectionStore({
+    r01: stateFor("r01", { title: "Alpha" }),
+    r02: stateFor("r02", { title: "Hidden room" }), // operator-unpublished
+    r03: stateFor("r03", { title: "   " }), // space-only title
+    r04: stateFor("r04", { title: "" }), // empty title AND operator-unpublished
+    r05: stateFor("r05", { title: "\t " }), // title JS trim removes but bare SQLite TRIM does not
+    r06: stateFor("r06", { title: 123 }), // non-string title: cleanText rejects it
+    r07: stateFor("r07", { title: "Echo" }),
+    r08: stateFor("r08", { title: "Foxtrot" }),
+    r09: stateFor("r09", { title: "Ghost" }), // projection corrupted below (#4126 shape)
+  });
+  const dir = new RoomDirectory(store);
+  for (const id of ["r01", "r02", "r03", "r04", "r05", "r06", "r07", "r08", "r09"]) dir.set(id, "owner", true);
+  unpublishRoom(store, "r02");
+  unpublishRoom(store, "r04");
+  // A quarantined corrupt projection must be skipped, never throw the list.
+  store.db.prepare("UPDATE rooms SET projection = 'not json' WHERE id = 'r09'").run();
+  // At base this first page was [r01] with nextCursor r02: the suppressed
+  // r02 consumed the window and the short page + cursor leaked that a
+  // listing had been suppressed inside it.
+  const first = dir.list({ limit: 2 });
+  assert.deepEqual(first.rooms.map(r => r.roomId), ["r01", "r07"]);
+  assert.equal(first.nextCursor, "r07");
+  const second = dir.list({ after: first.nextCursor, limit: 2 });
+  assert.deepEqual(second.rooms.map(r => r.roomId), ["r08"]);
+  assert.equal(second.nextCursor, null);
+  // A full walk visits exactly the three visible rooms, once each.
+  const walked = [];
+  let cursor = null;
+  do {
+    const page = dir.list({ after: cursor, limit: 2 });
+    walked.push(...page.rooms.map(r => r.roomId));
+    cursor = page.nextCursor;
+  } while (cursor !== null);
+  assert.deepEqual(walked, ["r01", "r07", "r08"]);
+  assert.ok(!JSON.stringify(walked).includes("Hidden"), "no suppressed listing leaks");
+});
+
+test("F-C5-1: minimal store without a rooms.projection column still lists via the JS authority", () => {
+  // makeStore's rooms table has no projection column: the SQL title leg
+  // must stay off (PRAGMA probe) and _publicEntry's JS checks remain the
+  // authority — unpublished and blank-title rooms stay hidden, visible
+  // rooms still list, and nothing throws on the missing column.
+  const store = makeStore({
+    m1: stateFor("m1", { title: "Visible one" }),
+    m2: stateFor("m2", { title: "Hidden room" }),
+    m3: stateFor("m3", { title: "" }),
+    m4: stateFor("m4", { title: "Visible two" }),
+  });
+  const dir = new RoomDirectory(store);
+  for (const id of ["m1", "m2", "m3", "m4"]) dir.set(id, "owner", true);
+  unpublishRoom(store, "m2");
+  const { rooms, nextCursor } = dir.list();
+  assert.deepEqual(rooms.map(r => r.roomId), ["m1", "m4"]);
+  assert.equal(nextCursor, null);
 });
 
 test("public receipts column migrates onto pre-existing directory tables", () => {

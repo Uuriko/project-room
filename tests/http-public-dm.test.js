@@ -77,7 +77,8 @@ test("POST /join with an inviteCode redeems the invite", async t => {
   assert.equal(res.status, 201, JSON.stringify(res.json));
   assert.equal(res.json.via, "invite");
   assert.equal(res.json.roomId, "commons");
-  assert.match(res.json.identitySecret, /^rak_/);
+  assert.match(res.json.roomToken, /^rak_/);
+  assert.match(res.json.identitySecret, /^pri_/);
 });
 
 test("POST /join validates its body", async t => {

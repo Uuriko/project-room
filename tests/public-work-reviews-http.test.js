@@ -44,7 +44,15 @@ test('owner retains withdrawn submissions and records one explicit decision with
   assert.deepEqual(await read(await f.call(path + '/decide', input)), outcome);
   assert.equal((await f.call(path + '/decide', { ...input, reason: 'Different retry' })).status, 409);
   assert.equal((await f.call(path + '/decide', f.decision('second-decision', 'rejected'))).status, 409);
-  assert.deepEqual(await read(await f.call('/api/public-work/receipts/' + f.receipt.receiptId, undefined, null)), f.receipt);
+  // #3546: the accepted decision stamps the public receipt's verified
+  // successor state. The submission bytes and artifact are unchanged and
+  // a human-mode acceptance runs no executed checks, so the verification
+  // level stays hash_only and the stamp names the deciding review.
+  // #3733: the canonical read also composes the review summary onto the
+  // stamped record — the five public outcome fields, nothing member-side.
+  assert.deepEqual(await read(await f.call('/api/public-work/receipts/' + f.receipt.receiptId, undefined, null)),
+    { ...f.receipt, state: 'verified', verified: { by: 'owner', at: outcome.review.decision.at, reviewRevision: outcome.review.revision, passVerdict: null },
+      review: { state: 'accepted', verificationVerdict: null, verificationReviewerKind: null, verifiedAt: null, decidedAt: outcome.review.decision.at } });
   assert.equal(await (await f.call('/api/public-work/receipts/' + f.receipt.receiptId + '/artifact', undefined, null)).text(), f.artifactText);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM bounty_journal').get().n, before);
 });
@@ -77,6 +85,12 @@ test('HTTP isolates owner results, review methods and strict query parameters', 
   assert.equal((await f.call(root + '/results?limit=1&limit=2')).status, 422);
   assert.equal((await f.call(root + '/results?auth=room')).status, 200);
   assert.equal((await f.call(root + '/results?auth=account&auth=room')).status, 422);
+  // FO-DRIFT-1/2: a malformed auth selector must be rejected per the spec
+  // enum (room|account), even when bearer auth is used and the selector is
+  // otherwise ignored by credential selection.
+  assert.equal((await f.call(root + '/results?auth=bogus')).status, 422);
+  assert.equal((await f.call(root + '/results?auth=')).status, 422);
+  assert.equal((await f.call(root + '/results?auth=bogus', undefined, f.ownerKey, 'HEAD')).status, 422);
   assert.equal((await f.call(path + '?after=x')).status, 422);
   assert.equal(await (await f.call(root + '/results', undefined, f.ownerKey, 'HEAD')).text(), '');
 });

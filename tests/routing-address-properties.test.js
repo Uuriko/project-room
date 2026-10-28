@@ -44,7 +44,9 @@ const garbage = r => {
   return Array.from({ length: r.int(0, 60) }, () => r.pick(soup)).join("");
 };
 const recase = (r, s) => Array.from(s, ch => r.chance(0.5) ? ch.toUpperCase() : ch.toLowerCase()).join("");
-const agentName = r => r.pick([...ATOM]).toUpperCase().replace(/^[^A-Z]/, "A") + atomOf(r, ATOM + "_.:-", 0, 20);
+// A sentence colon is not part of a handle ("@Grok:" is Grok), so a generated
+// name never ends in ":"; interior colons stay.
+const agentName = r => (r.pick([...ATOM]).toUpperCase().replace(/^[^A-Z]/, "A") + atomOf(r, ATOM + "_.:-", 0, 20)).replace(/:+$/, "x");
 const cleanLocal = s => s.replace(/[+]/g, "a"); // keep generated locals plus-free so plus-tag tests control the tag
 const profile = (r, i, domains) => {
   const domain = r.pick(domains);

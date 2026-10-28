@@ -9,20 +9,26 @@ import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { wakeNamedReviewers } from '../server/work-claim-events.mjs';
-import { createWork, claimWork, updateWork, recordReview, recordCi } from '../server/work-claims.mjs';
+import { createWork, claimWork, updateWork, recordReview, recordCi, flagPremiseInvalid, clearPremiseFlag } from '../server/work-claims.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const WRITER = ['steer', 'accept_work', 'complete_work', 'verify'];
 
 function setup(t) {
-  const store = new RoomStore(':memory:');
+  // Pin the store clock to the scenario date: the fixtures kernel-claim
+  // at 2026-10-01 with default 24h leases and intend LIVE claims. Since
+  // #3898 the sections derive lease liveness from store.now(), so an
+  // unpinned (wall-clock) store would read every fixture claim as long
+  // expired.
+  const store = new RoomStore(':memory:', { now: () => Date.parse('2026-10-01T00:00:00Z') });
   t.after(() => store.close());
   const rooms = new AgentRooms(store);
   const owner = store.identities.create('Owen');
   const ada = store.identities.create('Ada');
   const rex = store.identities.create('Rex');
   rooms.create(owner.secret, { roomId: 'board', title: 'board', purpose: 'Open work', kind: 'personal' });
-  store.identities.link(owner.secret, 'board', { identityId: ada.identityId, displayName: 'Ada', permissions: WRITER });
-  store.identities.link(owner.secret, 'board', { identityId: rex.identityId, displayName: 'Rex', permissions: [] });
+  linkWithProof(store, owner.secret, 'board', ada, { displayName: 'Ada', permissions: WRITER });
+  linkWithProof(store, owner.secret, 'board', rex, { displayName: 'Rex', permissions: [] });
   const t0 = Date.parse('2026-10-01T00:00:00Z');
   const put = (id, minutes, extra = {}) => {
     const item = { ...createWork({ id, title: `Task ${id}`, tags: ['wk41'], ...extra }, { now: t0 + minutes * 60000, agentId: owner.identityId }) };
@@ -65,6 +71,40 @@ test('a dependency that is done makes its dependent ready', t => {
   assert.deepEqual(open.top.map(row => row.id), ['after']);
 });
 
+// Regression owner: the real needs-me response must not dispatch invalid work.
+// Existing readiness cases only cover state and dependencies; these records
+// stay unclaimed/done when invalidated. No production test seam is required.
+test('pickup recommendations omit invalid or superseded work and dependencies, and recover after re-review', t => {
+  const { store, ada, owner, put, t0 } = setup(t);
+  const first = collectNeedsMe(store, ada.secret, {});
+  const flag = item => flagPremiseInvalid(item, {
+    premiseId: item.id, reason: 'The premise was disproved', byMemberId: owner.identityId, now: t0 + 60000
+  });
+  const flagged = flag(put('flagged', 0));
+  store.workClaims.set('board', flagged);
+  store.workClaims.set('board', { ...put('retired', 0), supersededBy: 'replacement' });
+  const dependency = { ...put('dependency', 0), state: 'done' };
+  const retiredDependency = { ...put('retired-dependency', 0), state: 'done', supersededBy: 'replacement' };
+  store.workClaims.set('board', flag(dependency));
+  store.workClaims.set('board', retiredDependency);
+  put('after-invalid', 0, { dependsOn: ['dependency'] });
+  put('after-retired', 0, { dependsOn: ['retired-dependency'] });
+  assert.equal(collectNeedsMe(store, ada.secret, { since: first.cursor }).openWork, undefined,
+    'state alone must not recommend invalidated or retired scope');
+
+  // Clearing the flag is an explicit re-review. Restore just these two claims;
+  // retirement still does not become a delivered dependency or open work.
+  for (const item of [flagged, flag(dependency)]) {
+    store.workClaims.set('board', clearPremiseFlag(item, {
+      byMemberId: owner.identityId, note: 'The premise was rechecked', now: t0 + 120000
+    }));
+  }
+  const page = collectNeedsMe(store, ada.secret, { since: first.cursor });
+  assert.equal(page.openWork[0].count, 2);
+  assert.deepEqual(new Set(page.openWork[0].top.map(row => row.id)), new Set(['flagged', 'after-invalid']));
+  assert.deepEqual(page.cursor, first.cursor, 'recommendations do not consume the attention cursor');
+});
+
 test('work posted for pickup ranks above released work', t => {
   const { store, ada, owner, put } = setup(t);
   put('posted', 0);
@@ -98,7 +138,7 @@ test('every room with open work is summarised, none dropped', t => {
     const roomId = `room-${String(r).padStart(2, '0')}`;
     const owner = store.identities.create(`Owen ${r}`);
     rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Open work', kind: 'personal' });
-    store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: WRITER });
+    linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: WRITER });
     store.workClaims.set(roomId, createWork({ id: `task-${r}`, title: 'T' }, { now: Date.now(), agentId: owner.identityId }));
   }
   const page = collectNeedsMe(store, ada.secret, {});
@@ -118,7 +158,10 @@ test('openWork stays small on a crowded board', t => {
   assert.equal(open.count, 40);
   assert.equal(open.top.length, 3);
   assert.ok(open.top.every(row => row.title.length <= 80));
-  assert.ok(JSON.stringify(open).length < 600, `openWork was ${JSON.stringify(open).length} bytes`);
+  assert.ok(open.top.every(row => row.untrusted === true), 'open rows are marked as member-authored data');
+  // The old 600-byte budget plus exactly the 18-byte `,"untrusted":true`
+  // mark stampNeedsMe adds to each of the 3 top rows (measured 564 -> 618).
+  assert.ok(JSON.stringify(open).length < 654, `openWork was ${JSON.stringify(open).length} bytes`);
 });
 
 test('hard work (tag hard / hard-problem) ranks first and says how to close it', t => {
@@ -233,4 +276,27 @@ test('myWork carries the caller\'s own held claims that need attention: lease ex
   store.workClaims.set('board', updateWork(quiet, adaId, { state: 'in_progress', now: now - 1000 }));
   assert.deepEqual(collectNeedsMe(store, ada.secret, {}).myWork[0].top.map(row => row.id), ['soon']);
   assert.equal(collectNeedsMe(store, rex.secret, {}).myWork, undefined);
+});
+
+test("the three work sections share one claim-board read per room", t => {
+  const { store, ada, owner, put } = setup(t);
+  const memberOf = identity => store.db.prepare("SELECT member_id AS m FROM identity_links WHERE identity_id=? AND room_id=?").get(identity.identityId, "board").m;
+  const adaId = memberOf(ada), ownerId = memberOf(owner);
+  const now = Date.parse("2026-10-01T02:00:00Z");
+  put("open-1", 0);
+  const claimed = claimWork(put("review-1", 1, { tags: [`rev-${adaId}`] }), ownerId, { now });
+  const ready = recordCi(updateWork(claimed, ownerId, { state: "in_progress", now }), { state: "success", headSha: "a".repeat(40) }, now).item;
+  store.workClaims.set("board", ready);
+  // Count board reads per room.
+  const reads = [];
+  const inner = store.workClaims.list.bind(store.workClaims);
+  store.workClaims.list = (roomId, ...rest) => { reads.push(roomId); return inner(roomId, ...rest); };
+  const page = collectNeedsMe(store, ada.secret, {});
+  assert.equal(reads.filter(roomId => roomId === "board").length, 1,
+    "openWork/reviewAsks/myWork must share one board read (was 3 per room)");
+  // The shared list still feeds every section.
+  assert.equal(page.openWork?.length, 1);
+  assert.equal(page.openWork[0].top[0].id, "open-1");
+  assert.equal(page.reviewAsks?.length, 1);
+  assert.equal(page.reviewAsks[0].top[0].id, "review-1");
 });

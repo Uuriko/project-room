@@ -89,3 +89,51 @@ test('reset sync follows nextPageToken past the first 50 messages (H-8)', async 
   const sources = f.store.inbox.list(f.slot.token, f.session.sessionBinding, { includeChannels: true, limit: 100 }).sources;
   assert.equal(sources.filter(s => s.connection?.id === f.id).length, 76);
 });
+test('reset sync resumes past the 200-id per-tick budget instead of completing early (#2845)', async t => {
+  const f = await setup(t);
+  // 50 real INBOX messages (mail-1 from the fixture + 49 more; the pilot
+  // inbox caps imported sources at 100, so the rest of the 230-entry list
+  // is ghost ids whose detail fetch 404s, yielding absent observations).
+  for (let i = 2; i <= 50; i++) {
+    const id = 'mail-' + i;
+    f.messages.set(id, { id, historyId: '1000', internalDate: '1700000000000', threadId: 'thread-1', labelIds: ['INBOX'], snippet: 'body ' + i,
+      payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'taylor@example.com' }, { name: 'Subject', value: 'msg ' + i }], body: { data: Buffer.from('body ' + i).toString('base64url') } } });
+  }
+  const ghosts = Array.from({ length: 180 }, (_, i) => 'ghost-' + (i + 1));
+  // Paginate the /messages list at 50 per page, like the real Gmail API.
+  const original = f.config.fetchImpl;
+  f.config.fetchImpl = async (url, init) => {
+    const u = new URL(url);
+    if (u.pathname.endsWith('/messages') && u.searchParams.get('labelIds') === 'INBOX') {
+      const real = [...f.messages.values()].filter(m => m.labelIds.includes('INBOX')).map(m => m.id);
+      const all = [...real, ...ghosts].map(id => ({ id }));
+      const token = Number(u.searchParams.get('pageToken') ?? 0);
+      const slice = all.slice(token, token + 50);
+      return Response.json({ messages: slice, ...(token + 50 < all.length ? { nextPageToken: String(token + 50) } : {}) });
+    }
+    return original(url, init);
+  };
+  const folder = () => f.store.connections.folder(f.account.id, f.id, 'INBOX');
+  const record = () => f.m.record(f.m.auth(f.slot.token, f.session.sessionBinding));
+  // Fresh grant => the first tick starts a reset, but the 200-id budget
+  // covers only part of the list: the folder must stay incomplete, keep
+  // accumulating its scan without swapping membership, and the walk must
+  // keep its continuation instead of dropping the remaining entries.
+  const first = await f.sync.mailboxTick(f.account.id, f.id);
+  assert.equal(first.imported, 50);
+  assert.equal(folder().complete, false);
+  assert.equal(folder().members.length, 0);
+  assert.equal(folder().scanMembers.length, 50);
+  assert.equal(record().historyId, null);
+  assert.ok(record().historyPage);
+  // The next tick resumes the walk where it stopped and only then
+  // completes the folder, with the scanned set as membership.
+  const second = await f.sync.mailboxTick(f.account.id, f.id);
+  assert.equal(second.imported, 0);
+  assert.equal(folder().complete, true);
+  assert.equal(folder().members.length, 50);
+  assert.notEqual(record().historyId, null);
+  assert.equal(record().historyPage, null);
+  const sources = f.store.inbox.list(f.slot.token, f.session.sessionBinding, { includeChannels: true, limit: 100 }).sources;
+  assert.equal(sources.filter(s => s.connection?.id === f.id).length, 50);
+});

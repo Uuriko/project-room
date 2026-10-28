@@ -100,6 +100,7 @@ const messages = Object.freeze({
   invite_already_used: "This invite was already used — ask the room owner for a fresh one.",
   member_required: "Set the expected ROOM_AGENT_MEMBER before checking or saving agent access.",
   access_ended: "Access was not accepted. Keep the saved connection; check the service address and existing access with its owner.",
+  insufficient_scope: "This credential does not grant this operation. Ask its owner for an appropriately scoped replacement.",
   identity_credential_changed: "The saved credential changed or was revoked. Obtain the current credential from its owner; do not create a replacement identity.",
   identity_mismatch: "Access does not match the configured room and agent. No identity was adopted.",
   expiry_unconfirmed: "Expiry could not be confirmed. Check the local clock and key expiry.",
@@ -112,12 +113,37 @@ const messages = Object.freeze({
   cancelled: "The request was cancelled.",
   service_unavailable: "Could not complete the request. Check the service address and retry."
 });
+// qa1-r1 (2026-10-09): local setup codes are not server errors. Sent through
+// agentErrorAx they came back as "Unknown error 'config_exists' ... this code
+// has no known recovery" with room_check_access as the next step, which an
+// agent with no saved connection cannot run. Each local code names its fix.
+const setupCommand = "node scripts/agent-inbox.mjs";
+const localRecovery = Object.freeze({
+  insufficient_scope: ["Keep the existing identity and saved connection. Ask the credential owner for a replacement granting only the scopes required for the intended operation. Do not escalate automatically.",
+    ["Ask the credential owner to confirm the intended operation and provide an appropriately scoped replacement credential"]],
+  usage_error: ["Use a documented command; nothing was sent.", [`${setupCommand} --help`]],
+  invalid_config: ["The connection settings are incomplete or malformed; nothing was sent.",
+    ["Copy the private setup again from the room's Add agent dialog and import it into a new directory"]],
+  config_not_found: ["No saved connection at that path; nothing was sent.",
+    ["Set ROOM_AGENT_CONFIG to the directory you imported into",
+      `Or import first: pbpaste | ${setupCommand} import <new private directory>`]],
+  config_not_private: ["The saved connection must be an owner-only directory holding a regular private file, with no links.",
+    ["chmod 700 the directory and chmod 600 its file, or import into a new private directory"]],
+  ambiguous_config: ["Both ROOM_AGENT_CONFIG and ROOM_AGENT_* credentials are set; nothing was sent.",
+    ["Unset ROOM_AGENT_CONFIG or the ROOM_AGENT_ORIGIN/ROOM_AGENT_ROOM/ROOM_AGENT_TOKEN/ROOM_AGENT_MEMBER variables"]],
+  config_exists: ["Import never overwrites, and the existing directory was left untouched.",
+    [`Import into a path that does not exist yet (${setupCommand} import creates it)`,
+      `Or use the saved connection: ROOM_AGENT_CONFIG=<that directory> ${setupCommand} check`]],
+  config_save_failed: ["The new connection was not confirmed saved; nothing existing was replaced.",
+    ["Inspect the new private directory; if it is incomplete, remove it and import again"]]
+});
 export function connectionDiagnostic(error) {
   let code = "service_unavailable";
   if (error instanceof ConnectionError && Object.hasOwn(messages, error.code)) code = error.code;
   else if (error instanceof RoomClientError) {
     code = error.status === 403 && ["host_denied", "origin_denied", "proxy_denied"].includes(error.code) ? "invalid_config"
       : error.code === "identity_credential_changed" && error.status === 409 ? "identity_credential_changed"
+      : error.status === 403 && error.code === "insufficient_scope" ? "insufficient_scope"
       : [401, 403].includes(error.status) ? "access_ended" : error.status === 429 ? "rate_limited"
       : error.status === 409 && error.code === "invite_already_used" ? "invite_already_used"
       : error.status === 404 ? "unavailable_route" : ["member_required", "identity_mismatch", "expiry_unconfirmed", "invalid_response", "help_context_unavailable", "offer_context_unavailable"].includes(error.code) ? error.code : code;
@@ -126,7 +152,16 @@ export function connectionDiagnostic(error) {
   const httpStatus = error instanceof RoomClientError ? error.status : 0;
   const mapped = code === "access_ended" ? (httpStatus === 403 ? "access_denied" : "unauthenticated") : code === "rate_limited" ? "rate_limited"
     : code === "member_required" ? "member_required" : code;
-  const ax = agentErrorAx({ httpStatus, code: mapped, message: "" });
+  const recovery = Object.hasOwn(localRecovery, code) ? localRecovery[code] : null;
+  // qa-r16 (flaky network): no HTTP answer means the outcome is unknown. A say
+  // or other write may already be saved, and "retry" posted it twice.
+  const unknownOutcome = !recovery && httpStatus === 0 && ["service_unavailable", "request_timeout"].includes(code);
+  const ax = recovery
+    ? { status: "action_required", reason: code, hint: recovery[0], next: recovery[1].map(value => ({ command: value })) }
+    : unknownOutcome ? { status: "action_required", reason: code,
+      hint: "No answer came back, so the outcome is unknown: a say, reply or other write may already be saved. Reads are safe to retry; before repeating a write, read the room and resend only if it is missing.",
+      next: [{ tool: "room_check_access" }, { command: `${setupCommand} find "<words you sent>" messages` }] }
+    : agentErrorAx({ httpStatus, code: mapped, message: "" });
   return { type: "agent_connection_error", code, message: messages[code],
     status: ax.status, reason: ax.reason, hint: ax.hint, next: ax.next,
     ...(code === "rate_limited" && Number.isSafeInteger(error.retryAfterMs) && error.retryAfterMs >= 0 && error.retryAfterMs <= 300000 ? { retryAfterMs: error.retryAfterMs } : {}) };

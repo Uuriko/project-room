@@ -39,6 +39,7 @@ export async function ensurePeopleOpen(page) {
 export async function openCatchUp(page) {
   const dialog = page.locator("#catchup-dialog");
   if (!(await dialog.evaluate(node => node.open))) {
+    if (!(await page.locator("#updates-dialog").isVisible())) await page.locator("#topbar-updates").click();
     await page.locator("#topbar-catchup").click();
   }
   await dialog.waitFor({ state: "visible" });
@@ -110,11 +111,16 @@ export async function openMemberProfile(page, memberId) {
 
 // Secondary controls moved into their existing account/room contexts.
 export async function clickChrome(page, selector) {
+  if (selector === "#choose-room") selector = "#nav-rooms";
   const control = page.locator(selector);
+  if (selector === "#topbar-catchup" && !(await control.isVisible())) {
+    await ensureSidebarClosed(page);
+    await page.locator("#topbar-updates").click();
+  }
   if (['#signout-button', '#account-settings-button', '#refresh-button', '#clear-session-menu'].includes(selector)) {
     if (!(await control.isVisible())) await page.locator('#session-menu-button').click();
   }
-  if (['#topbar-activity', '#topbar-later', '#topbar-settings', '#room-actions-open'].includes(selector)) {
+  if (['#topbar-later', '#topbar-settings', '#room-actions-open'].includes(selector)) {
     await ensureSidebarClosed(page);
     const more = page.locator('#room-more');
     if (!(await more.evaluate(node => node.open))) await more.locator(':scope > summary').click();
@@ -131,6 +137,12 @@ export async function clickChrome(page, selector) {
     else await ensureSidebarClosed(page);
   }
   await control.click();
+}
+
+export async function returnToRoom(page, roomId = "commons") {
+  await clickChrome(page, "#nav-rooms");
+  await page.locator(`[data-account-room="${roomId}"]`).click();
+  await page.locator("#main").waitFor({ state: "visible" });
 }
 
 // Work cards expose one primary action; secondary actions use the native More
@@ -167,4 +179,22 @@ export async function enableHumanAdvanced(page) {
   await openSettings(page, "advanced-room-tools");
   await page.locator("#human-advanced").check();
   await closeSettings(page);
+}
+
+// Per-message actions live in the "⋯" overflow menu. The timeline can re-render
+// between opening the menu and clicking the action, which replaces the row or
+// closes the menu, so wait for the row and retry open-then-click with short
+// per-attempt timeouts.
+export async function messageAction(page, id, action, { attempts = 5 } = {}) {
+  const row = page.locator(`[data-message-record-id="${id}"]`);
+  const target = page.locator(`[data-message-id="${id}"][data-message-action="${action}"]`);
+  await row.waitFor({ state: "attached", timeout: 30000 });
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const menu = row.locator("details.message-more");
+      if (!(await menu.evaluate(node => node.open, null, { timeout: 3000 }))) await menu.locator("summary").click({ timeout: 3000 });
+      await target.click({ timeout: 3000 });
+      return;
+    } catch (failure) { if (attempt >= attempts) throw failure; }
+  }
 }

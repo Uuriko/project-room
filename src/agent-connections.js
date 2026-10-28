@@ -9,6 +9,8 @@ const statuses = { key_issued: "Access ready · setup not verified", access_chan
 export function installAgentConnections({ client, getState }) {
   const dialog = $("#agent-connect-dialog"), form = $("#agent-connect-form"), list = $("#agent-connect-list");
   let owner = null, generation = null, ownerRevision = null, pending = null, setup = null, setupMeta = null, mcpCredential = null, expiryTimer = null, busy = false, copying = false, listVersion = 0, flow = 0, rosterId = null;
+  // Rows rendered before the room state held their member: re-read once it arrives (R29-1).
+  let unseatedRows = new Set();
   const member = () => getState()?.members[client.session?.member?.id];
   const allowed = () => client.ownsAccountSession() && client.session?.account && member()?.active !== false
     && getState()?.room.id === client.session.roomId
@@ -29,7 +31,9 @@ export function installAgentConnections({ client, getState }) {
     clearTimeout(expiryTimer);
     if (setup) expiryTimer = setTimeout(() => { if (checkExpiry()) armExpiry(); else render(); }, Math.max(1, Math.min(2e9, setupMeta.expiresAt - Date.now() + 1)));
   }
-  const accessDenied = error => [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code);
+  // An unverified email is a 403 on a valid session: ending access here signed the
+  // owner out of the room the moment they tried to add an agent.
+  const accessDenied = error => error?.code !== "email_unverified" && [401, 403].includes(error?.status) || ["session_binding_changed", "session_binding_required", "invalid_session_binding"].includes(error?.code);
   const catalogButtons = () => $("#agent-type-catalog")?.querySelectorAll("[data-agent-type], [data-roster]")
     ?? $("#agent-roster")?.querySelectorAll("[data-agent-type], [data-roster]")
     ?? [];
@@ -146,6 +150,7 @@ export function installAgentConnections({ client, getState }) {
         || !current && client.sequence >= setupMeta.sequence) { forget(); status("Agent access changed. Review its connection."); render(); }
       else if (!checkExpiry()) render();
     }
+    if (dialog.open && owns() && [...unseatedRows].some(id => connectionSeat(getState()?.members, id))) { unseatedRows = new Set(); void load(); }
   }
   async function load() {
     const version = ++listVersion;
@@ -158,12 +163,13 @@ export function installAgentConnections({ client, getState }) {
         const current = result.connections.find(row => row.memberId === setup.memberId);
         if (!current || current.status !== "key_issued" || current.generation !== setupMeta.generation) { forget(); status("Agent access changed. Review its connection."); }
       }
-      list.replaceChildren();
+      list.replaceChildren(); unseatedRows = new Set();
       for (const row of result.connections) {
         const li = document.createElement("li"), name = document.createElement("strong"), text = document.createElement("p");
         name.textContent = row.displayName;
         const members = getState()?.members;
         const seat = connectionSeat(members, row.memberId);
+        if (members && seat == null && row.status !== "disconnected") unseatedRows.add(row.memberId);
         const standing = connectionStanding({
           connectionStatus: row.status,
           memberFound: members ? seat != null : null,
@@ -251,6 +257,7 @@ export function installAgentConnections({ client, getState }) {
       void load(); void client.refresh().catch(() => {});
     } catch (error) {
       if (!owns() || pending !== operation) return;
+      if (error?.code === "email_unverified") { status(error.message); return; } // keep the request: Retry works once verified
       if (accessDenied(error)) { reset(); client.handleFailure(error); return; }
       if (error.status === 409) {
         pending = null; status("Access changed. Review the current settings before trying again."); void load();

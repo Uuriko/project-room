@@ -95,9 +95,10 @@ export function summarizePatch(kind, bytes) {
   let subject = null;
   let inHeader = false;
   let hunk = null;
+  let plainOld = null;
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i].replace(/\r$/, "");
-    if (kind === "mbox" && /^From [0-9a-f]{40} /.test(line)) { inHeader = true; subject = null; current = null; hunk = null; continue; }
+    if (kind === "mbox" && /^From [0-9a-f]{40} /.test(line)) { inHeader = true; subject = null; current = null; hunk = null; plainOld = null; continue; }
     if (inHeader && line.startsWith("Subject: ")) {
       subject = line.slice(9);
       while (i + 1 < lines.length && /^[ \t]/.test(lines[i + 1])) { i += 1; subject += lines[i].replace(/\r$/, ""); }
@@ -114,13 +115,27 @@ export function summarizePatch(kind, bytes) {
       current = files.get(path) ?? { path, adds: 0, dels: 0 };
       files.set(path, current);
       hunk = null;
+      plainOld = null;
       continue;
     }
-    if (!current || !hunk) {
+    // A plain (non-git) file boundary is a ---/+++ header pair outside any
+    // hunk. Once the previous file's hunk is exhausted, the next file's +++
+    // starts a new entry — it must not accumulate into the first file. A
+    // +++ line inside a hunk is added content, not a header, so the hunk
+    // guard matters. For a deletion (+++ /dev/null) the file's path comes
+    // from the --- line instead.
+    if (!hunk && kind === "diff") {
+      const oldPlain = /^--- (?:a\/)?(.+?)(?:\t.*)?$/.exec(line);
+      if (oldPlain) plainOld = oldPlain[1];
       const plain = /^\+\+\+ (?:b\/)?(.+?)(?:\t.*)?$/.exec(line);
-      if (plain && !current && kind === "diff" && plain[1] !== "/dev/null") {
-        current = files.get(plain[1]) ?? { path: plain[1], adds: 0, dels: 0 };
-        files.set(plain[1], current);
+      if (plain) {
+        const path = plain[1] !== "/dev/null" ? plain[1]
+          : (plainOld && plainOld !== "/dev/null" ? plainOld : null);
+        if (path) {
+          current = files.get(path) ?? { path, adds: 0, dels: 0 };
+          files.set(path, current);
+        }
+        plainOld = null;
       }
     }
     // Count only inside hunks, by the hunk's own line counts, so mail

@@ -12,7 +12,7 @@
 // This replaces the deleted src/multi-instance-election.mjs: that module was
 // a lease election for a multi-instance deploy that was never wired to any
 // production path. The supported topology is one server per database.
-import { openSync, readFileSync, unlinkSync, writeSync, closeSync } from "node:fs";
+import { openSync, readFileSync, statSync, unlinkSync, writeSync, closeSync } from "node:fs";
 import process from "node:process";
 
 export const INSTANCE_LOCK_ERRORS = Object.freeze(["instance_lock_held", "instance_lock_io"]);
@@ -38,6 +38,20 @@ const readLock = lockPath => {
   return null;
 };
 
+// An empty lock file is ambiguous: it is either a crash leftover or a live
+// peer in the window between its exclusive create and its payload write
+// (adjacent calls in acquireInstanceLock, so the write follows immediately).
+// Only an empty file older than this grace window may be treated as a
+// leftover; a fresh one must be assumed to belong to a peer still starting.
+const EMPTY_LOCK_GRACE_MS = 5_000;
+
+const isFreshEmptyLock = lockPath => {
+  try {
+    const stat = statSync(lockPath);
+    return stat.size === 0 && Date.now() - stat.mtimeMs < EMPTY_LOCK_GRACE_MS;
+  } catch { return false; }
+};
+
 export function acquireInstanceLock(lockPath) {
   const create = () => {
     try { return openSync(lockPath, "wx", 0o600); }
@@ -53,6 +67,15 @@ export function acquireInstanceLock(lockPath) {
     if (existing && pidAlive(existing.pid)) {
       throw lockError("instance_lock_held",
         `another project-room instance holds this database (pid ${existing.pid}, started ${existing.startedAt ?? "unknown"}); refusing to boot`);
+    }
+    // An empty file has no payload to judge yet, but it may be a peer that
+    // created the lock a moment ago and has not written its payload.
+    // Reclaiming it here would put two processes on one database, so a
+    // fresh empty lock is refused as held; only an older empty file (a
+    // crash between create and write) falls through to the reclaim below.
+    if (!existing && isFreshEmptyLock(lockPath)) {
+      throw lockError("instance_lock_held",
+        `another project-room instance is starting on this database (lock ${lockPath} was just created and has no payload yet); refusing to boot`);
     }
     // Stale or malformed lock: reclaim exactly once. If a racing process
     // grabbed it between our unlink and re-create, the re-create fails and

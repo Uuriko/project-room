@@ -1,3 +1,4 @@
+import { escapeHtml } from "./html-escape.mjs";
 import { buildMagicLinkUrl } from "./magic-links.mjs";
 
 // Resend mail sender for magic-link sign-in codes.
@@ -37,7 +38,12 @@ async function postResendEmail({ apiKey, from, fetchFn, to, subject, text, html,
   if (!response.ok) {
     let detail = "";
     try { detail = (await response.text()).slice(0, 200); } catch { /* ignore */ }
-    throw new Error(`${label} failed to send (HTTP ${response.status})${detail ? `: ${detail}` : ""}`);
+    const error = new Error(`${label} failed to send (HTTP ${response.status})${detail ? `: ${detail}` : ""}`);
+    // Keep the provider status structured, not only inside the message
+    // text: the mailer seam classifies permanent refusals by it
+    // (isMailRecipientRefusal in server/magic-links.mjs).
+    error.providerStatus = response.status;
+    throw error;
   }
 }
 
@@ -60,12 +66,33 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
   if (!isNonEmptyString(apiKey) || !isNonEmptyString(from)) return null;
   return async ({ to, code, expiresAt, baseUrl, returnTo, purpose = "signin" } = {}) => {
     const notice = purpose === "password-reset-complete";
-    if (!isNonEmptyString(to) || (!notice && !isNonEmptyString(code))) {
+    // ID-SEC signup mail: the already-registered notice has no code, and the
+    // verification code is entered in Account settings, not redeemed by a link.
+    const registered = purpose === "signup-notice", verifying = purpose === "email-verify";
+    if (!isNonEmptyString(to) || (!notice && !registered && !isNonEmptyString(code))) {
       throw new Error("resendMagicLinkSend requires a recipient and a code");
     }
     const minutes = typeof expiresAt === "number"
       ? Math.max(1, Math.round((expiresAt - Date.now()) / 60000))
       : 15;
+    if (registered || verifying) {
+      const link = buildMagicLinkUrl({ baseUrl, to, code, returnTo, purpose });
+      const action = registered ? "Sign in to Project Room" : "Open Project Room";
+      const subject = registered ? "You already have a Project Room account" : "Verify your Project Room email";
+      const lead = registered
+        ? "Someone tried to create a Project Room account with this email address. It already has an account, so nothing was changed. Sign in instead."
+        : `Your Project Room verification code is: ${code}`;
+      const after = registered
+        ? "If this wasn't you, you can ignore this email."
+        : `Enter the code in Account settings to verify this address. It expires in ${minutes} minutes. If you didn't create a Project Room account, you can ignore this email.`;
+      const text = `${lead}\n\n` + (link ? `${action}:\n\n${link}\n\n` : "") + after;
+      const html = (registered ? `<p>${escapeHtml(lead)}</p>`
+        : `<p>Your Project Room verification code is:</p><p style="font-size: 24px; font-weight: bold; letter-spacing: 4px;">${escapeHtml(code)}</p>`)
+        + (link ? `<p><a href="${escapeHtml(link)}" style="display:inline-block;padding:12px 24px;background:#4f46e5;color:#ffffff;text-decoration:none;border-radius:8px;font-weight:bold;">${action}</a></p>` : "")
+        + `<p>${escapeHtml(after)}</p>`;
+      await postResendEmail({ apiKey, from, fetchFn, to, subject, text, html, label: "magic link email" });
+      return;
+    }
     // One-tap sign-in link: the app auto-redeems ?magic=<code>&email=<addr>
     // on load. The code stays single-use with a 15-minute expiry, and the
     // plaintext code remains in the body as a fallback for clients that
@@ -79,7 +106,7 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
     const text = notice ? notification : link
       ? `${action}:\n\n${link}\n\n` +
         `This link expires in ${minutes} minutes and works once. ` +
-        (resetting ? "Choose a new password after opening the link.\n\n" : `If the button doesn't work, enter this code instead: ${code}\n\n`) +
+        (resetting ? "Choose a new password after opening the link.\n\n" : `If the link doesn't work, enter this code instead: ${code}\n\n`) +
         `If you didn't request this, you can ignore this email.`
       : `Your Project Room sign-in code is: ${code}\n\n` +
         `It expires in ${minutes} minutes. If you didn't request this, you can ignore this email.`;
@@ -93,14 +120,6 @@ export function resendMagicLinkSend({ apiKey, from, fetchFn = fetch } = {}) {
         `<p>It expires in ${minutes} minutes. If you didn't request this, you can ignore this email.</p>`;
     await postResendEmail({ apiKey, from, fetchFn, to, subject, text, html, label: "magic link email" });
   };
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 // Resolve the magic-link mailer from the environment. Returns null when

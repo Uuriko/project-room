@@ -88,3 +88,37 @@ test("autolink does not fire inside code spans", () => {
 test("plain text without markdown is unchanged", () => {
   assert.equal(md("just a normal message"), esc("just a normal message"));
 });
+
+test("unordered lines render as a list", () => {
+  const out = md("line1\nline2\n\n- item\n- item2");
+  assert.match(out, /<ul class="md-list"><li>item<\/li><li>item2<\/li><\/ul>/);
+  assert.match(out, /line1\nline2/);
+  assert.ok(!out.includes("- item"), "markers are not left as literal text");
+});
+
+test("star markers and ordered lines render as lists", () => {
+  assert.match(md("* one\n* two"), /<ul class="md-list"><li>one<\/li><li>two<\/li><\/ul>/);
+  assert.match(md("1. one\n2. two"), /<ol class="md-list"><li>one<\/li><li>two<\/li><\/ol>/);
+});
+
+test("bold inside a list item still renders", () => {
+  assert.match(md("- say **hello**"), /<ul class="md-list"><li>say <strong>hello<\/strong><\/li><\/ul>/);
+});
+
+test("a list marker inside a fence stays literal", () => {
+  const out = md("```\n- item\n- item2\n```");
+  assert.ok(!out.includes("<ul"), "fence is not a list");
+  assert.match(out, /- item/);
+});
+
+test("italic and plain dashes are not lists", () => {
+  assert.match(md("*hello*"), /<em>hello<\/em>/);
+  assert.ok(!md("*hello*").includes("<ul"));
+  assert.equal(md("score - item"), esc("score - item"));
+});
+
+test("list items stay escaped", () => {
+  const out = md("- <script>alert(1)</script>");
+  assert.ok(!out.includes("<script>"), "no raw script tag in a list");
+  assert.match(out, /<li>&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/li>/);
+});

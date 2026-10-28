@@ -25,7 +25,7 @@ async function serve(t) {
   store.bindHumanAccount("commons", "owner", "account-owner");
   const accountKey = store.issueAccountAccessKey("account-owner");
   const ownerKey = store.issueAccessKey("commons", "owner");
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ enableDeferredInbox: true, store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); rmSync(directory, { recursive: true, force: true }); });
   const origin = `http://127.0.0.1:${server.address().port}`;
@@ -111,16 +111,25 @@ test("L1: the thread route runs through the shared room funnel", async t => {
 test("L1: thread reads share the per-credential read rate limit", async t => {
   const { request, ownerKey, post } = await serve(t);
   const root = post("root");
-  let limited = null;
-  for (let index = 0; index < 601 && limited === null; index += 1) {
-    const res = await request(`/api/rooms/commons/messages/${root}/thread`, { token: ownerKey });
-    if (res.status === 429) limited = { index, retryAfter: res.headers.get("retry-after"), body: await res.json() };
+  // Sixty thread reads stay inside the read burst on their own. Twenty
+  // event reads in the same burst push the shared bucket over 70.
+  const responses = await Promise.all([
+    ...Array.from({ length: 60 }, () => request(`/api/rooms/commons/messages/${root}/thread`, { token: ownerKey })),
+    ...Array.from({ length: 20 }, () => request("/api/rooms/commons/events", { token: ownerKey })),
+  ]);
+  const limited = [];
+  for (const res of responses) {
+    if (res.status === 429) limited.push(res);
     else { assert.equal(res.status, 200); await res.text().catch(() => {}); }
   }
-  assert.ok(limited, "the 601st thread read within a minute is rate limited");
-  assert.equal(limited.index, 600);
-  assert.equal(limited.body.error.code, "rate_limited");
-  assert.equal(limited.retryAfter, "60");
+  assert.ok(responses.some(res => res.status === 200), "the burst still serves reads");
+  assert.ok(limited.length > 0, "thread reads and event reads share one read burst");
+  for (const res of limited) {
+    assert.equal((await res.json()).error.code, "rate_limited");
+    assert.equal(res.headers.get("x-ratelimit-limit"), "70");
+    assert.equal(res.headers.get("x-ratelimit-bucket"), "read");
+    assert.ok(Number(res.headers.get("retry-after")) >= 1);
+  }
 });
 
 test("L2: agent-invite list, create and revoke honour the session-binding fence", async t => {
@@ -146,14 +155,17 @@ test("L2: the router passes the request's session fence to every agent-invite me
   const seen = {};
   for (const name of ["list", "create", "revoke"]) {
     const original = store.invites[name].bind(store.invites);
-    t.mock.method(store.invites, name, (...args) => { seen[name] = args.at(-1); return original(...args); });
+    // The fence is not always the trailing argument (create takes a trailing
+    // options object), so record whether the session fence reaches the method
+    // at all rather than asserting an argument position.
+    t.mock.method(store.invites, name, (...args) => { seen[name] = args.includes(account.session.sessionBinding); return original(...args); });
   }
   const created = await request("/api/rooms/commons/agent-invites", { method: "POST", headers, data: { permissions: ["accept_work"] } });
   assert.equal(created.status, 201);
   const { inviteId } = await created.json();
   assert.equal((await request("/api/rooms/commons/agent-invites", { headers })).status, 200);
   assert.equal((await request("/api/rooms/commons/agent-invites", { method: "DELETE", headers, data: { inviteId } })).status, 200);
-  assert.deepEqual(seen, { list: account.session.sessionBinding, create: account.session.sessionBinding, revoke: account.session.sessionBinding });
+  assert.deepEqual(seen, { list: true, create: true, revoke: true });
 });
 
 test("L3: identity creation and invite redemption rate limit before reading the body", async t => {
@@ -312,7 +324,7 @@ test("L6: the agent-invite audit and revoke handle never carry a stored code has
   const legacyId = sha256(legacy).slice(0, 8);
   const revoked = await request("/api/rooms/commons/agent-invites", { method: "DELETE", token: ownerKey, data: { inviteId: legacyId } });
   assert.equal(revoked.status, 200);
-  assert.deepEqual(await revoked.json(), { inviteId: legacyId, revoked: true });
+  assert.deepEqual(await revoked.json(), { inviteId: legacyId, revoked: true, status: "revoked" });
   assert.equal(store.db.prepare("SELECT revoked_at FROM agent_invite_codes WHERE code_hash=?").get(sha256(legacy)).revoked_at > 0, true);
   assert.equal(store.db.prepare("SELECT revoked_at FROM agent_invite_codes WHERE code_hash<>?").get(sha256(legacy)).revoked_at, null);
   const byHash = await request("/api/rooms/commons/agent-invites", { method: "DELETE", token: ownerKey, data: { inviteId: sha256(legacy) } });

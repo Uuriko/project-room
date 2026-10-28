@@ -23,6 +23,19 @@ test("extractAgentMentions finds ordered, unique mentions and skips emails", () 
   assert.ok(Object.isFrozen(extractAgentMentions("@claude hi")));
   expectCode(() => extractAgentMentions(null), "routing_invalid");
 });
+test("extractAgentMentions drops a trailing colon and keeps an interior one", () => {
+  assert.deepEqual(extractAgentMentions("ask @Grok: please review"), ["Grok"]);
+  assert.deepEqual(extractAgentMentions("ask @Grok: please, and @Codex: too"), ["Grok", "Codex"]);
+  assert.deepEqual(extractAgentMentions("ping @codex-bot:1 for review"), ["codex-bot:1"]);
+  assert.deepEqual(extractAgentMentions("done @codex-bot:1: next"), ["codex-bot:1"]);
+  const router = createAgentRouter({ clock: fixedClock([1000]), id: () => "route-colon",
+    policy: { Grok: { mode: "escalate", escalateTo: human, note: "Needs a person." } } });
+  const { records, mentions } = router.route("thread:1", { text: "ask @Grok: please review", from: human });
+  assert.deepEqual(mentions, ["Grok"]);
+  assert.equal(records[0].agent, "Grok");
+  assert.equal(records[0].mode, "escalate");
+  assert.equal(records[0].status, "escalated");
+});
 test("direct policy routes straight to the named agent", () => {
   const router = createAgentRouter({ clock: fixedClock([1000]), id: ids });
   const { records, mentions } = router.route("thread:1", { text: "@claude review this", from: human });

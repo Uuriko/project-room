@@ -68,7 +68,11 @@ async function setup(t, mobile = false, simulate = false, accountOnly = false) {
   page.on("pageerror", e => errors.push(e.message));
   page.on("dialog", dialog => dialog.accept());
   await page.route("**/*", route => { if (new URL(route.request().url()).origin !== origin) { external.push(route.request().url()); return route.abort(); } return route.continue(); });
-  await page.goto(origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"));
+  // Navigation gets a longer bound than the 9s action default: on a loaded
+  // runner the initial load alone can exceed 9s (seen in the #3288 repair
+  // runs), and a goto timeout fails the fixture before the test even starts.
+  // The per-test timeout still bounds the whole test.
+  await page.goto(origin + (accountOnly ? "/?account=1#pr-view/rooms" : "/?room=commons"), { timeout: 30000 });
   await signInFixture(page, accountKey); await page.locator(accountOnly ? "#account-rooms-panel" : "#main").waitFor({ state: "visible" });
   // Opening the inbox lists the connections and opens the first message, two independent round
   // trips; on a phone the opened reader covers the sidebar. Settle both before any sidebar step:
@@ -431,13 +435,17 @@ test("provider preview cannot repopulate private content after another tab chang
   for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
 });
-// Quarantined per tests/quarantine.json: this browser regression test for the
-// delayed account-confirmation race has never passed in hosted CI (original
-// PR #1401 or this rescue) — see the quarantine entry for the failure
-// signature. It stays out of the blocking suite and runs only in the
-// non-blocking lane (`npm run test:quarantined`, QUARANTINE_RUN=1).
-const QUARANTINED_DELAYED_CONFIRMATION = process.env.QUARANTINE_RUN !== "1";
-test("account-only confirmation preserves a newer login and retires a held private preview", { timeout: 35000, skip: QUARANTINED_DELAYED_CONFIRMATION ? "quarantined: tests/quarantine.json (delayed-confirmation harness flake; repair by 2026-10-20)" : false }, async t => {
+// Repaired and re-admitted (#3288; was quarantined per tests/quarantine.json
+// for a harness flake, never a product failure). The old staging decided the
+// race by runner speed: the second tab's page load and its post-login reload
+// sat inside the held-request windows, so on slow runners the browser
+// client's 10s request deadline (src/client.js) aborted the held
+// confirmation, the fixture navigation hit the 9s action timeout, or the
+// 35s test timeout landed mid-flow. The staging below keeps every held
+// window free of page loads and UI waits — a hold spans only local API
+// round trips — and capture of the confirmation is proven by the server-side
+// hold itself, not by a single focus dispatch. Assertions are unchanged.
+test("account-only confirmation preserves a newer login and retires a held private preview", { timeout: 60000 }, async t => {
   let releasePreview = () => {}, releaseConfirmation = () => {};
   let previewSettled = Promise.resolve(), confirmationSettled = Promise.resolve();
   let phase = "fixture", held = false, confirmationState = "not captured", confirmationAt = null, confirmationReleasedMs = null;
@@ -449,6 +457,14 @@ test("account-only confirmation preserves a newer login and retires a held priva
   });
   // No Room stream exists in this tab: confirmation must retire its private view.
   const f = await reviewFixture(t, false, true), p = f.page;
+  // Boot the second tab before any request is held. Its page load is the
+  // slowest uncontrolled step in this test; inside a held window it eats the
+  // client request deadline and lets runner speed decide the race. The API
+  // login below needs only the shared cookie jar, not this tab's JS.
+  phase = "second tab room";
+  const other = await p.context().newPage();
+  await other.goto(f.origin + "/?room=commons", { timeout: 30000 });
+  await other.locator("#main").waitFor();
   phase = "private preview request";
   await p.setExtraHTTPHeaders({ "X-Fixture-Tab": "account-confirmation" });
   let previewStarted, confirmationStarted, confirmationFinished;
@@ -464,9 +480,6 @@ test("account-only confirmation preserves a newer login and retires a held priva
     await previewSettled;
   });
   await p.locator("#inbox-reply-open").click(); await previewReady;
-  phase = "second tab room";
-  const other = await p.context().newPage(); await other.goto(f.origin + "/?room=commons");
-  await other.locator("#main").waitFor();
   const handler = f.server.listeners("request")[0];
   f.server.removeListener("request", handler);
   f.server.on("request", async (request, response) => {
@@ -488,10 +501,20 @@ test("account-only confirmation preserves a newer login and retires a held priva
   });
   phase = "first tab confirmation request";
   await p.bringToFront();
-  // Focus changes are browser-dependent in headless multi-page runs. Exercise
-  // the same public listener deliberately; its in-flight guard still coalesces.
-  await p.evaluate(() => window.dispatchEvent(new Event("focus")));
-  const captured = await confirmationReady;
+  // Focus delivery is browser-dependent in headless multi-page runs: a real
+  // foreground switch may not fire window focus, and a single synthetic
+  // dispatch is coalesced away when a periodic confirmation flight (the
+  // app's 5s interval check) is already in progress — its request predates
+  // the hold and is never captured. Retrigger the same public focus listener
+  // until the server-side hold proves a confirmation was actually captured;
+  // the in-flight guard makes repeat triggers harmless, and capture — not a
+  // fixed wait — ends the loop.
+  let captured = null;
+  for (let attempt = 0; attempt < 40 && !captured; attempt++) {
+    await p.evaluate(() => window.dispatchEvent(new Event("focus")));
+    captured = await Promise.race([confirmationReady, new Promise(resolve => setTimeout(() => resolve(null), 250))]);
+  }
+  assert.ok(captured, "focus never produced a held confirmation request");
   phase = "second tab guest login";
   const oldCookie = (await p.context().cookies()).find(cookie => cookie.name === "account_session");
   assert.ok(oldCookie); assert.ok(captured.cookie?.split("; ").includes(`account_session=${oldCookie.value}`));
@@ -530,14 +553,18 @@ test("account-only confirmation preserves a newer login and retires a held priva
   await p.locator("#auth-panel").waitFor();
   const current = await (await p.context().request.get(f.origin + "/api/account-session")).json();
   assert.equal(current.authenticated, true); assert.equal(current.account.id, guest.id);
-  phase = "second tab guest room";
-  await other.reload(); await other.locator("#main").waitFor();
   phase = "private preview retirement";
+  // Release the preview before the second tab's reload: the reload is a page
+  // load, and the held preview is under the same client request deadline as
+  // the confirmation — a slow reload must not decide whether the preview
+  // response lands. The retirement assertions below only read the first tab.
   releasePreview(); await p.waitForLoadState("networkidle");
   assert.equal(await p.locator("#inbox-reply-dialog").isVisible(), false);
   assert.equal(await p.locator("#inbox-reply-body").textContent(), ""); assert.equal(await p.locator("#inbox-reply-addresses").textContent(), "");
   for (const id of ["inbox-reply-original-body", "inbox-reply-local-body"]) assert.equal(await p.locator("#" + id).textContent(), "");
   assert.equal(await p.evaluate(() => sessionStorage.getItem("project-room:pending-reply-review:v1")), null);
+  phase = "second tab guest room";
+  await other.reload(); await other.locator("#main").waitFor();
   phase = "complete";
 });
 

@@ -1,9 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
-import { APPROVAL_TTL_MS } from "./protocol.mjs";
+import { APPROVAL_TTL_MS, ERROR } from "./protocol.mjs";
 import { listEvents, postMessage } from "./room.mjs";
 import { configHome } from "./config.mjs";
+
+// listEvents reads pages of this size (room.mjs).
+const EVENT_PAGE_SIZE = 100;
 
 function pathFor(home) {
   return join(home, "approvals.json");
@@ -38,6 +41,13 @@ export async function requestApproval({ home = configHome(), origin, roomId, sec
   pending[code] = { className, ownerMemberId, expiresAt: now + APPROVAL_TTL_MS, createdAt: now, used: false };
   save(home, pending);
   const posted = await postMessage(origin, roomId, secret, `approve ${code} to let ${detail}`);
+  // The owner's reply can only come after this request, so polls start at
+  // the request's own room position instead of event 1.
+  const sequence = posted.value?.sequence;
+  if (posted.ok && Number.isSafeInteger(sequence) && sequence > 0) {
+    const latest = load(home);
+    if (latest[code]) { latest[code].after = sequence; save(home, latest); }
+  }
   return { ok: posted.ok, code, expiresAt: pending[code].expiresAt };
 }
 
@@ -58,21 +68,74 @@ export async function takeApproval({ home = configHome(), origin, roomId, secret
       && String(event.data?.body ?? "").trim() === `approve ${code}`;
   };
   // M4: page through the room's events instead of reading only the first
-  // 100. Stop at the first page containing the approval reply; the code is
-  // unique, so an older page can never hold it. Cap the scan to bound the
-  // loop against pathological rooms.
-  let after = 0;
+  // 100. Each poll resumes at the row's cursor: the request's own position,
+  // then wherever the last poll stopped. So a poll reads only new events,
+  // and an approval in a room with more than 100 pages of history is still
+  // found. Rows saved without a cursor start at 0, as before. The page cap
+  // bounds one poll; the next poll continues from where it stopped.
+  let after = Number.isSafeInteger(row.after) && row.after > 0 ? row.after : 0;
   let found = false;
   for (let pages = 0; pages < 100 && !found; pages += 1) {
     const page = await listEvents(origin, roomId, secret, after);
     if (!page.ok) return { ok: false, reason: "approval_required" };
     found = page.events.some(matches);
-    if (!found && (!page.events.length || page.next <= after)) return { ok: false, reason: "approval_required" };
-    after = page.next;
+    if (found) break;
+    const advanced = Number.isSafeInteger(page.next) && page.next > after;
+    if (advanced) after = page.next;
+    // A short page is the end of the room for now: stop without another read.
+    if (!advanced || page.events.length < EVENT_PAGE_SIZE) break;
   }
-  if (!found) return { ok: false, reason: "approval_required" };
-  row.used = true;
-  pending[code] = row;
-  save(home, pending);
+  if (!found) {
+    if (after !== (row.after ?? 0)) {
+      const latest = load(home);
+      if (latest[code] && !latest[code].used) { latest[code].after = after; save(home, latest); }
+    }
+    return { ok: false, reason: "approval_required" };
+  }
+  // The scan above awaited the network, so `pending` can be stale: another
+  // caller may have consumed a code or requested a new one meanwhile (the
+  // bot and the daemon share this file). Reload and revalidate before
+  // saving — as the not-found path does — so this save cannot resurrect a
+  // code consumed in the window or drop one requested in it.
+  const latest = load(home);
+  const current = latest[code];
+  if (!current || current.used || now >= current.expiresAt) {
+    return { ok: false, reason: "approval_denied" };
+  }
+  current.used = true;
+  save(home, latest);
   return { ok: true };
+}
+
+// Research r6 (R327-1): one wake-based wait for an approval decision. take()
+// scans the room once up front (catches a decision that landed while the
+// machine was down), then again when the wake poll reports a release or every
+// scanMs as a safety net for an answer the server raised no wake for.
+// Research r7: stopped() is checked around every wait so a room Pause that
+// lands mid-wait ends the wait at once (the server releases the held poll).
+export async function waitForDecision({ take, poll = null, clock = Date.now, sleep = ms => new Promise(r => setTimeout(r, ms)), deadline, scanMs = 5000, stopped = () => false }) {
+  const decided = taken => taken?.ok === true || taken?.reason === ERROR.APPROVAL_DENIED;
+  let taken = await take();
+  if (decided(taken)) return { taken };
+  let lastScan = clock(), backoff = 250;
+  while (clock() <= deadline && !stopped()) {
+    const remaining = Math.max(0, deadline - clock());
+    if (!poll) {
+      await sleep(Math.min(40, remaining));
+      taken = await take();
+      if (decided(taken)) return { taken };
+      continue;
+    }
+    const asked = clock();
+    const page = await poll(Math.min(remaining, scanMs));
+    if (stopped()) break;
+    const released = Boolean(page?.ok) && page.value?.timedOut === false;
+    if (released || clock() - lastScan >= scanMs) {
+      lastScan = clock();
+      taken = await take();
+      if (decided(taken)) return { taken };
+    }
+    if (!released && clock() - asked < 50) { await sleep(Math.min(backoff, Math.max(remaining, 1))); backoff = Math.min(backoff * 2, 1000); }
+  }
+  return { taken: null };
 }

@@ -5,7 +5,7 @@
 //   status (active|deprecated, default active).
 //
 // This script validates every file and bakes a frozen index into
-// deploy/procedures-index.mjs, which the discovery surface serves at
+// server/procedures-index.mjs, which the discovery surface serves at
 // GET /procedures (read-only, global namespace: every room reads the same
 // bytes). Run it after adding or editing a procedure:
 //
@@ -106,7 +106,7 @@ ${entries.join(",\n")}
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const proceduresDir = join(repoRoot, "docs", "procedures");
-const outPath = join(repoRoot, "deploy", "procedures-index.mjs");
+const outPath = join(repoRoot, "server", "procedures-index.mjs");
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const check = process.argv.includes("--check");
@@ -115,7 +115,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (check) {
     const current = readFileSync(outPath, "utf8");
     if (current !== rendered) {
-      console.error("deploy/procedures-index.mjs is stale: run node scripts/procedures-index.mjs");
+      console.error("server/procedures-index.mjs is stale: run node scripts/procedures-index.mjs");
       process.exit(1);
     }
     console.log(`procedures index fresh: ${index.length} procedures`);

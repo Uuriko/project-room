@@ -28,6 +28,21 @@ test("a requested inbound delivery fails the CLI when the door is unconfigured",
   assert.equal(scheduled.status, 0, "an unused scheduled door can remain disabled");
 });
 
+test("configured inbound credentials never implicitly authorize public outbound publication", () => {
+  for (const publish of ["", "false", "TRUE", "1"]) {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/github-door.mjs", import.meta.url)), "out"], {
+      env: { ...process.env, ROOM_DOOR_SECRET: "synthetic", GITHUB_REPOSITORY: repo,
+        ROOM_DOOR_PUBLISH: publish, ROOM_ORIGIN: "http://127.0.0.1:1" }, encoding: "utf8"
+    });
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /outbound publication disabled/);
+  }
+  const enabled = spawnSync(process.execPath, [fileURLToPath(new URL("../scripts/github-door.mjs", import.meta.url)), "out"], {
+    env: { ...process.env, ROOM_DOOR_SECRET: "", GITHUB_REPOSITORY: repo, ROOM_DOOR_PUBLISH: "true" }, encoding: "utf8"
+  });
+  assert.match(enabled.stdout, /ROOM_DOOR_SECRET/, "explicit opt-in reaches configuration validation");
+});
+
 test("outbound checkpoints quiet pages so later public messages remain reachable", async t => {
   for (const ignoredMessages of [false, true]) await t.test(ignoredMessages ? "own and private messages" : "non-message events", async () => {
     const comments = [], requested = [];
@@ -191,6 +206,43 @@ test("overflow digest resumes with every omitted public message on the next run"
   assert.ok(comments.every(c => c.body.length <= 60000), "each posted digest stays within its comment budget");
   const combined = comments.map(c => c.body).join("\n");
   for (const m of messages) assert.equal(combined.split(`· \`${m.messageId}\``).length - 1, 1);
+});
+
+// Regression (#2883): the cursor scan used to page oldest-first and stop
+// after 30 pages (3000 comments), so on a busier door issue the newest
+// digest marker was never fetched and every run re-posted a duplicate digest.
+test("outbound cursor scan finds the newest digest marker beyond 3000 older comments", async () => {
+  const bot = { login: "github-actions[bot]", type: "Bot" };
+  const filler = { body: "busy discussion", user: { login: "uuriko", type: "User" } };
+  const comments = [
+    { body: `${OUT_MARKER} seq=10 -->\nold digest`, user: bot },
+    ...Array.from({ length: 3498 }, () => filler),
+    { body: `${OUT_MARKER} seq=99 -->\nlatest digest`, user: bot }
+  ];
+  assert.equal(comments.length, 3500);
+  const requestedUrls = [];
+  const fetchImpl = async (url, init = {}) => {
+    if (!init.method || init.method === "GET") {
+      requestedUrls.push(url);
+      const parsed = new URL(url);
+      const page = Number(parsed.searchParams.get("page") ?? 1);
+      const perPage = Number(parsed.searchParams.get("per_page") ?? 100);
+      const ordered = comments; // GitHub issue comments are always ascending by ID.
+      return new Response(JSON.stringify(ordered.slice((page - 1) * perPage, page * perPage)));
+    }
+    const comment = { ...JSON.parse(init.body), user: bot };
+    comments.push(comment); return new Response(JSON.stringify(comment), { status: 201 });
+  };
+  let requestedAfter;
+  const client = { roomMessages: async ({ after }) => { requestedAfter = after;
+    return { messages: after < 99 ? [{ sequence: 50, from: "peer", messageId: "dup-50", body: "already mirrored" }] : [],
+      next: Math.max(after, 99), hasMore: false };
+  } };
+  const result = await runOutbound({ repo, doorIssue: 7, token: "synthetic", client, roomId: "commons", selfMemberId: "door", fetchImpl });
+  assert.equal(requestedAfter, 99, "cursor must come from the newest digest, not the oldest fetched page");
+  assert.equal(result.posted, false);
+  assert.equal(comments.length, 3500, "no duplicate digest may be posted");
+  assert.ok(requestedUrls.every(url => !new URL(url).searchParams.has("direction")), "use supported issue-comment parameters");
 });
 
 test("forged markers from humans, other bots and quoted text cannot advance outbound cursor", async () => {

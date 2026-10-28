@@ -328,3 +328,23 @@ test("a squad channel cannot disclose a private message", t => {
  assert.throws(()=>createSquad(f.store,f.ownerKey,"commons",{name:"private",channelMessageId:messageId}),e=>e.status===422);
  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM squads").get().n,0);
 });
+
+test("an archived public squad channel remains linked and readable", async t => {
+  const f = await serve(t);
+  const channelMessageId = f.post(f.ownerKey, "squad channel root");
+  const created = await f.squads("POST", f.ownerKey, { name: "crew", channelMessageId });
+  assert.equal(created.status, 201, JSON.stringify(created.json));
+  for (let i = 0; i < 6; i++) f.post(f.ownerKey, `padding ${i}`);
+  for (let i = 0; i < 20; i++) if (f.store.backfillMessages({ limit: 1000 }).done) break;
+  f.store.checkMessagesParity();
+  assert.ok(f.store.archiveMessages("commons", { keepNewest: 2, dryRun: false }).archived > 0);
+  assert.equal(f.store.room("commons").state.messages.some(message => message.id === channelMessageId), false,
+    "precondition: the channel root has left the live projection");
+  assert.equal(f.store.messageThread(f.ownerKey, "commons", channelMessageId).thread.id, channelMessageId,
+    "the archived channel thread remains readable");
+
+  const listed = await f.squads("GET", f.ownerKey);
+  assert.equal(listed.status, 200, JSON.stringify(listed.json));
+  assert.equal(listed.json.squads.find(squad => squad.id === created.json.squad.id)?.channel, channelMessageId,
+    "squad reads keep linking to a readable archived channel");
+});

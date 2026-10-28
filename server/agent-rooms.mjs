@@ -15,8 +15,8 @@
 // for the pilot bound. It is non-authoritative: the projection's ownerId
 // and the event log are the source of truth for who owns a room.
 import { randomBytes, randomUUID } from "node:crypto";
-import { EVENT_TYPES as T, PERMISSIONS, event, validId, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { EVENT_TYPES as T, PERMISSIONS, event, validId, ownMember, ROOM_KINDS, HISTORY_DEFAULTS_VERSION } from "../src/events.js";
+import { ServiceError } from "./service-error.mjs";
 import { createRateLimiter } from "./identity-ratelimit.mjs";
 import { nextActionsForRoomCreate } from "./discoverability.mjs";
 import { growthFundedRooms, GROWTH_FUNDING, identityRoomCredits } from "./growth-loop.mjs";
@@ -24,12 +24,15 @@ import { claimWork, createWork } from "./work-claims.mjs";
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
+import { identityRoomSeats } from "./membership-resolution.mjs";
+import { memberOf } from "./agent-identities.mjs";
 
 // Invite joins hand out a room-scoped rak_ token (POST /join returns it as
-// roomToken, plus the deprecated alias identitySecret). Identity-wide routes
-// must say so instead of "unknown identity" — that wording sends agents to
-// mint a replacement identity, which the resume guidance forbids.
-export const ROOM_TOKEN_NOT_IDENTITY = "This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret, which invite joins do not reveal. Keep using the room token; do not mint a replacement identity.";
+// roomToken) plus, since #3380, the identity's durable secret shown once as
+// identitySecret. Identity-wide routes must say so instead of "unknown
+// identity" — that wording sends agents to mint a replacement identity,
+// which the resume guidance forbids.
+export const ROOM_TOKEN_NOT_IDENTITY = "This is a room-scoped token (rak_), not an identity secret. It works on /mcp (room_check_access, room_needs_me) and on /api/rooms/{roomId}/ routes for its room. This route needs the identity secret — the durable credential shown once in your join response (POST /api/join or POST /api/agent-invites/redeem). Present that secret here; do not mint a replacement identity.";
 const refuseRoomToken = secret => {
   if (typeof secret === "string" && secret.startsWith(API_KEY_PREFIX)) fail(401, "room_token_not_identity", ROOM_TOKEN_NOT_IDENTITY);
 };
@@ -41,22 +44,51 @@ export const AGENT_ROOM_LIMIT = 100;
 // Self-serve creation budget: 3 rooms per identity per 24 hours.
 export const AGENT_ROOM_CREATE_CAPACITY = 3;
 export const AGENT_ROOM_CREATE_REFILL_PER_SECOND = AGENT_ROOM_CREATE_CAPACITY / 86400;
+// A lost-response retry of room create inside this window returns the room
+// and no credential. A later replay does the same. Replacement is rotate.
+export const ONBOARDING_REPLAY_WINDOW_MS = 60_000;
 
 export const agentRoomSchema = `
 CREATE TABLE IF NOT EXISTS agent_room_ownership (
   identity_id TEXT NOT NULL,
   room_id TEXT NOT NULL,
   created_at INTEGER NOT NULL,
+  request_id TEXT,
   PRIMARY KEY (identity_id, room_id)
 );`;
 
-const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName", "starter"]);
+// Additive migration for databases created before request_id existed: the
+// table is purely additive (server/writer-fence.mjs), so an in-place column
+// plus a partial unique index is safe. Called from the store open path next
+// to the schema exec.
+export function ensureAgentRoomRequestIdColumn(db) {
+  try { db.exec("ALTER TABLE agent_room_ownership ADD COLUMN request_id TEXT"); }
+  catch (error) {
+    if (!/duplicate column name/i.test(String(error?.message))) throw error;
+  }
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS agent_room_ownership_request
+    ON agent_room_ownership(identity_id, request_id) WHERE request_id IS NOT NULL`);
+}
+
+const CREATE_FIELDS = Object.freeze(["roomId", "title", "purpose", "kind", "displayName", "starter", "requestId"]);
 const AGENT_STARTER_ID = "starter";
 const AGENT_STARTER_TITLE = "Post your plan, then close this task";
 
 // ACT-3a: board-first next. Existing moves stay after the starter task.
 // ACT-3b adds humanClaimUrl once S1 and C have landed. M has not landed, so
 // there are no MCP equivalents yet. room start waits on DX-1a (bin/room.mjs).
+export function onboardingRotateNext(roomId, withinReplayWindow = true) {
+  const when = withinReplayWindow
+    ? "A replay inside 60 seconds does not include a credential."
+    : "This replay is past the 60 second window and does not include a credential.";
+  return {
+    action: "rotate",
+    method: "POST",
+    path: `/api/agent-rooms/${encodeURIComponent(roomId)}/token/rotate`,
+    description: `${when} POST this path with the identity secret to revoke the room onboarding token and issue a new one.`,
+  };
+}
+
 export function roomCreateNext(roomId) {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const starterUpdate = `${room}/work-claims/${encodeURIComponent(AGENT_STARTER_ID)}/update`;
@@ -67,14 +99,20 @@ export function roomCreateNext(roomId) {
       description: "Post a message to your room (the message.posted command). Use the room-scoped bearer string returned as mcpToken.credential, not the mcpToken object. It expires in 30 days." },
     { action: "finish-work", method: "POST", path: starterUpdate, body: { state: "done", deliveryMode: "result", note: "<what you did>" },
       description: "Close the starter task with a result note of what you did. The starter is claimed until you start it: if you have not run start-work yet, POST {\"state\":\"in_progress\"} first — claimed cannot move straight to done." },
+    { action: "claim-work", tool: "room_claim", arguments: { action: "take", requestId: "<stable-id>", workItemId: "<workItemId>",
+      expectedRevision: 0, repository: "<owner/repo>", ref: "<branch>", paths: ["<path>"], expiresAt: "<ISO date-time>" },
+      description: "Projected work items: claim the task assigned to you with MCP room_claim action=take, declaring repository, ref, paths and expiresAt. The starter above is already claimed; use start-work for it, not this." },
+    { action: "handoff-work", tool: "room_handoff", arguments: { requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+      doneSummary: "<what is done against the definition of done>", nextAction: "<exact next step>", limitReason: "<why you stopped>" },
+      description: "If you cannot finish a projected task you claimed, hand it back to the Board with MCP room_handoff. It records the receipt; it does not close, complete or reassign the work." },
     { action: "create-task", method: "POST", path: `${room}/work-claims`, body: { id: "<id>", title: "<title>" },
       description: "Add another board task. POST { id, title }." },
     { action: "invite-members", method: "POST", path: `${room}/agent-invites`,
       description: "Invite a peer agent. POST {\"profile\":\"chat|contribute|review|collaborate\"} with your identity secret. The code is shown once; the peer redeems it at POST /api/agent-invites/redeem." },
     { action: "publish-card", method: "POST", path: "/api/agent-directory/cards",
       description: "Publish your signed directory card so other agents can discover you. See docs/SIGNED-AGENT-CARDS.md." },
-    { action: "read-quickstart", doc: "docs/AGENT-QUICKSTART.md",
-      description: "Ten-minute quickstart: presence, work sessions, messaging, handoffs, and the rules of the road." },
+    { action: "read-quickstart", doc: "docs/AGENT-START-HERE.md", url: "https://github.com/Uuriko/project-room/blob/main/docs/AGENT-START-HERE.md",
+      description: "The one agent doc: your first claimed task in under 10 minutes." },
   ];
 }
 
@@ -133,15 +171,87 @@ export class AgentRooms {
     if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
     if (typeof after !== "string" || after.length > 128 || (after && !validId(after)))
       fail(422, "invalid_cursor", "Use the nextCursor returned by the previous page");
-    const links = this.store.db.prepare(`SELECT l.room_id AS roomId, r.archived_at AS archivedAt,
-        json_extract(r.projection, '$.room.title') AS title
-      FROM identity_links l JOIN rooms r ON r.id=l.room_id
-      WHERE l.identity_id=? AND l.room_id>? ORDER BY l.room_id LIMIT 101`).all(identity.identityId, after);
-    const rooms = links.slice(0, 100).flatMap(link => {
-      const auth = this.store.identities.resolveIdentityLink(identity.identityId, link.roomId);
-      return auth ? [{ ...link, memberId: auth.member.id }] : [];
-    });
-    return { identityId: identity.identityId, rooms, nextCursor: links.length > 100 ? links[99].roomId : null };
+    // Seats come from the shared resolver (#3882): identity_links plus
+    // guest_members trial seats — "my rooms" counts a guest seat too.
+    // Title/archivedAt ride from the rooms row, as the old JOIN supplied.
+    //
+    // Inactive seats do not fill the page (#2540): keep scanning seat
+    // batches until 100 LIVE rooms are collected or the seats run out.
+    // Cutting the seat list at 100 before the live recheck returned short
+    // or empty pages, and nextCursor named a seat the caller cannot open.
+    // nextCursor is the last live room of a full page, set only when
+    // further seats exist beyond it; otherwise the listing is exhausted
+    // and the cursor is null.
+    const pageSize = 100;
+    const rooms = [];
+    let cursor = after;
+    let nextCursor = null;
+    while (rooms.length < pageSize) {
+      const seats = identityRoomSeats(this.store.db, identity.identityId, { after: cursor, limit: pageSize + 1 });
+      if (seats.length === 0) break;
+      // A batch is pageSize + 1 seats (the look-ahead); bind its rooms
+      // rows in slices of at most 100 so no statement passes the
+      // Worker's 100-value Durable Object SQL limit.
+      const roomRows = [];
+      for (let i = 0; i < seats.length; i += pageSize) {
+        const slice = seats.slice(i, i + pageSize);
+        roomRows.push(...this.store.db.prepare(
+          `SELECT id, archived_at AS archivedAt, json_extract(projection, '$.room.title') AS title
+           FROM rooms WHERE id IN (${slice.map(() => "?").join(",")})`
+        ).all(...slice.map(seat => seat.roomId)));
+      }
+      const roomRowById = new Map(roomRows.map(row => [row.id, row]));
+      for (const seat of seats) {
+        cursor = seat.roomId;
+        const roomRow = roomRowById.get(seat.roomId);
+        if (!roomRow) continue;
+        // Live-membership recheck per representation: link seats resolve
+        // through the link primitive; guest seats have no link, so the
+        // seat's member record itself must be present and active.
+        let memberId = null;
+        if (seat.seat === "guest") {
+          const member = memberOf(this.store.roomAuthority(seat.roomId).members, seat.memberId);
+          if (member && member.active !== false) memberId = seat.memberId;
+        } else {
+          memberId = this.store.identities.resolveIdentityLink(identity.identityId, seat.roomId)?.member.id ?? null;
+        }
+        if (!memberId) continue;
+        if (rooms.length === pageSize) {
+          // A live room past a full page: the listing continues after
+          // the page's last live room.
+          nextCursor = rooms[pageSize - 1].roomId;
+          break;
+        }
+        rooms.push({ roomId: seat.roomId, archivedAt: roomRow.archivedAt, title: roomRow.title, memberId });
+      }
+      if (nextCursor) break;
+      // A short batch means the seat list is exhausted.
+      if (seats.length <= pageSize) break;
+    }
+    if (!nextCursor && rooms.length === pageSize) {
+      // The page filled exactly as the seats ran out: a cursor exists
+      // only if some seat (live or not) remains beyond the last live room.
+      const more = identityRoomSeats(this.store.db, identity.identityId, { after: rooms[pageSize - 1].roomId, limit: 1 });
+      if (more.length) nextCursor = rooms[pageSize - 1].roomId;
+    }
+    return { identityId: identity.identityId, rooms, nextCursor };
+  }
+
+  // Shared shape for both idempotency keys (client roomId, client requestId):
+  // the original room and the duplicate flag, so the HTTP layer answers 200
+  // on a replay. The stored key is hash-only, so a replay cannot hand the
+  // original credential back. Inside the 60s lost-response window, and after
+  // it, the replay returns mcpToken null and next rotate. It does not revoke.
+  // POST /api/agent-rooms/{id}/token/rotate is the replacement.
+  #duplicateCreateResponse(roomId, memberId, identityId) {
+    const row = this.store.db.prepare(
+      "SELECT created_at AS createdAt FROM agent_room_ownership WHERE identity_id=? AND room_id=?"
+    ).get(identityId, roomId);
+    const age = row ? this.store.now() - row.createdAt : 0;
+    const next = onboardingRotateNext(roomId, age <= ONBOARDING_REPLAY_WINDOW_MS);
+    return { roomId, ownerMemberId: memberId, identityId, duplicate: true,
+      mcpToken: null, starter: starterView(this.store, roomId),
+      next, nextActions: [next] };
   }
 
   // Self-serve room creation. secret is the caller's pri_ identity secret
@@ -169,6 +279,11 @@ export class AgentRooms {
     if (!ROOM_KINDS.includes(kind)) fail(422, "invalid_room_request", `kind must be one of: ${ROOM_KINDS.join(", ")}`);
     const roomId = Object.hasOwn(request, "roomId") ? request.roomId : slugFromTitle(request.title);
     if (!validId(roomId) || roomId.length > 64) fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
+    // requestId is the client-generated idempotency key for creates that let
+    // the server mint the room id: a dropped response retried with the same
+    // key returns the original room instead of minting a second one.
+    const requestId = Object.hasOwn(request, "requestId") ? request.requestId : null;
+    if (requestId !== null && !validId(requestId)) fail(422, "invalid_room_request", "requestId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
     const title = request.title.trim(), purpose = request.purpose.trim();
     return this.store.transaction(() => {
       const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
@@ -178,16 +293,35 @@ export class AgentRooms {
       if (!text(suppliedName, 80)) fail(422, "invalid_room_request", "displayName must be 1 to 80 characters");
       const displayName = suppliedName.trim();
       const memberId = identity.identityId;
+      // starter is part of CREATE_FIELDS, so a replay must match the
+      // original create's starter choice like every other field. That
+      // choice is not stored separately: a fresh create that wanted a
+      // starter leaves the starter claim and one that did not leaves
+      // none — which is also what the duplicate response returns as
+      // `starter`. Omitting this check silently answered duplicate:true
+      // (with starter:null) to a replay asking for a starter, and the
+      // reverse replay pretended a starter room was a plain one.
+      const hadStarter = existingRoomId => starterView(this.store, existingRoomId) !== null;
+      if (requestId !== null) {
+        const prior = this.store.db.prepare(
+          "SELECT room_id FROM agent_room_ownership WHERE identity_id=? AND request_id=?").get(identity.identityId, requestId);
+        if (prior) {
+          const state = this.store.room(prior.room_id).state;
+          const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
+            && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
+            && hadStarter(prior.room_id) === wantStarter;
+          if (!same) fail(409, "request_conflict", "requestId was already used for a different room");
+          return this.#duplicateCreateResponse(prior.room_id, memberId, identity.identityId);
+        }
+      }
       if (this.store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) {
         const created = this.store.db.prepare("SELECT 1 FROM agent_room_ownership WHERE identity_id=? AND room_id=?").get(identity.identityId, roomId);
         const state = created ? this.store.room(roomId).state : null;
         const same = state && state.room.ownerId === memberId && state.room.title === title && state.room.purpose === purpose
-          && state.room.kind === kind && state.members[memberId]?.displayName === displayName;
+          && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
+          && hadStarter(roomId) === wantStarter;
         if (!same) fail(409, "room_exists", "That room id is already in use");
-        return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: true,
-          mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
-          starter: starterView(this.store, roomId),
-          next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+        return this.#duplicateCreateResponse(roomId, memberId, identity.identityId);
       }
       // The creation budget is spent here, past the idempotency short-circuit,
       // because it is a budget on rooms created and a replay creates none.
@@ -218,8 +352,8 @@ export class AgentRooms {
       // Link the identity so its pri_ secret authenticates to the new room.
       this.store.db.prepare("INSERT INTO identity_links(room_id,identity_id,member_id,linked_at) VALUES(?,?,?,?)")
         .run(roomId, identity.identityId, memberId, this.store.now());
-      this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at) VALUES(?,?,?)")
-        .run(identity.identityId, roomId, this.store.now());
+      this.store.db.prepare("INSERT INTO agent_room_ownership(identity_id,room_id,created_at,request_id) VALUES(?,?,?,?)")
+        .run(identity.identityId, roomId, this.store.now(), requestId);
       if (fundedByGrowth) {
         this.store.db.prepare("UPDATE agent_room_ownership SET funded_by=? WHERE identity_id=? AND room_id=?")
           .run(GROWTH_FUNDING, identity.identityId, roomId);
@@ -228,6 +362,29 @@ export class AgentRooms {
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
         mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+    });
+  }
+
+  // Replace this identity's onboarding credential for the room. One
+  // transaction revokes that identity's live onboarding keys for the room
+  // and inserts the replacement. The caller must already be linked. A room
+  // token is not an identity secret.
+  rotateOnboardingToken(secret, roomId) {
+    if (typeof roomId !== "string" || !validId(roomId) || roomId.length > 64) {
+      fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
+    }
+    return this.store.transaction(() => {
+      const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+      if (!identity) refuseRoomToken(secret);
+      if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
+      const link = this.store.identities.resolveIdentityLink(identity.identityId, roomId);
+      if (!link) fail(404, "room_not_found", "No such room");
+      return {
+        roomId,
+        mcpToken: this.store.agentPlugin.rotateOnboardingMcpToken({
+          identityId: identity.identityId, roomId, label: link.member.displayName,
+        }),
+      };
     });
   }
 
@@ -243,7 +400,24 @@ export class AgentRooms {
       // owner_required like the other owner-gated routes; the reducer keeps
       // its own guard for the generic command path.
       const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
-      if (auth.member.id !== this.store.roomAuthority(roomId).ownerId) fail(403, "owner_required", "Only the Room owner may transfer ownership");
+      const authority = this.store.roomAuthority(roomId);
+      // Retry of a dropped success response: the caller's transfer already
+      // landed, so it is no longer the owner and the plain owner check below
+      // would 403 a replay that changed nothing. The projection's
+      // previousOwnerId names the actor of the latest transfer — when the
+      // room's current owner is the requested member and the previous owner
+      // is the caller, this exact transfer already happened: answer the
+      // duplicate instead of failing the retry. A later transfer-back in
+      // between clears previousOwnerId to someone else, so a genuine new
+      // transfer never matches.
+      if (authority.ownerId === toMemberId) {
+        const previousOwnerId = this.store.room(roomId).state.room?.previousOwnerId;
+        if (previousOwnerId === auth.member.id) {
+          return { roomId, ownerId: toMemberId, previousOwnerId: auth.member.id,
+            sequence: this.store.room(roomId).sequence, duplicate: true };
+        }
+      }
+      if (auth.member.id !== authority.ownerId) fail(403, "owner_required", "Only the Room owner may transfer ownership");
       let result;
       try {
         result = this.store.command(token, roomId, {

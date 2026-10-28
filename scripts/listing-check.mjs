@@ -1,4 +1,4 @@
-// Weekly directory listing check. Reads docs/listings.json and server.json.
+// Weekly directory listing check. Reads scripts/listings.json and server.json.
 // The one-liner is server.json's description, so a description edit does not
 // require a change here.
 import { createHash } from "node:crypto";
@@ -277,7 +277,7 @@ const isMain = process.argv[1] && pathToFileURL(resolve(process.argv[1])).href =
 if (isMain) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
   const server = JSON.parse(readFileSync(resolve(root, "server.json"), "utf8"));
-  const catalog = JSON.parse(readFileSync(resolve(root, "docs/listings.json"), "utf8"));
+  const catalog = JSON.parse(readFileSync(resolve(root, "scripts/listings.json"), "utf8"));
   const outFlag = process.argv.indexOf("--out");
   const outPath = outFlag === -1 ? resolve(root, "listing-check.json") : resolve(process.argv[outFlag + 1] ?? "");
   const rows = await checkListings(catalog.rows, {

@@ -106,6 +106,32 @@ test("failed PKCE guesses do not burn the code for the legitimate exchanger", ()
   assert.ok(provider.verifyAccessToken(tokens.accessToken));
 });
 
+test("O1 (issue #941): replayed authorization code revokes the tokens already issued from it", () => {
+  // RFC 6749 §10.5: a replayed code points to a leaked code, so the server
+  // SHOULD revoke the tokens issued from that code. Invariant: replaying a
+  // used code kills the whole token family minted from it (access and
+  // refresh alike) and emits an authorization_code_reuse_detected security
+  // event. Regression: the old behavior rejected the replay but left the
+  // issued tokens live.
+  const events = [];
+  let t = 1_000_000;
+  const provider = createOAuthProvider({ clock: () => t, onSecurityEvent: event => { events.push(event); } });
+  provider.registerClient({ clientId: CLIENT_A, name: "Muse", redirectUris: [URI_A, URI_B] });
+  const { code, verifier: v, tokens } = fullGrant(provider);
+  assert.ok(provider.verifyAccessToken(tokens.accessToken), "grant works before the replay");
+  assert.throws(() => provider.exchangeCode({
+    code, clientId: CLIENT_A, redirectUri: URI_A, codeVerifier: v,
+  }), err => err instanceof OAuthProviderError
+    && err.code === "invalid_grant" && /already used/.test(err.message));
+  assert.equal(provider.verifyAccessToken(tokens.accessToken), null,
+    "O1: the access token issued from the replayed code is revoked");
+  assert.throws(() => provider.refresh({
+    refreshToken: tokens.refreshToken, clientId: CLIENT_A,
+  }), /refresh token revoked/, "O1: the refresh token issued from the replayed code is revoked");
+  assert.equal(events.filter(event => event.type === "authorization_code_reuse_detected").length, 1,
+    "O1: exactly one reuse signal is emitted");
+});
+
 // ---------------------------------------------------------------------------
 // 2. PKCE downgrade / verifier mismatch
 // ---------------------------------------------------------------------------

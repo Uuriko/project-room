@@ -100,6 +100,33 @@ function uniqueTarget(candidates, senderMemberId) {
   return targets.length ? targets[0] : null;
 }
 
+// Two-trigger discipline (lane B8): interrupt suppression/re-arm driven off
+// the mention lifecycle transitions. `state` is the mention's current
+// lifecycle state; the caller supplies whether a second interrupt for the
+// same request falls inside the 30-minute dedupe window (collapses into the
+// first) and whether a fresh explicit request re-arms a timed-out mention.
+// Pure and additive: terminal `responded` never re-fires; `delivered` /
+// `acknowledged` fire once per window; only a fresh explicit request after
+// `timed_out` re-arms.
+export function mentionInterruptGate({ state, explicitReRequest = false, withinDedupeWindow = false } = {}) {
+  if (!isMentionState(state)) throw new Error(`unknown mention state: ${state}`);
+  if (state === "responded") return Object.freeze({ fire: false, reason: "mention already responded" });
+  if (state === "timed_out") {
+    return explicitReRequest
+      ? Object.freeze({ fire: true, reason: "fresh explicit request after timeout re-arms the interrupt" })
+      : Object.freeze({ fire: false, reason: "timed out without a fresh explicit request" });
+  }
+  return withinDedupeWindow
+    ? Object.freeze({ fire: false, reason: "collapsed into the pending interrupt (dedupe window)" })
+    : Object.freeze({ fire: true, reason: "first interrupt for this request" });
+}
+
+// Resolve an @name to a room member id. `members` is the room projection's
+// members map ({ memberId: { displayName, kind, active } });
+// `identityNames` maps memberId -> linked agent-identity display name.
+// Match order: memberId, then displayName, then identity display name —
+// all case-insensitive, first match wins. Skips the sender and inactive
+// members; returns null when nothing resolves (never invent a recipient).
 export function resolveMentionTarget(members, identityNames, name, senderMemberId) {
   if (typeof name !== "string" || !name) return null;
   return uniqueTarget(mentionCandidates(members, identityNames)
@@ -117,6 +144,22 @@ export const mentionStateSchema = `
     decided_at INTEGER,
     PRIMARY KEY(room_id,message_event_id,mentioned_member_id)
   );
+  CREATE TABLE IF NOT EXISTS mention_observations (
+    room_id TEXT NOT NULL,
+    message_event_id TEXT NOT NULL,
+    mentioned_member_id TEXT NOT NULL,
+    acknowledged INTEGER NOT NULL DEFAULT 0 CHECK(acknowledged IN (0,1)),
+    acknowledged_at INTEGER,
+    responded_at INTEGER,
+    PRIMARY KEY(room_id,message_event_id,mentioned_member_id),
+    FOREIGN KEY(room_id,message_event_id,mentioned_member_id)
+      REFERENCES mention_states(room_id,message_event_id,mentioned_member_id) ON DELETE CASCADE
+  );
+  INSERT OR IGNORE INTO mention_observations
+    (room_id,message_event_id,mentioned_member_id,acknowledged,responded_at)
+    SELECT room_id,message_event_id,mentioned_member_id,1,
+      CASE WHEN state='responded' THEN decided_at ELSE NULL END
+    FROM mention_states WHERE state IN ('acknowledged','responded');
   CREATE INDEX IF NOT EXISTS mention_states_member ON mention_states(room_id,mentioned_member_id,state);
   CREATE INDEX IF NOT EXISTS mention_states_message ON mention_states(room_id,message_event_id);
   CREATE TABLE IF NOT EXISTS room_mention_settings (
@@ -125,6 +168,28 @@ export const mentionStateSchema = `
     updated_at INTEGER NOT NULL
   );
 `;
+
+// Member id -> linked agent-identity display name. Mention detection and
+// mention delivery must resolve the same names: every @-resolution path
+// shares this map, or a mention the tracker records as delivered never wakes
+// its agent. Never throws: a database without the identity tables simply has
+// no identity aliases.
+export function identityNamesForRoom(db, roomId) {
+  try {
+    const links = db.prepare(
+      `SELECT l.member_id AS memberId, i.display_name AS displayName FROM identity_links l
+       JOIN agent_identities i ON i.identity_id=l.identity_id
+       WHERE l.room_id=? AND i.revoked_at IS NULL`).all(roomId);
+    return Object.fromEntries(links.map(row => [row.memberId, row.displayName]));
+  } catch {
+    return {};
+  }
+}
+
+// A hyphen continues the handle. "@Instinct-3" is not a mention of "Instinct".
+// A unicode letter, number, or mark continues the token too: "@Groké" is not a
+// mention of Grok (parity with tokenContinues in inbox-agent-routing.mjs).
+const handleContinues = (text, end) => end < text.length && /[\p{L}\p{N}\p{M}_-]/u.test(text[end]);
 
 // Resolve explicit @mentions using the longest complete label first, then
 // exact-id/name precedence and uniqueness. Never fall back from an ambiguous
@@ -142,7 +207,7 @@ export function resolveMentionTargetsInText(members, identityNames, text, sender
     for (const candidate of candidates) {
       const end = nameAt + candidate.lower.length;
       if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
-      if (end < text.length && /[A-Za-z0-9_]/.test(text[end])) continue;
+      if (handleContinues(text, end)) continue;
       if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
       if (candidate.lower.length === longest) matches.push(candidate);
     }
@@ -183,7 +248,7 @@ export function mentionTargetWarnings(members, identityNames, text, senderMember
     for (const candidate of candidates) {
       const end = nameAt + candidate.lower.length;
       if (lowerText.slice(nameAt, end) !== candidate.lower) continue;
-      if (end < text.length && /[A-Za-z0-9_]/.test(text[end])) continue;
+      if (handleContinues(text, end)) continue;
       if (candidate.lower.length > longest) { matches = []; longest = candidate.lower.length; }
       if (candidate.lower.length === longest) matches.push(candidate);
     }

@@ -287,6 +287,49 @@ describe('ralph-loop: state persistence', () => {
   });
 });
 
+describe('ralph-loop: state lock just-created lockfile (#2888)', () => {
+  it('a just-created, not-yet-written lockfile is NOT stale — a live lock is never stolen', async () => {
+    const { withStateLock } = await import('../scripts/ralph-loop.mjs');
+    const { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, utimesSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { fileURLToPath } = await import('node:url');
+    const root = join(fileURLToPath(import.meta.url), '..', '..', '.tmp');
+    const dir = mkdtempSync(join(root, 'ralph-test-'));
+    try {
+      const p = join(dir, 'state.json');
+      const lockPath = `${p}.lock`;
+      // Simulate a live holder in the window between openSync(lockPath, 'wx')
+      // and writing its pid: the lockfile exists but is still empty, with a
+      // fresh mtime. Pre-fix, a contender parsed '' -> NaN -> stale, unlinked
+      // this live lock and acquired its own, so both ticks ran concurrently.
+      writeFileSync(lockPath, '');
+      assert.throws(() => withStateLock(p, () => 'stole it'), (err) => {
+        assert.equal(err.code, 'STATE_LOCKED');
+        return true;
+      });
+      assert.equal(existsSync(lockPath), true, 'just-created lock must not be unlinked');
+      assert.equal(readFileSync(lockPath, 'utf8'), '', 'just-created lock content untouched');
+      // A truncated/garbled fresh lockfile gets the same protection: its
+      // writer may still be mid-write.
+      writeFileSync(lockPath, '12x');
+      assert.throws(() => withStateLock(p, () => 'stole it'), (err) => {
+        assert.equal(err.code, 'STATE_LOCKED');
+        return true;
+      });
+      assert.equal(existsSync(lockPath), true, 'fresh garbled lock must not be unlinked');
+      // But an empty lockfile left long ago by a holder that crashed between
+      // create and write IS stale: it is cleared so the loop is not wedged.
+      writeFileSync(lockPath, '');
+      const longAgo = new Date(Date.now() - 60_000);
+      utimesSync(lockPath, longAgo, longAgo);
+      assert.equal(withStateLock(p, () => 'stale-cleared'), 'stale-cleared');
+      assert.equal(existsSync(lockPath), false, 'lock released after fn');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('ralph-loop: claim block parsing', () => {
   it('parses the `backlog pull` emitted block', () => {
     const out = `[jill][claim] openapi drift

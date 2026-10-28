@@ -8,6 +8,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { PublicWorkClaims, publicWorkClaimsSchema } from '../server/public-work-claims.mjs';
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from '../server/public-work-claim-fence.mjs';
+import { unpublishPublic } from '../server/legal-store.mjs';
 
 // Real store/identity/offer/lease boundary; registration/HTTP/workerd keepers
 // independently own transport and old-writer fencing. No registry doubles.
@@ -36,7 +37,7 @@ const code = expected => error => error.code === expected;
 
 test('cold public index and strict shared repository path locks work without private membership', t => {
   const f = fixture(t), [a, b] = f.identities;
-  assert.deepEqual(f.service().list(), { tasks: [], nextCursor: null });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
   const first = f.enable('first:task', ['src']); f.enable('second.task', ['src/file.js']); f.enable('third-task', ['docs/readme.md']);
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM identity_links').get().n, 0);
   assert.equal(f.service().list({ limit: 1 }).nextCursor, 'first:task');
@@ -70,7 +71,7 @@ test('lease expiry/reclaim rejects prior generations and exact retries survive w
   assert.deepEqual(f.service().act('lease-task', a.secret, 'claim', claim('a', { leaseHours: 1 })), first);
   assert.deepEqual(f.service().act('lease-task', b.secret, 'claim', claim('b')), second);
   assert.equal(f.service().act('lease-task', b.secret, 'release', owned('release', 2)).task.claim.state, 'unclaimed');
-  assert.deepEqual(f.service().list(), { tasks: [], nextCursor: null });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
 });
 
 test('submitted immutable receipt hashes exact UTF-8 bytes and reports checks without asserting acceptance', t => {
@@ -91,6 +92,37 @@ test('submitted immutable receipt hashes exact UTF-8 bytes and reports checks wi
   assert.equal(f.store.db.prepare('SELECT count(*) AS n FROM public_work_receipts').get().n, 1);
   f.store.projectOffers.transition('commons', 'owner', 'receipt-task', 'withdraw', { requestId: 'withdraw', expectedRevision: 2 });
   assert.deepEqual(f.service().receipt(result.receipt.receiptId), result.receipt);
+});
+
+test('operator unpublish hides a public-work receipt and its full artifact at the public-work door', t => {
+  const f = fixture(t), [a] = f.identities; f.enable('unpublish-receipt-task');
+  f.service().act('unpublish-receipt-task', a.secret, 'claim', claim('claim'));
+  const result = f.service().act('unpublish-receipt-task', a.secret, 'finish', owned('finish', 1, { artifactText: 'Secret submitted work', checksReported: [] }));
+  assert.deepEqual(f.service().receipt(result.receipt.receiptId), result.receipt);
+  // Receipt-level takedown: both the receipt and its artifact must 404, like the sibling receipts door.
+  unpublishPublic(f.store.db, { kind: 'receipt', id: result.receipt.receiptId, byAccount: 'operator', now: f.store.now() });
+  assert.throws(() => f.service().receipt(result.receipt.receiptId), code('public_receipt_not_found'));
+  assert.throws(() => f.service().artifact(result.receipt.receiptId), code('public_receipt_not_found'));
+  // Room-level takedown hides a different receipt from the same room too.
+  f.enable('unpublish-room-task', ['room-task.js']);
+  f.service().act('unpublish-room-task', a.secret, 'claim', claim('claim-room'));
+  const roomResult = f.service().act('unpublish-room-task', a.secret, 'finish', owned('finish-room', 1, { artifactText: 'Room submitted work', checksReported: [] }));
+  assert.deepEqual(f.service().receipt(roomResult.receipt.receiptId), roomResult.receipt);
+  unpublishPublic(f.store.db, { kind: 'room', id: 'commons', byAccount: 'operator', now: f.store.now() });
+  assert.throws(() => f.service().receipt(roomResult.receipt.receiptId), code('public_receipt_not_found'));
+  assert.throws(() => f.service().artifact(roomResult.receipt.receiptId), code('public_receipt_not_found'));
+});
+
+test('operator unpublish removes public-work tasks from the list and detail reads', t => {
+  const f = fixture(t), [a] = f.identities; f.enable('unpublish-listed-task');
+  f.service().act('unpublish-listed-task', a.secret, 'claim', claim('claim'));
+  const result = f.service().act('unpublish-listed-task', a.secret, 'finish', owned('finish', 1, { artifactText: 'Submitted work', checksReported: [] }));
+  // Before takedown the task advertises itself, including the submitted receipt id.
+  assert.equal(f.service().read('unpublish-listed-task').claim.submittedReceiptId, result.receipt.receiptId);
+  assert.deepEqual(f.service().list().tasks.map(task => task.taskId), ['unpublish-listed-task']);
+  unpublishPublic(f.store.db, { kind: 'room', id: 'commons', byAccount: 'operator', now: f.store.now() });
+  assert.deepEqual(f.service().list(), { tasks: [], claimableCount: 0, nextCursor: null });
+  assert.throws(() => f.service().read('unpublish-listed-task'), code('public_work_not_found'));
 });
 
 test('a reused identity cannot submit an earlier generation after release and reclaim', t => {
@@ -177,12 +209,16 @@ test('explicit match claims exactly one task and retry retains chosen outcome th
 });
 
 test('matching exposes continuation when the first hundred tasks are held and rejects invalid cursors', t => {
-  const f = fixture(t), [a, b] = f.identities;
+  const f = fixture(t), [, b] = f.identities;
   f.store.initialize(initialRoom('overflow'));
+  // The 100 holds are spread across 100 identities: since #3707 one
+  // identity may hold at most 3 live public-work claims, so a single
+  // holder for the whole page would be the squat that ceiling refuses.
+  const holders = Array.from({ length: 100 }, (_, n) => f.store.identities.create('Page holder ' + n));
   for (let n = 0; n < 101; n++) {
     const id = 'page-' + String(n).padStart(3, '0');
     f.enable(id, ['files/' + id], { kind: 'unpaid' }, 'main', n === 100 ? 'overflow' : 'commons');
-    if (n < 100) f.service().act(id, a.secret, 'claim', claim('hold-' + id));
+    if (n < 100) f.service().act(id, holders[n].secret, 'claim', claim('hold-' + id));
   }
   const page = f.service().match(null, {});
   assert.deepEqual(page.recommendations, []); assert.equal(page.inspected, 100);
@@ -255,4 +291,64 @@ test('stale claim distinguishes changed generation from expired lease', t => {
   assert.equal(expired.status, 409);
   assert.ok(/expired|lapsed/i.test(expired.message) && !/changed/i.test(expired.message),
     'says the lease expired (not ambiguously "expired or changed"): ' + expired.message);
+});
+
+// #3899: match() scanned one page of 100 tasks and, finding none of them
+// claimable, declared reasonCode 'no_claimable_tasks' for the whole
+// board — while claimable work sat on page 2 and llms.txt teaches agents
+// to read that code as "nothing claimable right now". The verdict is a
+// board-wide claim and may only follow a board-wide scan.
+function matchFixture(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'public-work-match-')), file = join(dir, 'room.sqlite');
+  let clock = Date.parse('2026-11-02T00:00:00Z');
+  const store = new RoomStore(file, { now: () => clock });
+  store.initialize(initialRoom());
+  store.initialize(initialRoom('annex'));
+  store.db.exec(publicWorkClaimsSchema); store.db.exec(publicWorkClaimFenceSchema);
+  const service = () => new PublicWorkClaims(store);
+  const enable = (id, roomId, deadline) => {
+    store.projectOffers.create(roomId, 'owner', { requestId: `create-${id}`, offerId: id, reviewerMemberIds: ['owner'],
+      terms: { kind: 'task', title: id, summary: 'Public result', acceptanceCriteria: ['Deliver the declared change'],
+        repositoryUrl: 'https://github.com/Example/Project', reward: { kind: 'unpaid' }, approvalPolicy: { mode: 'human' }, deadline } });
+    store.projectOffers.transition(roomId, 'owner', id, 'publish', { requestId: `publish-${id}`, expectedRevision: 1 });
+    return service().enable(roomId, 'owner', id, { requestId: `enable-${id}`, expectedRevision: 2, expectedTermsVersion: 1, repositoryRef: 'main', files: [`src/${id}.js`] });
+  };
+  t.after(() => { store.close(); rmSync(dir, { recursive: true, force: true }); });
+  return { store, service, enable, tick(ms) { clock += ms; } };
+}
+
+test('match makes no board-wide no_claimable_tasks verdict from a partial scan (#3899)', t => {
+  const f = matchFixture(t);
+  const t0 = Date.parse('2026-11-02T00:00:00Z');
+  const soon = new Date(t0 + 3600 * 1000).toISOString();
+  const later = new Date(t0 + 72 * 3600 * 1000).toISOString();
+  for (let i = 0; i < 100; i++) f.enable(`t-${String(i).padStart(3, '0')}`, 'commons', soon);
+  f.enable('zz-open', 'annex', later);
+  f.tick(2 * 3600 * 1000); // the first 100 tasks' deadlines pass; zz-open stays claimable
+  // Page 1 alone is all-unclaimable, but the board is not: the verdict
+  // must not be made, and the continuation fields carry the truth.
+  const result = f.service().match(null, {});
+  assert.deepEqual(result.recommendations, []);
+  assert.equal(result.reasonCode, undefined,
+    'no board-wide verdict from a scan that stopped at page 1');
+  assert.equal(result.inspected, 100);
+  assert.equal(result.hasMore, true);
+  assert.equal(result.nextCursor, 't-099');
+  // The caller-driven continuation reaches the claimable task.
+  const next = f.service().match(null, { after: result.nextCursor });
+  assert.deepEqual(next.recommendations.map(entry => entry.task.taskId), ['zz-open']);
+  // A cursor-bounded tail scan makes no board-wide claim either.
+  const tail = f.service().match(null, { after: 'zz-open' });
+  assert.deepEqual(tail.recommendations, []);
+  assert.equal(tail.reasonCode, undefined);
+
+  // A board with genuinely nothing claimable still earns the verdict —
+  // once the scan has covered the whole board.
+  const g = matchFixture(t);
+  for (let i = 0; i < 3; i++) g.enable(`d-${i}`, 'commons', soon);
+  g.tick(2 * 3600 * 1000);
+  const empty = g.service().match(null, {});
+  assert.deepEqual(empty.recommendations, []);
+  assert.equal(empty.reasonCode, 'no_claimable_tasks');
+  assert.equal(empty.inspected, 3);
 });

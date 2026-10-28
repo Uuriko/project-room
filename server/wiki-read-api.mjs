@@ -2,7 +2,7 @@
 //
 // Serves the three wiki planes as JSON for agent readers:
 //   - docs/ROOM-WIKI.md               append-only experience log ("lessons")
-//   - docs/history/ROOM-PROCEDURES.md validated procedures
+//   - docs/ROOM-PROCEDURES.md validated procedures
 //   - docs/*RUNBOOK*.md               runbooks
 //
 // The planes are embedded at build time: node scripts/wiki-build.mjs parses

@@ -56,12 +56,17 @@ test("restore returns the secret on an account landing and consumes the stash", 
   assert.equal(second, null);
 });
 
-test("restore is skipped when landing in a room", () => {
+// The Google/GitHub callback lands a returning member who already has a room
+// on /?room=<first room>; only a brand-new account lands on /?account=1. The
+// stash is written only at OAuth start and consumed by the next boot, so that
+// ?room= landing IS the OAuth return and must not drop the friend's link.
+test("restore returns the secret on the OAuth landing of a returning member (?room=)", () => {
   const storage = fakeStorage({ [PENDING_INVITE_KEY]: FRAGMENT });
   const result = takeRestoredInvite({ storage, hash: "", search: "?room=lobby" });
-  assert.equal(result, null);
-  // One-shot: the stash is consumed even when skipped.
+  assert.deepEqual(result, { valid: true, secret: SECRET });
+  // One-shot: a second boot in the same tab does not re-open it.
   assert.equal(storage._has(PENDING_INVITE_KEY), false);
+  assert.equal(takeRestoredInvite({ storage, hash: "", search: "?room=lobby" }), null);
 });
 
 test("restore is skipped when landing on #room/{roomId}", () => {
@@ -127,6 +132,16 @@ test("join clear removes the stash", () => {
   assert.equal(storage._has(PENDING_JOIN_KEY), false);
 });
 
+test("legacy join codes and their focus survive OAuth once", () => {
+  for (const fragment of ["#join/ABC-DEF-GHJ", "#join/abcdefghj", "#join/ABC-DEF-GHJ/work/w-123", "#join/ABC-DEF-GHJ/message/m-123"]) {
+    const storage = fakeStorage();
+    stashPendingJoin(storage, fragment);
+    assert.equal(storage.getItem(PENDING_JOIN_KEY), fragment);
+    assert.deepEqual(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), { valid: true, fragment });
+    assert.equal(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), null);
+  }
+});
+
 test("join restore returns the fragment on an account landing and consumes the stash", () => {
   const storage = fakeStorage({ [PENDING_JOIN_KEY]: JOIN_FOCUS_FRAGMENT });
   const first = takeRestoredJoin({ storage, hash: "", search: "?account=1" });
@@ -135,12 +150,20 @@ test("join restore returns the fragment on an account landing and consumes the s
   assert.equal(second, null);
 });
 
-test("join restore is skipped over a fresh join/invite hash or a room landing", () => {
+test("join restore returns the fragment on the OAuth landing of a returning member (?room=)", () => {
+  const storage = fakeStorage({ [PENDING_JOIN_KEY]: JOIN_FOCUS_FRAGMENT });
+  assert.deepEqual(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), { valid: true, fragment: JOIN_FOCUS_FRAGMENT });
+  assert.equal(storage._has(PENDING_JOIN_KEY), false);
+  assert.equal(takeRestoredJoin({ storage, hash: "", search: "?room=lobby" }), null);
+});
+
+test("join restore is skipped over a fresh join/code/invite hash or a #room/ deep link", () => {
   for (const landing of [
     { hash: JOIN_FRAGMENT, search: "" },
+    { hash: "#code/abc-def-ghj", search: "" },
     { hash: FRAGMENT, search: "" },
     { hash: "#room/commons", search: "" },
-    { hash: "", search: "?room=lobby" },
+    { hash: "#room/commons", search: "?room=lobby" },
   ]) {
     const storage = fakeStorage({ [PENDING_JOIN_KEY]: JOIN_FRAGMENT });
     assert.equal(takeRestoredJoin({ storage, ...landing }), null, JSON.stringify(landing));
@@ -150,7 +173,7 @@ test("join restore is skipped over a fresh join/invite hash or a room landing", 
 });
 
 test("join restore ignores malformed or missing stashes", () => {
-  for (const pending of [null, "", "#join/short", "#join/" + "e".repeat(44), "https://evil.example/" + JOIN_FRAGMENT]) {
+  for (const pending of [null, "", "#join/short", "#join/ABC-DEF-GHU", "#join/ABC-DEF-GHJ/other/w-123", "#join/ABC-DEF-GHJ/work/", "#join/" + "e".repeat(44), "https://evil.example/" + JOIN_FRAGMENT]) {
     const storage = fakeStorage(pending == null ? {} : { [PENDING_JOIN_KEY]: pending });
     assert.equal(
       takeRestoredJoin({ storage, hash: "", search: "?account=1" }),

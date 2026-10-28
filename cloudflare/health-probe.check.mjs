@@ -31,6 +31,39 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
   assert.deepEqual(secondBody.do, { status: 'timeout', timeoutMs: 1000 });
 });
 
+test('a joined probe bounds its own start() by the remaining timeout budget', async () => {
+  const probe = createHealthProbe();
+  let keptAlive = 0;
+  const waitUntil = promise => { keptAlive += 1; promise.then(() => {}, () => {}); };
+  const onSnapshot = (snapshot, timing) => readyProbeResponse(snapshot, healthRequest(), { mode: 'cloudflare-staging', elapsedMs: timing.elapsedMs });
+  const onUnready = (readiness, timing) => healthLivenessResponse(healthRequest(), { mode: 'cloudflare-staging', readiness, ...timing });
+  // Leader wakes the object quickly, settling the shared gate well inside
+  // the budget. The joiner then runs its own start(), which hangs for
+  // 1000 ms: without a race against the (remaining) budget it would answer
+  // ready after ~1000 ms instead of timing out at 50 ms.
+  const leaderStart = () => new Promise(resolve => {
+    setTimeout(() => resolve(Response.json({ status: 'ok' })), 10);
+  });
+  const joinerStart = () => new Promise(resolve => {
+    setTimeout(() => resolve(Response.json({ status: 'ok' })), 1000);
+  });
+  const startedAt = performance.now();
+  const [leader, joiner] = await Promise.all([
+    probe({ start: leaderStart, timeoutMs: 50, onSnapshot, onUnready, waitUntil }),
+    probe({ start: joinerStart, timeoutMs: 50, onSnapshot, onUnready, waitUntil })
+  ]);
+  const elapsedMs = performance.now() - startedAt;
+  assert.equal(leader.status, 200);
+  assert.equal(joiner.status, 503);
+  const joinerBody = await joiner.json();
+  assert.equal(joinerBody.status, 'degraded');
+  assert.deepEqual(joinerBody.durableObject, { ready: false, status: 'timeout' });
+  assert.equal(joinerBody.do.status, 'timeout');
+  assert.equal(joinerBody.do.timeoutMs, 50);
+  assert.ok(elapsedMs < 400, `joined probe took ${Math.round(elapsedMs)}ms, expected it to time out near 50ms`);
+  assert.ok(keptAlive >= 1, 'timed-out joined start() must be passed to waitUntil so its I/O is not dropped');
+});
+
 test('a ready probe reports storage readiness', async () => {
   const probe = createHealthProbe();
   const ready = await probe({

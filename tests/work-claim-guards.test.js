@@ -68,7 +68,8 @@ test("guests and chat-profile agents cannot create, claim, renew, or update; con
   assert.equal((await call(registry, "review", "create", null, { id: "reviewed" })).status, 201);
   assert.equal((await call(registry, "human", "create", null, { id: "human-item" })).status, 201);
 
-  await call(registry, "owner", "reassign", "contrib", { newOwner: "guest" });
+  const held = registry.get("room1", "contrib");
+  await call(registry, "owner", "reassign", "contrib", { newOwner: "guest", expectedClaimedAt: held.claimedAt, expectedHistoryLength: held.history.length });
   denied(await call(registry, "guest", "update", "contrib", { state: "in_progress" }));
   denied(await call(registry, "guest", "renew", "contrib", { progressMessageId: "msg-1" }));
   assert.equal(registry.get("room1", "contrib").state, "claimed");
@@ -191,8 +192,9 @@ test("work-claim pages are ordered, stable, and do not overlap", async () => {
 test("the room owner releasing another member's claim is recorded as the actor", async () => {
   const registry = createWorkClaimRegistry();
   await call(registry, "owner", "create", null, { id: "lane" });
-  await call(registry, "holder", "claim", "lane", {});
-  const released = await call(registry, "owner", "release", "lane", { reason: "stale lane" });
+  const claimed = await call(registry, "holder", "claim", "lane", {});
+  const round = { expectedClaimedAt: claimed.value.claimedAt, expectedHistoryLength: claimed.value.history.length };
+  const released = await call(registry, "owner", "release", "lane", { ...round, reason: "stale lane" });
   assert.equal(released.status, 200);
   assert.equal(released.value.state, "unclaimed");
   assert.equal(released.value.owner, null);
@@ -200,6 +202,73 @@ test("the room owner releasing another member's claim is recorded as the actor",
   assert.equal(last.agentId, "owner");
   assert.equal(last.action, "state:unclaimed");
   assert.equal(last.note, "stale lane");
+});
+
+test("a non-owner cannot release another member's claim (QA200-MUT-03A)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "owner", "create", null, { id: "lane" });
+  await call(registry, "holder", "claim", "lane", {});
+  await assert.rejects(call(registry, "chat", "release", "lane", { reason: "mine now" }), error => {
+    assert.equal(error.status, 403);
+    assert.equal(error.code, "work_not_owner");
+    return true;
+  });
+  assert.equal(registry.get("room1", "lane").state, "claimed");
+  assert.equal(registry.get("room1", "lane").owner, "holder");
+});
+
+test("releasing an already-unclaimed claim is refused (QA200-MUT-03B)", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "owner", "create", null, { id: "lane" });
+  await call(registry, "holder", "claim", "lane", {});
+  const claimed = registry.get("room1", "lane");
+  const round = { expectedClaimedAt: claimed.claimedAt, expectedHistoryLength: claimed.history.length };
+  const released = await call(registry, "owner", "release", "lane", { ...round, reason: "done for now" });
+  assert.equal(released.status, 200);
+  assert.equal(released.value.state, "unclaimed");
+  const historyLength = registry.get("room1", "lane").history.length;
+  await assert.rejects(call(registry, "owner", "release", "lane", { ...round, reason: "again" }), error => {
+    // The replay carries the round it already released, which is now stale.
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "work_claim_conflict");
+    return true;
+  });
+  assert.equal(registry.get("room1", "lane").history.length, historyLength);
+});
+
+test("release binds the claim round at the HTTP boundary", async () => {
+  const registry = createWorkClaimRegistry();
+  await call(registry, "owner", "create", null, { id: "lane" });
+  const claimed = await call(registry, "holder", "claim", "lane", {});
+  const round = { expectedClaimedAt: claimed.value.claimedAt, expectedHistoryLength: claimed.value.history.length };
+  // missing round fields are rejected
+  await assert.rejects(call(registry, "holder", "release", "lane", { reason: "no round" }), error => {
+    assert.equal(error.status, 422);
+    assert.equal(error.code, "invalid_claim_input");
+    return true;
+  });
+  // a stale round is refused instead of destroying the claim
+  const stale = { ...round, expectedClaimedAt: new Date(Date.parse(round.expectedClaimedAt) - 1000).toISOString() };
+  await assert.rejects(call(registry, "holder", "release", "lane", { ...stale, reason: "stale" }), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, "work_claim_conflict");
+    assert.match(error.message, /changed since it was read/);
+    assert.match(error.message, /re-read the claim/);
+    return true;
+  });
+  assert.equal(registry.get("room1", "lane").state, "claimed");
+  assert.equal(registry.get("room1", "lane").owner, "holder");
+  // a non-holder is refused with 403 work_not_owner even with a malformed
+  // body — ownership is checked before the body shape (abuse-guards C2)
+  await assert.rejects(call(registry, "guest", "release", "lane", { reason: "x" }), error => {
+    assert.equal(error.status, 403);
+    assert.equal(error.code, "work_not_owner");
+    return true;
+  });
+  // the current round releases cleanly
+  const released = await call(registry, "holder", "release", "lane", { ...round, reason: "done" });
+  assert.equal(released.status, 200);
+  assert.equal(released.value.state, "unclaimed");
 });
 
 test("an illegal transition names the states that are allowed", async () => {
@@ -231,4 +300,127 @@ test("a durable claim keeps the updatedAt used for board order", async t => {
   const stored = store.workClaims.get("commons", "kept");
   assert.equal(stored.updatedAt, out.value.updatedAt);
   assert.equal(Number.isFinite(Date.parse(stored.updatedAt)), true);
+});
+
+test("close and cancel retire open items over HTTP and free open-claim slots", async () => {
+  // Route refusals throw through helpers.reject in this harness; read them as {status, code}.
+  const outcome = async promise => {
+    try { const result = await promise; return { status: result.status, code: result.value?.error?.code, value: result.value }; }
+    catch (error) { if (!Number.isInteger(error?.status)) throw error; return { status: error.status, code: error.code }; }
+  };
+  const registry = createWorkClaimRegistry();
+  registry.configure("room1", { maxOpenClaims: 2 });
+  assert.equal((await call(registry, "contribute", "create", null, { id: "mine" })).status, 201);
+  assert.equal((await call(registry, "owner", "create", null, { id: "theirs" })).status, 201);
+  assert.equal((await call(registry, "owner", "create", null, { id: "over" })).value.error.code, "work_board_full");
+
+  // A non-manager cannot close or cancel an unclaimed item someone else opened.
+  assert.deepEqual(await outcome(call(registry, "contribute", "cancel", "theirs", {})), { status: 403, code: "work_not_owner" });
+  assert.deepEqual(await outcome(call(registry, "contribute", "close", "mine", {})), { status: 403, code: "work_not_owner" });
+
+  // The opener cancels their own unclaimed item; the reason is on the history.
+  const cancelled = await call(registry, "contribute", "cancel", "mine", { reason: "duplicate of theirs" });
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.value.state, "closed");
+  assert.deepEqual([cancelled.value.history.at(-1).action, cancelled.value.history.at(-1).note], ["cancelled", "duplicate of theirs"]);
+  assert.equal((await call(registry, "owner", "create", null, { id: "over" })).status, 201);
+
+  // A manager closes a held claim; a second close is a 409 conflict.
+  await call(registry, "holder", "claim", "theirs", {});
+  const closed = await call(registry, "owner", "close", "theirs", { reason: "stale" });
+  assert.equal(closed.status, 200);
+  assert.deepEqual([closed.value.state, closed.value.owner], ["closed", null]);
+  assert.deepEqual(await outcome(call(registry, "owner", "close", "theirs", {})), { status: 409, code: "work_claim_terminal" });
+  assert.ok((await outcome(call(registry, "holder", "update", "theirs", { state: "in_progress" }))).status >= 400);
+  assert.equal((await outcome(call(registry, "owner", "close", "mine", { extra: 1 }))).status, 422);
+  // Closed items are retained but not listed as open work by state filter default.
+  const listed = await call(registry, "owner", "list", null, undefined, "?state=closed");
+  assert.equal(listed.status, 200);
+  assert.deepEqual(listed.value.claims.map(item => item.id).sort(), ["mine", "theirs"]);
+});
+
+test("close/cancel permission matrix over HTTP: the holder retires their own claim, a manager may cancel an unclaimed item", async () => {
+  // Pins the #1999 lifecycle permission branches that the pure-machine tests
+  // do not exercise through the REST route: holder close/cancel and manager
+  // cancel of an unclaimed item they did not open.
+  const outcome = async promise => {
+    try { const result = await promise; return { status: result.status, code: result.value?.error?.code }; }
+    catch (error) { if (!Number.isInteger(error?.status)) throw error; return { status: error.status, code: error.code }; }
+  };
+  const registry = createWorkClaimRegistry();
+
+  // The holder (not a claim manager) closes their own held claim.
+  assert.equal((await call(registry, "owner", "create", null, { id: "h-close" })).status, 201);
+  assert.equal((await call(registry, "holder", "claim", "h-close", {})).status, 200);
+  const closed = await call(registry, "holder", "close", "h-close", { reason: "stale" });
+  assert.equal(closed.status, 200);
+  assert.equal(closed.value.state, "closed");
+  assert.equal(closed.value.owner, null);
+  assert.equal(closed.value.history.at(-1).action, "closed");
+
+  // The holder cancels their own held claim; the reason lands on the history.
+  assert.equal((await call(registry, "owner", "create", null, { id: "h-cancel" })).status, 201);
+  assert.equal((await call(registry, "holder", "claim", "h-cancel", {})).status, 200);
+  const cancelled = await call(registry, "holder", "cancel", "h-cancel", { reason: "changed mind" });
+  assert.equal(cancelled.status, 200);
+  assert.equal(cancelled.value.state, "closed");
+  assert.deepEqual([cancelled.value.history.at(-1).action, cancelled.value.history.at(-1).note],
+    ["cancelled", "changed mind"]);
+
+  // A claim manager may cancel an unclaimed item they did not open.
+  assert.equal((await call(registry, "contribute", "create", null, { id: "mgr-cancel" })).status, 201);
+  const mgrCancelled = await call(registry, "owner", "cancel", "mgr-cancel", { reason: "duplicate lane" });
+  assert.equal(mgrCancelled.status, 200);
+  assert.equal(mgrCancelled.value.state, "closed");
+  assert.equal(mgrCancelled.value.history.at(-1).action, "cancelled");
+
+  // A stranger cannot cancel or close someone else's held claim; refused
+  // handoffs write nothing and the claim stays claimed.
+  assert.equal((await call(registry, "owner", "create", null, { id: "held" })).status, 201);
+  assert.equal((await call(registry, "holder", "claim", "held", {})).status, 200);
+  assert.deepEqual(await outcome(call(registry, "contribute", "cancel", "held", {})), { status: 403, code: "work_not_owner" });
+  assert.deepEqual(await outcome(call(registry, "contribute", "close", "held", {})), { status: 403, code: "work_not_owner" });
+  assert.equal(registry.get("room1", "held").state, "claimed");
+  assert.equal(registry.get("room1", "held").owner, "holder");
+});
+
+// Route refusals surface either as a returned error body (production
+// reject plumbing) or as a thrown status/code error (this harness's
+// reject) — normalize both, like the outcome() helpers above.
+const claimAttempt = async promise => {
+  try { const result = await promise; return { status: result.status, code: result.value?.error?.code, message: result.value?.error?.message, value: result.value }; }
+  catch (error) { if (!Number.isInteger(error?.status)) throw error; return { status: error.status, code: error.code, message: error.message }; }
+};
+
+test("claim refuses work whose dependsOn are not done, naming the unmet deps (#3880)", async () => {
+  const registry = createWorkClaimRegistry();
+  assert.equal((await call(registry, "owner", "create", null, { id: "dep" })).status, 201);
+  assert.equal((await call(registry, "owner", "create", null, { id: "blocked", dependsOn: ["dep"] })).status, 201);
+  // The AvailableWork projection excludes "blocked" while its dep is not
+  // done; the claim write path must enforce the same definition instead
+  // of silently succeeding for callers who skip the projection.
+  const refused = await claimAttempt(call(registry, "contribute", "claim", "blocked", {}));
+  assert.equal(refused.status, 409);
+  assert.equal(refused.code, "work_claim_dependencies_unmet");
+  assert.match(refused.message, /"dep" \(unclaimed\)/);
+  assert.equal(registry.get("room1", "blocked").state, "unclaimed");
+  // Once the dep is done, the same claim succeeds.
+  registry.set("room1", { ...registry.get("room1", "dep"), state: "done" });
+  const claimed = await call(registry, "contribute", "claim", "blocked", {});
+  assert.equal(claimed.status, 200);
+  assert.equal(claimed.value.owner, "contribute");
+});
+
+test("a superseded dependency does not satisfy dependsOn at claim time (#3880)", async () => {
+  const registry = createWorkClaimRegistry();
+  assert.equal((await call(registry, "owner", "create", null, { id: "old-dep" })).status, 201);
+  assert.equal((await call(registry, "owner", "create", null, { id: "next", dependsOn: ["old-dep"] })).status, 201);
+  // Done-but-superseded is not "done" in the projection's definition
+  // (availableBoardRows counts only usable claims), so it cannot
+  // satisfy the gate at claim time either.
+  registry.set("room1", { ...registry.get("room1", "old-dep"), state: "done", supersededBy: "replacement" });
+  const refused = await claimAttempt(call(registry, "contribute", "claim", "next", {}));
+  assert.equal(refused.status, 409);
+  assert.equal(refused.code, "work_claim_dependencies_unmet");
+  assert.equal(registry.get("room1", "next").state, "unclaimed");
 });

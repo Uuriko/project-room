@@ -44,6 +44,12 @@ export const KNOWN_CATEGORIES = Object.freeze({
   sessions: { priority: 20, dependsOn: ["credentials"] },
   notifications: { priority: 30, dependsOn: [] },
   messages: { priority: 40, dependsOn: [] },
+  // F-1: delegation grants the account issued (owner + membership
+  // delegation) lapse with the account. Runs before owned-room disposition
+  // while member_accounts still maps the account to its member ids and the
+  // granter is still in place as room owner, so a grant-conferred
+  // permission bit can be stripped through the normal event path.
+  delegated_authority: { priority: 44, dependsOn: [] },
   // QA2 finding P2-11: owned-room disposition runs before memberships drop,
   // so a personal room is archived before the account leaves it.
   owned_rooms: { priority: 45, dependsOn: [] },
@@ -72,6 +78,13 @@ export const KNOWN_CATEGORIES = Object.freeze({
   issued_access: { priority: 74, dependsOn: [] },
   sponsored_agents: { priority: 75, dependsOn: [] },
   inbox_receipts: { priority: 76, dependsOn: [] },
+  // WAVE-500 G1 (2026-10-10): account-scoped rows the operator purge
+  // deletes for account targets (server/purge-registry.mjs, action
+  // "delete") must also purge on self-serve deletion: /api/account/delete
+  // runs only executeAccountDeletion, never the registry rows.
+  // (direct_channel_sends, quarantine_thread_splits, spam_quarantine are
+  // Fo's #2229 territory — folded into derived_inbox there, not duplicated.)
+  bounty_journal: { priority: 77, dependsOn: [] },
   profile: { priority: 100, dependsOn: [] },
 });
 

@@ -156,6 +156,16 @@ export function recordAnswer({ decision, courier, answer, answeredBy, answeredAt
   check(courier.relaysFor.includes(decision.needsAuthority),
     `this courier cannot carry a ${decision.needsAuthority} decision`, "authority_mismatch");
   check(Number.isFinite(answeredAt), "answeredAt must be an epoch in milliseconds");
+  // The deadline binds the answer, not just the routing. routeDecision
+  // refuses to carry a question whose window has shut, but an answer can
+  // still arrive late over a chain that was opened in time — and a decision
+  // that has expired has no answer, only a history of being asked. Same
+  // boundary as routeDecision: at notAfter the window is already shut.
+  if (decision.notAfter !== null && decision.notAfter !== undefined) {
+    check(answeredAt < Date.parse(decision.notAfter),
+      `this decision expired at ${decision.notAfter}; a late answer is not recorded`,
+      "decision_expired");
+  }
   check(typeof note === "string" && note.length <= 2000, "note must be under 2000 characters");
   return Object.freeze({
     decisionId: decision.decisionId, roomId: decision.roomId,

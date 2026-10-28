@@ -176,3 +176,57 @@ test("timing-safe comparison does not accept prefix-forged values", () => {
   tampered.signature = tampered.signature.slice(0, 32); // not 64 hex chars
   assert.equal(verifyReceipt(tampered, receipts[0].hash, KEY), false);
 });
+
+// Issue #1847 (receipt-forgery red-team, attack A6): verifyChain returns -1
+// for any authentic prefix, so a truncated chain is indistinguishable from
+// a complete one unless the caller anchors the expected head.
+test("truncated chain verifies -1 without an anchor (documents the A6 residual)", () => {
+  const receipts = buildChain(10);
+  const truncated = receipts.slice(0, 6);
+  assert.equal(verifyChain(truncated, KEY), -1);
+});
+
+test("verifyChain with expectedLength detects truncation at the first missing index", () => {
+  const receipts = buildChain(10);
+  const truncated = receipts.slice(0, 6);
+  assert.equal(verifyChain(truncated, KEY, { expectedLength: 10 }), 6);
+  assert.equal(verifyChain(receipts, KEY, { expectedLength: 10 }), -1);
+  // A chain longer than the anchored length is rejected at the first extra receipt.
+  assert.equal(verifyChain(receipts, KEY, { expectedLength: 6 }), 6);
+});
+
+test("verifyChain with expectedHeadHash detects truncation at the head", () => {
+  const receipts = buildChain(10);
+  const truncated = receipts.slice(0, 6);
+  const headHash = receipts[receipts.length - 1].hash;
+  assert.equal(verifyChain(truncated, KEY, { expectedHeadHash: headHash }), truncated.length - 1);
+  assert.equal(verifyChain(receipts, KEY, { expectedHeadHash: headHash }), -1);
+  // A wrong head hash fails at the head even when the length is right.
+  assert.equal(
+    verifyChain(receipts, KEY, { expectedHeadHash: truncated[truncated.length - 1].hash }),
+    receipts.length - 1
+  );
+});
+
+test("verifyChain with a correct length+head anchor verifies a complete chain", () => {
+  const receipts = buildChain(10);
+  const anchor = {
+    expectedLength: 10,
+    expectedHeadHash: receipts[receipts.length - 1].hash
+  };
+  assert.equal(verifyChain(receipts, KEY, anchor), -1);
+  // Both anchors together still catch a truncation.
+  assert.equal(verifyChain(receipts.slice(0, 6), KEY, anchor), 6);
+});
+
+test("verifyChain opts are optional and backward compatible", () => {
+  const receipts = buildChain(4);
+  assert.equal(verifyChain(receipts, KEY), -1);
+  assert.equal(verifyChain(receipts, KEY, {}), -1);
+  assert.equal(verifyChain(receipts, KEY, undefined), -1);
+  assert.equal(verifyChain(receipts, KEY, { expectedLength: 4 }), -1);
+  // Tamper detection still wins when anchors are also supplied.
+  const tampered = structuredClone(receipts);
+  tampered[2].hash = "f".repeat(64);
+  assert.equal(verifyChain(tampered, KEY, { expectedLength: 4 }), 2);
+});

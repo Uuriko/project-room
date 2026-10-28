@@ -18,7 +18,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agentCard, AGENT_CARD_A2A_PATH } from "../deploy/agent-discovery.mjs";
+import { agentCard, AGENT_CARD_A2A_PATH } from "../server/agent-discovery.mjs";
 import { handleA2aRpc } from "../server/a2a-jsonrpc.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -78,7 +78,7 @@ function assertInterfacesShareCardOrigin(card) {
 async function listen(t) {
   const directory = mkdtempSync(join(tmpdir(), "a2a-card-truth-"));
   const store = new RoomStore(join(directory, "room.sqlite"));
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ enableDeferredInbox: true, store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams();

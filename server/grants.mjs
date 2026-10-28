@@ -40,6 +40,7 @@
 // carry status and code like ServiceError and the router reads them as such.
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
+import { ownMember } from "../src/events.js";
 
 // Closed capability vocabulary. Issuing a grant for any other name is
 // refused (422 unknown_capability) so typo-grants can never silently do
@@ -224,7 +225,11 @@ export function requireGrantManagement({ db, roomId, state, actor, nowMs = Date.
 
 function requireRoomMember(room, memberId) {
   if (!validMemberId(memberId)) refuse(422, "invalid_grant", "memberId must be a room member id");
-  if (!room.state.members?.[memberId]) refuse(404, "member_not_found", `No member ${memberId} in this room`);
+  // Member projections are plain objects, so a raw members[memberId] index
+  // resolves inherited Object.prototype names ("toString", "constructor",
+  // ...) that pass validMemberId but are not room members. Resolve through
+  // ownMember (Object.hasOwn) like src/events.js / outside-agents.mjs.
+  if (!ownMember(room.state?.members, memberId)) refuse(404, "member_not_found", `No member ${memberId} in this room`);
 }
 
 // GET /api/rooms/:roomId/agent-grants — owner or grants:issue delegate.

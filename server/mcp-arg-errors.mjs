@@ -4,7 +4,6 @@
 // a room tool is called with no identity bearer.
 
 import { randomBytes } from "node:crypto";
-import { agentErrorAx } from "../src/agent-error.mjs";
 
 const operationId = () => `op_${randomBytes(6).toString("base64url")}`;
 
@@ -175,7 +174,11 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
             reason: "auth_required",
             category: "access",
             hint: hint || MCP_AUTH_HINT,
-            next: agentErrorAx({ httpStatus: 401 }).next,
+            // #1551: the shared 401 AX next[] named room_check_access, a
+            // hosted, auth-gated tool outside the anonymous caller's catalog.
+            // Scope the recovery to what the caller can actually see: re-list
+            // tools (their own visible catalog) instead of a hosted check.
+            next: [Object.freeze({ command: "tools/list" })],
           }),
         },
       }

@@ -152,7 +152,7 @@ function autoLinkShape(parsed) {
   return Object.freeze({
     url: parsed.url, repo: parsed.repo, number: parsed.number,
     outcome: null, syncedAt: null, nextPollAt: null, etag: null,
-    rateLimitedUntil: null, pollBackoffMs: null, ciCursor: null,
+    rateLimitedUntil: null, pollBackoffMs: null, ciCursor: null, ciStatus: null,
   });
 }
 

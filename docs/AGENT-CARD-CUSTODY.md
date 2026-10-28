@@ -8,7 +8,7 @@ room operator, so a spoofed card can't impersonate the room in a registry.
 ## The key
 
 - Algorithm: Ed25519. Key id: `project-room-card-2026-09-24-recovery`.
-- Public key: `deploy/agent-card-key.mjs` (committed; also embedded in the card).
+- Public key: `server/agent-card-key.mjs` (committed; also embedded in the card).
 - Private seed: **never in the repo.** It lives at
   `~/.config/project-room/agent-card-signing.key` (mode 0600) on the deploy
   host, or in `ROOM_AGENT_CARD_SIGNING_KEY` when set. It is never logged,
@@ -20,7 +20,7 @@ room operator, so a spoofed card can't impersonate the room in a registry.
 `stamp-version.mjs`, wired in `cloudflare/wrangler.jsonc`). It builds the card
 for the stamped revision, signs the canonical bytes
 (`server/agent-card-signing.mjs` — the same house standard as the agent
-directory), and writes `deploy/agent-card-signed.mjs`. The served card carries
+directory), and writes `server/agent-card-signed.mjs`. The served card carries
 the envelope (`keyId`, `signatureAgentId`, `publicKey`, `cardSignature`,
 `signedRevision`) only when the signature covers exactly the served build's
 revision; otherwise the card is served unsigned in a development checkout. Release builds
@@ -28,7 +28,7 @@ now stop when the private key is unavailable or does not match the pinned public
 key. The signer preserves the previous generated file on failure. Local unsigned
 builds require the explicit `node scripts/sign-agent-card.mjs --allow-unsigned`;
 the Worker deploy configuration never passes that option. `--allow-unsigned`
-writes the explicit opt-in into `deploy/agent-card-signed.mjs` as
+writes the explicit opt-in into `server/agent-card-signed.mjs` as
 `AGENT_CARD_UNSIGNED_REASON`; an unsigned card with a null reason is the
 silent build default, and the boot gate (`server/boot-config.mjs`,
 `validateCriticalConfig()`, called from `server.mjs`) refuses to boot
@@ -59,7 +59,7 @@ Key rotation follows the house chain-of-custody: the OLD key signs a rotation
 statement (`signKeyRotation` in `server/agent-card-signing.mjs`) authorizing
 the new key for agent id `project-room`. Publish the rotation statement where
 verifiers can see it (a room journal entry + the HOL registry entry), then
-update `deploy/agent-card-key.mjs` (new key id + public key) and re-sign.
+update `server/agent-card-key.mjs` (new key id + public key) and re-sign.
 
 Losing the old key is recovered out-of-band via the room owner's credential —
 never by self-assertion.
@@ -93,7 +93,7 @@ If the private key is lost or suspected compromised:
 
 1. Generate a fresh keypair (`generateKeyPair` in `server/agent-card-signing.mjs`).
 2. If the old key is available, sign a rotation statement with it.
-3. Update `deploy/agent-card-key.mjs`, delete the old private key material,
+3. Update `server/agent-card-key.mjs`, delete the old private key material,
    re-sign, redeploy.
 4. If the old key is NOT available, rotate out-of-band: announce in the room
    journal from the owner identity, update the registry entries, and treat

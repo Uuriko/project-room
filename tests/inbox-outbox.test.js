@@ -141,7 +141,7 @@ test("uncorrelated adapter evidence never marks an unknown attempt accepted", as
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
 test("HTTP callers may review, reserve and cancel but cannot forge dispatch or delivery", async t => {
-  const f = setup(t), server = createRoomServer({ store: f.store });
+  const f = setup(t), server = createRoomServer({ enableDeferredInbox: true, store: f.store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
@@ -216,8 +216,8 @@ test("late account revocation retains unknown status and a new authorized sessio
 });
 test("optional loopback simulation endpoint uses the existing intent and never accepts claimed outcomes", async t => {
   const f = setup(t), driver = f.driver();
-  assert.throws(() => createRoomServer({ store: f.store, origin: "https://example.test", trustedLocalProxy: true, syntheticInboxTransport: driver }), /loopback/);
-  const server = createRoomServer({ store: f.store, syntheticInboxTransport: driver });
+  assert.throws(() => createRoomServer({ enableDeferredInbox: true, store: f.store, origin: "https://example.test", trustedLocalProxy: true, syntheticInboxTransport: driver }), /loopback/);
+  const server = createRoomServer({ enableDeferredInbox: true, store: f.store, syntheticInboxTransport: driver });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
   const origin = "http://127.0.0.1:" + server.address().port;
@@ -233,4 +233,96 @@ test("optional loopback simulation endpoint uses the existing intent and never a
   response = await call(dispatch); assert.equal(response.status, 200); assert.equal(f.provider.submits, 1);
   response = await call({ ...dispatch, action: "reconcile" }); assert.equal(response.status, 200); assert.equal((await response.json()).send.status, "accepted");
   assert.equal(f.provider.submits, 1);
+});
+
+test("a second send.dispatch for the same outbox entry is refused, never re-applied", t => {
+  // Exactly-once pin on the outbox apply path (qa200-mut-16 Probe A): dispatch
+  // moves queued -> unknown and a repeat dispatch — even with a fresh request
+  // id and the current revision — must fail 409 inbox_send_started instead of
+  // re-running the transition. The driver-level status check is the caller's
+  // guard; this is the apply path's own dedupe.
+  const f = setup(t), request = f.reserve(); f.apply(request);
+  f.transport(f.command("send.dispatch", f.read()[0]));
+  assert.equal(f.read()[0].status, "unknown");
+  assert.equal(f.read()[0].revision, 1);
+  assert.throws(() => f.transport(f.command("send.dispatch", f.read()[0])), { code: "inbox_send_started" });
+  assert.equal(f.read()[0].status, "unknown");
+  assert.equal(f.read()[0].revision, 1);
+  assert.equal(f.provider.submits, 0);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
+
+test("ANCHOR-D6a: flush repairs a dispatch committed before the provider call — one submit, then settled, never a second", async t => {
+  // QA-200 ch-2039 liveness note: a crash between the dispatch commit
+  // (status "unknown") and the provider submit leaves the outbox entry stuck
+  // forever — dispatch() only ever re-runs for "queued" entries and reconcile
+  // only settles from provider evidence. The entry is completed (dispatch
+  // journaled past the point of no return) but unforwarded (the provider
+  // never got the message). flush() must eventually forward it exactly once.
+  const f = setup(t), request = f.reserve(); f.apply(request);
+  f.transport(f.command("send.dispatch", f.read()[0]));
+  assert.equal(f.read()[0].status, "unknown");
+  assert.equal(f.provider.count(), 0);
+  const driver = f.driver();
+  await driver.flush(f.token, "note", f.session.sessionBinding);
+  assert.equal(f.read()[0].status, "accepted");
+  assert.equal(f.provider.count(), 1);
+  assert.equal(f.provider.submits, 1);
+  // A second flush is a no-op: settled entries are never touched again.
+  await driver.flush(f.token, "note", f.session.sessionBinding);
+  assert.equal(f.read()[0].status, "accepted");
+  assert.equal(f.provider.submits, 1);
+  assert.equal(f.provider.count(), 1);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
+
+test("ANCHOR-D6b: flush never resubmits a message the provider already accepted — a lost observation settles from evidence", async t => {
+  // Mirror image of D6a: the submit ran and the observation was lost (mode
+  // "after"). Flush must reconcile first and settle from the provider's
+  // correlated record — not submit again.
+  const f = setup(t), request = f.reserve(); f.apply(request); f.provider.mode = "after";
+  assert.equal((await f.run(request.requestId)).status, "unknown");
+  assert.equal(f.provider.count(), 1);
+  assert.equal(f.provider.submits, 1);
+  await f.driver().flush(f.token, "note", f.session.sessionBinding);
+  assert.equal(f.read()[0].status, "accepted");
+  assert.equal(f.provider.submits, 1, "no second provider message");
+  assert.equal(f.provider.count(), 1);
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
+
+test("ANCHOR-D6c: flush ignores queued entries; concurrent flushes collapse to one provider message", async t => {
+  const f = setup(t), request = f.reserve(); f.apply(request);
+  await f.driver().flush(f.token, "note", f.session.sessionBinding);
+  assert.equal(f.read()[0].status, "queued", "flush never dispatches a queued entry");
+  assert.equal(f.provider.submits, 0);
+  f.transport(f.command("send.dispatch", f.read()[0]));
+  assert.equal(f.read()[0].status, "unknown");
+  await Promise.all([
+    f.driver().flush(f.token, "note", f.session.sessionBinding),
+    f.driver().flush(f.token, "note", f.session.sessionBinding),
+  ]);
+  assert.equal(f.provider.count(), 1, "exactly one provider message across the race");
+  assert.equal(f.read()[0].status, "accepted");
+  assert.doesNotThrow(() => auditRecovery(f.store));
+});
+
+test("flushSend: only an unknown attempt moves, and a very recent one is left to the in-flight dispatch (minAgeMs)", async t => {
+  const f = setup(t), request = f.reserve(); f.apply(request);
+  const driver = f.driver(), sourceId = "note", binding = f.session.sessionBinding, id = f.read()[0].id;
+  // queued: untouched, nothing submitted.
+  assert.equal((await driver.flushSend(f.token, sourceId, id, binding)).status, "queued");
+  assert.equal(f.provider.submits, 0);
+  f.transport(f.command("send.dispatch", f.read()[0]));
+  assert.equal(f.read()[0].status, "unknown");
+  // A recent unknown attempt is skipped when the caller asks for an age floor.
+  assert.equal((await driver.flushSend(f.token, sourceId, id, binding, { minAgeMs: 3_600_000 })).status, "unknown");
+  assert.equal(f.provider.submits, 0, "no submit while the original dispatch may still be in flight");
+  // Without the floor it reconciles, finds no record, and submits exactly once.
+  assert.equal((await driver.flushSend(f.token, sourceId, id, binding)).status, "accepted");
+  assert.equal(f.provider.submits, 1);
+  // Settled: a repeat is a no-op.
+  assert.equal((await driver.flushSend(f.token, sourceId, id, binding)).status, "accepted");
+  assert.equal(f.provider.submits, 1);
+  assert.doesNotThrow(() => auditRecovery(f.store));
 });

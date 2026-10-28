@@ -69,7 +69,14 @@ export async function routeInboundEmail({ from = "", to, raw, rawSize, receivedA
   try {
     const declared = Number.isSafeInteger(rawSize) ? rawSize : rawBytes(raw);
     if (!Number.isFinite(declared) || declared > limits.rawBytes || rawBytes(raw) > limits.rawBytes) reject("email_routing_too_large", emailRoutingRejections.tooLarge);
-    const routed = await resolveRoutedConnection(to, lookup);
+    let routed;
+    try { routed = await resolveRoutedConnection(to, lookup); }
+    catch (error) {
+      // A malformed/stale profile from the lookup is a malformed message, not
+      // an infrastructure failure: convert it to a reject like normalizeRoutedEmail below.
+      if (error?.name !== "EmailContractError") throw error;
+      reject(error.code, emailRoutingRejections.malformed);
+    }
     if (!routed) reject("email_routing_unknown_recipient", emailRoutingRejections.unknownRecipient);
     let parsed;
     try { parsed = parseMimeMessage(raw, { limits: { rawBytes: limits.rawBytes } }); }
@@ -102,8 +109,17 @@ export function completeRoutedImport(routed, { folder = null, expectedCursor = n
   if (!routed?.decision?.accept) throw new EmailRoutingError("email_routing_not_accepted", routed?.decision?.reason ?? null);
   if (priorReceipt) return { duplicate: true, receipt: priorReceipt, request: null };
   const { envelope, requestId, connection } = routed;
+  // A single routed message is never evidence that a folder enumeration
+  // finished, so preserve the folder's completeness instead of forcing
+  // complete:true. While a scan is in progress (complete:false with
+  // scanMembers set), plan() treats the scan set as the target: a forced
+  // complete would promote that partial set to members and clear the scan,
+  // dropping previously imported members the scan has not re-observed yet.
+  // A folder that does not exist yet is created by routed messages alone,
+  // so it starts complete.
+  const complete = folder?.complete !== false;
   return { duplicate: false, receipt: null, request: { action: "page.apply", requestId, connectionId: connection.id, connectionRevision: connection.revision,
-    folderId: emailRoutingFolderId, expectedRevision: folder?.revision ?? 0, expectedCursor, cursor: requestId, complete: true, reset: needsReset,
+    folderId: emailRoutingFolderId, expectedRevision: folder?.revision ?? 0, expectedCursor, cursor: requestId, complete, reset: needsReset,
     observations: [{ kind: "message", envelope, expectedSourceRevision: sourceRevision }] } };
 }
 // Convenience for a store with an account session: state, prior receipt,

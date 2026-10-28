@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, verifyWriterFence, fenceDefinitions } from "../server/writer-fence.mjs";
+import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, verifyWriterFence, fenceDefinitions, STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 
 // Construct a synthetic pre-upgrade database. Never use this fixture on user data.
 test("Node read transactions reject nested and direct writes, retain outer writes and restore mode after failures", t => {
@@ -48,12 +48,12 @@ test("schema upgrade preserves existing records and fences a previously opened c
   legacyStatement.run("fixture-account");
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 38);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 42);
     assert.deepEqual(current.db.prepare("SELECT * FROM accounts").all(), before);
     assert.doesNotThrow(() => verifyWriterFence(current.db));
     assert.equal(writerFenceDefinitions.length, (applicationTables.length - unfencedAdditiveTables.length) * 3,
       "the current fence covers every application table except intentionally-unfenced additive tables");
-    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v38|unsupported database writer/);
+    assert.throws(() => legacyStatement.run("fixture-account"), /project_room_writer_v42|unsupported database writer/);
     current.createAccount("new-fixture-account");
     assert.equal(current.account("new-fixture-account").active, true);
   } finally { current.close(); earlier.close(); }
@@ -88,7 +88,8 @@ test("failure after fence installation rolls back its schema marker and all trig
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try {
     assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5);
-    assert.equal(inspected.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE 'writer_v27_%'").get().n, 0);
+    assert.equal(inspected.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND name LIKE ?").get(`writer_v${STORE_SCHEMA_VERSION}_%`).n, 0,
+      "rollback must remove every trigger installed for the current schema version");
     assert.equal(inspected.prepare("SELECT count(*) n FROM accounts").get().n, 1);
   } finally { inspected.close(); }
   const retry = new RoomStore(filename);
@@ -97,7 +98,7 @@ test("failure after fence installation rolls back its schema marker and all trig
 
 test("read-only audit does not upgrade a pre-fence database", t => {
   const filename = legacyFixture(t);
-  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v38/);
+  assert.throws(() => new RoomStore(filename, { readOnly: true }), /requires schema v42/);
   const inspected = new DatabaseSync(filename, { readOnly: true });
   try { assert.equal(inspected.prepare("PRAGMA user_version").get().user_version, 5); }
   finally { inspected.close(); }
@@ -112,11 +113,51 @@ test("the v9 migration preserves v6 guards while retiring pre-open v6 writers", 
   oldWrite.run();
   const current = new RoomStore(filename);
   try {
-    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 38);
-    assert.throws(() => oldWrite.run(), /project_room_writer_v38|unsupported database writer/);
+    assert.equal(current.db.prepare("PRAGMA user_version").get().user_version, 42);
+    assert.throws(() => oldWrite.run(), /project_room_writer_v42|unsupported database writer/);
     current.createAccount("current-writer");
     assert.equal(current.account("current-writer").active, true);
   } finally { current.close(); earlier.close(); }
+});
+
+test("verifyWriterFence(28) requires deployed-lineage triggers when their tables are present, but not when absent", () => {
+  // The deployed v28 lineage fenced agent_invite_codes + room_attachments.
+  // Build those definitions from a literal template, not fenceDefinitions(28),
+  // so this test does not silently track whatever that function returns.
+  const deployedTables = ["agent_invite_codes", "room_attachments"];
+  const deployedDefs = deployedTables.flatMap(table => ["INSERT", "UPDATE", "DELETE"].map(operation => {
+    const name = `writer_v28_${table}_${operation.toLowerCase()}`;
+    return { name, sql: `CREATE TRIGGER ${name} BEFORE ${operation} ON ${table} BEGIN SELECT CASE WHEN project_room_writer_v28() IS NOT 28 THEN RAISE(ABORT,'unsupported database writer') END; END` };
+  }));
+  const baseDefs = fenceDefinitions(28).filter(def => !deployedDefs.some(deployed => deployed.name === def.name));
+  const baseTables = [...new Set(baseDefs.map(def => def.name.replace(/^writer_v28_/, "").replace(/_(insert|update|delete)$/, "")))];
+  const build = ({ withDeployedTables, withDeployedTriggers }) => {
+    const db = new DatabaseSync(":memory:");
+    for (const table of baseTables) db.exec(`CREATE TABLE ${table}(id INTEGER PRIMARY KEY)`);
+    if (withDeployedTables) for (const table of deployedTables) db.exec(`CREATE TABLE ${table}(id INTEGER PRIMARY KEY)`);
+    for (const { sql } of baseDefs) db.exec(sql);
+    if (withDeployedTriggers) for (const { sql } of deployedDefs) db.exec(sql);
+    return db;
+  };
+  // Deployed tables present with no writer triggers at all: must be rejected.
+  const missing = build({ withDeployedTables: true, withDeployedTriggers: false });
+  try { assert.throws(() => verifyWriterFence(missing, 28), /operator reconciliation/); }
+  finally { missing.close(); }
+  // Deployed tables present with only part of their trigger set: also rejected.
+  const partial = build({ withDeployedTables: true, withDeployedTriggers: true });
+  try {
+    partial.exec("DROP TRIGGER writer_v28_room_attachments_delete");
+    assert.throws(() => verifyWriterFence(partial, 28), /operator reconciliation/);
+  } finally { partial.close(); }
+  // Deployed tables present with their exact trigger set: accepted.
+  const exact = build({ withDeployedTables: true, withDeployedTriggers: true });
+  try { assert.doesNotThrow(() => verifyWriterFence(exact, 28)); }
+  finally { exact.close(); }
+  // Rebuilt v28 lineage: the deployed tables were never created, so their
+  // triggers are not required.
+  const rebuilt = build({ withDeployedTables: false, withDeployedTriggers: false });
+  try { assert.doesNotThrow(() => verifyWriterFence(rebuilt, 28)); }
+  finally { rebuilt.close(); }
 });
 
 test("v7 to v9 preserves every existing table row and retires a pre-open v7 connection", t => {
@@ -130,7 +171,7 @@ test("v7 to v9 preserves every existing table row and retires a pre-open v7 conn
   const current = new RoomStore(filename);
   try {
     assert.deepEqual(Object.fromEntries(tables.map(name => [name, current.db.prepare(`SELECT * FROM ${name}`).all()])), before);
-    assert.throws(() => cached.run(), /project_room_writer_v38|unsupported database writer/);
+    assert.throws(() => cached.run(), /project_room_writer_v42|unsupported database writer/);
     assert.equal(current.db.prepare("SELECT count(*) n FROM private_reminders").get().n, 0);
   } finally { current.close(); old.close(); }
 });

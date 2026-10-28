@@ -8,7 +8,7 @@ const hostsDir = join(root, "skills/project-room-host-router/hosts");
 const classes = JSON.parse(readFileSync(join(root, "skills/project-room-host-router/hosts.json"), "utf8"));
 const paste = readFileSync(join(root, "docs/JOIN-ANY-AGENT.md"), "utf8");
 const skill = readFileSync(join(root, "skills/project-room-host-router/SKILL.md"), "utf8");
-const plan = readFileSync(join(root, "docs/AGENT-HOST-PLAN-2026-09-29.md"), "utf8");
+const plan = readFileSync(join(root, "archive/docs/plans/AGENT-HOST-PLAN-2026-09-29.md"), "utf8");
 
 test("every advertised host class has a card and appears in the paste", () => {
   assert.ok(Array.isArray(classes) && classes.length >= 5);

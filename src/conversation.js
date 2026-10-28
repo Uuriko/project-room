@@ -1,14 +1,6 @@
 import { replyDraftKey, validReplyDraft, replyDraftData } from "./reply-requests.js";
-import { LEGACY_REACTIONS, foldedReactionMap, renderEmojiShortcodes } from "./emoji.js";
+import { uiText } from "./strings.js";
 // Conversation structure is derived from immutable reply links, including older logs.
-// Legacy names remain the input aliases. Pills render the Unicode key.
-export const REACTIONS = LEGACY_REACTIONS;
-
-export function reactionPills(reactions = {}) {
-  return Object.entries(foldedReactionMap(reactions)).map(([key, memberIds]) => (
-    { key, symbol: key, memberIds, count: memberIds.length, used: memberIds.length > 0 }
-  ));
-}
 
 // Composition, key repeat, and touch Return must never accidentally submit.
 export function sendsOnEnter(event, touchKeyboard = false) {
@@ -17,9 +9,8 @@ export function sendsOnEnter(event, touchKeyboard = false) {
     && Boolean(!touchKeyboard || event.ctrlKey || event.metaKey);
 }
 
-export function escapeChatAction({ dialogOpen = false, mentionOpen = false, emojiOpen = false, replyOpen = false, inThread = false } = {}) {
+export function escapeChatAction({ dialogOpen = false, mentionOpen = false, replyOpen = false, inThread = false } = {}) {
   if (dialogOpen) return null;
-  if (emojiOpen) return "hide-emoji";
   if (mentionOpen) return "hide-mentions";
   if (replyOpen) return "clear-reply";
   if (inThread) return "leave-thread";
@@ -48,6 +39,13 @@ export function messageCluster(messages, index) {
   return { grouped, dayStart, dayLabel: dayStart ? dayLabel(m.createdAt) : "" };
 }
 
+// Whether a message overflow menu should open upward: it does not fit between
+// its trigger and the bottom limit (the composer's top edge, else the window),
+// and there is more room above than below.
+export function menuOpensUp({ triggerTop, triggerBottom, menuHeight, limitTop, limitBottom }) {
+  const below = limitBottom - triggerBottom, above = triggerTop - limitTop;
+  return menuHeight > below && above > below;
+}
 export function mentionQuery(text, caret) {
   const value = String(text ?? "");
   const pos = Number.isInteger(caret) ? Math.min(Math.max(caret, 0), value.length) : value.length;
@@ -155,8 +153,20 @@ export function memberOnLine(member, { workItems, now } = {}) {
 
 export function memberStatus(member, context) {
   if (!member || member.active === false) return "access revoked";
+  // R350-n1: the seat is still a member, but its identity signed out for good.
+  if (member.identityRevoked === true) return uiText("people.status.signed_out_for_good");
   const line = context ? memberOnLine(member, context) : "";
   return line ? member.kind === "agent" ? `Assigned: ${line}` : line : kindLabel(member.kind);
+}
+
+// One accessible name per member row: who, agent or human, and how available.
+// Screen readers and browser drivers address the row by this name instead of
+// its initials and status chips.
+export function memberRowName(member, status) {
+  const name = String(member?.displayName ?? "").trim();
+  const kind = member?.kind === "agent" ? "agent" : "human";
+  const state = String(status ?? "").trim();
+  return [name, kind, state].filter(Boolean).join(", ");
 }
 
 // Compact Done receipt for an agent who posted completion. Not chat spam.
@@ -208,12 +218,39 @@ export function messageBodyHtml(body, members, esc, messageId) {
   const lines = text.split("\n");
   const full = mentionHtml(text, members, esc);
   if (text.length <= 1200 && lines.length <= 12) return full;
-  const preview = renderEmojiShortcodes([...lines.slice(0, 6).join("\n")].slice(0, 600).join(""));
+  const preview = [...lines.slice(0, 6).join("\n")].slice(0, 600).join("");
   return `<details class="message-expansion"><summary data-focus-key="message-expand:${esc(messageId)}"><span class="message-preview" aria-hidden="true">${esc(preview)}…</span><span class="message-show-more">Show more · ${lines.length} ${lines.length === 1 ? "line" : "lines"}</span><span class="message-show-less">Show less</span></summary><div class="message-full">${full}</div></details>`;
 }
 
+// Chat renders run on every arrival and used to rebuild every body's HTML
+// (emoji, @mention chips, markdown): about 200 ms of each render at 3,000
+// messages. The output is pure in (body, message id, mentionable members), so
+// one entry per message id is kept and the whole cache resets when the members
+// change. Callers pass a fresh members array per render pass (state.members is
+// mutated in place), and the members key is recomputed only when that array
+// or esc changes.
+export function createBodyHtmlCache(render = messageBodyHtml, limit = 20000) {
+  const entries = new Map();
+  let lastMembers = null, lastEsc = null, membersKey = null;
+  return {
+    html(body, members, esc, messageId) {
+      if (members !== lastMembers || esc !== lastEsc) {
+        const key = [...(members || [])].map(m => [m?.id, m?.displayName ?? "", m?.kind ?? ""].join("\u0001")).join("\u0002");
+        if (key !== membersKey || esc !== lastEsc) entries.clear();
+        lastMembers = members; lastEsc = esc; membersKey = key;
+      }
+      const text = String(body ?? ""), hit = entries.get(messageId);
+      if (hit && hit.body === text) return hit.html;
+      if (entries.size >= limit) entries.clear();
+      const html = render(text, members, esc, messageId);
+      entries.set(messageId, { body: text, html });
+      return html;
+    }
+  };
+}
+
 export function mentionHtml(body, members, esc) {
-  const text = renderEmojiShortcodes(body);
+  const text = String(body ?? "");
   const names = [...(members || [])].filter(m => m?.displayName).sort((a, b) => b.displayName.length - a.displayName.length);
   if (!names.length) return markdownHtml(esc(text));
   const pattern = new RegExp(`@(?:${names.map(m => escapeMentionName(m.displayName)).join("|")})(?=\\s|$)`, "g");
@@ -266,9 +303,37 @@ export function markdownHtml(escaped) {
     const tail = url.slice(clean.length);
     return `${pre}<a href="${clean}" target="_blank" rel="noopener noreferrer">${clean}</a>${tail}`;
   });
+  // Simple lists, after inline marks so **bold** inside an item still works,
+  // and before code is restored so a fence that contains "- item" stays literal.
+  text = renderMarkdownLists(text);
   // Restore stashed code (placeholders carry no markdown-significant characters).
   for (let i = 0; i < saved.length; i++) text = text.split(`${mdSlot}${i}${mdSlot}`).join(saved[i]);
   return text;
+}
+
+
+// One level only. A marker is "- ", "* ", or "1. " at the start of a line,
+// so "*italic*" and mid-line dashes stay as they are. Runs of the same
+// marker kind become one list; a blank line or a different marker ends it.
+function renderMarkdownLists(text) {
+  const lines = text.split("\n");
+  const bullet = /^[-*] (.+)$/;
+  const ordered = /^\d+\. (.+)$/;
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const kind = bullet.test(lines[i]) ? "ul" : ordered.test(lines[i]) ? "ol" : "";
+    if (!kind) { out.push(lines[i]); i += 1; continue; }
+    const pattern = kind === "ul" ? bullet : ordered;
+    const items = [];
+    while (i < lines.length && pattern.test(lines[i])) {
+      items.push(pattern.exec(lines[i])[1]);
+      i += 1;
+    }
+    const lis = items.map(item => ["<li>", item, "</li>"].join("")).join("");
+    out.push(["<", kind, " class=\"md-list\">", lis, "</", kind, ">"].join(""));
+  }
+  return out.join("\n");
 }
 
 export function composerPlaceholder({ workKind = null, inThread = false, channelName = "general" } = {}) {
@@ -411,6 +476,20 @@ export function draftRecoveryScope(identity) {
     identity.member.id, identity.sessionBinding]);
 }
 
+// Only references and recovery state persist. File bytes never enter browser storage.
+function recoveredFiles(files) {
+  return (Array.isArray(files) ? files : []).slice(0, 20).flatMap(file => {
+    if (!file || typeof file.id !== 'string' || !/^[a-zA-Z0-9-]{1,100}$/.test(file.id)
+      || typeof file.filename !== 'string' || file.filename.length > 255
+      || typeof file.mediaType !== 'string' || file.mediaType.length > 255
+      || !['staged', 'uploading', 'error'].includes(file.status)) return [];
+    return [{ id: file.id, filename: file.filename, mediaType: file.mediaType,
+      status: file.status === 'uploading' ? 'error' : file.status,
+      ...(typeof file.commitMessageId === 'string' && /^[a-zA-Z0-9-]{1,100}$/.test(file.commitMessageId)
+        ? { commitMessageId: file.commitMessageId } : {}) }];
+  });
+}
+
 // Tab-scoped recovery. The composer used to hide this behind a checkbox; drafts
 // now save for this tab until the 12-hour expiry or sign-out. Read only after
 // an authenticated room snapshot.
@@ -421,11 +500,13 @@ export class DraftRecovery {
   write(scope, drafts, threadId, activeKey = threadId) {
     try {
       if (typeof scope !== "string" || !scope) { this.clear(); return false; }
-      const entries = [...drafts.entries].filter(([, d]) => d.body.trim()).slice(-50).map(([id, d]) =>
+      const entries = [...drafts.entries].filter(([, d]) => d.body.trim() || recoveredFiles(d.files).length).slice(-50).map(([id, d]) =>
         [id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
           ...(typeof d.channelId === "string" ? { channelId: d.channelId } : {}),
           ...(d.mode ? { mode: d.mode, threadId: d.threadId } : {}),
-          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null }]);
+          ...(d.assistantDraft ? { assistantDraft: d.assistantDraft } : {}),
+          pending: d.pending ? { id: d.pending.command.id, messageId: d.pending.command.data.messageId, contents: d.pending.contents } : null,
+          files: recoveredFiles(d.files) }]);
       this.storage.setItem(this.key, JSON.stringify({ scope, expires: this.now() + 12 * 60 * 60 * 1000, threadId, activeKey, entries }));
       this.storage.removeItem("project-room:drafts:v2");
       return true;
@@ -472,17 +553,28 @@ export class DraftRecovery {
           // A malformed retained operation must never become a new automatic send.
           if (d.pending && !pending) continue;
           drafts.save(id, { body: d.body, toMemberId: d.toMemberId, replyToId: d.replyToId,
-            mode: d.mode, threadId: d.threadId, channelId, pending });
+            mode: d.mode, threadId: d.threadId, channelId, pending, files: recoveredFiles(d.files) });
           continue;
+        }
+        let assistantDraft = null;
+        if (d.assistantDraft) {
+          const input = d.assistantDraft, source = index.byId.get(input.sourceMessageId);
+          if (!source || source.deletedAt || source.toMemberId || d.toMemberId || d.replyToId !== source.id
+            || channelId !== (source.channelId ?? "general") || !['contribute', 'resolve'].includes(input.action)
+            || typeof input.runId !== 'string' || !/^[a-zA-Z0-9_-]{1,100}$/.test(input.runId)
+            || id !== ['assistant', input.runId].join(':') || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0
+            || input.action === 'contribute' && typeof input.conflict !== 'boolean') continue;
+          assistantDraft = { action: input.action, runId: input.runId, sourceMessageId: source.id,
+            expectedRevision: input.expectedRevision, ...(input.action === 'contribute' ? { conflict: input.conflict } : {}) };
         }
         const channelRoot = id === null || isChannelDraftKey(id);
         const draftId = channelRoot ? channelDraftKey(channelId ?? "general") : id;
         if (isChannelDraftKey(id) && id !== draftId) continue;
         if (channelId && channelId !== "general" && !state.channels?.[channelId]) continue;
-        if (!channelRoot && !index.threads.has(id)) continue;
+        if (!channelRoot && !assistantDraft && !index.threads.has(id)) continue;
         if (typeof d.body !== "string" || typeof d.toMemberId !== "string") continue;
         if (d.toMemberId && (!state.members[d.toMemberId] || state.members[d.toMemberId].active === false)) continue;
-        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && index.rootById.get(d.replyToId) !== id
+        if (d.replyToId !== null && (!index.byId.has(d.replyToId) || !channelRoot && !assistantDraft && index.rootById.get(d.replyToId) !== id
           || channelRoot && (index.byId.get(d.replyToId).channelId ?? "general") !== (channelId ?? "general"))) continue;
         // The current client has separate command and message identities. Preserve
         // both, then recompute the entire permitted payload before accepting a retry.
@@ -494,16 +586,70 @@ export class DraftRecovery {
         const contents = JSON.stringify({ type: "message.posted", data, causationId: null });
         const pending = messageIdValid && d.pending?.contents === contents && typeof d.pending.id === "string" && /^[a-zA-Z0-9-]{1,100}$/.test(d.pending.id)
           ? { contents, command: { id: d.pending.id, type: "message.posted", data } } : null;
-        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending });
+        drafts.save(draftId, { ...data, body: d.body, toMemberId: d.toMemberId, pending, files: recoveredFiles(d.files), ...(assistantDraft ? { assistantDraft } : {}) });
         restoredKeys.set(id, draftId);
       }
       let activeKey = restoredKeys.has(saved.activeKey) ? restoredKeys.get(saved.activeKey)
         : drafts.entries.has(saved.activeKey) ? saved.activeKey : drafts.entries.has(saved.threadId) ? saved.threadId : null;
+      // Keep empty-thread navigation separate from recoverable draft text.
+      // Never turn a rejected private draft into a fresh public reply.
+      if (activeKey === null && typeof saved.threadId === "string"
+        && saved.activeKey === saved.threadId && !saved.entries.some(([id]) => id === saved.threadId)) {
+        const root = index.byId.get(saved.threadId), channelId = root?.channelId ?? "general";
+        if (root && !root.deletedAt && !root.toMemberId && index.threads.has(root.id)
+          && (channelId === "general" || state.channels?.[channelId])
+          && !state.channels?.[channelId]?.archivedAt) {
+          drafts.save(root.id, { body: "", toMemberId: "", replyToId: root.id, channelId, pending: null });
+          activeKey = root.id;
+        }
+      }
       const active = drafts.entries.get(activeKey);
       if (active?.channelId && state.channels?.[active.channelId]?.archivedAt) activeKey = null;
       const selected = drafts.entries.get(activeKey);
       return { drafts, activeKey, channelId: selected?.channelId ?? "general",
-        threadId: selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) ? null : activeKey };
+        threadId: selected?.assistantDraft ? index.rootById.get(selected.assistantDraft.sourceMessageId) : selected?.mode ? selected.threadId : isChannelDraftKey(activeKey) ? null : activeKey };
     } catch { this.clear(); return null; }
   }
+}
+
+// Timeline windowing: a room with thousands of messages renders only its
+// newest `limit` root messages; the pager widens the window a page at a time.
+export const TIMELINE_WINDOW = 200;
+export function windowTimeline(messages, limit = TIMELINE_WINDOW) {
+  const hidden = Math.max(0, messages.length - limit);
+  return { messages: hidden ? messages.slice(hidden) : messages, hidden };
+}
+// The window size that renders message `id`, never smaller than `current`.
+export function windowToInclude(messages, id, current = TIMELINE_WINDOW, page = TIMELINE_WINDOW) {
+  const index = messages.findIndex(message => message.id === id);
+  if (index < 0) return current;
+  const needed = messages.length - index;
+  return needed > current ? Math.ceil(needed / page) * page : current;
+}
+
+// R68-1: keep a timeline that opened (or was brought) to its newest message
+// there while the layout around it settles, and tell real arrivals from
+// older history filling in above them.
+
+// The pin holds while nobody has scrolled since it was set: scrollTop is the
+// value the pin saw, or the list is still flush with its bottom (a taller list
+// clamps scrollTop without anyone scrolling). A list that only got shorter, or
+// whose content grew, keeps its pin, so the next layout or render can re-stick.
+export function createTimelinePin() {
+  let pin = null;
+  const flush = list => list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
+  return {
+    set(view, list) { pin = { view, top: list.scrollTop }; },
+    tracks(view) { return Boolean(pin && pin.view === view); },
+    holds(view, list) { return Boolean(pin && pin.view === view && (list.scrollTop === pin.top || flush(list))); },
+    clear() { pin = null; },
+  };
+}
+
+// Messages after the newest one already on screen. Older history rendered in
+// above it is not news, so it never counts toward "N new messages".
+export function arrivalsAfterShown(messages, isShown) {
+  let last = -1;
+  messages.forEach((message, index) => { if (isShown(message)) last = index; });
+  return messages.slice(last + 1).filter(message => !isShown(message));
 }

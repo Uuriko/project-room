@@ -28,8 +28,12 @@ export function completedResults(state) {
 // Read-only source projection: never a generated consensus or an access grant.
 export function roomOrientation(state) {
   const instructions = state.room.charter;
+  // A submitted result that still waits on verification or a decision is
+  // current work, not history; otherwise it vanishes from both lists.
+  const awaitingGate = item => item.state === "completed" && Boolean(item.receipt?.eventId)
+    && Boolean(item.receipt?.evidenceVersion) && !terminalWork(item);
   const work = Object.values(state.workItems).filter(item => !item.supersededBy
-    && ["proposed", "accepted", "working", "blocked"].includes(item.state))
+    && (["proposed", "accepted", "working", "blocked"].includes(item.state) || awaitingGate(item)))
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id));
   return {
     version: 1,
@@ -41,9 +45,17 @@ export function roomOrientation(state) {
     activeWork: work.slice(0, 3).map(item => ({ id: item.id, title: item.title,
       state: item.state, revision: item.revision, updatedAt: item.updatedAt })),
     activeWorkTotal: work.length,
-    recentDecisions: state.eventLog.filter(e => e.type === "decision.recorded").slice(-3).reverse()
-      .map(e => ({ eventId: e.id, statement: e.data.statement, sourceMessageId: e.data.sourceMessageId,
-        authorId: e.actorId, at: e.at }))
+    // Both decision records are decisions: a free-standing decision
+    // (decision.recorded) and a decision on a work result
+    // (owner.decision_recorded). Reading only the first made the Overview
+    // say "No decisions recorded yet" beside an Approved result (#3773).
+    recentDecisions: state.eventLog.filter(e => e.type === "decision.recorded"
+      || (e.type === "owner.decision_recorded" && e.data.sourceMessageId)).slice(-3).reverse()
+      .map(e => e.type === "decision.recorded"
+        ? { eventId: e.id, statement: e.data.statement, sourceMessageId: e.data.sourceMessageId,
+          authorId: e.actorId, at: e.at }
+        : { eventId: e.id, statement: `${{ approved: "Approved", changes_requested: "Changes requested", rejected: "Rejected" }[e.data.decision] ?? e.data.decision}${e.data.reason ? `: ${e.data.reason}` : ""}`,
+          sourceMessageId: e.data.sourceMessageId, authorId: e.actorId, at: e.at })
   };
 }
 

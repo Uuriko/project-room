@@ -13,6 +13,7 @@
 import { retentionReport } from "../retention-response.mjs";
 import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
+import { withProjectMapOverlap } from "../project-map-store.mjs";
 
 function requireRoomScope(ctx, auth, writing = false) {
   const required = writing ? "rooms:write" : "rooms:read";
@@ -56,8 +57,8 @@ export async function getRetentionDashboard(ctx) {
 export async function getWorkClaimsRead(ctx) {
   const { roomId, auth } = authenticateRead(ctx);
   const now = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
-  return ctx.json(ctx.res, 200, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
-    auth.member.id, ctx.url.searchParams, now));
+  return ctx.json(ctx.res, 200, withProjectMapOverlap(ctx.store, roomId, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
+    auth.member.id, ctx.url.searchParams, now)));
 }
 
 export async function provenanceRoute(ctx) {
@@ -69,6 +70,19 @@ export async function provenanceRoute(ctx) {
     helpers: { json: ctx.json, reject: ctx.reject, body: ctx.body } });
 }
 
+// Claim lifecycle: close / cancel retire open work without delivery. Same
+// pure path as MCP room_close_work_claim (work-claim-routes.mjs closeWork).
+export async function closeRoute(ctx) {
+  const { roomId, auth } = authenticateRead(ctx, true);
+  const verb = ctx.url.pathname.endsWith("/cancel") ? "cancel" : "close";
+  return handleWorkClaims({ req: ctx.req, res: ctx.res, url: ctx.url, store: ctx.store,
+    roomId, auth, workClaimRoute: verb, workClaimId: ctx.params.claimId,
+    registry: ctx.store.workClaims, reauthorize: () => authenticateRead(ctx, true).auth,
+    helpers: { json: ctx.json, reject: ctx.reject, body: ctx.body } });
+}
+
+const claimParameters = Object.freeze({ type: "object", required: ["roomId", "claimId"],
+  properties: { roomId: { type: "string" }, claimId: { type: "string" } } });
 const parameters = Object.freeze({ type: "object", required: ["roomId"],
   properties: { roomId: { type: "string" } } });
 
@@ -78,6 +92,12 @@ export const WORK_CLAIM_ROUTES = Object.freeze([
     path: `/api/rooms/{roomId}/work-claims/{claimId}/${method === "POST" ? "premise-invalid" : "provenance"}`,
     auth: "room", capability: null, scope: "room", handler: provenanceRoute,
     schema: { params: { type: "object", required: ["roomId", "claimId"], properties: { roomId: { type: "string" }, claimId: { type: "string" } } }, response: { type: "object" } }, events: [] })),
+  Object.freeze({ id: "work-claim-close", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/close",
+    auth: "room", capability: null, scope: "room", handler: closeRoute,
+    schema: { params: claimParameters, response: { type: "object" } }, events: ["work_claim.updated"] }),
+  Object.freeze({ id: "work-claim-cancel", method: "POST", path: "/api/rooms/{roomId}/work-claims/{claimId}/cancel",
+    auth: "room", capability: null, scope: "room", handler: closeRoute,
+    schema: { params: claimParameters, response: { type: "object" } }, events: ["work_claim.updated"] }),
   // A sibling path deliberately cannot enter an older server's mutating
   // work-claims handler; unsupported servers fail rather than sweep leases.
   Object.freeze({ id: "work-claims-read", method: "GET", path: "/api/rooms/{roomId}/work-claims-read",

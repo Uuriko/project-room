@@ -18,7 +18,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     fixture.store.command(fixture.keys.owner, "commons", { id: crypto.randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId: "human-reviewer", displayName: "Test human reviewer", kind: "human", permissions: ["verify"] } });
     const reviewerKey = fixture.store.issueAccessKey("commons", "human-reviewer");
-    const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
+    // Each work card step refreshes the room with its side panels, which is
+    // wider than the production credential burst. This browser fixture keeps
+    // the previous 600-read and 600-write windows; production stays on the burst.
+    const server = createRoomServer({ store: fixture.store, streamInterval: 60, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     let browser;
@@ -105,7 +108,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       await mutate("producer", T.WORK_COMPLETED, { summary: "The source supports this small finding.", evidenceUrl: "https://example.invalid/finding", evidenceVersion: "v1", producerId: "producer", nextAction: "Use the finding or review it as requested." });
       const card = page.locator(`[data-work-record-id="${id}"]`);
       const status = async (step, text, tone) => {
-        await card.locator(`[data-next-step="${step}"]`).waitFor();
+        await card.locator(`[data-next-step="${step}"]`).waitFor({ state: "attached" });
+        if (["complete", "in_progress"].includes(step)) await card.locator(".work-accountable").waitFor();
+        else await card.locator(`[data-next-step="${step}"]`).waitFor();
         assert.equal(await card.locator(".state").textContent(), text);
         assert.equal(await card.locator(".state").getAttribute("class"), `state state-${tone}`);
         assert.equal((await agent("owner").orient()).work.find(work => work.id === id).next.action, step);

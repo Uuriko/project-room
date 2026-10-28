@@ -9,8 +9,10 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { MESSAGE_BODY_READS } from "../server/routes/table.mjs";
 import { auditRecovery } from "../server/recovery.mjs";
-import { messageInHistory, eventInHistory, rowInHistory, indexMessages } from "../server/history-visibility.mjs";
+import { messageInHistory, eventInHistory, rowInHistory, indexMessages, historyFloor } from "../server/history-visibility.mjs";
+import { DatabaseSync } from "node:sqlite";
 import { EVENT_TYPES as T, event, replay, memberHistoryVisibility, historyVisibility, PERMISSIONS } from "../src/events.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // PRIV-2: an owner who chooses "since_join" keeps earlier messages away from
 // members who join later. Every read that can carry a message body
@@ -63,12 +65,13 @@ async function setup(t, { preJoinEvents = 0 } = {}) {
   cmd(T.MESSAGE_POSTED, { messageId: "before-reply", body: `${BEFORE} reply`, replyToId: "before-root" });
   cmd(T.MESSAGE_PINNED, { messageId: "before-root" });
   cmd(T.MESSAGE_POSTED, { messageId: "before-question", body: `${BEFORE} open question?` });
-  for (let i = 0; i < preJoinEvents; i++) cmd(T.CHANNEL_RENAMED, { channelId: "general", name: `general-${i}` });
+  cmd(T.CHANNEL_CREATED, { channelId: "filler", name: "filler" });
+  for (let i = 0; i < preJoinEvents; i++) cmd(T.CHANNEL_RENAMED, { channelId: "filler", name: `filler-${i}` });
   cmd(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" });
   cmd(T.MEMBER_ADDED, { memberId: "late-agent", displayName: "Late agent", kind: "agent", permissions: [], accountableHumanId: "owner" });
   const lateKey = store.issueAccessKey("commons", "late-agent");
   const identity = store.identities.create("Late reader");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, displayName: "Late reader", permissions: [] });
+  linkWithProof(store, ownerKey, "commons", identity, { displayName: "Late reader", permissions: [] });
   // An edit after the join still belongs to a message from before it.
   cmd(T.MESSAGE_EDITED, { messageId: "before-question", body: `${BEFORE_EDIT}?`, expectedMessageRevision: 0 });
   cmd(T.MESSAGE_POSTED, { messageId: "after-root", body: AFTER });
@@ -158,7 +161,7 @@ test("the owner, membership admins and members who joined earlier keep their rea
   assert.doesNotThrow(() => auditRecovery(f.store));
 });
 
-test("new rooms start link guests and agent guests at their join; older rooms and explicit choices keep their setting", () => {
+test("new and older rooms start link guests and agent guests at their join; explicit choices keep their setting", () => {
   const at = "2026-10-03T12:00:00.000Z";
   const created = (data = {}) => [
     event({ type: T.ROOM_CREATED, actorId: "owner", roomId: "r1", at, data: { roomId: "r1", ownerId: "owner", title: "R", purpose: "P", ...data } }),
@@ -171,9 +174,13 @@ test("new rooms start link guests and agent guests at their join; older rooms an
   assert.equal(memberHistoryVisibility(fresh, "guest-agent-0123456789abcdef01234567"), "since_join");
   assert.equal(memberHistoryVisibility(fresh, "agent-1"), "all");
   assert.equal(memberHistoryVisibility(fresh, "owner"), "all");
-  // Rooms created before this shipped carry no version: everyone reads all.
+  // Rooms created before historyDefaultsVersion 1 get the same computed guest
+  // default (Potter, Oct 10 2026). Non-guest members still read all.
   const legacy = replay(created());
-  assert.equal(memberHistoryVisibility(legacy, linkGuest), "all");
+  assert.equal(historyVisibility(legacy).guestsSinceJoin, true);
+  assert.equal(memberHistoryVisibility(legacy, linkGuest), "since_join");
+  assert.equal(memberHistoryVisibility(legacy, "agent-1"), "all");
+  assert.equal(memberHistoryVisibility(legacy, "owner"), "all");
   assert.equal("historyVisibility" in legacy.room, false, "older logs replay without the new field");
   // The owner's explicit choice replaces the guest default.
   const chosen = replay([...created({ historyDefaultsVersion: 1 }),
@@ -215,4 +222,86 @@ test("same-millisecond prejoin history stays private beyond500 intervening event
   const indexed = await (await f.get("/api/rooms/commons/conversation?limit=2", f.lateKey)).json();
   assert.deepEqual(indexed.messages.map(m => m.id), ["after-root"]);
   assert.equal((await f.get("/api/rooms/commons/conversation?messageId=before-root", f.lateKey)).status, 404);
+});
+
+// #1523: a since_join guest removed and later reactivated must not read
+// messages posted during the removal gap. The history floor is the LATEST
+// join event for the member id, not the first-ever one.
+test("a removed-then-reactivated guest reads nothing from the removal gap", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  const at = s => `2026-10-06T12:${s}:00.000Z`;
+  const rows = [
+    [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "gap-agent" } }],
+    [2, { id: "e2", type: T.MESSAGE_POSTED, at: at("01"), data: { messageId: "m-early" } }],
+    [3, { id: "e3", type: T.MEMBER_ACCESS_CHANGED, at: at("02"), data: { memberId: "gap-agent", active: false } }],
+    [4, { id: "e4", type: T.MESSAGE_POSTED, at: at("03"), data: { messageId: "m-gap" } }],
+    [5, { id: "e5", type: T.MEMBER_ADDED, at: at("04"), data: { memberId: "gap-agent" } }],
+    [6, { id: "e6", type: T.MESSAGE_POSTED, at: at("05"), data: { messageId: "m-late" } }],
+  ];
+  const insert = db.prepare("INSERT INTO events (room_id, sequence, body) VALUES (?, ?, ?)");
+  for (const [sequence, body] of rows) insert.run("commons", sequence, JSON.stringify(body));
+  const state = {
+    room: { ownerId: "owner", historyVisibility: { value: "since_join" } },
+    members: { "gap-agent": { id: "gap-agent", kind: "agent", active: true, permissions: [] } },
+  };
+  const floor = historyFloor(db, state, "commons", "gap-agent");
+  assert.equal(floor.sequence, 5, "floor is the reactivation join, not the first join");
+  assert.equal(messageInHistory({ id: "m-early", createdAt: at("01") }, floor), false);
+  assert.equal(messageInHistory({ id: "m-gap", createdAt: at("03") }, floor), false, "removal-gap message stays hidden");
+  assert.equal(messageInHistory({ id: "m-late", createdAt: at("05") }, floor), true);
+  assert.equal(eventInHistory({ id: "e4", at: at("03") }, floor), false);
+  assert.equal(eventInHistory({ id: "e6", at: at("05") }, floor), true);
+  db.close();
+});
+
+// The reducer refuses a second member.added, so real reactivation is a
+// member.access_changed { active: true }. The floor must follow it, and a
+// permission edit while already active must not move it.
+test("a guest reactivated through member.access_changed gets a new floor", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  const at = s => `2026-10-06T12:${s}:00.000Z`;
+  const rows = [
+    [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "g" } }],
+    [2, { id: "e2", type: T.MEMBER_ACCESS_CHANGED, at: at("01"), data: { memberId: "g", active: false } }],
+    [3, { id: "e3", type: T.MESSAGE_POSTED, at: at("02"), data: { messageId: "m-gap" } }],
+    [4, { id: "e4", type: T.MEMBER_ACCESS_CHANGED, at: at("03"), data: { memberId: "g", active: true } }],
+    [5, { id: "e5", type: T.MESSAGE_POSTED, at: at("04"), data: { messageId: "m-late" } }],
+    [6, { id: "e6", type: T.MEMBER_ACCESS_CHANGED, at: at("05"), data: { memberId: "g", active: true } }],
+  ];
+  const insert = db.prepare("INSERT INTO events (room_id, sequence, body) VALUES (?, ?, ?)");
+  for (const [sequence, body] of rows) insert.run("commons", sequence, JSON.stringify(body));
+  const state = {
+    room: { ownerId: "owner", historyVisibility: { value: "since_join" } },
+    members: { g: { id: "g", kind: "agent", active: true, permissions: [] } },
+  };
+  const floor = historyFloor(db, state, "commons", "g");
+  assert.equal(floor.sequence, 4, "floor is the reactivation, not the first join or a later edit");
+  assert.equal(messageInHistory({ id: "m-gap", createdAt: at("02") }, floor), false);
+  assert.equal(messageInHistory({ id: "m-late", createdAt: at("04") }, floor), true);
+  db.close();
+});
+
+test("a permission-only member.access_changed (no active field) does not move the floor", () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE events (room_id TEXT, sequence INTEGER, body TEXT)");
+  const at = s => `2026-10-06T12:${s}:00.000Z`;
+  const rows = [
+    [1, { id: "e1", type: T.MEMBER_ADDED, at: at("00"), data: { memberId: "g" } }],
+    [2, { id: "e2", type: T.MESSAGE_POSTED, at: at("01"), data: { messageId: "m-after-join" } }],
+    [3, { id: "e3", type: T.MEMBER_ACCESS_CHANGED, at: at("02"), data: { memberId: "g", permissions: ["read"] } }],
+    [4, { id: "e4", type: T.MEMBER_ACCESS_CHANGED, at: at("03"), data: { memberId: "g", permissions: [] } }],
+    [5, { id: "e5", type: T.MEMBER_ACCESS_CHANGED, at: at("04"), data: { memberId: "g", active: true, permissions: [] } }],
+  ];
+  const insert = db.prepare("INSERT INTO events (room_id, sequence, body) VALUES (?, ?, ?)");
+  for (const [sequence, body] of rows) insert.run("commons", sequence, JSON.stringify(body));
+  const state = {
+    room: { ownerId: "owner", historyVisibility: { value: "since_join" } },
+    members: { g: { id: "g", kind: "agent", active: true, permissions: [] } },
+  };
+  const floor = historyFloor(db, state, "commons", "g");
+  assert.equal(floor.sequence, 1, "permission-only edits keep the original join floor");
+  assert.equal(messageInHistory({ id: "m-after-join", createdAt: at("01") }, floor), true);
+  db.close();
 });

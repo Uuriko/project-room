@@ -97,8 +97,13 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(about.headers.get('x-test-do-fetches'), '0');
     assert.equal(about.headers.get('x-robots-tag'), 'all');
     assert.match(about.headers.get('content-security-policy'), /default-src 'none'/);
-    assert.match(about.headers.get('content-security-policy'), /script-src https:\/\/static\.cloudflareinsights\.com/);
-    assert.equal(about.headers.get('content-security-policy').split('; ').find(d => d.startsWith('connect-src ')), `connect-src https://cloudflareinsights.com ${origin}/cdn-cgi/rum`);
+    // /about is the one public page with a first-party script: its policy
+    // path-pins src/front-door.js and its /api/public/front-door feed ahead
+    // of the shared beacon sources — the shape cloudflare/public-search.check.mjs
+    // and tests/public-search-http.test.js pin by full directive map. Every
+    // other public page keeps the insights-only policy asserted there.
+    assert.match(about.headers.get('content-security-policy'), /script-src \S+\/src\/front-door\.js https:\/\/static\.cloudflareinsights\.com/);
+    assert.equal(about.headers.get('content-security-policy').split('; ').find(d => d.startsWith('connect-src ')), `connect-src ${origin}/api/public/front-door https://cloudflareinsights.com ${origin}/cdn-cgi/rum`);
     assert.doesNotMatch(about.headers.get('content-security-policy'), /connect-src 'self'|script-src 'self'|\*/);
     assert.match(about.headers.get('content-security-policy'), /style-src 'unsafe-inline'/);
     assert.equal(await about.text(), 'about-page');
@@ -130,6 +135,22 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const fetchesAfterScripts = assetFetches;
     await call('/src/app.js');
     assert.equal(assetFetches, fetchesAfterScripts, 'a repeated static asset must not refetch ASSETS');
+    // Scripts revalidate against a content ETag instead of re-downloading;
+    // fonts get a day of cache; the HTML shell stays no-store.
+    assert.equal(script.headers.get('cache-control'), 'no-cache');
+    const etag = script.headers.get('etag');
+    assert.match(etag, /^"[0-9a-f]{32}"$/);
+    assert.equal(scriptAgain.headers.get('etag'), etag, 'the ETag is stable for unchanged bytes');
+    const notModified = await call('/src/app.js', { headers: { 'If-None-Match': `W/${etag}` } });
+    assert.equal(notModified.status, 304);
+    assert.equal(notModified.headers.get('etag'), etag);
+    assert.equal((await notModified.arrayBuffer()).byteLength, 0);
+    const changed = await call('/src/app.js', { headers: { 'If-None-Match': '"stale"' } });
+    assert.equal(changed.status, 200);
+    assert.equal(await changed.text(), 'app-js');
+    assert.equal(fontResponse.headers.get('cache-control'), 'public, max-age=86400');
+    assert.equal(page.headers.get('cache-control'), 'no-store');
+    assert.equal(page.headers.get('etag'), null);
 
     const packet = await call('/llms.txt');
     assert.equal(packet.status, 200);
@@ -151,6 +172,24 @@ test('static assets and discovery documents do not enter the Durable Object', as
     const denied = await call('/llms.txt', { method: 'POST' });
     assert.equal(denied.status, 405);
     assert.equal(denied.headers.get('x-test-do-fetches'), '0');
+    // #3274: Worker-layer errors carry the standard envelope, not a bare
+    // { error: { code, message } } — same fields the Node handler emits.
+    const deniedBody = await denied.json();
+    assert.equal(deniedBody.error.code, 'method_not_allowed');
+    assert.equal(typeof deniedBody.hint, 'string');
+    assert.ok(deniedBody.hint.length > 0);
+    assert.ok(Array.isArray(deniedBody.next));
+    assert.equal(typeof deniedBody.operationId, 'string');
+    assert.equal(typeof deniedBody.category, 'string');
+    assert.equal(typeof deniedBody.reason, 'string');
+    // #3274: POST / is 404 (Node's answer for the app root), enveloped.
+    const rootPost = await call('/', { method: 'POST' });
+    assert.equal(rootPost.status, 404);
+    const rootPostBody = await rootPost.json();
+    assert.equal(rootPostBody.error.code, 'not_found');
+    assert.equal(typeof rootPostBody.hint, 'string');
+    assert.ok(Array.isArray(rootPostBody.next));
+    assert.equal(typeof rootPostBody.operationId, 'string');
 
     const missing = await call('/compare/project-room-vs-slack', { headers: { Accept: 'text/html' } });
     assert.equal(missing.status, 404);
@@ -175,7 +214,7 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(health.headers.get('x-test-do-probes'), '0');
     assert.match(health.headers.get('server-timing'), /total;dur=/);
     const healthBody = await health.json();
-    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging' });
+    assert.deepEqual(healthBody, { status: 'ok', mode: 'cloudflare-staging', deployment: 'staging', emailVerification: 'relaxed-no-mailer', emailVerificationScope: 'worker' });
 
     const ready = await call('/api/ready', { ip: '192.0.2.9' });
     assert.equal(ready.status, 200, await ready.clone().text());
@@ -183,6 +222,8 @@ test('static assets and discovery documents do not enter the Durable Object', as
     assert.equal(ready.headers.get('x-test-do-probes'), '1');
     const readyBody = await ready.json();
     assert.equal(readyBody.status, 'ready');
+    assert.equal(readyBody.emailVerification, 'relaxed-no-mailer');
+    assert.equal(readyBody.emailVerificationScope, 'durable-object');
     assert.equal(readyBody.do.status, 'ok');
     assert.equal(readyBody.do.statusCode, 200);
     assert.equal(typeof readyBody.do.ms, 'number');

@@ -132,6 +132,38 @@ test("C2 default-deny flows through C1 validation on record", () => {
   assert.equal(c.stats().total, 0);
 });
 
+test("C2 evictedHistory seeds cumulative counters for restored collectors", () => {
+  const c = createCollector({
+    maxEvents: 3,
+    evictedHistory: { dropped: 2, perType: { "message.sent": 2 }, perActor: { human: 1, agent: 1 } }
+  });
+  const seeded = c.stats();
+  assert.equal(seeded.total, 0);
+  assert.equal(seeded.recorded, 2);
+  assert.equal(seeded.dropped, 2);
+  assert.equal(seeded.recorded, seeded.total + seeded.dropped);
+  // New records continue the seeded totals (and id sequence) seamlessly.
+  const res = c.record(messageSent());
+  assert.deepEqual(res, { ok: true, id: 3 });
+  const s = c.stats();
+  assert.equal(s.recorded, 3);
+  assert.deepEqual(s.perType, { "message.sent": 3 });
+  assert.deepEqual(s.perActor, { human: 2, agent: 1 });
+  // Inconsistent seeds are rejected: totals must sum to the dropped count.
+  assert.throws(
+    () => createCollector({ evictedHistory: { dropped: 2, perType: { "message.sent": 1 }, perActor: { human: 2 } } }),
+    /must equal evictedHistory\.dropped/
+  );
+  assert.throws(
+    () => createCollector({ evictedHistory: { dropped: -1, perType: {}, perActor: {} } }),
+    /non-negative integer/
+  );
+  assert.throws(
+    () => createCollector({ evictedHistory: { dropped: 0, perType: null, perActor: {} } }),
+    /must be an object/
+  );
+});
+
 test("C2 createCollector requires a positive integer capacity", () => {
   assert.throws(() => createCollector({ maxEvents: 0 }), /positive integer/);
   assert.throws(() => createCollector({ maxEvents: -5 }), /positive integer/);

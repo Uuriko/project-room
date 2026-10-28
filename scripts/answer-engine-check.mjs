@@ -9,7 +9,7 @@ import { postAnalyticsSnapshot, postOpsSummary, redact, resolveIngestPath } from
 // committed. A missing key skips that engine and exits 0 when nothing was called.
 
 const sleep = ms => new Promise(done => { setTimeout(done, ms); });
-export const DEFAULT_PROMPTS = new URL("../docs/answer-engine-prompts.json", import.meta.url);
+export const DEFAULT_PROMPTS = new URL("./answer-engine-prompts.json", import.meta.url);
 
 const CUE = /\b(recommend(?:ed|s|ation)?|suggest(?:ed|ion|s)?|try|use|using|option|best|consider|choose|pick|worth|ideal)\b/i;
 const NEGATION = /\b(not recommend|don't recommend|do not recommend|avoid|wouldn't recommend|would not recommend)\b/i;

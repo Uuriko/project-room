@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Referral growth: a join is recorded immediately, and it counts toward a
 // reward only after the new member posts a message and 24 hours pass from
 // that message. Rewards are room-founding credits (a guest room, or one
@@ -8,6 +9,7 @@
 // rows whose token is recomputed from the room's referral signing seed.
 
 import { createHash, createHmac } from "node:crypto";
+import { tableExists } from "./db-util.mjs";
 
 // Same sentence as inviteMessage in src/share-links.js. The server copy stays
 // here so the runtime package does not pull the browser module into its closure.
@@ -96,10 +98,6 @@ export function partyAddress(address) {
 export function partySession(session) {
   if (typeof session !== "string" || !session || session.length > 512) return null;
   return partyDigest("session", session);
-}
-
-function tableExists(db, name) {
-  return Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 }
 
 function columnExists(db, table, column) {
@@ -231,11 +229,16 @@ function payoutsInWindow(store, roomId, referrerMemberId, now) {
     WHERE referrer_member_id=? AND activated_at IS NOT NULL AND activated_at>?`).get(referrerMemberId, since).n;
 }
 
-// First message starts the clock. The referral activates at firstMessage + 24h,
-// not at join, so an empty signup never counts. An agent the inviter minted
-// or owns never activates. Everyone else is capped at PAYOUT_DAILY_CAP
-// activations in a rolling day; a later day can still pay a referral that
-// already qualified.
+// First message starts the clock. The referral becomes eligible at
+// firstMessage + 24h, not at join, so an empty signup never counts. An agent
+// the inviter minted or owns never activates. Everyone else is capped at
+// PAYOUT_DAILY_CAP activations in a rolling day; a later day can still pay
+// a referral that already qualified. activated_at records the settlement
+// time (now), not the eligibility time: payoutsInWindow counts payouts in
+// the rolling window by activated_at, so backdating it to firstMessage +
+// 24h would let a delayed settlement (there is no timer — settlement only
+// runs when board()/creditsFor callers invoke it) drop payouts out of the
+// window they were actually paid in and bypass the cap.
 export function settleActivations(store, roomId) {
   ensurePayoutColumns(store.db);
   const pending = store.db.prepare(
@@ -243,14 +246,7 @@ export function settleActivations(store, roomId) {
      FROM referrals WHERE room_id=? AND activated_at IS NULL ORDER BY completed_at ASC, referee_member_id ASC`
   ).all(roomId);
   if (!pending.length) return 0;
-  const firstByAuthor = new Map();
-  for (const message of store.room(roomId).state.messages ?? []) {
-    if (!message?.authorId || typeof message.createdAt !== "string") continue;
-    const at = Date.parse(message.createdAt);
-    if (!Number.isFinite(at)) continue;
-    const prior = firstByAuthor.get(message.authorId);
-    if (prior === undefined || at < prior) firstByAuthor.set(message.authorId, at);
-  }
+  const firstByAuthor = messageRepository(store, roomId).firstPostedAtByAuthor();
   const now = store.now();
   const activate = store.db.prepare(
     "UPDATE referrals SET activated_at=? WHERE room_id=? AND referee_member_id=? AND activated_at IS NULL AND payout_block IS NULL"
@@ -269,7 +265,7 @@ export function settleActivations(store, roomId) {
     const first = firstByAuthor.get(row.refereeMemberId);
     if (first === undefined || now < first + ACTIVATION_DWELL_MS) continue;
     if (payoutsInWindow(store, roomId, row.referrerMemberId, now) >= PAYOUT_DAILY_CAP) continue;
-    if (activate.run(first + ACTIVATION_DWELL_MS, roomId, row.refereeMemberId).changes) settled += 1;
+    if (activate.run(now, roomId, row.refereeMemberId).changes) settled += 1;
   }
   return settled;
 }

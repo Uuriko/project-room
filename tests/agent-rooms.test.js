@@ -3,19 +3,21 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
+import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import { nextActionsForRoomCreate } from "../server/discoverability.mjs";
 import { updateWork } from "../server/work-claims.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { PERMISSIONS, AGENT_AUTONOMY_PERMISSIONS, ROOM_KINDS, validId } from "../src/events.js";
 import { RoomAgentClient, createAgentIdentity, createAgentRoom, redeemAgentInvite } from "../client/room-agent.mjs";
 import { parseBootstrapArgs, parseAccountLinkArgs, slugRoomId, roomDeepLink } from "../scripts/bootstrap-agent-room.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const execFileAsync = promisify(execFile);
 async function cli(origin, args, env = {}) {
@@ -58,12 +60,13 @@ test("an identity creates a room self-serve and becomes its owner", async t => {
   assert.equal(created.duplicate, false);
   // RC-2026-09-18-030: the create response names the first-owner moves.
   assert.deepEqual(created.next.map(n => n.action),
-    ["start-work", "post-message", "finish-work", "create-task", "invite-members", "publish-card", "read-quickstart"]);
-  assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.doc)),
-    "every next step names a path or doc plus what to do");
+    ["start-work", "post-message", "finish-work", "claim-work", "handoff-work", "create-task", "invite-members", "publish-card", "read-quickstart"]);
+  assert.ok(created.next.every(n => typeof n.description === "string" && (n.path || n.tool || n.doc)),
+    "every next step names a path, tool or doc plus what to do");
   assert.equal(created.next[0].path, "/api/rooms/agent-den/work-claims/starter/update",
     "room-scoped next steps are templated with the new roomId");
   assert.equal(created.nextActions[0].path, "/api/rooms/agent-den/work-claims/starter/update");
+  assert.equal(created.next.find(n => n.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   assert.equal(created.starter.claimId, "starter");
   assert.equal(created.starter.state, "claimed");
   // The projection names the agent member as owner with the full set...
@@ -85,6 +88,93 @@ test("same identity retrying with the same parameters gets duplicate:true", asyn
   assert.equal(retry.duplicate, true);
   assert.equal(retry.roomId, first.roomId);
   assert.equal(retry.ownerMemberId, first.ownerMemberId);
+});
+
+const credentialDigest = value => createHash("sha256").update(value).digest("hex");
+
+test("a room-create replay inside 60s returns no credential and rotate revokes the old one", async t => {
+  let now = 1_700_000_000_000;
+  const { store, rooms, identity } = setup(t);
+  store.now = () => now;
+  const first = rooms.create(identity.secret, createArgs());
+  const wider = store.agentPlugin.issueApiKey({
+    identityId: identity.identityId,
+    scopes: [...first.mcpToken.scopes, "directory:read"],
+    label: "wider than onboarding",
+  });
+  const otherRoom = rooms.create(identity.secret, createArgs("other-den"));
+  now += 59_000;
+  const replay = rooms.create(identity.secret, createArgs());
+  assert.equal(replay.duplicate, true);
+  assert.equal(replay.mcpToken, null);
+  assert.equal(replay.next.action, "rotate");
+  assert.equal(replay.next.path, "/api/agent-rooms/agent-den/token/rotate");
+  assert.match(replay.next.description, /inside 60 seconds/);
+  assert.equal(store.authenticate(first.mcpToken.credential, "agent-den").identityId, identity.identityId);
+  now += 2000;
+  const late = rooms.create(identity.secret, createArgs());
+  assert.equal(late.duplicate, true);
+  assert.equal(late.mcpToken, null);
+  assert.match(late.next.description, /past the 60 second window/);
+  assert.equal(store.authenticate(first.mcpToken.credential, "agent-den").roomId, "agent-den");
+  const rotated = rooms.rotateOnboardingToken(identity.secret, "agent-den");
+  assert.match(rotated.mcpToken.credential, /^rak_/);
+  assert.notEqual(credentialDigest(rotated.mcpToken.credential), credentialDigest(first.mcpToken.credential));
+  assert.throws(() => store.authenticate(first.mcpToken.credential, "agent-den"),
+    err => err.status === 401 && err.code === "unauthenticated");
+  assert.equal(store.authenticate(rotated.mcpToken.credential, "agent-den").identityId, identity.identityId);
+  const again = rooms.create(identity.secret, createArgs());
+  assert.equal(again.mcpToken, null);
+  assert.equal(store.authenticate(rotated.mcpToken.credential, "agent-den").roomId, "agent-den");
+  assert.equal(store.authenticate(`${API_KEY_PREFIX}${wider.secret}`, "agent-den").apiKeyId, wider.keyId);
+  assert.equal(store.authenticate(otherRoom.mcpToken.credential, "other-den").roomId, "other-den");
+  const stranger = store.identities.create("Stranger");
+  assert.throws(() => rooms.rotateOnboardingToken(stranger.secret, "agent-den"),
+    err => err.status === 404 && err.code === "room_not_found");
+  assert.throws(() => rooms.rotateOnboardingToken(rotated.mcpToken.credential, "agent-den"),
+    err => err.status === 401 && err.code === "room_token_not_identity");
+});
+
+test("overlapping rotates do not revoke each other's new token", async t => {
+  const { store, rooms, identity } = setup(t);
+  const first = rooms.create(identity.secret, createArgs());
+  const wider = store.agentPlugin.issueApiKey({
+    identityId: identity.identityId,
+    scopes: [...first.mcpToken.scopes, "directory:read"],
+    label: "wider than onboarding",
+  });
+  const otherRoom = rooms.create(identity.secret, createArgs("other-den"));
+  const keys = store.agentPlugin.keys;
+  const set = keys.set.bind(keys);
+  let started = false;
+  let nested = null;
+  // The second rotate begins once the first has stored its new key and
+  // before that rotate returns the credential. A revoke that scans every
+  // live onboarding key in that window kills the token the first rotate
+  // is about to hand back.
+  keys.set = (keyId, record) => {
+    const result = set(keyId, record);
+    const expected = store.agentPlugin.onboardingMcpScopes("agent-den");
+    const scopes = record?.scopes;
+    if (!started && Array.isArray(scopes) && scopes.length === expected.length && expected.every(scope => scopes.includes(scope))) {
+      started = true;
+      nested = rooms.rotateOnboardingToken(identity.secret, "agent-den");
+    }
+    return result;
+  };
+  try {
+    const outer = rooms.rotateOnboardingToken(identity.secret, "agent-den");
+    assert.ok(nested, "second rotate ran while the first rotate was storing its new key");
+    assert.notEqual(credentialDigest(outer.mcpToken.credential), credentialDigest(nested.mcpToken.credential));
+    assert.equal(store.authenticate(outer.mcpToken.credential, "agent-den").identityId, identity.identityId);
+    assert.equal(store.authenticate(nested.mcpToken.credential, "agent-den").identityId, identity.identityId);
+    assert.throws(() => store.authenticate(first.mcpToken.credential, "agent-den"),
+      err => err.status === 401 && err.code === "unauthenticated");
+    assert.equal(store.authenticate(`${API_KEY_PREFIX}${wider.secret}`, "agent-den").apiKeyId, wider.keyId);
+    assert.equal(store.authenticate(otherRoom.mcpToken.credential, "other-den").roomId, "other-den");
+  } finally {
+    keys.set = set;
+  }
 });
 
 test("room id collision with different parameters is 409", async t => {
@@ -120,9 +210,7 @@ test("unknown or malformed identity secrets are 401", async t => {
 
 test("owner transfers ownership to an agent member; the chain is auditable", async t => {
   const { store, rooms, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   const result = rooms.transfer(ownerToken, "commons", { toMemberId: identity.identityId, reason: "the agent runs this room now" });
   assert.equal(result.roomId, "commons");
   assert.equal(result.previousOwnerId, "owner");
@@ -151,9 +239,7 @@ test("owner transfers ownership to an agent member; the chain is auditable", asy
 
 test("transfer by a non-owner is 403", async t => {
   const { store, rooms, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   assert.throws(() => rooms.transfer(identity.secret, "commons", { toMemberId: "owner" }),
     err => err.status === 403 && err.code === "owner_required");
 });
@@ -166,9 +252,7 @@ test("transfer to an unknown or inactive member is a bare 404", async t => {
 
 test("an agent owner may set room policy and the room-wide spend allowance", async t => {
   const { store, rooms, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   rooms.transfer(ownerToken, "commons", { toMemberId: identity.identityId });
   // Room-scoped owner powers work for the agent owner...
   const policy = store.command(identity.secret, "commons", {
@@ -198,9 +282,7 @@ test("an agent owner may archive its own room", async t => {
 
 test("transfer through the generic command path is auditable too", async t => {
   const { store, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Owning Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Owning Agent", permissions: ["accept_work"] });
   const result = store.command(ownerToken, "commons", {
     id: randomUUID(), type: "ownership.transferred", data: { toMemberId: identity.identityId }
   });
@@ -267,12 +349,33 @@ test("HTTP: prefix-preserving /room/api/* aliases identity-create, agent-rooms, 
   assert.equal(missing.status, 404);
   assert.equal(missing.body?.error?.code, "not_found");
   for (const path of [
-    "/api/agent-identities", "/api/identity-create", "/api/agent-invites/redeem",
-    "/api/share-links/join-agent", "/api/access-requests",
-    "/room/api/agent-identities", "/room/api/identity-create", "/room/api/agent-invites/redeem",
-    "/room/api/share-links/join-agent", "/room/api/access-requests"
+    "/api/agent-identities", "/api/identity-create",
+    "/api/share-links/join-agent",
+    "/room/api/agent-identities", "/room/api/identity-create",
+    "/room/api/share-links/join-agent"
   ]) {
     const got = await fetch(`${origin}${path}`);
+    assert.equal(got.status, 405, path);
+    assert.equal(got.headers.get("allow"), "POST", path);
+    assert.equal((await got.json()).error.code, "method_not_allowed", path);
+  }
+  // Redeem also answers GET: an availability check for a code that does not
+  // consume it. Other methods still get 405 naming both.
+  for (const path of ["/api/agent-invites/redeem", "/room/api/agent-invites/redeem"]) {
+    const checked = await fetch(`${origin}${path}?code=nope`);
+    assert.equal(checked.status, 200, path);
+    const got = await fetch(`${origin}${path}`, { method: "DELETE" });
+    assert.equal(got.status, 405, path);
+    assert.equal(got.headers.get("allow"), "GET, POST", path);
+  }
+  // Issue #2912: /api/access-requests left the open POST-only set above —
+  // it is an identity-secret route now. A wrong method from an anonymous
+  // caller gets the 401 before the method error (SEC-03 ordering); a
+  // caller presenting a credential still gets the 405 + Allow: POST.
+  for (const path of ["/api/access-requests", "/room/api/access-requests"]) {
+    const anonymous = await fetch(`${origin}${path}`);
+    assert.equal(anonymous.status, 401, path);
+    const got = await fetch(`${origin}${path}`, { headers: { Authorization: `Bearer ${minted.body.secret}` } });
     assert.equal(got.status, 405, path);
     assert.equal(got.headers.get("allow"), "POST", path);
     assert.equal((await got.json()).error.code, "method_not_allowed", path);
@@ -346,6 +449,14 @@ test("HTTP: self-serve creation over the bearer identity secret", async t => {
   const retry = await post("/api/agent-rooms", { token: identity.secret, data: args });
   assert.equal(retry.status, 200);
   assert.equal(retry.body.duplicate, true);
+  assert.equal(retry.body.mcpToken, null);
+  assert.equal(retry.body.next.action, "rotate");
+  const rotated = await post("/api/agent-rooms/http-den/token/rotate", { token: identity.secret });
+  assert.equal(rotated.status, 200);
+  assert.match(rotated.body.mcpToken.credential, /^rak_/);
+  assert.throws(() => store.authenticate(first.body.mcpToken.credential, "http-den"),
+    err => err.status === 401 && err.code === "unauthenticated");
+  assert.equal(store.authenticate(rotated.body.mcpToken.credential, "http-den").roomId, "http-den");
   const badSecret = await post("/api/agent-rooms", { token: `pri_${"z".repeat(43)}`, data: createArgs("nope") });
   assert.equal(badSecret.status, 401);
   const noAuth = await post("/api/agent-rooms", { data: createArgs("nope2") });
@@ -356,9 +467,7 @@ test("HTTP: owner transfers ownership; non-owner is refused", async t => {
   const { store, post } = await httpFixture(t);
   const ownerToken = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("HTTP Agent");
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "HTTP Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "HTTP Agent", permissions: ["accept_work"] });
   const memberToken = store.issueAccessKey("commons", identity.identityId);
   const refused = await post("/api/rooms/commons/ownership/transfer", {
     token: memberToken, data: { toMemberId: "owner", reason: "coup" }
@@ -563,6 +672,8 @@ test("CLI: bootstrap-agent-room one-shot → peer redeem → check + orient + he
   assert.equal(boot.json.invite.profile, "collaborate");
   assert.deepEqual(boot.json.invite.permissions, [...AGENT_AUTONOMY_PERMISSIONS]);
   assert.match(boot.json.invite.code, /^RM-/);
+  assert.equal(Date.parse(boot.json.invite.expiresAtIso), boot.json.invite.expiresAt);
+  assert.equal(boot.json.warnings.includes("Live www /room/api/* is 404 until Instinct publishes the Worker rewrite. Source path is ready."), false);
   assert.equal(boot.json.hello.posted, true);
   assert.ok(boot.json.ownerPermissions.includes("invite_member"));
   assert.ok(boot.json.ownerPermissions.includes("manage_members"));
@@ -597,7 +708,8 @@ test("CLI: account-link requests autonomy perms into a human-owned room", async 
   const { origin } = await httpFixture(t);
   const minted = await cli(origin, ["identity-create", "Visitor"]);
   assert.equal(minted.status, 0, minted.stderr);
-  const asked = await cli(origin, ["account-link", "commons", minted.json.identityId, "Visitor"]);
+  const asked = await cli(origin, ["account-link", "commons", minted.json.identityId, "Visitor"],
+    { ROOM_AGENT_TOKEN: minted.json.secret });
   assert.equal(asked.status, 0, asked.stderr);
   assert.equal(asked.json.type, "agent_account_link_request");
   assert.equal(asked.json.roomId, "commons");
@@ -620,7 +732,7 @@ test("room-create kind 422 teaches the allowed kinds (RC-2026-09-18-021)", async
 // #597/#643: the agent owner administers by ID on its identity bearer —
 // reports, access review, diagnostics, agent connections, share links —
 // while a non-owner agent member is denied on each. Guest-agent mint passes
-// the owner gate but stays account-bound (403 account_session_required).
+// the owner gate but stays account-bound (403 guest_invite_account_session_required, #3432).
 test("HTTP: agent owner administers by ID; non-owner agent is denied", async t => {
   const { store, post, origin } = await httpFixture(t);
   const get = (path, token) => fetch(`${origin}${path}`, {
@@ -647,28 +759,24 @@ test("HTTP: agent owner administers by ID; non-owner agent is denied", async t =
   assert.equal(made.status, 201, JSON.stringify(made.body)?.slice(0, 200));
   const cancelled = await post(`${room}/share-links-cancel`, { token: ownerSecret, data: { linkId: made.body.link.id } });
   assert.equal(cancelled.status, 200);
-  // Guest-agent mint: the owner gate passes, but minting stays account-bound.
-  const guestMint = await post(`${room}/guest-agent-links`, { token: ownerSecret, data: {
-    requestId: randomUUID(), linkToken: `ga1.${randomBytes(32).toString("base64url")}`,
-    expectedOwnerRevision: 0, displayName: "Guest"
+  // Guest-invite mint: the owner gate passes, but minting stays account-bound.
+  const guestMint = await post(`${room}/guest-invites`, { token: ownerSecret, data: {
+    requestId: randomUUID(), expectedOwnerRevision: 0, guestLabel: "Guest"
   } });
   assert.equal(guestMint.status, 403);
-  assert.equal(guestMint.body?.error?.code, "account_session_required");
+  assert.equal(guestMint.body?.error?.code, "guest_invite_account_session_required");
   // A non-owner agent member: denied on every admin surface.
   const other = await post("/room/api/agent-identities", { data: { displayName: "Other Agent" } });
-  store.identities.link(ownerSecret, "owner-den", {
-    identityId: other.body.identityId, displayName: "Other Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerSecret, "owner-den", other.body, { displayName: "Other Agent", permissions: ["accept_work"] });
   for (const path of [`${room}/reports`, `${room}/access-review`, `${room}/agent-connections`, `${room}/diagnostics`, `${room}/share-links`]) {
     const res = await get(path, other.body.secret);
     assert.equal(res.status, 403, `${path}: ${res.status}`);
   }
-  const otherMint = await post(`${room}/guest-agent-links`, { token: other.body.secret, data: {
-    requestId: randomUUID(), linkToken: `ga1.${randomBytes(32).toString("base64url")}`,
-    expectedOwnerRevision: 0, displayName: "Guest"
+  const otherMint = await post(`${room}/guest-invites`, { token: other.body.secret, data: {
+    requestId: randomUUID(), expectedOwnerRevision: 0, guestLabel: "Guest"
   } });
   assert.equal(otherMint.status, 403);
-  assert.notEqual(otherMint.body?.error?.code, "account_session_required");
+  assert.notEqual(otherMint.body?.error?.code, "guest_invite_account_session_required");
 });
 
 test("the auto-claimed starter task carries the retention ack with the 24h SLA", async t => {
@@ -740,4 +848,60 @@ test("both taught vocabularies agree on the starter verbs (non-divergent)", t =>
   assert.equal(finishNext.path, finishActions.path);
   assert.equal(finishNext.method, finishActions.method);
   assert.deepEqual(finishNext.body, finishActions.body);
+});
+
+test("create with starter:false skips the auto-claimed starter task", t => {
+  // Seed Room Guide (#1367) added the starter:false opt-out for callers that
+  // manage their own first task. Pin it: no starter claim exists and the
+  // response says so, so the opt-out cannot silently regress to always-on.
+  const { store, rooms, identity } = setup(t);
+  const created = rooms.create(identity.secret, { ...createArgs("no-starter-room"), starter: false });
+  assert.equal(created.duplicate, false);
+  assert.equal(created.starter, null, "response reports no starter");
+  assert.ok(!store.workClaims.list("no-starter-room").some(item => item.id === "starter"),
+    "no starter work claim was created");
+});
+
+test("client: a lost creation response can be retried before inviting a contributor", async t => {
+  const { store, origin, post } = await httpFixture(t);
+  const identity = store.identities.create("Project creator");
+  const request = { title: "Shared project", purpose: "Build together", requestId: "create-retry" };
+  await assert.rejects(createAgentRoom(origin, identity.secret, request, {
+    fetchImpl: async (...args) => {
+      const response = await fetch(...args);
+      assert.equal(response.status, 201);
+      await response.arrayBuffer();
+      throw new Error("Connection lost after the server committed");
+    }
+  }), { code: "service_unavailable" });
+  const recovered = await createAgentRoom(origin, identity.secret, request);
+  assert.equal(recovered.duplicate, true, "retry recovers the committed room instead of creating another");
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n, 1);
+  await assert.rejects(createAgentRoom(origin, identity.secret, { ...request, title: "Different project" }),
+    { status: 409, code: "request_conflict" });
+  const invite = await post(`/api/rooms/${recovered.roomId}/agent-invites`, {
+    token: identity.secret, data: { profile: "contribute", displayName: "Contributor" }
+  });
+  assert.equal(invite.status, 201);
+  const joined = await redeemAgentInvite(origin, invite.body.code, "Contributor");
+  assert.equal(joined.roomId, recovered.roomId);
+  const contributor = new RoomAgentClient({ origin, roomId: joined.roomId,
+    memberId: joined.memberId, token: joined.mcpToken.credential });
+  await contributor.command({ id: "first-contribution", type: "message.posted",
+    data: { messageId: "first-contribution", body: "Here is my first contribution." } });
+  const snapshot = await contributor.snapshot();
+  assert.equal(snapshot.state.room.id, recovered.roomId);
+  assert.equal(snapshot.state.messages.find(message => message.id === "first-contribution").body, "Here is my first contribution.");
+});
+
+test("client: explicitly creating an empty room preserves that choice on retry", async t => {
+  const { store, origin } = await httpFixture(t);
+  const identity = store.identities.create("Empty project creator");
+  const request = { ...createArgs("empty-client-room"), starter: false };
+  const created = await createAgentRoom(origin, identity.secret, request);
+  assert.equal(created.starter, null);
+  assert.equal(store.workClaims.list(created.roomId).length, 0);
+  assert.equal((await createAgentRoom(origin, identity.secret, request)).duplicate, true);
+  await assert.rejects(createAgentRoom(origin, identity.secret, { ...request, starter: true }),
+    { status: 409, code: "room_exists" });
 });

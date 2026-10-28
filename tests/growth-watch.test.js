@@ -95,6 +95,31 @@ test("second tick compares windows and fires surge + spike rules", () => {
   assert.deepEqual(result.triggered.map(h => h.ruleId).sort(), ["spike", "surge"]);
 });
 
+test("mention-spike fires for a watched agent ranked outside the summary top-10", () => {
+  // Regression for #2975: createWatcher summarizes without topN, so the
+  // default top-10 truncation silently hid watched agents ranked 11th+.
+  const collector = createCollector();
+  const events = [];
+  for (let i = 0; i < 10; i += 1) {
+    events.push(mention(`agent-top-${i}`, 30, "2026-09-15T11:25:00Z"));
+  }
+  events.push(mention("agent-watched", 25, "2026-09-15T11:30:00Z"));
+  for (const event of events) {
+    const result = collector.record(event);
+    assert.equal(result.ok, true, `fixture record failed: ${result.reason}`);
+  }
+  const watcher = createWatcher({
+    collector,
+    rules: [mentionSpikeRule({ agentIds: ["agent-watched"], countThreshold: 25, ruleId: "spike-watched" })],
+    windowMs: HOUR
+  });
+  const result = watcher.tick(new Date("2026-09-15T12:00:00Z"));
+  assert.equal(result.summary.topMentionedAgents.some(entry => entry.agentId === "agent-watched"), false);
+  const spike = result.hits.find(h => h.ruleId === "spike-watched");
+  assert.equal(spike.triggered, true);
+  assert.deepEqual(result.triggered.map(h => h.ruleId), ["spike-watched"]);
+});
+
 test("tick is safe to repeat and accessors track the latest run", () => {
   const watcher = createWatcher({ collector: buildFixture(), rules: rules(), windowMs: HOUR });
   watcher.tick(new Date("2026-09-15T11:00:00Z"));

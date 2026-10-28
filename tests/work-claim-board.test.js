@@ -102,12 +102,28 @@ async function startReviewedClaim(f, id, reviewPolicy, extra = {}) {
   return started.value;
 }
 
-async function refusedCompletion(f, id, reviewedBy) {
+const BUNDLE = { artifact: { kind: "text", ref: "room://artifacts/board", sha256: "c".repeat(64) },
+  checks: [{ name: "unit", result: "pass" }], criteria: [] };
+
+// #3546: completion under a reviewed policy is two transitions — the
+// holder finishes to delivered with the delivery bundle, then the reviewer
+// verifies to done from their own session.
+async function deliverAndVerify(f, id, verifyKey) {
+  const delivered = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "delivered", delivery: BUNDLE });
+  assert.equal(delivered.status, 200);
+  assert.equal(delivered.value.state, "delivered");
+  const done = await f.call(verifyKey, `/work-claims/${id}/update`, { state: "done" });
+  assert.equal(done.status, 200);
+  assert.equal(done.value.state, "done");
+  return done;
+}
+
+async function refusedCompletion(f, id, reviewedBy, { status = 422, code = "work_not_delivered" } = {}) {
   const before = f.store.workClaims.get("commons", id);
   const sequence = f.store.room("commons").sequence;
   const response = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy });
-  assert.equal(response.status, 403);
-  assert.equal(response.value.error.code, "work_review_rejected");
+  assert.equal(response.status, status);
+  assert.equal(response.value.error.code, code);
   assert.deepEqual(f.store.workClaims.get("commons", id), before, "a rejected completion preserves the claim");
   assert.equal(f.store.room("commons").sequence, sequence, "a rejected completion adds no event");
 }
@@ -125,7 +141,13 @@ test("a contribute-profile agent creates, renews, and releases a claim without w
   const renewed = await coord.renewWorkItem("coord-1", { progressMessageId: progress, leaseHours: 3 });
   assert.equal(renewed.state, "claimed");
   assert.ok(Date.parse(renewed.leaseExpiresAt) > Date.parse(claimed.leaseExpiresAt));
-  const released = await coord.releaseWorkItem("coord-1", { reason: "parked" });
+  const released = await (async () => {
+    // E5/D4 (QA-200 2026-10-08): /release binds the claim round the client read.
+    const held = await coord.workClaimGet("coord-1");
+    return coord.releaseWorkItem("coord-1", { reason: "parked",
+      expectedClaimedAt: held.claimedAt,
+      expectedHistoryLength: held.history.length + (held.historyOmitted ?? 0) });
+  })();
   assert.equal(released.state, "unclaimed");
   assert.equal(released.owner, null);
   const refused = await call(coordKey, "/work-claims", { id: "chat-cannot" });
@@ -153,6 +175,34 @@ test("the room owner sets the per-member claim cap and a second claim is refused
   const read = await call(ownerKey, "/work-claims/config");
   assert.equal(read.status, 200);
   assert.equal(read.value.maxMemberOpenClaims, 1);
+});
+
+test("the room owner sets the room-wide claim cap and the next create is refused", async t => {
+  const { call, ownerKey, coordKey, coord } = await fixture(t);
+  const saved = await call(ownerKey, "/work-claims/config", { maxOpenClaims: 2 });
+  assert.equal(saved.status, 200);
+  assert.equal(saved.value.maxOpenClaims, 2);
+  assert.equal(saved.value.maxMemberOpenClaims, 20);
+  const denied = await call(coordKey, "/work-claims/config", { maxOpenClaims: 500 });
+  assert.equal(denied.status, 403);
+  assert.equal(denied.value.error.code, "work_claims_not_permitted");
+  for (const bad of [{}, { maxOpenClaims: 0 }, { maxOpenClaims: 10001 }, { maxOpenClaims: "5" }, { maxOpenClaims: 5, extra: 1 }]) {
+    const refused = await call(ownerKey, "/work-claims/config", bad);
+    assert.equal(refused.status, 422, JSON.stringify(bad));
+  }
+  await coord.workClaimCreate({ id: "room-cap-1", title: "First" });
+  await coord.workClaimCreate({ id: "room-cap-2", title: "Second" });
+  const third = await call(coordKey, "/work-claims", { id: "room-cap-3", title: "Third" });
+  assert.equal(third.status, 409);
+  assert.equal(third.value.error.code, "work_board_full");
+  const both = await call(ownerKey, "/work-claims/config", { maxOpenClaims: 3, maxMemberOpenClaims: 5 });
+  assert.equal(both.status, 200);
+  assert.equal(both.value.maxOpenClaims, 3);
+  assert.equal(both.value.maxMemberOpenClaims, 5);
+  const retry = await call(coordKey, "/work-claims", { id: "room-cap-3", title: "Third" });
+  assert.ok(retry.status < 300, `create after raise: ${retry.status}`);
+  const read = await call(ownerKey, "/work-claims/config");
+  assert.equal(read.value.maxOpenClaims, 3);
 });
 
 test("an ownerless room refuses a non-member and a member without a claim profile", async t => {
@@ -186,7 +236,7 @@ test("an ownerless room refuses a non-member and a member without a claim profil
   assert.equal(allowed.value.owner, null);
 });
 
-test("CI state changes are stored, receipted, and wake the owner on failure", async t => {
+test("CI state changes are stored, receipted, and the failure wake is a counted loss for the unlinked claimant (#3266)", async t => {
   const phase = { failure: false };
   const { store, call, coordKey } = await fixture(t, { phase });
   const created = await call(coordKey, "/work-claims", {
@@ -205,6 +255,7 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
     .filter(entry => entry.type === "work_claim.updated" && entry.data.workClaim === "ci-1");
   assert.ok(events().some(entry => entry.data.reason === "ci_changed" && entry.data.ciState === "pending"));
   assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("coord").n, 0);
+  const acctBefore = store.agentHeartbeats.accounting({ roomId: "commons" });
   phase.failure = true;
   store.workClaims.set("commons", {
     ...pendingItem,
@@ -216,12 +267,16 @@ test("CI state changes are stored, receipted, and wake the owner on failure", as
   assert.equal(failedItem.ci.state, "failure");
   assert.equal(failedItem.ci.url, "https://example.com/ci");
   assert.ok(events().some(entry => entry.data.reason === "ci_changed" && entry.data.ciState === "failure"));
-  const wake = store.db.prepare("SELECT kind, message_id FROM agent_wake_signals WHERE agent_id=?").get("coord");
-  assert.equal(wake.kind, "mention");
-  assert.match(wake.message_id, /ci-1:ci:failure/);
+  // #3266: coord has no identity link, so no identity-scoped door could
+  // ever drain a wake addressed to them — the failure wake is a counted,
+  // journaled loss, not a phantom signal row parked under the memberId.
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("coord").n, 0);
+  const acctAfter = store.agentHeartbeats.accounting({ roomId: "commons" });
+  assert.equal(acctAfter.byStore.signals.suppressed_no_identity - acctBefore.byStore.signals.suppressed_no_identity, 1);
+  assert.equal((acctAfter.failures.byReason.no_identity_link ?? 0) - (acctBefore.failures.byReason.no_identity_link ?? 0), 1);
 });
 
-test("review records refuse the owner and a chat agent, and a changes request wakes the owner", async t => {
+test("review records refuse the owner and a chat agent; the changes-request wake is a counted loss for the unlinked owner (#3266)", async t => {
   const { call, ownerKey, coordKey, chatKey, store } = await fixture(t);
   assert.equal((await call(ownerKey, "/work-claims", { id: "rev-1", title: "Review me" })).status, 201);
   assert.equal((await call(ownerKey, "/work-claims/rev-1/claim", {})).status, 200);
@@ -231,6 +286,7 @@ test("review records refuse the owner and a chat agent, and a changes request wa
   const chatReview = await call(chatKey, "/work-claims/rev-1/review", { verdict: "comment", summary: "from chat" });
   assert.equal(chatReview.status, 403);
   assert.equal(chatReview.value.error.code, "work_claims_not_permitted");
+  const acctBefore = store.agentHeartbeats.accounting({ roomId: "commons" });
   const review = await call(coordKey, "/work-claims/rev-1/review", {
     verdict: "changes_requested", summary: "rename the helper", url: "https://example.com/notes"
   });
@@ -242,9 +298,12 @@ test("review records refuse the owner and a chat agent, and a changes request wa
     .map(row => JSON.parse(row.body))
     .find(entry => entry.data?.workClaim === "rev-1" && entry.data?.verdict === "changes_requested");
   assert.equal(event.data.reason, "reviewed");
-  const wake = store.db.prepare("SELECT kind FROM agent_wake_signals WHERE agent_id=?").get("owner");
-  assert.equal(wake.kind, "mention");
-  assert.match(store.db.prepare("SELECT message_id FROM agent_wake_signals WHERE agent_id=?").get("owner").message_id, /^work-claim:rev-1:review:/);
+  // #3266: the owner has no identity link, so the changes-request wake has
+  // no addressable door — a counted, journaled loss, not a phantom row.
+  assert.equal(store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n, 0);
+  const acctAfter = store.agentHeartbeats.accounting({ roomId: "commons" });
+  assert.equal(acctAfter.byStore.signals.suppressed_no_identity - acctBefore.byStore.signals.suppressed_no_identity, 1);
+  assert.equal((acctAfter.failures.byReason.no_identity_link ?? 0) - (acctBefore.failures.byReason.no_identity_link ?? 0), 1);
 });
 
 test("reviewed completion requires the named reviewer's latest explicit approval", async t => {
@@ -283,10 +342,10 @@ test("reviewed completion requires the named reviewer's latest explicit approval
           assert.equal(after.attestations.find(entry => entry.memberId === reviewer).note, negative.note);
         }
         assert.equal((await review({ verdict: "approve", summary: "Rechecked after the latest feedback" })).status, 200);
-        const done = await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy: reviewer });
-        assert.equal(done.status, 200);
+        const done = await deliverAndVerify(f, id, key);
         assert.equal(done.value.state, "done");
         assert.equal(done.value.reviewedBy, reviewer);
+        assert.equal(done.value.verification.state, "verified");
       }
     });
   }
@@ -299,8 +358,7 @@ test("manual completion uses the named reviewer's approval, not another member's
   assert.equal((await f.call(f.coordKey, path, { verdict: "comment", summary: "Still reviewing" })).status, 200);
   assert.equal((await f.call(f.verifierKey, path, { verdict: "approve", summary: "Verified this result" })).status, 200);
   await refusedCompletion(f, "named-reviewer", "coord");
-  const done = await f.call(f.ownerKey, "/work-claims/named-reviewer/update", { state: "done", reviewedBy: "verifier" });
-  assert.equal(done.status, 200);
+  const done = await deliverAndVerify(f, "named-reviewer", f.verifierKey);
   assert.equal(done.value.reviewedBy, "verifier");
   assert.equal(done.value.reviews.find(entry => entry.memberId === "coord").verdict, "comment");
 });
@@ -320,10 +378,12 @@ test("human verify permits review without granting Board writes, and self-attest
   const approved = await f.call(f.verifierKey, "/work-claims/human-review/review", { verdict: "approve", summary: "Verified" });
   assert.equal(approved.status, 200);
   assert.deepEqual(f.store.roomAuthority("commons").members.verifier.permissions, ["verify"]);
-  const done = await f.call(f.ownerKey, "/work-claims/human-review/update", { state: "done", reviewedBy: "verifier" });
-  assert.equal(done.status, 200);
+  // the verify itself is a review action: the verify-only human performs it
+  // from their own session without gaining Board writes
+  const done = await deliverAndVerify(f, "human-review", f.verifierKey);
+  assert.equal(done.value.reviewedBy, "verifier");
   await startReviewedClaim(f, "self-review", "self_attested");
-  await refusedCompletion(f, "self-review", "verifier");
+  await refusedCompletion(f, "self-review", "verifier", { status: 403, code: "work_review_rejected" });
   const self = await f.call(f.ownerKey, "/work-claims/self-review/update", { state: "done" });
   assert.equal(self.status, 200);
   assert.equal(self.value.state, "done");
@@ -331,10 +391,12 @@ test("human verify permits review without granting Board writes, and self-attest
 
 test("completion rechecks a reviewer's active membership and current review authority", async t => {
   for (const scenario of [
-    { policy: "distinct_member", reviewer: "coord", permissions: [], active: true },
-    { policy: "distinct_member", reviewer: "coord", permissions: ["accept_work", "complete_work"], active: false },
-    { policy: "independent_principal", reviewer: "verifier", permissions: ["accept_work", "complete_work"], active: true },
-    { policy: "independent_principal", reviewer: "verifier", permissions: ["verify"], active: false },
+    { policy: "distinct_member", reviewer: "coord", permissions: [], active: true, status: 403, code: "work_claims_not_permitted" },
+    // an inactive member's key no longer authenticates at all (401) — the
+    // verify is refused before any claim gate is even reached
+    { policy: "distinct_member", reviewer: "coord", permissions: ["accept_work", "complete_work"], active: false, status: 401 },
+    { policy: "independent_principal", reviewer: "verifier", permissions: ["accept_work", "complete_work"], active: true, status: 403, code: "work_review_rejected" },
+    { policy: "independent_principal", reviewer: "verifier", permissions: ["verify"], active: false, status: 401 },
   ]) {
     await t.test(`${scenario.policy}: ${scenario.active ? "permission revoked" : "inactive"}`, async t => {
       const f = await fixture(t);
@@ -346,26 +408,38 @@ test("completion rechecks a reviewer's active membership and current review auth
         expectedMemberRevision: f.store.roomAuthority("commons").members[scenario.reviewer].revision,
         permissions: scenario.permissions, active: scenario.active,
       } });
-      await refusedCompletion(f, "authority", scenario.reviewer);
+      // #3546: the holder's delivery still lands — it is the holder's act —
+      // but the verify is re-gated on the reviewer's CURRENT authority.
+      const delivered = await f.call(f.ownerKey, "/work-claims/authority/update", { state: "delivered", delivery: BUNDLE });
+      assert.equal(delivered.status, 200);
+      const refused = await f.call(key, "/work-claims/authority/update", { state: "done" });
+      assert.equal(refused.status, scenario.status);
+      if (scenario.code) assert.equal(refused.value.error.code, scenario.code);
+      assert.equal(f.store.workClaims.get("commons", "authority").state, "delivered");
     });
   }
 });
 
-test("an unchanged latest review retry preserves its timestamp, basis, events, and wakes", async t => {
+test("an unchanged latest review retry preserves its timestamp, basis, events, and wake count", async t => {
   const f = await fixture(t);
   await startReviewedClaim(f, "retry-review", "distinct_member", { revision: "reviewed-revision" });
   const body = { verdict: "changes_requested", summary: "Add the missing validation", url: "https://example.com/review" };
+  const lostWakes = () => f.store.agentHeartbeats.accounting({ roomId: "commons" }).byStore.signals.suppressed_no_identity;
+  const lostBefore = lostWakes();
   const first = await f.call(f.coordKey, "/work-claims/retry-review/review", body);
   assert.equal(first.status, 200);
   const sequence = f.store.room("commons").sequence;
-  const wakes = f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n;
-  assert.equal(wakes, 1);
+  // #3266: the owner is unlinked, so the review's one wake attempt is a
+  // counted loss and no signal row exists; the retry must not re-attempt.
+  const wakes = lostWakes();
+  assert.equal(wakes - lostBefore, 1);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n, 0);
   await new Promise(resolve => setTimeout(resolve, 5));
   const retry = await f.call(f.coordKey, "/work-claims/retry-review/review", body);
   assert.equal(retry.status, 200);
   assert.deepEqual(retry.value, first.value);
   assert.equal(f.store.room("commons").sequence, sequence);
-  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM agent_wake_signals WHERE agent_id=?").get("owner").n, wakes);
+  assert.equal(lostWakes(), wakes);
   assert.deepEqual(stripTrust((await f.call(f.ownerKey, "/work-claims/retry-review")).value.reviews), first.value.reviews);
 });
 
@@ -406,7 +480,7 @@ test("approval remains bound to the reviewed revision and observed pull-request 
       const fresh = await f.call(f.coordKey, `/work-claims/${id}/review`, { verdict: "approve", summary: "Reviewed the updated work" });
       assert.equal(fresh.status, 200);
       assert.notDeepEqual(fresh.value.reviews[0].basis, basis);
-      assert.equal((await f.call(f.ownerKey, `/work-claims/${id}/update`, { state: "done", reviewedBy: "coord" })).status, 200);
+      await deliverAndVerify(f, id, f.coordKey);
     });
   }
 });
@@ -430,7 +504,7 @@ test("persisted approvals retain their basis while older unbound records need a 
   assert.equal((await f.call(f.ownerKey, "/work-claims/persisted-review")).status, 200);
   await refusedCompletion(f, "persisted-review", "coord");
   assert.equal((await f.call(f.coordKey, "/work-claims/persisted-review/review", { verdict: "approve", summary: "Fresh review with the current context" })).status, 200);
-  assert.equal((await f.call(f.ownerKey, "/work-claims/persisted-review/update", { state: "done", reviewedBy: "coord" })).status, 200);
+  await deliverAndVerify(f, "persisted-review", f.coordKey);
 });
 
 test("a superseded claim cannot be manually completed with an otherwise valid approval", async t => {
@@ -487,13 +561,19 @@ test("land queue rows copy into land claims once and the list stays the same sha
 
 test("board v2 routes answer 410 and point at work claims", async t => {
   const { origin, ownerKey } = await fixture(t);
-  const response = await fetch(`${origin}/api/rooms/commons/board/v2/claims`, {
+  for (const path of ["/board/v2/claims", "/board/v2/health", "/board/v2/claims/task-1/not-a-route"]) {
+    const response = await fetch(`${origin}/api/rooms/commons${path}`, {
+      headers: { authorization: `Bearer ${ownerKey}` }
+    });
+    const body = await response.json();
+    assert.equal(response.status, 410, path);
+    assert.equal(body.error.code, "board_v2_retired");
+    assert.equal(body.next[0].href, "/api/rooms/commons/work-claims");
+  }
+  const near = await fetch(`${origin}/api/rooms/commons/board/v2extra`, {
     headers: { authorization: `Bearer ${ownerKey}` }
   });
-  const body = await response.json();
-  assert.equal(response.status, 410);
-  assert.equal(body.error.code, "board_v2_retired");
-  assert.equal(body.next[0].href, "/api/rooms/commons/work-claims");
+  assert.equal(near.status, 404);
   const tables = ["board_vtwo_claims", "board_vtwo_events", "board_vtwo_mirror", "board_vtwo_idempotency"];
   const { store } = await fixture(t);
   for (const name of tables) {
@@ -512,4 +592,20 @@ test("hard work defaults to a distinct reviewer at create; an explicit policy st
   assert.equal(explicit.value.reviewPolicy, "self_attested");
   const plain = await call(coordKey, "/work-claims", { id: "plain-1", title: "Plain", tags: ["wk41"] });
   assert.equal(plain.value.reviewPolicy, null);
+});
+
+const roundOfItem = item => ({ expectedClaimedAt: item?.claimedAt ?? null, expectedHistoryLength: (item?.history?.length ?? 0) + (Number(item?.historyOmitted) || 0) });
+test("reassign honors the room's per-member open-claim cap", async t => {
+  const f = await fixture(t);
+  await f.call(f.ownerKey, "/work-claims/config", { maxMemberOpenClaims: 1 });
+  assert.equal((await f.call(f.coordKey, "/work-claims", { id: "reassign-cap-1" })).status, 201);
+  assert.equal((await f.call(f.coordKey, "/work-claims/reassign-cap-1/claim", {})).status, 200);
+  assert.equal((await f.call(f.ownerKey, "/work-claims", { id: "reassign-cap-2" })).status, 201);
+  assert.equal((await f.call(f.ownerKey, "/work-claims/reassign-cap-2/claim", {})).status, 200);
+  const sequence = f.store.room("commons").sequence;
+  const result = await f.call(f.ownerKey, "/work-claims/reassign-cap-2/reassign", { newOwner: "coord", ...roundOfItem(f.store.workClaims.get("commons", "reassign-cap-2")) });
+  assert.equal(result.status, 409);
+  assert.equal(result.value.error.code, "too_many_open_claims");
+  assert.equal(f.store.room("commons").sequence, sequence, "a refused handoff writes nothing");
+  assert.equal(f.store.workClaims.get("commons", "reassign-cap-2").owner, "owner");
 });

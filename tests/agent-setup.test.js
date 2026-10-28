@@ -37,6 +37,10 @@ test("self-serve join links parse in the CLI and connect like the old hash links
   const result = await f.connect({ target: `${f.origin}/join/${invite.code}` });
   assert.equal(result.status, "connected");
   assert.equal(result.roomId, "commons");
+  assert.equal(result.orientation.view, "brief");
+  assert.equal(result.orientation.full, "/api/rooms/commons/activation-pack");
+  assert.deepEqual(result.orientation.you.permissions, result.permissions);
+  assert.ok(Buffer.byteLength(JSON.stringify(result.orientation)) <= 2048);
 });
 test("one connection survives lost registration and redemption responses with one identity and membership", async t => {
   const f = await fixture(t), invite = f.invite(); let lose = "agent-identities";
@@ -52,6 +56,10 @@ test("one connection survives lost registration and redemption responses with on
   const before = f.store.room("commons").sequence;
   const result = await f.connect({ target: invite.code, fetchImpl });
   assert.equal(result.status, "connected"); assert.equal(f.store.room("commons").sequence, before);
+  const saved = JSON.parse(readFileSync(join(f.directory, "setup.json"), "utf8"));
+  const requestId = Object.values(saved.targets)[0].requestId;
+  await assert.rejects(redeemAgentInvite(f.origin, invite.code, "Changed name", { requestId, identitySecret: saved.secret }),
+    { code: "invite_redeem_idempotency_conflict" });
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
   const config = readAgentConnection(result.configDirectory);
   assert.equal(JSON.stringify(result).includes(config.token), false);
@@ -91,6 +99,23 @@ test("recoverable registration cannot resurrect a revoked or rotated identity", 
   const revoked = secret(), next = await createAgentIdentity(f.origin, "Other", { identitySecret: revoked });
   f.store.db.prepare("UPDATE agent_identities SET revoked_at=1 WHERE identity_id=?").run(next.identityId);
   await assert.rejects(createAgentIdentity(f.origin, "Other", { identitySecret: revoked }), { code: "identity_credential_changed" });
+});
+test("anonymous redeem client recovers a lost committed response with the same request id", async t => {
+  const f = await fixture(t), invite = f.invite(), requestId = "lost-redeem-response";
+  const fetchImpl = async (url, options) => {
+    const result = await fetch(url, options);
+    assert.equal(result.status, 201);
+    throw new TypeError("committed response lost");
+  };
+  await assert.rejects(redeemAgentInvite(f.origin, invite.code, "Peer", { requestId, fetchImpl }));
+  const before = f.store.room("commons").sequence;
+  const retry = await redeemAgentInvite(f.origin, invite.code, "Peer", { requestId });
+  assert.equal(retry.duplicate, true);
+  assert.equal(f.store.room("commons").sequence, before);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
+  assert.equal(f.store.room("commons").state.members[retry.memberId].active, true);
+  await assert.rejects(redeemAgentInvite(f.origin, invite.code, "Changed name", { requestId }),
+    { code: "invite_redeem_idempotency_conflict" });
 });
 test("only the redeeming identity can recover an invite; revoked membership is not reactivated", async t => {
   const f = await fixture(t), invite = f.invite(), identitySecret = secret();
@@ -178,6 +203,23 @@ test("failure to save a room config preserves enrollment; retry recovers without
   assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
   const another = f.invite(); await f.connect({ target: another.code });
   assert.equal(f.store.invites.preview(another.code).roomId, "commons", "an existing membership does not burn a second invite");
+});
+
+test("a conflicting saved connection fails before minting a new agent key", async t => {
+  const f = await fixture(t), invite = f.invite();
+  const result = await f.connect({ target: invite.code });
+  assert.equal(result.status, "connected");
+  const keyCount = () => f.store.db.prepare("SELECT count(*) n FROM agent_api_keys").get().n;
+  assert.equal(keyCount(), 1);
+  // A saved config in another accepted token format (a bare 43-char token)
+  // reads back fine but is not the rak_ connection this run would write, so
+  // a retry must refuse — and must not mint a server-side key it would only
+  // orphan on the way to failing.
+  const config = readAgentConnection(result.configDirectory);
+  writeFileSync(join(result.configDirectory, "connection.json"), JSON.stringify({ ...config, token: "a".repeat(43) }));
+  await assert.rejects(f.connect({ target: invite.code }), /Existing connection differs; nothing was replaced/);
+  await assert.rejects(f.connect({ target: invite.code }), /Existing connection differs; nothing was replaced/);
+  assert.equal(keyCount(), 1, "no agent key was minted for a connection that cannot be saved");
 });
 
 test("expired invites and denied admission remain recoverable states without enrollment duplication", async t => {
@@ -269,7 +311,7 @@ test("shared link HTTP self-service joins, reads and retries with the same ident
     assert.ok(response.ok, `${path}: ${response.status}`);
     return response.json();
   };
-  const packet = await (await fetch(f.origin + "/llms.txt")).text();
+  const packet = await (await fetch(f.origin + "/llms-full.txt")).text();
   assert.match(packet, /HTTP-only agents/);
   assert.doesNotMatch(packet, /#join\/ ≠ agent auth|Instinct \/ Muse default/);
   const preview = await request("/api/share-links/preview", { linkToken });
@@ -284,4 +326,95 @@ test("shared link HTTP self-service joins, reads and retries with the same ident
   assert.equal(resumed.memberId, joined.memberId);
   assert.equal(resumed.duplicate, true);
   assert.equal(f.store.shareLinks.list(f.keys.commons, "commons").links[0].joins, 1);
+});
+
+function publishEntrance(f, open = true) {
+  f.store.command(f.keys.commons, "commons", { id: "public-page", type: "room.public_page_set", data: { enabled: true } });
+  if (open) f.store.command(f.keys.commons, "commons", { id: "public-join", type: "room.join_link_set", data: { enabled: true } });
+}
+
+test("public room page admits one fresh identity, verifies access and resumes after a lost response", async t => {
+  const f = await fixture(t); publishEntrance(f);
+  const target = `${f.origin}/r/commons`;
+  const preview = await f.connect({ target, accept: false });
+  assert.equal(preview.status, "approval_required");
+  assert.deepEqual(preview.preview.permissions, []);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 0);
+  let lose = true;
+  await assert.rejects(f.connect({ target, fetchImpl: async (url, options) => {
+    const response = await fetch(url, options);
+    if (lose && new URL(url).pathname === "/api/share-links/join-agent") { lose = false; throw new TypeError("lost join response"); }
+    return response;
+  } }), /Could not complete the request/);
+  const joined = await f.connect({ target });
+  assert.equal(joined.status, "connected"); assert.deepEqual(joined.permissions, []);
+  assert.equal(joined.readiness.read, "verified");
+  const again = await f.connect({ target });
+  assert.equal(again.memberId, joined.memberId);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 1);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM identity_links WHERE room_id='commons'").get().n, 1);
+});
+
+test("public page respects request-only, private and disabled entrances", async t => {
+  const f = await fixture(t), target = `${f.origin}/r/commons`;
+  await assert.rejects(f.connect({ target }), /Public room page unavailable/);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 0);
+  publishEntrance(f, false);
+  const preview = await f.connect({ target, accept: false });
+  assert.equal(preview.preview.admission, "request");
+  const pending = await f.connect({ target }); assert.equal(pending.status, "pending");
+  assert.equal((await f.connect({ target })).requestId, pending.requestId);
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM identity_links WHERE room_id='commons'").get().n, 0);
+});
+
+test("public page cannot redirect an identity or invitation to another service or room", async t => {
+  const f = await fixture(t); publishEntrance(f);
+  for (const href of ["https://other.example/#join/" + "a".repeat(43), "/#room/lab"]) {
+    await assert.rejects(f.connect({ target: `${f.origin}/r/commons`, fetchImpl: async (url, options) => {
+      if (new URL(url).pathname === "/r/commons.json") return Response.json({ schema: "project-room-public-room/1", slug: "commons", join: { mode: "link", href } });
+      return fetch(url, options);
+    } }), /Public invitation|not a shared invitation/);
+  }
+  assert.equal(f.store.db.prepare("SELECT count(*) n FROM agent_identities").get().n, 0);
+});
+
+test("maximum access is a retryable request, not a join grant, and approval is observed on resume", async t => {
+  const f = await fixture(t); publishEntrance(f);
+  const options = { target: `${f.origin}/r/commons`, access: "maximum" };
+  const preview = await f.connect({ ...options, accept: false });
+  assert.ok(preview.requestedAccess.permissions.includes("manage_members"));
+  const joined = await f.connect(options);
+  assert.deepEqual(joined.permissions, []); assert.equal(joined.accessRequest.status, "pending");
+  const again = await f.connect(options);
+  assert.equal(again.accessRequest.requestId, joined.accessRequest.requestId);
+  const ownerFeed = await (await fetch(`${f.origin}/api/rooms/commons/notifications`, { headers: { Authorization: `Bearer ${f.keys.commons}` } })).json();
+  assert.equal(ownerFeed.notifications.filter(n => n.requestId === joined.accessRequest.requestId).length, 1);
+  new AccessRequests(f.store).decide(f.keys.commons, "commons", joined.accessRequest.requestId, { decision: "approve" });
+  const approved = await f.connect(options);
+  assert.equal(approved.accessRequest.status, "already_granted");
+  assert.deepEqual([...approved.permissions].sort(), [...preview.requestedAccess.permissions].sort());
+  assert.equal(approved.readiness.execution, "not_tested");
+});
+
+
+test("public room names that resemble short invitation codes remain room targets", () => {
+  assert.deepEqual(setupTarget("https://room.trydemigod.com/r/test-room1"), { origin: "https://room.trydemigod.com", publicRoom: "test-room1" });
+  assert.throws(() => setupTarget("https://elsewhere.example/#code/ABC-DEF-GHJ", "https://room.trydemigod.com"), /origin disagree/);
+  assert.throws(() => setupTarget("https://user:secret@room.trydemigod.com/#code/ABC-DEF-GHJ"), /credentials/);
+});
+
+
+test("resuming a partially approved or denied upgrade does not send a new request", async t => {
+  for (const decision of ['approve', 'deny']) {
+    const f = await fixture(t); publishEntrance(f);
+    const options = { target: `${f.origin}/r/commons`, access: 'maximum' };
+    const first = await f.connect(options);
+    new AccessRequests(f.store).decide(f.keys.commons, 'commons', first.accessRequest.requestId, { decision, ...(decision === 'approve' ? { permissions: ['accept_work'] } : {}) });
+    const again = await f.connect(options);
+    assert.equal(again.accessRequest.requestId, first.accessRequest.requestId);
+    assert.equal(again.accessRequest.status, decision === 'approve' ? 'approved' : 'denied');
+    assert.deepEqual(again.permissions, decision === 'approve' ? ['accept_work'] : []);
+    assert.match(again.accessRequest.next, /no new request was sent/);
+    assert.equal(f.store.db.prepare('SELECT count(*) n FROM access_requests').get().n, 1);
+  }
 });

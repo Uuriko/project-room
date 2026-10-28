@@ -67,6 +67,58 @@ test("a declared opening becomes matchable and an undeclared one stays invisible
   assert.equal(value.match.openingId, "W-1");
 });
 
+test("an offer records its declarer on the stored terms row", () => {
+  const registry = createMatchmakingRegistry();
+  call("offer", { registry, caller: "ai_owner", data: {
+    workId: "W-owned", title: "Owned opening", rewardKind: "paid",
+    rewardAmount: 40, requires: ["rust"], sizeMinutes: 90, trustFloor: 0 } });
+  const row = registry.termRows("muse-room").find(r => r.work_id === "W-owned");
+  assert.equal(row.declared_by, "ai_owner");
+});
+
+test("another member cannot overwrite or close someone else's opening (#2940)", () => {
+  const registry = createMatchmakingRegistry();
+  call("offer", { registry, caller: "ai_owner", data: {
+    workId: "W-1", title: "Port the claim lease to rust", rewardKind: "paid",
+    rewardAmount: 40, requires: ["rust"], sizeMinutes: 90, trustFloor: 0 } });
+
+  // Re-pricing by a different member is refused and leaves the row intact.
+  const overwrite = refusal("offer", { registry, caller: "ai_attacker", data: {
+    workId: "W-1", title: "Hijacked", rewardKind: "paid",
+    rewardAmount: 999, requires: [], sizeMinutes: 30, trustFloor: 0 } });
+  assert.equal(overwrite.status, 403);
+  assert.equal(overwrite.code, "opening_not_owner");
+  let row = registry.termRows("muse-room").find(r => r.work_id === "W-1");
+  assert.equal(row.title, "Port the claim lease to rust");
+  assert.equal(row.reward_amount, 40);
+  assert.equal(row.open, true);
+
+  // Closing (open: false) by a different member is refused the same way.
+  const close = refusal("offer", { registry, caller: "ai_attacker", data: {
+    workId: "W-1", title: "Port the claim lease to rust", rewardKind: "paid",
+    rewardAmount: 40, requires: ["rust"], sizeMinutes: 90, trustFloor: 0, open: false } });
+  assert.equal(close.status, 403);
+  assert.equal(close.code, "opening_not_owner");
+  row = registry.termRows("muse-room").find(r => r.work_id === "W-1");
+  assert.equal(row.open, true);
+  assert.equal(row.declared_by, "ai_owner");
+});
+
+test("the declarer can still update and close their own opening", () => {
+  const registry = createMatchmakingRegistry();
+  call("offer", { registry, caller: "ai_owner", data: {
+    workId: "W-1", title: "Port the claim lease to rust", rewardKind: "paid",
+    rewardAmount: 40, requires: ["rust"], sizeMinutes: 90, trustFloor: 0 } });
+  const { status } = call("offer", { registry, caller: "ai_owner", data: {
+    workId: "W-1", title: "Port the claim lease to rust", rewardKind: "paid",
+    rewardAmount: 55, requires: ["rust"], sizeMinutes: 90, trustFloor: 0, open: false } });
+  assert.equal(status, 201);
+  const row = registry.termRows("muse-room").find(r => r.work_id === "W-1");
+  assert.equal(row.reward_amount, 55);
+  assert.equal(row.open, false);
+  assert.equal(row.declared_by, "ai_owner");
+});
+
 test("every opening passed over carries a coded reason", () => {
   const registry = createMatchmakingRegistry();
   call("declare", { registry, data: { motives: ["paid"], capabilities: ["rust"], appetiteMinutes: 60, trustTier: 0 } });

@@ -182,6 +182,7 @@ export async function bootstrapAgentRoom(origin, args, { fetchImpl = globalThis.
       profile: invite.profile ?? "collaborate",
       permissions: invite.permissions,
       expiresAt: invite.expiresAt,
+      expiresAtIso: new Date(invite.expiresAt).toISOString(),
       displayName: invite.displayName,
     },
     hello,
@@ -193,7 +194,6 @@ export async function bootstrapAgentRoom(origin, args, { fetchImpl = globalThis.
     warnings: [
       "Secrets (identity secret, invite code) are shown once. Never commit them, paste them in a prompt, or put them in a URL.",
       "Invitees get profile:collaborate (steer, accept_work, complete_work, verify) — act + emit_receipt via the capability fold. Not manage_members / decide / invite_member / write_external.",
-      "Live www /room/api/* is 404 until Instinct publishes the Worker rewrite. Source path is ready.",
     ],
   };
 }
@@ -230,7 +230,7 @@ Ask a human-owned room to link this already-minted identity. Does not create
 a room and does not implement Second.bind. Default requested permissions are
 the autonomy set (steer, accept_work, complete_work, verify) — not
 manage_members / decide / invite_member. Owner approves with identity-link.
-Needs ROOM_AGENT_ORIGIN.`);
+Needs ROOM_AGENT_ORIGIN and the identity's secret in ROOM_AGENT_TOKEN.`);
     return;
   }
   try {
@@ -243,7 +243,7 @@ Needs ROOM_AGENT_ORIGIN.`);
       requestedPermissions: args.permissions,
       note: args.note ?? "Agent account-link: request autonomy to collaborate. No Second.bind.",
       requestId: `ar_${randomUUID().replaceAll("-", "").slice(0, 16)}`,
-    });
+    }, { identitySecret: process.env.ROOM_AGENT_TOKEN });
     console.log(JSON.stringify({
       contractVersion: 1,
       type: "agent_account_link_request",

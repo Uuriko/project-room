@@ -77,6 +77,41 @@ test("a token issued before a restart still works, and the raw token is not stor
   }
 });
 
+test("O1 (issue #941, durable): a replayed code revokes its family even after a restart", t => {
+  // The code→family linkage must survive Durable Object eviction: exchange
+  // in one provider instance, restart (new instance over the same SQLite
+  // file), then replay the code. The family minted from the code dies.
+  const file = openDb(t);
+  let now = 1_700_000_000_000;
+  const first = provider(file, () => now);
+  first.provider.registerClient(CLIENT);
+  const { code } = first.provider.issueCode({
+    clientId: CLIENT.clientId, userId: "user-1", redirectUri: CLIENT.redirectUris[0],
+    scopes: ["rooms:read"], codeChallenge: challengeFor(VERIFIER)
+  });
+  const issued = first.provider.exchangeCode({
+    code, clientId: CLIENT.clientId, redirectUri: CLIENT.redirectUris[0], codeVerifier: VERIFIER
+  });
+  assert.ok(first.provider.verifyAccessToken(issued.accessToken), "grant works before the restart");
+  first.db.close();
+
+  const events = [];
+  const db = new DatabaseSync(file);
+  t.after(() => db.close());
+  const second = createOAuthProvider({ db, clock: () => now, onSecurityEvent: event => { events.push(event); } });
+  assert.ok(second.verifyAccessToken(issued.accessToken), "grant survived the restart");
+  assert.throws(() => second.exchangeCode({
+    code, clientId: CLIENT.clientId, redirectUri: CLIENT.redirectUris[0], codeVerifier: VERIFIER
+  }), /already used/);
+  assert.equal(second.verifyAccessToken(issued.accessToken), null,
+    "O1: the access token issued from the replayed code is revoked after restart");
+  assert.throws(() => second.refresh({
+    refreshToken: issued.refreshToken, clientId: CLIENT.clientId
+  }), /refresh token revoked/, "O1: the refresh token issued from the replayed code is revoked after restart");
+  assert.equal(events.filter(event => event.type === "authorization_code_reuse_detected").length, 1,
+    "O1: the reuse signal fires after restart");
+});
+
 test("expired tokens are rejected and a bounded prune removes them", t => {
   const file = openDb(t);
   let now = 1_700_000_000_000;

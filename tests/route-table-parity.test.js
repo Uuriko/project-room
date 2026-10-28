@@ -21,6 +21,7 @@ import { allowlistProblems, extractLegacyRoutes, loadRouteSources } from "../scr
 import { methodCoverageProblems, openApiParseErrors } from "../scripts/openapi-gen.mjs";
 import { openapiOperations } from "../scripts/open-routes.mjs";
 import { parse as parseOpenApiYaml } from "yaml";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const root = new URL("..", import.meta.url);
 
@@ -30,7 +31,7 @@ function listen(server) {
 
 test("paths outside the route table stay on the legacy chain", async t => {
   const fixture = createAcceptanceFixture();
-  const server = createRoomServer({ store: fixture.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: fixture.store });
   const origin = await listen(server);
   t.after(async () => {
     server.closeStreams();
@@ -104,7 +105,7 @@ test("inbox mounts require an account session before they choose a method", asyn
   const key = fixture.store.issueAccountAccessKey(account.id);
   const slot = fixture.store.createAccountSessionSlot();
   const session = { token: slot.token, ...fixture.store.loginAccountSession(slot.token, key, 0) };
-  const server = createRoomServer({ store: fixture.store });
+  const server = createRoomServer({ enableDeferredInbox: true, store: fixture.store });
   const origin = await listen(server);
   t.after(async () => {
     server.closeStreams();
@@ -163,7 +164,7 @@ test("inbox mounts require an account session before they choose a method", asyn
 test("auth routes keep their status, error code, and 405 Allow", async t => {
   const fixture = createAcceptanceFixture();
   const sent = [];
-  const server = createRoomServer({
+  const server = createRoomServer({ enableDeferredInbox: true,
     store: fixture.store,
     magicLinkMailer: createMagicLinkMailer({ send: async payload => { sent.push(payload); } }),
   });
@@ -406,7 +407,7 @@ function probeRow() {
 test("docs 403 descriptions match the served error codes for owner-gated room routes", async t => {
   const fixture = createAcceptanceFixture();
   const store = fixture.store;
-  const server = createRoomServer({ store });
+  const server = createRoomServer({ enableDeferredInbox: true, store });
   const origin = await listen(server);
   t.after(async () => {
     server.closeStreams();
@@ -416,7 +417,7 @@ test("docs 403 descriptions match the served error codes for owner-gated room ro
   });
   const ownerKey = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Docs parity prober");
-  store.identities.link(ownerKey, "commons", { identityId: identity.identityId, permissions: ["accept_work"] });
+  linkWithProof(store, ownerKey, "commons", identity, { permissions: ["accept_work"] });
   const probe = async (method, path, reqBody) => {
     const res = await fetch(`${origin}${path}`, {
       method,

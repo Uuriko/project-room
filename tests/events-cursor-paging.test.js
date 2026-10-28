@@ -120,3 +120,22 @@ test("an until filter terminates rather than waiting for events it excludes", t 
   const { pages } = pageThrough(fixture.store, fixture.keys.owner, { until: cutoff });
   assert.equal(pages.at(-1).hasMore, false, "events after the cutoff are excluded, not pending");
 });
+
+// actor + since + until combine into one windowed scan: every matching event
+// arrives exactly once, in order, across pages, and paging terminates.
+test("actor, since and until combine across pages without loss or duplication", t => {
+  const fixture = room(t);
+  const base = Date.parse("2026-10-01T00:00:00.000Z");
+  let now = base;
+  fixture.store.now = () => now;
+  for (let index = 0; index < 8; index += 1) {
+    fixture.send(index % 2 ? "bob" : "alice", T.MESSAGE_POSTED, { messageId: `m-${index}`, body: `msg ${index}` });
+    now += 1000;
+  }
+  const iso = ms => new Date(ms).toISOString();
+  const { events } = pageThrough(fixture.store, fixture.keys.owner,
+    { actor: "alice", since: iso(base + 1500), until: iso(base + 5500) }, 2);
+  // alice's posts land at t=0,2,4,6s; the window (1.5s, 5.5s] keeps t=2s and t=4s.
+  assert.deepEqual(events.map(e => e.event.data.messageId), ["m-2", "m-4"]);
+  assert.ok(events.every(e => e.event.actorId === "alice"));
+});

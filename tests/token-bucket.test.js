@@ -21,6 +21,20 @@ test("burst is allowed, then refused with a Retry-After hint", () => {
   const refilled = limiter.tryTake("agent:quill", { now: 2000 });
   assert.equal(refilled.allowed, true);
 });
+test("a backwards clock step does not rewind updatedAt or double-grant tokens", () => {
+  const limiter = createLimiter({ rate: 1, burst: 10 });
+  // Drain the bucket empty at t=10000.
+  for (let i = 0; i < 10; i += 1) assert.equal(limiter.tryTake("k", { now: 10000 }).allowed, true);
+  assert.equal(limiter.tryTake("k", { now: 10000 }).allowed, false);
+  // A backwards step (NTP correction / snapshot restore) grants nothing and
+  // must not move updatedAt backwards.
+  limiter.peek("k", { now: 0 });
+  // Returning to t=10000 must not refill the rewound interval a second time.
+  assert.equal(limiter.tryTake("k", { now: 10000 }).allowed, false);
+  // Forward refill still works from the un-rewound timestamp: 1s later, 1 token.
+  assert.equal(limiter.tryTake("k", { now: 11000 }).allowed, true);
+  assert.equal(limiter.tryTake("k", { now: 11000 }).allowed, false);
+});
 test("keys are independent and reset clears a bucket", () => {
   const limiter = createLimiter({ rate: 1, burst: 1 });
   limiter.tryTake("a", { now: 0 });

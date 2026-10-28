@@ -11,12 +11,13 @@ import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
 import {
-  AgentHeartbeats, HeartbeatError, agentHeartbeatSchema,
+  AgentHeartbeats, HeartbeatError, agentHeartbeatSchema, convergeWakeSignalRoomScope,
   HEARTBEAT_STALE_AFTER_MS,
 } from "../server/agent-heartbeats.mjs";
 import { buildWakePing, WAKE_PING_EVENT } from "../server/outbound-webhooks.mjs";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const T0 = 1_750_000_000_000;
 
@@ -26,7 +27,7 @@ function unit(t, { staleAfterMs = HEARTBEAT_STALE_AFTER_MS } = {}) {
   const db = new DatabaseSync(":memory:");
   db.exec(agentHeartbeatSchema);
   let at = T0;
-  const hb = new AgentHeartbeats({ db, now: () => at }, { staleAfterMs });
+  const hb = new AgentHeartbeats({ db, now: () => at, transaction: fn => { db.exec("BEGIN IMMEDIATE"); try { const result = fn(); db.exec("COMMIT"); return result; } catch (error) { db.exec("ROLLBACK"); throw error; } } }, { staleAfterMs });
   t.after(() => db.close());
   return { hb, advance: ms => { at += ms; }, at: () => at };
 }
@@ -85,7 +86,7 @@ test("heartbeat upserts hosts and derives online/offline/unregistered status", t
 });
 
 test("wake signals coalesce per message and deliver through pending/ack", t => {
-  const { hb } = unit(t);
+  const { hb, advance } = unit(t);
   hb.heartbeat(wakeable());
   const first = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-1", messageId: "msg-1" });
   assert.equal(first.enqueued, true);
@@ -93,6 +94,7 @@ test("wake signals coalesce per message and deliver through pending/ack", t => {
   const dup = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-1", messageId: "msg-1" });
   assert.equal(dup.enqueued, false, "same message wakes once");
   assert.equal(dup.signal.signalId, first.signal.signalId);
+  advance(1); // Distinct times exercise oldest-first; tied cursor order has its own test.
   hb.enqueueWake({ agentId: "ai_testagent", kind: "dm", roomId: "room-1", messageId: "msg-2" });
   const pending = hb.pendingWakes("ai_testagent");
   assert.equal(pending.length, 2);
@@ -105,6 +107,66 @@ test("wake signals coalesce per message and deliver through pending/ack", t => {
   assert.deepEqual(hb.ackWakes({ agentId: "ai_testagent", signalIds: [pending[0].signalId, "ws_nope"] }).acknowledged, []);
   assert.equal(hb.pendingWakes("ai_testagent").length, 1);
   assert.throws(() => hb.ackWakes({ agentId: "ai_testagent", signalIds: [] }), /signalIds/);
+});
+
+test("wake signals coalesce per room: the same message id wakes once in each room (#2913)", t => {
+  const { hb } = unit(t);
+  hb.heartbeat(wakeable());
+  // Claim/message ids repeat across rooms (claim TASK-1 in two rooms): the
+  // room-B wake must not be suppressed by the room-A wake.
+  const roomA = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-a", messageId: "work-claim:TASK-1:assigned" });
+  assert.equal(roomA.enqueued, true);
+  const roomB = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-b", messageId: "work-claim:TASK-1:assigned" });
+  assert.equal(roomB.enqueued, true, "same message id in another room still wakes");
+  assert.equal(roomB.signal.roomId, "room-b");
+  assert.notEqual(roomB.signal.signalId, roomA.signal.signalId);
+  // Within one room the same message still coalesces to the room's own signal.
+  const dupB = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-b", messageId: "work-claim:TASK-1:assigned" });
+  assert.equal(dupB.enqueued, false, "same message in the same room wakes once");
+  assert.equal(dupB.signal.signalId, roomB.signal.signalId);
+  assert.equal(hb.pendingWakes("ai_testagent", { roomId: "room-a" }).length, 1);
+  assert.equal(hb.pendingWakes("ai_testagent", { roomId: "room-b" }).length, 1);
+  assert.equal(hb.pendingWakes("ai_testagent").length, 2);
+  // Room-less signals keep coalescing with each other (NULL room is its own scope).
+  const noRoom = hb.enqueueWake({ agentId: "ai_testagent", kind: "dm", messageId: "dm-1" });
+  const noRoomDup = hb.enqueueWake({ agentId: "ai_testagent", kind: "dm", messageId: "dm-1" });
+  assert.equal(noRoom.enqueued, true);
+  assert.equal(noRoomDup.enqueued, false, "room-less duplicate still coalesces");
+  assert.equal(noRoomDup.signal.signalId, noRoom.signal.signalId);
+});
+
+test("legacy wake-signal tables converge to room-scoped coalescing (#2913)", t => {
+  // A deployed database still has the pre-fix table: UNIQUE(agent_id,
+  // message_id) inline and no coalesce index. Convergence must preserve
+  // every row, after which verifySchema passes and cross-room wakes land.
+  const legacyTable = `CREATE TABLE IF NOT EXISTS agent_wake_signals (
+    signal_id TEXT PRIMARY KEY, agent_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('mention','dm')),
+    room_id TEXT, message_id TEXT,
+    created_at INTEGER NOT NULL, delivered_at INTEGER,
+    UNIQUE(agent_id, message_id)
+  );`;
+  const legacySchema = agentHeartbeatSchema.split(/;\s*(?=CREATE|$)/).filter(Boolean)
+    .filter(chunk => !chunk.includes("agent_wake_signals_coalesce"))
+    .map(chunk => chunk.includes("CREATE TABLE IF NOT EXISTS agent_wake_signals") ? legacyTable : chunk)
+    .join(";\n");
+  const db = new DatabaseSync(":memory:");
+  t.after(() => db.close());
+  db.exec(legacySchema);
+  db.prepare(`INSERT INTO agent_wake_signals (signal_id, agent_id, kind, room_id, message_id, created_at, delivered_at)
+    VALUES ('ws_legacy', 'ai_testagent', 'mention', 'room-a', 'work-claim:TASK-1:assigned', ?, NULL)`).run(T0);
+  convergeWakeSignalRoomScope(db);
+  db.exec(agentHeartbeatSchema);
+  convergeWakeSignalRoomScope(db); // idempotent: a second run changes nothing
+  const hb = new AgentHeartbeats({ db, now: () => T0 });
+  assert.equal(hb.verifySchema(), true);
+  const roomB = hb.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "room-b", messageId: "work-claim:TASK-1:assigned" });
+  assert.equal(roomB.enqueued, true, "converged table no longer suppresses the other room's wake");
+  assert.deepEqual(
+    db.prepare("SELECT signal_id, room_id FROM agent_wake_signals ORDER BY room_id").all()
+      .map(row => `${row.signal_id}:${row.room_id}`),
+    ["ws_legacy:room-a", `${roomB.signal.signalId}:room-b`],
+    "the legacy row survives convergence verbatim");
 });
 
 test("a registered host queues one wake per message regardless of mode or presence", t => {
@@ -131,10 +193,10 @@ test("hosts and signals survive a restart (new instance on the same database)", 
   const db = new DatabaseSync(":memory:");
   db.exec(agentHeartbeatSchema);
   let at = T0;
-  const first = new AgentHeartbeats({ db, now: () => at });
+  const first = new AgentHeartbeats({ db, now: () => at, transaction: fn => { db.exec("BEGIN IMMEDIATE"); try { const result = fn(); db.exec("COMMIT"); return result; } catch (error) { db.exec("ROLLBACK"); throw error; } } });
   first.heartbeat(wakeable());
   first.enqueueWake({ agentId: "ai_testagent", kind: "mention", roomId: "r", messageId: "m1" });
-  const second = new AgentHeartbeats({ db, now: () => at });
+  const second = new AgentHeartbeats({ db, now: () => at, transaction: fn => { db.exec("BEGIN IMMEDIATE"); try { const result = fn(); db.exec("COMMIT"); return result; } catch (error) { db.exec("ROLLBACK"); throw error; } } });
   assert.equal(second.verifySchema(), true);
   assert.equal(second.statusOf("ai_testagent").status, "online");
   assert.equal(second.pendingWakes("ai_testagent").length, 1);
@@ -243,10 +305,7 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-agent");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "wakeagent",
-    displayName: "Wake Agent", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "wakeagent", displayName: "Wake Agent", permissions: ["accept_work"] });
   // Consent-bound DMs: the owner's test DM to wakeagent needs approval.
   f.store.dmConsents.request("commons", "owner", "wakeagent", "test fixture");
   f.store.dmConsents.decide("commons", "wakeagent", "owner", "approve");
@@ -276,6 +335,9 @@ test("mention of an offline agent enqueues a wake and journals the webhook ping"
 
   // A DM wakes with kind dm (coalescing on messageId is covered at the
   // unit level; the room itself rejects duplicate messageIds).
+  // Wake order is timestamp then signal ID, not insertion order. Give this
+  // later message a later timestamp rather than depending on random IDs.
+  at += 1;
   f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted",
     data: { messageId: "dm-1", body: "direct ping", toMemberId: "wakeagent" } });
   const afterDm = f.store.agentHeartbeats.pendingWakes(identity.identityId);
@@ -293,10 +355,7 @@ test("fresh wakeable agents retain mentions while non-agent mentions queue nothi
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-agent-2");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "wakeagent2",
-    displayName: "Wake Agent Two", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "wakeagent2", displayName: "Wake Agent Two", permissions: ["accept_work"] });
   await post(origin, "/api/agent-heartbeats", beat("host-1"), identity.secret);
 
   // Fresh heartbeat does not prove message delivery; retain the targeted pointer.
@@ -316,10 +375,7 @@ test("room presence lists agent members with additive host presence", async t =>
   f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("wake-agent-3");
-  f.store.identities.link(f.keys.owner, "commons", {
-    identityId: identity.identityId, memberId: "wakeagent3",
-    displayName: "Wake Agent Three", permissions: ["accept_work"],
-  });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "wakeagent3", displayName: "Wake Agent Three", permissions: ["accept_work"] });
   const presenceOf = async () => {
     const res = await get(origin, "/api/rooms/commons/presence", f.keys.owner);
     assert.equal(res.status, 200);
@@ -386,8 +442,7 @@ test("opted-in work wakes survive retries and obey current pause, preferences, r
   let at = Date.now(); f.store.now = () => at;
   const origin = await startServer(t, f);
   const identity = f.store.identities.create("work-wake-agent");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, memberId: "workwake",
-    displayName: "Work wake", permissions: ["accept_work"] });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { memberId: "workwake", displayName: "Work wake", permissions: ["accept_work"] });
   const heartbeat = async extra => {
     const response = await post(origin, "/api/agent-heartbeats", { hostId: "worker", mode: "pull-only", ...extra }, identity.secret);
     assert.equal(response.status, 200); return response.json();
@@ -430,6 +485,12 @@ test("opted-in work wakes survive retries and obey current pause, preferences, r
   at += 3 * 60000;
   assert.equal((await heartbeat()).pendingWakes.length, 1);
   const other = f.store.identities.create("other-work-wake");
+  // #3266: ack enforces poll's registration gate — an identity that has
+  // never heartbeated gets 404 agent_not_registered, not a drained queue.
+  const unregisteredAck = await post(origin, "/api/agent-heartbeats/ack", { signalIds: [wake.signalId] }, other.secret);
+  assert.equal(unregisteredAck.status, 404);
+  assert.equal((await unregisteredAck.json()).error?.code, "agent_not_registered");
+  await post(origin, "/api/agent-heartbeats", { hostId: "other-host", mode: "pull-only" }, other.secret);
   assert.deepEqual((await (await post(origin, "/api/agent-heartbeats/ack", { signalIds: [wake.signalId] }, other.secret)).json()).acknowledged, []);
   send(identity.secret, "work.accepted", { workItemId: "wake-work", expectedRevision: 0 });
   assert.deepEqual((await heartbeat()).pendingWakes, [], "old assignment must not survive a newer work revision");
@@ -490,4 +551,17 @@ test("fresh wakeable hosts queue durable wakes without activating offline-only p
   assert.equal(duplicate.enqueued, false); assert.equal(duplicate.signal.signalId, first.signal.signalId);
   assert.equal(hb.pendingWakes("ai_testagent").length, 1);
   assert.deepEqual(hb.pushTargets("ai_testagent"), [], "durable queue eligibility must not widen push eligibility");
+});
+
+// Round 29: one heartbeat with an absurd cadence used to read "online" for
+// good (window = cadence x 1.5), so land-queue never woke the claimant.
+test("cadenceSeconds is bounded so one heartbeat cannot stay online indefinitely", t => {
+ const { hb, advance } = unit(t);
+ for (const cadenceSeconds of [1e300, 604801]) {
+ assert.throws(() => hb.heartbeat({ ...wakeable(), cadenceSeconds }), err =>
+ err instanceof HeartbeatError && err.status === 422 && err.code === "invalid_heartbeat", String(cadenceSeconds));
+ }
+ hb.heartbeat({ ...wakeable(), cadenceSeconds: 604800 });
+ advance(604800 * 1500 + 1);
+ assert.equal(hb.statusOf("ai_testagent").status, "offline", "the longest window still ends");
 });

@@ -17,7 +17,11 @@ export function createLimiter({ rate, burst, store } = {}) {
   const buckets = store ?? new Map();
   check(buckets instanceof Map, "store must be a Map");
   const refill = (bucket, now) => {
-    const elapsed = Math.max(0, (now - bucket.updatedAt) / 1000);
+    // Non-monotonic time (NTP correction, snapshot restore) must not move
+    // updatedAt backwards: that would let the rewound interval refill a
+    // second time on the next forward step, double-granting tokens.
+    if (now <= bucket.updatedAt) return;
+    const elapsed = (now - bucket.updatedAt) / 1000;
     bucket.tokens = Math.min(burst, bucket.tokens + elapsed * rate);
     bucket.updatedAt = now;
   };

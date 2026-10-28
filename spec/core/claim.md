@@ -62,7 +62,7 @@ Overlap between the files of the claim being taken and the files of another live
 
 ## Caps
 
-Open claims are claims that are not `done`. A room MUST default to 200 open claims (HTTP 409 `work_board_full`). A member MUST default to 20 claims in `claimed`, `in_progress`, or `blocked` (HTTP 409 `too_many_open_claims`). A room MAY set either cap to an integer from 1 to 10000. Release leaves a claim `unclaimed`, which still counts as open. Source: `server/work-claims.mjs`, `server/work-claim-routes.mjs`.
+Open claims are claims that are not `done` or `closed`, minus dormant ones: an `unclaimed` claim with no activity for 14 days does not count, and when the room turns on `staleSweep` (off by default) the stale sweep closes it. A room MUST default to 1000 open claims (HTTP 409 `work_board_full`). A member MUST default to 20 claims in `claimed`, `in_progress`, or `blocked` (HTTP 409 `too_many_open_claims`). A room MAY set either cap to an integer from 1 to 10000. Release leaves a claim `unclaimed`, which still counts as open until it goes dormant. Source: `server/work-claims.mjs`, `server/work-claim-routes.mjs`.
 
 ## Room events
 
@@ -76,7 +76,7 @@ There is no claim state named `input_required`. Waiting is `blocked`. `server/no
 
 `server/work-handoff.mjs` validates a status report and a typed delegation envelope. It does not change a board claim. `work.handoff_recorded` in `src/events.js` is a work-item event, not a board reassign.
 
-Work items have a second reservation. `claim.acquired` stores `repository`, `ref`, and `paths` (a path or `folder/**`) on the work item. `server/claim-scopes.mjs` (`conflictingClaim`) refuses an overlapping active reservation with HTTP 409 `claim_conflict` from `server/store.mjs`. MCP tools `room_acquire_claim`, `room_release_claim`, and `room_renew_claim` submit that reservation. They do not write the board. `src/board.js` (`projectBoard`) is the work-item board. `src/board-ui.js` is the work-claims board shown under Tasks.
+Work items have a second reservation. `claim.acquired` stores `repository`, `ref`, and `paths` (a path or `folder/**`) on the work item. `server/claim-scopes.mjs` (`conflictingClaim`) refuses an overlapping active reservation with HTTP 409 `claim_conflict` from `server/store.mjs`. The MCP tool `room_claim` submits that reservation with `action=take`, `action=renew`, or `action=release`; `room_acquire_claim`, `room_release_claim`, and `room_renew_claim` remain deprecated aliases. They do not write the board. `src/board.js` (`projectBoard`) is the work-item board. `src/board-ui.js` is the work-claims board shown under Tasks.
 
 `docs/WORK-CLAIMS.md` describes `progressMessageId` as required on renew. The route treats the field as optional: the checks above run when it is present, and a renew that omits it is accepted.
 

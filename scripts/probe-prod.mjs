@@ -17,6 +17,9 @@ else {
   console.log(`probe ${BASE} @ ${report.probed_at}`);
   for (const r of report.endpoints) console.log(`  ${r.ok ? "ok  " : "FAIL"} ${r.label.padEnd(16)} ${String(r.status).padEnd(4)} ${r.latencyMs}ms`);
   console.log(`verdict: ${report.verdict} - ${report.note}`);
+  if (report.jobsHealth && report.jobsHealth.status !== "ok") {
+    console.log(`jobs health (separate signal): status=${report.jobsHealth.status}${report.jobsHealth.failing.length ? ` failing=${report.jobsHealth.failing.join(",")}` : ""}`);
+  }
   if (report.sourceRevision) console.log(`prod sourceRevision: ${report.sourceRevision} (compare: git rev-parse main)`);
 }
 process.exit(report.verdict === "healthy" ? 0 : 1);

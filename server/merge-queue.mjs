@@ -237,9 +237,10 @@ const ERROR_STATUS = {
   merge_queue_unknown_entry: 404,
 };
 
-// HTTP handler mounted by server/http.mjs inside the authenticated room block
-// (mount pending: server/http.mjs is file-leased to claude-code-drops until
-// 2026-10-07T00:23Z; the mount is a 3-line add — see the ASK in the room).
+// HTTP handler, NOT MOUNTED: server/http.mjs never routes to it, so these
+// paths return 404 in production. The in-process registry is also not safe
+// across Workers isolates. Until a durable registry is mounted, the merge-slot
+// is the Board claim MERGE-SLOT (docs/ROOM-COORDINATION.md, "Land and deploy").
 // Routes: POST /api/rooms/{roomId}/merge-queue/{enqueue,heartbeat,adopt,release,sweep}
 //         GET  /api/rooms/{roomId}/merge-queue/status
 export async function handleMergeQueue({
@@ -297,7 +298,6 @@ export async function handleMergeQueue({
 //   - any current changes_requested blocks
 //   - an approve counts only from a member other than the claim owner, bound
 //     to the head: basis.headSha matches, or the summary names the head (7+ hex)
-const shortSha = sha => String(sha ?? "").slice(0, 7);
 const ownerOf = claim => (typeof claim?.owner === "object" ? claim?.owner?.memberId ?? claim?.owner?.id : claim?.owner) ?? null;
 const headsIn = text => (String(text ?? "").match(/\b[0-9a-f]{7,40}\b/gi) ?? []).map(sha => sha.toLowerCase());
 const sameSha = (a, b) => !!a && !!b && a.length >= 7 && b.length >= 7 && (a.startsWith(b) || b.startsWith(a));
@@ -326,7 +326,7 @@ export function approvalGate({ claim, headSha, authorizedHeadSha }) {
   const owner = ownerOf(claim) ?? claim.reviews.find(review => review?.basis?.owner)?.basis?.owner ?? null;
   const approvals = current.filter(review => review.verdict === "approve" && review.memberId !== owner
     && (sameSha(String(review.basis?.headSha ?? "").toLowerCase(), head) || headsIn(review.summary).some(sha => sameSha(sha, head))));
-  if (!approvals.length) return { ok: false, reason: `no independent approve bound to head ${shortSha(head)} on claim ${claim.id ?? "?"}: a reviewer other than the owner must approve this exact head (name it in the review)` };
+  // Independent review is advisory (Potter, 2026-10-16): approvals are reported, never required.
   return { ok: true, approvedBy: approvals.map(review => review.memberId) };
 }
 

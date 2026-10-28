@@ -117,7 +117,7 @@ for (const outcome of ["committed-empty", "uncommitted-empty", "committed-lost",
     await f.unknown(); assert.equal(await f.input("summary").inputValue(), attempts[0].data.summary);
     await f.input("summary").evaluate(node => { node.value = "Changed DOM cannot replace a pending save"; });
     await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
-    assert.deepEqual(attempts[0], attempts[1]); assert.equal(f.snapshot().sequence, before + 1);
+    assert.deepEqual(attempts[0], attempts[1]); assert.equal(f.snapshot().sequence, before + 2); // the one completion + its board state_changed event (decision #10 cutover); the exact retry added neither
     assert.equal(f.item().receipt.summary, attempts[0].data.summary); assert.equal(f.item().verification, null); assert.equal(f.item().decision, null);
     assert.equal(await page.locator("#resume-action").isVisible(), false);
     assert.equal(f.snapshot().cursor, 0);
@@ -193,7 +193,7 @@ test("a competing reservation resolves an uncommitted retry without overwriting 
   f.send(T.WORK_ACCEPTED, { workItemId: "competing", expectedRevision: 0 });
   f.send(T.CLAIM_ACQUIRED, { ...attempts[0].data, workItemId: "competing", expectedRevision: 1 });
   await f.save.click(); await page.waitForFunction(() => !document.querySelector("#action-fields [name=paths]").disabled);
-  assert.match(await page.locator("#action-error").textContent(), /Scope is reserved/);
+  assert.match(await page.locator("#action-error").textContent(), /holds a claim on this scope/);
   assert.deepEqual(attempts[0], attempts[1]); assert.equal(f.item().claim, null);
   await f.input("paths").fill("docs/result.md"); await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
   assert.notEqual(attempts[1].id, attempts[2].id); assert.deepEqual(f.item().claim.paths, ["docs/result.md"]);
@@ -218,7 +218,7 @@ test("stale refusal with no live updates provides an owned refresh before rebasi
   assert.equal(await f.save.isDisabled(), true); assert.equal(attempts.length, 1);
   await page.locator("#refresh-action").click(); await f.save.waitFor({ state: "visible" });
   await page.waitForFunction(() => !document.querySelector("#action-form button[type=submit]").disabled);
-  assert.match(await page.locator("#action-context").textContent(), /revision 2/); assert.equal(await f.input("summary").inputValue(), attempts[0].data.summary);
+  assert.equal(await page.locator("#action-context").textContent(), "Synthetic room result"); assert.equal(await f.input("summary").inputValue(), attempts[0].data.summary);
   assert.equal(attempts.length, 1, "refresh reads but does not resubmit");
   await f.save.click(); await f.dialog.waitFor({ state: "hidden" });
   assert.notEqual(attempts[0].id, attempts[1].id); assert.equal(attempts[1].data.expectedRevision, 2);
@@ -232,9 +232,9 @@ test("a failed explicit refresh keeps old evidence and notes until a later succe
   await f.save.click(); await page.locator("#refresh-action").waitFor({ state: "visible" });
   await page.route("**/api/rooms/commons", route => fail ? route.fulfill({ status: 503, json: { error: { code: "temporary", message: "Synthetic read failure" } } }) : route.continue());
   await page.locator("#refresh-action").click(); await page.getByText("Could not load current work. Try again.", { exact: true }).waitFor();
-  assert.match(await page.locator("#action-context").textContent(), /evidence v1/); assert.equal(await f.input("result").inputValue(), "pass");
+  assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v1"); assert.equal(await f.input("result").inputValue(), "pass");
   assert.equal(await f.input("summary").inputValue(), "Checked this exact result"); assert.equal(await f.save.isDisabled(), true);
-  fail = false; await page.locator("#refresh-action").click(); await page.waitForFunction(() => document.querySelector("#action-context").textContent.includes("evidence v2"));
+  fail = false; await page.locator("#refresh-action").click(); await page.waitForFunction(() => document.querySelector("#action-evidence").getAttribute("href") === "https://example.invalid/result/v2");
   assert.equal(await f.input("result").inputValue(), ""); assert.notEqual(f.evidence().completionEventId, old.completionEventId);
   assert.equal(f.item().verification, null); assert.equal(f.item().decision, null);
 });
@@ -270,10 +270,10 @@ for (const action of ["verify", "decide"]) {
     f.complete("v2", action === "verify" ? null : "owner");
     if (action === "decide") f.mutate(T.VERIFICATION_RECORDED, { ...f.evidence(), result: "pass", summary: "Checked v2" }, "human-reviewer");
     await page.locator("#refresh-action").waitFor({ state: "visible" }); assert.equal(await f.save.isDisabled(), true);
-    assert.match(await page.locator("#action-context").textContent(), /evidence v1/);
+    assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v1");
     assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v1");
     await page.locator("#refresh-action").click();
-    await page.waitForFunction(() => document.querySelector("#action-context").textContent.includes("evidence v2"));
+    await page.waitForFunction(() => document.querySelector("#action-evidence").getAttribute("href") === "https://example.invalid/result/v2");
     assert.equal(await f.input(verdict).inputValue(), ""); assert.equal(await f.input(notes).inputValue(), note);
     assert.equal(await page.locator("#action-evidence").getAttribute("href"), "https://example.invalid/result/v2");
     if (action === "verify") {
@@ -364,7 +364,7 @@ for(const outcome of ['normal','rationale-lost','rationale-uncommitted','decisio
   const decision=f.item().decision,rationale=f.snapshot().state.messages.find(m=>m.id===decision.sourceMessageId);
   assert.equal(rationale.body,'Accept the checked result with café and 🪷.');assert.equal(rationale.authorId,'owner');assert.equal(rationale.toMemberId,null);
   assert.equal(decision.reason,rationale.body);assert.equal(decision.completionEventId,pinned.completionEventId);assert.equal(decision.evidenceVersion,pinned.evidenceVersion);
-  assert.equal(f.snapshot().sequence,before+2,'exact retries produce one ordinary rationale and one decision');
+  assert.equal(f.snapshot().sequence,before+3,'exact retries produce one ordinary rationale, one decision and its board event (decision #10 cutover)');
   assert.equal(await page.locator('#resume-action').isVisible(),false);
 });
 
@@ -385,7 +385,7 @@ for(const replacement of ['revision','session','account']) test(`human approval 
     f.mutate(T.VERIFICATION_RECORDED,{...f.evidence(),result:'pass',summary:'Checked v2'},'human-reviewer');
     release();await page.locator('#refresh-action').waitFor({state:'visible'});
     assert.equal(f.item().decision,null);assert.equal(attempts.filter(c=>c.type===T.OWNER_DECISION_RECORDED).length,0);
-    await page.locator('#refresh-action').click();await page.waitForFunction(()=>document.querySelector('#action-context').textContent.includes('evidence v2'));
+    await page.locator('#refresh-action').click();await page.waitForFunction(()=>document.querySelector('#action-evidence').getAttribute('href') === 'https://example.invalid/result/v2');
     assert.equal(await f.input('decision').inputValue(),'');assert.equal(await f.input('reason').inputValue(),'Original checked rationale.');
     await page.unroute('**/commands');await f.input('decision').selectOption('approved');await f.save.click();await f.dialog.waitFor({state:'hidden'});
     assert.equal(f.item().decision.evidenceVersion,'v2');

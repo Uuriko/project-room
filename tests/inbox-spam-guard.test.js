@@ -56,6 +56,17 @@ test("a single confirmed-spam outcome marks the sender bad", () => {
   const snap = rep.record("spam@example.com", "spam_confirmed");
   assert.equal(snap.label, "bad");
 });
+test("confirmed spam disqualifies a long clean history from the trusted label", () => {
+  const rep = createSenderReputation();
+  for (let i = 0; i < 10; i += 1) rep.record("mixed@example.com", "clean");
+  rep.record("mixed@example.com", "spam_confirmed");
+  rep.record("mixed@example.com", "spam_confirmed");
+  const snap = rep.get("mixed@example.com");
+  assert.equal(snap.clean, 10);
+  assert.equal(snap.spamConfirmed, 2);
+  assert.equal(snap.score, 100);
+  assert.equal(snap.label, "bad");
+});
 test("flagged-but-not-quarantined senders sit at watch, not bad", () => {
   const rep = createSenderReputation();
   rep.record("iffy@example.com", "flagged");
@@ -191,6 +202,20 @@ test("reviews are final and unknown ids fail loudly", () => {
   throwsQz(() => q.review(rec.id, { decision: "release", reviewer: "owner-1" }), "invalid_quarantine");
   throwsQz(() => q.review("qz-999", { decision: "release", reviewer: "owner-1" }), "invalid_quarantine");
   throwsQz(() => q.review(rec.id, { decision: "maybe", reviewer: "owner-1" }), "invalid_quarantine");
+});
+test("pre-populated store: new ids continue past existing qz ids instead of overwriting (#2935)", () => {
+  const existing = { id: "qz-1", messageId: "msg-old", channel: "email", connectionId: null,
+    score: 90, signals: [], at: 1000, status: "pending", reviewedBy: null, reviewedAt: null,
+    decision: null, note: null };
+  const store = new Map([["qz-1", existing], ["qz-3", { ...existing, id: "qz-3", messageId: "msg-older" }]]);
+  const q = createQuarantineQueue({ store });
+  const rec = q.quarantine({ messageId: "msg-new", flag: sampleFlag(), channel: "email" });
+  assert.equal(rec.id, "qz-4");
+  // the pre-existing records are untouched, not overwritten by the new filing
+  assert.equal(q.get("qz-1").messageId, "msg-old");
+  assert.equal(q.get("qz-3").messageId, "msg-older");
+  assert.equal(q.size(), 3);
+  assert.deepEqual(q.pending().map(r => r.id), ["qz-1", "qz-3", "qz-4"]);
 });
 test("scannableMessage shape still validates normally", () => {
   const m = scannableMessage({ body: "hi" });

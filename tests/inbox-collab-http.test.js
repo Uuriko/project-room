@@ -16,6 +16,8 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { assertNoInternal } from "../server/inbox-internal-notes.mjs";
+import { InboxCollabStore } from "../server/inbox-collab-store.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-collab-http-"));
@@ -34,11 +36,9 @@ function setup(t) {
     purpose: "An agent-owned room.", kind: "personal", displayName: "Den Keeper" });
   const humanKey = state.store.issueAccessKey("commons", "owner");
   const agent = state.store.identities.create("Collab Agent");
-  state.store.identities.link(humanKey, "commons", { identityId: agent.identityId,
-    displayName: "Collab Agent", permissions: ["accept_work"] });
+  linkWithProof(state.store, humanKey, "commons", agent, { displayName: "Collab Agent", permissions: ["accept_work"] });
   const agent2 = state.store.identities.create("Second Agent");
-  state.store.identities.link(humanKey, "commons", { identityId: agent2.identityId,
-    displayName: "Second Agent", permissions: ["accept_work"] });
+  linkWithProof(state.store, humanKey, "commons", agent2, { displayName: "Second Agent", permissions: ["accept_work"] });
   Object.assign(state, { humanKey, agent, agent2, denIdentity });
   state.serve = async () => {
     const server = createRoomServer({ store: state.store });
@@ -631,6 +631,38 @@ test("restart persistence: every journal replays from SQLite", async t => {
   // And the replayed state keeps working: release the assignment by id.
   const released = await post(f, `${base}/assignments/${assignmentId}/release`, f.humanKey, {});
   assert.equal(released.status, 200);
+});
+
+test("failed replay evicts the partially-replayed entry instead of caching it (#2933)", async t => {
+  const f = setup(t);
+  const agent = { kind: "agent", id: agentIdOf(f) };
+  const owner = { kind: "human", id: "owner" };
+  f.store.collab.assignThread("commons", "thread-replay-fail", agent, { by: owner });
+  f.store.collab.addThreadNote("commons", "thread-replay-fail",
+    { author: owner, body: "replay me after repair" });
+  // A fresh store over the same database replays on first room access.
+  // Corrupt the note row (replayed after assignments) so replay throws
+  // part-way, after the assignment journal has already been populated.
+  const fresh = new InboxCollabStore(f.store);
+  const original = f.store.db.prepare(
+    "SELECT note_json FROM collab_notes WHERE room_id='commons'").get().note_json;
+  f.store.db.prepare("UPDATE collab_notes SET note_json='not-json' WHERE room_id='commons'").run();
+  assert.throws(() => fresh.listAssignments("commons"));
+  // The partial entry must not stay cached: while the row is still corrupt
+  // the next access replays (and throws) again instead of silently serving
+  // the partially-replayed assignment as if the room were healthy.
+  assert.throws(() => fresh.listAssignments("commons"));
+  assert.throws(() => fresh.listThreadNotes("commons", "thread-replay-fail"));
+  // After the row is repaired, the next access replays fully and serves
+  // the complete journal set — no process restart needed.
+  f.store.db.prepare("UPDATE collab_notes SET note_json=? WHERE room_id='commons'").run(original);
+  const assignments = fresh.listAssignments("commons");
+  assert.equal(assignments.length, 1);
+  assert.equal(assignments[0].threadId, "thread-replay-fail");
+  assert.equal(assignments[0].assignee.id, agentIdOf(f));
+  const notes = fresh.listThreadNotes("commons", "thread-replay-fail");
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0].body, "replay me after repair");
 });
 
 test("room scoping: collab data never crosses rooms", async t => {

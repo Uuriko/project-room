@@ -11,9 +11,15 @@ class AttachmentError extends Error { constructor(code, message) { super(message
 const fail = (code, message) => { throw new AttachmentError(code, message); };
 const check = (condition, message) => { if (!condition) fail("invalid_attachment", message); };
 
+// Windows (and most download handlers on it) silently drop trailing dots and
+// spaces, so "evil.exe." and "evil.exe " land on disk as evil.exe. A colon
+// names an NTFS alternate data stream: "evil.exe::$DATA" and
+// "evil.exe:Zone.Identifier" are saved as evil.exe. Read the extension of
+// the name before that colon, the way the file will actually be saved.
 const extensionOf = filename => {
-  const dot = filename.lastIndexOf(".");
-  return dot === -1 ? "" : filename.slice(dot + 1).toLowerCase();
+  const saved = filename.split(":")[0].replace(/[.\s]+$/u, "");
+  const dot = saved.lastIndexOf(".");
+  return dot === -1 ? "" : saved.slice(dot + 1).toLowerCase();
 };
 // Validate attachment metadata without touching bytes.
 export function validateAttachment({ filename, sizeBytes, mimeType }, { maxFileBytes } = {}) {

@@ -14,11 +14,11 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { routeCandidates } from "./open-routes.mjs";
-import { nextActionsRouteTemplates, pluginRouteTemplates, workerRouteTemplates } from "./route-docs-check.mjs";
+import { BOARD_V2_RETIRED_TEMPLATES, httpRetiresBoardV2, nextActionsRouteTemplates, pluginRouteTemplates, workerRouteTemplates } from "./route-docs-check.mjs";
 import { A2A_PATHS } from "../server/a2a-jsonrpc.mjs";
 import { ROOM_MCP_PATHS } from "../src/room-mcp-join.js";
-import { DISCOVERY_PATHS, HEALTH_ALIAS_PATHS } from "../deploy/agent-discovery.mjs";
-import { PUBLIC_DOOR_PATHS } from "../deploy/room-entry.mjs";
+import { DISCOVERY_PATHS, HEALTH_ALIAS_PATHS } from "../server/agent-discovery.mjs";
+import { PUBLIC_DOOR_PATHS } from "../server/room-entry.mjs";
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const ALLOWLIST = "scripts/routes-legacy-allowlist.json";
@@ -364,6 +364,15 @@ function scanSource(source, bag, { names, matchers, bindings }) {
     for (const path of paths) addRoute(bag, match[2], path);
   }
 
+  // Disjunctive method gates: const x = (method === "GET" || method === "HEAD")
+  // ? ROUTE.exec(pathname) — the readMethod pairs the plugin dispatcher uses
+  // for its documented HEAD reads.
+  for (const match of source.matchAll(/const (\w+) = \((method(?: === "[A-Z]+")(?: \|\| method === "[A-Z]+")*)\) \? (\w+)\.exec\(pathname\)/g)) {
+    const consts = indexRegexConsts(source);
+    const paths = consts.get(match[3]) ?? [];
+    for (const method of match[2].matchAll(/"([A-Z]+)"/g)) for (const path of paths) addRoute(bag, method[1], path);
+  }
+
   for (const match of source.matchAll(/const (\w+) = (?:routePattern\("([^"]+)"\)|\/\^([\s\S]*?)\$\/)\.exec\(url\.pathname\);\s*if \(\1 && ([^)]*)\)/g)) {
     const paths = match[2] ? [match[2]] : regexToTemplates(match[3]);
     const methods = methodsFrom(match[4], "");
@@ -392,6 +401,10 @@ export function loadRouteSources(root) {
   };
 }
 
+// Worker literals that answer POST only (every other method is 405), so the
+// inventory does not record a GET/HEAD the Durable Object never serves.
+const WORKER_POST_ONLY_PATHS = new Set(["/api/operator/restore", "/api/operator/restore-from-backup"]);
+
 export function extractLegacyRoutes(sources) {
   const prepared = substitute(sources.http, sources.constants);
   const names = routeNameMap(prepared);
@@ -411,14 +424,11 @@ export function extractLegacyRoutes(sources) {
   catalogPaths(sources.http, /isPublicRoomDoorPath\(/, PUBLIC_DOOR_PATHS, ["GET", "HEAD"], bag);
   catalogPaths(sources.http, /discovery && \["GET", "HEAD"\]/, DISCOVERY_PATHS, ["GET", "HEAD"], bag);
   for (const path of workerRouteTemplates(sources.worker)) {
-    addRoute(bag, "GET", path);
-    addRoute(bag, "HEAD", path);
+    for (const method of WORKER_POST_ONLY_PATHS.has(path) ? ["POST"] : ["GET", "HEAD"]) addRoute(bag, method, path);
   }
-  if (/if \(boardV2Match\)/.test(prepared)) {
-    for (const [, paths] of indexRegexConsts(prepared)) {
-      for (const path of paths) if (path.includes("/board/v2/")) {
-        for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]) addRoute(bag, method, path);
-      }
+  if (httpRetiresBoardV2(prepared)) {
+    for (const path of BOARD_V2_RETIRED_TEMPLATES) {
+      for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"]) addRoute(bag, method, path);
     }
   }
   return [...bag.values()].sort((a, b) => a.path === b.path ? a.method.localeCompare(b.method) : a.path.localeCompare(b.path));

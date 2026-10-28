@@ -63,6 +63,16 @@ export function currentTypists(state, roomId, excludeId, nowMs = Date.now()) {
   return out.sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
+// A member who just posted is no longer typing. Their client stops beating on
+// send, but the last beat would otherwise linger for up to TYPING_TTL_MS, so
+// others kept seeing "<name> is typing…" under the message itself.
+export function clearBeat(state, roomId, memberId) {
+  const room = state.get(roomId);
+  if (!room || !room.delete(memberId)) return false;
+  if (room.size === 0) state.delete(roomId);
+  return true;
+}
+
 export function typingKey(typists) {
   return typists.map(t => t.memberId).join(",");
 }

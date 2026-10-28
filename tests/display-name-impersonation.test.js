@@ -137,7 +137,7 @@ test("redeem, share-link join, access requests, and referral redeem refuse a tak
 
   let blocked;
   try {
-    requests.request("commons", { identityId: identity.identityId, displayName: "SYSTEM", requestedPermissions: [], requestId: "ar_blocked_name" });
+    requests.request("commons", { identityId: identity.identityId, displayName: "SYSTEM", requestedPermissions: [], requestId: "ar_blocked_name" }, identity.secret);
     assert.fail("a reserved display name was stored");
   } catch (error) { blocked = error; }
   assert.equal(blocked.status, 422);
@@ -147,7 +147,7 @@ test("redeem, share-link join, access requests, and referral redeem refuse a tak
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM access_requests").get().n, 0);
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Quiet Person", requestedPermissions: [], requestId: "ar_quiet",
-  });
+  }, identity.secret);
   store.db.prepare("UPDATE access_requests SET display_name=? WHERE request_id=?").run("SYSTEM", pending.requestId);
   assert.throws(
     () => requests.decide(ownerKey, "commons", pending.requestId, { decision: "approve" }),

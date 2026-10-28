@@ -23,6 +23,7 @@ import {
   providerStatus,
   webResearchContract,
   WEB_RESEARCH_RATE_PER_MEMBER_PER_DAY,
+  WEB_RESEARCH_DOCS_CACHE_TTL_MS,
 } from "../server/web-research.mjs";
 import { WebFetchError } from "../server/web-fetch.mjs";
 
@@ -226,6 +227,56 @@ test("docs leg searches a corpus with typed ids and provenance", async () => {
     assert.equal(e.provenance.source, "docs");
     assert.equal(e.provenance.content_sha256.length, 64);
     assert.equal(e.provenance.cache, null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("docs leg: instances with different docsRoots search their own corpus (#2964)", async () => {
+  const dirA = mkdtempSync(join(tmpdir(), "room-research-docs-a-"));
+  const dirB = mkdtempSync(join(tmpdir(), "room-research-docs-b-"));
+  try {
+    writeFileSync(join(dirA, "zebra.md"), "# Zebra Care\n\nFeeding and grooming a zebra.\n");
+    writeFileSync(join(dirB, "yak.md"), "# Yak Shelter\n\nBuilding winter shelter for a yak.\n");
+    const a = makeService({ serviceOpts: { docsRoot: { docsDir: dirA, extraFiles: [] } } });
+    const b = makeService({ serviceOpts: { docsRoot: { docsDir: dirB, extraFiles: [] } } });
+    const resA = await a.service.research("room1", "member1",
+      { question: "zebra grooming feeding", sources: ["docs"] });
+    assert.equal(resA.evidence.length, 1);
+    assert.equal(resA.evidence[0].title, "Zebra Care");
+    // The second instance must not reuse the first instance's cached file list.
+    const resB = await b.service.research("room1", "member1",
+      { question: "yak shelter winter", sources: ["docs"] });
+    assert.equal(resB.evidence.length, 1);
+    assert.equal(resB.evidence[0].title, "Yak Shelter");
+    const resBWrong = await b.service.research("room1", "member1",
+      { question: "zebra grooming feeding", sources: ["docs"] });
+    assert.equal(resBWrong.evidence.length, 0);
+  } finally {
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
+  }
+});
+
+test("docs leg: a doc added after the first search becomes searchable once the cache TTL lapses (#2964)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "room-research-docs-ttl-"));
+  try {
+    writeFileSync(join(dir, "first.md"), "# Alpha Setup\n\nConfiguring alpha widgets.\n");
+    const { service, setNow } = makeService({ serviceOpts: { docsRoot: { docsDir: dir, extraFiles: [] } } });
+    const before = await service.research("room1", "member1",
+      { question: "alpha widgets configuring", sources: ["docs"] });
+    assert.equal(before.evidence.length, 1);
+    writeFileSync(join(dir, "second.md"), "# Beta Tuning\n\nAdjusting beta dials.\n");
+    // Within the TTL the cached list is still served…
+    const cached = await service.research("room1", "member1",
+      { question: "beta dials adjusting", sources: ["docs"] });
+    assert.equal(cached.evidence.length, 0);
+    // …but once it lapses the new doc is picked up instead of staying invisible forever.
+    setNow(1_000_000 + WEB_RESEARCH_DOCS_CACHE_TTL_MS);
+    const after = await service.research("room1", "member1",
+      { question: "beta dials adjusting", sources: ["docs"] });
+    assert.equal(after.evidence.length, 1);
+    assert.equal(after.evidence[0].title, "Beta Tuning");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

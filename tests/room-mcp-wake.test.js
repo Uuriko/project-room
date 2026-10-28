@@ -11,6 +11,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { installFakeWebhookDns } from "./helpers/fake-webhook-dns.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 const WAKE_TOOLS = [
@@ -149,7 +150,14 @@ test("an enrolled identity registers, reads, and clears an HTTPS wakeUrl", async
   const cleared = await call(origin, "wake.clear", { hostId: "host-1" }, owner.secret);
   assert.equal(cleared.value.host.mode, "pull-only");
   assert.equal(cleared.value.host.wakeUrl, null);
+  // wake.clear clears the cadence hint too — via an explicit
+  // cadenceSeconds null (the documented clear), not as a side effect of
+  // omission. BUILD-HEARTBEAT-CADENCE: with the hint cleared the server
+  // assigns its default, so the host and the stored row read 120, not
+  // null — the assignment is what every surface reports now.
+  assert.equal(cleared.value.host.cadenceSeconds, 120);
   assert.equal(store.db.prepare("SELECT mode, wake_url FROM agent_hosts WHERE agent_id=?").get(owner.identityId).wake_url, null);
+  assert.equal(store.db.prepare("SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=?").get(owner.identityId).cadenceSeconds, 120);
   assert.equal(cleared.raw.includes(owner.secret), false);
 });
 
@@ -249,14 +257,14 @@ test("wake.pause and wake.resume use the room wake-queue pause path", async t =>
   const owner = store.identities.create("Pause owner");
   const peer = store.identities.create("Pause peer");
   const created = roomFor(store, rooms, owner);
-  store.identities.link(owner.secret, created.roomId, {
-    identityId: peer.identityId, displayName: "Pause peer", permissions: []
-  });
+  linkWithProof(store, owner.secret, created.roomId, peer, { displayName: "Pause peer", permissions: [] });
   const outsider = await call(origin, "wake.pause", {
     roomId: created.roomId, memberId: created.ownerMemberId, requestId: "pause-1", reason: "away"
   }, store.identities.create("Pause outsider").secret);
   assert.equal(outsider.body.result.isError, true);
-  assert.equal(outsider.value.status, 401);
+  assert.equal(outsider.value.status, 403);
+  assert.equal(outsider.value.code, "not_member");
+  assert.equal(outsider.value.next.action, "pair");
 
   const cross = await call(origin, "wake.pause", {
     roomId: created.roomId, memberId: created.ownerMemberId, requestId: "pause-peer", reason: "no"
@@ -325,4 +333,56 @@ test("a session cookie without a bearer secret gets the anonymous MCP catalog", 
   const withBearer = await rpc(origin, "tools/list", { profile: "full" }, bearer.secret);
   const names = (await withBearer.json()).result.tools.map(tool => tool.name);
   assert.equal(names.includes("wake_register"), true);
+});
+
+test("wake.register and heartbeat.set reject cadenceSeconds above the 7-day bound", async t => {
+  // Round 29 regression (server/agent-heartbeats.mjs caps cadence at 7 days):
+  // the hosted MCP layer must reject an absurd cadence before it reaches the
+  // store — otherwise one heartbeat could read "online" indefinitely and the
+  // land queue would never wake the claimant.
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Cadence owner");
+  roomFor(store, rooms, owner);
+  const over = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL, cadenceSeconds: 604801 }, owner.secret);
+  assert.equal(over.body.error.code, -32602);
+  assert.equal(over.body.error.data.reason, "invalid_arguments");
+  const absurd = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL, cadenceSeconds: 1e300 }, owner.secret);
+  assert.equal(absurd.body.error.code, -32602);
+  assert.equal(absurd.body.error.data.reason, "invalid_arguments");
+  const max = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL, cadenceSeconds: 604800 }, owner.secret);
+  assert.equal(max.body.error, undefined);
+  // BUILD-HEARTBEAT-CADENCE: the in-bound maximum is accepted as a hint
+  // but the server assigns its ceiling (3600) — the Round 29 hazard is
+  // now closed by assignment, not just by the protocol bound.
+  assert.equal(max.value.host.cadenceSeconds, 3600);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_hosts").get().n, 1, "only the in-bound registration landed");
+});
+
+test("cadenceSeconds is sticky over MCP: omit preserves, explicit null clears", async t => {
+  // Rotation review P5-F2: a host that declared its cadence once and
+  // then heartbeated bare used to lose the declaration (the MCP layer
+  // turned omission into a stored null). Omission now preserves it on
+  // both wake tools; only an explicit null clears it.
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Sticky cadence owner");
+  roomFor(store, rooms, owner);
+  const storedCadence = () => store.db.prepare(
+    "SELECT cadence_seconds AS cadenceSeconds FROM agent_push_configs WHERE agent_id=? AND host_id=?")
+    .get(owner.identityId, "host-1")?.cadenceSeconds ?? null;
+  const registered = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL, cadenceSeconds: 120 }, owner.secret);
+  assert.equal(registered.value.host.cadenceSeconds, 120);
+  const bareSet = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL }, owner.secret);
+  assert.equal(bareSet.body.error, undefined);
+  assert.equal(bareSet.value.host.cadenceSeconds, 120, "heartbeat.set without cadenceSeconds preserves the declaration");
+  assert.equal(storedCadence(), 120);
+  const bareRegister = await call(origin, "wake.register", { hostId: "host-1", wakeUrl: WAKE_URL }, owner.secret);
+  assert.equal(bareRegister.value.host.cadenceSeconds, 120, "wake.register without cadenceSeconds preserves the declaration");
+  const replaced = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL, cadenceSeconds: 300 }, owner.secret);
+  assert.equal(replaced.value.host.cadenceSeconds, 300, "an explicit value replaces the declaration");
+  const cleared = await call(origin, "heartbeat.set", { hostId: "host-1", mode: "wakeable", wakeUrl: WAKE_URL, cadenceSeconds: null }, owner.secret);
+  assert.equal(cleared.body.error, undefined);
+  // BUILD-HEARTBEAT-CADENCE: the explicit null still clears the hint;
+  // the server then assigns its default, which is what reads back.
+  assert.equal(cleared.value.host.cadenceSeconds, 120, "an explicit null clears the hint; the server assigns its default");
+  assert.equal(storedCadence(), 120);
 });

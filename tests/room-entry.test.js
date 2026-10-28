@@ -2,8 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { runInThisContext } from "node:vm";
-import { roomEntry, START_ROOM_URL, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../deploy/room-entry.mjs";
-import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../deploy/agent-discovery.mjs";
+import { roomEntry, START_ROOM_URL, publicRoomDoorHtml, isPublicRoomDoorPath, wantsPublicDoorHtml, PUBLIC_DOOR_PATHS, ROOM_DEEP_LINK_SCRIPT, PUBLIC_DOOR_CSP, connectMcpPathHtml, HOSTED_MCP_JOIN_PUBLIC_URL } from "../server/room-entry.mjs";
+import { ROOM_ORIGIN, COMPUTE_DOOR, ROOM_PUBLIC_WWW } from "../server/agent-discovery.mjs";
 
 const FORBIDDEN = /Bearer |ROOM_AGENT_TOKEN|sk-|password|@gmail|John |Potter |Uuriko@|acct-|memberId":"[^c]/i;
 
@@ -76,7 +76,8 @@ test("getdasha public door is a quiet Join + Connect page, not the llms packet",
   assert.match(html, /id="join-prompt"/);
   assert.match(html, /<a href="\/room\/join.txt">join.txt<\/a>/);
   assert.match(html, /Add Room as MCP/);
-  assert.match(html, /https:\/\/www\.getdasha\.com\/room\/mcp/);
+  assert.match(html, /https:\/\/room\.trydemigod\.com\/mcp/);
+  assert.doesNotMatch(html, /https:\/\/www\.getdasha\.com\/room\/mcp/);
   assert.match(html, /claude mcp add --transport http/);
   assert.doesNotMatch(html, /Join with code/);
   assert.doesNotMatch(html, /id="join-code"/);
@@ -226,7 +227,7 @@ test("www /room #room/{id} still rewrites Open/People and does not follow Join",
 });
 
 test("public door pages have skip links and /room is indexable (QA4 polish)", async () => {
-  const { PUBLIC_ROOM_DOOR_HTML } = await import("../deploy/room-entry.mjs");
+  const { PUBLIC_ROOM_DOOR_HTML } = await import("../server/room-entry.mjs");
   const html = publicRoomDoorHtml();
   for (const page of [html, PUBLIC_ROOM_DOOR_HTML]) {
     assert.match(page, /<a class="skip" href="#main">Skip to content<\/a>/);
@@ -267,4 +268,30 @@ test("HTTP public doors redirect HTML, preserve query, and retain plain packets 
   assert.match(await packet.text(), /Project Room/);
   const mutation = await fetch(origin+"/room",{method:"POST"});
   assert.equal(mutation.status,405);
+});
+
+test("stale www card paths redirect to the signed canonical agent card (#956)", async () => {
+  for (const path of ["/room/.well-known/agent-card.json", "/project-room/.well-known/agent-card.json"]) {
+    const response = roomEntry(new Request(`https://www.trydemigod.com${path}`));
+    assert.equal(response.status, 308, `${path} redirects permanently`);
+    assert.equal(response.headers.get("Location"), `${ROOM_ORIGIN}/.well-known/agent-card.json`);
+    assert.equal(await response.text(), "", "redirect carries no stale card bytes");
+    const head = roomEntry(new Request(`https://www.trydemigod.com${path}`, { method: "HEAD" }));
+    assert.equal(head.status, 308);
+    assert.equal(head.headers.get("Location"), `${ROOM_ORIGIN}/.well-known/agent-card.json`);
+  }
+  // Other hosts keep their own routing: no redirect leaks off the www door.
+  assert.equal(roomEntry(new Request("https://www.getdasha.com/room/.well-known/agent-card.json")), null);
+});
+
+test("human door guides invite-holders and disambiguates the two CTAs (HD-05 first-60s audit)", () => {
+  // The Sept-12 door carried a "Have an invite?" block; the current door at
+  // /room dropped it, so a stranger arriving with an invite link gets no
+  // guidance. It must also say which of "Start a room" / "Open Room" a
+  // newcomer should pick.
+  const html = publicRoomDoorHtml();
+  assert.match(html, /New here\?/);
+  assert.match(html, /Been here before\?/);
+  assert.match(html, /Have an invite link\?/);
+  assert.match(html, /Open it in this browser/);
 });

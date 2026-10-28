@@ -12,8 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { validateCriticalConfig } from "../server/boot-config.mjs";
-import { agentCard, agentCardSignatureState, markUnsignedCard } from "../deploy/agent-discovery.mjs";
-import { AGENT_CARD_UNSIGNED_REASON } from "../deploy/agent-card-signed.mjs";
+import { agentCard, agentCardSignatureState, markUnsignedCard } from "../server/agent-discovery.mjs";
+import { AGENT_CARD_UNSIGNED_REASON } from "../server/agent-card-signed.mjs";
 import { signAgentCard } from "../scripts/sign-agent-card.mjs";
 import { generateKeyPair } from "../server/agent-card-signing.mjs";
 
@@ -108,4 +108,66 @@ test("agentCardSignatureState mirrors the serve path's revision gate", () => {
   assert.equal(AGENT_CARD_UNSIGNED_REASON, null);
   assert.equal(state.signed, false);
   assert.equal(state.unsignedReason, null);
+});
+
+test("QA200-REG-14: bare validateCriticalConfig() (dev default path) warns loudly, never throws", () => {
+  // Regression guard for the `??` default: an absent cardSignature must
+  // degrade to the unsigned dev warning, never a fail-open clean pass.
+  const { warnings } = validateCriticalConfig();
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /UNSIGNED/i);
+  assert.match(warnings[0], /ROOM_AGENT_CARD_SIGNING_KEY|--allow-unsigned/);
+});
+
+test("QA200-REG-14: production with no cardSignature refuses boot (fail-loud default)", () => {
+  // Guards the defaulting logic against a fail-open regression where the
+  // absent card state is treated as signed.
+  assert.throws(
+    () => validateCriticalConfig({ production: true }),
+    error => {
+      assert.match(error.message, /Refusing to boot/);
+      assert.match(error.message, /UNSIGNED/i);
+      assert.match(error.message, /ROOM_AGENT_CARD_SIGNING_KEY/);
+      return true;
+    }
+  );
+  assert.throws(
+    () => validateCriticalConfig({ production: true, cardSignature: { signed: false } }),
+    /Refusing to boot/
+  );
+});
+
+// BG-1 (NEW-RC-5): the gate moved into the shared boot path —
+// createRoomServer — so a fixture boot runs it too. Pre-fix only the
+// server.mjs entry validated, and every fixture boot skipped the gate.
+import { createRoomServer } from "../server/http.mjs";
+import { RoomStore } from "../server/store.mjs";
+
+test("BG-1: a fixture boot with production-shaped arguments fails on broken critical config", () => {
+  // Premise: the source tree's agent card is unsigned — signing is a
+  // build/deploy step (scripts/sign-agent-card.mjs), so the tree a suite
+  // runs from is exactly the "deliberately broken critical config" case.
+  // If this tree is ever committed signed, the premise — not the gate —
+  // is what changed, and this test must be revisited.
+  assert.equal(agentCardSignatureState().signed, false);
+  const store = new RoomStore(":memory:");
+  try {
+    assert.throws(
+      () => createRoomServer({ store, production: true }),
+      error => {
+        assert.match(error.message, /Refusing to boot/);
+        assert.match(error.message, /UNSIGNED agent card/i);
+        return true;
+      }
+    );
+  } finally { store.close(); }
+});
+
+test("BG-1: a default fixture boot runs the gate in dev semantics — warns, never throws", () => {
+  const store = new RoomStore(":memory:");
+  try {
+    const server = createRoomServer({ store });
+    assert.equal(typeof server.listen, "function");
+    assert.equal(server.listening, false);
+  } finally { store.close(); }
 });

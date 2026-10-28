@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openCatchUp } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 // Real browser commands against disposable loopback rooms only. No external agent runs.
 import test from "node:test";
@@ -72,7 +72,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     assert.equal(await isOpen("#rb-history-section"), false);
     assert.equal(await isOpen("#rb-involving-section"), false);
     await page.locator("#message-input").fill("Keep my draft while I move around the room.");
-    await page.locator("#topbar-catchup").click();
+    await openCatchUp(page);
     assert.equal(await isOpen("#catchup-dialog"), true);
     assert.equal(await page.locator("#message-input").inputValue(), "Keep my draft while I move around the room.");
     await page.locator("#return-brief-panel > summary").click();
@@ -130,9 +130,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const beforeConflict = snapshot();
     const conflict = await saveAction(page, 409);
     assert.equal(conflict.error.code, "claim_conflict");
-    await page.waitForFunction(() => document.querySelector("#action-error").textContent.includes("reserved") && !document.querySelector('#action-form button[type="submit"]').disabled);
+    await page.waitForFunction(() => document.querySelector("#action-error").textContent.includes("holds a claim") && !document.querySelector('#action-form button[type="submit"]').disabled);
     assert.equal(await page.locator("#action-dialog").isVisible(), true);
-    assert.match(await page.locator("#action-error").textContent(), /no new claim was saved/i);
+    assert.match(await page.locator("#action-error").textContent(), /Coordinate with them or release their claim first/i);
     assert.equal(snapshot().sequence, beforeConflict.sequence);
     assert.deepEqual(item(second), beforeConflict.state.workItems[second]);
     for (const [name, value] of Object.entries({ ...scope, paths: "src/room.js" })) assert.equal(await page.locator(`#action-fields [name="${name}"]`).inputValue(), value);
@@ -185,7 +185,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     await page.locator("#message-input").fill("Keep this private unsent draft while I review changes.");
     await Promise.all([
       page.waitForResponse(response => new URL(response.url()).pathname === "/api/rooms/commons/return-brief"),
-      page.locator("#topbar-catchup").click()
+      openCatchUp(page)
     ]);
     await page.waitForFunction(() => document.querySelector("#summary-grid").textContent && !document.querySelector("#rb-refresh-button").disabled);
     assert.equal(await isOpen("#return-brief-panel"), true);
@@ -203,8 +203,13 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     }
     const recorded = fixture.store.eventsAfter(fixture.keys.owner, "commons", baseline.sequence, 100).events;
     assert.deepEqual(recorded.map(({ event }) => event.type), [
-      T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_PROPOSED, T.WORK_ACCEPTED,
-      T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED, T.CLAIM_RELEASED, T.WORK_CLAIM_UPDATED, T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED
+      // PRODUCT-200 D4 + decision #10 cutover: the first board write per work
+      // item emits its own work_claim.updated "created" event, and that write
+      // now happens at accept - so each accept is followed by its board
+      // event, and a claim on the existing card emits only "claimed".
+      T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_CLAIM_UPDATED, T.WORK_PROPOSED, T.WORK_ACCEPTED, T.WORK_CLAIM_UPDATED,
+      T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED, T.CLAIM_RELEASED, T.WORK_CLAIM_UPDATED,
+      T.CLAIM_ACQUIRED, T.WORK_CLAIM_UPDATED
     ]);
     assert.equal(recorded.some(({ event }) => [T.WORK_STARTED, T.WORK_COMPLETED].includes(event.type)), false, "coordination never claims automatic execution or completion");
     assert.equal(snapshot().cursor, baseline.cursor, "reading and disclosing a catch-up never acknowledges it");

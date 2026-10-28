@@ -1,3 +1,4 @@
+import { messageRepository } from "./message-repository.mjs";
 // Work-claim HTTP routes (task RC-2026-09-18-041; receipts RC-2026-09-24-205).
 //
 // Room-scoped handlers mounted by server/http.mjs inside the authenticated
@@ -34,33 +35,39 @@
 // 409; unknown ids as 404. Unknown errors are rethrown for the generic 500
 // path — never wrapped, so no internal detail leaks.
 import {
-  createWork, claimWork, updateWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
+  createWork, claimWork, updateWork, releaseWork, appendWorkPullRequest, attestWork, recordReview, reassignWork, releaseExpired, canCloseWork,
   renewWork, roomWorkClaimConfig, closeWhenLive, isReceiptTag, ClaimError, REVIEW_POLICIES, CLAIM_KINDS,
   claimUpdatedAt, ACTIVE_CLAIM_STATES, MAX_LEASE_HOURS, STATES, summarizeClaimHistory, isHardWork,
-  walkProvenance, flagPremiseInvalid, clearPremiseFlag,
+  walkProvenance, flagPremiseInvalid, clearPremiseFlag, closeWork, isTerminalClaimState, claimHistoryLength,
+  updateRequestDigest, requestReplayVerdict, bindReviewerRequestOutcome, reviewerRequestOutcome, reviewerReadingAckMatches, hasCurrentReview,
+  openClaimCount, STALE_UNCLAIMED_DAYS,
 } from "./work-claims.mjs";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
 import { findClaimCollisions } from "./claim-collisions.mjs";
 import { emitWorkClaimEvent, enqueueClaimWake, wakeNamedReviewers } from "./work-claim-events.mjs";
+import { alertLeaseRefusal, notifyClaimCollisions } from "./agent-collisions.mjs";
+import { noteProjectMapOverlap, publishProjectMapOverlap, withProjectMapOverlap } from "./project-map-store.mjs";
 import { noteReadyWork } from "./work-wants.mjs"; // BOARD-WAKE-2
 import { getActiveSquad } from "./squads.mjs"; // plan-squads: work offers target squads
 import { isFirstContribution, retentionAck } from "./retention-response.mjs";
 import { requiredReadingFor, stampReadingAck } from "./required-reading.mjs"; // W012: per-lane required reading
 import { ROOM_GUIDE_ID } from "./room-guide.mjs";
-import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims } from "./claim-coordination.mjs";
+import { fileLeaseConflictBody, fileLeaseConflicts, holdForRateLimit, readyClaims, withPullSettlement } from "./claim-coordination.mjs";
 import { collectPullRequestLookups, commitPullRequestLookup, readClaimPullBudget, writeClaimPullBudget } from "./claim-pr-sync.mjs";
 import {
   assertBoardEventBudget, assertBoardLeaseHours, assertDependsOnKnown, boardText, boardTextFields, clientPullRequestInput,
   readBoardDeployStatus, roomEventsRemaining, DONE_WINDOW_MS, LIST_HISTORY_ENTRIES,
 } from "./work-claim-integrity.mjs";
 import { stampClaim, stampClaimPage, stampReceipts, withContentTrust } from "./content-trust.mjs";
+import { publicReceiptById } from "./receipts-live.mjs";
+import { publicReceiptUrl, publicWorkClaimReceiptId, publicWorkItemReceiptId } from "./public-read-model.mjs";
 import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived } from "../src/events.js";
+import { isRoomArchived, publicReceipts } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -353,8 +360,11 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   const metadata = { roomId, source: "work-claims", evaluatedAt: new Date(nowMs).toISOString(),
     consistency: "live", limit, historyLimit: LIST_HISTORY_ENTRIES };
   const present = page => {
+    // #3661: every claim read carries the derived pull settlement state on
+    // its pull record (verified / asserted / pending; link-less claims
+    // keep pullRequest null, which reads as "none").
     const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => summarizeClaimHistory(item, LIST_HISTORY_ENTRIES)) }, viewerId);
+      claims: page.claims.map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
   if (params.has("queue")) {
@@ -375,11 +385,23 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
   }
   // Keep the canonical seven-day done window and open dependency exception.
   const since = nowMs - DONE_WINDOW_MS;
-  const needed = new Set(items.filter(item => item.state !== "done").flatMap(item => item.dependsOn ?? []));
-  const visible = items.filter(item => item.state !== "done" || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since);
+  const needed = new Set(items.filter(item => !isTerminalClaimState(item.state)).flatMap(item => item.dependsOn ?? []));
+  const visible = items.filter(item => !isTerminalClaimState(item.state) || needed.has(item.id) || Date.parse(claimUpdatedAt(item)) >= since);
   const olderDone = items.length - visible.length;
   return present({ ...pageBoard(visible, limit, cursor), historyScope: "recent_done_and_dependencies",
     ...(olderDone > 0 ? { olderDone, olderDoneQuery: "state=done" } : {}) });
+}
+
+// Legacy malformed rows remain available for explicit repair. Only validation
+// refusals are isolated; persistence/event failures must still fail the request.
+function skipInvalidMaintenanceClaim(error, item, skipped) {
+  if (!(error instanceof ClaimError) || error.code !== "invalid_claim_input") throw error;
+  skipped.count += 1;
+  if (skipped.claimIds.length < 5) skipped.claimIds.push(String(item.id).slice(0, 128));
+}
+function warnInvalidMaintenanceClaims(roomId, phase, skipped) {
+  if (skipped.count) console.warn(JSON.stringify({ event: "work_claim.maintenance_invalid", roomId,
+    phase, code: "invalid_claim_input", skippedCount: skipped.count, claimIds: skipped.claimIds }));
 }
 
 // Evaluate lease expiry across the room's items; expired claims auto-release
@@ -391,15 +413,16 @@ function sweepRoom(registry, roomId, nowMs, onRelease = () => {}) {
   const entry = registry.list(roomId).filter(item => ACTIVE_CLAIM_STATES.includes(item.state)
     && typeof item.leaseExpiresAt === "string" && Date.parse(item.leaseExpiresAt) <= nowMs);
   if (entry.length === 0) return [];
-  const swept = releaseExpired(entry, nowMs);
-  const released = [];
-  // releaseExpired returns a normalized copy of every item, expired or not,
-  // so compare states: only a claim that actually lapsed counts as swept.
-  swept.forEach((item, index) => {
-    if (item.state === "unclaimed" && entry[index].state !== "unclaimed") {
-      registry.set(roomId, item); released.push(item.id); onRelease(item, entry[index]);
+  const released = [], skipped = { count: 0, claimIds: [] };
+  for (const before of entry) {
+    let item;
+    try { [item] = releaseExpired([before], nowMs); }
+    catch (error) { skipInvalidMaintenanceClaim(error, before, skipped); continue; }
+    if (item.state === "unclaimed" && before.state !== "unclaimed") {
+      registry.set(roomId, item); released.push(item.id); onRelease(item, before);
     }
-  });
+  }
+  warnInvalidMaintenanceClaims(roomId, "lease_expiry", skipped);
   return released;
 }
 
@@ -449,7 +472,45 @@ const receiptOf = item => {
     createdBy: item.owner,
     createdAt: doneAtMsOf(item),
     blobs: Object.freeze([...(item.blobs ?? [])]),
+    // #3546/#3547: a receipt says how its completion was verified —
+    // self-attested is a different fact from independently verified, and
+    // the delivery bundle's digest lets a reader fetch the exact bundle
+    // from the claim. Items completed before verification facts existed
+    // carry null (unknown), never a fabricated verdict.
+    verification: item.verification
+      ? Object.freeze({ state: item.verification.state, by: item.verification.by, at: item.verification.at,
+        executedChecks: Object.freeze((item.verification.executedChecks ?? []).map(entry => Object.freeze({ ...entry }))) })
+      : null,
+    deliveryDigest: item.delivery?.digest ?? null,
   });
+};
+
+// The member receipt names its public twin when one resolves (#3636).
+// The twin id is the projection's deterministic hash; the link is carried
+// only when the anonymous public read would resolve it — the room opted
+// in to public receipts and neither the owner toggle nor an operator
+// unpublish hides it — so the field is never a dead link. No twin: both
+// fields are null, stating plainly that this receipt has no public page.
+//
+// The recorded opt-in is checked on the room state itself, never on the
+// projection rows: a stale row left by mirror drift must not advertise a
+// link for a room that opted out (the settled-lot RCA's lesson). And one
+// completion carries one public receipt under either of two ids — the
+// claim's own wcr_ row, or the wir_ row a completed board work item
+// projects the same completion under (the projection deliberately skips
+// the mirrored claim there, UT-SHARE F-3) — so both deterministic ids
+// are tried and whichever the public read resolves is the twin.
+const receiptWithPublicLink = (store, roomId, item) => {
+  const receipt = receiptOf(item);
+  const noTwin = Object.freeze({ ...receipt, publicId: null, publicUrl: null });
+  const state = store.room(roomId)?.state;
+  if (!state || publicReceipts(state).enabled !== true) return noTwin;
+  for (const publicId of [publicWorkClaimReceiptId(roomId, item.id), publicWorkItemReceiptId(roomId, item.id)]) {
+    if (publicReceiptById(store, publicId)) {
+      return Object.freeze({ ...receipt, publicId, publicUrl: publicReceiptUrl(publicId) });
+    }
+  }
+  return noTwin;
 };
 
 const receiptsQueryOf = (reject, params) => {
@@ -486,6 +547,52 @@ const cursorDecode = (reject, value) => {
 // REST and hosted MCP share this owner-only mutation, including a fresh
 // authorization and claim read inside the registry transaction. This does not
 // sweep or settle other work, renew the lease, or synchronously contact GitHub.
+// Pure close/cancel with HTTP-shaped refusals: 403 not permitted, 409 already
+// terminal, 422 bad input.
+function retire(reject, item, caller, verb, reason, authority, nowMs) {
+  try {
+    return closeWork(item, caller, { verb, reason, authority, now: nowMs });
+  } catch (error) {
+    if (!(error instanceof ClaimError)) throw error;
+    reject(error.code === "work_not_owner" ? 403 : error.code === "work_claim_terminal" ? 409 : 422, error.code, error.message);
+  }
+}
+
+// MCP room_close_work_claim: the same close/cancel as the REST routes, in one
+// transaction, with the same access checks as room_link_work_claim_pr.
+export function closeWorkClaim({ store, roomId, auth, claimId, verb = "close", reason, registry = store.workClaims, reauthorize }) {
+  const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
+  const run = () => {
+    const current = reauthorize ? reauthorize() : auth;
+    if (!current?.member?.id) reject(401, "unauthenticated", "Room authentication is required");
+    if (current.member.id !== auth?.member?.id) reject(403, "access_denied", "The acting identity changed");
+    if (current.kind === "api-key" && !(current.apiKeyScopes ?? []).some(scope =>
+      scope === "rooms:write" || scope.endsWith(":*") && "rooms:write".startsWith(scope.slice(0, -1)))) {
+      reject(403, "insufficient_scope", "API key lacks the rooms:write scope");
+    }
+    if (isGuestAgentMemberId(current.member.id)) reject(403, "guest_scope_denied", "Guest members cannot perform this action");
+    if (verb !== "close" && verb !== "cancel") reject(422, "invalid_claim_input", "verb must be close or cancel");
+    const access = resolveWorkClaimAccess(store, roomId, current);
+    if (!mayWriteWorkClaims(access)) refuseWorkClaims();
+    enforceAutonomyTierForAction({ db: store.db, roomId, state: { room: { ownerId: access.ownerId } },
+      actor: access.member, action: `POST work-claim ${verb}`, fail: reject });
+    if (isRoomArchived(store.room(roomId).state)) reject(409, "room_archived", "This room is archived; nothing was closed");
+    assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
+    claimIdOf(reject, claimId);
+    refuseRoomGuideOffStarter(registry, roomId, current, claimId, "POST", reject);
+    const clean = boardText(reject, "reason", reason, { multiline: true });
+    const item = registry.get(roomId, claimId);
+    if (!item) reject(404, "work_claim_not_found", `No work claim "${claimId}" in this room`);
+    const now = typeof store.now === "function" ? store.now() : Date.now();
+    const closed = retire(reject, item, current.member.id, verb, clean, mayManageAnyClaim(access), now);
+    registry.set(roomId, closed);
+    emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: closed, action: "closed",
+      reason: verb === "cancel" ? "cancelled" : "closed", atMs: now });
+    return closed;
+  };
+  return registry.transaction ? registry.transaction(run) : run();
+}
+
 export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, registry = store.workClaims, reauthorize }) {
   const reject = (status, code, message) => { throw new ServiceError(status, code, message); };
   const run = () => {
@@ -530,6 +637,8 @@ export function linkWorkClaimPullRequest({ store, roomId, auth, claimId, data, r
     if (linked === item) return item;
     registry.set(roomId, linked);
     emitWorkClaimEvent(store, roomId, { actorId: current.member.id, item: linked, action: "state_changed", atMs: now });
+    try { notifyClaimCollisions(store, roomId, linked); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
+    try { noteProjectMapOverlap(store, roomId, linked); } catch (error) { console.error("project map overlap failed:", error?.message ?? error); }
     return linked;
   };
   return registry.transaction ? registry.transaction(run) : run();
@@ -548,7 +657,7 @@ export async function handleWorkClaims(options) {
     try {
       const item = linkWorkClaimPullRequest({ store: options.store, roomId: options.roomId,
         auth: options.auth, claimId: options.workClaimId, data: requestData, registry, reauthorize });
-      return helpers.json(res, 200, item);
+      return helpers.json(res, 200, withProjectMapOverlap(options.store, options.roomId, item));
     } catch (error) {
       if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
       throw error;
@@ -604,7 +713,26 @@ export async function handleWorkClaims(options) {
     const result = registry.transaction ? registry.transaction(run) : run();
     return helpers.json(res, result.status, result.value);
   } catch (error) {
-    if (error?.code === "file_lease_conflict" && error.body) return helpers.json(res, 409, error.body);
+    if (error?.code === "file_lease_conflict" && error.body) {
+      try {
+        alertLeaseRefusal(options.store, options.roomId, {
+          claimId: error.attemptedClaimId, callerId: error.attemptedBy, conflict: error.body
+        });
+      } catch (alertError) {
+        console.error("collision alert failed:", alertError?.message ?? alertError);
+      }
+      let body = error.body;
+      try {
+        const overlap = publishProjectMapOverlap(options.store, options.roomId, {
+          id: error.attemptedClaimId, title: error.attemptedTitle, files: error.attemptedFiles,
+          repo: error.attemptedRepo, state: "claimed"
+        });
+        if (overlap) body = { ...body, overlap };
+      } catch (overlapError) {
+        console.error("project map overlap failed:", overlapError?.message ?? overlapError);
+      }
+      return helpers.json(res, 409, body);
+    }
     if (Number.isInteger(error?.status) && error.body && error.code) return helpers.json(res, error.status, error.body);
     throw error;
   }
@@ -645,6 +773,25 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     db: store.db, roomId, state: { room: { ownerId: store.roomAuthority?.(roomId)?.ownerId } },
     actor: auth.member, action: `${req.method} work-claim ${workClaimRoute}`, fail: reject });
   refuseRoomGuideOffStarter(registry, roomId, auth, workClaimId, req.method, reject);
+  // An item-backed card is a view of canonical work acceptance. Its
+  // board bundle/verdict cannot replace signed evidence or designated roles.
+  // Both human and agent callers use the existing command endpoint instead.
+  if (req.method === "POST" && typeof workClaimId === "string") {
+    const linked = registry.get(roomId, workClaimId);
+    const data = body(req);
+    const acceptance = workClaimRoute === "review" && data?.verdict !== undefined
+      || workClaimRoute === "update" && (["done", "delivered"].includes(data?.state)
+        || linked?.state === "delivered" && data?.state === "in_progress");
+    if (linked?.workItemId && acceptance) {
+      const error = new ServiceError(409, "work_claim_conflict", "Open the linked work item to submit evidence, verify its result or request changes.");
+      error.body = { error: error.message, code: error.code,
+        workItemId: linked.workItemId,
+        next: [{ path: `/api/rooms/${encodeURIComponent(roomId)}/work-context?workItemId=${encodeURIComponent(linked.workItemId)}` },
+          { path: `/api/rooms/${encodeURIComponent(roomId)}/commands` }],
+      };
+      throw error;
+    }
+  }
   const nowMs = typeof store.now === "function" ? store.now() : Date.now();
   const caller = auth.member.id;
   // Every committed claim change appends one work_claim.updated room event
@@ -660,6 +807,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item,
       action,
       previousOwnerId: extra.previousOwnerId ?? null,
+      previousState: extra.previousState ?? null,
       atMs: nowMs,
       paths: action === "released" || action === "pr_closed" ? (prior?.files ?? []) : undefined,
       pullRequest: extra.pullRequest,
@@ -680,17 +828,22 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // agents that opted in (server/work-wants.mjs). Default off; never throws.
     if (action === "created" || action === "released") noteReadyWork(store, roomId, item, { actorId: extra.actorId ?? caller, now: nowMs });
     if (action === "state_changed" || action === "claimed") wakeNamedReviewers(store, roomId, item, { actorId: extra.actorId ?? caller });
+    try { notifyClaimCollisions(store, roomId, item); } catch (error) { console.error("collision alert failed:", error?.message ?? error); }
+    try { noteProjectMapOverlap(store, roomId, item); } catch (error) { console.error("project map overlap failed:", error?.message ?? error); }
     return item;
   };
   const closeLiveClaims = () => {
-    const closed = [];
+    const closed = [], skipped = { count: 0, claimIds: [] };
     for (const item of registry.list(roomId)) {
-      if ((item.kind !== "land" && item.kind !== "deploy") || item.state === "done") continue;
-      const next = closeWhenLive(item, SOURCE_REVISION, nowMs);
+      if ((item.kind !== "land" && item.kind !== "deploy") || isTerminalClaimState(item.state)) continue;
+      let next;
+      try { next = closeWhenLive(item, SOURCE_REVISION, nowMs); }
+      catch (error) { skipInvalidMaintenanceClaim(error, item, skipped); continue; }
       if (!next) continue;
       commit(next, "state_changed");
       closed.push(next.id);
     }
+    warnInvalidMaintenanceClaims(roomId, "live_close", skipped);
     return closed;
   };
   const sweptIds = sweepRoom(registry, roomId, nowMs, (item, before) => {
@@ -731,6 +884,29 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (mayManageAnyClaim(access)) return true;
     reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
   };
+  // QA200 ch-2037 challenge: the file-lease exclusivity check lived only on
+  // the claim route. create-with-assignee and reassign are acquire paths
+  // too — they must refuse overlapping leases with the same 409 body, or a
+  // lease can be landed silently around the conflict check. fileLeaseConflicts
+  // already excludes the item itself by id.
+  const refuseFileLeaseConflict = item => {
+    const conflicts = fileLeaseConflicts(registry.list(roomId), item);
+    if (conflicts.length === 0) return;
+    const conflict = fileLeaseConflictBody(item, conflicts);
+    const body = {
+      ...agentErrorBody({ httpStatus: 409, code: "file_lease_conflict", message: conflict.error.message, roomId, workItemId: item.id }),
+      ...conflict
+    };
+    const error = new Error(body.error.message);
+    error.code = "file_lease_conflict";
+    error.body = body;
+    error.attemptedClaimId = item.id;
+    error.attemptedBy = caller;
+    error.attemptedFiles = item.files;
+    error.attemptedRepo = item.repo;
+    error.attemptedTitle = item.title;
+    throw error;
+  };
 
   if (workClaimRoute === "status" && req.method === "GET") {
     closeLiveClaims();
@@ -741,8 +917,8 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "list" && req.method === "GET") {
     closeLiveClaims();
-    return json(res, 200, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
-      url?.searchParams, nowMs), swept: sweptIds });
+    return json(res, 200, withProjectMapOverlap(store, roomId, { ...buildWorkClaimPage(registry.list(roomId), roomId, caller,
+      url?.searchParams, nowMs), swept: sweptIds }));
   }
   if (workClaimRoute === "receipts" && req.method === "GET") {
     // RC-2026-09-24-205: receipts search. The room block already rejected
@@ -773,12 +949,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const page = ranked.slice(offset, offset + limit);
     const nextOffset = offset + limit;
     return json(res, 200, stampReceipts({
-      receipts: page.map(receiptOf),
+      receipts: page.map(item => receiptWithPublicLink(store, roomId, item)),
       nextCursor: nextOffset < ranked.length ? cursorEncode(nextOffset) : null,
     }, caller));
   }
   if (workClaimRoute === "sweep" && req.method === "POST") {
     if (!maySweepWorkClaims(access)) refuseSweep();
+    // QA200-CH-2033: a sweep settles PR links and records CI facts, which
+    // emit room events — it is a Board write, so the event-budget floor
+    // applies here exactly like the other Board write routes.
+    requireEventBudget();
     const data = body(req);
     if (!shape(data, {})) invalidInput(reject, "an empty JSON object");
     let updated = 0;
@@ -833,18 +1013,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   }
   if (workClaimRoute === "create" && req.method === "POST") {
     const raw = body(req);
-    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?}");
+    if (!shape(raw, { required: ["id"], optional: ["title", "reviewPolicy", "note", "tags", "files", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch", "kind", "revision", "assignee", "squadId", "acceptanceCriteria"] })) invalidInput(reject, "{id, title?, reviewPolicy?, note?, tags?, files?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?, kind?, revision?, assignee?, squadId?, acceptanceCriteria?}");
     requireWriter();
     requireEventBudget();
     const id = claimIdOf(reject, raw.id);
     const data = clientPullRequestInput(reject, boardTextFields(reject, raw, { title: {}, note: { multiline: true } }));
     assertDependsOnKnown(reject, data, { selfId: id, has: other => registry.has(roomId, other) });
     if (registry.has(roomId, id)) reject(409, "work_claim_exists", `Work claim "${id}" already exists in this room`);
-    const open = registry.list(roomId).filter(item => item.state !== "done").length;
+    const open = openClaimCount(registry.list(roomId), nowMs);
     if (open >= config.maxOpenClaims) {
       refuseCap("work_board_full",
-        `This room already has ${config.maxOpenClaims} open claims. Close stale claims before opening another.`,
-        "Close stale claims before opening another.");
+        `This room already has ${config.maxOpenClaims} open claims. Close stale claims (POST …/work-claims/{id}/close or /cancel) before opening another. Unclaimed items idle for ${STALE_UNCLAIMED_DAYS} days stop counting and are closed by the stale sweep.`,
+        "Close stale claims (POST /api/rooms/{roomId}/work-claims/{claimId}/close or /cancel) before opening another.");
     }
     if (data.reviewPolicy !== undefined && !REVIEW_POLICIES.includes(data.reviewPolicy)) invalidInput(reject, `reviewPolicy one of ${REVIEW_POLICIES.join(", ")}`);
     if (data.kind !== undefined && !CLAIM_KINDS.includes(data.kind)) invalidInput(reject, `kind one of ${CLAIM_KINDS.join(", ")}`);
@@ -864,7 +1044,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // Pair rule: hard work defaults to a distinct reviewer, so it cannot close
     // without a non-owner APPROVE. An explicit reviewPolicy still wins.
     const reviewPolicy = data.reviewPolicy ?? (isHardWork({ tags: data.tags }) ? "distinct_member" : undefined);
-    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId }, { now: nowMs, agentId: caller }));
+    let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId, acceptanceCriteria: data.acceptanceCriteria }, { now: nowMs, agentId: caller }));
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
       if (held >= config.maxMemberOpenClaims) {
@@ -875,6 +1055,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       item = runPure(reject, () => claimWork(item, assignee, {
         note: data.note ?? `assigned by ${caller}`, room: roomLike, now: nowMs
       }));
+      // QA200 ch-2037: create-with-assignee lands a lease without touching
+      // the claim route, so run the exclusivity check here. The whole request
+      // is one transaction — a conflict fails atomically and the item is
+      // never created.
+      refuseFileLeaseConflict(item);
       // Retention ack (research brief 2026-09-28, mechanic #2): every claim
       // gets the bot's immediate structured receipt, so no contribution sits
       // at zero replies from t=0. First-time contributors carry the 24h
@@ -885,7 +1070,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         attention: "assigned", attentionMemberId: assignee,
         wakeMemberId: assignee, wakeReason: "assigned"
       });
-      return json(res, 201, ackedAssignee);
+      return json(res, 201, withProjectMapOverlap(store, roomId, ackedAssignee));
     }
     commit(item, "created");
     return json(res, 201, item);
@@ -893,19 +1078,53 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "read" && req.method === "GET") {
     closeLiveClaims();
     // SEC-2: member-authored text is marked untrusted for the reader.
-    return json(res, 200, withContentTrust(stampClaim(load(claimIdOf(reject, workClaimId)), caller)));
+    // #3661: the single-claim read carries the same derived pull
+    // settlement state as the board page.
+    return json(res, 200, withProjectMapOverlap(store, roomId, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller))));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
     const data = body(req);
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
     const item = load(claimIdOf(reject, workClaimId));
-    if (item.state !== "unclaimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state} — release it first`);
+    // H4 (QA-200 2026-10-08): a failed claim's 409 must name the real recovery.
+    // The old "release it first" advice destroyed your own claim on self
+    // re-claim and was unactionable for a foreign holder (non-owners cannot
+    // release it) — it also never named the holder.
+    if (item.state !== "unclaimed") {
+      if (item.state !== "claimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
+      if (item.owner === caller) {
+        reject(409, "work_claim_conflict",
+          `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`);
+      }
+      reject(409, "work_claim_conflict",
+        `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
+    }
     requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
     assertDependsOnKnown(reject, data, { selfId: item.id, has: other => registry.has(roomId, other) });
+    // #3880: dependsOn gates the AvailableWork projection (a claim is
+    // claimable only when every dependency is done); the claim write path
+    // must enforce the same definition, or the projection's "claimable"
+    // is unenforced at its own endpoint and direct API/MCP claimers can
+    // take work whose prerequisites are unfinished. The checked set is
+    // the one the claim records — the body's dependsOn when supplied,
+    // else the item's stored list, exactly as claimWork resolves it —
+    // and "done" is the projection's test (availableBoardRows): a usable
+    // claim (not premise-flagged, not superseded) in state "done".
+    const effectiveDeps = data.dependsOn !== undefined ? (data.dependsOn ?? []) : (item.dependsOn ?? []);
+    if (effectiveDeps.length) {
+      const board = registry.list(roomId);
+      const doneIds = new Set(board.filter(entry => entry && !entry.premiseFlag && !entry.supersededBy && entry.state === "done").map(entry => entry.id));
+      const unmet = effectiveDeps.filter(dep => !doneIds.has(dep));
+      if (unmet.length) {
+        const stateOf = id => board.find(entry => entry?.id === id)?.state ?? "missing";
+        reject(409, "work_claim_dependencies_unmet",
+          `Work "${item.id}" cannot be claimed yet — dependencies not done: ${unmet.map(id => `"${id}" (${stateOf(id)})`).join(", ")}. Finish those first, or ask the coordinator to reassign the dependency.`);
+      }
+    }
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
     if (held >= config.maxMemberOpenClaims) {
@@ -932,6 +1151,11 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       const error = new Error(body.error.message);
       error.code = "file_lease_conflict";
       error.body = body;
+      error.attemptedClaimId = claimed.id;
+      error.attemptedBy = caller;
+      error.attemptedFiles = claimed.files;
+      error.attemptedRepo = claimed.repo;
+      error.attemptedTitle = claimed.title;
       throw error;
     }
     // Retention ack (research brief 2026-09-28, mechanic #2): every claim gets
@@ -948,31 +1172,129 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // W012 required reading: every enrollment response presents the reading
     // list for the claim's kind. Advisory only — enrollment never gates on
     // it, so there is no bypass to learn and no existing flow can break.
-    return json(res, 200, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
-      requiredReading: requiredReadingFor(item.kind) });
+    return json(res, 200, withProjectMapOverlap(store, roomId, { ...acked, fileWarnings: data.advisory === true ? fileWarningsFor(registry.list(roomId), acked) : [],
+      requiredReading: requiredReadingFor(item.kind) }));
   }
   if (workClaimRoute === "update" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?}");
+    if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
+    if (data.requestId !== undefined
+      && (typeof data.requestId !== "string" || !CLAIM_ID_PATTERN.test(data.requestId))) {
+      invalidInput(reject, "requestId must be 1..128 characters [A-Za-z0-9_-]");
+    }
     if (data.state === undefined && data.note === undefined && data.readingAck === undefined) invalidInput(reject, "a state transition, a note, or a reading ack");
     // W012 required reading: the owner confirms they read the enrollment
     // reading list. { docs: [...] } is validated by the pure machine; a
     // malformed ack is a 422, never a silent drop.
     if (data.readingAck !== undefined && !shape(data.readingAck, { required: ["docs"] })) invalidInput(reject, "readingAck: {docs: [...]}");
     const item = load(claimIdOf(reject, workClaimId));
-    if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
-    requireWriter();
-    requireEventBudget();
+    // #3546: two transitions on a delivered item belong to its reviewer,
+    // not its owner — verify (delivered -> done) and the changes_requested
+    // send-back (delivered -> in_progress). Each carries its own gate
+    // below (the review policy for verify; a recorded changes_requested
+    // review or claim management for the send-back). Every other update
+    // stays owner-only.
+    const verifyCall = item.state === "delivered" && data.state === "done";
+    const sendBackCall = item.state === "delivered" && data.state === "in_progress";
+    const reviewerOutcome = item.owner !== caller && data.requestId !== undefined
+      ? reviewerRequestOutcome(item, data.requestId, caller) : null;
+    if (item.owner !== caller && !verifyCall && !sendBackCall && !reviewerOutcome) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
+    if (sendBackCall && item.owner !== caller
+      && !mayManageAnyClaim(access)
+      && !(item.reviews ?? []).some(entry => entry.memberId === caller && entry.verdict === "changes_requested")) {
+      reject(403, "work_review_rejected", `Work "${item.id}" can be sent back only by its owner, a claim manager, or the reviewer who recorded changes_requested`);
+    }
+    // The note is normalized before the replay verdict below so the
+    // payload digest is computed over the exact text updateWork stores
+    // (a retry re-sends the same raw note and normalizes identically).
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
-    if (data.state === "done") {
+    // PRODUCT-200 A4 (QA-200 AQ-HI-06): opt-in idempotency. A requestId
+    // that already landed on this claim replays the stored outcome (200,
+    // the current item) with no new write, no history entry and no room
+    // event — a timed-out retry cannot duplicate the update. It runs before
+    // the stale-basis precondition: the client already got its 200 for this
+    // request, so a retry carrying a now-stale basis is still a replay.
+    // #2965: the replay is bound to the payload digest — a seen requestId
+    // carrying a different update is refused 409, never silently swallowed.
+    if (data.requestId !== undefined) {
+      if (item.owner !== caller && Object.hasOwn(item.requestOutcomes ?? {}, data.requestId)) {
+        // A requestId is not a capability. Only the actor bound to this exact
+        // landed exit may retry; old digest-only records grant no reviewer access.
+        if (!reviewerOutcome) reject(403, "work_not_owner", `requestId "${data.requestId}" does not bind a current reviewer exit by ${caller}`);
+        const reviewers = reviewersOf(store, roomId);
+        if (!mayReviewWorkClaims(access) || !reviewers.includes(caller)) refuseWorkClaims();
+        const allowed = reviewerOutcome.state === "done"
+          ? canCloseWork({ ...item, state: "delivered" }, caller, {
+            policy: item.reviewPolicy ?? config.reviewPolicy,
+            verifyMembers: verifiersOf(store, roomId), reviewMembers: reviewers,
+          })
+          : mayManageAnyClaim(access) || (hasCurrentReview(item, caller)
+            && (item.reviews ?? []).some(entry => entry.memberId === caller && entry.verdict === "changes_requested"));
+        if (!allowed) reject(403, "work_review_rejected", `The current review authority does not permit replaying work "${item.id}"`);
+        if (!reviewerReadingAckMatches(reviewerOutcome, data.readingAck)) reject(409, "work_claim_conflict",
+          `requestId "${data.requestId}" already landed on work "${item.id}" with a different reading ack`);
+      }
+      const verdict = requestReplayVerdict(item.requestOutcomes, data.requestId,
+        updateRequestDigest({ state: data.state, note: data.note, deliveryMode: data.deliveryMode,
+          reviewedBy: data.reviewedBy, tags: data.tags, blobs: data.blobs,
+          parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, delivery: data.delivery }),
+        item.claimRound);
+      if (verdict === "replay") return json(res, 200, item);
+      if (verdict === "conflict") reject(409, "work_claim_conflict",
+        `requestId "${data.requestId}" already landed on work "${item.id}" with a different update — a reused requestId cannot carry a new payload`);
+    }
+    // #3546: a reviewer's verify / send-back on a delivered item is a
+    // review action, not a board write — the review gate is its access
+    // rule, matching the review route. Owner updates keep the board-write
+    // rule (requireWriter).
+    if ((verifyCall || sendBackCall) && item.owner !== caller) {
+      if (!mayReviewWorkClaims(access)) refuseWorkClaims();
+    } else requireWriter();
+    // #3546/#3747: the reviewer's verify is a review action, not a board
+    // write, so the board-write event-budget floor does not refuse it.
+    // The exit it lands is cap-exempt at the emit layer (#3747); refusing
+    // it here would leave a delivered, approved claim unverifiable in any
+    // room inside its budget reserve. Every other update keeps the floor.
+    if (!(verifyCall && item.owner !== caller)) requireEventBudget();
+    // QA-200 worker-13 (C3/E4): opt-in round precondition on plain note/state
+    // updates. The appendPullRequest variant binds its write to claimedAt +
+    // history length; a plain update had no such binding, so a stale client
+    // (timeout retry, replayed or abandoned-then-resent payload) silently
+    // clobbered newer state with 200. When either precondition is present it
+    // must describe the claim exactly as the client last read it, otherwise
+    // the write is refused with 409 work_claim_conflict. Absent preconditions
+    // keep the legacy behavior unchanged.
+    if (Object.hasOwn(data, "expectedClaimedAt") || Object.hasOwn(data, "expectedHistoryLength")) {
+      if (!(typeof data.expectedClaimedAt === "string" && data.expectedClaimedAt.length <= 100
+        && Number.isFinite(Date.parse(data.expectedClaimedAt)))) invalidInput(reject, "expectedClaimedAt must be the current claim timestamp");
+      if (!(Number.isSafeInteger(data.expectedHistoryLength) && data.expectedHistoryLength >= 0)) invalidInput(reject, "expectedHistoryLength must be the current history length");
+      if (item.claimedAt !== data.expectedClaimedAt || claimHistoryLength(item) !== data.expectedHistoryLength) {
+        const href = `/api/rooms/${encodeURIComponent(roomId)}/work-claims/${encodeURIComponent(workClaimId)}`;
+        const hint = "Read the current claim and check its owner and round before retrying. Do not release or reacquire it.";
+        const refusal = new ServiceError(409, "work_claim_conflict",
+          `Stale update basis for "${item.id}": the claim changed since this request was prepared.`);
+        refusal.body = { ...agentErrorBody({ httpStatus: 409, code: "work_claim_conflict", message: refusal.message, roomId, workItemId: workClaimId }),
+          hint, next: [{ path: href }, { command: hint }] };
+        throw refusal;
+      }
+    }
+    const policy = item.reviewPolicy ?? config.reviewPolicy;
+    if (data.state === "done" && item.state === "in_progress" && policy !== "self_attested") {
+      // #3546: under a reviewed policy there is no single-step finish.
+      // The owner finishes to "delivered" (the delivery bundle is recorded
+      // there); the named reviewer then verifies to "done" from their own
+      // session. The refusal names both steps so a caller can recover.
+      reject(422, "work_not_delivered",
+        `Review policy "${policy}" not satisfied for "${item.id}": finish it to "delivered" first — its reviewer then verifies it to "done"`);
+    }
+    if (data.state === "done" && (item.state === "in_progress" || item.state === "delivered")) {
       // QA-Sec 2026-09-19: the reviewer must be authenticated. For
       // self_attested the reviewer is the owner (the caller). For the
-      // stronger policies the named reviewer must have recorded an
-      // attestation from their own session via the review route — naming
-      // another member without their attestation is rejected (confused
-      // deputy). canCloseWork then applies the policy (distinct member /
-      // verify permission) to the attested reviewer.
-      const policy = item.reviewPolicy ?? config.reviewPolicy;
+      // stronger policies the verifying reviewer IS the caller, acting
+      // from the session that recorded the attestation via the review
+      // route — naming another member is rejected (confused deputy).
+      // canCloseWork then applies the policy (distinct member / verify
+      // permission) to the attested reviewer.
       if (policy === "self_attested") {
         const reviewer = data.reviewedBy ?? caller;
         if (reviewer !== caller) {
@@ -980,10 +1302,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
             `Review policy "self_attested" not satisfied for "${item.id}": only the owner may attest this work`);
         }
       } else {
-        const reviewer = data.reviewedBy;
-        if (typeof reviewer !== "string" || reviewer.length === 0 || reviewer.length > 128) {
+        const reviewer = caller;
+        if (data.reviewedBy !== undefined && data.reviewedBy !== caller) {
           reject(403, "work_review_rejected",
-            `Review policy "${policy}" not satisfied for "${item.id}": reviewedBy must name the member who attested this work`);
+            `Review policy "${policy}" not satisfied for "${item.id}": reviewedBy cannot name another member — the reviewer verifies from their own session`);
         }
         const attested = (item.attestations ?? []).some(entry => entry.memberId === reviewer);
         if (!attested) {
@@ -997,41 +1319,54 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         }
       }
     }
-    const updated = runPure(reject, () => updateWork(item, caller,
-      { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
-        tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, now: nowMs }));
+    // Jev-harness receipt-acceptance gate (docs/JEV-GATES.md): the receipt
+    // is scored BEFORE the transition so the verdict can ride the
+    // verification fact (#3546) as an advisory signal; the shadow journal
+    // below still records every scored done. Shadow mode never changes the
+    // outcome — scoring sits in a try, and a failure leaves the fact
+    // without a jev entry rather than breaking the transition.
+    let jevDecision = null;
     if (data.state === "done") {
-      // Jev-harness receipt-acceptance gate, shadow mode (docs/JEV-GATES.md):
-      // score the receipt, journal the would-be verdict (flagging
-      // low-confidence accepts for a human look), then accept anyway —
-      // shadow mode never changes the outcome. Never throws: a scoring or
-      // journal failure cannot break the done transition.
       try {
-        const policy = updated.reviewPolicy ?? config.reviewPolicy;
-        const reviewer = policy === "self_attested" ? (data.reviewedBy ?? caller) : data.reviewedBy;
-        const receiptDecision = evaluateReceipt({
-          workId: updated.id, ownerId: updated.owner ?? null,
+        const reviewer = policy === "self_attested" ? (data.reviewedBy ?? caller) : caller;
+        jevDecision = evaluateReceipt({
+          workId: item.id, ownerId: item.owner ?? null,
           reviewPolicy: policy,
-          attestations: updated.attestations ?? [],
+          attestations: item.attestations ?? [],
           reviewerIsVerifier: typeof reviewer === "string" && verifiersOf(store, roomId).includes(reviewer),
-          deliveryMode: updated.deliveryMode ?? null,
+          deliveryMode: data.deliveryMode ?? item.deliveryMode ?? null,
           note: typeof data.note === "string" ? data.note : null,
-          claimedAtMs: updated.claimedAt ? Date.parse(updated.claimedAt) : null,
+          claimedAtMs: item.claimedAt ? Date.parse(item.claimedAt) : null,
           doneAtMs: nowMs, at: nowMs,
         });
+      } catch { jevDecision = null; }
+    }
+    const updated = runPure(reject, () => updateWork(item, caller,
+      { state: data.state, note: data.note, deliveryMode: data.deliveryMode, reviewedBy: data.reviewedBy,
+        tags: data.tags, blobs: data.blobs, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs,
+        delivery: data.delivery, policy,
+        jev: jevDecision ? { verdict: jevDecision.verdict, score: jevDecision.quality } : undefined,
+        requestId: data.requestId, now: nowMs,
+        authority: (verifyCall || sendBackCall) && item.owner !== caller }));
+    if (data.state === "done" && jevDecision) {
+      try {
         store.jevShadow.record({ gate: "receipt", roomId, identityId: updated.owner ?? null,
           subject: updated.id, path: "work-claim:done",
-          score: receiptDecision.quality, decision: receiptDecision.verdict,
-          escalate: receiptDecision.escalate, signals: receiptDecision.signals, at: nowMs });
+          score: jevDecision.quality, decision: jevDecision.verdict,
+          escalate: jevDecision.escalate, signals: jevDecision.signals, at: nowMs });
       } catch { /* shadow-only: never break the done transition */ }
     }
     // W012 required reading: record the ack on the claim (who confirmed what,
     // when) after the state/note write, in the same commit.
     const acked = data.readingAck === undefined ? updated
       : runPure(reject, () => stampReadingAck(updated, caller, { docs: data.readingAck.docs, now: nowMs }));
+    // Keep the legacy self_attested first-call behavior unchanged; it does
+    // not create authority for a nonowner to replay an owner's attestation.
+    const result = data.requestId !== undefined && (sendBackCall || (verifyCall && policy !== "self_attested")) && item.owner !== caller
+      ? runPure(reject, () => bindReviewerRequestOutcome(item, acked, caller, data.requestId, data.readingAck)) : acked;
     // Q3-A: a note-only update coalesces with this claim's last room event.
-    commit(acked, "state_changed", { coalesce: data.state === undefined || data.state === item.state });
-    return json(res, 200, acked);
+    commit(result, "state_changed", { coalesce: data.state === undefined || data.state === item.state, previousState: item.state });
+    return json(res, 200, result);
   }
   if (workClaimRoute === "review" && req.method === "POST") {
     // A verdict review is a record from someone other than the owner who
@@ -1040,13 +1375,25 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const data = body(req);
     const verdictReview = data && typeof data === "object" && !Array.isArray(data) && ("verdict" in data || "summary" in data || "url" in data);
     if (verdictReview) {
-      if (!shape(data, { required: ["verdict", "summary"], optional: ["url"] })) invalidInput(reject, "{verdict, summary, url?}");
+      if (!shape(data, { required: ["verdict", "summary"], optional: ["url", "expectedBasis"] })) invalidInput(reject, "{verdict, summary, url?, expectedBasis?}");
       if (!mayReviewWorkClaims(access)) refuseWorkClaims();
       requireEventBudget();
       data.summary = text("summary", data.summary, { multiline: true });
       const item = load(claimIdOf(reject, workClaimId));
       if (item.owner === caller) reject(403, "work_review_rejected", "The owner cannot review their own claim");
-      const reviewed = runPure(reject, () => recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, now: nowMs }));
+      // #2966: expectedBasis names the basis the reviewer actually read;
+      // a stale one is a 409 work_claim_conflict (same as the release and
+      // reassign round preconditions), not a review of the current basis.
+      let reviewed;
+      try {
+        reviewed = recordReview(item, caller, { verdict: data.verdict, summary: data.summary, url: data.url, expectedBasis: data.expectedBasis, now: nowMs });
+      } catch (error) {
+        if (error instanceof ClaimError && error.code === "work_claim_conflict") {
+          reject(409, error.code, `${error.message} — re-read the claim and retry with its current basis.`);
+        }
+        if (error instanceof ClaimError) reject(422, error.code, error.message);
+        throw error;
+      }
       const duplicate = reviewed.history === item.history;
       if (!duplicate) commit(reviewed, "reviewed", { reason: "reviewed", verdict: data.verdict });
       if (!duplicate && data.verdict === "changes_requested") {
@@ -1073,28 +1420,61 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (before?.note !== after?.note) { registry.set(roomId, attested); return json(res, 200, attested); }
     return json(res, 200, item);
   }
+  if ((workClaimRoute === "close" || workClaimRoute === "cancel") && req.method === "POST") {
+    // Claim lifecycle: retire open work without delivering it. close is for
+    // the holder or claim managers; cancel is also open to whoever created
+    // the item while it is still unclaimed. Same pure path as MCP
+    // room_close_work_claim (server/work-claims.mjs closeWork).
+    const data = body(req);
+    if (!shape(data, { optional: ["reason"] })) invalidInput(reject, "{reason?}");
+    requireWriter();
+    const item = load(claimIdOf(reject, workClaimId));
+    requireEventBudget();
+    const reason = text("reason", data.reason, { multiline: true });
+    const closed = retire(reject, item, caller, workClaimRoute, reason, mayManageAnyClaim(access), nowMs);
+    commit(closed, "closed", { reason: workClaimRoute === "cancel" ? "cancelled" : "closed" });
+    return json(res, 200, closed);
+  }
   if (workClaimRoute === "release" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { optional: ["note", "reason"] })) invalidInput(reject, "{reason?, note?}");
-    let item = load(claimIdOf(reject, workClaimId));
+    const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
+    // E5/D4 (QA-200 2026-10-08): ownership is checked before the body
+    // shape, so a non-holder is always refused with 403 work_not_owner
+    // (abuse-guards C2) regardless of what the body carries.
+    if (!shape(data, { required: ["expectedClaimedAt", "expectedHistoryLength"], optional: ["note", "reason"] }))
+      invalidInput(reject, "{expectedClaimedAt, expectedHistoryLength, reason?, note?}");
     requireEventBudget();
     const reason = text(Object.hasOwn(data, "reason") ? "reason" : "note", data.reason ?? data.note, { multiline: true });
-    // W2 (QA 2026-09-28): /release used to 422 on in_progress claims with no
-    // recovery path. The pure machine's release path is claimed -> unclaimed,
-    // so route an active claim through the pause transition internally —
-    // both steps are stamped in history — instead of refusing.
-    if (item.state === "in_progress" || item.state === "blocked") {
-      item = runPure(reject, () => updateWork(item, caller, { state: "claimed", note: "paused for release", now: nowMs, authority }));
-      registry.set(roomId, item);
+    // E5/D4 (QA-200 2026-10-08): a release binds the claim round the client
+    // read (claimedAt + history length). A stale replay or a delayed
+    // duplicate landing after an intervening re-claim is refused instead of
+    // silently destroying the fresh claim. releaseWork keeps the W2 pause
+    // transition for in_progress/blocked claims, stamped in history.
+    // A stale round is a 409 work_claim_conflict (same as the update
+    // route's round precondition), with a read-back hint.
+    let released;
+    try {
+      released = releaseWork(item, caller, {
+        expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength,
+        note: reason, now: nowMs, authority,
+      });
+    } catch (error) {
+      // runPure's mapping, plus 409 for a stale round (same as the update
+      // route's round precondition).
+      if (error instanceof ClaimError && error.code === "work_claim_conflict") {
+        reject(409, error.code, `${error.message} — re-read the claim and retry with the current round.`);
+      }
+      if (error instanceof ClaimError) reject(422, error.code, error.message);
+      throw error;
     }
-    const released = runPure(reject, () => updateWork(item, caller, { state: "unclaimed", note: reason, now: nowMs, authority }));
     commit(released, "released");
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
     const data = body(req);
-    if (!shape(data, { required: ["newOwner"], optional: ["note"] })) invalidInput(reject, "{newOwner, note?}");
+    if (!shape(data, { required: ["newOwner", "expectedClaimedAt", "expectedHistoryLength"], optional: ["note"] }))
+      invalidInput(reject, "{newOwner, expectedClaimedAt, expectedHistoryLength, note?}");
     const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
     // W3 (QA 2026-09-28): /reassign used to accept any newOwner string, so a
@@ -1108,10 +1488,36 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
     }
+    // A handoff consumes the new owner's slot just like claim and
+    // create-with-assignee do; otherwise reassign bypasses the per-member cap.
+    if (target !== item.owner) {
+      const held = registry.list(roomId).filter(entry => entry.owner === target && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
+      if (held >= config.maxMemberOpenClaims) {
+        refuseCap("too_many_open_claims",
+          `${target} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          "Release or finish an open claim before assigning another.");
+      }
+    }
     requireEventBudget();
     const previousOwnerId = item.owner;
     const note = text("note", data.note, { multiline: true });
-    const reassigned = runPure(reject, () => reassignWork(item, caller, target, { note, now: nowMs, authority, room: roomLike }));
+    // A stale round is a 409 work_claim_conflict, same as /release.
+    let reassigned;
+    try {
+      reassigned = reassignWork(item, caller, target, {
+        expectedClaimedAt: data.expectedClaimedAt, expectedHistoryLength: data.expectedHistoryLength,
+        note, now: nowMs, authority, room: roomLike });
+    } catch (error) {
+      if (error instanceof ClaimError && error.code === "work_claim_conflict") {
+        reject(409, error.code, `${error.message} — re-read the claim and retry with the current round.`);
+      }
+      if (error instanceof ClaimError) reject(422, error.code, error.message);
+      throw error;
+    }
+    // QA200 ch-2037: reassign moves a lease to a new holder (and a fresh
+    // unclaimed item lands claimed) without touching the claim route — run
+    // the exclusivity check here too.
+    refuseFileLeaseConflict(reassigned);
     commit(reassigned, "reassigned", {
       previousOwnerId,
       attention: "assigned", attentionMemberId: target,
@@ -1145,8 +1551,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     if (Object.hasOwn(data, "note")) data.note = text("note", data.note, { multiline: true });
     const progressId = data.progressMessageId;
     if (progressId !== undefined && (typeof progressId !== "string" || !progressId.trim())) invalidInput(reject, "progressMessageId as a message id when citing evidence");
-    const messages = progressId ? (store.room(roomId).state.messages ?? []) : [];
-    const message = progressId ? messages.find(entry => entry.id === progressId) : null;
+    const message = progressId ? messageRepository(store, roomId).get(progressId) : null;
     if (progressId) {
       if (!message || message.deletedAt) {
         reject(422, "claim_renewal_source_required",
@@ -1174,14 +1579,25 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   if (workClaimRoute === "config" && (req.method === "GET" || req.method === "POST")) {
     if (req.method === "GET") return json(res, 200, { roomId, ...config });
     const data = body(req);
-    if (!shape(data, { required: ["maxMemberOpenClaims"] })) invalidInput(reject, "{maxMemberOpenClaims}");
+    if (!shape(data, { required: [], optional: ["maxMemberOpenClaims", "maxOpenClaims", "staleSweep"] })
+      || (data.maxMemberOpenClaims === undefined && data.maxOpenClaims === undefined && data.staleSweep === undefined)) {
+      invalidInput(reject, "{maxMemberOpenClaims?, maxOpenClaims?, staleSweep?} with at least one");
+    }
     const ownerId = typeof access.authority?.ownerId === "string" && access.authority.ownerId.length > 0
       ? access.authority.ownerId : null;
-    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the per-member claim cap.");
-    if (!Number.isSafeInteger(data.maxMemberOpenClaims) || data.maxMemberOpenClaims < 1 || data.maxMemberOpenClaims > 10000) {
-      invalidInput(reject, "maxMemberOpenClaims as an integer 1..10000");
+    if (ownerId !== caller) reject(403, "work_claims_not_permitted", "Only the room owner can set the claim caps.");
+    for (const key of ["maxMemberOpenClaims", "maxOpenClaims"]) {
+      const value = data[key];
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 1 || value > 10000)) {
+        invalidInput(reject, `${key} as an integer 1..10000`);
+      }
     }
-    const saved = registry.configure(roomId, { maxMemberOpenClaims: data.maxMemberOpenClaims });
+    if (data.staleSweep !== undefined && typeof data.staleSweep !== "boolean") invalidInput(reject, "staleSweep as true or false");
+    const patch = {};
+    if (data.staleSweep !== undefined) patch.staleSweep = data.staleSweep;
+    if (data.maxMemberOpenClaims !== undefined) patch.maxMemberOpenClaims = data.maxMemberOpenClaims;
+    if (data.maxOpenClaims !== undefined) patch.maxOpenClaims = data.maxOpenClaims;
+    const saved = registry.configure(roomId, patch);
     return json(res, 200, { roomId, ...saved });
   }
   if (workClaimRoute === "provenance" && (req.method === "GET" || req.method === "HEAD")) {

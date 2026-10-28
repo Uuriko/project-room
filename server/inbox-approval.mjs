@@ -135,7 +135,12 @@ export function createApprovalQueue({ clock = () => Date.now(), id = () => rando
     check(agent.id === proposal.byAgent.id, "approval_invalid",
       "resubmit must come from the original proposer.");
     const moved = move(proposal, "pending", agent);
-    return freezeProposal({ ...moved, draft: draftOf(draft), version: proposal.version + 1, requestedEdits: null });
+    // M-7: the new draft/version must be persisted with the record — the old
+    // code attached them only to the returned copy, so get()/reviewers kept
+    // seeing the pre-resubmit draft and version (same pattern as M-4).
+    const stored = freezeProposal({ ...moved, draft: draftOf(draft), version: proposal.version + 1, requestedEdits: null });
+    proposals.set(stored.proposalId, stored);
+    return stored;
   }
   function reject(proposalId, { by, reason } = {}) {
     const proposal = getProposal(proposalId);

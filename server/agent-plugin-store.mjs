@@ -31,13 +31,21 @@ import {
   assertSubscriptionWebhookUrl,
 } from "./agent-webhook-subscriptions.mjs";
 import { buildWakePing, WAKE_PING_EVENT, validateWebhookUrl } from "./outbound-webhooks.mjs"; // RC-2026-09-18-051: wake-ping payloads.
+import { memberIdForWakeIdentity } from "./wake-identity-resolution.mjs"; // Decision #25: guest-aware identity->member for the fan-out (#3777).
 import { syncDirectoryCard } from "./public-read-model.mjs";
 import {
   signDelivery, deliveryEnvelope, deliveryHeaders, postDelivery,
   backoffDelayMs, MAX_DELIVERY_ATTEMPTS, DELIVERY_TIMEOUT_MS, fenceRoomEventData,
+  WebhookDispatchError,
 } from "./webhook-dispatch.mjs"; // RC-2026-09-19-064: signed dispatch engine.
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
+
+function sameScopeSet(actual, expected) {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  const have = new Set(actual);
+  return expected.every(scope => have.has(scope));
+}
 
 // Purely additive, intentionally outside the writer fence (see
 // unfencedAdditiveTables in server/writer-fence.mjs): older writers have no
@@ -84,6 +92,10 @@ export const agentPluginSchema = `
   -- One row per (event, subscription) delivery; the idempotency_key makes
   -- fan-out double-delivery impossible even if an event is applied twice.
   -- state: pending -> delivered | failed (-> retry) -> dead_letter.
+  -- claim_expires_at is the drain lease (#3251): a drain claims a due row
+  -- by stamping it before any POST; only the claim owner may write the
+  -- attempt's outcome, and a claim left behind by a crashed drain becomes
+  -- reclaimable once it expires. NULL = unclaimed.
   -- target_url overrides the subscription URL for wakeUrl pushes: the wake
   -- ping is journaled on the matching subscription but POSTed to the
   -- host's wakeUrl (NULL = the subscription's own URL).
@@ -101,6 +113,7 @@ export const agentPluginSchema = `
     state TEXT NOT NULL CHECK(state IN ('pending','delivered','failed','dead_letter')),
     attempts INTEGER NOT NULL DEFAULT 0,
     next_attempt_at INTEGER NOT NULL,
+    claim_expires_at INTEGER,
     last_error TEXT,
     created_at INTEGER NOT NULL,
     updated_at INTEGER NOT NULL
@@ -136,6 +149,13 @@ export const agentPluginSchema = `
 // it block the head of the due queue.
 export const SKIPPED_RECHECK_MS = 10 * 60 * 1000;
 
+// How long one drain owns a delivery it has claimed (#3251). A single
+// attempt is bounded by the per-hop DELIVERY_TIMEOUT_MS across the
+// redirect hops plus DNS re-validation, so five minutes comfortably
+// outlives any live attempt; a claim older than this belongs to a drain
+// that died mid-attempt and the row is reclaimable.
+export const WEBHOOK_DELIVERY_CLAIM_LEASE_MS = 5 * 60 * 1000;
+
 // The in-memory journal keeps this many newest rows per subscription.
 // Retention keeps those, plus delivered and dead-letter rows inside the
 // window below. Pending and failed rows are never pruned: they can still
@@ -143,6 +163,29 @@ export const SKIPPED_RECHECK_MS = 10 * 60 * 1000;
 export const WEBHOOK_DELIVERY_KEEP = 100;
 export const WEBHOOK_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const WEBHOOK_DELIVERY_PRUNE_BATCH = 500;
+
+// Bug sweep 2026-10-16 lane 11 F1 (#3893): per-row isolation for the
+// webhook drain, mirroring the claim-prs registry isolation (#3464). A
+// stored delivery row that throws during its attempt — a payload_json
+// that no longer parses, a stored secret that fails signDelivery's
+// checks — used to abort the whole drain batch at the same position on
+// every tick: the row was claimed, the throw landed before any outcome
+// write, and next_attempt_at never advanced, so the row could never
+// dead-letter and the webhook-dispatch job failed forever. The drain now
+// isolates the row instead: count it, name it in the operator log, and
+// keep its detail on the drain's return value. The numeric count is the
+// part that survives into the job heartbeat summary (compactSummary
+// keeps numbers only); repairing the row itself is operator work — a
+// dead-lettered row can be redriven once its stored data is fixed.
+function noteIsolatedWebhookDelivery(isolated, deliveryId, error) {
+  const entry = { deliveryId: deliveryId ?? null, error: String(error?.message ?? error).slice(0, 200) };
+  if (Array.isArray(isolated)) {
+    if (isolated.some(prior => prior.deliveryId === entry.deliveryId)) return entry;
+    isolated.push(entry);
+  }
+  console.warn(`[webhook-dispatch] isolated throwing delivery row ${entry.deliveryId}: ${entry.error}`);
+  return entry;
+}
 
 // Indexed per subscription. ORDER BY created_at matches the previous
 // "newest 100" selection when timestamps differ; rowid breaks ties without
@@ -180,6 +223,9 @@ export class AgentPluginError extends Error {
 }
 
 export class AgentPluginStore {
+  #protectedOnboardingKeyIds = new Set();
+  #onboardingRotationDepth = 0;
+
   constructor(store) {
     this.store = store;
     this.db = store.db;
@@ -193,6 +239,12 @@ export class AgentPluginStore {
     // commit journals them. Null in tests and when unset — deliveries then
     // wait for the cron tick / manual drain.
     this.dispatchKick = null;
+    // Tail of the in-flight webhook drain (#3251): drains on this store
+    // run strictly one at a time, chained onto this promise. The durable
+    // per-row claim below is the cross-instance backstop; this chain is
+    // what keeps the kick / cron / endpoint triggers on one store from
+    // ever overlapping in the first place.
+    this.webhookDrainTail = null;
     // Subscribe-time and delivery-time DNS. Null uses dns.lookup on Node
     // (skipped on Workers). Tests inject a lookup so they never touch the
     // network. The same function is used at delivery so a name that was
@@ -264,6 +316,10 @@ export class AgentPluginStore {
     const deliveryColumns = new Set(this.db.prepare("PRAGMA table_info(agent_webhook_deliveries)").all().map(c => c.name));
     if (deliveryColumns.size > 0 && !deliveryColumns.has("target_url")) {
       this.db.exec("ALTER TABLE agent_webhook_deliveries ADD COLUMN target_url TEXT");
+    }
+    // #3251: drain claim lease. Same additive backfill pattern.
+    if (deliveryColumns.size > 0 && !deliveryColumns.has("claim_expires_at")) {
+      this.db.exec("ALTER TABLE agent_webhook_deliveries ADD COLUMN claim_expires_at INTEGER");
     }
     const keyColumns = new Set(this.db.prepare("PRAGMA table_info(agent_api_keys)").all().map(c => c.name));
     if (keyColumns.size > 0 && !keyColumns.has("last_used_ua")) {
@@ -375,14 +431,65 @@ export class AgentPluginStore {
     }
   }
 
+  onboardingMcpScopes(roomId) {
+    // CX5-FIX: heartbeats:report/read let the saved credential run the
+    // room-scoped wake listener (createHeartbeatActor binds it to this
+    // room via the mcp:room: scope below). Without them the standard
+    // setup credential 403'd on its own listener surface.
+    return [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"];
+  }
+
   issueOnboardingMcpToken({ identityId, roomId, label }) {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake"],
+      scopes: this.onboardingMcpScopes(roomId),
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });
+    return this.#onboardingTokenView(issued);
+  }
+
+  // POST /api/agent-rooms/{id}/token/rotate. One transaction revokes the
+  // onboarding keys already live for this room and inserts the replacement.
+  // A key minted by an overlapping rotate is claimed before the insert
+  // returns, so this rotation does not revoke it. A wider key, or an
+  // onboarding bundle for another room, is not in the revoke set. Room-create
+  // replay does not call this.
+  rotateOnboardingMcpToken({ identityId, roomId, label }) {
+    const outermost = this.#onboardingRotationDepth === 0;
+    this.#onboardingRotationDepth += 1;
+    try {
+      return this.mutate(() => {
+        const expected = this.onboardingMcpScopes(roomId);
+        const priorIds = [];
+        for (const record of this.apiKeys.keysForIdentity(identityId)) {
+          if (record.revoked || !sameScopeSet(record.scopes, expected)) continue;
+          if (this.#protectedOnboardingKeyIds.has(record.keyId)) continue;
+          priorIds.push(record.keyId);
+        }
+        const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
+        const issued = this.#issueProtectedOnboardingKey({
+          identityId,
+          scopes: expected,
+          expiresAt: this.store.now() + 30 * 86400000,
+          label: host
+        });
+        for (const keyId of priorIds) {
+          const current = this.keys.get(keyId);
+          if (!current || current.revoked || this.#protectedOnboardingKeyIds.has(keyId)) continue;
+          this.apiKeys.revoke(keyId);
+          this.db.prepare("UPDATE agent_api_keys SET revoked=1 WHERE key_id=?").run(keyId);
+        }
+        return this.#onboardingTokenView(issued);
+      });
+    } finally {
+      this.#onboardingRotationDepth -= 1;
+      if (outermost) this.#protectedOnboardingKeyIds.clear();
+    }
+  }
+
+  #onboardingTokenView(issued) {
     return {
       credential: API_KEY_PREFIX + issued.secret,
       scopes: [...issued.scopes],
@@ -390,6 +497,32 @@ export class AgentPluginStore {
       label: issued.label,
       keyId: issued.keyId
     };
+  }
+
+  // Claim the key id before Map.set returns. An overlapping retry that
+  // starts from that insert then sees the id and leaves the key live.
+  #issueProtectedOnboardingKey(request) {
+    const previous = this.keys.set.bind(this.keys);
+    this.keys.set = (keyId, record) => {
+      this.#protectedOnboardingKeyIds.add(keyId);
+      return previous(keyId, record);
+    };
+    try {
+      const issued = this.apiKeys.issue(request);
+      const record = this.keys.get(issued.keyId);
+      this.#persistApiKey(record);
+      return issued;
+    } finally {
+      this.keys.set = previous;
+    }
+  }
+
+  #persistApiKey(record) {
+    this.db.prepare(`INSERT INTO agent_api_keys
+      (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
+      .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
+        record.label, record.createdAt, record.expiresAt);
   }
 
   notePresentedKeyUse(keyId, { at = null, ua = null } = {}) {
@@ -408,12 +541,7 @@ export class AgentPluginStore {
   issueApiKey({ identityId, scopes, expiresAt = null, label = null }) {
     return this.mutate(() => {
       const issued = this.apiKeys.issue({ identityId, scopes, expiresAt, label });
-      const record = this.keys.get(issued.keyId);
-      this.db.prepare(`INSERT INTO agent_api_keys
-        (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
-        .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
-          record.label, record.createdAt, record.expiresAt);
+      this.#persistApiKey(this.keys.get(issued.keyId));
       return issued;
     });
   }
@@ -436,7 +564,7 @@ export class AgentPluginStore {
       this.keyRecordForOwner(keyId, identityId);
       const rotated = this.apiKeys.rotate(keyId);
       const record = this.keys.get(keyId);
-      this.db.prepare("UPDATE agent_api_keys SET key_hash=?, last_used_at=NULL WHERE key_id=?")
+      this.db.prepare("UPDATE agent_api_keys SET key_hash=?, last_used_at=NULL, last_used_ua=NULL WHERE key_id=?")
         .run(record.keyHash, keyId);
       return rotated;
     });
@@ -903,6 +1031,8 @@ export class AgentPluginStore {
   // delivery in its journal. No subscription, no delivery — the heartbeat
   // queue alone carries the wake.
   deliverWakePing({ identityId, signal }) {
+    // R282-1: a revoked identity's secret is dead, so its wake must be too.
+    if (this.identityRevoked(identityId)) return Object.freeze({ deliveries: Object.freeze([]) });
     const result = this.mutate(() => {
       const rows = this.db.prepare(
         "SELECT subscription_id AS subscriptionId, events_json AS eventsJson FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
@@ -973,6 +1103,33 @@ export class AgentPluginStore {
   // stays outside the transaction.
   subscribeWebhook({ identityId, url, events, secret = null }) {
     return this.mutate(() => {
+      // R277-1: a dropped 201 makes the client retry the same subscribe,
+      // which used to leave a second subscription and double every
+      // delivery. A subscribe for the same (identity, url, event set)
+      // returns the existing subscription instead; a retry that also
+      // re-enables a subscription the agent had disabled. Both HTTP and
+      // MCP call this one path, so they dedupe identically.
+      const wantedEvents = [...new Set(events)].sort().join("\u0000");
+      for (const existing of this.subs.values()) {
+        if (existing.agentId !== identityId || existing.url !== url) continue;
+        if ([...existing.events].sort().join("\u0000") !== wantedEvents) continue;
+        if (!existing.enabled) {
+          this.webhooks.setEnabled(existing.subscriptionId, { agentId: identityId, enabled: true });
+          this.db.prepare("UPDATE agent_webhook_subs SET enabled=1 WHERE subscription_id=?").run(existing.subscriptionId);
+          existing.enabled = true;
+        }
+        this.hydrateDeliveries(existing.subscriptionId);
+        return { subscription: Object.freeze({
+          subscriptionId: existing.subscriptionId,
+          agentId: existing.agentId,
+          secretRef: this.webhooks.sentinelFor(existing.subscriptionId),
+          url: existing.url,
+          events: Object.freeze([...existing.events]),
+          enabled: existing.enabled,
+          createdAt: existing.createdAt,
+          deliveries: existing.deliveries.length,
+        }) };
+      }
       const signingSecret = secret ?? randomBytes(32).toString("base64url");
       const view = this.webhooks.subscribe({ agentId: identityId, url, events, secret: signingSecret });
       const sub = this.subs.get(view.subscriptionId);
@@ -986,6 +1143,36 @@ export class AgentPluginStore {
       // Inbound-delivery verification moved server-side (verifyWebhookDelivery).
       return { subscription: view };
     });
+  }
+
+  // R282-1: revoking an identity secret must stop webhook deliveries. The
+  // subscription URL was chosen by the identity, so after the leak response
+  // the room's message bodies must not keep flowing to that holder. Called
+  // from agent-identities revoke() inside its transaction: disables every
+  // enabled subscription of the identity and returns the count.
+  disableWebhooksForIdentity(identityId) {
+    return this.mutate(() => {
+      const rows = this.db.prepare(
+        "SELECT subscription_id AS subscriptionId FROM agent_webhook_subs WHERE agent_id=? AND enabled=1").all(identityId);
+      for (const row of rows) {
+        this.webhooks.setEnabled(row.subscriptionId, { agentId: identityId, enabled: false });
+        this.db.prepare("UPDATE agent_webhook_subs SET enabled=0 WHERE subscription_id=?").run(row.subscriptionId);
+        const sub = this.subs.get(row.subscriptionId);
+        if (sub) sub.enabled = false;
+      }
+      return rows.length;
+    });
+  }
+
+  // R282-1: whether the identity's secret is revoked. Fail-open on a store
+  // without the identities table: no identities there means nothing was
+  // revoked. Belt-and-braces beside the revoke-time disable, so a stale
+  // enabled row from an older build still fans out nothing.
+  identityRevoked(agentId) {
+    try {
+      return !!this.db.prepare(
+        "SELECT 1 FROM agent_identities WHERE identity_id=? AND revoked_at IS NOT NULL").get(agentId);
+    } catch { return false; }
   }
 
   listWebhooks(identityId) {
@@ -1142,19 +1329,21 @@ export class AgentPluginStore {
   // RC-2026-09-19-064: fan out a persisted room event to every enabled
   // subscription whose event filter matches. RC-2026-09-24 fanout scope:
   // delivery is scoped to room membership — only subscriptions whose
-  // agent_id is linked to the event's room (identity_links) are
-  // considered. A subscription that never joined the room hears nothing
-  // from it, the same way the /events and /stream read paths behave.
+  // agent_id is seated in the event's room are considered. A subscription
+  // that never joined the room hears nothing from it, the same way the
+  // /events and /stream read paths behave. #3777: seating resolves
+  // through the shared guest-aware resolver (identity_links first,
+  // guest_members fallback) — trial seats hold subscriptions too, and an
+  // identity_links-only join silently starved them of every delivery.
   // Called from the room store's command() inside the same transaction as
   // the event insert, so a delivery is never journaled without its
   // triggering event.
   fanoutRoomEvent({ roomId, event }) {
     const rows = this.db.prepare(
       `SELECT s.subscription_id AS subscriptionId, s.agent_id AS agentId,
-              s.events_json AS eventsJson, l.member_id AS memberId
+              s.events_json AS eventsJson
        FROM agent_webhook_subs s
-       JOIN identity_links l ON l.identity_id = s.agent_id AND l.room_id = ?
-       WHERE s.enabled = 1`).all(roomId);
+       WHERE s.enabled = 1`).all();
     let created = 0;
     // Q3-D: the actor's kind and name come from the room roster, read once.
     let members;
@@ -1165,6 +1354,16 @@ export class AgentPluginStore {
       return members?.[event?.actorId] ?? null;
     };
     for (const row of rows) {
+      // R282-1: a revoked identity's subscription must not keep pushing the
+      // room's message bodies to the URL it chose, even if the row stayed
+      // enabled from an older build.
+      if (this.identityRevoked(row.agentId)) continue;
+      // Room-membership scope: resolve the subscription's agent_id to its
+      // member id in this room through the shared guest-aware resolver.
+      // An identity seated in neither identity_links nor guest_members
+      // for this room is not a member and hears nothing.
+      const memberId = memberIdForWakeIdentity(this.db, roomId, row.agentId, this.store.now());
+      if (!memberId) continue;
       let events = [];
       try { events = JSON.parse(row.eventsJson); } catch { continue; }
       if (!events.includes(event.type) && !events.includes("*")) continue;
@@ -1172,17 +1371,19 @@ export class AgentPluginStore {
       // (RC-2026-09-18-012, server/store.mjs). A message.posted event
       // carrying data.toMemberId is a direct message, visible only to its
       // sender and its addressed member — never to third-party push
-      // subscribers. The JOIN above already resolved the subscription's
-      // agent_id to this room's member id; apply the same rule the
-      // /events and /stream read paths use. (Every candidate row has a
-      // link by construction, so an unlinkable subscriber can never
-      // reach this branch as sender or addressee.)
+      // subscribers. The resolver above already resolved the
+      // subscription's agent_id to this room's member id (the guest
+      // seat's member id for trial seats, so the fence binds guests
+      // too); apply the same rule the /events and /stream read paths
+      // use. (Every candidate row is a seated member by construction, so
+      // an unseated subscriber can never reach this branch as sender or
+      // addressee.)
       if (event?.type === "message.posted" && event?.data?.toMemberId) {
-        if (event.actorId !== row.memberId && event.data.toMemberId !== row.memberId) continue;
+        if (event.actorId !== memberId && event.data.toMemberId !== memberId) continue;
       }
       const delivery = this.buildWebhookDelivery(row.subscriptionId,
         { eventType: event.type, eventId: event.id, roomId,
-          data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: row.memberId }) });
+          data: fenceRoomEventData(event.data ?? {}, { actorId: event.actorId, member: actorMember(), recipientMemberId: memberId }) });
       if (!delivery.duplicate) created++;
     }
     // Prompt dispatch: the drain kicks fire-and-forget after the request
@@ -1192,32 +1393,147 @@ export class AgentPluginStore {
     return Object.freeze({ deliveries: created });
   }
 
-  markDelivered(deliveryId, { signature, issuedAt, envelope, now }) {
-    this.db.prepare(`UPDATE agent_webhook_deliveries
-      SET state='delivered', attempts=attempts+1, last_error=NULL,
-          signature=?, payload_json=?, updated_at=? WHERE delivery_id=?`)
-      .run(signature, JSON.stringify(envelope), now, deliveryId);
+  // #3251: atomically claim one due row for a single drain attempt.
+  // The UPDATE only lands while the row is still in a deliverable state,
+  // still due at the snapshot's next_attempt_at, and unclaimed (or held
+  // by a claim whose lease has expired — the owner died mid-attempt).
+  // Runs synchronously inside a transaction before the attempt's first
+  // await, so two drains that both selected the row cannot both own it.
+  // Returns the claim's expiry (the ownership token completion writes
+  // must present), or null when another drain owns the row.
+  claimWebhookDelivery(row, now) {
+    const claimExpiresAt = now + WEBHOOK_DELIVERY_CLAIM_LEASE_MS;
+    const claimed = this.store.transaction(() => this.db.prepare(
+      `UPDATE agent_webhook_deliveries SET claim_expires_at=?
+       WHERE delivery_id=? AND state IN ('pending','failed')
+         AND next_attempt_at=? AND next_attempt_at<=?
+         AND (claim_expires_at IS NULL OR claim_expires_at<=?)`)
+      .run(claimExpiresAt, row.delivery_id, row.next_attempt_at, now, now).changes);
+    return claimed === 1 ? claimExpiresAt : null;
   }
 
-  markDeadLetter(deliveryId, reason, now, attempts = null) {
-    if (attempts === null) {
-      this.db.prepare(`UPDATE agent_webhook_deliveries
-        SET state='dead_letter', last_error=?, updated_at=? WHERE delivery_id=?`)
-        .run(String(reason).slice(0, 500), now, deliveryId);
-    } else {
-      this.db.prepare(`UPDATE agent_webhook_deliveries
-        SET state='dead_letter', attempts=?, last_error=?, updated_at=? WHERE delivery_id=?`)
-        .run(attempts, String(reason).slice(0, 500), now, deliveryId);
+  // Completion writes are claim-guarded when claimExpiresAt is given
+  // (#3251): they land only while the caller still owns the row and the
+  // row is still in a deliverable state, and they release the claim.
+  // A stale attempt whose claim was lost (lease expired and the row was
+  // reclaimed, or another writer already terminated it) changes nothing
+  // instead of overwriting that outcome from its drain-start snapshot.
+  // Returns the number of rows changed.
+  markDelivered(deliveryId, { signature, issuedAt, envelope, now, claimExpiresAt = null }) {
+    if (claimExpiresAt !== null) {
+      return this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='delivered', attempts=attempts+1, last_error=NULL,
+            signature=?, payload_json=?, claim_expires_at=NULL, updated_at=?
+        WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+        .run(signature, JSON.stringify(envelope), now, deliveryId, claimExpiresAt).changes;
     }
+    return this.db.prepare(`UPDATE agent_webhook_deliveries
+      SET state='delivered', attempts=attempts+1, last_error=NULL,
+          signature=?, payload_json=?, updated_at=? WHERE delivery_id=?`)
+      .run(signature, JSON.stringify(envelope), now, deliveryId).changes;
+  }
+
+  markDeadLetter(deliveryId, reason, now, attempts = null, claimExpiresAt = null) {
+    if (claimExpiresAt !== null) {
+      if (attempts === null) {
+        return this.db.prepare(`UPDATE agent_webhook_deliveries
+          SET state='dead_letter', last_error=?, claim_expires_at=NULL, updated_at=?
+          WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+          .run(String(reason).slice(0, 500), now, deliveryId, claimExpiresAt).changes;
+      }
+      return this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='dead_letter', attempts=?, last_error=?, claim_expires_at=NULL, updated_at=?
+        WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+        .run(attempts, String(reason).slice(0, 500), now, deliveryId, claimExpiresAt).changes;
+    }
+    if (attempts === null) {
+      return this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='dead_letter', last_error=?, updated_at=? WHERE delivery_id=?`)
+        .run(String(reason).slice(0, 500), now, deliveryId).changes;
+    }
+    return this.db.prepare(`UPDATE agent_webhook_deliveries
+      SET state='dead_letter', attempts=?, last_error=?, updated_at=? WHERE delivery_id=?`)
+      .run(attempts, String(reason).slice(0, 500), now, deliveryId).changes;
   }
 
   // Attempt one stored delivery: recompute the signature with a fresh
   // issuedAt (replay resistance), POST, and advance the lifecycle.
-  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers }) {
+  async attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers, isolated = null }) {
+    // #3251: claim the row before the first await. A concurrent drain —
+    // on this store, or on another instance sharing the database — that
+    // selected the same row loses this race and skips it instead of
+    // POSTing a second copy.
+    const claimExpiresAt = this.claimWebhookDelivery(row, now);
+    if (claimExpiresAt === null) return "skipped";
+    try {
+      return await this.#attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt });
+    } catch (error) {
+      // #3893: a throw after the claim — the stored payload no longer
+      // parses, the subscription's stored secret fails signDelivery's
+      // checks, the stored row fails the dispatch module's validation —
+      // must not escape. Uncaught, it aborted the whole drain batch
+      // before any outcome was written, so next_attempt_at never
+      // advanced and every later drain re-claimed the same row and
+      // aborted again; the row could never dead-letter and the
+      // webhook-dispatch job reported failure forever. Isolate the row
+      // instead: record its outcome, name it, and let the batch move on.
+      // (The drain loop keeps a last-resort guard for throws that happen
+      // before this layer can record anything.)
+      return this.#isolateClaimedDelivery(row, { error, now, claimExpiresAt, isolated });
+    }
+  }
+
+  // #3893: write the outcome for a claimed delivery whose attempt threw
+  // before it could record one, claim-guarded like every other outcome
+  // write (#3251). A throw from the stored row's own data — a JSON.parse
+  // SyntaxError or a WebhookDispatchError from the dispatch module's
+  // validation of the stored payload, secret, or target — is permanent
+  // as stored: the bytes cannot change between attempts, so the row
+  // dead-letters immediately, with redriveDeadLetter as the operator
+  // repair path once the stored data is fixed. Any other throw is
+  // recorded as a failed attempt under the usual backoff and attempt
+  // cap, so a transient fault still gets its retries.
+  #isolateClaimedDelivery(row, { error, now, claimExpiresAt, isolated }) {
+    noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
+    const message = String(error?.message ?? error).slice(0, 500);
+    const permanent = error instanceof SyntaxError || error instanceof WebhookDispatchError;
+    return this.mutate(() => {
+      const fresh = this.db.prepare(
+        "SELECT state, attempts, claim_expires_at FROM agent_webhook_deliveries WHERE delivery_id=?")
+        .get(row.delivery_id);
+      if (!fresh || (fresh.state !== "pending" && fresh.state !== "failed")
+        || fresh.claim_expires_at !== claimExpiresAt) {
+        return "skipped";
+      }
+      try {
+        this.webhooks.recordAttempt(row.delivery_id, {
+          ok: false, error: message, terminal: permanent,
+        });
+      } catch { /* cache may lag; the table is authoritative */ }
+      const attempts = fresh.attempts + 1;
+      if (permanent || attempts >= MAX_DELIVERY_ATTEMPTS) {
+        const reason = permanent
+          ? `stored delivery cannot be attempted: ${message}`
+          : `gave up after ${MAX_DELIVERY_ATTEMPTS} attempts; last error: ${message}`;
+        const changed = this.markDeadLetter(row.delivery_id, reason, now, attempts, claimExpiresAt);
+        return changed ? "deadLettered" : "skipped";
+      }
+      const changed = this.db.prepare(`UPDATE agent_webhook_deliveries
+        SET state='failed', attempts=?, last_error=?, next_attempt_at=?,
+            claim_expires_at=NULL, updated_at=?
+        WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+        .run(attempts, `delivery attempt failed before dispatch: ${message}`,
+          now + backoffDelayMs(attempts), now, row.delivery_id, claimExpiresAt).changes;
+      return changed ? "retried" : "skipped";
+    });
+  }
+
+  async #attemptClaimedDelivery(row, { fetchImpl, now, dnsResolvers, claimExpiresAt }) {
     const sub = this.subs.get(row.subscription_id);
     if (!sub) {
-      this.mutate(() => this.markDeadLetter(row.delivery_id, "subscription removed", now));
-      return "deadLettered";
+      const changed = this.mutate(() =>
+        this.markDeadLetter(row.delivery_id, "subscription removed", now, null, claimExpiresAt));
+      return changed ? "deadLettered" : "skipped";
     }
     // A skipped delivery stays pending but moves its next_attempt_at forward.
     // The drain reads the oldest due rows first (LIMIT 25), so skipped rows
@@ -1226,39 +1542,60 @@ export class AgentPluginStore {
     // processed 25 / skipped 25 and nothing was ever delivered or retried.
     const skip = () => {
       this.mutate(() => this.db.prepare(
-        "UPDATE agent_webhook_deliveries SET next_attempt_at=? WHERE delivery_id=?")
-        .run(now + SKIPPED_RECHECK_MS, row.delivery_id));
+        `UPDATE agent_webhook_deliveries SET next_attempt_at=?, claim_expires_at=NULL
+         WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+        .run(now + SKIPPED_RECHECK_MS, row.delivery_id, claimExpiresAt));
       return "skipped";
     };
     if (!sub.enabled) return skip();
     // RC-2026-09-24 fanout scope, dispatch-time re-check: a delivery whose
-    // identity lost its room link between fan-out and dispatch is skipped,
+    // identity lost its room seat between fan-out and dispatch is skipped,
     // not sent. Fail closed at the last moment too. The delivery stays
-    // pending, so a re-linked identity still receives it on a later drain.
-    const link = this.db.prepare(
-      "SELECT 1 FROM identity_links WHERE room_id=? AND identity_id=?")
-      .get(row.room_id, row.agent_id);
-    if (!link && row.room_id) return skip();
+    // pending, so a re-seated identity still receives it on a later drain.
+    // The seat lookup goes through the shared guest-aware resolver
+    // (identity_links first, guest_members fallback) — the same one the
+    // fan-out uses (#3777) — so a trial seat's queued delivery is not
+    // stranded by an identity_links-only re-check (#3881, F-2 dispatch leg).
+    if (row.room_id && !memberIdForWakeIdentity(this.db, row.room_id, row.agent_id, now)) return skip();
     const payload = JSON.parse(row.payload_json);
     const issuedAt = now;
+    // payload?.data: a stored payload that parses to a non-object (or an
+    // object without an object data) reaches signDelivery's own check
+    // and throws its WebhookDispatchError, which the isolation layer
+    // classifies as permanent-as-stored (#3893) — not a bare TypeError.
     const signature = signDelivery(sub.secret,
-      { deliveryId: row.delivery_id, eventType: row.event_type, issuedAt, data: payload.data });
+      { deliveryId: row.delivery_id, eventType: row.event_type, issuedAt, data: payload?.data });
     const envelope = deliveryEnvelope({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
-      eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload.data });
+      eventType: row.event_type, issuedAt, roomId: row.room_id, data: payload?.data });
     const headers = deliveryHeaders({ deliveryId: row.delivery_id, subscriptionId: row.subscription_id,
       eventType: row.event_type, issuedAt, signature });
     const result = await postDelivery({ fetchImpl, url: row.target_url ?? sub.url, envelope, headers, timeoutMs: DELIVERY_TIMEOUT_MS, dnsResolvers });
     return this.mutate(() => {
+      // #3251: re-read and verify ownership before writing the outcome.
+      // The drain-start snapshot (row.attempts, row.state) is stale by
+      // now: if the claim was lost or the row already reached a terminal
+      // state, this attempt's result is discarded rather than
+      // overwriting the recorded outcome (a delivered row must never be
+      // resurrected to 'failed' by a slower concurrent attempt), and the
+      // attempt count is incremented from the fresh row, not the snapshot.
+      const fresh = this.db.prepare(
+        "SELECT state, attempts, claim_expires_at FROM agent_webhook_deliveries WHERE delivery_id=?")
+        .get(row.delivery_id);
+      if (!fresh || (fresh.state !== "pending" && fresh.state !== "failed")
+        || fresh.claim_expires_at !== claimExpiresAt) {
+        return "skipped";
+      }
       try {
         this.webhooks.recordAttempt(row.delivery_id, {
           ok: result.ok, error: result.error, terminal: result.classification === "dead",
         });
       } catch { /* cache may lag; the table is authoritative */ }
       if (result.ok) {
-        this.markDelivered(row.delivery_id, { signature, issuedAt, envelope, now });
-        return "delivered";
+        const changed = this.markDelivered(row.delivery_id,
+          { signature, issuedAt, envelope, now, claimExpiresAt });
+        return changed ? "delivered" : "skipped";
       }
-      const attempts = row.attempts + 1;
+      const attempts = fresh.attempts + 1;
       if (result.classification === "dead" || attempts >= MAX_DELIVERY_ATTEMPTS) {
         // QA-Sec 2026-09-19: keep the dispatch guard's reason (e.g. an SSRF
         // refusal) in the journal — "HTTP 0" alone hides why it died.
@@ -1266,14 +1603,16 @@ export class AgentPluginStore {
         const reason = result.classification === "dead"
           ? `receiver rejected the delivery (HTTP ${result.status}); not retried${detail}`
           : `gave up after ${MAX_DELIVERY_ATTEMPTS} attempts; last error: ${result.error}`;
-        this.markDeadLetter(row.delivery_id, reason, now, attempts);
-        return "deadLettered";
+        const changed = this.markDeadLetter(row.delivery_id, reason, now, attempts, claimExpiresAt);
+        return changed ? "deadLettered" : "skipped";
       }
-      this.db.prepare(`UPDATE agent_webhook_deliveries
+      const changed = this.db.prepare(`UPDATE agent_webhook_deliveries
         SET state='failed', attempts=?, last_error=?, next_attempt_at=?,
-            signature=?, payload_json=?, updated_at=? WHERE delivery_id=?`)
-        .run(attempts, result.error, now + backoffDelayMs(attempts), signature, JSON.stringify(envelope), now, row.delivery_id);
-      return "retried";
+            signature=?, payload_json=?, claim_expires_at=NULL, updated_at=?
+        WHERE delivery_id=? AND state IN ('pending','failed') AND claim_expires_at=?`)
+        .run(attempts, result.error, now + backoffDelayMs(attempts), signature,
+          JSON.stringify(envelope), now, row.delivery_id, claimExpiresAt).changes;
+      return changed ? "retried" : "skipped";
     });
   }
 
@@ -1344,35 +1683,79 @@ export class AgentPluginStore {
   // Called by the Cloudflare cron tick and by the agent-triggered process
   // endpoint (agentId scopes it to one identity's deliveries). Each
   // delivery mutates in its own transaction so one poison row cannot roll
-  // back the rest of the sweep. dnsResolvers ({ resolve4, resolve6 }) is
+  // back the rest of the sweep, and a row whose attempt throws is
+  // isolated the same way (#3893): its outcome is recorded, it is named
+  // in the summary's isolated items, and the sweep continues.
+  // dnsResolvers ({ resolve4, resolve6 }) is
   // injectable so tests never touch the network; omitted it defaults to the
   // real resolver (dns.lookup on Node; skipped on Workers) and every target
   // is re-validated before its POST (dispatch-time SSRF guard). An injected
   // webhook lookup, when set, is the resolver for this drain. fetchImpl is an optional
   // override (tests); omitted, postDelivery uses its DNS-pinned transport
   // on Node (plain fetch on Workers) — the M-1 rebinding fix.
-  async drainWebhookDeliveries({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
+  // #3251: drains on one store are serialized. The dispatch kick, the
+  // per-minute cron and the agent-triggered process endpoint can all fire
+  // while an earlier drain is still awaiting a POST; without this chain
+  // each of them swept the same due rows. A queued drain re-selects its
+  // rows only when its turn comes, so it sees the previous drain's
+  // committed outcomes (delivered rows are gone, failed rows are inside
+  // their backoff) instead of racing them. Defaults (notably `now`) are
+  // likewise resolved when the drain actually runs, in the serial body
+  // below. Cross-instance overlap is covered by the per-row claim.
+  async drainWebhookDeliveries(options = {}) {
+    const previous = this.webhookDrainTail ?? Promise.resolve();
+    const run = () => this.#drainWebhookDeliveriesOnce(options);
+    const current = previous.then(run, run);
+    // The tail never rejects, so one failed drain cannot poison the next.
+    this.webhookDrainTail = current.catch(() => {});
+    return current;
+  }
+
+  async #drainWebhookDeliveriesOnce({ fetchImpl, now = this.store.now(), limit = 25, agentId = null, dnsResolvers } = {}) {
     const resolvers = dnsResolvers ?? (this.webhookLookup ? { lookup: this.webhookLookup } : undefined);
     // Only rows that can actually be attempted fill the batch. Deliveries of a
-    // disabled subscription or of an identity no longer linked to the event's
-    // room stay pending but are left out here; otherwise a large skipped
+    // disabled subscription or of an identity no longer seated in the event's
+    // room (identity_links or guest_members — the resolver's two seats,
+    // #3881) stay pending but are left out here; otherwise a large skipped
     // backlog occupies every LIMIT-sized batch and live deliveries wait behind
     // it (2026-09-24: every tick was processed 25 / skipped 25). Rows whose
     // subscription was removed (s is NULL) are still selected so they
-    // dead-letter as before.
+    // dead-letter as before. A guest seat counts as seated here only
+    // while it holds a live access credential (the resolver's liveness
+    // gate, mirrored in SQL), so a disconnected guest's rows stay out.
     const due = this.db.prepare(
       `SELECT d.* FROM agent_webhook_deliveries d
        LEFT JOIN agent_webhook_subs s ON s.subscription_id = d.subscription_id
        WHERE d.state IN ('pending','failed') AND d.next_attempt_at <= ?
        ${agentId ? "AND d.agent_id = ?" : ""}
        AND (s.subscription_id IS NULL OR (s.enabled = 1 AND (d.room_id IS NULL
-         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id))))
+         OR EXISTS (SELECT 1 FROM identity_links l WHERE l.room_id = d.room_id AND l.identity_id = d.agent_id)
+         OR EXISTS (SELECT 1 FROM guest_members g WHERE g.room_id = d.room_id AND g.guest_identity_id = d.agent_id
+           AND EXISTS (SELECT 1 FROM credentials c WHERE c.room_id = g.room_id AND c.member_id = g.member_id
+             AND c.kind = 'access' AND c.revoked = 0 AND c.expires_at > ?)))))
        ORDER BY d.next_attempt_at ASC LIMIT ?`)
-      .all(...(agentId ? [now, agentId, limit] : [now, limit]));
+      .all(...(agentId ? [now, agentId, now, limit] : [now, now, limit]));
+    const isolated = [];
     const summary = { processed: 0, delivered: 0, retried: 0, deadLettered: 0, skipped: 0 };
     for (const row of due) {
       summary.processed++;
-      summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers })]++;
+      try {
+        summary[await this.attemptStoredDelivery(row, { fetchImpl, now, dnsResolvers: resolvers, isolated })]++;
+      } catch (error) {
+        // #3893 last-resort guard: attemptStoredDelivery records an
+        // outcome for every throw after its claim; a throw that still
+        // escapes (the claim transaction itself, a failed outcome
+        // write) is isolated here so one row can never abort the batch.
+        // The row keeps its queue position and is retried next drain.
+        noteIsolatedWebhookDelivery(isolated, row.delivery_id, error);
+      }
+    }
+    // #3893: the isolated count is numeric, so it survives compactSummary
+    // into the job heartbeat; the item detail rides this return value
+    // and the operator log — the claim-prs convention (#3464).
+    if (isolated.length) {
+      summary.isolated = isolated.length;
+      summary.isolatedItems = isolated;
     }
     return Object.freeze(summary);
   }

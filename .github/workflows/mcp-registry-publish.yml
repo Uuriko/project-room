@@ -17,6 +17,12 @@ on:
     branches: [main]
   workflow_dispatch:
 
+# Burst merges push main many times. Keep one run and at most one pending
+# per ref (GitHub drops older pending runs); a running publish is never cut.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   id-token: write # Required for mcp-publisher login github-oidc
   contents: read

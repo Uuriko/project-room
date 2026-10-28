@@ -6,8 +6,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { signAgentCard } from "../scripts/sign-agent-card.mjs";
 import { generateKeyPair, verifyCardSignature, verifyCardJws } from "../server/agent-card-signing.mjs";
-import { AGENT_CARD_KEY_ID } from "../deploy/agent-card-key.mjs";
-import { markUnsignedCard } from "../deploy/agent-discovery.mjs";
+import { AGENT_CARD_KEY_ID } from "../server/agent-card-key.mjs";
+import { markUnsignedCard } from "../server/agent-discovery.mjs";
 
 test("missing or wrong keys stop a release without overwriting its signature", t => {
   const directory = mkdtempSync(join(tmpdir(), "card-build-"));
@@ -73,7 +73,7 @@ test("signed build writes an A2A v1.0 JWS covering the served envelope", async t
   // The served card is the fixture card plus the envelope attachCardSignatureEnvelope()
   // builds at serve time; the JWS must verify over exactly those bytes, or no
   // A2A client could ever verify the served card.
-  const { attachCardSignatureEnvelope } = await import("../deploy/agent-discovery.mjs");
+  const { attachCardSignatureEnvelope } = await import("../server/agent-discovery.mjs");
   const served = attachCardSignatureEnvelope({ ...card }, {
     signature: signed.AGENT_CARD_SIGNATURE,
     jwsSignatures: null,

@@ -18,8 +18,8 @@
 #
 # One-time setup (needs the repo owner): create a fine-grained PAT with
 # contents:write and pull-requests:write on Uuriko/project-room, store it as
-# the TRACE_ENTRY_TOKEN repo secret. Until it exists this workflow fails
-# loudly on every run (it never falls back to GITHUB_TOKEN — that would
+# the TRACE_ENTRY_TOKEN repo secret. Until it exists every run skips with a
+# warning annotation (it never falls back to GITHUB_TOKEN — that would
 # silently reintroduce the suppression bug).
 #
 # Design notes:
@@ -82,7 +82,11 @@ jobs:
             echo "the TRACE_ENTRY_TOKEN repo secret. GITHUB_TOKEN cannot be"
             echo "used: GitHub suppresses workflow runs for GITHUB_TOKEN-caused"
             echo "events, so the trace PR would never launch CI."
-            exit 1
+            # Skip with a warning rather than fail: a red run on every merge
+            # for weeks trained everyone to ignore this workflow's status.
+            echo "::warning title=trace-entry skipped::TRACE_ENTRY_TOKEN is not set; no trace entry was written for PR #${PR_NUMBER}."
+            echo "branch=" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

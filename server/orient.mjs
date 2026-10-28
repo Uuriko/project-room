@@ -1,12 +1,14 @@
-// Orient endpoint builder (jill lane, RC-2026-09-28 — ryska's 404).
+import { messageRepository } from "./message-repository.mjs";
+// Orient payload builder (jill lane, RC-2026-09-28 — ryska's 404).
 //
-// The URL outside agents guess by analogy with /activation-pack:
-// GET /api/rooms/{roomId}/orient. Read-only, member-scoped orientation
-// payload: contract version, the authenticated member and their scope,
-// room summary, evaluated-through sequence, and a bounded list of open
-// work records with their next steps — the same "where the room stands"
-// the client-side orient() computes from a snapshot, served to cold-HTTP
-// agents with no client SDK.
+// Read-only, member-scoped orientation payload: contract version, the
+// authenticated member and their scope, room summary, evaluated-through
+// sequence, and a bounded list of open work records with their next
+// steps — the same "where the room stands" the client-side orient()
+// computes from a snapshot. The standalone GET /api/rooms/{roomId}/orient
+// endpoint was deleted (simplification register D1); this builder is the
+// shared helper embedded by the activation pack, the context response,
+// and the MCP room profile.
 //
 // Everything returned is derivable from the activation pack plus the
 // caller's own member record, so this adds no new visibility and has no
@@ -21,6 +23,7 @@ import { orientSections } from "./updates.mjs";
 import { fleetSelf } from "./agent-fleet.mjs";
 import { ServiceError } from "./store.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
+import { availableClaimsFromBoard, memoizeBoardList } from "./available-work.mjs";
 
 // Work states that count as open; completed and superseded work is history,
 // not something an arriving agent should pick up.
@@ -57,11 +60,10 @@ const workOf = (item, now) => {
   };
 };
 
-// Opaque resume token for the event log: versioned, self-describing to the
-// server, meaningless to clients. Encodes the room event sequence the
-// payload was generated from.
-const cursorOf = sequence =>
-  Buffer.from(JSON.stringify({ v: 1, seq: sequence }), "utf8").toString("base64url");
+// eventCursor is the room's numeric event sequence — the value the event
+// log actually resumes from (GET …/events?after=<seq>, SSE Last-Event-ID).
+// It was previously an opaque base64url token that no endpoint parsed back
+// (#3222), so the cursor this payload handed out could not be used anywhere.
 
 const FOCUS = new Set(["conversation", "work", "review"]);
 const CONVERSATION = new Set(["request", "mention", "dm", "invite_pending", "access_request"]);
@@ -111,7 +113,10 @@ function rankLines(lines, query, maxTokens) {
   let used = 0;
   for (const doc of scored) {
     const cost = Math.max(1, doc.tokens.length);
-    if (kept.length && used + cost > maxTokens) break;
+    // maxTokens is a hard budget: a line whose cost alone exceeds the
+    // remaining budget is never kept (not even as the first/only line) —
+    // skip it and keep scanning for lower-ranked lines that do fit.
+    if (used + cost > maxTokens) continue;
     kept.push({ id: doc.id, source: doc.source, text: doc.text, score: Math.round(doc.score * 1000) / 1000, untrusted: true });
     used += cost;
     if (used >= maxTokens) break;
@@ -119,12 +124,18 @@ function rankLines(lines, query, maxTokens) {
   return { lines: kept, tokens: used };
 }
 
-function fleetSelfOrNull(store, roomSlug, room, viewerId) {
+function fleetSelfOrNull(store, roomSlug, room, viewerId, boardList = null) {
   try {
-    const self = fleetSelf(store, roomSlug, room, viewerId);
+    const self = fleetSelf(store, roomSlug, room, viewerId, { boardList });
     return self ? self : {};
   } catch { return {}; }
 }
+
+// Board claims an arriving member can pick up right now (#3020) come from
+// the AvailableWork projection (server/available-work.mjs) — the ONE
+// availability definition every discovery surface consumes, so orient and
+// the activation pack cannot diverge. The `claims` list below stays the
+// viewer's own claims; `work`/`openWork` still derive from Work Items.
 
 export function buildOrient(store, roomSlug, viewerId, options = {}) {
   // Unknown rooms fail here with the store's 404 (room_not_found).
@@ -133,6 +144,12 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   const member = state.members?.[viewerId];
   if (!member) throw new Error("Viewer is not a member of this room");
   const now = store.now();
+  // PERF-10X L4: the board is decoded ONCE per request. Every board
+  // consumer in this payload — the claims sections below, the fleet badge
+  // (agent viewers), and the next-actions snapshot (token callers) —
+  // shares this per-request memo; a caller composing several reads in one
+  // request (activation pack, context) passes its own memo in.
+  const boardList = options.boardList ?? memoizeBoardList(store);
   const query = parseOrientQuery(options);
   const openWork = Object.values(state.workItems ?? {})
     .filter(item => item && OPEN_WORK_STATES.has(item.state))
@@ -141,15 +158,18 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   const focusOf = query.focus === "conversation" ? CONVERSATION : query.focus === "work" ? WORK_FOCUS : query.focus === "review" ? REVIEW_FOCUS : null;
   const updates = (focusOf ? sections.updates.filter(item => focusOf.has(item.kind)) : sections.updates).slice(0, 10);
   let claims = [];
+  let availableClaims = [];
   try {
-    claims = (store.workClaims?.list?.(roomSlug) ?? [])
+    const board = boardList(roomSlug);
+    claims = board
       .filter(item => item?.owner === viewerId)
       .map(item => ({ id: item.id, title: item.title ?? item.id, state: item.state, untrusted: true }));
-  } catch { claims = []; }
+    availableClaims = availableClaimsFromBoard(board, roomSlug, { viewerId, state }).slice(0, MAX_WORK);
+  } catch { claims = []; availableClaims = []; }
   let nextActions = [];
   if (options.token && store.nextActions?.list) {
     try {
-      const listed = store.nextActions.list(options.token, roomSlug, { limit: 8, binding: options.binding ?? null });
+      const listed = store.nextActions.list(options.token, roomSlug, { limit: 8, binding: options.binding ?? null, boardList });
       nextActions = listed.items.filter(item => item.action?.api).slice(0, 8).map(item => ({
         id: item.id, kind: item.kind, title: item.title,
         method: item.action.api.method, path: item.action.api.path
@@ -166,7 +186,7 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
   }));
   const lines = [
     ...pinned.filter(pin => pin.text).map(pin => ({ id: pin.messageId, source: "pinned", text: pin.text })),
-    ...(state.messages ?? []).filter(visible).slice(-40).map(message => ({ id: message.id, source: "message", text: message.body })),
+    ...messageRepository(store, roomSlug, state).recent(40, visible).map(message => ({ id: message.id, source: "message", text: message.body })),
     ...claims.map(item => ({ id: item.id, source: "claim", text: item.title }))
   ];
   // A member with no published directory card is still orientable. Missing
@@ -189,20 +209,21 @@ export function buildOrient(store, roomSlug, viewerId, options = {}) {
       profile: { displayName: member.displayName, kind: member.kind, identityId: member.identityId ?? null },
       capabilities,
       // CP-AGENTS-1: the calling agent's own fleet state (agents only).
-      ...(member.kind === "agent" ? fleetSelfOrNull(store, roomSlug, { sequence, state }, viewerId) : {})
+      ...(member.kind === "agent" ? fleetSelfOrNull(store, roomSlug, { sequence, state }, viewerId, boardList) : {})
     },
     instructions: { charter: charterContext(state.room), pinned },
     focus: query.focus,
     updates,
     claims,
+    availableClaims,
     workItems: openWork.filter(item => item.accountableMemberId === viewerId || item.claim?.holderId === viewerId || item.verifierMemberId === viewerId)
       .slice(0, MAX_WORK).map(item => workOf(item, now)),
     uncertain: sections.uncertain,
     nextActions,
-    cursors: { eventCursor: cursorOf(sequence), evaluatedThrough: sequence, updates: updates.length },
+    cursors: { eventCursor: sequence, evaluatedThrough: sequence, updates: updates.length },
     ...(query.q ? { matched: rankLines(lines, query.q, query.maxTokens) } : {}),
     evaluatedThrough: sequence,
-    eventCursor: cursorOf(sequence),
+    eventCursor: sequence,
     orientation: annotateOrientation(roomOrientation(state)),
     work: openWork.slice(0, MAX_WORK).map(item => workOf(item, now)),
     workTotal: openWork.length,

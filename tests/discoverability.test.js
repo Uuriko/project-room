@@ -37,7 +37,8 @@ import {
 // Independently re-derived enforcing constants: the governance document must
 // agree with these, or it has drifted from what the code enforces.
 import { BUDGET_CAPS } from "../src/work-item-session.js";
-import { GUEST_AGENT_PERMISSIONS, GUEST_AGENT_TTL_MS } from "../server/guest-agent-links.mjs";
+import { GUEST_AGENT_PERMISSIONS } from "../server/guest-agent-links.mjs";
+import { GUEST_CREDENTIAL_TTL_DEFAULT_MS } from "../server/guest-invites.mjs";
 import { wakeQueueLimits } from "../server/wake-queue-limits.mjs";
 import { SEVERITY_KEEP_DAYS, ARCHIVE_AFTER_DAYS } from "../server/audit-retention.mjs";
 import { DEFAULT_LEASE_HOURS, MAX_LEASE_HOURS } from "../server/work-claims.mjs";
@@ -402,7 +403,7 @@ test("governance: served on origin and /room, linked, derived from enforcing con
   // Numeric claims re-derived from the enforcing modules (fail on drift).
   assert.equal(doc.agentWorkControls.roundLimits.cap, BUDGET_CAPS.maxRounds);
   assert.equal(doc.agentWorkControls.toolBudgets.cap, BUDGET_CAPS.maxToolCalls);
-  assert.equal(doc.identityModel.guestTier.ttlMs, GUEST_AGENT_TTL_MS);
+  assert.equal(doc.identityModel.guestTier.ttlMs, GUEST_CREDENTIAL_TTL_DEFAULT_MS);
   assert.deepEqual(doc.identityModel.guestTier.permissions, [...GUEST_AGENT_PERMISSIONS]);
   assert.equal(doc.workLedger.leases.defaultHours, DEFAULT_LEASE_HOURS);
   assert.equal(doc.workLedger.leases.maxHours, MAX_LEASE_HOURS);
@@ -470,7 +471,10 @@ test("MCP: errors carry canonical guidance in error.data with valid JSON-RPC sha
   assert.equal(authed.body.error.code, -32001);
   const ad = authed.body.error.data;
   assert.equal(ad.reason, "auth_required");
-  assert.equal(ad.next[0].tool, "room_check_access");
+  // #1551: an anonymous caller must not learn hosted tool names from the
+  // auth_required next[]; recovery points at their own visible catalog.
+  assert.deepEqual(ad.next, [{ command: "tools/list" }]);
+  assert.ok(!JSON.stringify(ad.next).includes("room_check_access"), "anonymous auth_required hides hosted tools");
   assert.ok(!ad.next.some(step => step.method === "POST"), "MCP auth does not direct credential creation");
   assert.ok(Array.isArray(ad.next) && ad.next.length > 0, "auth_required next[] non-empty");
   assert.equal(ad.status, "action_required");
@@ -505,6 +509,8 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   assert.ok(listTools.description.includes("public_work_read_task"),
     "list-tools pointer names public_work_read_task");
   assert.ok(listTools.description.includes("seven"), "list-tools pointer states the seven-tool count");
+  assert.equal(listTools.path, "/mcp", "list-tools pointer uses the canonical /mcp path");
+  assert.equal(minted.next.find(s => s.action === "read-quickstart").doc, "docs/AGENT-START-HERE.md");
   for (const step of minted.nextActions) {
     assert.equal(typeof step.transport, "string", "nextActions names the transport");
     assert.ok(step.method || step.tool, "nextActions names the method or tool");
@@ -518,9 +524,9 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   assert.ok(roomActions.includes("invite-members"), "room create points at invite mint");
   assert.ok(roomActions.includes("post-message"), "room create points at first post");
   assert.deepEqual(room.nextActions.map(s => s.action),
-    ["start-work", "post-message", "finish-work", "create-task", "invite-members"],
+    ["start-work", "post-message", "finish-work", "claim-work", "handoff-work", "create-task", "invite-members"],
     "room create nextActions is the canonical verb list");
-  assert.ok(room.nextActions.every(s => s.path.includes(room.roomId)), "room nextActions paths are room-scoped");
+  assert.ok(room.nextActions.every(s => s.transport !== "http" || s.path.includes(room.roomId)), "room nextActions HTTP paths are room-scoped");
   // Invite redemption -> orient + access pointers.
   const invite = store.invites.create(secret, room.roomId, { permissions: ["accept_work"] });
   const redeemRes = await post(origin, "/api/agent-invites/redeem", { code: invite.code, displayName: "Guest Two" });
@@ -529,7 +535,8 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   const redeemActions = redeemed.next.map(s => s.action);
   assert.ok(redeemActions.includes("see-who-is-around"), "redeem points at orientation");
   assert.ok(redeemActions.includes("post-first-message"), "redeem points at first post");
-  assert.deepEqual(redeemed.nextActions.map(s => s.action), ["see-who-is-around", "room_check_access"],
+  assert.deepEqual(redeemed.nextActions.map(s => s.action),
+    ["see-who-is-around", "room_check_access", "claim-work", "handoff-work"],
     "redeem nextActions is the canonical verb list");
   assert.ok(redeemed.nextActions.some(s => s.transport === "mcp" && s.tool === "room_check_access"),
     "redeem nextActions names the MCP access-check tool");
@@ -539,7 +546,7 @@ test("onboarding: success bodies name the next step", { timeout: 30000 }, async 
   const accessRes = await post(origin, "/api/access-requests", {
     roomId: room.roomId, identityId: applicant.identityId, displayName: "Access Applicant",
     requestedPermissions: [], note: null, requestId: `ar_${randomUUID().replaceAll("-", "").slice(0, 12)}`,
-  });
+  }, applicant.secret);
   assert.equal(accessRes.status, 201);
   const access = await accessRes.json();
   assert.equal(access.next[0]?.action, "poll-status");
@@ -589,7 +596,10 @@ test("nextActions vocabulary: shared builders are frozen and transport-labeled",
     return { body: await res.json() };
   })();
   const guidance = JSON.stringify(body.error.data.next);
-  assert.ok(guidance.includes("room_check_access"), "MCP guidance shares the room_check_access verb");
+  // #1551: the anonymous MCP auth guidance no longer names the hosted
+  // room_check_access tool; it shares the tools/list discovery verb instead.
+  assert.ok(!guidance.includes("room_check_access"), "anonymous MCP guidance hides hosted tool names");
+  assert.ok(guidance.includes("tools/list"), "anonymous MCP guidance points at the visible catalog");
 });
 
 // ---------------------------------------------------------------------------

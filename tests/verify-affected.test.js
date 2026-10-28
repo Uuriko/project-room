@@ -1,0 +1,156 @@
+// verify:affected picks the unit tests related to a diff. Each test names the
+// observable selection rule it guards; the fixture repo is in memory.
+import test from "node:test";
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, cpSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  parseImports,
+  resolveSpecifier,
+  buildReverseGraph,
+  relatedTests,
+  selectTests,
+  changedFiles,
+  parseGitPathList,
+  SMOKE_TESTS,
+} from "../scripts/verify-affected.mjs";
+
+const repo = {
+  "server/core.mjs": `export const x = 1;`,
+  "server/feature.mjs": `import { x } from "./core.mjs";\nexport const y = x;`,
+  "server/lazy.mjs": `export async function f() { return import("./feature.mjs"); }`,
+  "server/orphan.mjs": `export const z = 3;`,
+  "tests/feature.test.js": `import { y } from "../server/feature.mjs";`,
+  "tests/core.test.js": `import { x } from "../server/core";`,
+  "tests/lazy.test.js": `const m = await import("../server/lazy.mjs");`,
+  "tests/docs.test.js": `const spec = readFileSync(new URL("../docs/openapi.yaml", import.meta.url));`,
+  "tests/mention.test.js": `const p = "docs/guide.md"; read("README.md");`,
+  "tests/prose.test.js": `// see README.md for details`,
+  "tests/slow.test.js": `import "../server/feature.mjs";`,
+  "docs/openapi.yaml": "openapi: 3.1.0",
+  "docs/guide.md": "# guide",
+  "README.md": "# readme",
+  [SMOKE_TESTS[0]]: "",
+};
+const files = Object.keys(repo);
+const read = (f) => repo[f];
+const tests = files.filter((f) => f.startsWith("tests/"));
+const reverse = buildReverseGraph(files, read);
+
+test("failed or terminated preflight prevents test discovery and preserves failure", t => {
+  const directory = mkdtempSync(join(tmpdir(), "affected-preflight-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  mkdirSync(join(directory, "scripts"));
+  cpSync(new URL("../scripts/verify-affected.mjs", import.meta.url), join(directory, "scripts/verify-affected.mjs"));
+  // There is deliberately no Git repository or test-discovery module. Reaching
+  // either would produce a different error rather than the preflight outcome.
+  for (const [source, expected] of [["console.log('preflight refusal'); process.exit(17);", 17],
+    ["console.log('preflight refusal'); process.kill(process.pid, 'SIGTERM');", 1]]) {
+    writeFileSync(join(directory, "scripts/verify-preflight.mjs"), source);
+    const result = spawnSync(process.execPath, ["scripts/verify-affected.mjs"], { cwd: directory, encoding: "utf8" });
+    assert.equal(result.status, expected, result.stderr);
+    assert.match(result.stdout, /preflight refusal/);
+    assert.equal(result.stderr, "");
+  }
+});
+
+test("parseImports reads static, re-export, dynamic, require and new URL specifiers", () => {
+  const src = [
+    `import a from "./a.mjs";`,
+    `import { b } from '../b.js';`,
+    `import "./side.mjs";`,
+    `export * from "./re.mjs";`,
+    `const c = await import("./c.mjs");`,
+    `const d = require("./d.cjs");`,
+    `new URL("../e.json", import.meta.url)`,
+    `import fs from "node:fs";`,
+  ].join("\n");
+  assert.deepEqual(new Set(parseImports(src)), new Set(["./a.mjs", "../b.js", "./side.mjs", "./re.mjs", "./c.mjs", "./d.cjs", "../e.json", "node:fs"]));
+});
+
+test("resolveSpecifier resolves relative paths with or without extension and ignores bare ones", () => {
+  const known = new Set(files);
+  assert.equal(resolveSpecifier("tests/core.test.js", "../server/core", known), "server/core.mjs");
+  assert.equal(resolveSpecifier("server/feature.mjs", "./core.mjs", known), "server/core.mjs");
+  assert.equal(resolveSpecifier("server/feature.mjs", "node:fs", known), null);
+  assert.equal(resolveSpecifier("server/feature.mjs", "./missing.mjs", known), null);
+  assert.equal(resolveSpecifier("server/feature.mjs", "../../outside.mjs", known), null);
+});
+
+test("a change selects direct and transitive importers with their distance", () => {
+  const hit = relatedTests({ changed: ["server/core.mjs"], tests, reverse, read });
+  assert.equal(hit.get("tests/core.test.js").distance, 1);
+  assert.equal(hit.get("tests/feature.test.js").distance, 2);
+  assert.equal(hit.get("tests/lazy.test.js").distance, 3, "literal dynamic import is an edge");
+  assert.equal(hit.has("tests/docs.test.js"), false);
+});
+
+test("non-code files map through new URL() references and path mentions", () => {
+  const hit = relatedTests({ changed: ["docs/openapi.yaml", "docs/guide.md"], tests, reverse, read });
+  assert.ok(hit.has("tests/docs.test.js"));
+  assert.equal(hit.get("tests/mention.test.js").via, "mentions docs/guide.md");
+  assert.equal(hit.has("tests/feature.test.js"), false);
+
+  const root = relatedTests({ changed: ["README.md"], tests, reverse, read });
+  assert.ok(root.has("tests/mention.test.js"), "quoted root file name");
+  assert.equal(root.has("tests/prose.test.js"), false, "bare root file name in prose");
+});
+
+test("closest tests win the budget; changed tests are always kept", () => {
+  const timings = { "tests/core.test.js": 1000, "tests/feature.test.js": 1000, "tests/lazy.test.js": 1000, "tests/slow.test.js": 500000 };
+  const { selected, skipped } = selectTests({ changed: ["server/core.mjs"], tests, reverse, read, timings, budgetMs: 2500 });
+  assert.deepEqual(selected.map((s) => s.test), ["tests/core.test.js", "tests/feature.test.js"]);
+  assert.deepEqual(new Set(skipped.map((s) => s.test)), new Set(["tests/lazy.test.js", "tests/slow.test.js"]));
+
+  const kept = selectTests({ changed: ["tests/slow.test.js"], tests, reverse, read, timings, budgetMs: 1 });
+  assert.deepEqual(kept.selected.map((s) => s.test), ["tests/slow.test.js"]);
+});
+
+test("a git-quoted name-only path still names the changed file", () => {
+  assert.deepEqual(parseGitPathList('"server/caf\\303\\251.mjs"\n'), ["server/café.mjs"]);
+  assert.deepEqual(parseGitPathList('"server/tab\\tname.mjs"\n'), ["server/tab\tname.mjs"]);
+  assert.deepEqual(parseGitPathList("server/core.mjs\n"), ["server/core.mjs"]);
+  const dir = mkdtempSync(join(tmpdir(), "verify-affected-quote-"));
+  const git = (args) => execFileSync("git", ["-C", dir, "-c", "user.email=verify@example.com", "-c", "user.name=Verify", ...args], { encoding: "utf8" });
+  try {
+    git(["init", "-q", "-b", "main"]);
+    git(["config", "core.quotePath", "true"]);
+    mkdirSync(join(dir, "server"));
+    writeFileSync(join(dir, "server", "café.mjs"), "export const n = 1;\n");
+    writeFileSync(join(dir, "server", "tab\tname.mjs"), "export const t = 1;\n");
+    git(["add", "server/café.mjs", "server/tab\tname.mjs"]);
+    git(["commit", "-q", "-m", "base"]);
+    git(["checkout", "-q", "-b", "edit"]);
+    writeFileSync(join(dir, "server", "café.mjs"), "export const n = 2;\n");
+    writeFileSync(join(dir, "server", "tab\tname.mjs"), "export const t = 2;\n");
+    git(["add", "server/café.mjs", "server/tab\tname.mjs"]);
+    git(["commit", "-q", "-m", "edit"]);
+    const changed = changedFiles("main", dir);
+    assert.deepEqual(changed, ["server/café.mjs", "server/tab\tname.mjs"]);
+    const cafe = "server/café.mjs";
+    const graph = {
+      [cafe]: "export const n = 2;\n",
+      "tests/cafe.test.js": "import { n } from \"../server/café.mjs\";\n",
+    };
+    const tests = ["tests/cafe.test.js"];
+    const read = (file) => graph[file];
+    const reverse = buildReverseGraph(Object.keys(graph), read);
+    const selected = selectTests({ changed: [cafe], tests, reverse, read, budgetMs: 1e9 });
+    assert.deepEqual(selected.selected.map((row) => row.test), ["tests/cafe.test.js"]);
+    assert.deepEqual(selected.smokeReasons, []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("unmapped code, global files and empty diffs fall back to the smoke set", () => {
+  const smoke = (changed) => selectTests({ changed, tests, reverse, read, budgetMs: 1e9 });
+  const orphan = smoke(["server/orphan.mjs"]);
+  assert.match(orphan.smokeReasons.join(), /no related test for server\/orphan\.mjs/);
+  assert.ok(orphan.selected.some((s) => s.via === "smoke" && s.test === SMOKE_TESTS[0]));
+  assert.deepEqual(smoke(["package.json"]).smokeReasons, ["global file changed"]);
+  assert.deepEqual(smoke([]).smokeReasons, ["no changes"]);
+  assert.deepEqual(smoke(["server/core.mjs"]).smokeReasons, [], "mapped code needs no smoke set");
+});

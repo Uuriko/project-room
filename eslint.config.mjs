@@ -3,6 +3,13 @@
 // allowed. Globals are scoped per runtime so a Node-only name used in the
 // browser bundle (or vice versa) is an error, not noise.
 import globals from "globals";
+import roomRules from "./scripts/eslint-rules/no-raw-transaction.mjs";
+import { noRawMembersIndex } from "./scripts/eslint-rules/no-raw-members-index.mjs";
+
+// One combined `room` plugin object: flat config cannot redefine a plugin
+// namespace across blocks, so every room rule lives in this single object
+// and each block enables the rules it enforces.
+const roomPlugin = { rules: { ...roomRules.rules, "no-raw-members-index": noRawMembersIndex } };
 
 const rules = {
   "no-undef": "error",
@@ -19,6 +26,22 @@ const rules = {
   // churn for a lint PR. Promote to "error" once the warnings are gone.
   "prefer-const": ["warn", { destructuring: "all" }],
 };
+export const RAW_TRANSACTION_EXEMPT = ["server/store.mjs", "server/analytics/tail.mjs"];
+// Files fully migrated off raw members[ indexing (decision #19a): the
+// no-raw-members-index rule is an error there. Everywhere else in server/**
+// it is a warning, so the remaining burn-down stays visible in lint output.
+// Move a file into this list in the same PR that migrates its last site.
+// Burn-down tracker: issue #3224.
+export const RAW_MEMBERS_INDEX_ENFORCED = [
+  "server/access-requests.mjs",
+  "server/access-review.mjs",
+  "server/agent-connections.mjs",
+  "server/agent-rooms.mjs",
+  "server/invitation-evidence.mjs",
+  "server/member-permission-requests.mjs",
+  "server/outside-agents.mjs",
+  "server/room-lifecycle.mjs",
+];
 const languageOptions = { ecmaVersion: "latest", sourceType: "module" };
 
 export default [
@@ -47,11 +70,38 @@ export default [
   // Door hash-forward is authored as a Node export then stringified into the
   // public door HTML, so it legitimately references browser globals.
   {
-    files: ["deploy/room-entry.mjs"],
+    files: ["server/room-entry.mjs"],
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
   },
   {
     files: ["scripts/*-check.mjs", "scripts/*-exercise.mjs", "scripts/*-journey.mjs", "scripts/qa2/public-pages.mjs", "scripts/build-og-atlas.mjs"],
     languageOptions: { ...languageOptions, globals: { ...globals.node, ...globals.browser } },
+  },
+  // TST-07: server code opens transactions only through store.transaction(fn).
+  // store.mjs implements that helper. The other file predates the rule:
+  // analytics/tail.mjs writes the separate analytics database. (spend-grants.mjs
+  // is LIVE money code, wired into both MCP profiles; it delegates to
+  // store.transaction and is no longer exempt.) Remove an entry when its file moves to the
+  // helper; tests/no-raw-transaction-lint.test.js fails on a stale entry.
+  {
+    files: ["server.mjs", "server/**/*.mjs"],
+    ignores: RAW_TRANSACTION_EXEMPT,
+    plugins: { room: roomPlugin },
+    rules: { "room/no-raw-transaction": "error" },
+  },
+  // Decision #19a: raw members[ indexing is banned. Warn-only outside the
+  // migrated set (the phantom-member bug family — #2842/#3006/#3007/#3009/
+  // #3023 — came from exactly this pattern, so the warnings are the
+  // burn-down list); an error in RAW_MEMBERS_INDEX_ENFORCED files.
+  {
+    files: ["server/**/*.mjs"],
+    ignores: RAW_MEMBERS_INDEX_ENFORCED,
+    plugins: { room: roomPlugin },
+    rules: { "room/no-raw-members-index": "warn" },
+  },
+  {
+    files: RAW_MEMBERS_INDEX_ENFORCED,
+    plugins: { room: roomPlugin },
+    rules: { "room/no-raw-members-index": "error" },
   },
 ];

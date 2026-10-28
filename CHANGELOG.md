@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- First-room setup failure no longer reads as an empty account ("No rooms
+  yet."). It now says the setup failed and names the retry: "Couldn’t set
+  up your first room. Choose Rooms to retry."
+
 - Human browser push, mentions and direct messages only. One button asks the
   browser for permission. No notification-level picker and no quiet hours.
   Thread mutes and member mutes still suppress delivery. The push carries a

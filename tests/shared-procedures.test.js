@@ -2,7 +2,7 @@
 // The library is docs-first: docs/procedures/*.md carry YAML frontmatter
 // (id, title, version, author, source_room, updated, status). The generator
 // (scripts/procedures-index.mjs) validates the files and bakes a frozen index
-// into deploy/procedures-index.mjs; the discovery surface serves it at
+// into server/procedures-index.mjs; the discovery surface serves it at
 // GET /procedures (read-only, global namespace, every room).
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -19,13 +19,13 @@ const {
   buildProceduresIndex,
   PROCEDURES_SCHEMA_VERSION,
 } = await import("../scripts/procedures-index.mjs");
-const { PROCEDURES_INDEX } = await import("../deploy/procedures-index.mjs");
+const { PROCEDURES_INDEX } = await import("../server/procedures-index.mjs");
 const {
   discoveryDoc,
   DISCOVERY_PATHS,
   PROCEDURES_PATH,
   KEY_ROUTES,
-} = await import("../deploy/agent-discovery.mjs");
+} = await import("../server/agent-discovery.mjs");
 
 const BASE_FIELDS = {
   id: "test.example-proc",
@@ -118,7 +118,7 @@ test("the baked index matches the live docs (drift gate)", () => {
   assert.deepEqual(
     buildProceduresIndex(proceduresDir),
     PROCEDURES_INDEX.map(p => ({ ...p })),
-    "deploy/procedures-index.mjs is stale: run node scripts/procedures-index.mjs",
+    "server/procedures-index.mjs is stale: run node scripts/procedures-index.mjs",
   );
 });
 

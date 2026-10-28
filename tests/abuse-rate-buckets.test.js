@@ -77,3 +77,14 @@ test("an expired bucket is ignored and a bounded prune removes it", async t => {
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM abuse_rate_buckets WHERE until_ms <= ?").get(Date.now()).n, 0);
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM abuse_rate_buckets WHERE id='login:10.4.4.5'").get().n, 1);
 });
+
+test("a 429 names its bucket and tells the agent when to retry (AUX-13)", async t => {
+  const store = openStore(t);
+  const { login } = await listen(t, store);
+  for (let i = 0; i < 10; i++) assert.equal((await login("10.8.8.8")).status, 401, `attempt ${i + 1}`);
+  const limited = await login("10.8.8.8");
+  assert.equal(limited.status, 429);
+  assert.equal((await limited.json()).error.code, "rate_limited");
+  assert.equal(limited.headers.get("x-ratelimit-bucket"), "login", "the 429 names the bucket that refused it");
+  assert.equal(Number(limited.headers.get("retry-after")), 60, "Retry-After matches the one-minute window");
+});

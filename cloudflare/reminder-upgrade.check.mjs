@@ -12,6 +12,11 @@ import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 
 test(`real Workers v7→v${STORE_SCHEMA_VERSION} migration fences a cached legacy adapter, rolls back failures and survives restart`, { timeout: 90000 }, async () => {
   const fixture = createAcceptanceFixture(), db = fixture.store.db;
+  // Decision #10: the workItems -> board-claims backfill runs when a store
+  // opens a room and records its marker row once. Stage that one-time
+  // migration in the fixture so the replayed legacy rows already carry it
+  // and the restart census below compares migrated state to migrated state.
+  fixture.store.backfillWorkItemClaims();
   const persistence = mkdtempSync(join(tmpdir(), 'room-reminder-upgrade-'));
   // Exclude SQLite internals (sqlite_sequence et al.): the Workers runtime owns
   // and recreates them, and replaying their CREATE TABLE is rejected as reserved.

@@ -36,7 +36,7 @@
 //
 // This module does not import server/store.mjs (store imports it); errors
 // carry status and code like ServiceError and the router reads them as such.
-import { EVENT_TYPES as T } from "../src/events.js";
+import { EVENT_TYPES as T, ownMember } from "../src/events.js";
 
 export const AUTONOMY_TIERS = Object.freeze(["t1_readonly", "t2_standard"]);
 // Absent row = legacy behavior: no behavior change for existing members
@@ -203,7 +203,11 @@ function requireOwner(auth, room) {
 
 function requireMember(room, memberId) {
   if (!validMemberId(memberId)) refuse(422, "invalid_autonomy_tier", "memberId must be a room member id");
-  if (!room.state.members?.[memberId]) refuse(404, "member_not_found", `No member ${memberId} in this room`);
+  // #3009: members is a plain-object projection, so a raw members[memberId]
+  // index resolves inherited Object.prototype names ("toString",
+  // "constructor", ...) as truthy phantom members. Resolve through
+  // ownMember (Object.hasOwn) like src/events.js / server/outside-agents.mjs.
+  if (!ownMember(room.state.members, memberId)) refuse(404, "member_not_found", `No member ${memberId} in this room`);
 }
 
 // GET /api/rooms/:roomId/operator/agents/:memberId - owner only (403 for

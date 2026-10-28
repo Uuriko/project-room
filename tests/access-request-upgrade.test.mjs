@@ -10,6 +10,7 @@ import { initialRoom } from "../server/bootstrap.mjs";
 import { AccessRequests, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // Owner-boundary regression: existing access-request tests cover admission,
 // including a join granted before review, but not a request by a current
@@ -24,10 +25,7 @@ function setup(t, permissions = ["steer"]) {
   store.initialize(initialRoom("commons"));
   const ownerToken = store.issueAccessKey("commons", "owner", 30 * 86400000);
   const identity = store.identities.create("Existing Agent");
-  const { memberId } = store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, memberId: "existing-agent",
-    displayName: "Existing Agent", permissions,
-  });
+  const { memberId } = linkWithProof(store, ownerToken, "commons", identity, { memberId: "existing-agent", displayName: "Existing Agent", permissions });
   t.after(() => { store.close(); rmSync(directory, { recursive: true, force: true }); });
   const fixture = {
     get store() { return store; }, ownerToken, identity, memberId,
@@ -119,7 +117,7 @@ test("unprivileged and admission-only reviewers cannot approve an upgrade", t =>
   assert.throws(() => f.requests.decide(f.identity.secret, "commons", "ar_admin", { decision: "approve" }),
     error => error.status === 403 && error.code === "access_denied");
   const reviewer = f.store.identities.create("Admission Reviewer");
-  f.store.identities.link(f.ownerToken, "commons", { identityId: reviewer.identityId, permissions: [] });
+  linkWithProof(f.store, f.ownerToken, "commons", reviewer, { permissions: [] });
   f.store.delegation.grant(f.ownerToken, "commons", { identityId: reviewer.identityId });
   assert.throws(() => f.requests.decide(reviewer.secret, "commons", "ar_admin", { decision: "approve" }),
     error => error.status === 403 && error.code === "access_denied");
@@ -138,10 +136,7 @@ test("changed or withdrawn membership invalidates a pending upgrade", async t =>
     revoked: f => f.store.identities.revoke(f.identity.identityId, f.identity.secret),
     relinked: f => {
       f.store.identities.unlink(f.ownerToken, "commons", f.identity.identityId);
-      f.store.identities.link(f.ownerToken, "commons", {
-        identityId: f.identity.identityId, memberId: f.memberId,
-        permissions: [], settleAccessRequests: false,
-      });
+      linkWithProof(f.store, f.ownerToken, "commons", f.identity, { memberId: f.memberId, permissions: [], settleAccessRequests: false });
     },
   };
   for (const [name, change] of Object.entries(changes)) {
@@ -173,7 +168,7 @@ test("inactive or revoked memberships cannot file upgrades", async t => {
   }
 });
 
-test("HTTP upgrades and status require current identity-holder proof; admission stays public", async t => {
+test("HTTP upgrades, status and fresh admission require current identity-holder proof", async t => {
   const f = setup(t);
   const other = f.store.identities.create("Other Requester");
   const server = createRoomServer({ store: f.store });
@@ -204,7 +199,13 @@ test("HTTP upgrades and status require current identity-holder proof; admission 
   const status = await fetch(statusPath, { headers: { Authorization: `Bearer ${current.secret}` } });
   assert.equal(status.status, 200);
   assert.equal((await status.json()).status, "pending");
-  assert.equal((await post({ ...data, identityId: other.identityId, displayName: "Other Requester", requestId: "ar_public_join" })).status, 201);
+  // Issue #2912: fresh admission is not public either — filing under an
+  // identityId requires that identity's secret, and another identity's
+  // secret does not file in its name.
+  const joinData = { ...data, identityId: other.identityId, displayName: "Other Requester", requestId: "ar_public_join" };
+  assert.equal((await post(joinData)).status, 401);
+  assert.equal((await post(joinData, f.identity.secret)).status, 401);
+  assert.equal((await post(joinData, other.secret)).status, 201);
   assert.deepEqual(f.member().permissions, ["steer"]);
 });
 
@@ -248,6 +249,24 @@ test("upgrade pending state obeys cap, cancellation and expiry", t => {
   assert.equal(requests.list(f.ownerToken, "commons").length, 0);
   assert.equal(requests.list(f.ownerToken, "commons", { status: "expired" }).length, 4);
   assert.deepEqual(f.member().permissions, ["steer"]);
+});
+
+// #3745: the cap test above frees slots by polling and listing — the two
+// read paths that materialize expiry. With no reader at all, lapsed
+// upgrade rows used to consume the cap forever; the create path now
+// expires the caller's own lapsed rows before counting.
+test("lapsed upgrade pendings are expired on create and do not consume the cap (#3745)", t => {
+  const f = setup(t);
+  const requests = new AccessRequests(f.store, { rateLimiter: createRateLimiter({ capacity: 100, refillPerSecond: 100 }) });
+  const input = { identityId: f.identity.identityId, displayName: "Existing Agent", requestedPermissions: ["accept_work"] };
+  for (let i = 0; i < 5; i++) requests.request("commons", { ...input, requestId: `ar_lapse_${i}` }, f.identity.secret);
+  // Nobody lists, decides, or polls: past the TTL the rows are still
+  // stored 'pending_upgrade'.
+  f.advance(REQUEST_TTL_MS + 1);
+  const sixth = requests.request("commons", { ...input, requestId: "ar_lapse_new" }, f.identity.secret);
+  assert.equal(sixth.status, "pending");
+  assert.equal(requests.list(f.ownerToken, "commons", { status: "expired" }).length, 5);
+  assert.equal(requests.list(f.ownerToken, "commons").length, 1);
 });
 
 test("the pre-upgrade writer rejects pending upgrades even with explicit grants", async t => {

@@ -1,0 +1,50 @@
+# Dependabot version updates (HK3 change-list #3).
+#
+# Security updates are enabled at the repository level; this file adds the
+# missing scheduled *version-update* cadence: weekly, minor+patch grouped per
+# directory, major updates as individual PRs, and a per-directory open-PR
+# limit so update PRs cannot add to a PR flood. GitHub Actions updates keep
+# the full-SHA pins current (Dependabot rewrites the SHA + version comment),
+# which the workflow pin-gate (scripts/check-workflow-pins.mjs) requires.
+version: 2
+updates:
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "npm"
+    directory: "/cloudflare"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "npm"
+    directory: "/relay"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"

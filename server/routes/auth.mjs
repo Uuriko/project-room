@@ -3,12 +3,14 @@
 // Email verification, password set, recovery codes, and OAuth stay on the
 // legacy chain. Handler bodies keep their checks; the dispatcher only
 // adds 405 Allow for a wrong method on one of these paths.
+// GET /api/auth/signin-options (H3, #3341) lives in its own table group
+// (server/routes/signin-options.mjs) — this group stays POST-only.
 
 import { createHash } from "node:crypto";
 import { ServiceError } from "../service-error.mjs";
-import { magicLinkUnavailable, validateMagicReturnTo } from "../magic-links.mjs";
+import { magicLinkUnavailable, validateMagicReturnTo, attemptMailDelivery, attemptAuthMailDelivery } from "../magic-links.mjs";
 import { normalizeEmail } from "../account-login-methods.mjs";
-import { resolvePasskeyParams } from "../account-passkeys.mjs";
+import { resolvePasskeyParams, passkeyUserLabel, PASSKEY_RP_NAME } from "../account-passkeys.mjs";
 import { hashPassword, verifyPassword, checkPasswordPolicy, DUMMY_PASSWORD_VERIFIER } from "../../src/password-auth.mjs";
 
 const objectResponse = Object.freeze({ type: "object" });
@@ -39,7 +41,22 @@ function authRoute(row) {
   };
 }
 
-const passwordAccountId = normalized => `email:${createHash("sha256").update(normalized).digest("hex")}`;
+// Accounts provisioned from an email (password signup, magic link) use
+// email:<sha256>. Deleting an account leaves a deactivated tombstone under that
+// id so retained audit rows stay attributable; a later signup for the same email
+// takes the next free suffix (email:<sha256>.2, …) instead of colliding with it.
+// A live account at an id is returned as is, so callers keep their
+// existing-account handling.
+const MAX_EMAIL_ACCOUNT_GENERATIONS = 20;
+export function emailAccountIdFor(store, normalized) {
+  const base = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
+  for (let generation = 1; generation <= MAX_EMAIL_ACCOUNT_GENERATIONS; generation++) {
+    const id = generation === 1 ? base : `${base}.${generation}`;
+    const row = store.db.prepare("SELECT active FROM accounts WHERE id=?").get(id);
+    if (!row || row.active === 1) return id;
+  }
+  throw new ServiceError(409, "account_exists", "This email can't start a new account; contact support");
+}
 
 export async function handleAuthGroup(ctx) {
   const {
@@ -62,10 +79,17 @@ export async function handleAuthGroup(ctx) {
     return loggedIn;
   };
   const signupReply = () => ({ status: "check_email", mailConfigured: magicMailer.isConfigured() });
-  const deliverSignupMail = async fn => {
-    try { await fn(); } catch { /* Delivery does not change the signup response. */ }
-  };
+  // Delivery does not change the signup response, but a failure is logged
+  // (redacted) so operators can see why mail is not arriving.
+  const deliverSignupMail = fn => attemptMailDelivery(fn, "signup");
+  // Sign-in and reset requests answer indistinguishably whether or not the
+  // address is deliverable (#3529): a provider refusal for the recipient is
+  // absorbed (and logged), while a transient provider failure still throws
+  // so the request surfaces as retryable instead of a fake "sent".
+  const deliverAuthMail = (fn, kind) => attemptAuthMailDelivery(fn, kind);
   const passkeyUnavailable = () => json(res, 503, { status: "unavailable", reason: "passkey_not_configured" });
+
+
 
   // ---- Magic link auth (slice 3, RC-2026-09-17-012) ----
   //
@@ -104,7 +128,7 @@ export async function handleAuthGroup(ctx) {
       magicEmailLimit(magicRequestEmailLimiter, normalized);
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
       const issued = store.accountLogins.issueMagicCode({ email: normalized });
-      await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
+      await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) }), "magic-request");
       return json(res, 200, { status: "sent" });
     }
     const data = await body(req);
@@ -147,7 +171,7 @@ export async function handleAuthGroup(ctx) {
       const adopted = store.accountLogins.adoptVerifiedEmail(normalized, { preserveSlotToken: consumeToken });
       let accountId = adopted?.accountId ?? null;
       if (!accountId) {
-        const derived = `email:${createHash("sha256").update(normalized, "utf8").digest("hex")}`;
+        const derived = emailAccountIdFor(store, normalized);
         try { store.createAccount(derived, "magic-link"); }
         catch (error) { if (!(error instanceof ServiceError) || error.status !== 409) throw error; }
         accountId = derived;
@@ -185,8 +209,8 @@ export async function handleAuthGroup(ctx) {
     if (requesting) {
       if (!magicMailer.isConfigured()) return json(res, 200, magicLinkUnavailable());
       const issued = store.accountLogins.issuePasswordResetCode({ email: normalized });
-      await magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
-        ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) });
+      await deliverAuthMail(() => magicMailer.sendMagicLink({ to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "password-reset",
+        ...(Object.hasOwn(data, "returnTo") ? { returnTo: data.returnTo } : {}) }), "password-reset-request");
       return json(res, 200, { status: "sent" });
     }
     const verifyResetSlot = () => {
@@ -235,11 +259,17 @@ export async function handleAuthGroup(ctx) {
     checkOrigin(req, true);
     rate(`password-signup:${remoteAddress}`, 10);
     const data = await body(req);
-    const signupToken = signInSlotToken(req, data, ["email", "password", "sessionRevision"],
+    // An optional returnTo (same strict validation as magic sign-in) rides
+    // the signup mail, so an invitee who signs up from a #join/ or #invite/
+    // link lands back on that invitation from the email, not on a bare root.
+    const signupReturn = Object.hasOwn(data, "returnTo");
+    const signupToken = signInSlotToken(req, data, ["email", "password", "sessionRevision", ...(signupReturn ? ["returnTo"] : [])],
       { code: "invalid_signup", message: "An email, password, and current session are required" });
     if (typeof data.email !== "string" || typeof data.password !== "string") {
       reject(422, "invalid_signup", "An email, password, and current session are required");
     }
+    if (signupReturn && validateMagicReturnTo(data.returnTo) === null) reject(422, "invalid_return_target", "A valid local return target is required");
+    const signupLink = signupReturn ? { returnTo: data.returnTo } : {};
     const normalized = normalizeEmail(data.email);
     if (!normalized) reject(422, "invalid_email", "A valid email address is required");
     const policy = checkPasswordPolicy(data.password);
@@ -249,14 +279,14 @@ export async function handleAuthGroup(ctx) {
     const mailConfigured = magicMailer.isConfigured();
     const holding = store.accountLogins.findAccountHoldingEmail(normalized);
     if (holding) {
-      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
+      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice", ...signupLink }));
       return json(res, 202, signupReply());
     }
-    const accountId = passwordAccountId(normalized);
+    const accountId = emailAccountIdFor(store, normalized);
     try { store.createAccount(accountId, "password-signup"); }
     catch (error) {
       if (!(error instanceof ServiceError) || error.status !== 409) throw error;
-      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice" }));
+      if (mailConfigured) await deliverSignupMail(() => magicMailer.sendMagicLink({ to: normalized, purpose: "signup-notice", ...signupLink }));
       return json(res, 202, signupReply());
     }
     const method = store.accountLogins.linkPasswordMethod(accountId, { email: normalized, verifier });
@@ -264,7 +294,7 @@ export async function handleAuthGroup(ctx) {
     if (mailConfigured) {
       const issued = store.accountLogins.issueEmailVerifyCode({ accountId, email: normalized });
       await deliverSignupMail(() => magicMailer.sendMagicLink({
-        to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify"
+        to: normalized, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify", ...signupLink
       }));
     }
     finishPasswordSlot(signupToken, accountId, data.sessionRevision, method.id);
@@ -288,6 +318,12 @@ export async function handleAuthGroup(ctx) {
     // Unknown emails and verifier-less accounts verify against the dummy
     // so the response never reveals whether the email is registered.
     if (!verifyPassword(data.password, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+      reject(401, "invalid_credentials", "Invalid email or password");
+    }
+    // A pass against the dummy is not authentication: with no real account
+    // or no real verifier there is nothing to sign in to. Answer exactly
+    // like a wrong password so the response never reveals which case it was.
+    if (!accountId || !verifier) {
       reject(401, "invalid_credentials", "Invalid email or password");
     }
     const passwordMethod = store.accountLogins.listMethods(accountId).find(m => m.type === "password");
@@ -318,6 +354,11 @@ export async function handleAuthGroup(ctx) {
     verifyChangeSession();
     const verifier = store.accountLogins.readPasswordVerifier(session.account.id);
     if (!verifyPassword(data.currentPassword, verifier ?? DUMMY_PASSWORD_VERIFIER)) {
+      reject(401, "invalid_credentials", "The current password is incorrect");
+    }
+    // An account with no password set has no current password to match; the
+    // dummy verifier must never stand in for one.
+    if (!verifier) {
       reject(401, "invalid_credentials", "The current password is incorrect");
     }
     const policy = checkPasswordPolicy(data.newPassword);
@@ -351,7 +392,7 @@ export async function handleAuthGroup(ctx) {
       reject(422, "invalid_passkey_request", "authenticatorSelection must be an object");
     }
     return json(res, 200, passkeys().beginRegistration({ accountId: auth.account.id, rpId: params.rpId,
-      rpName: params.rpId, userName: data.userName ?? auth.account.id, authenticatorSelection: data.authenticatorSelection }));
+      rpName: PASSKEY_RP_NAME, userName: data.userName ?? passkeyUserLabel(store, auth.account.id), authenticatorSelection: data.authenticatorSelection }));
   }
   if (url.pathname === "/api/auth/passkey/register/finish" && req.method === "POST") {
     checkOrigin(req, true);
@@ -407,6 +448,126 @@ export async function handleAuthGroup(ctx) {
   reject(404, "not_found", "Not found");
 }
 
+// Guest upgrade (auth audit 2026-10-09, path 13).
+//
+// A guest who joins from a share link gets a real account (guest-<uuid>)
+// whose sign-in lasts 8 hours, with no email. Account settings offered "Set a
+// password", which needs an email, and no way to add one, so a guest could
+// neither keep the account nor delete it.
+//
+// Two steps, both on the guest's own signed-in session:
+//   POST /api/auth/guest/upgrade          { email }
+//   POST /api/auth/guest/upgrade/confirm  { email, code, password }
+// The first always answers the same 202. A free address gets a 6-digit code;
+// an address another account holds gets the existing-account notice instead.
+// The second links the email (verified) and the password to the SAME account,
+// so its id, rooms, and messages stay. Nothing is linked until the code
+// proves the inbox, and a held address simply has no code, so neither step
+// reveals whether someone else uses an email.
+
+
+function guestSession(ctx) {
+  const { req, store, reject, cookie, checkOrigin, protectWrite, accountCookieName } = ctx;
+  checkOrigin(req, true);
+  const slotToken = cookie(req, accountCookieName);
+  if (!slotToken) reject(401, "account_session_required", "Sign in to keep this account");
+  let session;
+  try { session = store.authenticateAccountSession(slotToken); }
+  catch (error) {
+    if (error.status !== 401) throw error;
+    reject(401, "invalid_session", "That session is no longer valid; sign in again");
+  }
+  if (!session.account) reject(401, "account_session_required", "Sign in to keep this account");
+  protectWrite(req, session, false);
+  const methods = store.accountLogins.listMethods(session.account.id);
+  if (methods.some(method => method.email || method.type === "password")) {
+    reject(409, "login_method_exists", "This account already has an email or password; manage it in Account settings");
+  }
+  return session;
+}
+
+const emailFrom = (ctx, data) => {
+  const normalized = typeof data.email === "string" ? normalizeEmail(data.email) : null;
+  if (!normalized) ctx.reject(422, "invalid_email", "A valid email address is required");
+  return normalized;
+};
+
+async function postGuestUpgrade(ctx) {
+  const { res, store, remoteAddress, json, reject, rate, body, exact, magicMailer, magicEmailLimit, signupEmailLimiter } = ctx;
+  rate(`guest-upgrade:${remoteAddress}`, 20);
+  const session = guestSession(ctx);
+  const data = await body(ctx.req);
+  if (!exact(data, ["email"])) reject(422, "invalid_email", "A valid email address is required");
+  const email = emailFrom(ctx, data);
+  rate(`guest-upgrade-account:${session.account.id}`, 5);
+  magicEmailLimit(signupEmailLimiter, email);
+  const mailConfigured = magicMailer.isConfigured();
+  if (mailConfigured) {
+    const send = fn => attemptMailDelivery(fn, "guest-upgrade");
+    if (store.accountLogins.findAccountHoldingEmail(email)) {
+      await send(() => magicMailer.sendMagicLink({ to: email, purpose: "signup-notice" }));
+    } else {
+      const issued = store.accountLogins.issueEmailVerifyCode({ accountId: session.account.id, email });
+      await send(() => magicMailer.sendMagicLink({ to: email, code: issued.code, expiresAt: issued.expiresAt, purpose: "email-verify" }));
+    }
+  }
+  return json(res, 202, { status: "check_email", mailConfigured });
+}
+
+async function postGuestUpgradeConfirm(ctx) {
+  const { res, store, remoteAddress, json, reject, rate, body, exact } = ctx;
+  rate(`guest-upgrade-confirm:${remoteAddress}`, 20);
+  const session = guestSession(ctx);
+  const data = await body(ctx.req);
+  if (!exact(data, ["email", "code", "password"]) || typeof data.code !== "string" || typeof data.password !== "string") {
+    reject(422, "invalid_password_set", "An email, code, and password are required");
+  }
+  const email = emailFrom(ctx, data);
+  const policy = checkPasswordPolicy(data.password);
+  if (policy) reject(422, policy.code, policy.message);
+  const accountId = session.account.id;
+  // Someone took the address since the code went out: same answer as a bad code.
+  if (store.accountLogins.findAccountHoldingEmail(email)) reject(401, "invalid_email_code", "That code is not valid");
+  const verifier = hashPassword(data.password);
+  // #2956: burn the code, link the magic method (consume does both), link
+  // the password, and mark verified in ONE transaction. Previously each
+  // step committed on its own, so a linkPasswordMethod failure after the
+  // consume (e.g. a racing tab set a password first) left the code spent
+  // and a magic method behind, and guestSession then refused any retry.
+  // An invalid code is the one failure that must COMMIT: consume counts
+  // the miss before throwing, and rolling that back would let an attacker
+  // retry forever — so return it and throw only after the transaction,
+  // exactly like the password-reset consume above.
+  const consumeFailure = store.transaction(() => {
+    // Recheck inside the writer fence so an address taken, or a password
+    // set, between the checks above and this transaction is seen here.
+    if (store.accountLogins.findAccountHoldingEmail(email)) reject(401, "invalid_email_code", "That code is not valid");
+    try {
+      store.accountLogins.consumeEmailVerifyCode({ accountId, email, code: data.code.trim() });
+    } catch (error) {
+      if (error instanceof ServiceError && error.code === "invalid_email_code") return error;
+      throw error;
+    }
+    const method = store.accountLogins.linkPasswordMethod(accountId, { email, verifier });
+    store.accountLogins.markEmailVerified(accountId, email);
+    store.accountLogins.touchMethod(accountId, method.id);
+    return null;
+  });
+  if (consumeFailure) throw consumeFailure;
+  return json(res, 200, { status: "upgraded", email });
+}
+
+const row = (id, path, handler, required) => Object.freeze({ id, method: "POST", path, auth: "account",
+  capability: null, scope: "worker", handler, events: [], rate: { key: id, max: 20 },
+  parity: "exempt:human browser account setup; agents have no guest account",
+  schema: { body: { type: "object", required, additionalProperties: false,
+    properties: Object.fromEntries(required.map(key => [key, { type: "string" }])) }, response: { type: "object" } } });
+
+const GUEST_UPGRADE_ROUTES = [
+  row("auth.guest.upgrade", "/api/auth/guest/upgrade", postGuestUpgrade, ["email"]),
+  row("auth.guest.upgrade.confirm", "/api/auth/guest/upgrade/confirm", postGuestUpgradeConfirm, ["email", "code", "password"]),
+];
+
 export const AUTH_ROUTES = Object.freeze([
   authRoute({
     id: "auth.magic.request", method: "POST", path: "/api/auth/magic/request", auth: "account",
@@ -436,7 +597,7 @@ export const AUTH_ROUTES = Object.freeze([
     id: "auth.password.signup", method: "POST", path: "/api/auth/password/signup", auth: "account",
     rate: { key: "password-signup", max: 10 },
     schema: { body: { type: "object", required: ["email", "password", "sessionRevision"], additionalProperties: false, properties: {
-      email: { type: "string" }, password: { type: "string" }, ...slotFields,
+      email: { type: "string" }, password: { type: "string" }, returnTo: { type: "string" }, ...slotFields,
     } } },
   }),
   authRoute({
@@ -477,4 +638,5 @@ export const AUTH_ROUTES = Object.freeze([
       challengeId: { type: "string" }, response: { type: "object" }, ...slotFields,
     } } },
   }),
+  ...GUEST_UPGRADE_ROUTES,
 ]);

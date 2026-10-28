@@ -6,6 +6,7 @@ import { connectSnippets, HOSTED_MCP_URL, WORK_LOOP, renderedSnippet } from "../
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const ORIGIN = "https://room.trydemigod.com";
+export const PASTE_PAGE = Object.freeze({ id: "paste", docsPath: "/docs/agents/paste", htmlFile: "docs/agents/paste.html" });
 
 const escape = text => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
@@ -118,15 +119,16 @@ function howTo(name, steps) {
 
 const style = `:root{color-scheme:dark;--bg:#202127;--text:#eeedf1;--muted:#aaaab7;--blue:#a9b9ff;--line:#393b45;--font:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
 body{margin:0;background:var(--bg);color:var(--text);font:17px/1.6 var(--font)}
-main{max-width:720px;margin:auto;padding:40px 20px}
+main{max-width:720px;margin:auto;padding:40px 20px;overflow-wrap:anywhere}
 h1{font-size:clamp(28px,6vw,42px);line-height:1.15;letter-spacing:-.04em}
 h2{font-size:23px;margin-top:32px}
 p,li{color:var(--muted)}
 h1,h2{color:var(--text)}
 a{color:var(--blue)}
-pre{overflow:auto;padding:12px 16px;background:#191a20;border:1px solid var(--line);border-radius:.45rem}
+pre{box-sizing:border-box;max-width:100%;white-space:pre-wrap;overflow-wrap:anywhere;overflow:auto;padding:12px 16px;background:#191a20;border:1px solid var(--line);border-radius:.45rem}
 pre:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
 code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.9em}
+:not(pre)>code{overflow-wrap:anywhere}
 footer{margin-top:40px;border-top:1px solid var(--line);padding-top:16px;color:var(--muted)}
 `;
 
@@ -142,7 +144,7 @@ function page({ title, description, path, body, steps }) {
 <script type="application/ld+json">${howTo(title, steps)}</script>
 </head><body><main>
 ${body}
-<footer><a href="/docs/agents">All agents</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
+<footer><a href="/docs/agents">All agents</a> · <a href="/">Home</a> · <a href="/about">About</a> · <a href="/offers">Open offers</a> · <a href="https://github.com/Uuriko/project-room">Source</a></footer>
 </main></body></html>
 `;
 }
@@ -167,6 +169,17 @@ export function agentPages(dir = join(root, "docs", "agents")) {
       steps,
     }));
   }
+  // S1b: the human paste-block page. Same renderer and secret guard as the tool pages.
+  const pasteMd = readFileSync(join(dir, PASTE_PAGE.id + ".md"), "utf8");
+  if (/pri_[A-Za-z0-9_-]{8,}/.test(pasteMd)) throw new Error("paste page contains a secret");
+  if (!indexMd.includes(`(${PASTE_PAGE.id}.md)`)) throw new Error("docs/agents/index.md does not link to the paste page");
+  pages.set(PASTE_PAGE.htmlFile, page({
+    title: "Connect your agent by pasting",
+    description: "Paste one block into ChatGPT, Claude, Cursor or another agent. It joins your room, says hello, and never needs your key.",
+    path: PASTE_PAGE.docsPath,
+    body: renderMarkdown(pasteMd, { labelPrefix: "Paste block" }),
+    steps: sections(pasteMd),
+  }));
   const indexBody = renderMarkdown(indexMd) + "<ul>" + connectSnippets.map(tool => `<li><a href="${tool.docsPath}">${escape(tool.label)}</a> — <code>${escape(tool.command)}</code></li>`).join("") + "</ul>";
   pages.set("docs/agents/index.html", page({
     title: "Connect your agent",

@@ -84,7 +84,7 @@ test("settingsHtml shows linked methods with actions and honest provider states"
   assert.ok(html.includes('data-action="enable" data-id="m2"'));
   assert.ok(html.includes('data-action="remove"'));
   assert.ok(html.includes("/api/auth/github/link/start"), "configured GitHub offers a connect link");
-  assert.ok(html.includes("Google sign-in isn\u2019t configured on this Room."), "unconfigured Google is honest");
+  assert.ok(!html.includes("/api/auth/google/link/start"), "unconfigured Google is not offered");
   assert.ok(html.includes("Email delivery isn\u2019t configured on this Room"), "unconfigured mail is honest");
   assert.ok(html.includes("data-form=\"password-change\""), "an existing password offers change, not set");
   for (const heading of ["Profile", "Notifications", "Agents &amp; connections", "Billing / plan", "Advanced", "Linked sign-in methods"]) {
@@ -99,12 +99,21 @@ test("settingsHtml shows linked methods with actions and honest provider states"
 });
 
 test("settingsHtml offers password set when none exists and recovery generation", () => {
-  const html = settingsHtml({ methods: [], providers: null });
-  assert.ok(html.includes("No sign-in methods are linked yet."));
-  assert.ok(html.includes("No email on this account yet. Add a sign-in method under Advanced."));
+  const html = settingsHtml({ methods: [{ id: "m1", type: "magic", label: "Email link", email: "a@b.c", disabled: false }], providers: null });
   assert.ok(html.includes("data-form=\"password-set\""));
   assert.ok(html.includes("Generate recovery codes"));
-  assert.ok(html.includes("GitHub sign-in isn\u2019t configured on this Room."));
+  assert.ok(!html.includes("/api/auth/github/link/start"));
+});
+
+test("an account with no email or password (a guest) is offered Keep this account, not a dead-end Set a password", () => {
+  const html = settingsHtml({ methods: [], providers: null });
+  assert.ok(html.includes("No sign-in methods are linked yet."));
+  assert.ok(html.includes('data-form="guest-upgrade"'), "Profile offers the guest upgrade");
+  assert.ok(html.includes("Add your email to keep this account"));
+  assert.ok(!html.includes('data-form="password-set"'), "no Set a password that needs an email the guest can't add");
+  const pending = settingsHtml({ methods: [], providers: null, pendingEmail: "g@<x>.c" });
+  assert.ok(pending.includes('data-form="guest-upgrade-confirm"'));
+  assert.ok(pending.includes("g@&lt;x&gt;.c") && !pending.includes("g@<x>.c"), "the pending email is escaped");
 });
 
 test("storeTheme paints light or dark and remembers the choice", () => {
@@ -146,8 +155,11 @@ function stubClient(responses) {
   const calls = [];
   return {
     calls,
+    generation: 0,
     session: { authenticated: true, account: { id: "acct" }, sessionRevision: 1, csrf: "c", sessionBinding: "b" },
     currentSession() { return this.session; },
+    // Mirrors src/client.js: owns() is generation equality plus session identity.
+    owns(generation, session) { return generation === this.generation && this.session === session; },
     async request(path, { method = "GET", data } = {}) {
       calls.push({ path, method, data });
       const response = responses[path];
@@ -252,4 +264,74 @@ test("recovery-code generation shows the one-time codes", async () => {
   assert.ok(shownHtml.includes("AAAA-BBBB"));
   assert.ok(shownHtml.includes("CCCC-DDDD"));
   assert.ok(shownHtml.includes("Save these now."));
+});
+
+test("an unverified account sees the email verification form after mount (emailVerification is kept from /api/auth/methods)", async () => {
+  const methods = [{ id: "m1", type: "password", label: "Password", email: "a@b.c", createdAt: 1, lastUsedAt: null, disabled: false }];
+  const client = stubClient({ "/api/auth/methods": { methods, emailVerification: { status: "unverified", verified: false, passwordResetRequired: false },
+    providers: { mail: { configured: true } } } });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = fakeContainer();
+  await ui.mount(container);
+  assert.ok(container.innerHTML.includes('data-form="email-verify"'), "the verification-code form renders");
+  assert.ok(container.innerHTML.includes('name="code"'));
+  assert.ok(container.innerHTML.includes('data-action="email-verify-resend"'), "a Send a new code control renders");
+  const verified = stubClient({ "/api/auth/methods": { methods, emailVerification: { status: "verified", verified: true, passwordResetRequired: false }, providers: null } });
+  const ui2 = createAccountSettingsUI({ accountClient: verified });
+  const container2 = fakeContainer();
+  await ui2.mount(container2);
+  assert.equal(container2.innerHTML.includes('data-form="email-verify"'), false, "a verified account sees no form");
+});
+
+// --- Regression: refresh() must not repaint a previous account after reset/sign-out (#2970) ---
+const gatedContainer = () => ({ ...fakeContainer(), replaceChildren() { this.innerHTML = ""; } });
+const previousMethod = { id: "m1", type: "password", label: "Password", email: "prev@b.c",
+  createdAt: 1, lastUsedAt: null, disabled: false };
+
+test("a refresh response landing after reset does not repaint the previous account's methods", async () => {
+  let resolveMethods;
+  const gate = new Promise(resolve => { resolveMethods = resolve; });
+  const client = stubClient({ "/api/auth/methods": () => gate });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = gatedContainer();
+  const mounted = ui.mount(container);
+  ui.reset();
+  resolveMethods({ methods: [previousMethod], providers: null });
+  await mounted;
+  assert.equal(container.innerHTML.includes("prev@b.c"), false, "late response must not repaint after reset");
+  assert.equal(ui.html().includes("prev@b.c"), false, "late response must not overwrite state after reset");
+});
+
+test("a refresh error landing after reset does not repaint the previous account", async () => {
+  let rejectMethods;
+  const gate = new Promise((resolve, reject) => { rejectMethods = reject; });
+  const client = stubClient({ "/api/auth/methods": () => gate });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = gatedContainer();
+  const mounted = ui.mount(container);
+  ui.reset();
+  rejectMethods(new Error("boom"));
+  await mounted;
+  assert.equal(container.innerHTML, "", "late error must not repaint after reset");
+});
+
+test("a refresh response landing after sign-out (session/generation change) is dropped", async () => {
+  let resolveMethods;
+  const gate = new Promise(resolve => { resolveMethods = resolve; });
+  const client = stubClient({ "/api/auth/methods": () => gate });
+  const ui = createAccountSettingsUI({ accountClient: client });
+  const container = gatedContainer();
+  const mounted = ui.mount(container);
+  client.generation++;
+  client.session = { authenticated: false, account: null, sessionRevision: 2, csrf: "c2", sessionBinding: "b2" };
+  resolveMethods({ methods: [previousMethod], providers: null });
+  await mounted;
+  assert.equal(container.innerHTML.includes("prev@b.c"), false, "late response must not repaint after sign-out");
+  assert.equal(ui.html().includes("prev@b.c"), false, "late response must not overwrite state after sign-out");
+});
+
+test("linked OAuth provider is represented as connected, not offered for linking again", () => {
+  const html = settingsHtml({ methods: [{ id: "g", type: "oauth", provider: "google", disabled: false }], providers: { google: { configured: true } } });
+  assert.match(html, /Google connected/);
+  assert.doesNotMatch(html, /href="\/api\/auth\/google\/link\/start"/);
 });

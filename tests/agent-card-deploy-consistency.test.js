@@ -2,7 +2,7 @@
 //
 // QA-b's production probes saw /.well-known/agent-card.json signed on 1 of 15
 // fetches and unsigned on the other 14. The serve path bakes the signature at
-// build time (deploy/agent-card-signed.mjs) and attaches it only when
+// build time (server/agent-card-signed.mjs) and attaches it only when
 // AGENT_CARD_SIGNED_REVISION === deployed.revision, so a single process can
 // never flap per request — the observed flap means mixed versions behind the
 // URL (gradual Worker rollout / traffic split). The post-deploy smoke
@@ -32,7 +32,7 @@ const keyPair = generateKeyPair();
 // attachCardSignatureEnvelope, which hardcodes the production pinned key)
 // so the fixture uses the test keypair end to end.
 // `deployed` mirrors the served card, which names its own build
-// (deploy/agent-discovery.mjs deployedInfo()); omit it to model older cards.
+// (server/agent-discovery.mjs deployedInfo()); omit it to model older cards.
 const buildSignedCard = (revision = REVISION, { deployed = false } = {}) => {
   const card = {
     name: "Test Room",

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { EVENT_TYPES as T, validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { EVENT_TYPES as T, validId, ownMember } from "../src/events.js";
+import { ServiceError } from "./service-error.mjs";
 import { LINK_CODE_RE } from "./agent-identities.mjs";
 import { isCatalogAgentType } from "../src/room-roster.js";
 
@@ -73,7 +73,7 @@ export class AgentConnections {
   }
   authority(row) {
     const room = this.store.roomAuthority(row.room_id);
-    const sponsor = room.members[row.sponsor_member_id], member = room.members[row.member_id];
+    const sponsor = ownMember(room.members, row.sponsor_member_id), member = ownMember(room.members, row.member_id);
     const account = this.db.prepare("SELECT active,auth_epoch FROM accounts WHERE id=?").get(row.sponsor_account_id);
     const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, row.sponsor_member_id);
     if (!sponsor || sponsor.kind !== "human" || sponsor.active === false || sponsor.id !== room.ownerId
@@ -84,7 +84,7 @@ export class AgentConnections {
     return true;
   }
   view(row) {
-    const member = this.store.room(row.room_id).state.members[row.member_id];
+    const member = ownMember(this.store.room(row.room_id).state.members, row.member_id);
     const credential = this.db.prepare("SELECT revoked FROM credentials WHERE hash=?").get(row.credential_hash);
     const status = row.status === "disconnected" ? "disconnected" : row.expires_at <= this.store.now() ? "expired"
       : !this.authority(row) ? "access_changed" : credential?.revoked !== 0 ? "revoked" : "key_issued";
@@ -217,9 +217,13 @@ export class AgentConnections {
           // RC-2026-09-24-201: stamp the identity on the member record so
           // the room state is self-describing (agent-rooms.mjs already does).
           ...(request.identityId ? { identityId: request.identityId } : {}) } }, binding);
-      if (action === "disconnect" && this.store.room(roomId).state.members[memberId].active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
-        data: { memberId, expectedMemberRevision, active: false, permissions: this.store.room(roomId).state.members[memberId].permissions } }, binding);
-      const member = this.store.room(roomId).state.members[memberId];
+      if (action === "disconnect" && ownMember(this.store.room(roomId).state.members, memberId)?.active !== false) membership = this.store.command(token, roomId, { id: `agent-${hash(`${auth.account.id}:${requestId}`).slice(0, 40)}`, type: T.MEMBER_ACCESS_CHANGED,
+        data: { memberId, expectedMemberRevision, active: false, permissions: ownMember(this.store.room(roomId).state.members, memberId)?.permissions } }, binding);
+      // Read AFTER the create/disconnect commands above: downstream state
+      // persistence needs the post-command member (revision, permissions) —
+      // hoisting this read above the disconnect command was the #3283
+      // hosted-CI failure (verifyHistory rejected the stale member_revision).
+      const member = ownMember(this.store.room(roomId).state.members, memberId);
       if (membership) now = Date.parse(membership.event.at);
       if (action !== "disconnect" && member.permissions.some(permission => ["manage_members", "decide", "write_external"].includes(permission))) fail(409, "unsupported_agent_scope", "This agent scope needs a separate reviewed connection");
       this.db.prepare("UPDATE credentials SET revoked=1 WHERE room_id=? AND member_id=?").run(roomId, memberId);
@@ -235,7 +239,8 @@ export class AgentConnections {
       // so a disconnected identity can't keep acting through the bond
       // surface; the removed identity is echoed on the receipt for audit.
       if (action === "create" && request.identityId) {
-        this.store.identities.consumeLinkCode(request.identityId, identityLinkCode);
+        this.store.identities.consumeLinkCode(request.identityId, identityLinkCode,
+          { roomId, sponsorAccountId: auth.account.id });
         const identity = this.store.identities.get(request.identityId);
         if (!identity) fail(404, "identity_not_found", "No such agent identity");
         const plugin = this.store.agentPlugin;
@@ -284,8 +289,50 @@ export class AgentConnections {
     try { this.verifyHistory(); }
     catch { fail(503, "connection_integrity_error", "Agent connection history requires reconciliation"); }
   }
+  // Who owned a room when a connection operation landed. Sponsorship is
+  // an at-the-time authority fact — apply() required the sponsor to be
+  // the owner when they acted — not a claim that they still own the room
+  // today: ownership transfer is a supported, reversible operation, and
+  // demanding the sponsor still be the current owner makes every
+  // transferred room's connection journal fail integrity forever. The
+  // timeline comes from the room's own event log: the owner before the
+  // first ownership.transferred event is that event's actor (the reducer
+  // requires the actor to be the owner), and each transfer hands
+  // ownership to data.toMemberId. Operations whose receipt carries the
+  // membership event's sequence resolve exactly by sequence; the rest
+  // resolve by time. A time-only receipt cannot place a rotation between
+  // transfers in the same millisecond: every owner in that sequence-ordered
+  // window remains plausible, including intermediate owners in a cycle.
+  ownerIdsAt(roomId, currentOwnerId, { sequence = null, at = null } = {}, cache = null) {
+    let transfers = cache?.get(roomId);
+    if (!transfers) {
+      transfers = this.db.prepare(`SELECT sequence, body FROM events WHERE room_id=?
+        AND json_extract(body,'$.type')=? ORDER BY sequence`).all(roomId, T.OWNERSHIP_TRANSFERRED)
+        .map(({ sequence: seq, body }) => { const event = JSON.parse(body);
+          return { sequence: seq, at: Date.parse(event.at), from: event.actorId, to: event.data?.toMemberId }; })
+        .filter(transfer => typeof transfer.to === "string");
+      cache?.set(roomId, transfers);
+    }
+    const initial = transfers.length ? transfers[0].from : currentOwnerId;
+    if (Number.isSafeInteger(sequence)) {
+      let owner = initial;
+      for (const transfer of transfers) {
+        if (transfer.sequence >= sequence) break;
+        owner = transfer.to;
+      }
+      return [owner];
+    }
+    const owners = new Set([initial]);
+    for (const transfer of transfers) {
+      if (transfer.at < at) { owners.clear(); owners.add(transfer.to); }
+      else if (transfer.at === at) owners.add(transfer.to);
+      else break;
+    }
+    return [...owners];
+  }
   verifyHistory() {
     const invalid = () => fail(503, "connection_integrity_error", "Agent connection history requires reconciliation");
+    const ownershipCache = new Map();
     for (const sql of tables.split(";").map(sql => sql.trim()).filter(Boolean)) {
       const name = /^CREATE TABLE (\w+)/.exec(sql)[1];
       if (this.db.prepare("SELECT sql FROM sqlite_master WHERE name=? AND type='table'").get(name)?.sql !== sql) invalid();
@@ -311,9 +358,28 @@ export class AgentConnections {
           || (index === 0 ? request.action !== "create" || state.created_at !== state.updated_at
             : request.action === "create" || previous.status === "disconnected" || request.expectedGeneration !== previous.generation
               || state.created_at !== previous.created_at)) invalid();
-        const room = this.store.room(row.room_id).state, sponsor = room.members[state.sponsor_member_id];
+        const room = this.store.room(row.room_id).state, sponsor = ownMember(room.members, state.sponsor_member_id);
         const account = this.db.prepare("SELECT * FROM accounts WHERE id=?").get(state.sponsor_account_id);
         const binding = this.db.prepare("SELECT account_id FROM member_accounts WHERE room_id=? AND member_id=?").get(row.room_id, state.sponsor_member_id);
+        // The member↔account binding is a current-state record, not an
+        // at-the-time fact: apply() authenticated the sponsor's account
+        // session (and the operation row's actor_account_id, checked
+        // above against state.sponsor_account_id, is that account), but
+        // two supported flows dissolve the binding afterwards — account
+        // deletion (server/account-deletion.mjs deletes every
+        // member_accounts row for the account and deactivates it, while
+        // the connection journal is retained by policy) and a self-left
+        // member's account rejoining under a new member id (store.mjs
+        // acceptInvitation deletes the left member's binding). Demanding
+        // the binding still exist today makes those rooms' journals
+        // fail integrity forever, the same defect class #3945 fixed for
+        // the room owner. A missing binding is explained only by a
+        // terminal fact — the sponsor account deactivated or the
+        // sponsor member inactive; a binding naming a different
+        // account, and a missing binding with both parties still
+        // active, remain corrupt.
+        const bindingOk = binding ? binding.account_id === state.sponsor_account_id
+          : !account || account.active !== 1 || sponsor?.active === false;
         if (Object.keys(state).sort().join() !== Object.keys(row).sort().join()
           // RC-2026-09-24-201: atomic enrollment receipts may carry the
           // optional identityId echo; the key set is exact either way.
@@ -322,8 +388,9 @@ export class AgentConnections {
           || Object.keys(receipt).sort().join() !== ["version", "action", "requestId", "roomId", "memberId", "generation", "status", "expiresAt", "at", "membershipEventId", "membershipSequence", ...(receipt.identityId !== undefined ? ["identityId"] : []), ...(receipt.unlinkedIdentityId !== undefined ? ["unlinkedIdentityId"] : [])].sort().join()
           || ![state.created_at, state.updated_at, state.expires_at, state.sponsor_auth_epoch, state.sponsor_member_revision, state.member_revision].every(integer)
           || state.status !== (request.action === "disconnect" ? "disconnected" : "issued")
-          || state.sponsor_member_id !== room.room.ownerId || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision
-          || !account || account.auth_epoch < state.sponsor_auth_epoch || binding?.account_id !== state.sponsor_account_id) invalid();
+          || !this.ownerIdsAt(row.room_id, room.room.ownerId, { sequence: receipt.membershipSequence, at: receipt.at }, ownershipCache).includes(state.sponsor_member_id)
+          || sponsor?.kind !== "human" || sponsor.revision < state.sponsor_member_revision
+          || !account || account.auth_epoch < state.sponsor_auth_epoch || !bindingOk) invalid();
         const credential = this.db.prepare("SELECT * FROM credentials WHERE hash=?").get(state.credential_hash);
         if (!credential || credential.room_id !== row.room_id || credential.member_id !== row.member_id || credential.kind !== "access"
           || credential.parent_hash !== null || credential.account_id !== null || credential.account_auth_epoch !== null || credential.expires_at !== state.expires_at
@@ -347,7 +414,7 @@ export class AgentConnections {
         previous = state;
       }
       if (Object.keys(row).some(k => row[k] !== previous[k])) invalid();
-      const member = this.store.room(row.room_id).state.members[row.member_id];
+      const member = ownMember(this.store.room(row.room_id).state.members, row.member_id);
       if (!member || member.kind !== "agent" || member.revision < row.member_revision) invalid();
     }
   }

@@ -309,12 +309,15 @@ if (action === "join") {
   node scripts/agent-inbox.mjs room-create ROOM_ID TITLE PURPOSE [KIND] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs account-link ROOM_ID IDENTITY_ID DISPLAY_NAME [PERM1,PERM2] [NOTE]
   node scripts/agent-inbox.mjs identity-link IDENTITY_ID [PERM1,PERM2] [MEMBER_ID] [DISPLAY_NAME]
-  (omit permissions for a read/chat-only link)
+  (omit permissions for a read/chat-only link; a direct link needs holder
+  proof — set ROOM_AGENT_LINK_CODE to a link code the identity holder
+  minted for this room, unless an approved access request is on record)
   node scripts/agent-inbox.mjs identity-links
   node scripts/agent-inbox.mjs identity-unlink IDENTITY_ID
   node scripts/agent-inbox.mjs leave-room
   node scripts/agent-inbox.mjs invite-code PERM1,PERM2 [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-code profile:chat|contribute|review|collaborate [EXPIRES_MINUTES] [DISPLAY_NAME]
+  node scripts/agent-inbox.mjs invite-code owner [EXPIRES_MINUTES] [DISPLAY_NAME]
   node scripts/agent-inbox.mjs invite-codes
   node scripts/agent-inbox.mjs invite-code-revoke INVITE_ID
   node scripts/agent-inbox.mjs agent-keys create SCOPES_CSV [--label LABEL] [--expires-in 24h|7d] [--expires-at MS_EPOCH]
@@ -407,8 +410,12 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       || (action === "sessions" && checkpoint !== undefined && !/^[a-z]+$/.test(checkpoint))
       || (action === "session" && (!validId(checkpoint) || extra.length !== 1 || !/^[a-z]+$/.test(extra[0])))
       || (action === "search" && !validWorkSearchQuery(checkpoint))
+      || (action === "find" && !validWorkSearchQuery(checkpoint))
+      || (action === "apply-template" && checkpoint === undefined)
       || (["discussion", "result"].includes(action) ? false : action === "work" ? new Set(extra).size !== extra.length || extra.some(flag => !["--include-source", "--include-offers", "--brief"].includes(flag))
         : action === "search" ? extra.length > 1 || (extra.length === 1 && extra[0] !== "--needs-me")
+        : action === "find" ? extra.length > 1 || (extra.length === 1 && !["messages", "work", "all"].includes(extra[0]))
+        : action === "apply-template" ? extra.length > 1
         : ["advertise", "say", "session", "identity-link", "invite-code", "invite-codes", "invite-code-revoke", "redeem-invite", "room-create", "agent-keys", "membership-grant", "membership-revoke", "membership-grants", "outside-agents"].includes(action) ? false
         : ["work-claim", "work-complete", "work-release"].includes(action) ? workActionOptions === null
         : action === "claim" ? extra.length > 1 || (extra.length === 1 && !isJSONObject(extra[0]))
@@ -470,11 +477,13 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
       : action === "identity-create" ? await createAgentIdentity(process.env.ROOM_AGENT_ORIGIN, checkpoint)
       : action === "rooms" ? await listAgentRooms(process.env.ROOM_AGENT_ORIGIN, process.env.ROOM_AGENT_TOKEN, { after: checkpoint ?? "" })
       : action === "room-create" ? await createAgentRoom(process.env.ROOM_AGENT_ORIGIN, process.env.ROOM_AGENT_TOKEN, parseRoomCreate(checkpoint, extra))
-      : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }) })
+      : action === "identity-link" ? await client.linkIdentity({ identityId: checkpoint, permissions: (extra[0] ?? "").split(",").map(p => p.trim()).filter(Boolean), ...(extra[1] === undefined ? {} : { memberId: extra[1] }), ...(extra[2] === undefined ? {} : { displayName: extra.slice(2).join(" ") }), ...(process.env.ROOM_AGENT_LINK_CODE ? { identityLinkCode: process.env.ROOM_AGENT_LINK_CODE } : {}) })
       : action === "identity-links" ? await client.identityLinks()
       : action === "identity-unlink" ? await client.unlinkIdentity(checkpoint)
       : action === "leave-room" ? await client.deactivateMembership()
-      : action === "invite-code" ? await client.createAgentInvite({ ...(checkpoint.startsWith("profile:")
+      : action === "invite-code" ? await client.createAgentInvite({ ...(checkpoint === "owner"
+            ? { ownerEquivalent: true }
+            : checkpoint.startsWith("profile:")
             ? { profile: checkpoint.slice("profile:".length) }
             : { permissions: checkpoint.split(",").map(p => p.trim()).filter(Boolean) }),
           ...(extra[0] === undefined ? {} : { expiresInMinutes: Number(extra[0]) }),
@@ -487,7 +496,7 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
           roomId: checkpoint, identityId: extra[0], displayName: extra[1],
           requestedPermissions: extra[2].split(",").map(p => p.trim()).filter(Boolean),
           ...(extra[3] === undefined ? {} : { note: extra[3] })
-        })
+        }, { identitySecret: process.env.ROOM_AGENT_TOKEN })
       : action === "access-requests" ? await client.accessRequests(checkpoint === undefined ? {} : { status: checkpoint })
       : action === "access-decide" ? await client.decideAccessRequest(checkpoint, {
           decision: extra[0],
@@ -510,7 +519,15 @@ permissions. See docs/SWARM-PLUG-IN.md for scope, recovery and current limits.`)
         })()
       : action === "work-claim" ? await client.workClaim(checkpoint, workActionOptions)
       : action === "work-complete" ? await client.workComplete(checkpoint, workActionOptions)
-      : action === "work-release" ? await client.workRelease(checkpoint, workActionOptions)
+      : action === "work-release" ? await (async () => {
+          // E5/D4 (QA-200 2026-10-08): /release binds the claim round, so
+          // read the current item first and release exactly that round.
+          const record = await client.workClaimGet(checkpoint);
+          const held = record?.claim ?? record;
+          return client.workRelease(checkpoint, { ...workActionOptions,
+            expectedClaimedAt: held?.claimedAt,
+            expectedHistoryLength: (held?.history?.length ?? 0) + (held?.historyOmitted ?? 0) });
+        })()
       : await client.changes(Number(checkpoint));
     if (action === "export") process.stdout.write(result.ndjson);
     // redeem-invite returns undefined on consent abort (exit code already

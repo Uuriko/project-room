@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { event, EVENT_TYPES as T, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
-import { canonicalInvitationData } from "./invitation-journal.mjs";
+import { event, EVENT_TYPES as T, ownMember, MEMBERSHIP_AUTHORITY_POLICY_VERSION, DISPLAY_NAME_POLICY_VERSION } from "../src/events.js";
+import { canonicalInvitationData } from "./journal.mjs";
 
 // One complete receipt contract is shared by issuance of the joined event and audit.
 // Keep private account IDs and token material out of the shared event.
@@ -26,8 +26,8 @@ export function invitationJoinedEvent(record) {
   });
 }
 
-export function assertInvitationMembershipEvidence(record, linked, binding, room) {
-  const member = room?.state.members[record.intended_member_id];
+export function assertInvitationMembershipEvidence(record, linked, binding, room, { retiredInvitee = false } = {}) {
+  const member = ownMember(room?.state.members, record.intended_member_id);
   const origin = { kind: "invitation", invitationId: record.id, invitedByMemberId: record.issuer_member_id };
   const joined = linked && JSON.parse(linked.body);
   // W4-NEW-1 added displayNamePolicyVersion to newly issued joined events.
@@ -36,14 +36,19 @@ export function assertInvitationMembershipEvidence(record, linked, binding, room
   // upgrade integrity sweep.
   const expected = invitationJoinedEvent(record);
   if (joined?.data && !("displayNamePolicyVersion" in joined.data)) delete expected.data.displayNamePolicyVersion;
+  // A joined event stamped with an earlier display-name policy (v1 before r50's
+  // v2) is that era's shape too.
+  else if (joined?.data?.displayNamePolicyVersion === 1) expected.data.displayNamePolicyVersion = 1;
   if (!linked || linked.id !== record.joined_event_id || linked.room_id !== record.room_id
     || !Number.isSafeInteger(linked.sequence) || linked.sequence < 1 || linked.sequence > room.sequence
     || canonicalInvitationData(joined) !== canonicalInvitationData(expected)
-    || binding?.account_id !== record.intended_account_id || binding.origin !== `invitation:${record.id}`
+    // A deleted invitee has no member_accounts binding and a scrubbed live
+    // membership; the immutable joined event above is still verified.
+    || (!retiredInvitee && (binding?.account_id !== record.intended_account_id || binding.origin !== `invitation:${record.id}`
     || member?.id !== record.intended_member_id || member.kind !== "human"
     || member.displayName !== record.intended_display_name || member.role !== record.intended_role
     || member.accountableHumanId !== record.intended_member_id
-    || canonicalInvitationData(member.membershipOrigin) !== canonicalInvitationData(origin)) {
+    || canonicalInvitationData(member.membershipOrigin) !== canonicalInvitationData(origin)))) {
     throw new Error("Membership evidence differs from journal");
   }
   // Permissions, active state, and revision can legitimately change after joining.

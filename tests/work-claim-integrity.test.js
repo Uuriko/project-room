@@ -241,25 +241,34 @@ test("the Board list pages done claims by age and summarizes history", async t =
   assert.equal((await f.call("owner", "list", { query: "?state=finished" })).status, 422);
 });
 
-// QUARANTINED — see tests/quarantine.json and docs/FLAKY-QUARANTINE.md.
-// The p95 timing assertion below flakes on loaded/slow VMs (it fails on
-// pristine main), so it is skipped in the blocking suite and runs only in
-// the non-blocking quarantine lane (`npm run test:quarantined`, which sets
-// QUARANTINE_RUN=1).
-const QUARANTINE_RUN = process.env.QUARANTINE_RUN === "1";
-
-test("the Board list endpoint p95 stays under the 50 ms budget", { skip: !QUARANTINE_RUN }, async t => {
+// Perf guard (repaired and re-admitted from quarantine, #3289; it was
+// quarantined 2026-10-05 — see docs/FLAKY-QUARANTINE.md). The original
+// measurement was the defect, not the endpoint: a wall-clock p95 over 10
+// samples is the max sample, so one scheduler stall on a loaded runner
+// failed it (5/7 failures on pristine main, e.g. 58.3 ms; re-characterized
+// 2026-10-13 on a loaded VM: 0/20 runs passed, reported values 129–351 ms,
+// while the endpoint's own CPU cost stayed at p50 ≈ 15 ms / p95 ≈ 25 ms).
+// The budget is now priced in CPU time (process.cpuUsage), which measures
+// the work the endpoint itself does: co-tenant contention inflates
+// wall-clock time without moving CPU time, while a real per-list
+// regression (more work per call) still fails the same 50 ms budget.
+// 30 samples make the p95 a real percentile (the 29th value), not the max,
+// and three warm-up calls keep JIT/cache cold-start out of the samples.
+test("the Board list endpoint p95 stays under the 50 ms budget", async t => {
   const f = roomFixture(t);
   seedBoardClaims(f);
-  await f.call("owner", "list", { query: "?limit=200" }); // warm-up
+  for (let i = 0; i < 3; i++) await f.call("owner", "list", { query: "?limit=200" }); // warm-up (JIT, caches)
   const samples = [];
-  for (let i = 0; i < 10; i++) {
-    const started = performance.now();
+  for (let i = 0; i < 30; i++) {
+    const before = process.cpuUsage();
     await f.call("owner", "list", { query: "?limit=50" });
-    samples.push(performance.now() - started);
+    const delta = process.cpuUsage(before);
+    samples.push((delta.user + delta.system) / 1000);
   }
   samples.sort((a, b) => a - b);
-  assert.ok(samples[Math.ceil(samples.length * 0.95) - 1] < 50, `list p95 ${samples.at(-1).toFixed(1)} ms`);
+  const p95 = samples[Math.ceil(samples.length * 0.95) - 1];
+  const median = samples[samples.length >> 1];
+  assert.ok(p95 < 50, `list CPU p95 ${p95.toFixed(1)} ms (median ${median.toFixed(1)} ms; samples: ${samples.map(sample => sample.toFixed(1)).join(", ")})`);
 });
 
 test("Board reads mark another member's claim text untrusted and never the reader's own", async t => {
@@ -295,9 +304,49 @@ test("with under 10% of the event budget left only the owner and claim managers 
   const note = await f.call("contrib", "update", { id: "budget", body: { note: "still here" } });
   assert.equal(note.status, 409);
   assert.equal((await f.call("owner", "create", { body: { id: "owner-late" } })).status, 201);
-  assert.equal((await f.call("manager", "release", { id: "budget", body: { reason: "winding down" } })).status, 200);
+  const read = await f.call("manager", "read", { id: "budget" });
+  assert.equal((await f.call("manager", "release", { id: "budget", body: { reason: "winding down",
+    expectedClaimedAt: read.value.claimedAt, expectedHistoryLength: read.value.history.length } })).status, 200);
   const status = await f.call("chatter", "status");
   assert.equal(status.value.eventsRemaining, PILOT_LIMITS.eventsPerRoom - f.store.room("commons").sequence);
+});
+
+// QA200-CH-2033 (4th probe against the #2033 ledger): the member-triggered
+// sweep settles PR links and records CI facts, which emit work_claim.updated
+// room events — it is a Board write, so the event-budget floor must refuse it
+// for non-privileged writers exactly like create/claim/update do.
+test("with under 10% of the event budget left a writer's sweep is refused and emits no events", async t => {
+  const f = roomFixture(t);
+  await held(f, "sweepy");
+  const read = await f.call("contrib", "read", { id: "sweepy" });
+  assert.equal(read.status, 200);
+  const linked = await f.call("contrib", "update", { id: "sweepy", body: {
+    appendPullRequest: "https://github.com/octo/repo/pull/7",
+    expectedClaimedAt: read.value.claimedAt,
+    expectedHistoryLength: read.value.history.length,
+  } });
+  assert.equal(linked.status, 200, `${linked.code} ${linked.message ?? ""}`);
+  const nearlyFull = Math.ceil(PILOT_LIMITS.eventsPerRoom * 0.9) + 1;
+  f.store.db.prepare("UPDATE rooms SET sequence=? WHERE id='commons'").run(nearlyFull);
+  // GitHub says the linked PR merged: without the gate the sweep settles the
+  // claim and emits a pr_merged room event past the floor.
+  const mergedDoc = { state: "closed", merged: true, merge_commit_sha: "b".repeat(40), head: { sha: "a".repeat(40) } };
+  const fetchPullRequest = async () => ({
+    ok: true, status: 200, headers: { get: () => null },
+    text: async () => JSON.stringify(mergedDoc), json: async () => mergedDoc,
+  });
+  const before = f.events();
+  const swept = await f.call("contrib", "sweep", { body: {}, fetchPullRequest });
+  assert.equal(swept.status, 409);
+  assert.equal(swept.code, "room_event_budget_low");
+  assert.equal(f.events(), before, "no room events past the floor");
+  const stored = f.store.workClaims.get("commons", "sweepy");
+  assert.equal(stored.state, "claimed", "the PR settlement did not land");
+  // Privileged writers can still sweep to wind the room down.
+  const ownerSweep = await f.call("owner", "sweep", { body: {}, fetchPullRequest });
+  assert.equal(ownerSweep.status, 200);
+  assert.equal(ownerSweep.value.pullRequests.updated, 1);
+  assert.equal(f.events(), before + 1);
 });
 
 test("deploy status is fetched at most once per 60 s, and only writers can refresh", async t => {
@@ -377,7 +426,15 @@ test("over real HTTP a guest's review note and sweep are refused and the list is
   const ownerKey = store.issueAccessKey("commons", "owner");
   store.command(ownerKey, "commons", { id: "add-guest", type: "member.added", data: { memberId: "guest", displayName: "Guest", kind: "agent", permissions: [] } });
   const guestKey = store.issueAccessKey("commons", "guest");
-  const server = createRoomServer({ store });
+  // The /work-claims/status read below must be hermetic: without an injected
+  // fetch it performs a live api.github.com commits/main request and reports
+  // stale:true whenever that request fails or is rate-limited (as in the
+  // coverage CI run for PR #3129), which is unrelated to what this test checks.
+  const fetchPullRequest = async () => ({
+    ok: true, status: 200, headers: { get: () => null },
+    text: async () => JSON.stringify({ sha: "c".repeat(40) }), json: async () => ({ sha: "c".repeat(40) }),
+  });
+  const server = createRoomServer({ store, fetchPullRequest, githubToken: "test-token" });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   t.after(async () => {
     server.closeStreams();

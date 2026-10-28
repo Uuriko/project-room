@@ -82,8 +82,13 @@ test("C11 restore enforces capacity, keeping the newest and counting drops", () 
   const c = filled(8, 5); // capacity 5, 3 dropped live
   const json = snapshot(c); // snapshot holds the 5 stored
   const parsed = JSON.parse(json);
-  // Tamper: stuff more events than the capacity into the file.
-  const stuffed = JSON.stringify({ ...parsed, events: [...parsed.events, ...parsed.events, ...parsed.events] });
+  // Tamper: stuff more events than the capacity into the file. Strip the
+  // cumulative counters for this legacy-format case — with counters present
+  // the stuffed file is inconsistent and restore fails closed instead (see
+  // the counters-specific capacity test below).
+  const legacy = { ...parsed };
+  delete legacy.counters;
+  const stuffed = JSON.stringify({ ...legacy, events: [...parsed.events, ...parsed.events, ...parsed.events] });
   const restored = restore(stuffed);
   assert.equal(restored.droppedOldest, 10);
   assert.equal(restored.events.length, 5);
@@ -92,6 +97,115 @@ test("C11 restore enforces capacity, keeping the newest and counting drops", () 
   assert.equal(s.total, 5);
   assert.equal(s.recorded, 5);
   assert.equal(s.dropped, 0);
+});
+
+test("C11 snapshot/restore preserves cumulative counters after eviction", () => {
+  // Regression: snapshot() used to serialize only the stored events, so a
+  // restore restarted recorded/dropped and the per-type/per-actor totals
+  // from the stored subset, silently losing every evicted envelope.
+  const c = createCollector({ maxEvents: 3 });
+  c.record(messageSent({ occurredAt: at(0), fields: { roomId: "r1", messageId: "m0" } })); // human, evicted
+  c.record(reactionAdded(1)); // agent, evicted
+  c.record(messageSent({ actor: agent, occurredAt: at(2), fields: { roomId: "r1", messageId: "m2" } }));
+  c.record(messageSent({ occurredAt: at(3), fields: { roomId: "r1", messageId: "m3" } }));
+  c.record(reactionAdded(4));
+  const before = c.stats();
+  assert.equal(before.recorded, 5);
+  assert.equal(before.dropped, 2);
+  assert.deepEqual(before.perType, { "message.sent": 3, "reaction.added": 2 });
+  assert.deepEqual(before.perActor, { human: 2, agent: 3 });
+
+  const parsed = JSON.parse(snapshot(c));
+  assert.deepEqual(parsed.counters, {
+    recorded: 5,
+    dropped: 2,
+    perType: { "message.sent": 3, "reaction.added": 2 },
+    perActor: { human: 2, agent: 3 }
+  });
+
+  const restored = loadCollector(snapshot(c));
+  assert.deepEqual(restored.stats(), before);
+  // Recording continues from the restored totals, not from the stored count.
+  restored.record(messageSent({ occurredAt: at(5), fields: { roomId: "r1", messageId: "m5" } }));
+  const s = restored.stats();
+  assert.equal(s.recorded, 6);
+  assert.equal(s.dropped, 3);
+  assert.equal(s.total, 3);
+  assert.equal(s.recorded, s.total + s.dropped);
+  assert.deepEqual(s.perType, { "message.sent": 4, "reaction.added": 2 });
+  assert.deepEqual(s.perActor, { human: 3, agent: 3 });
+});
+
+test("C11 file round-trip preserves cumulative counters after eviction", () => {
+  const dir = mkdtempSync(join(tmpdir(), "growth-c11-counters-"));
+  try {
+    const file = join(dir, "growth-snapshot.json");
+    const c = filled(8, 5); // recorded 8, dropped 3, 5 stored
+    saveToFile(file, c);
+    const { restored, collector } = loadFromFile(file);
+    assert.equal(restored, true);
+    assert.deepEqual(collector.stats(), c.stats());
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("C11 legacy snapshot without counters restores with replay-only counters", () => {
+  const parsed = JSON.parse(snapshot(filled(8, 5)));
+  delete parsed.counters;
+  const s = loadCollector(JSON.stringify(parsed)).stats();
+  assert.equal(s.total, 5);
+  assert.equal(s.recorded, 5);
+  assert.equal(s.dropped, 0);
+  assert.deepEqual(s.perType, { "message.sent": 5 });
+});
+
+test("C11 restore throws on inconsistent cumulative counters", () => {
+  const parsed = JSON.parse(snapshot(filled(8, 5))); // recorded 8, dropped 3, 5 stored
+  const withCounters = counters => JSON.stringify({ ...parsed, counters });
+  // recorded must equal stored events + dropped.
+  assert.throws(
+    () => restore(withCounters({ recorded: 9, dropped: 3, perType: { "message.sent": 9 }, perActor: { human: 9 } })),
+    /counters\.recorded must equal/
+  );
+  // Per-type/per-actor totals must sum to recorded.
+  assert.throws(
+    () => restore(withCounters({ recorded: 8, dropped: 3, perType: { "message.sent": 7 }, perActor: { human: 8 } })),
+    /totals must equal counters\.recorded/
+  );
+  // Cumulative totals may not undercount the stored events themselves.
+  assert.throws(
+    () => restore(withCounters({ recorded: 8, dropped: 3, perType: { "reaction.added": 8 }, perActor: { human: 8 } })),
+    /undercounts stored events/
+  );
+  // Negative and non-object counters fail closed too.
+  assert.throws(
+    () => restore(withCounters({ recorded: 8, dropped: -1, perType: { "message.sent": 8 }, perActor: { human: 8 } })),
+    /must be a non-negative integer/
+  );
+  assert.throws(() => restore(withCounters(42)), /counters must be an object/);
+});
+
+test("C11 oversize snapshot with counters counts truncated events as dropped", () => {
+  const parsed = JSON.parse(snapshot(filled(8, 5)));
+  // Stuff 3x the events in, with counters that honestly describe the file:
+  // 15 stored + the same 3 pre-snapshot evictions = recorded 18.
+  const events = [...parsed.events, ...parsed.events, ...parsed.events];
+  const stuffed = JSON.stringify({
+    ...parsed,
+    events,
+    counters: { recorded: 18, dropped: 3, perType: { "message.sent": 18 }, perActor: { human: 18 } }
+  });
+  const restored = restore(stuffed);
+  assert.equal(restored.droppedOldest, 10);
+  assert.equal(restored.events.length, 5);
+  const s = loadCollector(stuffed).stats();
+  assert.equal(s.total, 5);
+  assert.equal(s.recorded, 18);
+  assert.equal(s.dropped, 13); // 3 pre-snapshot evictions + 10 truncated here
+  assert.equal(s.recorded, s.total + s.dropped);
+  assert.deepEqual(s.perType, { "message.sent": 18 });
+  assert.deepEqual(s.perActor, { human: 18 });
 });
 
 test("C11 snapshot throws on an invalid collector", () => {

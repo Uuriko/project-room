@@ -80,7 +80,7 @@ const docCalls = unique(
 
 const codeFiles = [
   "server/http.mjs",
-  "deploy/agent-discovery.mjs",
+  "server/agent-discovery.mjs",
   "server/a2a-jsonrpc.mjs",
   "server/claim-pr-sync.mjs",
   "server/work-claim-routes.mjs",

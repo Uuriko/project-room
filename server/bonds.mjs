@@ -442,14 +442,25 @@ export class Bonds {
     const existing = this.db.prepare("SELECT * FROM agent_bonds WHERE agent_a=? AND agent_b=?").get(agentA, agentB);
     const now = this.store.now();
     if (existing && this._effectiveState(existing, now) === "proposed") {
+      // The peer proposed first: this call is not a retry of ours. Answering
+      // "duplicate" with their bond dropped our scopes silently and left each
+      // side waiting on the other. Say whose proposal it is and how to answer it.
+      if (existing.proposed_by === peerId) {
+        fail(409, "bond_proposed_by_peer",
+          `That agent already proposed a bond to you (bondId ${existing.id}). Answer it with bond.accept { bondId: "${existing.id}", scopes } (accept a subset of what they proposed) or bond.decline, then propose again if you want different scopes.`);
+      }
       return { kind: "idempotent", bond: this._public(existing, now) };
     }
     if (existing && existing.state === "active") {
       fail(409, "bond_active", "This pair already has an active bond. Revoke it before proposing a new one.");
     }
+    // Only live proposals count toward the caps. An expired proposal can no
+    // longer be accepted, declined or revoked (all refuse it), so counting it
+    // would hold the slot forever.
+    const liveSince = now - BOND_TTL_MS;
     const pending = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_bonds WHERE proposed_by=? AND state='proposed' AND NOT (agent_a=? AND agent_b=?)"
-    ).get(identityId, agentA, agentB).n;
+      "SELECT count(*) AS n FROM agent_bonds WHERE proposed_by=? AND state='proposed' AND proposed_at>=? AND NOT (agent_a=? AND agent_b=?)"
+    ).get(identityId, liveSince, agentA, agentB).n;
     if (pending >= MAX_PENDING_PROPOSALS) {
       fail(429, "bond_rate_limited", "Too many pending bond proposals. Wait for a reply or revoke one.");
     }
@@ -457,8 +468,8 @@ export class Bonds {
     // bounds one proposer; a target could still be flooded by many distinct
     // proposers. Refuse once the recipient's pending inbox is full.
     const incoming = this.db.prepare(
-      "SELECT count(*) AS n FROM agent_bonds WHERE (agent_a=? OR agent_b=?) AND state='proposed' AND proposed_by<>?"
-    ).get(peerId, peerId, identityId).n;
+      "SELECT count(*) AS n FROM agent_bonds WHERE (agent_a=? OR agent_b=?) AND state='proposed' AND proposed_at>=? AND proposed_by<>?"
+    ).get(peerId, peerId, liveSince, identityId).n;
     if (incoming >= MAX_INCOMING_PROPOSALS) {
       fail(429, "bond_rate_limited", "That agent already has too many pending bond proposals. Try again later.");
     }

@@ -17,6 +17,10 @@ const PATTERNS = [
   { id: "bearer-token", label: "bearer token", regex: /\bbearer\s+[A-Za-z0-9\-_.~+/]{20,}=*/i },
   { id: "slack-token", label: "Slack token", regex: /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/ },
   { id: "stripe-key", label: "Stripe key", regex: /\b[rs]k_(?:live|test)_[A-Za-z0-9]{16,}\b/ },
+  // Room credentials accepted by the HTTP credential grammar: identity
+  // secrets, minted API keys, and guest links. A trailing hyphen is valid
+  // in those alphabets, so the end boundary is not a word boundary.
+  { id: "room-credential", label: "room credential", regex: /(?<![A-Za-z0-9_])(?:pri_[A-Za-z0-9_-]{43,128}|rak_[A-Za-z0-9_-]{16,128}|ga1\.[A-Za-z0-9_-]{43})(?![A-Za-z0-9_])/ },
   // Regression rule for secret-scanning alert #1 (2026-09-17): a real
   // Telegram bot token was committed in tests/telegram-connect.test.js.
   // BotFather tokens are <bot-id>:<secret>; the burned one was 9 digits
@@ -90,14 +94,13 @@ export function scanLines(lines, { allowlist, safeEntropyTokens } = {}) {
   lines.forEach((line, index) => {
     check(typeof line === "string", `line ${index} must be a string`);
     const lineNo = index + 1;
+    // Every hit of a rule, not only the first. An allowlisted earlier match
+    // must not hide a later secret of the same rule on this line.
     for (const pattern of PATTERNS) {
-      const match = pattern.regex.exec(line);
-      if (match) {
-        const start = match.index, end = start + match[0].length;
-        if (!findingAllowed(allowlist, line, start, end)) {
-          findings.push(Object.freeze({ line: lineNo, rule: pattern.id, label: pattern.label,
-            preview: redact(match[0]) }));
-        }
+      for (const [start, end] of matchSpans(line, pattern.regex)) {
+        if (findingAllowed(allowlist, line, start, end)) continue;
+        findings.push(Object.freeze({ line: lineNo, rule: pattern.id, label: pattern.label,
+          preview: redact(line.slice(start, end)) }));
       }
     }
     let tm;

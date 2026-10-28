@@ -1,6 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { AccountClient, RoomClient, RoomSessionClient } from "../src/client.js";
+import { AccountClient } from "../src/account-client.js";
+import { AccountClient as LegacyAccountClient, RoomClient, RoomSessionClient } from "../src/client.js";
+
+test("the legacy client entry preserves the account client constructor", () => {
+  assert.equal(LegacyAccountClient, AccountClient);
+});
 
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => body });
 const deferred = () => {
@@ -209,7 +214,9 @@ test("stale account-session and binding rejections force a fresh restore", async
       method: client => client.acceptInvitation({ invitationToken: "invitation-secret", redemptionId: "redemption", expectedRevision: 0 }),
       status: 409,
       code: "session_binding_changed",
-      message: "Account session binding changed"
+      message: "Account session binding changed",
+      // The client now resolves this fallthrough code to human copy.
+      humanMessage: "Your browser identity changed. Review the invitation again and rejoin."
     }
   ];
   for (const item of cases) {
@@ -217,7 +224,7 @@ test("stale account-session and binding rejections force a fresh restore", async
     client.session = item.code === "stale_session_revision"
       ? accountSession(null, 0)
       : accountSession("account-human", 2);
-    await assert.rejects(item.method(client), new RegExp(item.message));
+    await assert.rejects(item.method(client), new RegExp(item.humanMessage ?? item.message));
     assert.equal(client.session, null);
   }
 });
@@ -301,7 +308,7 @@ test("Room account mode carries auth and binding through restore, writes, and SS
   assert.equal(await client.restore("room:one"), roomSession);
   assert.deepEqual(seen, [7]);
   assert.equal(calls[0].path, "/api/session?room=room%3Aone");
-  assert.equal(calls[1].path, "/api/rooms/room%3Aone");
+  assert.equal(calls[1].path, "/api/rooms/room%3Aone?messages=recent");
   for (const call of calls.slice(0, 2)) {
     assert.equal(call.options.headers["X-Project-Room-Auth"], "account");
     assert.equal(call.options.headers["X-Session-Binding"], owner.sessionBinding);
@@ -340,4 +347,23 @@ test('closed invitation fallback is bound to existing account ownership and igno
     assert.equal((await preparing).session, switched ? null : current);
     assert.equal(client.session.account.id, switched ? 'replacement' : 'member');
   }
+});
+
+for (const denied of [false, true]) test(`confirmation distinguishes concurrent invalidation from a pending restore (${denied ? "denied" : "success"})`, async () => {
+  const first = deferred(), second = deferred(); let reads = 0;
+  const client = new AccountClient({ fetcher: () => (++reads === 1 ? first : second).promise });
+  const old = accountSession("old", 1); client.session = old;
+  const checking = client.confirm();
+  client.invalidate(client.generation, old);
+  first.resolve(response(denied ? { error: { code: "unauthenticated" } } : old, denied ? 401 : 200));
+  assert.equal(await checking, false, "another read already confirmed this account ended");
+
+  const stale = deferred(), restored = deferred(); reads = 0;
+  const replacement = new AccountClient({ fetcher: () => (++reads === 1 ? stale : restored).promise });
+  replacement.session = old;
+  const oldCheck = replacement.confirm(), newRestore = replacement.restore();
+  stale.resolve(response(denied ? { error: { code: "unauthenticated" } } : old, denied ? 401 : 200));
+  assert.equal(await oldCheck, null, "old confirmation must not retire the pending restore UI");
+  const next = accountSession("new", 2); restored.resolve(response(next));
+  assert.equal(await newRestore, next); assert.equal(replacement.session, next);
 });

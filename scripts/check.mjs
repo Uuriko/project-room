@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
+import { checkSyntax } from "./syntax-check.mjs";
 
 // Fail fast with a clear message on old Node (task #42): package.json
 // declares engines >=24.19.0, and npm only warns without engine-strict.
@@ -16,13 +17,9 @@ import { spawnSync } from "node:child_process";
 function files(path) { return readdirSync(path, { withFileTypes: true }).flatMap(e => e.isDirectory() ? files(join(path, e.name)) : /\.(mjs|js)$/.test(e.name) ? [join(path, e.name)] : []); }
 const cloudflare = readdirSync("cloudflare", { withFileTypes: true })
   .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("cloudflare", e.name));
-const deploy = readdirSync("deploy", { withFileTypes: true })
-  .filter(e => e.isFile() && e.name.endsWith(".mjs")).map(e => join("deploy", e.name));
 const relay = ["relay/src", "relay/checks"].filter(existsSync).flatMap(files);
-for (const path of ["server.mjs", "push-sw.js", "bin/room.mjs", ...["src", "server", "client", "scripts", "tests", "cli"].flatMap(files), ...cloudflare, ...deploy, ...relay]) {
-  const result = spawnSync(process.execPath, ["--check", path], { stdio: "inherit" });
-  if (result.status !== 0) process.exit(result.status || 1);
-}
+const syntaxStatus = await checkSyntax(["server.mjs", "push-sw.js", "bin/room.mjs", ...["src", "server", "client", "scripts", "tests", "cli"].flatMap(files), ...cloudflare, ...relay]);
+if (syntaxStatus !== 0) process.exit(syntaxStatus);
 const uiStrings = spawnSync(process.execPath, ["scripts/build-ui-strings.mjs", "--check"], { stdio: "inherit" });
 if (uiStrings.status !== 0) process.exit(uiStrings.status || 1);
 const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], { stdio: "inherit" });
@@ -61,6 +58,8 @@ if (wiki.status !== 0) process.exit(wiki.status || 1);
 // Wiki read API (W009): the build-time embedded wiki data stays current with the planes.
 const wikiBuild = spawnSync(process.execPath, ["scripts/wiki-build.mjs", "--check"], { stdio: "inherit" });
 if (wikiBuild.status !== 0) process.exit(wikiBuild.status || 1);
+const workflowPins = spawnSync(process.execPath, ["scripts/check-workflow-pins.mjs"], { stdio: "inherit" });
+if (workflowPins.status !== 0) process.exit(workflowPins.status ?? 1);
 const docLinks = spawnSync(process.execPath, ["scripts/docs-link-check.mjs"], { stdio: "inherit" });
 if (docLinks.status !== 0) process.exit(docLinks.status || 1);
 // VL-2a: the GitHub App manifest stays aligned with the shared core.
@@ -74,7 +73,11 @@ if (contrast.status !== 0) process.exit(contrast.status || 1);
 const tokensCss = spawnSync(process.execPath, ["scripts/sync-design-tokens-css.mjs", "--check"], { stdio: "inherit" });
 if (tokensCss.status !== 0) process.exit(tokensCss.status || 1);
 // CI runs the root suite in the dedicated unit job; local check runs it here.
+// The MCP/OpenAPI drift test reads the rendered document. Affected unit
+// selection can skip it, so the contract job runs it here.
 if (process.env.CI) {
+  const drift = spawnSync(process.execPath, ["--test", "tests/mcp-openapi-drift.test.js"], { stdio: "inherit" });
+  if (drift.status !== 0) process.exit(drift.status ?? 1);
   console.log("check: skipping node --test in CI (covered by test jobs)");
   process.exit(0);
 }

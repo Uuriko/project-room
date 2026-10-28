@@ -15,7 +15,7 @@ import { createHash } from "node:crypto";
 import { ServiceError } from "./service-error.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
 import { validateAttachment, AttachmentError } from "./attachments.mjs";
-import { validAttachmentData } from "./room-attachment-bytes.mjs";
+import { validAttachmentData, base64DecodedLength } from "./room-attachment-bytes.mjs";
 import { validId } from "../src/events.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
@@ -54,9 +54,13 @@ export const inboxAttachmentBytesSchema = `
 
 function decodeData(value) {
   if (!validAttachmentData(value)) fail(422, "invalid_attachment", "data must be canonical base64 with no whitespace");
+  // Same #3436 shape as room files: size before decode, limit and actual
+  // size named, so an over-cap upload is not misreported as an encoding error.
+  const decodedLength = base64DecodedLength(value);
+  if (decodedLength > attachmentLimits.fileBytes)
+    fail(413, "attachment_too_large", `File is ${decodedLength} bytes; the inbox attachment size limit is ${attachmentLimits.fileBytes} bytes`);
   const bytes = Buffer.from(value, "base64");
   if (bytes.toString("base64") !== value) fail(422, "invalid_attachment", "data must be canonical base64 with no whitespace");
-  if (bytes.length > attachmentLimits.fileBytes) fail(413, "attachment_too_large", "File exceeds the inbox attachment size limit");
   return bytes;
 }
 

@@ -126,11 +126,24 @@ export function createReputation({ store } = {}) {
     return updated;
   };
   // Apply decay: score moves toward 0 by factor (0 = no decay, 1 = full reset).
+  // For time-aware records the multiplicative step must also advance
+  // updatedMs, or scoreAt() would decay the same interval a second time
+  // from the stale timestamp (#2947). A factor step is exactly the
+  // exponential time decay over an equivalent elapsed interval,
+  // 1 - factor = 0.5^(elapsed / half-life), so advance updatedMs by that
+  // interval (rounded to whole ms) and the two views stay consistent.
+  // factor = 1 zeroes the score, which time decay can never change, so
+  // its timestamp is left alone; legacy records (updatedMs null) have no
+  // timestamp to advance.
   const decay = factor => {
     check(Number.isFinite(factor) && factor >= 0 && factor <= 1, "factor must be 0-1");
+    const equivalentElapsedMs = factor >= 1 ? 0
+      : Math.round(-REPUTATION_DECAY_HALF_LIFE_MS * Math.log2(1 - factor));
     const updated = [];
     for (const [agentId, current] of reputations) {
-      const next = Object.freeze({ ...current, score: current.score * (1 - factor) });
+      const next = Object.freeze({ ...current, score: current.score * (1 - factor),
+        updatedMs: current.updatedMs === null || equivalentElapsedMs === 0
+          ? current.updatedMs : current.updatedMs + equivalentElapsedMs });
       reputations.set(agentId, next);
       updated.push(next);
     }

@@ -107,7 +107,7 @@ const workflow = parse(readFileSync(join(root, ".github/workflows/review-mechani
 test("PR mechanical review emits only immediate signals; completed test events own final conclusions", () => {
   assert.equal(workflow.name, "review-mechanical");
   assert.equal(workflow.jobs.mechanical.if, "github.event_name == 'pull_request'");
-  assert.equal(workflow.jobs.full.if, "github.event_name == 'workflow_run'");
+  assert.equal(workflow.jobs.full.if, "github.event_name == 'workflow_run' && github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled'");
   assert.deepEqual(workflow.on.workflow_run, { workflows: ["test"], types: ["completed"] });
   const fast = workflow.jobs.mechanical.steps.filter(step => step.run);
   assert.equal(fast.length, 1, "the PR path finishes immediately after its fast report");

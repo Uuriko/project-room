@@ -5,8 +5,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
-import { AccessRequests, accessRequestSchema, MAX_PENDING_PER_IDENTITY_ROOM } from "../server/access-requests.mjs";
+import { AccessRequests, accessRequestSchema, MAX_PENDING_PER_IDENTITY_ROOM, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function setup(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-access-"));
@@ -22,7 +23,7 @@ function setup(t) {
   return { store, requests, ownerToken, identity };
 }
 
-test("unauthenticated identity can request access; idempotent on requestId", async t => {
+test("identity can request access with its secret; idempotent on requestId", async t => {
   const { requests, identity } = setup(t);
   const first = requests.request("commons", {
     identityId: identity.identityId,
@@ -30,7 +31,7 @@ test("unauthenticated identity can request access; idempotent on requestId", asy
     requestedPermissions: ["accept_work", "complete_work"],
     note: "I can triage inbox items.",
     requestId: "ar_test1"
-  });
+  }, identity.secret);
   assert.equal(first.status, "pending");
   assert.equal(first.identityId, identity.identityId);
   assert.deepEqual(first.requestedPermissions, ["accept_work", "complete_work"]);
@@ -40,9 +41,62 @@ test("unauthenticated identity can request access; idempotent on requestId", asy
     displayName: "Requesting Agent",
     requestedPermissions: ["accept_work", "complete_work"],
     requestId: "ar_test1"
-  });
+  }, identity.secret);
   assert.equal(retry.requestId, first.requestId);
   assert.equal(retry.status, "pending");
+});
+
+// QA200-MUT-14: an idempotency-key retry must not double-apply side effects.
+// The retry branch returns the stored request; it must not insert a second
+// row or emit a second access.requested timeline event (which would fan out
+// duplicate owner notifications).
+test("idempotent retry does not double-apply: one row, one timeline event", async t => {
+  const { store, requests, identity } = setup(t);
+  const input = {
+    identityId: identity.identityId,
+    displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"],
+    note: "retry me",
+    requestId: "ar_no_double_apply"
+  };
+  requests.request("commons", input, identity.secret);
+  requests.request("commons", input, identity.secret);
+  const rows = store.db.prepare(
+    "SELECT count(*) AS n FROM access_requests WHERE request_id='ar_no_double_apply'").get().n;
+  assert.equal(rows, 1, "retry with the same requestId must not insert a second row");
+  const events = store.db.prepare(
+    `SELECT count(*) AS n FROM events WHERE room_id='commons'
+     AND json_extract(body, '$.type')='access.requested'
+     AND json_extract(body, '$.data.requestId')='ar_no_double_apply'`).get().n;
+  assert.equal(events, 1, "retry with the same requestId must not emit a second access.requested event");
+});
+
+// QA200-MUT-14: a replayed idempotency key must return the ORIGINAL result,
+// not a stale or corrupted cached body. Caught a mutation that returned
+// requestedPermissions ["steer"] on replay while all prior tests stayed green.
+test("idempotent retry returns the original request body", async t => {
+  const { requests, identity } = setup(t);
+  const first = requests.request("commons", {
+    identityId: identity.identityId,
+    displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work", "complete_work"],
+    note: "original note",
+    requestId: "ar_replay_body"
+  }, identity.secret);
+  const retry = requests.request("commons", {
+    identityId: identity.identityId,
+    displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work", "complete_work"],
+    requestId: "ar_replay_body"
+  }, identity.secret);
+  assert.equal(retry.requestId, first.requestId);
+  assert.equal(retry.roomId, first.roomId);
+  assert.equal(retry.identityId, first.identityId);
+  assert.equal(retry.displayName, first.displayName);
+  assert.deepEqual(retry.requestedPermissions, first.requestedPermissions);
+  assert.deepEqual(retry.requestedPermissions, ["accept_work", "complete_work"]);
+  assert.equal(retry.note, first.note);
+  assert.equal(retry.status, first.status);
 });
 
 test("requestId collision across identities is rejected", async t => {
@@ -51,11 +105,34 @@ test("requestId collision across identities is rejected", async t => {
   requests.request("commons", {
     identityId: identity.identityId, displayName: "A",
     requestedPermissions: ["accept_work"], requestId: "ar_collision"
-  });
+  }, identity.secret);
   assert.throws(() => requests.request("commons", {
     identityId: other.identityId, displayName: "B",
     requestedPermissions: ["accept_work"], requestId: "ar_collision"
-  }), /requestId is already in use/);
+  }, other.secret), /requestId is already in use/);
+});
+
+// PRODUCT-200 B10 (QA200-MUT-14 design question): request_id is a global
+// PRIMARY KEY and the retry lookup was unscoped (WHERE request_id=? with no
+// room_id). A client-supplied key minted in room A and retried in room B must
+// NOT replay room A's request — it fails honestly with the same 409 the
+// cross-identity collision uses.
+test("requestId reused in a different room is rejected, not replayed", async t => {
+  const { store, requests, identity } = setup(t);
+  store.initialize(initialRoom("lab"));
+  const first = requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_crossroom"
+  }, identity.secret);
+  assert.equal(first.roomId, "commons");
+  assert.throws(() => requests.request("lab", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId: "ar_crossroom"
+  }, identity.secret), /requestId is already in use/);
+  // The original room's request is untouched: one row, still in commons.
+  const rows = store.db.prepare(
+    "SELECT count(*) AS n FROM access_requests WHERE request_id='ar_crossroom'").get().n;
+  assert.equal(rows, 1);
 });
 
 test("unknown identity or room is a bare 404", async t => {
@@ -72,13 +149,11 @@ test("unknown identity or room is a bare 404", async t => {
 
 test("already-linked identity cannot request", async t => {
   const { store, requests, ownerToken, identity } = setup(t);
-  store.identities.link(ownerToken, "commons", {
-    identityId: identity.identityId, displayName: "Requesting Agent", permissions: ["accept_work"]
-  });
+  linkWithProof(store, ownerToken, "commons", identity, { displayName: "Requesting Agent", permissions: ["accept_work"] });
   assert.throws(() => requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_linked"
-  }), /already linked/);
+  }, identity.secret), /already linked/);
 });
 
 test("pending cap per identity per room", async t => {
@@ -87,12 +162,74 @@ test("pending cap per identity per room", async t => {
     requests.request("commons", {
       identityId: identity.identityId, displayName: "Requesting Agent",
       requestedPermissions: ["accept_work"], requestId: `ar_cap${i}`
-    });
+    }, identity.secret);
   }
   assert.throws(() => requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_cap_over"
-  }), /At most/);
+  }, identity.secret), /At most/);
+});
+
+// #3745 (TIME-TRAVEL): expiry is lazy, so in a room nobody reads, lapsed
+// requests stay stored 'pending' forever — and the create path counted
+// them, permanently refusing a sixth request. The create now materializes
+// the caller's own lapsed rows before counting.
+test("lapsed pendings are expired on create and do not consume the cap (#3745)", async t => {
+  const { store, requests, identity } = setup(t);
+  const ask = requestId => requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId
+  }, identity.secret);
+  for (let i = 0; i < MAX_PENDING_PER_IDENTITY_ROOM; i++) ask(`ar_dead${i}`);
+  // All five lapse with nobody reading the room: past the 7-day TTL, still
+  // stored 'pending' because nothing has materialized the expiry.
+  store.db.prepare("UPDATE access_requests SET created_at=? WHERE room_id='commons'")
+    .run(store.now() - REQUEST_TTL_MS - 1000);
+  // The sixth create flips the dead rows instead of refusing.
+  assert.equal(ask("ar_after_lapse").status, "pending");
+  const stored = store.db.prepare(
+    "SELECT status, count(*) AS n FROM access_requests WHERE room_id='commons' GROUP BY status").all();
+  assert.deepEqual(Object.fromEntries(stored.map(row => [row.status, row.n])),
+    { expired: MAX_PENDING_PER_IDENTITY_ROOM, pending: 1 });
+  // The poll path agrees with the stored state the create left behind.
+  assert.equal(requests.status("ar_dead0", identity.identityId).status, "expired");
+});
+
+test("only live pendings count toward the cap when lapsed and live rows mix (#3745)", async t => {
+  const { store, requests, identity } = setup(t);
+  const ask = requestId => requests.request("commons", {
+    identityId: identity.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId
+  }, identity.secret);
+  for (let i = 0; i < 3; i++) ask(`ar_mix_old${i}`);
+  store.db.prepare("UPDATE access_requests SET created_at=? WHERE room_id='commons'")
+    .run(store.now() - REQUEST_TTL_MS - 1000);
+  // The three lapsed rows free their slots entirely: a full cap of live
+  // pendings fits, and the next live one is refused exactly as before.
+  for (let i = 0; i < MAX_PENDING_PER_IDENTITY_ROOM; i++) {
+    assert.equal(ask(`ar_mix_live${i}`).status, "pending");
+  }
+  assert.throws(() => ask("ar_mix_over"), err => err.code === "too_many_requests");
+});
+
+test("a create expires only the caller's rows, never another identity's (#3745)", async t => {
+  const { store, requests, identity } = setup(t);
+  const other = store.identities.create("Other Agent");
+  const ask = (who, requestId) => requests.request("commons", {
+    identityId: who.identityId, displayName: "Requesting Agent",
+    requestedPermissions: ["accept_work"], requestId
+  }, who.secret);
+  ask(other, "ar_other_old");
+  for (let i = 0; i < MAX_PENDING_PER_IDENTITY_ROOM; i++) ask(identity, `ar_mine${i}`);
+  store.db.prepare("UPDATE access_requests SET created_at=? WHERE room_id='commons'")
+    .run(store.now() - REQUEST_TTL_MS - 1000);
+  assert.equal(ask(identity, "ar_mine_new").status, "pending");
+  // The other identity's lapsed row is untouched by this identity's
+  // create; it flips only when its owner polls it (or the room is listed).
+  const otherRow = store.db.prepare(
+    "SELECT status FROM access_requests WHERE request_id='ar_other_old'").get();
+  assert.equal(otherRow.status, "pending");
+  assert.equal(requests.status("ar_other_old", other.identityId).status, "expired");
 });
 
 test("identity can check its own request; others get 404", async t => {
@@ -101,7 +238,7 @@ test("identity can check its own request; others get 404", async t => {
   requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_status"
-  });
+  }, identity.secret);
   const seen = requests.status("ar_status", identity.identityId);
   assert.equal(seen.status, "pending");
   assert.throws(() => requests.status("ar_status", other.identityId), err => err.status === 404);
@@ -113,7 +250,7 @@ test("owner lists pending; approve links the identity", async t => {
   requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work", "complete_work"], requestId: "ar_approve"
-  });
+  }, identity.secret);
   const pending = requests.list(ownerToken, "commons");
   assert.equal(pending.length, 1);
   assert.equal(pending[0].requestId, "ar_approve");
@@ -143,7 +280,7 @@ test("owner can narrow permissions on approve; deny records a reason", async t =
   requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work", "complete_work", "verify"], requestId: "ar_narrow"
-  });
+  }, identity.secret);
   const decided = requests.decide(ownerToken, "commons", "ar_narrow",
     { decision: "approve", permissions: ["accept_work"] });
   assert.equal(decided.status, "approved");
@@ -157,7 +294,7 @@ test("deny flow", async t => {
   requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_deny"
-  });
+  }, identity.secret);
   const denied = requests.decide(ownerToken, "commons", "ar_deny",
     { decision: "deny", note: "Not now." });
   assert.equal(denied.status, "denied");
@@ -180,7 +317,7 @@ test("non-owner cannot list or decide", async t => {
   requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_forbidden"
-  });
+  }, identity.secret);
   assert.throws(() => requests.list(memberToken, "commons"), err => err.status === 403);
   assert.throws(() => requests.decide(memberToken, "commons", "ar_forbidden", { decision: "approve" }),
     err => err.status === 403);
@@ -191,7 +328,7 @@ test("expired requests are not decidable", async t => {
   requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_old"
-  });
+  }, identity.secret);
   // Backdate past the 7-day TTL.
   store.db.prepare("UPDATE access_requests SET created_at=? WHERE request_id=?")
     .run(store.now() - 8 * 24 * 60 * 60 * 1000, "ar_old");
@@ -208,7 +345,7 @@ test("unknown permission names fail fast with a self-teaching 422 (RC-2026-09-18
   assert.throws(() => requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["read", "write"], requestId: "ar_badnames"
-  }), error => {
+  }, identity.secret), error => {
     assert.equal(error.code, "invalid_request");
     assert.ok(error.message.includes("accept_work"), "422 names real permissions");
     return true;
@@ -217,7 +354,7 @@ test("unknown permission names fail fast with a self-teaching 422 (RC-2026-09-18
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_goodnames"
-  });
+  }, identity.secret);
   assert.throws(() => requests.decide(ownerToken, "commons", pending.requestId,
     { decision: "approve", permissions: ["read"] }),
     error => {
@@ -236,7 +373,7 @@ test("note:null is accepted like an omitted note (RC-2026-09-18-025)", async t =
   const created = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], note: null, requestId: "ar_nullnote"
-  });
+  }, identity.secret);
   assert.equal(created.status, "pending");
   assert.equal(created.note, null);
   const seen = requests.status("ar_nullnote", identity.identityId);
@@ -245,11 +382,11 @@ test("note:null is accepted like an omitted note (RC-2026-09-18-025)", async t =
   assert.throws(() => requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], note: 123, requestId: "ar_badnote"
-  }), err => err.status === 422);
+  }, identity.secret), err => err.status === 422);
   assert.throws(() => requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], note: "x".repeat(501), requestId: "ar_longnote"
-  }), err => err.status === 422);
+  }, identity.secret), err => err.status === 422);
 });
 
 test("decide deny with note:null is accepted like an omitted note (RC-2026-09-18-025)", async t => {
@@ -257,7 +394,7 @@ test("decide deny with note:null is accepted like an omitted note (RC-2026-09-18
   requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_deny_null"
-  });
+  }, identity.secret);
   const denied = requests.decide(ownerToken, "commons", "ar_deny_null",
     { decision: "deny", note: null });
   assert.equal(denied.status, "denied");
@@ -276,7 +413,7 @@ test("auto-approve: subset of the configured rule is approved and linked inline"
   const approved = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto1"
-  });
+  }, identity.secret);
   assert.equal(approved.status, "approved");
   assert.equal(approved.memberId, identity.identityId);
   assert.deepEqual(approved.grantedPermissions, ["accept_work"]);
@@ -300,7 +437,7 @@ test("auto-approve: audit fields on the request row", async t => {
   const approved = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work", "complete_work"], requestId: "ar_auto_audit"
-  });
+  }, identity.secret);
   assert.equal(approved.status, "approved");
   assert.equal(approved.decidedBy, "auto-approve");
   assert.ok(typeof approved.decidedAt === "number" && approved.decidedAt > 0);
@@ -313,7 +450,7 @@ test("auto-approve: superset of the rule stays pending with a reason", async t =
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work", "steer"], requestId: "ar_auto_super"
-  });
+  }, identity.secret);
   assert.equal(pending.status, "pending");
   assert.match(pending.pendingNote, /outside the rule/);
   assert.equal(pending.memberId, undefined);
@@ -324,7 +461,7 @@ test("auto-approve: empty request and no rule stay pending without a note", asyn
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: [], requestId: "ar_auto_empty"
-  });
+  }, identity.secret);
   assert.equal(pending.status, "pending");
   assert.equal(pending.pendingNote, undefined);
 });
@@ -370,7 +507,7 @@ test("auto-approve: empty permission list disables the rule", async t => {
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_cleared"
-  });
+  }, identity.secret);
   assert.equal(pending.status, "pending");
   assert.equal(pending.pendingNote, undefined);
 });
@@ -382,7 +519,7 @@ test("auto-approve: verified-only rooms never auto-approve the unverified", asyn
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_unverified"
-  });
+  }, identity.secret);
   assert.equal(pending.status, "pending");
   assert.match(pending.pendingNote, /verified/);
   // A verified identity in the same room is approved inline.
@@ -390,7 +527,7 @@ test("auto-approve: verified-only rooms never auto-approve the unverified", asyn
   const approved = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_verified"
-  });
+  }, identity.secret);
   assert.equal(approved.status, "approved");
   assert.equal(approved.decidedBy, "auto-approve");
 });
@@ -412,7 +549,7 @@ test("auto-approve: rule suspends when its author loses membership administratio
   const pending = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_demoted"
-  });
+  }, identity.secret);
   assert.equal(pending.status, "pending");
   assert.match(pending.pendingNote, /suspended/);
 });
@@ -423,12 +560,12 @@ test("auto-approve: idempotent retry on an approved request returns the approval
   const first = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_retry"
-  });
+  }, identity.secret);
   assert.equal(first.status, "approved");
   const retry = requests.request("commons", {
     identityId: identity.identityId, displayName: "Requesting Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_retry"
-  });
+  }, identity.secret);
   assert.equal(retry.status, "approved");
   assert.equal(retry.decidedBy, "auto-approve");
   assert.equal(retry.memberId, identity.identityId);
@@ -450,7 +587,7 @@ test("auto-approve: deceptive display names never auto-admit", async t => {
   assert.throws(() => requests.request("commons", {
     identityId: impostor.identityId, displayName: "Ａlice",
     requestedPermissions: ["accept_work"], requestId: "ar_auto_deceptive"
-  }), error => error.status === 422 && error.code === "display_name_unavailable" && error.reason === "duplicate");
+  }, impostor.secret), error => error.status === 422 && error.code === "display_name_unavailable" && error.reason === "duplicate");
   assert.equal(store.db.prepare("SELECT count(*) AS n FROM access_requests WHERE request_id=?").get("ar_auto_deceptive").n, 0);
   assert.equal(store.room("commons").state.members[impostor.identityId], undefined);
 });
@@ -461,7 +598,7 @@ test("pending responses carry service-level poll-status guidance", async t => {
   const first = requests.request("commons", {
     identityId: identity.identityId, displayName: "Guided Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_guide_plain"
-  });
+  }, identity.secret);
   assert.equal(first.status, "pending");
   assert.equal(first.next[0].action, "poll-status");
   assert.equal(first.next[0].method, "GET");
@@ -478,7 +615,7 @@ test("pending responses carry service-level poll-status guidance", async t => {
   const retry = requests.request("commons", {
     identityId: identity.identityId, displayName: "Guided Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_guide_plain"
-  });
+  }, identity.secret);
   assert.equal(retry.status, "pending");
   assert.deepEqual(retry.next.map(n => n.action), ["poll-status", "cancel-request"]);
 });
@@ -491,7 +628,7 @@ test("pending guidance fires alongside a pendingNote when a rule is configured b
   const filed = requests.request("commons", {
     identityId: identity.identityId, displayName: "Mismatched Agent",
     requestedPermissions: ["accept_work"], requestId: "ar_guide_mismatch"
-  });
+  }, identity.secret);
   assert.equal(filed.status, "pending");
   assert.ok(filed.pendingNote, "pendingNote explains why the rule did not fire");
   assert.equal(filed.next[0].action, "poll-status");

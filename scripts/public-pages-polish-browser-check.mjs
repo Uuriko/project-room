@@ -139,8 +139,8 @@ test("public pages permit only the intended analytics connection and remain axe-
   await page.goto(origin + "/no-such-page", { waitUntil: "domcontentloaded" });
   await page.locator("a[href='/']").focus();
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), "/");
-  await page.keyboard.press("Tab");
-  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), "/about");
-  await page.keyboard.press("Tab");
-  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), "/receipts");
+  for (const href of ["/about", "/offers", "/docs/agents", "/compare/project-room-vs-slack", "/receipts"]) {
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("href")), href);
+  }
 });

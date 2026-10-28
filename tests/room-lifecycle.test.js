@@ -31,7 +31,7 @@ const access = (actorId, memberId, permissions, active = false) => event({ type:
   data: { memberId, expectedMemberRevision: 0, permissions, active } });
 
 test("reducer: kind is validated at creation, archive is owner-only and closes the log, leaving needs no administration", () => {
-  assert.equal(STORE_SCHEMA_VERSION, 38);
+  assert.equal(STORE_SCHEMA_VERSION, 42);
   assert.deepEqual([...ROOM_KINDS], ["personal", "organization"]);
   assert.ok(COMMAND_TYPES.includes(T.ROOM_ARCHIVED)); assert.equal(classifyCommand(T.ROOM_ARCHIVED), "act");
   const state = seed("r").reduce(applyEvent, emptyRoomState());
@@ -191,7 +191,7 @@ test("migration: genuine v27 data gains rooms.archived_at exactly once, keeps ev
   assert.deepEqual(migrated.map(row => row.id), rooms.map(row => row.id), "every room survives the migration");
   assert.deepEqual(migrated.map(row => row.sequence), rooms.map(row => row.sequence), "no room's sequence moves");
   for (const [index, row] of migrated.entries()) {
-    const after = JSON.parse(row.projection), before = JSON.parse(rooms[index].projection);
+    const after = structuredClone(current.room(row.id).state), before = JSON.parse(rooms[index].projection);
     assert.deepEqual(Object.keys(after).filter(key => !(key in before)), ["channels"],
       `${row.id}: the default channel is the only projection key a v27 room gains`);
     assert.deepEqual(Object.keys(after.channels), ["general"]);
@@ -270,6 +270,44 @@ test("account rooms: discovery carries kind and archive state; creation is bound
   assert.equal(auditRecovery(f.store).rooms, 4);
 });
 
+test("account rooms: reserved prototype-named ids get a reserved error, not the charset message (#3013)", t => {
+  const f = createAcceptanceFixture();
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  const login = accountId => {
+    const key = f.store.issueAccountAccessKey(accountId), slot = f.store.createAccountSessionSlot();
+    const session = f.store.loginAccountSession(slot.token, key, 0);
+    return { token: slot.token, binding: session.sessionBinding };
+  };
+  f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED, data: { memberId: "admin", displayName: "Avery", kind: "human", permissions: ["manage_members"] } });
+  f.store.createAccount("admin-account"); f.store.bindHumanAccount("commons", "admin", "admin-account");
+  const admin = login("admin-account");
+  const request = (overrides = {}) => ({ roomId: "room-a", title: "Alpha", purpose: "Plan the pilot", kind: "personal", displayName: "Admin", ...overrides });
+  // "constructor" and "prototype" pass the charset/length rules outright, and
+  // "__proto__" is on the same denylist in validId: all three are rejected
+  // because the name is reserved, so the error must say so.
+  for (const reserved of ["constructor", "prototype", "__proto__"]) {
+    assert.throws(() => f.store.createAccountRoom(admin.token, admin.binding, request({ roomId: reserved })),
+      error => {
+        assert.equal(error.status, 422);
+        assert.equal(error.code, "reserved_room_id");
+        assert.match(error.message, /reserved/i);
+        assert.doesNotMatch(error.message, /letters, digits/);
+        return true;
+      }, `${reserved}: reserved names get the reserved error`);
+    assert.equal(f.store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(reserved), undefined, `${reserved}: no room was created`);
+  }
+  // Genuine charset and length failures keep the original error.
+  for (const bad of ["../x", "x".repeat(65)]) {
+    assert.throws(() => f.store.createAccountRoom(admin.token, admin.binding, request({ roomId: bad })),
+      error => {
+        assert.equal(error.status, 422);
+        assert.equal(error.code, "invalid_room_request");
+        assert.match(error.message, /letters, digits, dots, colons, underscores or hyphens/);
+        return true;
+      }, `${bad}: charset/length failures keep the charset message`);
+  }
+});
+
 test("account rooms: the membership cap bounds creation", t => {
   const f = createAcceptanceFixture();
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
@@ -279,4 +317,25 @@ test("account rooms: the membership cap bounds creation", t => {
   const key = f.store.issueAccountAccessKey("busy-account"), slot = f.store.createAccountSessionSlot(), session = f.store.loginAccountSession(slot.token, key, 0);
   assert.throws(() => f.store.createAccountRoom(slot.token, session.sessionBinding, { roomId: "room-101", title: "One more", purpose: "Over the cap", kind: "personal", displayName: "Admin" }), { status: 409, code: "pilot_limit" });
   assert.equal(f.store.db.prepare("SELECT 1 FROM rooms WHERE id='room-101'").get(), undefined);
+});
+
+test("account rooms: someone who left their only room may create their first room", t => {
+ const f = createAcceptanceFixture();
+ t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+ f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: T.MEMBER_ADDED,
+ data: { memberId: "visitor", displayName: "Visitor", kind: "human", permissions: ["steer"] } });
+ f.store.createAccount("visitor-account");
+ f.store.bindHumanAccount("commons", "visitor", "visitor-account");
+ const key = f.store.issueAccountAccessKey("visitor-account");
+ const slot = f.store.createAccountSessionSlot();
+ const session = f.store.loginAccountSession(slot.token, key, 0);
+ const request = { roomId: "visitor-first", title: "Fresh start", purpose: "Own room after leaving", kind: "personal", displayName: "Visitor" };
+ assert.throws(() => f.store.createAccountRoom(slot.token, session.sessionBinding, request), { status: 403, code: "room_creation_denied" },
+ "an active conversation-only guest cannot create a second room");
+ const member = f.store.room("commons").state.members.visitor;
+ f.store.command(slot.token, "commons", { id: randomUUID(), type: T.MEMBER_ACCESS_CHANGED,
+ data: { memberId: "visitor", expectedMemberRevision: member.revision, permissions: [...member.permissions], active: false } }, session.sessionBinding);
+ assert.deepEqual(f.store.accountRooms(slot.token, session.sessionBinding).rooms, [], "no active rooms remain");
+ const created = f.store.createAccountRoom(slot.token, session.sessionBinding, request);
+ assert.equal(created.room.id, "visitor-first");
 });

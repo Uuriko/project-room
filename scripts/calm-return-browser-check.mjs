@@ -88,7 +88,10 @@ for (const mobile of [false, true]) {
     assert.equal(await page.locator("#rb-history-section").evaluate(node => node.open), false);
     assert.equal(await page.locator("#rb-involving-section").evaluate(node => node.open), false);
     assert.equal(await page.locator("#rb-more-button").getAttribute("hidden"), null, "history has another page even while its disclosure is closed");
-    assert.match(await page.locator("#rb-ack-note").textContent(), new RegExp(`Marks all ${horizon} updates read`));
+    // The unread count is horizon minus the Catch up marker. The marker is not 0 any
+    // more: the owner's own leading events are skipped (store.catchUpCursor, QA8).
+    const unread = horizon - f.store.catchUpCursor("commons", "owner");
+    assert.match(await page.locator("#rb-ack-note").textContent(), new RegExp(`Marks all ${unread} updates read`));
     assert.equal(await page.locator('#rb-involving-list [data-open-work="return-0"]').count(), 0, "needs and ongoing do not duplicate the same task");
     assert.equal(await page.locator("#reminder-due li").count(), 1, "a personal reminder is a separate reason, not an extra task count");
     await page.evaluate(() => scrollTo(0, 0)); await capture("expanded");
@@ -103,7 +106,7 @@ for (const mobile of [false, true]) {
     await page.locator("#message-input").evaluate(node => node.setSelectionRange(2, 9));
     await openCatchUp(page); await ready();
     await attention("return-1").click();
-    assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), false);
     assert.equal(await card("return-1").evaluate(node => node === document.activeElement), true);
     assert.deepEqual(await page.locator("#message-input").evaluate(node => [node.value, node.selectionStart, node.selectionEnd]), ["A draft to keep while catching up.", 2, 9]);
     assert.equal(await page.locator("#message-to-select").inputValue(), "guest");
@@ -124,7 +127,7 @@ for (const mobile of [false, true]) {
     assert.equal(await card("return-1").locator('[data-action="start"]').count(), 0);
     assert.equal(await card("return-1").locator('[data-action="claim"]').count(), 1);
     assert.match(await card("return-1").locator(".claim > summary").textContent(), /expired/);
-    assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), true);
+    assert.equal(await card("return-1").locator(".work-details").evaluate(node => node.open), false);
     assert.equal(Number(await page.locator("#rb-ack-button").getAttribute("data-horizon")), horizon);
     assert.deepEqual(snapshot(), initial); assert.deepEqual(writes.filter(path => !path.endsWith("/typing")), []);
 
@@ -152,12 +155,18 @@ for (const mobile of [false, true]) {
 
     // Result-first catch-up (C6): the refreshed history groups by outcome,
     // blocker and remaining volume, and each grouped line still opens its exact
-    // supporting record. The completed/blocked events are on the second page,
-    // so page the frozen window first - grouping covers every loaded page.
+    // supporting record. The completed/blocked events sit past the first page,
+    // so page the frozen window to its end first - grouping covers every
+    // loaded page. (How many pages the window spans depends on event volume:
+    // decision #10's cutover added board events to this stream, moving the
+    // outcome/blocker events from page 2 to page 3 of this fixture.)
     await page.locator("#rb-history-section > summary").click();
-    const moreBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
-    await page.locator("#rb-more-button").click(); await moreBrief;
-    await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    for (let pages = 0; pages < 10; pages++) {
+      if (await page.locator("#rb-more-button").isHidden()) break;
+      const moreBrief = page.waitForResponse(response => new URL(response.url()).pathname.endsWith("/return-brief"));
+      await page.locator("#rb-more-button").click(); await moreBrief;
+      await page.waitForFunction(() => document.querySelector("#return-brief-panel").getAttribute("aria-busy") === "false");
+    }
     const groupLabels = await page.locator("#rb-history-list .rb-group-label").allTextContents();
     assert.deepEqual(groupLabels.map(text => text.replace(/\s*\(\d+\)$/, "")), ["Results", "Blockers", "Other updates"]);
     const resultsGroup = page.locator("#rb-history-list .rb-group", { has: page.locator(".rb-group-label", { hasText: "Results" }) });

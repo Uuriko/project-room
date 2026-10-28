@@ -204,6 +204,67 @@ test("flush POSTs OTLP JSON to the configured endpoint and clears the buffer", a
   }
 });
 
+// --- Concurrent auto-export (regression: #2926) -------------------------------
+// _onSpanEnd fires _export() on every span end. The old implementation had no
+// in-flight guard and cleared the whole buffer after awaiting fetch, so
+// overlapping exports POSTed the same spans twice and wiped spans that had
+// ended mid-flight (never exported). These tests stub fetch with a 30ms
+// latency — the interleaving from the bug report — and require each span to
+// be delivered exactly once.
+
+const stubFetch = handler => {
+  const original = globalThis.fetch;
+  const posts = [];
+  globalThis.fetch = async (url, opts) => {
+    await new Promise(r => setTimeout(r, 30));
+    const payload = JSON.parse(opts.body);
+    posts.push(payload.resourceSpans[0].scopeSpans[0].spans.map(s => s.name));
+    return handler();
+  };
+  return { posts, restore: () => { globalThis.fetch = original; } };
+};
+
+const waitForExportsToSettle = async tracer => {
+  for (let i = 0; i < 100 && (tracer._exportInFlight || tracer.bufferedSpanCount() > 0); i++) {
+    await new Promise(r => setTimeout(r, 10));
+  }
+};
+
+test("concurrent auto-exports deliver each span exactly once and drop none", async () => {
+  const { posts, restore } = stubFetch(() => ({ ok: true, status: 200 }));
+  try {
+    const tracer = new DeliveryTracer({ ...ON, OTEL_EXPORTER_OTLP_ENDPOINT: "http://otlp.invalid/v1/traces" });
+    tracer.startSpan("a").end(); // starts an export of ["a"], fetch in flight
+    tracer.startSpan("b").end(); // old code: second export snapshots ["a", "b"]
+    await new Promise(r => setTimeout(r, 10)); // still inside the 30ms fetch window
+    tracer.startSpan("c").end(); // after both old snapshots, before either clears
+    await waitForExportsToSettle(tracer);
+    assert.equal(tracer.bufferedSpanCount(), 0);
+    assert.deepEqual(posts.flat().sort(), ["a", "b", "c"]); // no "a" duplicate, no missing "c"
+  } finally {
+    restore();
+  }
+});
+
+test("a failed export keeps its spans buffered for exactly-once retry", async () => {
+  let calls = 0;
+  const { posts, restore } = stubFetch(() => (++calls === 1 ? { ok: false, status: 500 } : { ok: true, status: 200 }));
+  try {
+    const tracer = new DeliveryTracer({ ...ON, OTEL_EXPORTER_OTLP_ENDPOINT: "http://otlp.invalid/v1/traces" });
+    tracer.startSpan("a").end();
+    // Let the auto-export fail; the span must remain buffered, not be cleared.
+    for (let i = 0; i < 100 && calls === 0; i++) await new Promise(r => setTimeout(r, 10));
+    await new Promise(r => setTimeout(r, 20));
+    assert.equal(tracer.bufferedSpanCount(), 1);
+    const result = await tracer.flush();
+    assert.equal(result.exported, 1);
+    assert.equal(tracer.bufferedSpanCount(), 0);
+    assert.deepEqual(posts.flat(), ["a", "a"]); // one failed attempt, one successful delivery
+  } finally {
+    restore();
+  }
+});
+
 test("flush is a no-op without an endpoint", async () => {
   const tracer = new DeliveryTracer(ON);
   tracer.startSpan("delivery.test").end();

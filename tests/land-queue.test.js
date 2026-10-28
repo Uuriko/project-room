@@ -16,8 +16,8 @@ import {
   landTransition, tipTransition, landWakePayload, rollupChecks, normalizePull, githubAccessToken,
   nextPollBackoff, POLL_BACKOFF_STEPS_MS, migrateLandQueueClaims
 } from "../server/land-queue.mjs";
-import { createWork } from "../server/work-claims.mjs";
-import { landCardHtml, shortSha } from "../src/land-queue-board.js";
+import { createWork, claimWork } from "../server/work-claims.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const SHA = "a".repeat(40);
 const NEXT = "b".repeat(40);
@@ -91,9 +91,7 @@ function spyWake(t, store) {
 
 function linkOffline(store, ownerKey) {
   const identity = store.identities.create("Lander");
-  const linked = store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, displayName: "Lander", permissions: []
-  });
+  const linked = linkWithProof(store, ownerKey, "commons", identity, { displayName: "Lander", permissions: [] });
   const seen = store.now() - 10 * 60 * 1000;
   store.db.prepare(`INSERT INTO agent_hosts
     (agent_id, host_id, mode, wake_url, last_seen_at, created_at, updated_at)
@@ -163,7 +161,7 @@ test("githubAccessToken reads an existing env token and nothing else", () => {
   assert.equal(githubAccessToken({ GITHUB_TOKEN: "first", GH_TOKEN: "second" }), "first");
 });
 
-test("first observation records state and does not emit or wake", async t => {
+test("first observation records state and emits the added receipt without waking", async t => {
   const { store, ownerKey } = fixture(t);
   const wake = spyWake(t, store);
   const { memberId } = linkOffline(store, ownerKey);
@@ -175,7 +173,12 @@ test("first observation records state and does not emit or wake", async t => {
   assert.equal(added.item.checks, "green");
   assert.equal(added.item.headSha, SHA);
   assert.equal(added.item.claimantMemberId, memberId);
-  assert.equal(landEvents(store).length, 0);
+  // The board write is observable: exactly the added receipt, and it is a
+  // receipt, not a wake — adding is the caller's own action.
+  const events = landEvents(store);
+  assert.equal(events.length, 1);
+  assert.deepEqual(events[0].data.changed, ["added"]);
+  assert.equal(events[0].data.itemId, added.item.itemId);
   assert.equal(wake.pushes.length, 0);
   assert.equal(wake.pings.length, 0);
   assert.equal(github.calls.every(call => call.authorization === `Bearer ${TOKEN}`), true);
@@ -191,7 +194,9 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   const github = mockGitHub(() => scene);
   store.landQueue.configure({ token: TOKEN, fetchImpl: github.fetchImpl });
   const added = await store.landQueue.add("commons", memberId, { repo: "acme/demo", prNumber: 969 });
-  assert.equal(landEvents(store).length, 0);
+  // The add receipt lands first; the transitions below append after it.
+  assert.equal(landEvents(store).length, 1);
+  assert.deepEqual(landEvents(store)[0].data.changed, ["added"]);
   const itemId = added.item.itemId;
   const due = () => store.landQueue.refreshDue({ now: clock.now + 120_000 });
 
@@ -199,12 +204,12 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   const green = await due();
   assert.equal(green.updated, 1);
   let events = landEvents(store);
-  assert.equal(events.length, 1);
-  assert.equal(events[0].data.pr, 969);
-  assert.equal(events[0].data.head, SHA);
-  assert.deepEqual(events[0].data.changed, ["green"]);
-  assert.deepEqual(events[0].data.state, { checks: "green", behind: false, mergeable: "mergeable", merged: false });
-  assert.equal(events[0].actorId, memberId);
+  assert.equal(events.length, 2);
+  assert.equal(events[1].data.pr, 969);
+  assert.equal(events[1].data.head, SHA);
+  assert.deepEqual(events[1].data.changed, ["green"]);
+  assert.deepEqual(events[1].data.state, { checks: "green", behind: false, mergeable: "mergeable", merged: false });
+  assert.equal(events[1].actorId, memberId);
   assert.equal(wake.pushes.length, 1);
   assert.equal(wake.pushes[0].eventType, "land.updated");
   assert.equal(wake.pushes[0].identityId, identity.identityId);
@@ -216,7 +221,14 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   assert.equal(wake.pings[0].signal.pr, 969);
   assert.equal(wake.pings[0].signal.head, SHA);
   assert.deepEqual(wake.pings[0].signal.changed, ["green"]);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals").get().n, 0);
+  // #3257: the offline claimant also gets a durable land wake signal —
+  // the doorbell and ping are fire-and-forget, the queue row is not.
+  const landSignals = store.db.prepare("SELECT * FROM agent_wake_signals").all();
+  assert.equal(landSignals.length, 1);
+  assert.equal(landSignals[0].kind, "land");
+  assert.equal(landSignals[0].agent_id, identity.identityId);
+  assert.equal(landSignals[0].room_id, "commons");
+  assert.equal(landSignals[0].message_id, events[1].id);
   const room = store.room("commons");
   const rebuilt = store.rebuildProjection("commons");
   assert.equal(rebuilt.sequence, room.sequence);
@@ -253,13 +265,16 @@ test("green, behind, red, merged, and tip wake only an offline claimant", async 
   assert.deepEqual(landEvents(store).at(-1).data.changed, ["tip"]);
   const same = store.landQueue.reportTip("commons", memberId, { itemId, sourceRevision: "src-1" });
   assert.deepEqual(same.changed, []);
-  assert.equal(landEvents(store).length, 5);
+  assert.equal(landEvents(store).length, 6);
   assert.throws(
     () => store.landQueue.reportTip("commons", memberId, { itemId }),
     error => error.status === 422 && error.code === "invalid_land_tip"
   );
   assert.equal(wake.warnings.some(line => line.includes(TOKEN)), false);
-  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals").get().n, 0);
+  // #3257: one durable land signal per waking transition — green, behind,
+  // green+merged, and tip. The red transition enqueued none (claimant was
+  // online), and the no-change reportTip enqueued none either.
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM agent_wake_signals WHERE kind='land'").get().n, 4);
 });
 
 test("a missing token is 503 github_unconfigured and is not logged", async t => {
@@ -279,7 +294,10 @@ test("a missing token is 503 github_unconfigured and is not logged", async t => 
   assert.equal(summary.unconfigured, 1);
   assert.match(wake.warnings.join("\n"), /github_unconfigured/);
   assert.equal(wake.warnings.some(line => /token|bearer|authorization/i.test(line)), false);
-  assert.equal(landEvents(store).length, 0);
+  // The row write already committed its added receipt before the refresh
+  // threw; only the poll failed, not the board mutation.
+  assert.equal(landEvents(store).length, 1);
+  assert.deepEqual(landEvents(store)[0].data.changed, ["added"]);
 });
 
 test("a rejected token is github_unconfigured and a missing pull request is pr_not_found", async t => {
@@ -376,7 +394,8 @@ test("an unchanged poll sends If-None-Match, backs off, and skips merged and clo
   const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 41 });
   assert.equal(added.item.checks, "pending");
   assert.equal(added.changed.length, 0);
-  assert.equal(landEvents(store).length, 0);
+  assert.equal(landEvents(store).length, 1);
+  assert.deepEqual(landEvents(store)[0].data.changed, ["added"]);
   assert.equal(github.calls.some(call => call.url.includes("/check-runs") && call.url.includes("filter=latest")), true);
 
   current = open;
@@ -404,7 +423,7 @@ test("an unchanged poll sends If-None-Match, backs off, and skips merged and clo
   assert.equal(row.backoff_ms, 120_000);
   assert.equal(row.checks_state, "green");
   assert.equal(row.next_poll_at, clock.now + 120_000);
-  assert.equal(landEvents(store).length, 1);
+  assert.equal(landEvents(store).length, 2);
 
   clock.now += 60_000;
   summary = await store.landQueue.refreshDue();
@@ -528,6 +547,40 @@ test("re-adding a pull request keeps one row and can move the claimant", async t
   assert.equal(second.item.itemId, first.item.itemId);
   assert.equal(second.item.claimantMemberId, memberId);
   assert.equal(store.landQueue.list("commons", "owner").items.length, 1);
+  // The claimant handoff is a board write: it commits its reassigned receipt.
+  const events = landEvents(store);
+  assert.deepEqual(events.map(event => event.data.changed), [["added"], ["reassigned"]]);
+  assert.equal(events[1].data.claimantMemberId, memberId);
+});
+
+test("prototype-named phantom members are not room members (#3023)", async t => {
+  const { store } = fixture(t);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot()).fetchImpl });
+  // These ids pass validId but are not members; a raw members[id] index
+  // resolves them to inherited Object.prototype values (truthy, with
+  // .active undefined), so #member must resolve through ownMember only.
+  for (const phantom of ["toString", "valueOf", "hasOwnProperty"]) {
+    await assert.rejects(
+      () => store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969, claimantMemberId: phantom }),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `add with phantom claimant ${phantom}`
+    );
+    await assert.rejects(
+      () => store.landQueue.add("commons", phantom, { repo: "acme/demo", prNumber: 969 }),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `add by phantom actor ${phantom}`
+    );
+    assert.throws(
+      () => store.landQueue.list("commons", phantom),
+      error => error.status === 422 && error.code === "invalid_land_item",
+      `list by phantom actor ${phantom}`
+    );
+  }
+  // No queue row was created for any phantom claimant.
+  assert.equal(store.landQueue.list("commons", "owner").items.length, 0);
+  // Positive control: a real own member still passes the membership check.
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969 });
+  assert.equal(added.item.claimantMemberId, "owner");
 });
 
 async function listen(t, store) {
@@ -648,29 +701,7 @@ test("a spent cron budget does not read GitHub for a due pull request", async t 
   assert.equal(github.calls.length, duringAdd);
 });
 
-test("the board card shows the pull request, short head, checks, behind, and tip", () => {
-  assert.equal(shortSha(SHA), "aaaaaaa");
-  assert.equal(shortSha("abc"), "");
-  const html = landCardHtml({
-    prNumber: 969,
-    title: `<script>alert("x")</script>`,
-    url: "https://github.com/acme/demo/pull/969",
-    headSha: SHA,
-    checks: "green",
-    behind: true,
-    mergedSha: null,
-    tip: { sourceRevision: "rev", buildId: null }
-  });
-  assert.match(html, /#969/);
-  assert.match(html, /land-checks-green/);
-  assert.match(html, /aaaaaaa/);
-  assert.match(html, /behind/);
-  assert.match(html, />tip</);
-  assert.match(html, /&lt;script&gt;/);
-  assert.doesNotMatch(html, /<script>/);
-  const page = readFileSync(new URL("../index.html", import.meta.url), "utf8");
-  assert.match(page, /id="land-queue-panel"/);
-  assert.match(page, /id="land-queue-list"/);
+test("land queue refresh remains available to the backend without a human panel", () => {
   const registry = readFileSync(new URL("../server/jobs.mjs", import.meta.url), "utf8");
   assert.match(registry, /refreshLandQueue\(\)/);
 });
@@ -728,4 +759,109 @@ test("pr_not_found during refresh emits a claim-deleted room event with dependen
   assert.equal(events[0].data.action, "deleted");
   assert.equal(events[0].data.workClaim, itemId);
   assert.deepEqual(events[0].data.dependents, ["work-dep-refresh"]);
+});
+
+test("add refuses a claimant already at the per-member open-claim cap", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  const github = mockGitHub(() => snapshot({ checks: "green" }));
+  store.landQueue.configure({ token: TOKEN, fetchImpl: github.fetchImpl });
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 1 });
+  // The claimant holds their one slot.
+  const held = claimWork(
+    createWork({ id: "cap-held", title: "held" }, { now: store.now(), agentId: memberId }),
+    memberId, { leaseHours: null, now: store.now() });
+  store.workClaims.set("commons", held);
+  // Another member naming them as claimant is refused: the queue row rolls
+  // back and no mirrored claim is minted.
+  await assert.rejects(
+    () => store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969, claimantMemberId: memberId }),
+    error => error.code === "too_many_open_claims" && error.status === 409);
+  assert.equal(store.db.prepare("SELECT count(*) AS n FROM land_queue").get().n, 0, "refused add rolls back the queue row");
+  const over = store.workClaims.list("commons")
+    .filter(entry => entry.owner === memberId && ["claimed", "in_progress", "blocked"].includes(entry.state));
+  assert.equal(over.length, 1, "no over-cap claim is minted");
+  // Under cap the same add still lands.
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 2 });
+  const added = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969, claimantMemberId: memberId });
+  assert.equal(added.duplicate, false);
+  assert.equal(store.workClaims.get("commons", added.item.itemId).owner, memberId);
+});
+
+test("migrateLandQueueClaims skips at-cap claimants without breaking the list read", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 1 });
+  const held = claimWork(
+    createWork({ id: "cap-held-2", title: "held" }, { now: store.now(), agentId: memberId }),
+    memberId, { leaseHours: null, now: store.now() });
+  store.workClaims.set("commons", held);
+  const itemId = "lq_atcap_1";
+  store.db.prepare(`INSERT INTO land_queue
+    (room_id, item_id, repo, pr_number, claimant_member_id, added_by_member_id, mergeable, behind, checks_state, observed, created_at, updated_at)
+    VALUES ('commons', ?, 'acme/demo', 11, ?, 'owner', 'unknown', 0, 'pending', 1, 1, 1)`).run(itemId, memberId);
+  assert.deepEqual(migrateLandQueueClaims(store), { copied: 0 });
+  assert.equal(store.workClaims.get("commons", itemId), null, "no claim is mirrored over cap");
+  // The list read that triggers the migration still works.
+  assert.ok(Array.isArray(store.landQueue.list("commons", "owner").items));
+  // Once the member is under cap, a later pass mirrors the claim.
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 2 });
+  assert.deepEqual(migrateLandQueueClaims(store), { copied: 1 });
+  assert.equal(store.workClaims.get("commons", itemId).owner, memberId);
+});
+
+test("reassigning the claimant moves the mirrored work claim to the new owner", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot({ checks: "pending" })).fetchImpl });
+  const first = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969 });
+  const itemId = first.item.itemId;
+  assert.equal(store.workClaims.get("commons", itemId).owner, "owner");
+  const second = await store.landQueue.add("commons", "owner", {
+    repo: "acme/demo", prNumber: 969, claimantMemberId: memberId
+  });
+  assert.equal(second.item.claimantMemberId, memberId);
+  const mirrored = store.workClaims.get("commons", itemId);
+  assert.equal(mirrored.owner, memberId, "mirrored claim follows the row's new claimant");
+  assert.equal(mirrored.state, "claimed");
+});
+
+test("a duplicate add naming an at-cap claimant rolls the reassignment back", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot({ checks: "pending" })).fetchImpl });
+  const first = await store.landQueue.add("commons", "owner", { repo: "acme/demo", prNumber: 969 });
+  const itemId = first.item.itemId;
+  store.workClaims.configure("commons", { maxMemberOpenClaims: 1 });
+  // The new claimant already holds their one open claim.
+  const held = claimWork(
+    createWork({ id: "cap-held-reassign", title: "held" }, { now: store.now(), agentId: memberId }),
+    memberId, { leaseHours: null, now: store.now() });
+  store.workClaims.set("commons", held);
+  await assert.rejects(
+    () => store.landQueue.add("commons", "owner", {
+      repo: "acme/demo", prNumber: 969, claimantMemberId: memberId
+    }),
+    error => error.code === "too_many_open_claims" && error.status === 409);
+  // The error must not trail a committed change: the row, the mirrored
+  // claim, and the event log all still name the original claimant.
+  assert.equal(store.landQueue.list("commons", "owner").items[0].claimantMemberId, "owner");
+  assert.equal(store.workClaims.get("commons", itemId).owner, "owner");
+  assert.deepEqual(landEvents(store).map(event => event.data.changed), [["added"]]);
+});
+
+test("a later list pass heals a mirrored claim left with a stale owner", async t => {
+  const { store, ownerKey } = fixture(t);
+  const { memberId } = linkOffline(store, ownerKey);
+  store.landQueue.configure({ fetchImpl: mockGitHub(() => snapshot({ checks: "pending" })).fetchImpl });
+  const first = await store.landQueue.add("commons", "owner", {
+    repo: "acme/demo", prNumber: 969, claimantMemberId: memberId
+  });
+  const itemId = first.item.itemId;
+  // Simulate the pre-fix divergence: the row names memberId while the
+  // mirrored claim still names the previous claimant.
+  const claim = store.workClaims.get("commons", itemId);
+  store.workClaims.set("commons", { ...claim, owner: "owner" });
+  assert.deepEqual(migrateLandQueueClaims(store), { copied: 0 });
+  assert.equal(store.workClaims.get("commons", itemId).owner, memberId);
 });

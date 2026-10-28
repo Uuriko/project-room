@@ -53,7 +53,7 @@ import {
   AGENT_CARD_AGENT_ID,
   AGENT_CARD_KEY_ID,
   AGENT_CARD_PUBLIC_KEY,
-} from "../deploy/agent-card-key.mjs";
+} from "../server/agent-card-key.mjs";
 
 const args = process.argv.slice(2);
 const opt = (name, fallback = "") => {
@@ -93,10 +93,30 @@ const get = async (url, accept = "application/json") => {
     try { json = JSON.parse(text); } catch {}
     return { status: res.status, json, ms: Date.now() - started };
   } catch (error) {
-    return { status: 0, json: null, ms: Date.now() - started, error: String(error?.message ?? error) };
+    return { status: 0, json: null, ms: Date.now() - started, error: String(error?.message ?? error), errorKind: error?.name === "TimeoutError" ? "fetch_timeout" : "fetch_error" };
   }
 };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Only fixed classifications and bounded numbers belong in deployment artifacts.
+// Never retain arbitrary response fields, exception messages, or headers here.
+export function readinessDetail(result) {
+  const choose = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
+  const number = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  const probe = result.json?.do;
+  const detail = {
+    status: result.status,
+    body: choose(result.json?.status, ["ready", "degraded"], null),
+    emailVerification: choose(result.json?.emailVerification, ["enforced", "relaxed-no-mailer"], "unknown"),
+    emailVerificationScope: choose(result.json?.emailVerificationScope, ["durable-object", "worker"], "unknown"),
+    do: { status: choose(probe?.status, ["ok", "timeout", "error"], "unknown") },
+  };
+  if (number(result.ms)) detail.elapsedMs = result.ms;
+  for (const key of ["ms", "timeoutMs"]) if (number(probe?.[key])) detail.do[key] = probe[key];
+  if (Number.isInteger(probe?.statusCode) && probe.statusCode >= 100 && probe.statusCode <= 599) detail.do.statusCode = probe.statusCode;
+  if (result.status === 0) detail.transport = choose(result.errorKind, ["fetch_timeout", "fetch_error"], "fetch_error");
+  return detail;
+}
 
 // Deploy-time consistency check for one served agent card (#1524). Returns
 // the list of failures; an empty list means the card is signed, binds the
@@ -149,7 +169,7 @@ export function checkAgentCard({ card, expectedRevision = null, publicKey = AGEN
 
 // Which build served this card? The card names its own build in
 // deployed.revision, and signedRevision is only attached when the signature
-// covers the serving build's revision (deploy/agent-discovery.mjs). Pure.
+// covers the serving build's revision (server/agent-discovery.mjs). Pure.
 export function cardServedByRevision(card, expectedRevision) {
   if (!expectedRevision || card === null || typeof card !== "object") return false;
   return card.deployed?.revision === expectedRevision || card.signedRevision === expectedRevision;
@@ -254,7 +274,7 @@ async function main() {
     const health = await get(`${door}/api/health`);
     record(`health ${door}/api/health`, health.status === 200 && health.json?.status === "ok", { status: health.status, body: health.json?.status ?? null });
     const ready = await get(`${door}/api/ready`);
-    record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready", { status: ready.status, body: ready.json?.status ?? null });
+    record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", readinessDetail(ready));
     for (const page of ["/terms", "/privacy", "/"]) {
       const r = await get(`${door}${page}`, "text/html");
       record(`page ${door}${page}`, r.status === 200, { status: r.status });

@@ -10,10 +10,13 @@ import { DurableDatabase, durableStorage } from './storage.mjs';
 import { STORE_SCHEMA_VERSION } from '../server/writer-fence.mjs';
 import { textVersion } from '../server/text-results.mjs';
 import { auditRecovery } from '../server/recovery.mjs';
+import { linkWithProof } from '../tests/helpers/link-with-proof.mjs';
 import { emailContractFixture } from '../scripts/email-contract-fixture.mjs';
 import { RecordedGraphMailbox, prepareGraphFixturePage, graphFixtureStart } from '../server/graph-fixture-sync.mjs';
 import { prepareGraphReplyDraft, currentGraphReplyDraft, observeGraphReplyCreation, prepareGraphReplyUpdate } from '../server/graph-reply-draft.mjs';
 import { generateVapidKeys } from '../server/web-push.mjs';
+import { exportNdjsonText } from '../server/room-export.mjs';
+import { replayNdjsonInto } from '../server/restore-ndjson.mjs';
 
 function checkNarrowAuthentication(store, credentials) {
   const { state, sequence } = store.room('commons'), before = auditRecovery(store).dataSha256;
@@ -37,6 +40,31 @@ export class StoreTestRoom {
   async fetch(request) {
     const store = this.store;
     const path = new URL(request.url).pathname;
+    if (path === '/stale-writer-permit') {
+      // P0 2026-10-24: prod committed room_writer_permit at the writer
+      // version with no write in flight, and every cold start then refused
+      // with "Database writer fence requires operator reconciliation".
+      store.initialize(initialRoom('permit'));
+      const permit = () => this.ctx.storage.sql.exec('SELECT version FROM room_writer_permit').one().version;
+      assert.equal(permit(), 0);
+      // Failure shapes that must never leave the permit raised.
+      store.transaction(() => { assert.throws(() => store.transaction(() => { store.createAccount('iso-1'); throw new Error('iso'); }, { isolated: true }), /iso/); });
+      assert.equal(permit(), 0, 'caught isolated throw');
+      assert.throws(() => store.transaction(() => { store.db.prepare('INSERT INTO accounts(id,created_at) VALUES(?,?)').run('z'.repeat(3e6), 1); }), /storage limit/);
+      assert.equal(permit(), 0, 'platform row limit');
+      assert.throws(() => store.transaction(async () => { store.createAccount('async-1'); await null; }), /synchronous/);
+      await new Promise(resolve => setTimeout(resolve, 5));
+      assert.equal(permit(), 0, 'async transaction body');
+      // The prod state: permit committed at the writer version.
+      this.ctx.storage.sql.exec(`UPDATE room_writer_permit SET version=${STORE_SCHEMA_VERSION} WHERE singleton=1`);
+      assert.equal(permit(), STORE_SCHEMA_VERSION);
+      // A cold start on the same storage must open and write, not refuse.
+      const cold = new RoomStore(null, { database: new DurableDatabase(this.ctx.storage), storagePlatform: durableStorage, integrity: 'deferred' });
+      cold.createAccount('after-reset');
+      assert.ok(cold.account('after-reset'));
+      assert.equal(permit(), 0, 'stale permit reset');
+      return Response.json({ ok: true });
+    }
     if (path === '/isolated-transactions') {
       store.initialize(initialRoom('isolated'));
       const owner = store.issueAccessKey('isolated', 'owner');
@@ -95,8 +123,9 @@ export class StoreTestRoom {
     if (path === '/delegation') {
       store.initialize(initialRoom('delegation-worker'));
       const owner = store.issueAccessKey('delegation-worker', 'owner');
-      const { identityId } = store.identities.create('Worker Delegate');
-      store.identities.link(owner, 'delegation-worker', { identityId, permissions: [] });
+      const delegate = store.identities.create('Worker Delegate');
+      const { identityId } = delegate;
+      linkWithProof(store, owner, 'delegation-worker', delegate, { permissions: [] });
       store.delegation.grant(owner, 'delegation-worker', { identityId });
       store.delegation.revoke(owner, 'delegation-worker', { identityId });
       store.delegation.grant(owner, 'delegation-worker', { identityId });
@@ -453,6 +482,26 @@ export class StoreTestRoom {
       assert.deepEqual(auditRecovery(store), before);
       return Response.json({ latestUnavailable: true, preservedLocal: true });
     }
+    // H2 backup/DR drill: export the seeded room as NDJSON, then replay it.
+    // The /restore-drill/replay route runs against whichever Durable Object
+    // the worker routes to — the drill check addresses a pristine DO so the
+    // replay meets an empty store, exactly like post-loss recovery.
+    if (path === '/restore-drill/seed') {
+      store.initialize(initialRoom('restore-worker'));
+      const owner = store.issueAccessKey('restore-worker', 'owner');
+      store.command(owner, 'restore-worker', { id: randomUUID(), type: T.MESSAGE_POSTED,
+        data: { messageId: randomUUID(), body: 'drill history must survive the replay' } });
+      return Response.json({ ndjson: exportNdjsonText(store.db) });
+    }
+    if (path === '/restore-drill/replay') {
+      const ndjson = await request.text();
+      try {
+        const summary = replayNdjsonInto(ndjson, store);
+        return Response.json({ ok: true, verified: summary.verified, events: summary.events, tables: summary.tables });
+      } catch (error) {
+        return Response.json({ ok: false, error: error?.message ?? String(error) }, { status: 500 });
+      }
+    }
     if (path === '/newer-version') {
       store.transaction(() => durableStorage.setVersion(this.db, STORE_SCHEMA_VERSION + 1));
       assert.throws(() => new RoomStore(null, { database: this.db, storagePlatform: durableStorage }), /newer than this service/);
@@ -462,4 +511,17 @@ export class StoreTestRoom {
     return new Response('Not found', { status: 404 });
   }
 }
-export default { fetch(request, env) { return env.ROOM.getByName('shared-store-proof').fetch(request); } };
+export default { fetch(request, env) {
+  const url = new URL(request.url);
+  if (url.pathname === '/restore-drill-fresh') {
+    // Disaster-recovery drill: address a pristine Durable Object so the
+    // replay runs against an empty store, exactly like post-loss recovery.
+    // Only this exact path is rerouted; every other request keeps the
+    // original pass-through untouched.
+    return env.ROOM.getByName('restore-fresh-target').fetch(
+      new Request('http://localhost/restore-drill/replay', {
+        method: 'POST', headers: { 'content-type': 'application/x-ndjson' }, body: request.body, duplex: 'half',
+      }));
+  }
+  return env.ROOM.getByName('shared-store-proof').fetch(request);
+} };
