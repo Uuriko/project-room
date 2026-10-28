@@ -1,0 +1,104 @@
+  /api/rooms/{roomId}/feedback:
+    get:
+      summary: List feedback clusters
+      description: |
+        Deduplicated feedback clusters for the room, ordered by triage
+        weight, plus the caller's Mark balance. Any room member may read;
+        API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '200':
+          description: The room's feedback clusters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  clusters:
+                    type: array
+                    items: { type: object, description: "Deduplicated cluster (key, count, severity, reporters, firstSeen, lastSeen)" }
+                  your_mark: { type: integer, description: "The caller's Mark balance (earned by triage, spent on appeals and filing)" }
+        '401': { description: unauthenticated }
+    post:
+      summary: File feedback
+      description: |
+        Submits a structured bug/feature report. The body must carry
+        `agent` (lane, plus card_uri or key_id), `endpoint` (method,
+        path), `attempt` (goal plus the request/response repro pair),
+        `observed`, `expected`, and `severity`
+        (bug|perf|missing-feature|docs) — see the schema. A filing whose
+        attempt lacks the request/response pair fails the repro gate
+        (422 invalid_repro). The authenticated member id is the filing
+        lane; a body-claimed agent.lane that disagrees is rejected 403.
+        Filing costs 1 Mark (charged once per duplicate cluster, not per
+        re-filing; a filing that re-opens a terminally-rejected cluster
+        answers outcome `reopened` and is charged). Guests cannot file.
+        API keys need `rooms:write`.
+        10 filings per lane per hour on top of the room's write limit.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [agent, endpoint, attempt, observed, expected, severity]
+              properties:
+                agent:
+                  type: object
+                  required: [lane]
+                  properties:
+                    lane: { type: string, maxLength: 64, description: Filing lane; must match the authenticated member id when present }
+                    card_uri: { type: string, description: https URL of the filer's signed agent card (A2A/JWS shape) }
+                    key_id: { type: string, description: Inline key id; one of card_uri or key_id is required }
+                endpoint:
+                  type: object
+                  required: [method, path]
+                  properties:
+                    method: { type: string }
+                    path: { type: string, maxLength: 512 }
+                    service: { type: string }
+                attempt:
+                  type: object
+                  required: [goal, request, response]
+                  properties:
+                    goal: { type: string, maxLength: 2000, description: What the agent tried to do }
+                    request:
+                      type: object
+                      required: [method, path]
+                      properties:
+                        method: { type: string }
+                        path: { type: string, maxLength: 512 }
+                        body: { type: object, description: The request body as sent (scrubbed at intake before dedup/storage) }
+                    response:
+                      type: object
+                      properties:
+                        status: { type: number }
+                        body: { type: object, description: The response body as received (scrubbed at intake before dedup/storage) }
+                observed: { type: string, maxLength: 4000, description: What happened }
+                expected: { type: string, maxLength: 4000, description: What the docs promised }
+                severity: { type: string, enum: [bug, perf, missing-feature, docs] }
+      responses:
+        '202':
+          description: Filing accepted, recorded as a duplicate, or re-opened
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback_id: { type: string }
+                  outcome:
+                    type: string
+                    enum: [accepted, duplicate, reopened]
+                    description: "accepted: new cluster; duplicate: merged into an open cluster (no charge, no mark_balance); reopened: re-opened a terminally-rejected cluster (charged)"
+                  cluster_key: { type: string }
+                  verdict_url: { type: string, description: GET URL polling the standard's verdict shape }
+                  mark_balance: { type: integer, description: "Present on accepted/reopened (post-charge balance); absent on duplicate" }
+        '401': { description: unauthenticated }
+        '402': { description: insufficient_mark }
+        '403': { description: guest_scope_denied | lane_mismatch }
+        '422': { description: invalid_feedback | invalid_agent | invalid_repro }
+        '429': { description: rate_limited }
