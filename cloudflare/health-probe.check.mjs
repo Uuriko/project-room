@@ -35,8 +35,6 @@ test('a slow Durable Object probe answers liveness from one shared fetch', async
 
 test('a joined probe is served from the shared start, never its own start()', async () => {
   const probe = createHealthProbe();
-  let keptAlive = 0;
-  const waitUntil = promise => { keptAlive += 1; promise.then(() => {}, () => {}); };
   const onSnapshot = (snapshot, timing) => readyProbeResponse(snapshot, healthRequest(), { mode: 'cloudflare-staging', elapsedMs: timing.elapsedMs });
   const onUnready = (readiness, timing) => healthLivenessResponse(healthRequest(), { mode: 'cloudflare-staging', readiness, ...timing });
   // The shared start is the single store call: a joiner arriving while it is
@@ -56,8 +54,8 @@ test('a joined probe is served from the shared start, never its own start()', as
   });
   const startedAt = performance.now();
   const [leader, joiner] = await Promise.all([
-    probe({ start: leaderStart, timeoutMs: 50, onSnapshot, onUnready, waitUntil }),
-    probe({ start: joinerStart, timeoutMs: 50, onSnapshot, onUnready, waitUntil })
+    probe({ start: leaderStart, timeoutMs: 50, onSnapshot, onUnready }),
+    probe({ start: joinerStart, timeoutMs: 50, onSnapshot, onUnready })
   ]);
   const elapsedMs = performance.now() - startedAt;
   assert.equal(leader.status, 200);
