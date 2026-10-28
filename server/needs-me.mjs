@@ -636,7 +636,9 @@ const BOUNTY_SHOWN = 10;
 // Terminal bounty outcomes are an outcome record, not history: they ride
 // needs-me for a week after settlement, then the bounty list read owns
 // them. Live obligations (claimed/submitted/accepted/disputed/approved)
-// have no window — they ride until the state itself moves on.
+// have no window — they ride until the state itself moves on. The one
+// exception is the decider's row on a ruled `approved` bounty: that row
+// is an outcome record too, so it retires on this same window.
 export const BOUNTY_OUTCOME_WINDOW_MS = 7 * 24 * 3600 * 1000;
 const BOUNTY_TERMINAL_STATES = new Set(["paid", "refunded", "cancelled"]);
 
@@ -664,10 +666,16 @@ function bountyListOf(store, roomId) {
 // evidence, criteria and dispute grounds never enter this projection.
 // One row per (bounty, role); a member holding two roles on one bounty
 // carries both obligations. Standing state like myClaims: it never moves
-// the cursor, and a row clears when its obligation clears (the decider
-// row exists exactly while the bounty is `disputed` and this member
-// holds the seat disputeBounty resolved — disputeDecider, else the
-// designated verifier, the same seat decideDispute enforces).
+// the cursor, and a row clears when its obligation clears. The decider's
+// ruling obligation exists exactly while the bounty is `disputed` and
+// this member holds the seat disputeBounty resolved — disputeDecider,
+// else the designated verifier, the same seat decideDispute enforces.
+// After the ruling the decider records the outcome like the other two
+// parties (charter §6): on `approved` and on the terminal states the
+// seated decider of a disputed bounty (its disputeId is still on the
+// bounty view) carries the same outcome row as poster/worker, inside
+// the same 7-day outcome window — `approved` is a live row for
+// poster/worker, so the decider leg there retires on the window alone.
 export function bountyAttentionOf(store, roomId, memberId, bounties = null, nowMs = Date.now()) {
   const list = bounties ?? bountyListOf(store, roomId);
   if (!list) return null;
@@ -698,6 +706,12 @@ export function bountyAttentionOf(store, roomId, memberId, bounties = null, nowM
     };
     const isPoster = laneOf(bounty.poster) === lane;
     const isWorker = bounty.claimant != null && laneOf(bounty.claimant) === lane;
+    const deciderLane = laneOf(bounty.disputeDecider ?? bounty.verifier);
+    const isDecider = Boolean(deciderLane) && deciderLane === lane;
+    // A ruling happened only if a dispute was opened on this bounty; its
+    // disputeId stays on the view through approved and the terminal
+    // states, so it is the record that this member's seat decided.
+    const ruledDispute = isDecider && typeof bounty.disputeId === "string" && bounty.disputeId.length > 0;
     if (bounty.state === "disputed") {
       const disputeAgeMinutes = Number.isSafeInteger(bounty.disputeOpenedMs)
         ? Math.max(0, Math.round((nowMs - bounty.disputeOpenedMs) / 60000)) : null;
@@ -705,8 +719,7 @@ export function bountyAttentionOf(store, roomId, memberId, bounties = null, nowM
         disputeId: bounty.disputeId ?? null,
         ...(disputeAgeMinutes !== null ? { disputeAgeMinutes } : {})
       };
-      const deciderLane = laneOf(bounty.disputeDecider ?? bounty.verifier);
-      if (deciderLane && deciderLane === lane) {
+      if (isDecider) {
         add({ ...base, role: "decider", why: "dispute_awaiting_ruling", ...dispute,
           next: `POST /api/rooms/${encodeURIComponent(roomId)}/bounties/${encodeURIComponent(bounty.bountyId)}/dispute-decide` });
       }
@@ -719,6 +732,7 @@ export function bountyAttentionOf(store, roomId, memberId, bounties = null, nowM
       if (settledMs === null || nowMs - settledMs > BOUNTY_OUTCOME_WINDOW_MS) continue;
       if (isPoster) add({ ...base, role: "poster", why: `bounty_${bounty.state}`, next: listNext });
       if (isWorker) add({ ...base, role: "worker", why: `bounty_${bounty.state}`, next: listNext });
+      if (ruledDispute) add({ ...base, role: "decider", why: `bounty_${bounty.state}`, next: listNext });
       continue;
     }
     switch (bounty.state) {
@@ -740,6 +754,12 @@ export function bountyAttentionOf(store, roomId, memberId, bounties = null, nowM
       case "approved":
         if (isPoster) add({ ...base, role: "poster", why: "bounty_approved", next: listNext });
         if (isWorker) add({ ...base, role: "worker", why: "bounty_approved", next: listNext });
+        // The decider's approved row is an outcome record, not a live
+        // obligation: it rides only inside the outcome window from the
+        // ruling (stateChangedAt), then retires like a terminal outcome.
+        if (ruledDispute && Number.isFinite(stateChangedMs)
+          && nowMs - stateChangedMs <= BOUNTY_OUTCOME_WINDOW_MS)
+          add({ ...base, role: "decider", why: "bounty_approved", next: listNext });
         break;
       default:
         break; // proposed/funded: not yet anyone's obligation.

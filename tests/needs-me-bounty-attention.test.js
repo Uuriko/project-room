@@ -102,6 +102,81 @@ test('outcome leg: after ruling, poster and worker record the outcome once; stal
   assert.equal(bountyAttentionOf(null, 'room', POSTER, [stale], T0), null);
 });
 
+test('decider outcome leg: after ruling, the decider records the outcome once on approved, paid and refunded', () => {
+  // Charter §6: "After ruling, all three parties' needs-me records the
+  // outcome once" — the decider's dispute_awaiting_ruling row must not
+  // simply vanish when the bounty leaves `disputed` (critic D1).
+  for (const [state, why] of [
+    ['approved', 'bounty_approved'],
+    ['paid', 'bounty_paid'],
+    ['refunded', 'bounty_refunded'],
+  ]) {
+    const ruled = bounty({ state, stateChangedAt: new Date(T0 - 3600000).toISOString() });
+    const section = bountyAttentionOf(null, 'room', DECIDER, [ruled], T0);
+    assert.equal(section.count, 1, `decider sees exactly one outcome row on ${state}`);
+    const row = section.top[0];
+    assert.equal(row.role, 'decider');
+    assert.equal(row.why, why);
+    assert.equal(row.id, 'B-1');
+    assert.equal(row.poster, POSTER);
+    assert.equal(row.claimant, WORKER);
+    assert.equal(row.amount, 4);
+    // Same fields discipline as the poster/worker outcome rows:
+    // grounds-free, explicit picks only — no dispute or evidence content.
+    assert.equal(row.evidence, undefined);
+    assert.equal(row.criteria, undefined);
+    assert.ok(!JSON.stringify(row).includes('grounds-must-never-leak'));
+    assert.ok(!JSON.stringify(row).includes('secret criteria'));
+  }
+  // The seat fallback agrees with the disputed row: a verifier seated as
+  // decider (no disputeDecider named) also records the outcome.
+  const viaVerifier = bounty({ state: 'paid', disputeDecider: null, verifier: DECIDER,
+    stateChangedAt: new Date(T0 - 3600000).toISOString() });
+  assert.deepEqual(bountyAttentionOf(null, 'room', DECIDER, [viaVerifier], T0).top.map(r => [r.role, r.why]),
+    [['decider', 'bounty_paid']]);
+});
+
+test('decider outcome leg: absent before ruling, absent without a dispute, and a non-decider verifier gets nothing', () => {
+  // Before any ruling the decider has no outcome row: live states give
+  // the decider nothing, and `disputed` gives the awaiting row, never an
+  // outcome row.
+  for (const state of ['claimed', 'submitted', 'accepted']) {
+    const live = bounty({ state, disputeId: null, disputeOpenedMs: null });
+    assert.equal(bountyAttentionOf(null, 'room', DECIDER, [live], T0), null, `decider ${state}`);
+  }
+  const awaiting = bountyAttentionOf(null, 'room', DECIDER, [bounty()], T0);
+  assert.deepEqual(awaiting.top.map(r => r.why), ['dispute_awaiting_ruling']);
+  // An outcome that was never disputed (approved on challenge expiry,
+  // paid/refunded with no dispute on the bounty) is not the designated
+  // decider's outcome to record — they never held a ruling.
+  for (const state of ['approved', 'paid', 'refunded']) {
+    const undisputed = bounty({ state, disputeId: null, disputeOpenedMs: null,
+      stateChangedAt: new Date(T0 - 3600000).toISOString() });
+    assert.equal(bountyAttentionOf(null, 'room', DECIDER, [undisputed], T0), null, `decider undisputed ${state}`);
+  }
+  // A verifier who is not the designated decider gets nothing, in the
+  // outcome states just as in `disputed`.
+  const VERIFIER = 'id:agent/verifier';
+  for (const state of ['approved', 'paid', 'refunded']) {
+    const ruled = bounty({ state, verifier: VERIFIER,
+      stateChangedAt: new Date(T0 - 3600000).toISOString() });
+    assert.equal(bountyAttentionOf(null, 'room', VERIFIER, [ruled], T0), null, `verifier ${state}`);
+    assert.equal(bountyAttentionOf(null, 'room', 'id:agent/stranger', [ruled], T0), null, `stranger ${state}`);
+  }
+});
+
+test('decider outcome leg: the outcome row retires at the same 7-day window as poster/worker outcomes', () => {
+  const WEEK = 7 * 24 * 3600000;
+  for (const state of ['approved', 'paid', 'refunded']) {
+    const atWindow = bounty({ state, stateChangedAt: new Date(T0 - WEEK).toISOString() });
+    assert.equal(bountyAttentionOf(null, 'room', DECIDER, [atWindow], T0).top[0].role, 'decider',
+      `${state} outcome still shown at exactly 7 days`);
+    const pastWindow = bounty({ state, stateChangedAt: new Date(T0 - WEEK - 1).toISOString() });
+    assert.equal(bountyAttentionOf(null, 'room', DECIDER, [pastWindow], T0), null,
+      `${state} outcome retired at 7 days + 1ms`);
+  }
+});
+
 test('no duplicates: one row per (bounty, role); a member with two roles gets both obligations', () => {
   const both = bountyAttentionOf(null, 'room', POSTER, [bounty({ disputeDecider: POSTER })], T0);
   assert.deepEqual(both.top.map(r => r.role).sort(), ['decider', 'poster']);
@@ -175,11 +250,15 @@ test('UT2 window: decider/poster/worker needs-me during and after a live ruling'
     assert.equal(page.actionsNeeded, undefined);
   }
 
-  // Ruling lands: decider obligation clears; poster + worker record outcome.
+  // Ruling lands: the decider's awaiting row is replaced by the outcome
+  // record (charter §6 — all three parties record the outcome once);
+  // poster + worker record the same outcome.
   escrow.decideDispute('board', posted.bountyId, { decider: memberOf(decider), outcome: 'upheld', reasonCodes: ['receipt-incomplete'] });
   const settled = escrow.getBounty('board', posted.bountyId);
   assert.ok(['paid', 'refunded'].includes(settled.state), `terminal state, got ${settled.state}`);
-  assert.equal(collectNeedsMe(store, decider.secret, {}).bountyAttention, undefined, 'decider row clears with the ruling');
+  const deciderOutcome = collectNeedsMe(store, decider.secret, {}).bountyAttention?.flatMap(s => s.top) ?? [];
+  assert.deepEqual(deciderOutcome.map(r => [r.role, r.why]), [['decider', `bounty_${settled.state}`]],
+    'decider records the outcome once, not silence');
   for (const identity of [poster, worker]) {
     const rows = collectNeedsMe(store, identity.secret, {}).bountyAttention?.flatMap(s => s.top) ?? [];
     assert.deepEqual(rows.map(r => r.why), [`bounty_${settled.state}`], 'outcome recorded once');
