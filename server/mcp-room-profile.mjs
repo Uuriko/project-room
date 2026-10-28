@@ -37,6 +37,7 @@ import { MCP_JOIN_TOOLS, MCP_AUTH_REQUIRED, handleMcpJoinRpc } from "./mcp-http.
 import { mcpInvalidRequest } from "./mcp-arg-errors.mjs";
 import { AgentRooms } from "./agent-rooms.mjs";
 import { AccessRequests } from "./access-requests.mjs";
+import { buildRoomBootstrap } from "./room-bootstrap.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
 import { MCP_SUPPORTED_VERSIONS, MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./mcp-full-profile.mjs";
@@ -182,6 +183,7 @@ function validRoomArgs(name, args) {
       && (!code || typeof args.inviteCode === "string" && args.inviteCode.length > 0 && args.inviteCode.length <= 80);
   }
   if (name === "get_room_context") return args.since_version === undefined || typeof args.since_version === "string" && /^[a-f0-9]{64}$/.test(args.since_version);
+  if (name === "room_read_bootstrap") return true;
   if (name === "room_list_events") {
     return (args.after === undefined || Number.isSafeInteger(args.after) && args.after >= 0)
       && (args.limit === undefined || Number.isSafeInteger(args.limit) && args.limit >= 1 && args.limit <= 100);
@@ -475,7 +477,10 @@ async function callLandTool(store, secret, name, args) {
 // refusal — the tool must not run. withSpendCharge (spend-grants.mjs) is the
 // single implementation of the settle/void contract — the REST doors run
 // the same helper, so a priced operation charges identically everywhere.
-function callRoomTool(store, secret, identity, name, args, agentRooms) {
+function callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential) {
+  if (typeof spendCredential === "function") {
+    spendCredential(secret, mcpRoomToolScope(name) === "rooms:write" ? "write" : "read");
+  }
   enforceMcpApiKeyRoomScope(store, secret, name, args.roomId);
   enforceMcpCallVisibility(store, identity, name);
   return withSpendCharge(store, secret, name, args,
@@ -552,6 +557,9 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
     if (context.not_modified) return context;
     const auth = store.authenticate(secret, roomId);
     return { ...stampRoomContext(context), orient: buildOrient(store, roomId, auth.member.id, { text: false, token: secret, boardList: memoizeBoardList(store) }) };
+  }
+  if (name === "room_read_bootstrap") {
+    return withContentTrust(buildRoomBootstrap(store, secret, roomId, null, { accessRequests: new AccessRequests(store), watchers: [] }));
   }
   if (name === "room_list_events") {
     const auth = store.authenticate(secret, roomId);
@@ -864,7 +872,7 @@ function listSelection(message, searchParams) {
 
 const SUGGESTABLE_TOOLS = Object.freeze([...HOSTED_ROOM_MCP_TOOLS, ...PUBLIC_WORK_MCP_TOOLS, ...MCP_JOIN_TOOLS.map(entry => entry.name), ...ACTION_META_TOOL_NAMES]);
 
-async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms }) {
+async function handleAuthed(message, { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential }) {
   const hasId = object(message) && Object.hasOwn(message, "id");
   const requestId = message?.id;
   if (!object(message) || message.jsonrpc !== "2.0" || typeof message.method !== "string"
@@ -953,7 +961,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         return mcpCallError(requestId, { reason: "unknown_tool", tool: args.name, suggestion: closestToolName(args.name, HOSTED_ROOM_MCP_TOOLS) });
       }
       return handleAuthed({ ...message, params: { name: inner, arguments: args.arguments ?? {} } },
-        { store, secret, identity, mcpUrl, searchParams, agentRooms });
+        { store, secret, identity, mcpUrl, searchParams, agentRooms, spendCredential });
     }
     const accepted = isHostedStdioTool(name) ? validHostedStdioArgs(name, args)
       : INBOX_TOOLS.some(entry => entry.name === name) ? validInboxArgs(name, args)
@@ -985,7 +993,7 @@ async function handleAuthed(message, { store, secret, identity, mcpUrl, searchPa
         }
         return { jsonrpc: "2.0", id: requestId, result: toolResult(await callWakeTool(store, secret, identity, name, args)) };
       }
-      const value = await callRoomTool(store, secret, identity, name, args, agentRooms);
+      const value = await callRoomTool(store, secret, identity, name, args, agentRooms, spendCredential);
       // A minted invite code is a one-time credential: it rides in
       // structuredContent only, never in the text block hosts log
       // verbatim (issue #3750). room_run_action recurses into this same
@@ -1085,7 +1093,7 @@ function resolveMcpIdentity(store, secret, userAgent) {
   return identity;
 }
 
-export function createHostedRoomMcp(store, { agentRooms } = {}) {
+export function createHostedRoomMcp(store, { agentRooms, spendCredential } = {}) {
   const rooms = agentRooms ?? new AgentRooms(store);
   return async function hostedRoomMcp(message, { authorization, mcpUrl, searchParams, userAgent, remoteAddress } = {}) {
     // Anonymous enrollment: mint an identity secret without leaving MCP.
@@ -1104,6 +1112,6 @@ export function createHostedRoomMcp(store, { agentRooms } = {}) {
     if (parsed.error) return rpcError(message, MCP_AUTH_REQUIRED, parsed.error);
     const identity = resolveMcpIdentity(store, parsed.secret, userAgent);
     if (!identity) return rpcError(message, MCP_AUTH_REQUIRED, "Unknown or revoked identity credential");
-    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms });
+    return handleAuthed(message, { store, secret: parsed.secret, identity, mcpUrl, searchParams, agentRooms: rooms, spendCredential });
   };
 }
