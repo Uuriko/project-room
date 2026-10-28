@@ -145,6 +145,10 @@ const PROBES = {
   // Opt-in room directory (#605): public by design so a freshly minted
   // identity can discover rooms; an empty directory answers 200 with no rooms.
   "GET /api/public/rooms/directory": [undefined, 200],
+  // Public door funnel (DOOR-FUNNEL-READ): counts-only weekly joins/mints
+  // aggregates; public by design, answers 200 with honest zeros on an
+  // empty store.
+  "GET /api/public/door-funnel": [undefined, 200],
   // Public run-receipts aggregate: measured work from the receipt board,
   // public by design; answers 200 with the checked-in snapshot.
   "GET /api/public/receipts": [undefined, 200],
@@ -173,6 +177,11 @@ const PROBES = {
   // RM-AAAAAAAA is an 8-symbol legacy-format code: retired by format alone
   // (#3672), so the anonymous answer is 410 invite_format_retired, not 404.
   "POST /api/agent-invites/redeem": [{ code: "RM-AAAAAAAA", displayName: "Boundary probe" }, 410],
+  "GET /api/agent-invites/redeem": [undefined, 200],
+  "GET /api/pair": [undefined, 422],
+  "POST /api/pair": [{}, 422],
+  "GET /pair": [undefined, 422],
+  "GET /pair/{}": [undefined, 200],
   // Invite preview (#3259: POST-only, code in the body): a bare probe (no
   // code) gets 422 invalid_invite. The retired GET form is not an open
   // route and so has no probe here; its 405 is pinned in

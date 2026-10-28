@@ -9,6 +9,7 @@ import { runGuideStep } from "../server/room-guide.mjs";
 import { postReceiptCard } from "../server/receipt-cards.mjs";
 import { buildGrowthEvent } from "../src/growth-emit.js";
 import { roomUsageSummary } from "../server/usage-summary.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function assertIndexedMessage(store, roomId, message) {
   const row = store.db.prepare("SELECT seq, body, record_json FROM messages WHERE room_id=? AND message_id=?").get(roomId, message.id);
@@ -176,9 +177,7 @@ test("a choice closes the starter with a result card, then the first agent is as
   assert.equal(growth.actor.kind, "system");
   assert.equal(roomUsageSummary(store, ownerKey, "script-room").members.agents, 0);
   const identity = store.identities.create("Pair Agent");
-  store.identities.link(ownerKey, "script-room", {
-    identityId: identity.identityId, displayName: "Pair Agent", permissions: ["accept_work", "complete_work"]
-  });
+  linkWithProof(store, ownerKey, "script-room", identity, { displayName: "Pair Agent", permissions: ["accept_work", "complete_work"] });
   assert.equal(store.workClaims.get("script-room", "agent-pair-agree").owner, identity.identityId);
   const assign = store.room("script-room").state.messages.find(message => message.authorId === "room-guide" && message.body.includes("is yours"));
   assert.equal(assign.body, "@Pair Agent Agree the change is yours.");
@@ -207,9 +206,7 @@ test("guide does not announce a chosen claim that someone else already took", as
   assert.equal(store.workClaims.get("taken-room", "agent-pair-agree").owner, "owner");
   // The first agent joins; the guide must not announce the claim as theirs or wake them for it.
   const identity = store.identities.create("Late Agent");
-  store.identities.link(ownerKey, "taken-room", {
-    identityId: identity.identityId, displayName: "Late Agent", permissions: ["accept_work", "complete_work"]
-  });
+  linkWithProof(store, ownerKey, "taken-room", identity, { displayName: "Late Agent", permissions: ["accept_work", "complete_work"] });
   assert.equal(runGuideStep(store, "taken-room", store.now()), null);
   const assign = store.room("taken-room").state.messages.find(message => message.authorId === "room-guide" && message.body.includes("is yours"));
   assert.equal(assign, undefined, "guide must not announce a claim held by someone else as the agent's");
@@ -255,7 +252,7 @@ test("a caught receipt index failure preserves the done claim without a partial 
   assert.equal((await bearer(origin, "/api/rooms/fault-room/work-claims/fault-claim/claim", ownerKey, {})).status, 200);
   assert.equal((await bearer(origin, "/api/rooms/fault-room/work-claims/fault-claim/update", ownerKey, { state: "in_progress" })).status, 200);
   const identity = store.identities.create("Receipt observer");
-  store.identities.link(ownerKey, "fault-room", { identityId: identity.identityId, displayName: "Observer", permissions: [] });
+  linkWithProof(store, ownerKey, "fault-room", identity, { displayName: "Observer", permissions: [] });
   const { subscription } = store.agentPlugin.subscribeWebhook({ identityId: identity.identityId,
     url: "https://observer.example/receipt", events: ["message.posted"], secret: "synthetic-receipt-observer-secret" });
   store.db.exec(`CREATE TRIGGER reject_receipt_index BEFORE INSERT ON messages
