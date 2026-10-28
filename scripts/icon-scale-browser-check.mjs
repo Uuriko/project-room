@@ -46,6 +46,11 @@ test("Icons scale with text size and keep default sizes at 100%", { timeout: 900
       return [selector, { button: Math.round(b.width), svg: Math.round(s.width), inside: s.left >= b.left - 0.5 && s.right <= b.right + 0.5 && s.top >= b.top - 0.5 && s.bottom <= b.bottom + 0.5, tall: Math.round(b.height) }];
     })), ICONS);
     result.overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+    result.toggleClear = await page.evaluate(() => {
+      const toggle = document.querySelector("#sidebar-toggle"), title = document.querySelector(".conversation-heading");
+      if (!toggle || !title || toggle.getClientRects().length === 0) return true;
+      return toggle.getBoundingClientRect().right <= title.getBoundingClientRect().left + 0.5;
+    });
     assert.deepEqual(errors, []);
     await page.context().close();
     return result;
@@ -63,6 +68,7 @@ test("Icons scale with text size and keep default sizes at 100%", { timeout: 900
       assert.equal(large[selector].inside, true, `${selector} icon stays inside its button on both axes (${width}px)`);
       assert.ok(large[selector].tall >= 40, `${selector} button is tall enough for its icon (${width}px)`);
     }
+    assert.equal(normal.toggleClear && large.toggleClear, true, `menu button does not overlap the room title (${width}px)`);
     assert.equal(large.overflow, false, `no horizontal page overflow at 200% text (${width}px)`);
     assert.ok(Object.values(normal).filter(v => v && typeof v === "object").length >= 3, `most icons measured at ${width}px`);
   }
