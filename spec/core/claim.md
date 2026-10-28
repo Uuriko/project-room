@@ -76,7 +76,7 @@ There is no claim state named `input_required`. Waiting is `blocked`. `server/no
 
 `server/work-handoff.mjs` validates a status report and a typed delegation envelope. It does not change a board claim. `work.handoff_recorded` in `src/events.js` is a work-item event, not a board reassign.
 
-Work items have a second reservation. `claim.acquired` stores `repository`, `ref`, and `paths` (a path or `folder/**`) on the work item. `server/claim-scopes.mjs` (`conflictingClaim`) refuses an overlapping active reservation with HTTP 409 `claim_conflict` from `server/store.mjs`. MCP tools `room_acquire_claim`, `room_release_claim`, and `room_renew_claim` submit that reservation. They do not write the board. `src/board.js` (`projectBoard`) is the work-item board. `src/board-ui.js` is the work-claims board shown under Tasks.
+Work items have a second reservation. `claim.acquired` stores `repository`, `ref`, and `paths` (a path or `folder/**`) on the work item. `server/claim-scopes.mjs` (`conflictingClaim`) refuses an overlapping active reservation with HTTP 409 `claim_conflict` from `server/store.mjs`. The MCP tool `room_claim` submits that reservation with `action=take`, `action=renew`, or `action=release`; `room_acquire_claim`, `room_release_claim`, and `room_renew_claim` remain deprecated aliases. They do not write the board. `src/board.js` (`projectBoard`) is the work-item board. `src/board-ui.js` is the work-claims board shown under Tasks.
 
 `docs/WORK-CLAIMS.md` describes `progressMessageId` as required on renew. The route treats the field as optional: the checks above run when it is present, and a renew that omits it is accepted.
 
