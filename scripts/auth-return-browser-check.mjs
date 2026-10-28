@@ -60,7 +60,7 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
     await page.goto(delivery.link);
   };
   const requestAndRedeem = async () => {
-    await openMagicSignin(page);
+    await openMagicSignin(page, email);
     await form().locator('[name=email]').fill(email);
     await form().locator('[name=password]').fill('unused-for-email-link');
     await form().getByRole('button', { name: 'Email me a sign-in link' }).click();
@@ -77,7 +77,7 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   let releaseMagic;
   const magicPending = new Promise(resolve => { releaseMagic = resolve; });
   await page.route("**/api/auth/magic/request", route => { releaseMagic(route); });
-  await openMagicSignin(page);
+  await openMagicSignin(page, email);
   await form().locator('[name=email]').fill(email);
   await form().locator('button[type=submit]').click();
   const magicRoute = await magicPending;

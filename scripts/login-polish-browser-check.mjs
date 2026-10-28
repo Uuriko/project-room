@@ -6,6 +6,7 @@ import { createServer as createPortProbe } from "node:net";
 import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixtureInPlace } from "./in-place-fixture-signin.mjs";
+import { hashPassword } from "../src/password-auth.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { axeSerious, assertAxeClean, chromiumLaunchOptions } from "./a11y-axe-helper.mjs";
 
@@ -171,4 +172,48 @@ test("signup reconciles a committed account when its response body is interrupte
   const message = Object.values(room.messages).find(message => message.body === 'First message after recovery');
   assert.ok(message, 'the first useful action is durable, not an optimistic UI echo');
   assert.equal(store.accountForMember(roomId, message.authorId).id, actual.account.id);
+});
+
+
+test("sign-in offers email recovery only after invalid credentials and keeps no-room joining discoverable", { timeout: 45000 }, async t => {
+  const { page, store, origin } = await setup(t, { mail: [] });
+  const form = page.locator('[data-signin-form="password"]');
+  const recovery = page.locator('[name="method"][value="email"]');
+  assert.equal(await recovery.count(), 0);
+  assert.equal(await page.locator('#auth-panel .signin-divider, #terms-notice, #join-code-link').count(), 0);
+  await form.locator('[name="email"]').fill('new-person@example.invalid');
+  await form.locator('[name="password"]').fill('wrong-password');
+  await page.route('**/api/auth/password/login', route => route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { code: 'unavailable', message: 'Try again' } }) }));
+  await form.locator('[type="submit"]').click();
+  await page.waitForFunction(() => document.querySelector('#auth-signin-ui').getAttribute('aria-busy') === 'false');
+  assert.equal(await recovery.count(), 0, 'server failure offers no recovery');
+  await page.unroute('**/api/auth/password/login');
+  await form.locator('[name="password"]').fill('wrong-password');
+  await form.locator('[type="submit"]').click();
+  await recovery.waitFor({ state: 'visible' });
+  assert.match(await page.locator('[data-signin-status]').textContent(), /Invalid email or password/);
+  assertAxeClean(await axeSerious(page), 'invalid credential recovery');
+  await form.locator('[name="email"]').fill('other@example.invalid');
+  assert.equal(await recovery.count(), 0, 'editing email resets contextual recovery');
+  assert.equal(await form.locator('[name="password"]').getAttribute('required'), '');
+
+  store.createAccount('ui-no-room', 'New person');
+  store.completeOnboarding('ui-no-room');
+  // Returning account that left its rooms: existing first-run behavior may
+  // create a starter room for a never-member account. This fixture has none.
+  store.markAccountHadRoom('ui-no-room');
+  store.accountLogins.linkPasswordMethod('ui-no-room', { email: 'new-person@example.invalid', verifier: hashPassword('valid-password-for-fixture') });
+  await page.goto(origin + '/?account=1');
+  await form.waitFor({ state: 'visible' });
+  await form.locator('[name="email"]').fill('new-person@example.invalid');
+  await form.locator('[name="password"]').fill('valid-password-for-fixture');
+  await form.locator('[type="submit"]').click();
+  const join = page.locator('#account-rooms-panel').getByRole('link', { name: 'Join room', exact: true });
+  await join.waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#account-rooms-list [data-account-room]').count(), 0);
+  await join.focus();
+  assert.equal(await join.evaluate(node => node === document.activeElement), true);
+  assertAxeClean(await axeSerious(page), 'signed-in no-room workspace');
+  await join.click();
+  await page.waitForURL('**/join');
 });

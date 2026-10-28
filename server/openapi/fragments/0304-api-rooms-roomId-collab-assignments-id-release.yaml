@@ -1,0 +1,26 @@
+  /api/rooms/{roomId}/collab/assignments/{id}/release:
+    post:
+      summary: Release a thread assignment
+      description: >-
+        Room-token write (CSRF + rate limit). The {id} is the assignmentId
+        returned by the assign call. Releasing an already-released
+        assignment is refused with 404 assign_not_assigned; unknown ids
+        are 404 assignment_not_found.
+      security:
+        - roomToken: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, maxLength: 500 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ assignmentId, assignment: { threadId, status: released, releasedAt, releasedBy, history } }" }
+        '404': { description: assignment_not_found or assign_not_assigned }

@@ -1,0 +1,32 @@
+  /api/rooms/{roomId}/feedback/{feedbackId}:
+    get:
+      summary: Poll a feedback verdict
+      description: |
+        The standard's machine-readable verdict shape: `status`
+        (open|triaged, or the closed status), `verdict` (real|junk|
+        user-error), `triaged_at`, `severity`, and the severity-routed
+        destination (`route`: task|proposal|docs-fix). Any room member may
+        read; API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: feedbackId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The feedback item's verdict
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feedback_id: { type: string }
+                  status: { type: string }
+                  verdict: { type: string, enum: [real, junk, user-error], nullable: true }
+                  triaged_at: { type: string, nullable: true }
+                  severity: { type: string, enum: [bug, perf, missing-feature, docs] }
+                  route: { type: string, enum: [task, proposal, docs-fix] }
+                  cluster_key: { type: string }
+        '401': { description: unauthenticated }
+        '404': { description: feedback_not_found }
