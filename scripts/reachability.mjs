@@ -64,6 +64,11 @@ export const KEEP = [
   // edit those files, and the runtime package list is one of them.
   "server/repro-check.mjs",
   "server/agent-audit.mjs",
+  // Deliberately standalone library (B2) — REACHABILITY CLASS RULE KEEP:
+  // Bloom/HLL counters for approximate reads only; no runtime caller by
+  // design. Wiring into a funnel/dashboard surface is a separate gated
+  // product decision. Remove when that wiring lands.
+  "server/probabilistic-counters.mjs",
 ];
 
 const KEEP_SET = new Set(KEEP);
