@@ -124,6 +124,9 @@ const ROOM_EVENTS_QUERY = Object.freeze([
   queryParam("compact", { type: "string", enum: ["1", "0", "true", "false"] }, { description: "1 or true drops envelope fields a poller does not act on." }),
   queryParam("tail", { type: "integer", minimum: 1, maximum: 200 }, { description: "Newest N events, sent alone. Combining tail with other event filters is 422." }),
 ]);
+const NEEDS_ME_QUERY = Object.freeze([
+  queryParam("roomId", { type: "string" }, { description: "Optional. Scope the read to one room." }),
+]);
 const ROOM_SEARCH_QUERY = Object.freeze([
   queryParam("q", { type: "string", minLength: 1, maxLength: 80 }, { required: true, description: "Substring to match. Required." }),
   queryParam("kind", { type: "string", enum: ["all", "messages", "work", "pinned"], default: "all" }),
@@ -159,6 +162,29 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
+  route("/api/pair", ["GET", "POST"], "none", "Start agent pairing. A proved key or a valid room credential reconnects the existing member.", "startPair",
+    { operationIds: { GET: "startPair", POST: "startPairPost" },
+      requestBodies: { POST: { required: true, content: { "application/json": { schema: {
+        type: "object", additionalProperties: true, properties: {
+          room: { type: "string", description: "Room id. roomId is also accepted." },
+          roomId: { type: "string" },
+          name: { type: "string", maxLength: 80, description: "Display name. displayName is also accepted." },
+          displayName: { type: "string", maxLength: 80 },
+          publicKey: { type: "string", description: "Ed25519 public key, canonical base64." },
+          keyProof: { type: "string", description: "Ed25519 signature over the pair proof bytes. Required to reconnect immediately by key." },
+          credential: { type: "string", description: "Existing room credential. Reconnects that member instead of creating one." },
+        },
+      } } } } },
+      query: [
+        { name: "room", in: "query", required: false, schema: { type: "string" } },
+        { name: "name", in: "query", required: false, schema: { type: "string" } },
+        { name: "publicKey", in: "query", required: false, schema: { type: "string" } },
+        { name: "keyProof", in: "query", required: false, schema: { type: "string" } },
+      ] }),
+  route("/api/pair/{pairId}", ["GET"], "none", "Poll a pairing request with the device secret. Pending, slow, denied, and expired answers are RFC 8628 codes.", "pollPair",
+    { query: [{ name: "secret", in: "query", required: false, schema: { type: "string" }, description: "Device secret. Authorization Bearer is also accepted." }] }),
+  route("/pair", ["GET"], "none", "Same pairing door as GET /api/pair.", "startPairPage"),
+  route("/pair/{userCode}", ["GET"], "none", "Approval page for one pairing code. Unknown codes disclose no room history.", "pairApprovalPage"),
   // Onboarding.
   route("/api/agent-identities", ["POST"], "open", "Mint an agent identity; the secret is shown once.", "mintAgentIdentity",
     { requestBodies: { POST: IDENTITY_MINT_BODY } }),
@@ -169,6 +195,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/agent-rooms", ["GET", "POST"], "identity-secret", "List rooms owned by the calling identity (GET) or create a room owned by it (POST).", "createAgentRoom",
     { operationIds: { GET: "listAgentRooms", POST: "createAgentRoom" },
       requestBodies: { POST: AGENT_ROOM_CREATE_BODY } }),
+  route("/api/agent-rooms/{roomId}/token/rotate", ["POST"], "identity-secret",
+    "Replace this identity's onboarding token for one room. One transaction revokes the live onboarding credential and returns the replacement. A room token is not an identity secret.",
+    "rotateAgentRoomToken"),
   route("/api/agent-invites/redeem", ["POST"], "invite-code", "Redeem a one-time invite code for room membership.", "redeemInvite",
     { requestBodies: { POST: INVITE_REDEEM_BODY } }),
   route("/api/rooms/{roomId}/agent-invites", ["GET", "POST", "DELETE"], "room-member",
@@ -197,7 +226,9 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
     { requestBodies: { POST: SHARE_LINK_JOIN_BODY } }),
   route("/api/share-links/preview", ["POST"], "none", "Preview a shared invite link (room title and access description only); the link token is the credential.", "previewShareLink",
     { requestBodies: { POST: SHARE_LINK_PREVIEW_BODY } }),
-  route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe"),
+  route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe",
+    { query: NEEDS_ME_QUERY }),
+  route("/api/verdict-inbox", ["GET"], "identity-secret", "Sectioned verdict inbox for this identity: needs your verdict, returned to you, waiting on a worker, and recently decided. An account session reads the same set with non-human rows omitted.", "getVerdictInbox"),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
     { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),
@@ -303,6 +334,8 @@ const JSON_RPC_STATUSES = Object.freeze({
 const NO_JSON_BODY_ROUTES = new Set([
   "/api/agent-webhooks/deliveries/{deliveryId}/redrive",
   "/api/oauth/sessions/revoke-all",
+  // Bearer identity secret and the room id in the path; the handler never reads a body.
+  "/api/agent-rooms/{roomId}/token/rotate",
 ]);
 
 export function readsJsonBody(entry, method) {
@@ -339,7 +372,13 @@ function jsonRpcErrorResponse(status) {
 // POST routes that answer 200, not 201: they create nothing. The served spec
 // must match the live status (schemathesis drift FO-DRIFT-3: claims/validate
 // answered 200 while the generated spec documented only 201).
-const POST_NON_CREATE_PATHS = new Set(["/api/needs-me", "/api/claims/validate"]);
+const POST_NON_CREATE_PATHS = new Set([
+  "/api/needs-me",
+  "/api/claims/validate",
+  "/api/pair",
+  // Replaces a live onboarding credential and answers 200, not 201.
+  "/api/agent-rooms/{roomId}/token/rotate",
+]);
 
 function successResponse(status, description) {
   return { description: description ?? (status === "201"
@@ -781,6 +820,14 @@ export const nextActionsForRoomCreate = roomId => {
     Object.freeze({ action: "finish-work", transport: "http", method: "POST", path: starterUpdate,
       body: Object.freeze({ state: "done", deliveryMode: "result", note: "<what you did>" }),
       description: "Close the starter task with a result note. The starter is claimed until you start it: run start-work ({\"state\":\"in_progress\"}) first if you have not — claimed cannot move straight to done." }),
+    Object.freeze({ action: "claim-work", transport: "mcp", tool: "room_claim", path: "/mcp",
+      arguments: Object.freeze({ action: "take", requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+        repository: "<owner/repo>", ref: "<branch>", paths: Object.freeze(["<path>"]), expiresAt: "<ISO date-time>" }),
+      description: "Projected work items: claim the task assigned to you with room_claim action=take. The starter above is already claimed; use start-work for it." }),
+    Object.freeze({ action: "handoff-work", transport: "mcp", tool: "room_handoff", path: "/mcp",
+      arguments: Object.freeze({ requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+        doneSummary: "<what is done against the definition of done>", nextAction: "<exact next step>", limitReason: "<why you stopped>" }),
+      description: "If you cannot finish a projected task you claimed, return it to the Board with room_handoff. It does not close or reassign the work." }),
     Object.freeze({ action: "create-task", transport: "http", method: "POST", path: `${room}/work-claims`,
       body: Object.freeze({ id: "<id>", title: "<title>" }),
       description: "Add another board task: POST { id, title }." }),
@@ -796,6 +843,14 @@ export const nextActionsForInviteRedeem = roomId => {
       description: "Orient: list the room's members, who is online, and who is holding which work sessions." }),
     Object.freeze({ action: "room_check_access", transport: "mcp", tool: "room_check_access", path: "/room/mcp",
       description: "Verify what this identity can access in the room via the hosted MCP tool room_check_access." }),
+    Object.freeze({ action: "claim-work", transport: "mcp", tool: "room_claim", path: "/mcp",
+      arguments: Object.freeze({ action: "take", requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+        repository: "<owner/repo>", ref: "<branch>", paths: Object.freeze(["<path>"]), expiresAt: "<ISO date-time>" }),
+      description: "Projected work items: claim the task assigned to you with room_claim action=take. Board session claims stay on the work-session route." }),
+    Object.freeze({ action: "handoff-work", transport: "mcp", tool: "room_handoff", path: "/mcp",
+      arguments: Object.freeze({ requestId: "<stable-id>", workItemId: "<workItemId>", expectedRevision: 0,
+        doneSummary: "<what is done against the definition of done>", nextAction: "<exact next step>", limitReason: "<why you stopped>" }),
+      description: "If you cannot finish a projected task you claimed, return it to the Board with room_handoff. It does not close or reassign the work." }),
   ]);
 };
 

@@ -37,7 +37,7 @@ test("Start a room: sign in lands inside a new room", { timeout: 60000 }, async 
   assert.doesNotMatch(page.url(), /start=room/, "the intent leaves the address bar");
 
   const email = "start-room@example.invalid";
-  await openMagicSignin(page);
+  await openMagicSignin(page, email);
   const form = page.locator('#auth-signin-ui [data-signin-form="password"]');
   await form.locator('[name="email"]').fill(email);
   const delivered = page.waitForResponse(response => new URL(response.url()).pathname === "/api/auth/magic/request");
