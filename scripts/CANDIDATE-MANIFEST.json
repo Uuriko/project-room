@@ -85,7 +85,7 @@
     "src/dm-consents.js": "sha256:aa1cce0e89827470728d2c1b878ae6a5aca2efcc5ebd2c27b2b7cfe4d0c88f2c",
     "src/entry-started.js": "sha256:a569941b2109cc91a0da9665700e9395ab3cf7f2de190055c0862c8b17808a2b",
     "src/entry.js": "sha256:1825c1d62da7e6d71caa472ed5cbccfecca85030232f0af1cb0a0b535be0af40",
-    "src/error-copy.js": "sha256:455551b0dc073205d4feac4ce9eee7df89c8fa311610e1ffd6eb8105fcf8f2b8",
+    "src/error-copy.js": "sha256:09497e8823c6568b13328039f5140fa55b1a573cbb6337e0573e5254b743d132",
     "src/events.js": "sha256:176e231eceb6ab98276ab9a790639e6cc04eec5dd3816ab093073b072af02595",
     "src/first-room-copy.js": "sha256:ee1906746b47669cd4db34c84e7d78bc116729284ab5a9f7403ddd27b17ffbce",
     "src/friend-bond.js": "sha256:585f2a15ab46ca2319a8546a5c7e674804940bb4edf64e05a50b2bdcade36c09",
@@ -151,8 +151,8 @@
     "src/work-status.js": "sha256:fa3394eb7d8dfa39999d5f8b5c85f7b305f815bc573aa6e34be5a48e5ff34478",
     "src/workflow.js": "sha256:677a12a29df00fae54176d3c30a5be92685933c25c5014bee1a1347e2d3e5254",
     "src/workspace-navigation.js": "sha256:45ed52899af80ecb711457da040d938ab8e0566bb5ca3037c5b383dcbbc4897d",
-    "strings/en.js": "sha256:a906a21d01914b05a1269d249af7b7b8d1afaced2059af302adb9a34070e853f",
-    "strings/en.json": "sha256:2b516396771b9dbdada40b71e3757717295ce0c12904df315e56b82774bc9f89"
+    "strings/en.js": "sha256:6016b18733e3f8a10f23e8c96c16dfb7cf50790030d739fedd4d6fc4addd00f5",
+    "strings/en.json": "sha256:72faef93afca380c9c54b08cf248d2f9a48c94c6cb385d07ba8130cbc9568e8b"
   },
   "deployment": {
     ".github/workflows/deploy-prod.yml": "sha256:c46b418b45f552a3b9eb3b8df6669768301e608f512ba2465791ae6a524cce8e",
