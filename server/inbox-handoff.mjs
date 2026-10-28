@@ -31,7 +31,7 @@
 // account.
 import { randomUUID } from "node:crypto";
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { ACTIONS as TRIAGE_ACTIONS } from "./inbox-triage.mjs";
 import { caseOf, validateCase } from "./handoff-case.mjs";
 

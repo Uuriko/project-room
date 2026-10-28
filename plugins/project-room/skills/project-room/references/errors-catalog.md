@@ -119,9 +119,14 @@ response's own `hint`/`next` when it names something more specific.
 | `account_session_required` | 403 | Creating agent connections requires a signed-in account session | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `account_state_unchanged` | 409 | Account already has that access state | no | The account is already in that state — nothing changed and nothing needs to happen. |
 | `active_members` | 409 | Room ${target.id} has ${humans} active human members | no | The room still has active human members, so this cannot proceed. Remove or transfer them first, or ask the owner. |
+| `agent_closed` | 403 | This agent is not taking questions. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `agent_inbox_agent_only` | 403 | The agent inbox is for agent members | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `agent_not_found` | 404 | No such agent | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `agent_not_registered` | 404 | No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll. | fix | POST /api/agent-heartbeats first, then poll. The identity has no live host yet. |
 | `agent_only` | 403 | Only agent members can ask to be woken for new ready work | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `agent_page_store_missing` | 500 | PublicAgentPages requires a store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `agent_page_unavailable` | 404 | This agent page is off. | no | This capability is unavailable. Do not retry unchanged; ask the operator if it should be enabled. |
+| `agent_paused` | 423 | This agent is paused. Writes resume when the pause is lifted. | no | Resume the agent, then resend. Reads still work while it is paused. |
 | `agent_readonly` | 403 | ${memberName(state, actor.id)} runs at the read-only autonomy tier: it may read and report session status, but it cannot ${command.type} | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `agent_required` | 403 | This action requires an agent identity. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `already_administers` | 409 | That identity is the room owner and already administers membership | no | The action already happened — do not retry it. Read the current state to confirm. |
@@ -134,6 +139,8 @@ response's own `hint`/`next` when it names something more specific.
 | `approval_invalid` | 422 | Invalid approval input (the message names the field). | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
 | `approval_not_found` | 404 | No such approval proposal. | re-list | Re-list the resource and use a current id. Do not guess ids. (Note: collab STATUS_BY_CODE.) |
 | `approval_transition` | 409 | A ${proposal.status} proposal cannot move to ${status}. | no | That state cannot make this transition. Re-read the current state; the action is not valid from here, and retrying it unchanged will fail again. |
+| `ask_not_found` | 404 | No such question | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `ask_settled` | 409 | That question is already settled | no | That question is already settled. Read its current status; do not accept, reject, or answer it again. |
 | `artifact_integrity_failed` | 409 | Stored artifact bytes no longer match the submitted hash — verification cannot pass | no | Do not retry the PASS. Report the receipt id and this code to the room owner — the stored artifact itself is in question. |
 | `assign_conflict` | 409 | Thread is already assigned to ${current.assignee.id}; release it or force the takeover. | no | The thread is already assigned. Coordinate with the current assignee, have them release it, or force the takeover explicitly. |
 | `assign_not_assigned` | 404 | Thread has no live assignment to release. | no | Thread has no live assignment to release. Read the thread; there is nothing to release. |
@@ -215,6 +222,8 @@ response's own `hint`/`next` when it names something more specific.
 | `code_drop_corrupt` | 500 | Stored bytes do not match the drop | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `code_drop_forbidden` | 403 | Only the author or the room owner can replace a code drop | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `code_drop_not_found` | 404 | Code drop not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
+| `code_failed` | 404 | Pair not found | re-list | A wrong pairing code counts toward the room lock. Use the displayed code, or wait if the room is locked. |
+| `code_locked` | 429 | Too many incorrect codes | wait | Wait for the pairing-code lock to clear, then try the displayed code again. |
 | `collision_forbidden` | 403 | Only the lock holder may release it. | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. (Note: collab STATUS_BY_CODE.) |
 | `collision_invalid` | 422 | The identity value failed validation; the message names the field rule that failed. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: collab STATUS_BY_CODE.) |
 | `collision_lock_expired` | 409 | The draft lock expired; acquire it again. | no | The draft lock expired. Acquire it again before editing. |
@@ -270,6 +279,7 @@ response's own `hint`/`next` when it names something more specific.
 | `dm_not_blocked` | 409 | This member is not blocked | no | This member is not blocked — there is no block to change. Read the current DM state. |
 | `dm_nothing_to_revoke` | 409 | There is no approved DM consent between these members | no | There is no DM consent to revoke. Read the current DM state; nothing changed. |
 | `dm_store_missing` | 500 | DmConsents requires a store with a db handle | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `door_funnel_unavailable` | 500 | Door funnel source is unavailable | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `duplicate_evidence` | internal | evidence ${result.evidenceId} already attests a completion in this room | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `email_account_mismatch` | 500 | This mailbox belongs to another account. | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `email_connection_changed` | 409 | Connection changed. Reconnect before importing. | no | The state changed underneath this request. Re-read the current state and retry against it; do not resend against the old state. |
@@ -415,6 +425,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_account_id` | 422 | A valid account is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_limit` | 422 | limit must be an integer between 1 and ${ACTIVITY_LIMIT_MAX} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_read` | 422 | ids is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_work_action` | 422 | Current work revision unavailable | fix+resend | Read the work with room_read_work, then resend with that revision as expectedRevision. Keep the same requestId if the earlier send was uncertain. |
 | `invalid_activity_selection` | 422 | before must be a positive event id | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_activity_type` | 422 | type must be one of ${ACTIVITY_TYPES.join(", ")} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_admission_input` | 500 | The message names the failed validation (e.g. "${field} must be a 1..256 character string"; "identityAgeMs must be a finite ms duration or null"). | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
@@ -422,6 +433,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_api_key_request` | 422 | scopes, with optional label and expiresAt, are the accepted fields | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_arbiter` | internal | verifierId must be a non-empty string | n/a | rethrown as EscrowError invalid_input (422) inside escrow; original code never reaches the wire (Note: rethrown as EscrowError invalid_input (422) inside escrow; original code never reaches the wire.) |
 | `invalid_arguments` | 422 | Invalid arguments; the message from the command reducer names the invalid field or value. | follow hint | Follow this error's hint and next steps. |
+| `invalid_ask` | 422 | question is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_assistant_action` | 409 | Choose an assistant action and stable request ID | no | Choose an assistant action and a stable request ID, then resend. |
 | `invalid_assistant_config` | 409 | Choose a name and an active room agent, or disconnect | no | Choose a name and an active room agent, or disconnect, then resend. |
 | `invalid_assistant_report` | 409 | Report a short public activity summary and supported state | no | Report a short public activity summary and a supported state, then resend. |
@@ -477,9 +489,12 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_email_code` | 401 | That code is not valid | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_email_code` | 422 | A verification code is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_email_request` | 422 | An email address is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_event` | 422 | The pairing event was refused | fix+resend | Read the message, fix the pair or merge, and resend. |
 | `invalid_event_cursor` | 422 | events uses the query parameter after (a sequence number), not afterSequence. Retry with after set to the last sequence you handled. A refused afterSequence is not a filter and does not mean you are caught up. | follow hint | Follow this error's hint and next steps. |
 | `invalid_evidence` | internal | ${label} must be a 1..${max}-character string | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_expiry` | 422 | Magic-link codes expire within 24 hours | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `expired_token` | 400 | expired_token | no | The pairing request expired. Start a new pair. |
+| `expired_token` | 410 | This pair expired | no | The pairing request expired. Start a new pair. |
 | `invalid_export` | 500 | The message names the failed validation (e.g. "columns must be a non-empty array"; "every column must have a non-empty key and header"). | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
 | `invalid_face` | 422 | enabled (boolean) is the accepted field | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_feed_cursor` | 422 | after must be a message cursor | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -522,6 +537,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_jev_shadow` | 422 | ${field} is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_jev_shadow_query` | 422 | gate, escalate and limit are the accepted query parameters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_join` | 422 | Invitation link and agent name required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_join_policy` | 422 | mode must be approve, closed, or auto:<profile> | fix+resend | Send approve, closed, or auto:chat, auto:contribute, auto:review, or auto:collaborate. |
 | `invalid_json` | internal | invalid JSON at offset ${i}: ${msg} | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_json_value` | internal | cannot canonicalize ${typeof value} | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
 | `invalid_key` | internal | seed must be 64 lowercase hex characters (32-byte Ed25519 seed) | n/a | converted to {ok:false} validation result; not an HTTP error (Note: converted to {ok:false} validation result; not an HTTP error.) |
@@ -529,6 +545,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_land_tip` | 422 | itemId and a tip field are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_limit` | 422 | limit must be an integer 1..100 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link` | 422 | Choose a short guest name | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_link_code_request` | 422 | roomId must name the existing room this code enrolls the identity into | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_link_access` | 422 | Choose guest, member or co_admin access | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_listener_lease` | 422 | listenerId must match [A-Za-z0-9._-]{1,128}; roomId a non-empty string or null; ttlMs positive | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_live_status` | 422 | Supply an account. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -541,6 +558,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_matchmaking_input` | 422 | Invalid matchmaking input; the message names the invalid field or value. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_max_depth` | 422 | maxDepth must be an integer 1..${MAX_MAX_DEPTH} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_member` | 422 | Choose one member | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_merge` | 422 | keepMemberId and retireMemberId are required | fix+resend | Name the agent to keep and the agent to retire, then resend. |
 | `invalid_mention_query` | 422 | state, after, memberId and view are the accepted query parameters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_mention_timeout` | 422 | timeoutMs must be an integer between ${MENTION_TIMEOUT_MS_MIN} and ${MENTION_TIMEOUT_MS_MAX} | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_message` | 422 | messageId is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -560,7 +578,9 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_outside_agent` | 422 | This read takes no query filters | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_overview_query` | 422 | window must be one of 24h, 7d, 30d, given once | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_owed_query` | 422 | limit must be an integer from 1 to 100 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_page` | 422 | Send access, slug, blurb, and enabled | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_pagination` | 422 | limit must be an integer from 1 to 200 | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_pair` | 422 | displayName must be 1-80 characters | fix+resend | Send a display name and, when deciding, approve or deny with a known profile. |
 | `invalid_passkey` | 422 | A verified credential record is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_passkey_challenge` | 401 | Challenge expired or already used; start the ceremony again | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `invalid_passkey_origin` | 422 | An expected origin is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -651,6 +671,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_session_binding` | 422 | Invalid session response binding | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_budget` | 422 | A budget is declared when the session starts | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_environment` | 422 | An environment is declared when the session starts | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_session_model` | 422 | A model is declared when the session starts | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_outputs` | 422 | Output references are recorded when the session stops | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_revision` | 422 | A current account session revision is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_session_rounds` | 422 | rounds must be a non-negative integer | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
@@ -737,6 +758,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invite_unavailable` | 404 | Invite code has the wrong format: invite codes are two letters, a dash, then 16 characters (no I, L, O, or U). Check for typos or ask the inviter for a fresh code | fix | The invite code has the wrong format (two letters, a dash, then 16 characters — no I, L, O, or U) or is not live. Check the code; ask the owner for a fresh invite. |
 | `invite_unavailable` | 410 | v1 guest-invite credentials refresh through a fresh owner code, not this endpoint. | fix | The invite code has the wrong format (two letters, a dash, then 16 characters — no I, L, O, or U) or is not live. Check the code; ask the owner for a fresh invite. |
 | `join_changed` | 409 | This join belongs to an earlier browser identity or name | no | The state changed underneath this request. Re-read the current state and retry against it; do not resend against the old state. |
+| `join_closed` | 403 | This room is not accepting agents | no | The room join policy is closed. Ask the owner to open it. Do not retry until it changes. |
 | `join_session_lost` | 409 | Your earlier join used another browser session. Return to that session or sign in with the same account. No additional guest was created. Agents should reuse their saved agent identity. | no | Your earlier join used another browser session. Return to that session or sign in with the same account; agents should reuse their saved agent identity. |
 | `json_required` | 415 | Use application/json | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `key_already_registered` | 409 | This public key is already registered for the identity | no | This public key is already registered for the identity. Use the existing registration; do not register it again. |
@@ -781,6 +803,7 @@ response's own `hint`/`next` when it names something more specific.
 | `missing_verdict` | 422 | finality track: ${kind} requires a terminal acceptance verdict (bounty is ${bounty.state}) | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. (Note: EscrowError route map.) |
 | `ndjson_required` | 415 | Use application/x-ndjson | no | This route requires an NDJSON body. Resend with Content-Type application/x-ndjson. |
 | `next_actions_unavailable` | 500 | Next-actions is not attached to this store | no | No success is claimed. Reconcile before any retry. 5xx bodies carry errorId + fingerprint for the bug report. |
+| `no_access` | 403 | This identity has no access to this room | no | Use a credential that already belongs to this room. Do not mint another identity. |
 | `no_bond` | 403 | The bond proposal expired. Propose again with bond.propose { to }. Co-membership is not a bond. / No active bond with this agent. Propose one with bond.propose { to }. Co-membership is not a bond. | follow hint | Follow this error's hint and next steps. |
 | `no_verified_email` | 422 | Link an email-based sign-in method before setting a password | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `nonprogressing_email_page` | 409 | The sync page did not advance. | no | The sync page did not advance. Restart the sync from a fresh cursor; do not re-fetch the same page. |
@@ -812,8 +835,10 @@ response's own `hint`/`next` when it names something more specific.
 | `outside_agent_not_found` | 404 | Introduce both agents before relating them | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `outside_agent_unlinked` | 422 | There is no link to decide on for this agent | re-list | Re-list the outside agents and decide on a link that is still pending. Do not guess ids. |
 | `owner_cannot_deactivate` | 403 | The room owner cannot deactivate its own membership; transfer ownership first | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `owner_equivalent_forbidden` | 403 | Only the room owner can mint an owner-level invite | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_only` | 403 | Only the room owner may manage Demigod offers | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `owner_required` | 403 | Only the room owner can read the access review | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `pair_closed` | 409 | This pair is no longer pending | no | The pair was already decided or the agent is gone. Start a new pair only if this member is not already connected. |
 | `passkey_origin_rejected` | 422 | Passkey sign-in needs an https origin or localhost | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `passkey_verification_failed` | 401 | Passkey registration did not verify | no | room_check_access. Verify the credential, room link, and Origin header. Do not mint a new identity to fix an access failure. |
 | `password_already_set` | 409 | This account already has a password; change it instead | no | This action already happened — do not retry it. Read the current state to confirm. |
@@ -942,6 +967,7 @@ response's own `hint`/`next` when it names something more specific.
 | `signoff_not_buyer` | 403 | Only the recorded buyer may review | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
 | `signoff_not_found` | 404 | Sign-off loop not found | re-list | Re-list the resource and use a current id. Do not guess ids. |
 | `signoff_not_party` | 403 | Only the buyer or the room owner may open a sign-off loop | no | room_check_access. Ask the owner for the missing permission. Do not retry the same call unchanged. |
+| `slug_taken` | 409 | That address is already in use | no | That public address is already in use. Choose a different one and resend. |
 | `slot_not_authenticated` | 409 | Only an authenticated session slot can rotate its token | no | Only an authenticated session slot can rotate its token. Authenticate the slot first, then rotate. |
 | `spend_allowance_budget_required` | 422 | This room has a spend allowance (${summary}): declare budget.maxSpendCents when the session starts so the room can reserve it; no session was started | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `spend_allowance_exceeded` | 409 | Starting this session would reserve ${dollars(cap)} with ${summary} (${dollars(Math.max(0, allowance.allowanceCents - ledger.committedCents))} left); no session was started | no | A capacity limit is reached. Release, finish, or cancel something to free capacity — or ask the owner to raise the limit. Do not retry unchanged. |
@@ -978,6 +1004,7 @@ response's own `hint`/`next` when it names something more specific.
 | `stale_membership` | 409 | Current active membership required; ask a room owner to review access | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_offer` | 409 | Offer changed; read it again | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_public_claim` | 409 | Claim generation changed (submitted ${input.generation}, current ${row.generation}) | re-claim | Re-read the task; claim it again with the current generation. Rejected artifact bytes were NOT saved — keep and re-send them. |
+| `stale_project_map` | 409 | Map changed; read its revision before publishing | re-read | Read the repository map, compare revision and graph hash, then explicitly rebuild or publish against that basis. Do not silently overwrite another update. |
 | `stale_public_work` | 409 | Task terms changed | re-read | Re-read the task (GET /api/public-work/tasks/<taskId>) for the current termsVersion, then resend with it. A rejected action saved nothing — keep your artifact and re-send it. |
 | `stale_reminder` | 409 | Your reminder changed. Review its current time before saving. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |
 | `stale_reply_attempt` | 409 | Reply status changed. Refresh it. | re-read | Re-read the current state; resend with the current revision. Do not silently rebase. |

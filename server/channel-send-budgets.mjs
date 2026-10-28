@@ -22,7 +22,7 @@
 // approval. `check`/`view` for the gmail channel are documented no-ops, and
 // the route layer must not call check() for gmail sends.
 import { createLimiter } from "./token-bucket.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 
 export const DEFAULT_SEND_BUDGET_PER_MIN = 30;
 export const DEFAULT_SEND_BUDGET_BURST = 30;
