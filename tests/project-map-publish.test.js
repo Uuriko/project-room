@@ -9,6 +9,7 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { setTier } from '../server/autonomy-tiers.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const connection = { origin: 'http://127.0.0.1:1234', roomId: 'commons', memberId: 'agent', token: 'pri_' + 'a'.repeat(43) };
 const envelope = { repo: 'test/repo', revision: 'a'.repeat(40), graph: { nodes: [{ id: 'a', label: 'a', file: 'a.js', type: 'function' }], edges: [] } };
@@ -109,7 +110,7 @@ test('real HTTP publication obeys fresh admin policy and checks stored hash', as
   store.featureEnv = { ROOM_PROJECT_MAP_GRAPHIFY: 'on', ROOM_PROJECT_MAP_REPO: envelope.repo };
   const owner = store.issueAccessKey('commons', 'owner');
   const identity = store.identities.create('Agent');
-  store.identities.link(owner, 'commons', { identityId: identity.identityId, memberId: 'agent', displayName: 'Agent', permissions: ['manage_claims'] });
+  linkWithProof(store, owner, 'commons', identity, { memberId: 'agent', displayName: 'Agent', permissions: ['manage_claims'] });
   setTier(store.db, 'commons', 'agent', 't2_standard', { updatedBy: 'owner', nowMs: store.now() });
   const server = createRoomServer({ store }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
