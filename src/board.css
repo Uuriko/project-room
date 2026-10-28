@@ -11,6 +11,14 @@
 [data-claim-cap] button { padding: .58rem .85rem; border: 1px solid var(--line); border-radius: .42rem; background: var(--panel-raised); color: var(--text); font-size: var(--text-xs); font-weight: 600; }
 [data-claim-cap] button:hover { background: var(--panel-hover); }
 .board-head { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-bottom: var(--space-3); }
+/* #659: state / member-lanes grouping toggle in the board head. */
+.board-group { display: inline-flex; gap: var(--space-2); }
+.board-group button { min-height: 44px; }
+/* #659: per-card state chips — the recorded claim state, plus Verified only
+   when the claim carries a verification fact. */
+.claim-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-2); }
+.claim-chip { display: inline-block; padding: 0 .4rem; border: 1px solid var(--line); border-radius: 99px; font-size: var(--text-xs); text-transform: uppercase; }
+.claim-chip-verified { color: var(--green); }
 .live-chip { margin: 0; padding: .2rem .55rem; border: 1px solid var(--line); border-radius: 99px; color: var(--text); font-size: var(--text-sm); }
 .board-empty { margin: 0; max-width: 36rem; }
 .board-new { display: grid; gap: var(--space-2); margin: 0 0 var(--space-4); max-width: 28rem; }
