@@ -1,0 +1,17 @@
+  /api/rooms/{roomId}/charter:
+    get:
+      summary: Room instructions (charter)
+      description: >-
+        Member read of the room's instructions at the current or a past
+        `?revision=N` (docs/ROOM-INSTRUCTIONS.md). No other query parameter
+        is accepted.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: revision
+          in: query
+          schema: { type: integer, minimum: 0 }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ contractVersion, roomId, evaluatedThrough, currentRevision, currentEventId, authority, revision, eventId, charter, viewer* }" }
+        '404': { description: No such revision }
+        '422': { description: invalid_charter_revision }
