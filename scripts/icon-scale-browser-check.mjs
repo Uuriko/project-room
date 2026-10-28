@@ -43,8 +43,9 @@ test("Icons scale with text size and keep default sizes at 100%", { timeout: 900
       const svg = button?.querySelector("svg");
       if (!button || !svg || button.getClientRects().length === 0) return [selector, null];
       const b = button.getBoundingClientRect(), s = svg.getBoundingClientRect();
-      return [selector, { button: Math.round(b.width), svg: Math.round(s.width), inside: s.left >= b.left - 0.5 && s.right <= b.right + 0.5 }];
+      return [selector, { button: Math.round(b.width), svg: Math.round(s.width), inside: s.left >= b.left - 0.5 && s.right <= b.right + 0.5 && s.top >= b.top - 0.5 && s.bottom <= b.bottom + 0.5, tall: Math.round(b.height) }];
     })), ICONS);
+    result.overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
     assert.deepEqual(errors, []);
     await page.context().close();
     return result;
@@ -59,8 +60,10 @@ test("Icons scale with text size and keep default sizes at 100%", { timeout: 900
       assert.ok(large[selector], `${selector} still shown at 200% text (${width}px)`);
       assert.equal(large[selector].svg, 40, `${selector} icon doubles at 200% text (${width}px)`);
       assert.ok(large[selector].button >= 2 * normal[selector].button - 4 || large[selector].button >= 72, `${selector} button grows with text (${width}px)`);
-      assert.equal(large[selector].inside, true, `${selector} icon stays inside its button (${width}px)`);
+      assert.equal(large[selector].inside, true, `${selector} icon stays inside its button on both axes (${width}px)`);
+      assert.ok(large[selector].tall >= 40, `${selector} button is tall enough for its icon (${width}px)`);
     }
-    assert.ok(Object.values(normal).filter(Boolean).length >= 3, `most icons measured at ${width}px`);
+    assert.equal(large.overflow, false, `no horizontal page overflow at 200% text (${width}px)`);
+    assert.ok(Object.values(normal).filter(v => v && typeof v === "object").length >= 3, `most icons measured at ${width}px`);
   }
 });
