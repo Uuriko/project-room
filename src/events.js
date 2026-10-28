@@ -183,9 +183,12 @@ function ensureDefaultChannel(state, at) {
 // live command path. Limits mirror the creation contract in
 // server/agent-rooms.mjs (title 1-120, purpose 1-1000). Surfaces that read
 // the projection (room read, directory, /r/ face, activation pack) follow a
-// rename; the public_receipts mirror keeps the room_title it stored at
-// issuance — this handler writes no receipt rows, so issued proof keeps
-// the title it was issued under.
+// rename; issued proof does not follow: this handler writes no receipt
+// rows, and the store-level publication sync that re-derives the
+// public_receipts mirror preserves the stored room_title of every
+// receipt id that already exists (issuance wins — see
+// replaceOptedInReceipts in server/public-read-model.mjs), so a receipt
+// keeps the title it was issued under.
 export const ROOM_TITLE_LIMITS = Object.freeze({ title: 120, purpose: 1000 });
 export const ROOM_TITLE_SET_COOLDOWN_MS = 60_000;
 
