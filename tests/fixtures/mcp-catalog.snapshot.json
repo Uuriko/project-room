@@ -1139,7 +1139,7 @@
       }
     },
     "room_request_access": {
-      "inputSchema": "a0e27548596fad91",
+      "inputSchema": "7b8fd369eddf258d",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,

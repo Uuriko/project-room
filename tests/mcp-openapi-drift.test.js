@@ -240,6 +240,31 @@ const ALLOW = {
       since: "Tool: 'Complete returned cursor, unchanged. Legacy sequence numbers also accepted.' (untyped: the cursor is a JSON object, the legacy form a number). REST: the query-string wire encoding of the same logical value; the route description documents both forms ('since is a sequence number or the previous complete returned cursor object').",
     },
   },
+  room_request_access: {
+    // "Same write as POST /api/access-requests." The tool files for the
+    // CALLER's identity: the dispatch takes identityId from the caller's
+    // identity (its secret is the proof) — "the caller never names another
+    // identityId" (server/mcp-hosted-tools.mjs).
+    narrowed: {
+      identityId: "The REST body names the identity being filed for; the MCP caller IS that identity, proven by its bearer secret, so the tool exposes no identityId argument.",
+    },
+    toolDefaults: {
+      displayName: "Tool: 'displayName defaults to your identity's name.' API: displayName is required in the REST body, where the caller must state it.",
+      requestedPermissions: "Tool: 'omit it or pass an empty list to ask for read/chat access.' API: requestedPermissions is required in the REST body (the empty list is the same read/chat ask).",
+    },
+  },
+  room_access_request_status: {
+    // "Same read as GET /api/access-requests/:id." The documented template
+    // names the path segment {id}; the tool names the same segment
+    // requestId ("Pass the requestId from room_request_access").
+    transportOnly: {
+      requestId: "The tool's name for the documented {id} path segment. The REST operation declares that segment as the path param id; it declares no requestId param.",
+    },
+    narrowed: {
+      id: "The documented template's name for the path segment the tool calls requestId (see transportOnly above).",
+      identityId: "The REST read requires the caller's identityId as a query param; the MCP caller supplies its identity by bearer secret and the service scopes the read to that identity (anyone else gets not_found).",
+    },
+  },
 };
 
 // Triaged drift: real disagreements filed as GitHub issues. Each entry pins

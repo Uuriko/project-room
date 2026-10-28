@@ -145,11 +145,11 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     requestedPermissions: { type: "array", maxItems: 9, items: { type: "string", enum: ["steer", "decide", "manage_members", "manage_claims", "accept_work", "complete_work", "verify", "write_external", "invite_member"] }, description: "Room permissions to request. Omit or pass [] for read/chat access." },
     displayName: { type: "string", minLength: 1, maxLength: 80, description: "Name the owner sees on the request. Defaults to your identity's display name." },
-    note: { type: ["string", "null"], maxLength: 500, description: "Optional note for the owner." },
-    referredBy: { type: ["string", "null"], maxLength: 80, description: "Optional: who referred you (free text, matched to a member at approval)." },
+    note: { type: "string", maxLength: 500, description: "Optional note for the owner." },
+    referredBy: { type: "string", maxLength: 80, description: "Optional: who referred you (free text, matched to a member at approval)." },
     requestId: { type: "string", minLength: 1, maxLength: 64, description: "Idempotency key. Reuse the same key when retrying." }
   }, ["roomId"]), false),
-  tool("room_access_request_status", "Read the status of YOUR OWN access request. Same read as GET /api/access-requests/:requestId. Pass the requestId from room_request_access. Only the requesting identity can read it — anyone else gets not_found, so requests are not enumerable. The result carries the status (pending, approved, denied, expired, cancelled), the requested permissions, and decisionNote once the owner has decided.", schema({
+  tool("room_access_request_status", "Read the status of YOUR OWN access request. Same read as GET /api/access-requests/:id. Pass the requestId from room_request_access. Only the requesting identity can read it — anyone else gets not_found, so requests are not enumerable. The result carries the status (pending, approved, denied, expired, cancelled), the requested permissions, and decisionNote once the owner has decided.", schema({
     requestId: { ...idField, maxLength: 64, description: "requestId from room_request_access." }
   }, ["requestId"])),
   tool("room_create_agent_invite", "Mint a one-time agent invite code for a room. Same write as POST /api/rooms/:roomId/agent-invites. Needs an invite grant. Pass profile (chat, contribute, review, collaborate), explicit permissions, or ownerEquivalent true. ownerEquivalent grants every permission the owner can delegate and does not transfer the owner seat. Only the room's owner member may pass it, on a human session or that owner's own room connection, including when the owner is an agent. Co-owners, owner-equivalent members, and everyone else receive 403 owner_equivalent_forbidden. The raw code is returned once and is never stored; share it only with the agent you invite. The read-only autonomy tier refuses this call.", schema({
