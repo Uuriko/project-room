@@ -8,11 +8,12 @@ import { RoomStore } from '../server/store.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { pushProjectMap } from '../server/project-map-store.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(':memory:'); store.initialize(initialRoom('commons'));
   const owner = store.issueAccessKey('commons', 'owner'), identity = store.identities.create('Agent');
-  store.identities.link(owner, 'commons', { identityId: identity.identityId, memberId: 'agent', displayName: 'Agent', permissions: [] });
+  linkWithProof(store, owner, 'commons', identity, { memberId: 'agent', displayName: 'Agent', permissions: [] });
   await pushProjectMap(store, 'commons', { repo: 'test/repo', revision: 'abc', files: [
     { path: 'a.js', source: 'export function helper() { return 1; }' },
     { path: 'b.js', source: 'import { helper } from "./a.js"; export function run() { return helper(); }' }
