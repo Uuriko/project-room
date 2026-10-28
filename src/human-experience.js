@@ -1,3 +1,4 @@
+import { canAdministerRoom } from './room-administration.js';
 import { canReplyToResult } from "./result-availability.js";
 import { uiText } from './strings.js';
 import { currentResult } from './work-selectors.js';
@@ -147,14 +148,14 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     const assistant = projection.assistant;
     assistantSettings.querySelector('strong').textContent = uiText('human.assistantLabel', { name: assistant.name || 'Room' });
     $('#room-assistant-status').textContent = assistant.availability === 'connected' ? 'Connected' : assistant.availability === 'awaiting_host' ? uiText("human.copy.009") : assistant.availability === 'paused' ? uiText("human.assistantPaused") : 'Not connected';
-    $('#assistant-setup').hidden = getState().room.ownerId !== getSession().member.id;
+    $('#assistant-setup').hidden = !canAdministerRoom(getState(), getSession().member.id);
     $('#assistant-setup').textContent = assistant.availability === 'connected' ? uiText('human.assistantChange') : 'Connect';
     $('#assistant-activity').hidden = !runs.length;
     const openRuns = new Set([...document.querySelectorAll('#assistant-runs details.assistant-run[open]')].map(d => d.dataset.assistantRun));
     const runsHtml = runs.map(run => {
       const source = getState().messages.find(m => m.id === run.sourceMessageId);
       const sourceDeleted = run.sourceDeleted || Boolean(source?.deletedAt);
-      const controls = getState().room.ownerId === getSession().member.id || run.initiatorId === getSession().member.id;
+      const controls = canAdministerRoom(getState(), getSession().member.id) || run.initiatorId === getSession().member.id;
       const inputs = (sourceDeleted ? [] : run.inputs).slice(1).map(input => {
         const message = getState().messages.find(m => m.id === input.sourceMessageId);
         return ["<p>", esc(getState().members[input.memberId]?.displayName || 'Participant'), ": ", esc(message?.body?.slice(0,100) || 'Context'), " · ", input.status === 'applied' ? 'Applied' : 'Pending', "</p>"].join('');
@@ -189,7 +190,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
     const faceSource = current && getState().messages.find(m => m.id === current.sourceMessageId);
     const resultMessage = current?.resultMessageId && getState().messages.find(message => message.id === current.resultMessageId);
     const replyable = current?.status === 'done' && canReplyToResult(getState(), resultMessage);
-    const faceControls = current && (getState().room.ownerId === getSession().member.id || current.initiatorId === getSession().member.id);
+    const faceControls = current && (canAdministerRoom(getState(), getSession().member.id) || current.initiatorId === getSession().member.id);
     const faceKey = current ? JSON.stringify([current.id, current.revision, current.status, current.attemptId, current.stopOutcome, current.resultMessageId, Boolean(replyable), faceControls, faceSource?.body?.slice(0, 120)]) : '';
     if (face._key !== faceKey) {
       face._key = faceKey;
@@ -413,7 +414,7 @@ export function installHumanExperience({ getState, getSession, getConversation, 
         }
       }
       if (contribution) return { ...contribution };
-      const routed = conversationIntent({ content, messages: getState().messages, runs: projection?.runs, assistant: projection?.assistant, selfId: getSession().member.id, ownerId: getState().room.ownerId, canInvoke: getState().members[getSession().member.id]?.permissions.includes("steer") });
+      const routed = conversationIntent({ content, messages: getState().messages, runs: projection?.runs, assistant: projection?.assistant, selfId: getSession().member.id, ownerId: getState().room.ownerId, canInvoke: canAdministerRoom(getState(), getSession().member.id) || getState().members[getSession().member.id]?.permissions.includes("steer") });
       if (routed || content.replyToId) return routed;
       const solo = askAvailable(projection?.assistant) && Object.values(getState().members).filter(m => m.active !== false && m.kind === 'human').length === 1
         && soloUnaddressed({ ...content, members: getState().members, messages: getState().messages, selfId: getSession().member.id, assistantId: projection.assistant.coordinatorMemberId });

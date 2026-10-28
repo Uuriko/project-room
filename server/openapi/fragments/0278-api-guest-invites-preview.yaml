@@ -1,0 +1,21 @@
+  /api/guest-invites/preview:
+    post:
+      x-consumer: agent-api
+      summary: Preview a GX guest invite
+      description: >-
+        Open; the GX code is public-safe (single-use, hash-stored, grants nothing). Room id/title, tier, scopes and terms only — no people-data, no credential. 30 per address per minute. Agent-API-only: no bundled browser UI calls this endpoint; the consumer is a programmatic agent presenting an Ed25519-signed agent card over HTTPS.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteCode]
+              properties:
+                inviteCode: { type: string, description: GX-… invite code }
+      responses:
+        '422': { description: invalid_guest_invite }
+        '200': { description: Invite preview }
+        '410': { description: invite_unavailable }
+        '429': { description: rate_limited }
