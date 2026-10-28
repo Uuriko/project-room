@@ -20,7 +20,8 @@ test("validSessionExpiry rejects everything that is not a usable expiry", () => 
 test("formatSessionExpiry renders a real date/time in the locale", () => {
   const formatted = formatSessionExpiry(Date.UTC(2026, 8, 24, 12, 0, 0));
   assert.equal(typeof formatted, "string");
-  assert.match(formatted, /2026/, "carries the genuine year");
+  const year = new Intl.DateTimeFormat(undefined, { year: "numeric" }).formatToParts(new Date(Date.UTC(2026, 8, 24, 12, 0, 0))).find(part => part.type === "year").value;
+  assert.ok(formatted.includes(year), "carries the genuine year in the locale's own digits");
 });
 
 test("formatSessionExpiry returns null instead of guessing", () => {
@@ -33,9 +34,12 @@ test("formatSessionExpiry returns null instead of guessing", () => {
 test("formatSessionExpiry drops seconds and shows only the time on the same day", () => {
   const now = new Date(2026, 9, 28, 9, 0, 0).getTime();
   const later = new Date(2026, 9, 28, 17, 1, 47).getTime();
+  const timeOnly = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(new Date(later));
+  const withDate = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+  const withSeconds = new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(new Date(later));
   const sameDay = formatSessionExpiry(later, now);
-  assert.doesNotMatch(sameDay, /47/, "no seconds");
-  assert.doesNotMatch(sameDay, /2026/, "no date for today");
-  const nextDay = formatSessionExpiry(new Date(2026, 9, 29, 1, 0, 0).getTime(), now);
-  assert.match(nextDay, /2026/, "date shown for another day");
+  assert.equal(sameDay, timeOnly, "same day shows the locale's short time only");
+  assert.notEqual(sameDay, withSeconds, "no seconds");
+  const nextDayAt = new Date(2026, 9, 29, 1, 0, 0);
+  assert.equal(formatSessionExpiry(nextDayAt.getTime(), now), withDate.format(nextDayAt), "another day shows date and time");
 });
