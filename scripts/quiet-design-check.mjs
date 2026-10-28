@@ -30,7 +30,7 @@ for (const touch of [false, true]) {
     await signInFixture(page, fixture.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), false, "people-panel starts collapsed in the human sidebar");
-    assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
+    assert.equal(await page.locator("#composer-options > summary").count(), 0, "composer actions do not require a disclosure");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false, "work-options starts quiet");
     assert.equal(await page.locator(".work-details").first().evaluate(e => e.open), false);
     // C3 rest state, before any screenshot (Chromium 151 captures reset touch
@@ -81,7 +81,7 @@ for (const touch of [false, true]) {
     assert.equal(await page.locator("#verifier-select").isDisabled(), true);
     assert.match(await page.locator("#work-options-summary").textContent(), /Evidence only/);
     await page.keyboard.press("Escape");
-    await page.waitForFunction(() => document.activeElement.id === "composer-options-toggle");
+    await page.waitForFunction(() => document.activeElement.id === "new-work-button");
     await openComposerOptions(page); await page.locator("#new-work-button").click();
     assert.equal(await page.locator("#require-verification").isChecked(), true);
     assert.equal(await page.locator("#require-decision").isChecked(), true);
@@ -138,7 +138,7 @@ for (const touch of [false, true]) {
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     assert.equal(await page.locator("#work-dialog").evaluate(e => e.open), false);
     assert.equal(await page.locator("#people-panel").evaluate(e => e.open), false, "sign-out restores the quiet human disclosure state");
-    assert.equal(await page.locator("#composer-options").evaluate(node => node.open), false, "secondary composer options start closed");
+    assert.equal(await page.locator("#composer-options > summary").count(), 0, "composer actions do not require a disclosure");
     assert.equal(await page.locator("#work-options").evaluate(e => e.open), false);
     assert.deepEqual(errors, []);
   });

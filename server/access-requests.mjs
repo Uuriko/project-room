@@ -234,6 +234,7 @@ export class AccessRequests {
       // global PRIMARY KEY, so this key can never be re-created here; fail
       // honestly with the same 409 the cross-identity collision uses
       // instead of leaking or shadowing the other room's request.
+      if (rid.startsWith("humanjoin-")) fail(422, "invalid_request", "requestId prefix humanjoin- is reserved for account requests");
       const elsewhere = this.db.prepare(
         "SELECT 1 FROM access_requests WHERE request_id=?").get(rid);
       if (elsewhere) fail(409, "request_conflict", "requestId is already in use");

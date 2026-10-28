@@ -45,9 +45,8 @@ test("message composer is axe-clean (serious/critical)", { timeout: 180000 }, as
     await page.goto(origin);
     await signInFixture(page, ownerKey);
     await page.locator("#message-form").waitFor({ state: "visible" });
-    // Options open: the composer at its most complex (extra controls shown).
+    // Direct actions remain in the ordinary composer accessibility sweep.
     await openComposerOptions(page);
-    await page.locator("#composer-options").evaluate(node => node.open);
     assertAxeClean(
       await axeSerious(page, { include: ["#message-form", "#composer-options"] }),
       `message composer @${viewport.width}px`,

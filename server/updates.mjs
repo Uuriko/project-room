@@ -357,6 +357,13 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
       if (!tableMissing(error)) throw error;
     }
   }
+  if ((owner || member.permissions?.includes("manage_members")) && !needsMeOnly) {
+    const rows = store.db.prepare("SELECT request_id,display_name,created_at,revision FROM account_join_requests WHERE room_id=? AND status='pending' AND expires_at>? ORDER BY created_at LIMIT 100").all(roomId, now);
+    for (const row of rows) items.push(draft({ kind: "access_request", roomId, key: `humanaccess|${row.request_id}`,
+      title: clip(`${row.display_name} asks to join`), actor: null, createdAt: iso(row.created_at), updatedAt: iso(row.created_at),
+      basis: row.request_id, sourceRef: { requestId: row.request_id },
+      next: { method: "GET", path: `/api/rooms/${encodeURIComponent(roomId)}/join-requests` } }));
+  }
   if (member.permissions?.includes("manage_members") && !needsMeOnly) {
     try {
       const rows = store.db.prepare(

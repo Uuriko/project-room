@@ -1,3 +1,4 @@
+import { createRoomJoinSettings } from "./room-join-settings.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
@@ -50,7 +51,9 @@ import { installPortableWork, installResultCopy } from "./portable-work.js";
 import { replyDraftKey, replyDraftData, validReplyDraft, replyFollowUp, creditQuestion, confirmsReplyCommand, REPLY_CANCELLED } from "./reply-requests.js";
 import { workHelpContext, validateHelpData } from "./work-help.js";
 import { workOffersContext, validateHelpOfferData } from "./help-offers.js";
-import { installWorkspaceNavigation, nameBeforeFirstRoom } from "./workspace-navigation.js";
+import { installWorkspaceNavigation } from "./workspace-navigation.js";
+import { installRoomDiscovery } from "./room-discovery.js";
+import { createHumanJoinUI } from "./human-join-ui.js";
 import { createAccountSettingsUI, applyStoredTheme, organizeRoomSettings, ACCOUNT_DELETED_MESSAGE } from "./account-settings-ui.js";
 import { createAuthSigninUI, classifyAuthLink } from "./auth-signin-ui.js";
 import { stashPendingInvite, clearPendingInvite, takeRestoredInvite, stashPendingJoin, clearPendingJoin, takeRestoredJoin, inviteRequestDoor, normalizeAgentInviteCode, agentInviteJoinPath } from "./invite-context.js";
@@ -597,6 +600,7 @@ const client = new RoomClient({
     // JDOT-MEMBER-PERMS-UI begin
     memberPermissionsUI?.reset();
     ownerAttentionCard.hide();
+    roomJoinSettings.reset();
     // JDOT-MEMBER-PERMS-UI end
     agentConnectionsUI?.reset();
     agentInvitesUI?.reset();
@@ -760,6 +764,7 @@ agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
 // JDOT-MEMBER-PERMS-UI begin
+const roomJoinSettings = createRoomJoinSettings({ client, getState: () => state, section: $("#room-discovery-settings") });
 const ownerAttentionCard = createNeedsAttentionCard({ client, section: $("#needs-attention"), getState: () => state });
 // #3342: Owner Cockpit shell on the account home — cross-room Decisions +
 // Exceptions from /api/owner/overview. Decide actions execute against the
@@ -787,6 +792,18 @@ workspaceUI = installWorkspaceNavigation({ account: accountClient, getRoom: () =
   onRooms: () => loadAccountRooms(),
   onNavigate: () => { if (!$("#status").classList.contains("error")) clearNotice(); } });
 let accountCheckFlight = null, roomListVersion = 0, roomListCursor = null;
+const humanJoinUI = createHumanJoinUI({ accountClient, container: $("#account-human-join"), onJoined: openAccountRoom });
+const roomDiscovery = installRoomDiscovery({ getSession: () => accountClient.session, onRequestRoom: (roomId, title) => humanJoinUI.open(roomId, title) });
+$("#room-choice-create").addEventListener("click", () => {
+  $("#account-room-create").hidden = false;
+  $("#account-room-create").open = true;
+  $("#account-room-title").focus();
+});
+$("#account-room-cancel").addEventListener("click", () => {
+  $("#account-room-create").open = false;
+  $("#account-room-create").hidden = true;
+  $("#room-choice-create").focus();
+});
 // Account-session restore flight: declared before the sign-in UI mounts.
 // The magic-link auto-redeem runs synchronously during mount (page load
 // with ?magic=), so ensureAccountSession must not sit in the temporal dead
@@ -962,6 +979,8 @@ $("#account-settings").addEventListener("toggle", () => {
   if ($("#account-settings").open && accountClient.session?.authenticated) void mountAccountSettings();
 });
 function clearPrivateWorkspace(options) {
+  roomDiscovery.reset();
+  humanJoinUI.reset();
   $("#account-profile-dialog").close(); profileSettingsUI.reset();
   workspaceUI?.reset(options); roomListVersion++;
   $("#account-rooms-list").replaceChildren(); $("#account-rooms-status").textContent = "";
@@ -1005,27 +1024,6 @@ async function openRememberedRoomOrList() {
     return false;
   }
 }
-// --- Q3-C: signup with no chosen room opens that account's room. ---
-async function openPersonalRoomAfterSignup() {
-  const owned = accountClient.session;
-  // /?start=room already asks for the name and then creates the room.
-  // A second create here would make the room while that dialog is still open.
-  if (startRoomIntent || startRoomFlight) {
-    showAccountWorkspace();
-    if (startRoomFlight) await startRoomFlight;
-    return;
-  }
-  showAccountWorkspace();
-  if (accountClient.session !== owned || state) return;
-  const body = await ensureDefaultRoom();
-  if (accountClient.session !== owned || state) return;
-  const roomId = body?.room?.id;
-  if (!roomId) { showAccountWorkspace(); return; }
-  history.replaceState(null, "", roomHandoffLocation(roomId));
-  try { await client.restore(roomId); workspaceUI.showRooms(); workspaceUI.refreshSetup?.(); }
-  catch { if (accountClient.session === owned && !state) showAccountWorkspace(); }
-}
-// --- end Q3-C ---
 // The verification resume is a convenience on top of the normal landing. A
 // failed read must fall through to that landing, not strand the tab (the
 // intent stays in sessionStorage for 30 minutes and would repeat on reload).
@@ -1067,10 +1065,8 @@ async function landAfterSignIn() {
   });
   if (!target.explicit) {
     if (target.roomId) await openRememberedRoomOrList();
-    // ?account=1 opens the room list. A sign-in without a room target
-    // opens that account's room after the name step.
-    else if (accountHomeFromLocation()) showAccountWorkspace();
-    else await openPersonalRoomAfterSignup();
+    // Without a chosen room, let the person create, join, or discover one.
+    else showAccountWorkspace();
     return;
   }
   try {
@@ -1169,6 +1165,7 @@ async function loadAccountRooms(more = false) {
   try {
     const value = await accountClient.rooms(more ? roomListCursor : null);
     if (version !== roomListVersion || accountClient.session !== owned || !value) return;
+    if (!more) humanJoinUI.refresh();
     for (const room of value.rooms) {
       const button = document.createElement("button"); button.type = "button"; button.className = "inbox-row";
       button.dataset.accountRoom = room.id;
@@ -1191,11 +1188,6 @@ async function loadAccountRooms(more = false) {
     }
     roomListCursor = value.nextCursor; $("#account-rooms-more").hidden = !roomListCursor;
     $("#account-rooms-status").textContent = $("#account-rooms-list").children.length ? "" : roomListCursor ? "No available rooms on this page." : "No rooms yet.";
-    // RC-2026-09-19-088: first sign-in must never land in an empty void. A
-    // fresh account with no rooms and no pending invitation gets its default
-    // room created and opened.
-    if (!more && !$("#account-rooms-list").children.length && !roomListCursor
-      && !startRoomIntent && !startRoomFlight) nameThenEnsureDefaultRoom();
   } catch (error) {
     if (version !== roomListVersion || (accountClient.session && accountClient.session !== owned)) return;
     if ([401, 403].includes(error.status) || !accountClient.session) endAccountAccess();
@@ -1206,8 +1198,6 @@ async function loadAccountRooms(more = false) {
 // invitation is being redeemed — the invite flow owns the landing. Idempotent
 // server-side; a second call returns the existing room.
 let defaultRoomFlight = null;
-const nameThenEnsureDefaultRoom = nameBeforeFirstRoom({
-  askName: () => workspaceUI.askSetupName?.(), ensure: () => ensureDefaultRoom(), session: () => accountClient.session });
 async function ensureDefaultRoom() {
   if (defaultRoomFlight) return defaultRoomFlight;
   // Never create a default room when entering through an invitation or a
@@ -1320,6 +1310,7 @@ $("#account-room-form").addEventListener("submit", async event => {
   if (!owned?.authenticated || form.dataset.busy === "true" || invitationIsCommitting() || signoutLoading) return;
   const title = $("#account-room-title").value.trim(), purpose = $("#account-room-purpose").value.trim(), displayName = $("#account-room-name").value.trim();
   const kind = $("#account-room-kind").value;
+  const discoverable = $("#account-room-visibility").value === "public";
   if (!title || !purpose || !displayName) { setFormStatus(status, "Room name, purpose and your name are required.", true); return; }
   // One id per attempt: a retry after a lost response finds the same room instead of creating a twin.
   const roomId = form.dataset.roomId || (form.dataset.roomId = "room-" + crypto.randomUUID().replaceAll("-", "").slice(0, 12));
@@ -1331,10 +1322,10 @@ $("#account-room-form").addEventListener("submit", async event => {
   try {
     const session = accountClient.currentSession("creating a room", { authenticated: true });
     const result = template
-      ? await accountClient.request("/api/account-rooms/from-template", { method: "POST", data: { roomId, template, title, purpose, kind, displayName, ...(ref ? { ref } : {}) }, session })
-      : await accountClient.request("/api/account-rooms", { method: "POST", data: { roomId, title, purpose, kind, displayName }, session });
+      ? await accountClient.request("/api/account-rooms/from-template", { method: "POST", data: { roomId, template, title, purpose, kind, displayName, discoverable, ...(ref ? { ref } : {}) }, session })
+      : await accountClient.request("/api/account-rooms", { method: "POST", data: { roomId, title, purpose, kind, displayName, discoverable }, session });
     if (accountClient.session !== owned) return;
-    delete form.dataset.roomId; form.reset(); setFormStatus(status, ""); $("#account-room-create").open = false;
+    delete form.dataset.roomId; form.reset(); setFormStatus(status, ""); $("#account-room-create").open = false; $("#account-room-create").hidden = true;
     await openAccountRoom(result.room.id);
   } catch (error) {
     if (accountClient.session !== owned) return;
@@ -3088,7 +3079,7 @@ function syncRequestComposer() {
   const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
   const requestHost = $("#composer-options .composer-options-panel");
   if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
-  requestButton.hidden = !state || active || !recipientId || recipientId === session?.member.id;
+  requestButton.hidden = !state || active || !recipientId || recipientId === session?.member.id || state.members[recipientId]?.active !== true || isRoomArchived(state);
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
   const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
@@ -3168,20 +3159,6 @@ async function openRequestMode(kind, id) {
     if (epoch === requestEpoch) { requestReading = false; syncRequestComposer(); }
   }
 }
-const composerOptions = $("#composer-options");
-composerOptions.addEventListener("click", event => {
-  if (!event.target.closest("button")) return;
-  composerOptions.open = false;
-  $("#composer-options-toggle").focus({ preventScroll: true });
-}, true);
-composerOptions.addEventListener("keydown", event => {
-  if (event.key !== "Escape" || !composerOptions.open) return;
-  event.preventDefault(); event.stopPropagation(); composerOptions.open = false;
-  $("#composer-options-toggle").focus({ preventScroll: true });
-});
-document.addEventListener("click", event => {
-  if (!composerOptions.contains(event.target)) composerOptions.open = false;
-});
 $("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }, { toMemberId: $("#message-to-select").value }); });
 document.addEventListener("click", event => {
   const resume = event.target.closest("[data-resume-credit]");
@@ -6283,7 +6260,7 @@ function closeWorkForm({ returnFocus = true } = {}) {
     if (epoch !== workFormEpoch || !sameSession(generation, roomId, memberId) || !$("#new-work-form").hidden || document.activeElement !== focusAtClose) return;
     const usable = node => node?.isConnected && !node.disabled && !node.hidden && node.getClientRects().length > 0;
     const replacement = opener?.key ? [...document.querySelectorAll("[data-focus-key]")].find(node => node.dataset.focusKey === opener.key) : null;
-    const target = [opener?.node, replacement, $("#new-work-button"), $("#composer-options-toggle")].find(usable) || $("#conversation-title");
+    const target = [opener?.node, replacement, $("#new-work-button")].find(usable) || $("#conversation-title");
     target.focus({ preventScroll: true });
   }, 0);
 }
@@ -6309,8 +6286,7 @@ $("#work-recipe-select").addEventListener("change", event => {
 });
 $("#new-work-button").addEventListener("click", () => openWork());
 // Front-door batch B-2 (#3772): a visible, labeled New work address in the
-// Tasks navigation — the same single control the composer Options menu
-// carries, reached without opening a disclosure.
+// Tasks navigation, using the same creation handler as the composer.
 $("#new-work-open")?.addEventListener("click", () => openWork());
 $("#review-settings-button").addEventListener("click", () => {
   $("#work-options").open = true;
@@ -6534,6 +6510,7 @@ function openSettings(panelId) {
   if (!dialog) return;
   if (panelId === "results-panel") { selectWorkView("results"); return; }
   $("#settings-title").textContent = "Settings";
+  roomJoinSettings.refresh();
   if (!dialog.open) dialog.showModal();
   if (panelId) {
     const panel = document.getElementById(panelId);

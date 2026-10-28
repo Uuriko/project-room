@@ -1,0 +1,231 @@
+  /api/rooms/{roomId}/join-settings:
+    get:
+      summary: room join settings get
+      description: Fresh room authority required; membership review requires
+        manage_members and listing settings require the owner. API keys require
+        rooms:read or rooms:write. Browser writes require session binding,
+        same-origin Origin and CSRF.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      responses:
+        "200":
+          description: Current request or visibility result.
+        "403":
+          description: Current authority or write protection refused
+        "409":
+          description: Request revision, membership or idempotency changed
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+    post:
+      summary: room join settings post
+      description: Fresh room authority required; membership review requires
+        manage_members and listing settings require the owner. API keys require
+        rooms:read or rooms:write. Browser writes require session binding,
+        same-origin Origin and CSRF.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      responses:
+        "200":
+          description: Current request or visibility result.
+        "403":
+          description: Current authority or write protection refused
+        "409":
+          description: Request revision, membership or idempotency changed
+      x-room-permission: owner
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - discoverable
+                - expectedDiscoverable
+              properties:
+                discoverable:
+                  type: boolean
+                expectedDiscoverable:
+                  type: boolean
+  /api/account-join-requests:
+    post:
+      summary: human join request
+      description: Authenticated browser account session and current session binding
+        required. Writes require same-origin Origin and CSRF. Request bodies never
+        choose the acting account.
+      security:
+        - accountSession: []
+      responses:
+        "201":
+          description: Current request or visibility result.
+        "403":
+          description: Current authority or write protection refused
+        "409":
+          description: Request revision, membership or idempotency changed
+      x-room-permission: account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - roomId
+                - requestId
+                - displayName
+              properties:
+                roomId:
+                  type: string
+                  maxLength: 64
+                requestId:
+                  type: string
+                  pattern: ^humanjoin-[A-Za-z0-9_-]+$
+                  maxLength: 64
+                displayName:
+                  type: string
+                  minLength: 1
+                  maxLength: 80
+                note:
+                  type: string
+                  maxLength: 1000
+    get:
+      summary: human join status
+      description: Authenticated browser account session and current session binding
+        required. Writes require same-origin Origin and CSRF. Request bodies never
+        choose the acting account.
+      security:
+        - accountSession: []
+      responses:
+        "200":
+          description: Current request or visibility result.
+        "403":
+          description: Current authority or write protection refused
+        "409":
+          description: Request revision, membership or idempotency changed
+  /api/account-join-requests/{requestId}/cancel:
+    post:
+      summary: human join cancel
+      description: Authenticated browser account session and current session binding
+        required. Writes require same-origin Origin and CSRF. Request bodies never
+        choose the acting account.
+      security:
+        - accountSession: []
+      responses:
+        "200":
+          description: Current request or visibility result.
+        "403":
+          description: Current authority or write protection refused
+        "409":
+          description: Request revision, membership or idempotency changed
+      x-room-permission: account
+      parameters:
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - expectedRevision
+              properties:
+                expectedRevision: &a1
+                  type: integer
+                  minimum: 0
+  /api/rooms/{roomId}/join-requests:
+    get:
+      summary: human join review
+      description: Fresh room authority required; membership review requires
+        manage_members and listing settings require the owner. API keys require
+        rooms:read or rooms:write. Browser writes require session binding,
+        same-origin Origin and CSRF.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      responses:
+        "200":
+          description: Bounded requests and nextCursor; pass after for the next page.
+        "403":
+          description: Current authority or write protection refused
+        "409":
+          description: Request revision, membership or idempotency changed
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: after
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 384
+  /api/rooms/{roomId}/join-requests/{requestId}/decide:
+    post:
+      summary: human join decide
+      description: Fresh room authority required; membership review requires
+        manage_members and listing settings require the owner. API keys require
+        rooms:read or rooms:write. Browser writes require session binding,
+        same-origin Origin and CSRF.
+      security:
+        - bearerAuth: []
+        - roomSession: []
+        - accountSession: []
+      responses:
+        "200":
+          description: Current request or visibility result.
+        "403":
+          description: Current authority or write protection refused
+        "409":
+          description: Request revision, membership or idempotency changed
+      x-room-permission: manage_members
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: requestId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+                - decision
+                - expectedRevision
+              properties:
+                decision:
+                  type: string
+                  enum:
+                    - approve
+                    - deny
+                expectedRevision: *a1

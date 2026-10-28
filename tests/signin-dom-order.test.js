@@ -10,5 +10,5 @@ test("sign-in contains primary controls without passive legal copy, divider or r
 });
 test("signed-in rooms workspace retains a visible join link", () => {
   const rooms = html.slice(html.indexOf('id="account-rooms-panel"'), html.indexOf('id="account-room-create"'));
-  assert.match(rooms, /<a class="button" href=".\/join">Join room<\/a>/);
+  assert.match(rooms, /<a class="button" href=".\/join">Join with an invitation<\/a>/);
 });

@@ -183,10 +183,9 @@ export async function clickWorkAction(card, action, { keyboard = false } = {}) {
   }
 }
 
-// Explicit user step for secondary composer actions; never intercept clicks.
+// Compatibility helper for existing journey tests: actions are now inline.
 export async function openComposerOptions(page) {
-  const details = page.locator("#composer-options");
-  if (!(await details.evaluate(node => node.open))) await details.locator(":scope > summary").click();
+  await page.locator("#composer-options").waitFor({ state: "visible" });
 }
 
 // Protocol owners deliberately enter the human's opt-in technical workspace.

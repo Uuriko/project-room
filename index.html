@@ -106,15 +106,24 @@
       <section id="account-rooms-panel" class="auth-panel panel" aria-labelledby="account-rooms-title" hidden>
         <h2 id="account-rooms-title" class="view-title" tabindex="-1">Rooms</h2>
         <p id="account-rooms-status" role="status"></p>
-        <p><a class="button" href="./join">Join room</a></p>
+        <div class="account-room-actions" id="room-choices">
+          <button id="room-choice-create" class="button" type="button">Create room</button>
+          <a class="button" href="./join">Join with an invitation</a>
+          <button id="room-choice-discover" class="button" type="button" aria-expanded="false" aria-controls="room-discovery">Discover listed rooms</button>
+        </div>
+        <section id="room-discovery" aria-labelledby="room-discovery-title" hidden>
+          <h3 id="room-discovery-title" tabindex="-1">Listed rooms</h3>
+          <p>These rooms chose to be listed. Their owners control who can join.</p>
+          <p id="room-discovery-status" role="status"></p>
+          <div id="room-discovery-list"></div>
+          <button id="room-discovery-more" class="text-button" type="button" hidden>More listed rooms</button>
+          <button id="room-discovery-retry" class="text-button" type="button" hidden>Retry</button>
+        </section>
         <div id="account-rooms-list"></div>
         <button id="account-rooms-more" class="text-button" type="button" hidden>More</button>
 
-        <!-- Request access lives at the room address now: the join page
-             carries the one request-access door (human-map §8.1, #3293
-             step 2). The acquisition-intent consumer in src/app.js sends
-             "request" intents there. -->
-        <details id="account-room-create" class="account-room-create">
+        <section id="account-human-join" hidden aria-label="Room join request"></section>
+          <details id="account-room-create" class="account-room-create" hidden>
           <summary>New room</summary>
           <form id="account-room-form" class="account-room-form" autocomplete="off">
             <label for="account-room-template">Start from a template</label>
@@ -123,12 +132,15 @@
             <input id="account-room-title" name="title" type="text" maxlength="120" required>
             <label for="account-room-purpose">Purpose</label>
             <textarea id="account-room-purpose" name="purpose" rows="2" maxlength="1000" required></textarea>
+            <label for="account-room-visibility">Visibility</label>
+            <select id="account-room-visibility" name="visibility"><option value="private">Private · invitation only</option><option value="public">Public · listed, approval required</option></select>
             <label for="account-room-kind">Kind</label>
             <select id="account-room-kind" name="kind"><option value="personal">Personal</option><option value="organization">Organization</option></select>
             <label for="account-room-name">Your name in this room</label>
             <input id="account-room-name" name="displayName" type="text" maxlength="80" required>
             <div class="account-room-actions">
-              <button id="account-room-submit" class="button" type="submit">Create room</button>
+              <button id="account-room-submit" class="button primary" type="submit">Create room</button>
+              <button id="account-room-cancel" class="button ghost" type="button">Cancel</button>
               <p id="account-room-status" class="status form-status" role="status"></p>
             </div>
           </form>
@@ -267,14 +279,13 @@
             </div>
             <label id="also-send-label" class="form-hint also-send-toggle" hidden><input id="also-send-to-channel" type="checkbox"> Also send to channel</label>
             <div class="composer-row">
-              <details id="composer-options" class="composer-options">
-                <summary id="composer-options-toggle">Options</summary>
+              <div id="composer-options" class="composer-options">
                 <div class="composer-options-panel" aria-label="Message options">
                   <button id="new-work-button" class="composer-add" type="button" aria-label="New work" title="New work"><span aria-hidden="true">+</span><span class="composer-add-label">New work</span></button>
                   <button id="request-reply" class="button ghost" type="button" hidden>Request a reply</button>
                   <button id="composer-attach" class="icon-button composer-attach" type="button" aria-label="Attach a file" title="Attach a file"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg><span>Attach a file</span></button>
                 </div>
-              </details>
+              </div>
               <textarea id="message-input" rows="1" aria-describedby="message-length-status composer-hint" placeholder="Message #general" title="Enter to send · Shift + Enter for a new line" aria-description="Enter to send · Shift + Enter for a new line" aria-controls="mention-list" aria-autocomplete="list" aria-haspopup="listbox" required></textarea>
               <input id="composer-file" type="file" hidden multiple tabindex="-1">
               <button class="button primary icon-button" type="submit" aria-label="Send" title="Send"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
@@ -382,6 +393,7 @@
             <button id="room-trust-toggle" class="topbar-button" type="button" hidden aria-pressed="true" title="Trust is on. Members may assign and wake agents across owners.">Trust</button>
           </details>
           <details id="room-permissions"><summary>Permissions</summary>
+          <section id="room-discovery-settings" hidden><label for="room-discovery-select">Visibility</label><select id="room-discovery-select"><option value="private">Private · invitation only</option><option value="public">Public · listed, approval required</option></select><p class="form-hint">Listing shares the room’s name and purpose. Message sharing stays unchanged.</p><p id="room-discovery-settings-status" role="status"></p></section>
             <label id="public-receipts-control" class="field" hidden><input id="public-receipts-toggle" type="checkbox"> Public receipts — publish receipts from this room on the public receipts page</label>
             <p id="public-receipts-hint" class="form-hint" hidden>Settled bounty lots follow this switch too: a settled lot's receipt stays private until you turn this on, and turning it off makes it private again.</p>
             <label id="history-visibility-control" class="field" hidden><input id="history-visibility-toggle" type="checkbox"> New members see only messages from after they join</label>
@@ -404,6 +416,7 @@
           <details id="advanced-room-tools"><summary>Advanced</summary>
             <p><a href="/demo">Demo conversation</a> · <button id="connect-guide-open" type="button" class="text-button">Connect your AI</button></p>
           </details>
+
           <details id="room-about" class="room-about" open>
             <summary>About</summary>
             <p class="room-purpose"></p>

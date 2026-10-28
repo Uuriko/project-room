@@ -47,6 +47,9 @@ function requireOwner(store, auth, roomId) {
 }
 
 function decideActions(roomId, request) {
+  if (request.kind === "human_join") return ["approve", "deny"].map(decision => ({ action: decision, method: "POST",
+    path: `/api/rooms/${encodeURIComponent(roomId)}/join-requests/${encodeURIComponent(request.requestId)}/decide`,
+    body: { decision, expectedRevision: request.revision } }));
   const path = `/api/rooms/${roomId}/access-requests/${request.requestId}/decide`;
   return Object.freeze([
     Object.freeze({ action: "approve", method: "POST", path,
@@ -65,7 +68,7 @@ export function accessRequestAttentionItem(roomId, request) {
     id: request.requestId,
     severity: "action",
     title: request.kind === "permissions" ? `${request.displayName} wants: ${request.requestedPermissions.join(", ")}` : `${request.displayName} asks to join`,
-    detail: `Requested ${request.requestedPermissions.join(", ")}`,
+    detail: request.kind === "human_join" ? "Wants to read and chat in this room" : `Requested ${request.requestedPermissions.join(", ")}`,
     actions: decideActions(roomId, request),
   });
 }
@@ -109,6 +112,8 @@ export function attentionReport(deps, token, roomId, expectedSessionBinding = nu
   for (const request of accessRequests.list(token, roomId, { status: "pending" }, expectedSessionBinding)) {
     items.push(accessRequestAttentionItem(roomId, request));
   }
+
+  for (const request of store.accountJoinRequests?.list(token, roomId, expectedSessionBinding).requests ?? []) items.push(accessRequestAttentionItem(roomId, request));
 
   const room = store.room(roomId);
   for (const item of Object.values(room.state.workItems ?? {})) {

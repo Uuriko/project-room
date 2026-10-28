@@ -115,6 +115,14 @@ test("email link sign-in returns to the last room, pending entry is guarded, and
   await form().locator('button[type=submit]').click();
   await redeemDeliveredLink();
   await dismissSetup(page);
+  await page.locator('#room-choices').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#account-rooms-list [data-account-room]').count(), 0, 'new account has no implicitly created room');
+  await page.locator('#room-choice-create').click();
+  await page.locator('#account-room-title').fill('My private room');
+  await page.locator('#account-room-purpose').fill('Keep my work together');
+  await page.locator('#account-room-name').fill('Ada');
+  assert.equal(await page.locator('#account-room-visibility').inputValue(), 'private');
+  await page.locator('#account-room-submit').click();
   await page.locator("#main").waitFor({ state: "visible" });
 
   const upload = page.waitForResponse(response => response.request().method() === "POST" && /\/api\/rooms\/[^/]+\/files$/.test(new URL(response.url()).pathname) && response.ok());

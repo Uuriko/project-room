@@ -152,7 +152,7 @@ test("signup reconciles a committed account when its response body is interrupte
   });
   assert.equal(verified.status(), 200);
   await clickChrome(page, '#nav-rooms');
-  await page.locator('#account-room-create summary').click();
+  await page.locator('#room-choice-create').click();
   await page.locator('#account-room-title').fill('Recovered workspace');
   await page.locator('#account-room-purpose').fill('Continue after interrupted signup.');
   await page.locator('#account-room-name').fill('Recovery tester');
@@ -208,7 +208,7 @@ test("sign-in offers email recovery only after invalid credentials and keeps no-
   await form.locator('[name="email"]').fill('new-person@example.invalid');
   await form.locator('[name="password"]').fill('valid-password-for-fixture');
   await form.locator('[type="submit"]').click();
-  const join = page.locator('#account-rooms-panel').getByRole('link', { name: 'Join room', exact: true });
+  const join = page.locator('#account-rooms-panel').getByRole('link', { name: 'Join with an invitation', exact: true });
   await join.waitFor({ state: 'visible' });
   assert.equal(await page.locator('#account-rooms-list [data-account-room]').count(), 0);
   await join.focus();

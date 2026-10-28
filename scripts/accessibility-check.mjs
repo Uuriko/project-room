@@ -117,7 +117,7 @@ test("stale return brief cannot cross a session; skip, local alerts, focus retur
   // Canceling the inline work form returns focus to the control that opened it.
   await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#cancel-work-button").click();
-  await page.waitForFunction(() => document.activeElement.id === "composer-options-toggle");
+  await page.waitForFunction(() => document.activeElement.id === "new-work-button");
 
   // Result sharing remains a visible primary action; Advanced exposes its protocol form.
   const producerCard = page.locator('[data-work-record-id="producer-choice"]');

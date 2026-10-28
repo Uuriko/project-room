@@ -1646,19 +1646,14 @@ summary { overflow-wrap: anywhere; }
 
 .auth-panel .auth-email-title { display: flex; align-items: center; min-height: 44px; margin: 0 0 0 3.25rem; font-size: 1.15rem; }
 
-/* Secondary chat actions are disclosed without hiding active audience or errors. */
+/* Direct composer actions preserve the conversation and avoid an extra menu. */
 .composer-row { grid-template-columns: minmax(0, 1fr) 44px; }
 .composer-row > button[type="submit"] { grid-column: 2; }
-.composer-options { position: relative; grid-column: 1; grid-row: 2; justify-self: start; }
-.composer-options > summary { display: flex; align-items: center; min-height: 44px; padding: .35rem .6rem; cursor: pointer; color: var(--muted); font-size: .85rem; }
-.composer-options-panel { position: absolute; bottom: calc(100% + .5rem); left: 0; z-index: 25; width: min(18rem, calc(100vw - 4rem)); padding: .4rem; border: 1px solid var(--line); border-radius: .6rem; background: var(--panel); box-shadow: 0 .4rem 1.5rem #0005; }
-.composer-options-panel > button { display: flex; align-items: center; justify-content: flex-start; gap: .5rem; width: 100%; min-height: 44px; height: auto; padding: .6rem; font-size: .85rem; text-align: left; }
+.composer-options { grid-column: 1; grid-row: 2; justify-self: start; min-width: 0; }
+.composer-options-panel { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
+.composer-options-panel > button { display: inline-flex; align-items: center; justify-content: flex-start; gap: var(--space-1); width: auto; max-width: 100%; min-height: 44px; height: auto; padding: var(--space-2); font-size: var(--text-sm); text-align: left; white-space: normal; }
 .composer-options-panel > button[hidden] { display: none; }
 .composer-options-panel .composer-add-label { display: inline; font-size: inherit; }
-.composer-options-panel #request-reply { min-height: 44px; padding: .6rem; font-size: .85rem; max-width: 100%; text-align: left; white-space: normal; }
-@media (max-width: 520px) {
-  .composer-options { margin-right: auto; }
-}
 /* Chat suggestions: one-tap replies and a task nudge above the composer. */
 .chat-suggestions { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; padding: .25rem 1.25rem 0; background: var(--bg); }
 .chat-suggestions[hidden] { display: none; }
@@ -1800,6 +1795,10 @@ body:has(#account-rooms-panel:not([hidden])) .site-footer { display: none; }
 @media (max-width: 700px) { #account-rooms-panel { margin: 1rem .75rem; } }
 
 #account-rooms-panel > p > .button { display: inline-flex; align-items: center; min-height: 44px; }
+#room-choices { margin-block: var(--space-4); }
+#room-choices .button { display: inline-flex; align-items: center; min-height: 44px; }
+.room-discovery-entry { padding-block: var(--space-4); border-bottom: 1px solid var(--line); }
+.room-discovery-entry h4, .room-discovery-entry p { overflow-wrap: anywhere; }
 body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: none; }
 
 #signin-methods:has(#google-signin[hidden]):has(#github-signin[hidden]) .signin-divider { display: none; }

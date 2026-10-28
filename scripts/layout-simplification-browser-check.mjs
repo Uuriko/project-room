@@ -143,9 +143,7 @@ for (const width of [390, 1280]) for (const theme of ['light', 'dark']) {
     if (width < 500) await page.keyboard.press('Escape');
     assert.equal(await page.locator('#message-input').inputValue(), 'Keep my draft through navigation');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
-    await page.locator('#composer-options-toggle').click();
     assert.equal(await page.locator('#new-work-button').isVisible(), true);
-    await page.locator('#composer-options-toggle').click();
     const send = page.locator('#message-form button[type="submit"]');
     assert.ok(await send.evaluate(node => { const r = node.getBoundingClientRect(); return node.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)); }), 'Send is not covered');
   });

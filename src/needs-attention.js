@@ -1,3 +1,4 @@
+import { uiText } from "./strings.js";
 import { ACCESS_PRESETS, permissionLabel } from "./access-presets.js";
 // #662 owner attention rollup, plus MEMBER-PERMS reviewed access requests.
 // Admins see only the existing access-request queue their authority permits;
@@ -30,6 +31,9 @@ export function createNeedsAttentionCard(options) {
   const range = section.querySelector("#attention-range");
   const previous = section.querySelector("#attention-previous");
   const next = section.querySelector("#attention-next");
+  const moreJoins = section.ownerDocument?.createElement("button");
+  let joinCursor = null;
+  if (moreJoins) { moreJoins.type = "button"; moreJoins.className = "button ghost"; moreJoins.textContent = uiText("rooms.join.more"); moreJoins.hidden = true; section.append(moreJoins); }
   let currentReport = null, epoch = 0, busy = false, partial = null, observed = null, activeScope = null, authority = null, resync = false;
   function viewer() {
     const state = typeof getState === "function" ? getState() : null, session = client.session;
@@ -47,13 +51,14 @@ export function createNeedsAttentionCard(options) {
     return owner || Boolean(member?.permissions?.includes(permission));
   }
   function requestItem(request) {
-    const path = client.path(`/access-requests/${encodeURIComponent(request.requestId)}/decide`);
+    const human = request.kind === "human_join";
+    const path = client.path(["", human ? "join-requests" : "access-requests", encodeURIComponent(request.requestId), "decide"].join("/"));
     return { kind: "access_request", id: request.requestId, severity: "action", requestKind: request.kind,
       title: request.kind === "permissions" ? `${request.displayName} wants more permissions` : `${request.displayName} asks to join`,
       detail: `Requested: ${request.requestedPermissions.map(permissionLabel).join(", ") || "read and chat"}${request.kind === "permissions" ? ". Approval adds permissions and keeps existing access." : ""}`,
       requestedPermissions: request.requestedPermissions,
-      actions: [{ action: "approve", method: "POST", path, body: { decision: "approve", permissions: request.requestedPermissions, note: null } },
-        { action: "deny", method: "POST", path, body: { decision: "deny", permissions: [], note: null } }] };
+      actions: [{ action: "approve", method: "POST", path, body: human ? { decision: "approve", expectedRevision: request.revision } : { decision: "approve", permissions: request.requestedPermissions, note: null } },
+        { action: "deny", method: "POST", path, body: human ? { decision: "deny", expectedRevision: request.revision } : { decision: "deny", permissions: [], note: null } }] };
   }
   // E-H1: retry state for failed fetches. The section starts hidden and the
   // Refresh button lives inside it, so a failed first fetch would otherwise
@@ -79,6 +84,7 @@ export function createNeedsAttentionCard(options) {
   }
   function setBusy(value) {
     busy = value;
+    if (moreJoins) moreJoins.disabled = value;
     refreshButton.disabled = value;
     previous.disabled = value || !currentReport?.previousCursor;
     next.disabled = value || !currentReport?.nextCursor;
@@ -89,6 +95,7 @@ export function createNeedsAttentionCard(options) {
   }
   function hide() {
     epoch++;
+    joinCursor = null; if (moreJoins) moreJoins.hidden = true;
     clearRetry();
     currentReport = null; partial = null; observed = null; activeScope = null; authority = null; resync = false;
     section.hidden = true;
@@ -110,7 +117,7 @@ export function createNeedsAttentionCard(options) {
           : `<a class="button ghost" href="${esc(action.path)}">Diagnostics</a>`;
       }
       if (action.method === "POST" && action.body) {
-        const label = action.action === "approve" ? "Approve" : action.action === "deny" ? (item.requestKind === "permissions" ? "Decline" : "Deny") : action.action;
+        const label = action.action === "approve" ? "Approve" : action.action === "deny" ? (["permissions", "human_join"].includes(item.requestKind) ? "Decline" : "Deny") : action.action;
         const unavailable = action.action === "approve" && (action.body.permissions ?? []).some(permission => !canGrant(permission));
         return `<button type="button" class="button${action.action === "approve" ? " primary" : ""} attention-decide" data-action-index="${index}" data-unavailable="${unavailable}"${unavailable ? " disabled" : ""}>${esc(label)}</button>`;
       }
@@ -187,7 +194,7 @@ export function createNeedsAttentionCard(options) {
     const item = report?.items?.[itemIndex], action = item?.actions?.[actionIndex];
     if (!action?.path || action.method !== "POST" || !action.body) return;
     const body = permissions ? { ...action.body, permissions } : action.body;
-    if (body.decision === "approve" && body.permissions.some(permission => !canGrant(permission))) return;
+    if (body.decision === "approve" && (body.permissions ?? []).some(permission => !canGrant(permission))) return;
     const ticket = ++epoch, session = client.session, generation = client.generation;
     setBusy(true);
     setStatus("Working…");
@@ -235,6 +242,7 @@ export function createNeedsAttentionCard(options) {
       if (!owns(ticket, session, generation)) return;
       if (hasRoomState) {
         if (queue?.roomId !== session.roomId || !Array.isArray(queue.requests)) throw new Error("The request queue could not be confirmed");
+        joinCursor = queue.nextJoinCursor ?? null; if (moreJoins) moreJoins.hidden = !joinCursor;
         const requests = queue.requests.map(requestItem), byId = new Map(requests.map(item => [item.id, item]));
         // Owners retain their paged rollup; admins receive only the request queue
         // their existing manage_members authority permits, never the owner rollup.
@@ -273,6 +281,22 @@ export function createNeedsAttentionCard(options) {
     }
   }
 
+  moreJoins?.addEventListener("click", async () => {
+    if (busy || !joinCursor || !canReview() || !currentReport) return;
+    const ticket = epoch, session = client.session, generation = client.generation;
+    if (!client.ownsAccountSession()) { hide(); client.endAccess(); return; }
+    setBusy(true);
+    try {
+      const page = await client.request(client.path(`/join-requests?after=${encodeURIComponent(joinCursor)}`));
+      if (!owns(ticket, session, generation)) return;
+      if (page.roomId !== session.roomId || !Array.isArray(page.requests)) throw new Error("The request queue could not be confirmed");
+      const items = [...new Map([...currentReport.items, ...page.requests.map(requestItem)].map(item => [[item.kind, item.id].join(":"), item])).values()];
+      joinCursor = page.nextCursor; moreJoins.hidden = !joinCursor;
+      render({ ...currentReport, items, itemCount: Math.max(currentReport.itemCount, items.length) });
+      setStatus("");
+    } catch { if (owns(ticket, session, generation)) setStatus(uiText("rooms.join.moreError")); }
+    finally { if (owns(ticket, session, generation)) { setBusy(false); if (resync) { resync = false; observed = null; sync(); } } }
+  });
   refreshButton.addEventListener("click", () => refresh());
   previous.addEventListener("click", () => { if (!busy && currentReport?.previousCursor) refresh(currentReport.previousCursor); });
   next.addEventListener("click", () => { if (!busy && currentReport?.nextCursor) refresh(currentReport.nextCursor); });

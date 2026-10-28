@@ -49,10 +49,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const commons = page.locator('[data-account-room="commons"]');
     await commons.waitFor();
     assert.equal(await commons.getAttribute("data-room-archived"), "false");
-    assert.equal(await commons.locator("small").textContent(), "Personal");
-    assert.equal(await commons.locator("span").textContent(), "Open");
+    assert.equal(await commons.locator("small").count(), 0, "room rows omit redundant kind labels");
+    assert.match(await commons.getAttribute("aria-label"), /^Open /);
     // Create: the form asks for what the room.created event needs and nothing else.
-    await page.locator("#account-room-create summary").click();
+    await page.locator("#room-choice-create").click();
     await page.locator("#account-room-title").fill("Pilot planning");
     await page.locator("#account-room-purpose").fill("Plan the synthetic pilot together.");
     await page.locator("#account-room-kind").selectOption("organization");
@@ -110,10 +110,10 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const row = page.locator(`[data-account-room="${created}"]`);
     await row.waitFor();
     assert.equal(await row.getAttribute("data-room-archived"), "true");
-    assert.equal(await row.locator("small").textContent(), "Organization · Archived");
+    assert.match(await row.getAttribute("aria-label"), /^Read archived room /);
     assert.equal(await row.locator("span").textContent(), "Read only");
     assert.equal(await row.getAttribute("aria-label"), "Read archived room Pilot planning");
-    assert.equal(await commons.locator("span").textContent(), "Open", "the other room is unchanged");
+    assert.match(await commons.getAttribute("aria-label"), /^Open /, "the other room is unchanged");
     await row.click();
     await page.locator("#main").waitFor({ state: "visible" });
     await ensureSidebarOpen(page);
@@ -146,7 +146,7 @@ test("room lifecycle: a member leaves from About, the room leaves the switcher, 
   await page.getByText("No rooms yet.", { exact: true }).waitFor();
   assert.equal(await page.locator("#account-rooms-list button").count(), 0);
   const before = f.roomCount();
-  await page.locator("#account-room-create summary").click();
+  await page.locator("#room-choice-create").click();
   await page.locator("#account-room-title").fill("Not allowed");
   await page.locator("#account-room-purpose").fill("A guest account cannot spawn rooms.");
   await page.locator("#account-room-name").fill("Guest");

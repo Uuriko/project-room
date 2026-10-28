@@ -14,6 +14,12 @@ import { getReadHorizon, setReadHorizon } from "../server/activity.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
 export async function seedRecoveryCoverage(f) {
+  // Account-bound admission records must survive online backup and recovery,
+  // including the prior-behavior fallback that does not expose admission UI.
+  f.store.createAccount("recovery-joiner");
+  f.store.db.prepare("INSERT INTO account_join_requests(request_id,room_id,account_id,fingerprint,display_name,note,status,created_at,expires_at) VALUES(?,?,?,?,?,?,?, ?,?)")
+    .run("humanjoin-recovery", "commons", "recovery-joiner", "synthetic-recovery-intent", "Recovery joiner", "Synthetic request", "pending", f.now(), f.now() + 86400000);
+
   // Immutable account redemption history must survive captures and restarts.
   const linkId = f.store.db.prepare("SELECT id FROM share_links LIMIT 1").get().id;
   f.store.db.prepare("INSERT INTO share_link_join_redemptions(link_id,redemption_id,account_id,created_at) VALUES(?,?,?,?)").run(linkId, "recovery-account-redemption", f.owner.session.account.id, f.now());
