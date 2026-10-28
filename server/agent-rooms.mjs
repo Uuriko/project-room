@@ -44,6 +44,26 @@ export const AGENT_ROOM_LIMIT = 100;
 // Self-serve creation budget: 3 rooms per identity per 24 hours.
 export const AGENT_ROOM_CREATE_CAPACITY = 3;
 export const AGENT_ROOM_CREATE_REFILL_PER_SECOND = AGENT_ROOM_CREATE_CAPACITY / 86400;
+// RRC §B: the create budget is knowable, so the refusal and the success
+// responses state it. The limiter itself stays generic (it knows the wait,
+// not what was being limited); this call site names its own budget, the
+// same shape the identity-mint refusal uses. Refill is one token per
+// 86400 / capacity seconds — one room every 8 hours at capacity 3.
+export const AGENT_ROOM_CREATE_REFILL_SECONDS_PER_TOKEN = Math.round(1 / AGENT_ROOM_CREATE_REFILL_PER_SECOND);
+export function roomCreateBudgetMessage(seconds) {
+  return `Room creation budget reached: room creation is limited to ${AGENT_ROOM_CREATE_CAPACITY} rooms per identity, `
+    + `refilling one room every 8 hours. Please wait ${seconds} seconds and try again.`;
+}
+export function roomCreateBudgetView(limiter, identityId) {
+  const state = limiter.state(identityId);
+  return {
+    capacity: state.capacity,
+    remaining: state.tokens,
+    refillSecondsPerToken: Math.round(1 / limiter.refillPerSecond),
+    scope: "per-identity"
+  };
+}
+
 // A lost-response retry of room create inside this window returns the room
 // and no credential. A later replay does the same. Replacement is rotate.
 export const ONBOARDING_REPLAY_WINDOW_MS = 60_000;
@@ -234,7 +254,8 @@ export class AgentRooms {
       const more = identityRoomSeats(this.store.db, identity.identityId, { after: rooms[pageSize - 1].roomId, limit: 1 });
       if (more.length) nextCursor = rooms[pageSize - 1].roomId;
     }
-    return { identityId: identity.identityId, rooms, nextCursor };
+    return { identityId: identity.identityId, rooms, nextCursor,
+      createBudget: roomCreateBudgetView(this.createLimiter, identity.identityId) };
   }
 
   // Shared shape for both idempotency keys (client roomId, client requestId):
@@ -251,6 +272,7 @@ export class AgentRooms {
     const next = onboardingRotateNext(roomId, age <= ONBOARDING_REPLAY_WINDOW_MS);
     return { roomId, ownerMemberId: memberId, identityId, duplicate: true,
       mcpToken: null, starter: starterView(this.store, roomId),
+      createBudget: roomCreateBudgetView(this.createLimiter, identityId),
       next, nextActions: [next] };
   }
 
@@ -334,11 +356,17 @@ export class AgentRooms {
       // the duplicate lookup above is a single indexed read.
       const limit = this.createLimiter.check(identity.identityId);
       let fundedByGrowth = false;
+      let growthRemaining = 0;
       if (!limit.allowed) {
         const credits = identityRoomCredits(this.store, identity.identityId);
         const funded = growthFundedRooms(this.store, identity.identityId);
-        if (credits.total - funded < 1) fail(429, "rate_limited", limit.message);
+        if (credits.total - funded < 1) {
+          const seconds = Math.max(1, Math.ceil(limit.retryAfterMs / 1000));
+          throw new ServiceError(429, "rate_limited", roomCreateBudgetMessage(seconds),
+            { "Retry-After": String(seconds) });
+        }
         fundedByGrowth = true;
+        growthRemaining = credits.total - funded - 1;
       }
       const createdCount = this.store.db.prepare("SELECT count(*) AS n FROM agent_room_ownership WHERE identity_id=?").get(identity.identityId).n;
       if (createdCount >= AGENT_ROOM_LIMIT) fail(409, "pilot_limit", "Bounded pilot capacity reached; no room was created");
@@ -359,7 +387,9 @@ export class AgentRooms {
           .run(GROWTH_FUNDING, identity.identityId, roomId);
       }
       const starter = wantStarter ? ensureAgentStarter(this.store, roomId, memberId) : null;
-      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
+      const createBudget = roomCreateBudgetView(this.createLimiter, identity.identityId);
+      if (fundedByGrowth) createBudget.remaining = Math.max(createBudget.remaining, growthRemaining);
+      return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter, createBudget,
         mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
     });
