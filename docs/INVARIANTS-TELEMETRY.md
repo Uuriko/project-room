@@ -11,9 +11,10 @@ rendering if that file appears.)
 
 ## When it runs
 
-`.github/workflows/invariants.yml` runs the harness on every pull request,
-every push to `main`, merge-group checks, and manual dispatch. The same
-command runs locally: `node scripts/invariants-ci.mjs`.
+`.github/workflows/pr-gates.yml` runs the harness in its `gates` job on
+pull requests carrying the `ready-to-land` label, every push to `main`,
+merge-group checks, and manual dispatch. The same command runs locally:
+`node scripts/invariants-ci.mjs`.
 
 ## Resolution order
 

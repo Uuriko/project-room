@@ -1,0 +1,140 @@
+# Small pull-request gates that do not need their own runner slot.
+#
+# One job runs, in order:
+#   - diff size (pull requests only; body edits re-run this workflow)
+#   - quarantine registry contract (pull requests and pushes to main)
+#   - invariant suite, with the PR comment and the JSONL + raw TAP artifact
+#     (artifact existence verified after upload; FAIL comments are evidence
+#     and are never deleted on re-run — #4263, ported from the standalone
+#     invariants workflow this job replaced)
+#
+# schema-gate stays its own workflow: deploy-prod and auto-revert select the
+# workflow by the name `schema-gate`. None of these checks are in the merge
+# gate's required set (test, contract, lint, browser, cloudflare, plus the
+# room/release-lease status).
+#
+# Quarantined tests are slow and non-blocking. They run on the nightly
+# schedule and on workflow_dispatch, not on every main push.
+
+name: pr-gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited, labeled]
+  push:
+    branches: [main]
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+  schedule:
+    - cron: "29 5 * * *"
+
+permissions:
+  contents: read
+
+# Pushes to main and merge-group runs are not cancelled mid-flight. Pull
+# requests cancel their own older runs.
+concurrency:
+  group: ${{ github.event_name == 'schedule' && 'pr-gates-nightly' || github.event_name == 'workflow_dispatch' && format('pr-gates-dispatch-{0}', github.run_id) || format('pr-gates-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  gates:
+    # Main pushes, merge-group, and manual runs stay. Pull requests run this
+    # job only when ready-to-land is set and the PR is not a draft.
+    if: github.event_name != 'schedule' && (github.event_name != 'pull_request' || (github.event.pull_request.draft == false && contains(github.event.pull_request.labels.*.name, 'ready-to-land')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read # Post-upload invariant artifact existence check.
+    env:
+      INVARIANTS_RESULTS_FILE: results/invariants-${{ github.sha }}.jsonl
+      INVARIANTS_TAP_FILE: results/invariants-${{ github.sha }}.tap
+      INVARIANTS_SHA: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Check diff size
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/pr-diff-size-check.mjs
+      - name: Enforce quarantine contract
+        run: node scripts/quarantine-check.mjs
+      - run: npm ci
+      - name: Run invariant suite
+        id: invariants
+        run: node scripts/invariants-ci.mjs --report-out "$RUNNER_TEMP/invariants-report.md"
+      - name: Upload invariant results
+        if: steps.invariants.conclusion == 'success' || steps.invariants.conclusion == 'failure'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: invariants-results-${{ github.sha }}-attempt-${{ github.run_attempt }}
+          path: |
+            ${{ env.INVARIANTS_RESULTS_FILE }}
+            ${{ env.INVARIANTS_TAP_FILE }}
+          if-no-files-found: error
+      - name: Verify invariant results artifact exists
+        if: steps.invariants.conclusion == 'success' || steps.invariants.conclusion == 'failure'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ARTIFACT_NAME: invariants-results-${{ github.sha }}-attempt-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # #4263: an upload step concluding success is not proof the
+          # artifact exists (run 39163358115's artifact did not). Verify
+          # against the run's artifact listing and fail loudly if absent.
+          for i in 1 2 3 4 5 6; do
+            if gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts" \
+                -q '.artifacts[].name' 2>/dev/null | grep -qx "$ARTIFACT_NAME"; then
+              echo "artifact verified: $ARTIFACT_NAME"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::results artifact $ARTIFACT_NAME not found in run ${{ github.run_id }} artifact listing after upload"
+          exit 1
+      - name: Comment invariant results on PR
+        if: github.event_name == 'pull_request' && (steps.invariants.conclusion == 'success' || steps.invariants.conclusion == 'failure')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          COMMENT_KEY: invariants-ci run=${{ github.run_id }} attempt=${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # Key the comment by run id + attempt (#4263). Delete only prior
+          # invariants comments that did NOT report failure — a FAIL table
+          # (heading or ❌ row) is evidence and survives every re-run.
+          { echo "<!-- $COMMENT_KEY -->"; cat "$RUNNER_TEMP/invariants-report.md"; } \
+            > "$RUNNER_TEMP/invariants-comment.md"
+          for id in $(gh api "repos/${{ github.repository }}/issues/$PR_NUMBER/comments" --paginate \
+              -q '.[] | select(.body | contains("<!-- invariants-ci")) | select(.body | contains("Invariant harness — FAIL") | not) | select(.body | contains("❌") | not) | .id' 2>/dev/null); do
+            gh api -X DELETE "repos/${{ github.repository }}/issues/comments/$id" >/dev/null 2>&1 || true
+          done
+          gh pr comment "$PR_NUMBER" --repo "${{ github.repository }}" \
+            --body-file "$RUNNER_TEMP/invariants-comment.md" || echo "comment failed"
+
+  quarantined-tests:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run quarantined tests (non-blocking)
+        run: scripts/test-env.sh npm run test:quarantined
