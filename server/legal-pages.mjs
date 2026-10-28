@@ -3,6 +3,7 @@
 import { readFileSync } from "node:fs";
 import { EMBEDDED_LEGAL } from "./legal-documents.mjs";
 import { TERMS_VERSION } from "./legal-store.mjs";
+import { escapeHtml } from "./html-escape.mjs";
 
 export const LEGAL_CACHE_CONTROL = "public, max-age=3600";
 // The edge injects the cookieless Cloudflare Web Analytics beacon; the
@@ -31,10 +32,6 @@ export function readLegalFile(name) {
     if (typeof text !== "string") throw new Error(`Missing legal document ${name}`);
     return text;
   }
-}
-
-function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[character]));
 }
 
 function inline(text) {
