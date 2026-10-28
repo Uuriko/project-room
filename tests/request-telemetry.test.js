@@ -38,6 +38,61 @@ test("classification: write / read / poll / hold / other", () => {
   assert.equal(c("GET", "/room/api/rooms/r1/stream"), "hold");
 });
 
+test("classification: trailing-slash twins classify identically to the canonical path (TEL-CURE D1)", () => {
+  const c = (m, p) => { const u = new URL(p, "https://room.example"); return classifyRequest(m, u.pathname, u.searchParams); };
+  // server/http.mjs:1208 strips trailing slashes before routing and
+  // serves the canonical route, but the DO records the un-normalised
+  // pathname (cloudflare/room.mjs) — every shape the TEL critic probed
+  // must classify the same with the slash as without it. Before the
+  // cure, /stream/ read as "read" (its whole hold duration landing in
+  // readCpuMs) and /api/pair/ read as "poll" instead of "read".
+  const pairs = [
+    ["GET", "/api/rooms/r1/stream", "/api/rooms/r1/stream/"],
+    ["GET", "/api/rooms/r1/stream", "/api/rooms/r1/stream//"],
+    ["GET", "/api/rooms/r1/stream?after=41", "/api/rooms/r1/stream/?after=41"],
+    ["GET", "/room/api/rooms/r1/stream", "/room/api/rooms/r1/stream/"],
+    ["GET", "/api/rooms/r1/events?after=41", "/api/rooms/r1/events/?after=41"],
+    ["GET", "/api/rooms/r1/digest?since=9", "/api/rooms/r1/digest/?since=9"],
+    ["GET", "/api/rooms/r1/work-changes?cursor=abc", "/api/rooms/r1/work-changes/?cursor=abc"],
+    ["GET", "/api/rooms/r1", "/api/rooms/r1/"],
+    ["GET", "/api/rooms/r1", "/api/rooms/r1//"],
+    ["GET", "/api/pair/p123", "/api/pair/p123/"],
+    ["GET", "/api/pair", "/api/pair/"],
+    ["GET", "/api/health/jobs", "/api/health/jobs/"],
+    ["HEAD", "/api/health/jobs", "/api/health/jobs/"],
+    ["POST", "/api/rooms/r1/commands", "/api/rooms/r1/commands/"],
+    ["POST", "/api/pair", "/api/pair/"],
+    ["POST", "/mcp", "/mcp/"],
+    ["GET", "/", "/"],
+    ["GET", "/pair/abc", "/pair/abc/"]
+  ];
+  for (const [method, plain, slashed] of pairs) {
+    assert.equal(c(method, slashed), c(method, plain), `${method} ${slashed} must classify like ${plain}`);
+  }
+  // The headline shapes, pinned by name so the regression reads plainly:
+  assert.equal(c("GET", "/api/rooms/r1/stream/"), "hold");
+  assert.equal(c("GET", "/api/pair/"), "read");
+  // Root / repeated-slash edges, called directly (a URL parser never
+  // hands classifyRequest a bare "//" pathname): http.mjs's length>1
+  // guard keeps "/" itself untouched, and no all-slash path is an API
+  // path under either form.
+  for (const p of ["/", "//", "///"]) assert.equal(classifyRequest("GET", p, new URLSearchParams()), "other", p);
+});
+
+test("snapshot: a trailing-slash stream hold stays out of readCpuMs (TEL-CURE D1)", () => {
+  const tele = createRequestTelemetry({ startedAt: 0 });
+  rec(tele, "GET", "/api/rooms/r1/stream/", 9000); // hold: waiting, not CPU
+  rec(tele, "GET", "/api/rooms/r1", 100);          // read: 100ms
+  rec(tele, "POST", "/api/rooms/r1/commands", 100); // write: 100ms
+  const s = tele.snapshot(1000);
+  assert.equal(s.holdRequests, 1);
+  assert.equal(s.readRequests, 1);
+  // Before the cure this snapshot read readCpuSharePct 98.9 — the 9s
+  // hold swamping the real read+write handler time.
+  assert.equal(s.readCpuSharePct, 50);
+  assert.equal(s.pollSharePct, 33.33); // 1 hold / 3 requests
+});
+
 test("snapshot: counts, poll share, cpu share and write p95 over the window", () => {
   const tele = createRequestTelemetry({ startedAt: 1000 });
   for (let i = 1; i <= 100; i++) rec(tele, "POST", "/api/rooms/r1/commands", i); // writes 1..100ms

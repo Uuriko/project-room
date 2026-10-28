@@ -18,7 +18,7 @@ test("a slow RPC failure preserves earlier outcomes and does not starve later jo
   try {
     const result = await (await mf.dispatchFetch("https://room.example.test/scheduled")).json();
     assert.match(result.error, /RPC failed: integrity/);
-    for (const name of ["retention", "room-backup", "store-growth"]) assert.ok(result.recorded[name]?.lastSuccessAt, name);
+    for (const name of ["retention", "room-backup", "store-growth", "request-telemetry"]) assert.ok(result.recorded[name]?.lastSuccessAt, name);
     assert.equal(result.recorded.integrity, undefined, "a failed RPC cannot invent successful integrity work");
   } finally { await mf.dispose(); }
 });
@@ -30,7 +30,7 @@ test("slow RPCs retain cadence checks instead of rerunning every cron invocation
     const second = await (await mf.dispatchFetch("https://room.example.test/scheduled")).json();
     assert.equal(first.error, null);
     assert.equal(second.error, null);
-    for (const name of ["retention", "integrity", "room-backup", "store-growth"]) {
+    for (const name of ["retention", "integrity", "room-backup", "store-growth", "request-telemetry"]) {
       assert.ok(first.recorded[name]?.lastRunAt, name);
       assert.equal(second.recorded[name].lastRunAt, first.recorded[name].lastRunAt, name);
     }

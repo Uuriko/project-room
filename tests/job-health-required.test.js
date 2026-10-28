@@ -27,7 +27,7 @@ function fixtureStore(t) {
 // existing heartbeat fixtures, so the only signal under test is the
 // room-backup gate.
 function freshRecords(now) {
-  return applyOutcomes({}, ["retention", "integrity", "public-read-model", "store-growth"]
+  return applyOutcomes({}, ["retention", "integrity", "public-read-model", "store-growth", "request-telemetry"]
     .map(job => ({ job, ok: true, at: now, summary: { checked: 1 } })));
 }
 

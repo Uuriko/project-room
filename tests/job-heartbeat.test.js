@@ -417,14 +417,14 @@ test("scheduled() preserves slow-job attempts when the fast safety-net RPC fails
   });
   await assert.rejects(worker.scheduled({ cron: "*/30 * * * *" }, { ROOM_MAINTENANCE: "0", ROOM: { getByName: () => stub } }, { waitUntil() {} }),
     /Scheduled job RPC failed: fast jobs/);
-  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
+  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(5).fill("runSlowJob")]);
 });
 
 test("scheduled() checks each slow job separately after the fast safety-net call", async () => {
   const { stub, calls } = roomStub();
   const env = { ROOM_MAINTENANCE: "0", ROOM_GMAIL_ENABLED: "0", ROOM: { getByName: () => stub } };
   await worker.scheduled({ cron: "*/30 * * * *" }, env, { waitUntil() {} });
-  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(4).fill("runSlowJob")]);
+  assert.deepEqual(calls, ["ensureJobAlarm", ...Array(5).fill("runSlowJob")]);
 });
 
 test("a failed slow RPC does not prevent later jobs and uses a fresh stub", async () => {
@@ -436,7 +436,7 @@ test("a failed slow RPC does not prevent later jobs and uses a fresh stub", asyn
     return [];
   } });
   await assert.rejects(worker.scheduled({}, { ROOM: { getByName() { bindings++; return stub; } } }, {}), /RPC failed: integrity/);
-  assert.deepEqual(names, ["retention", "integrity", "room-backup", "store-growth"]);
+  assert.deepEqual(names, ["retention", "integrity", "room-backup", "store-growth", "request-telemetry"]);
   assert.equal(bindings, 2);
 });
 
@@ -464,7 +464,7 @@ test("gmail and channel drain stay disabled, not stale, when nothing is configur
     // events, and this test grades the gmail/channel gates, not the patrol.
     store.patrolTick();
     const now = Date.parse("2026-09-24T22:00:00Z");
-    const alwaysOn = ["retention", "integrity", "public-read-model", "room-backup", "store-growth"];
+    const alwaysOn = ["retention", "integrity", "public-read-model", "room-backup", "store-growth", "request-telemetry"];
     const fresh = applyOutcomes({}, alwaysOn.map(job => ({ job, ok: true, at: now, summary: { checked: 1 } })));
     // The backups binding is present in this deployment: room-backup is a
     // required job (#3894), so an unbound fixture would fail the rollup

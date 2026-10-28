@@ -37,6 +37,15 @@ const WRITE_SAMPLE_CAP = 2048;
 export function classifyRequest(method, pathname, searchParams) {
   const verb = String(method ?? "GET").toUpperCase();
   let path = String(pathname ?? "");
+  // Mirror server/http.mjs's trailing-slash normalisation exactly (QA
+  // 2026-10-03 P2-1, http.mjs:1208): the inner handler strips every
+  // trailing slash before routing and serves the canonical route, but
+  // the DO call site (cloudflare/room.mjs) records the un-normalised
+  // pathname — without this, GET /api/rooms/{id}/stream/ (a real,
+  // minutes-long SSE hold) classified as "read" and its whole duration
+  // landed in readCpuMs, poisoning the read-share gauge. The length>1
+  // guard keeps the root path "/" itself untouched, as in http.mjs.
+  if (path.length > 1 && path.endsWith("/")) path = path.replace(/\/+$/, "");
   if (path.startsWith("/room/")) path = path.slice(5); // /room twin prefix
   const isApi = path.startsWith("/api/");
   if (verb !== "GET" && verb !== "HEAD" && verb !== "OPTIONS") {
