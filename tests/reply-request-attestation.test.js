@@ -10,6 +10,7 @@ import { auditRecovery } from "../server/recovery.mjs";
 import { applyEvent } from "../src/events.js";
 import { confirmsReplyCommand } from "../src/reply-requests.js";
 import { confirmsAgentCommand } from "../client/work-actions.mjs";
+import { validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 
 function fixture(t) {
@@ -98,4 +99,17 @@ test("requests without a response carry no stamp", t => {
   const f = fixture(t), q = f.ask("agent", "owner");
   assert.equal(Object.hasOwn(f.request(q), "answerCredential"), false);
   assert.equal(Object.hasOwn(q.receipt.event.data, "answerCredential"), false);
+});
+
+test("the client read validator accepts a stamped request and refuses a tampered stamp", t => {
+  const f = fixture(t), q = f.ask("agent", "owner"), id = q.command.data.messageId;
+  f.store.command(f.accountSession(), "commons", f.answer(q));
+  const read = f.store.replyRequests.selected(f.keys.agent, "commons", id);
+  const opts = { name: "room_read_request", args: { requestMessageId: id }, roomId: "commons" };
+  assert.equal(validateReplyRead(read, opts).request.answerCredential, "account_session");
+  const tampered = structuredClone(read); tampered.request.answerCredential = "notarized";
+  assert.throws(() => validateReplyRead(tampered, opts), { code: "invalid_response" });
+  const onOpen = f.store.replyRequests.selected(f.keys.agent, "commons", f.ask("agent", "owner").command.data.messageId);
+  onOpen.request.answerCredential = "account_session";
+  assert.throws(() => validateReplyRead(onOpen, { ...opts, args: { requestMessageId: onOpen.request.id } }), { code: "invalid_response" });
 });
