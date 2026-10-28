@@ -57,6 +57,18 @@ export function isGitHubConfigured(env = {}) {
     && typeof env.GITHUB_OAUTH_CLIENT_SECRET === "string" && env.GITHUB_OAUTH_CLIENT_SECRET.length > 0;
 }
 
+// index.html keeps the GitHub anchor so a configured deploy can serve it.
+// Callers strip it when GitHub is off: the start route would 503, and the
+// JS hide in signin-navigation.js does not run for curl, crawlers, or a
+// slow module load.
+const GITHUB_SIGNIN_MARKUP = /[ \t]*<a id="github-signin"[^>]*>[\s\S]*?<\/a>[ \t]*(?:\r?\n)?/;
+
+export function frontDoorHtml(html, { githubConfigured = false } = {}) {
+  const text = typeof html === "string" ? html : Buffer.from(html).toString("utf8");
+  if (githubConfigured) return text;
+  return text.replace(GITHUB_SIGNIN_MARKUP, "");
+}
+
 // Boot-path config builder mirroring googleConfig (server/google-oauth.mjs):
 // both env vars unset means GitHub sign-in is simply off (null, and the
 // routes keep their designed 503); a partial or invalid pair is a

@@ -25,6 +25,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/message-replay-snapshot.mjs');
   paths.add('server/work-repository.mjs');
   paths.add('server/message-command-service.mjs');
+  paths.add('server/agent-pause.mjs');
   paths.add('src/message-reducers.js');
   paths.add('src/work-reducers.js');
   paths.add('client/agent-setup.mjs'); paths.add('client/setup-journal.mjs'); paths.add('scripts/connect-room.mjs');
@@ -70,6 +71,7 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/routes/spend-grants.mjs'); // spend-primitive MVP: spend-grant RT routes (imported by server/routes/table.mjs)
   paths.add('server/routes/typing.mjs'); // human UX: typing heartbeat RT route (imported by server/routes/table.mjs)
   paths.add('server/routes/wake-status.mjs'); // plan-wake-live: wakeable / not-wakeable list RT route (imported by server/routes/table.mjs)
+  paths.add('server/routes/agent-presence.mjs'); // Presence Gap 4: cross-room presence read RT route (imported by server/routes/table.mjs)
   paths.add('server/claim-autolink.mjs'); // plan-pr-autolink: claim-id parsing, PR auto-link, webhook core, poll fallback, deploy linking (imported by server/jobs.mjs)
   paths.add('server/routes/demo.mjs'); paths.add('server/routes/human-push.mjs');
   paths.add('server/routes/squads.mjs'); // plan-squads: squad roster RT routes (imported by server/routes/table.mjs)
@@ -187,9 +189,13 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('server/room-flood-guard.mjs'); // per (room, member) chat post budget (imported by server/store.mjs)
   paths.add('server/members-directory.mjs'); // RC-2026-09-24-202: members directory + skill cards (imported by server/store.mjs)
   paths.add('server/public-face.mjs'); // Opt-in public read-only face (imported by server/store.mjs)
+  paths.add('server/public-agent-page.mjs'); // Public agent page (imported by server/store.mjs)
+  paths.add('server/routes/public-agent-page.mjs'); // Public agent page routes (imported by server/routes/table.mjs)
   paths.add('server/receipts-page.mjs'); // Public receipts page (imported by server/http.mjs)
   paths.add('server/receipts-live.mjs'); // Live public-receipt reader (imported by server/http.mjs)
   paths.add('server/public-read-model.mjs'); // Public page tables (imported by server/store.mjs and the public routes)
+  paths.add('server/door-funnel.mjs'); paths.add('server/routes/door-funnel.mjs'); // DOOR-FUNNEL-READ: public door funnel aggregates (imported by server/routes/table.mjs)
+  paths.add('server/verdict-inbox.mjs'); paths.add('server/verdict-inbox-read.mjs'); paths.add('server/routes/verdict-inbox.mjs'); // COMP-DEEP #1 verdict inbox (imported by server/routes/table.mjs)
   paths.add('server/public-visibility.mjs'); // The one visibility definition (imported by server/public-read-model.mjs)
   paths.add('server/templates.mjs'); // GR2 room templates (imported by server/http.mjs)
   paths.add('server/public-rooms.mjs'); // GR2 public room, template, and agent pages (imported by server/http.mjs)

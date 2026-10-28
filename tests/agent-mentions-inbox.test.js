@@ -254,3 +254,51 @@ test("short @names refuse ambiguity across all active members while exact names 
   assert.deepEqual(resolve({ cowork, exact: { displayName: "Claude" } }, {}, "@Claude (Cowork)", "owner"), ["cowork"]);
   assert.deepEqual(resolve({ cowork }, {}, "Claude please check; @_Claude; mail@Claude; @Claudette", "owner"), []);
 });
+
+test("pending mention attention survives a delivery cursor without acknowledging or leaking private messages", t => {
+  const { f, token } = enrolledAgent(t);
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  say(f, f.keys.owner, { messageId: "plain-name", body: "Scout, a plain name is not a notification" });
+  assert.deepEqual(f.store.agentInbox(token, "commons").attention.pendingMentions, []);
+  say(f, f.keys.owner, { messageId: "waiting", body: "@Scout please check this" });
+  f.store.dmConsents.request("commons", "guest", "owner", "test");
+  f.store.dmConsents.decide("commons", "owner", "guest", "approve");
+  say(f, f.keys.guest, { messageId: "private-attention", body: "private @Scout aside", toMemberId: "owner" });
+  const first = f.store.agentInbox(token, "commons");
+  const before = f.store.db.prepare("SELECT COUNT(*) AS n FROM events").get().n;
+  const polled = f.store.agentInbox(token, "commons", { after: first.cursor.after });
+  assert.deepEqual(polled.directMentions, []);
+  assert.deepEqual(polled.attention.pendingMentions.map(row => row.replyToId), ["waiting"]);
+  assert.equal(polled.attention.acknowledges, false);
+  assert.equal(polled.attention.hasMore, false);
+  assert.deepEqual(polled.attention.nextRead, { tool: "room_read_inbox", arguments: { limit: 50, after: 0 } });
+  assert.equal(JSON.stringify(polled).includes("private-attention"), false);
+  assert.equal(f.store.db.prepare("SELECT COUNT(*) AS n FROM events").get().n, before);
+  say(f, token, { messageId: "attention-answer", body: "Checked", replyToId: "waiting" });
+  const answered = f.store.agentInbox(token, "commons", { after: first.cursor.after });
+  assert.deepEqual(answered.attention.pendingMentions, []);
+  assert.equal(answered.attention.nextRead, null);
+});
+
+test("pending attention is bounded and discloses overflow rather than claiming completeness", t => {
+  const { f, token } = enrolledAgent(t);
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  for (let i = 0; i < 3; i++) say(f, f.keys.owner, { messageId: `pending-${i}`, body: `@Scout question ${i}` });
+  const inbox = f.store.agentInbox(token, "commons", { limit: 2, after: 999999 });
+  assert.equal(inbox.attention.pendingMentions.length, 2);
+  assert.equal(inbox.attention.hasMore, true);
+  assert.ok(inbox.attention.pendingMentions.every(row => !Object.hasOwn(row, "body")));
+  assert.deepEqual(inbox.directMentions, []);
+});
+
+test("late-answered expired mentions cannot crowd an older unanswered mention out of attention", t => {
+  const { f, token } = enrolledAgent(t);
+  t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
+  say(f, f.keys.owner, { messageId: "older-unanswered", body: "@Scout still waiting" });
+  for (let i = 0; i < 4; i++) say(f, f.keys.owner, { messageId: `expired-${i}`, body: `@Scout question ${i}` });
+  f.store.db.prepare("UPDATE mention_states SET state='timed_out', decided_at=? WHERE room_id='commons' AND mentioned_member_id='mention-agent'").run(Date.now());
+  for (let i = 0; i < 4; i++) say(f, token, { messageId: `late-${i}`, body: "answered", replyToId: `expired-${i}` });
+  const inbox = f.store.agentInbox(token, "commons", { limit: 1, after: 999999 });
+  assert.deepEqual(inbox.attention.pendingMentions.map(row => row.replyToId), ["older-unanswered"]);
+  assert.equal(inbox.attention.hasMore, false);
+});

@@ -1,0 +1,114 @@
+  /api/rooms/{roomId}/work-claims/{claimId}/claim:
+    post:
+      summary: Claim work
+      description: |
+        Claims an unclaimed item for the calling member (the anti-collision
+        rule: an already-claimed item gets 409 `work_claim_conflict`, with the
+        message naming the holder — self re-claims are told they already hold
+        it (never "release it first"); foreign claimants are told who holds
+        it).
+        `leaseHours` sets the claim lease in hours (default: the room's
+        configured default, else 24h; max 168h). `null` opts out of leases
+        and is only accepted from the room owner or a member with
+        manage_claims. The item records `claimedAt` and `leaseExpiresAt`.
+        Declared files are an exclusive lease: overlap with another live
+        claim is 409 `file_lease_conflict`, naming the holder, the files,
+        and `leaseExpiresAt`. `advisory: true` records the claim anyway and
+        returns `fileWarnings`. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+                leaseHours: { type: [number, 'null'], exclusiveMinimum: 0, maximum: 168 }
+                files:
+                  type: array
+                  items: { type: string, maxLength: 512 }
+                  maxItems: 64
+                  description: Repo-relative paths this claim will touch. Replaces the item's files when given.
+                advisory:
+                  type: boolean
+                  description: True keeps overlap as fileWarnings and still claims. Omitted or false refuses overlap with 409.
+                dependsOn:
+                  type: array
+                  items: { type: string }
+                  description: Replaces the claim's dependencies when given.
+                parentClaimId:
+                  type: string
+                  pattern: '[A-Za-z0-9_-]{1,128}'
+                  description: Claim this work builds on. Replaces the claim's parent when given; null clears it.
+                evidenceRefs:
+                  type: array
+                  items: { type: string, maxLength: 512 }
+                  maxItems: 16
+                  description: Replaces the claim's documentary evidence pointers when given (sha256:<64 hex> or https:// URLs).
+                pullRequest:
+                  type: [string, 'null']
+                  description: Links or clears the GitHub pull request URL.
+                pullRequests:
+                  type: array
+                  items: { type: string, maxLength: 300 }
+                  maxItems: 16
+                  description: Additional linked GitHub pull request URLs.
+                repo:
+                  type: string
+                  description: The repository this work targets (owner/name).
+                branch:
+                  type: string
+                  description: The branch this work targets.
+      responses:
+        '200':
+          description: |
+            The claimed item. `fileWarnings` names other live claims on the
+            same files when `advisory` is true; otherwise it is empty.
+            `requiredReading` lists the repo-relative docs the claim's kind
+            asks the holder to read (advisory; acks go to /update).
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/WorkClaim'
+                  - type: object
+                    properties:
+                      fileWarnings:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            file: { type: string }
+                            heldBy:
+                              type: array
+                              items:
+                                type: object
+                                properties:
+                                  id: { type: string }
+                                  owner: { type: [string, 'null'] }
+                      requiredReading:
+                        type: array
+                        items: { type: string }
+                        description: Advisory per-kind reading list for the claim holder
+        '401': { description: unauthenticated }
+        '403': { description: work_claims_not_permitted, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '404': { description: work_claim_not_found }
+        '409':
+          description: |
+            work_claim_conflict when the item is already claimed. The message
+            names the holder: a self re-claim (same holder) says "You already
+            hold work ..." — never release it to re-claim; a foreign claimant
+            gets "held by <owner>". file_lease_conflict when declared files
+            overlap a live lease. The body names holder { claimId, owner },
+            files, and leaseExpiresAt. too_many_open_claims when the caller
+            already holds the room's per-member cap. room_event_budget_low
+            when the room is nearly out of room events (owner and claim
+            managers may still write).
+        '422': { description: invalid_claim_input }
+        '429': { description: Rate limit exceeded (rate_limited). }

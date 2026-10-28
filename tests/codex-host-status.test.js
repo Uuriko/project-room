@@ -89,6 +89,22 @@ test("desktop CLI starts idle, publishes a fresh bounded heartbeat, and stops wi
   t.after(async () => { child.kill("SIGTERM"); await finished; });
   await waitFor(() => { try { return readCodexHostStatus(f.journal).credentials === "present"; } catch { return false; } });
   const initial = readCodexHostStatus(f.journal); assert.equal(initial.pid, child.pid); assert.equal(initial.protocol, "qualified");
+  // A healthy local runtime does not mean this agent is selected in the room.
+  // Exercise the actual CLI heartbeat and Room configuration, not a synthetic status.
+  await waitFor(() => readCodexHostStatus(f.journal).phase === "assistant_not_selected");
+  const select = async coordinatorMemberId => {
+    const response = await fetch(`${origin}/api/rooms/commons/assistant`, {
+      method: "POST", headers: { Authorization: `Bearer ${room.keys.owner}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "configure", requestId: crypto.randomUUID(), expectedRevision: coordinatorMemberId ? 0 : 1,
+        name: "Room", coordinatorMemberId }),
+    });
+    assert.equal(response.status, 200, await response.text());
+  };
+  await select("producer");
+  await waitFor(() => readCodexHostStatus(f.journal).phase === "watching_room");
+  await select(null);
+  await waitFor(() => readCodexHostStatus(f.journal).phase === "assistant_not_selected");
+  assert.equal(readCodexHostStatus(f.journal).credentials, "present");
   await waitFor(() => readCodexHostStatus(f.journal).updatedAt !== initial.updatedAt);
   const listed = spawnSync(process.execPath, [cli, "--status-watch", f.journal], { encoding: "utf8" });
   assert.equal(listed.status, 0, listed.stderr); assert.equal(JSON.parse(listed.stdout).fresh, true);
