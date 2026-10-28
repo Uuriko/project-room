@@ -2952,6 +2952,10 @@ const narrowSearch = matchMedia("(max-width: 40rem)");
 function renderSearch(now = Date.now()) {
   const query = $("#message-search").value;
   const resultsOnly = query.trim().toLowerCase() === "has:result";
+  $("#results-mode").hidden = !resultsOnly;
+  $("#search-form .search-row").hidden = resultsOnly;
+  $("#search-results").setAttribute("aria-label", uiText(resultsOnly ? "result.modeTitle" : "result.searchTitle"));
+  $("#main").classList.toggle("showing-results", resultsOnly && !searchCollapsed);
   $("#results-panel").hidden = !resultsOnly;
   $("#search-list").hidden = resultsOnly;
   if (resultsOnly) {
@@ -3079,7 +3083,7 @@ function syncRequestComposer() {
   const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
   const requestHost = $("#composer-options .composer-options-panel");
   if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
-  requestButton.hidden = !state || active || !recipientId || recipientId === session?.member.id || state.members[recipientId]?.active !== true || isRoomArchived(state);
+  requestButton.hidden = !state || active || recipientId === session?.member.id || Boolean(recipientId && state.members[recipientId]?.active !== true) || isRoomArchived(state);
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
   const changed = request && (request.revision !== mode.expectedRequestRevision || request.contextEventId !== mode.contextEventId);
   const label = mode?.followUpRequestId ? "Follow up · Earlier exchange included" : mode?.resultEventId ? "Ask about credit" : mode ? ({ request: "Request a reply", answered: "Answer request", declined: "Decline", cancelled: "Cancel request" })[mode.kind] : "";
@@ -5189,6 +5193,18 @@ $("#search-pinned").addEventListener("click", () => {
   $("#search-pinned").setAttribute("aria-pressed", on ? "false" : "true"); searchCollapsed = false;
   if (state) renderSearch();
 });
+$("#results-mode-title").textContent = uiText("result.modeTitle");
+$("#results-mode-close").textContent = uiText("result.backToChat");
+$("#results-mode-close").addEventListener("click", () => {
+  $("#message-search").value = "";
+  $("#search-mentions").setAttribute("aria-pressed", "false");
+  $("#search-pinned").setAttribute("aria-pressed", "false");
+  searchCollapsed = false;
+  renderSearch();
+  $("#search-form").hidden = true;
+  $("#topbar-search-toggle").setAttribute("aria-expanded", "false");
+  $("#conversation-title").focus({ preventScroll: true });
+});
 $("#clear-search").addEventListener("click", () => {
   $("#message-search").value = "";
   $("#search-mentions").setAttribute("aria-pressed", "false");
@@ -5225,7 +5241,7 @@ function roomActionEntries() {
     { id: "new-work", label: "New work", words: "create task request", target: "#new-work-button", activate: true },
     { id: "invite", label: "Invite", words: "share join link people agents", target: "#invite-people-button", activate: true },
     { id: "invite-agents", label: "Invite agents", words: "invite code redeem collaborate contribute bootstrap", target: "#invite-people-button", activate: true },
-    { id: "create-room", label: "Create Room", words: "bootstrap-agent-room agent-rooms pri_ own room", target: "#create-room-details > summary", always: true },
+    { id: "create-room", label: uiText("rooms.createAction"), words: "create own room", always: true, available: Boolean(accountClient.session?.authenticated) },
     { id: "agent", label: "Add agent", words: "ai assistant mcp tools instinct muse grok build grokbot grok bot claude code codex cursor hermes opencode pi connect wake pull desktop takeover catalog", target: "#connect-agent-button", reveal: "#people-panel", activate: true },
     { id: "how-invite", label: "How to invite someone", words: "how guest eight hours link help", always: true },
     { id: "how-agent", label: "How to add an agent", words: "how connect instinct muse grok claude codex cursor hermes opencode pi help catalog", always: true },
@@ -5235,6 +5251,7 @@ function roomActionEntries() {
     { id: "settings", label: "Settings", words: "advanced configuration", always: true },
     { id: "usage", label: "Usage", words: "spend seats sessions caps limits budget headroom", always: true }
   ].filter(entry => {
+    if (entry.available === false) return false;
     if (entry.always) return true;
     const target = $(entry.target); return target && !target.disabled && !target.closest("[hidden]");
   });
@@ -5389,7 +5406,12 @@ function chooseRoomAction(id) {
   if (id === "activity") { closeRoomActions(false); updatesUi?.open("all"); return; }
   if (id === "later") { closeRoomActions(false); openLater(); return; }
   if (id === "results") { selectWorkView("results"); return; }
-  if (id === "create-room") { openSettings(); $("#create-room-details").open = true; $("#create-room-details > summary").focus(); return; }
+  if (id === "create-room") {
+    if (!accountClient.session?.authenticated) return;
+    workspaceUI.showRoomList(true);
+    $("#room-choice-create").click();
+    return;
+  }
   if (id === "landing") { openSettings("land-queue-panel"); return; }
   if (id === "permissions") { openSettings("room-permissions"); return; }
   if (id === "settings") { openSettings(); return; }
@@ -6539,14 +6561,14 @@ function selectWorkView(view) {
   $("#message-search").value = "has:result";
   searchCollapsed = false;
   renderSearch();
-  $("#message-search").focus({ preventScroll: true });
+  $("#room-results-list").focus({ preventScroll: true });
 }
 function resultRow(item) {
   const result = currentResult(item), title = esc(item.title);
   const open = result.kind === "room_text"
     ? `<button type="button" data-read-result="${esc(item.id)}" data-focus-key="result:${esc(item.id)}">${title}</button>`
     : `<a href="${safeUrl(item.receipt.evidenceUrl)}" target="_blank" rel="noreferrer noopener" data-focus-key="result:${esc(item.id)}">${title} ↗</a>`;
-  return `<article class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc([...item.receipt.summary].slice(0, 200).join(""))}${[...item.receipt.summary].length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${result.kind === "external" ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></article>`;
+  return `<li class="result-row" data-result-work-id="${esc(item.id)}">${open}<p>${esc([...item.receipt.summary].slice(0, 200).join(""))}${[...item.receipt.summary].length > 200 ? "…" : ""}</p><div class="result-meta"><span>${result.status === "approved" ? "Approved" : "Completed"}${result.kind === "external" ? " · External evidence" : ""}</span><button type="button" class="text-button" data-result-work="${esc(item.id)}">Work details</button></div></li>`;
 }
 const { clear: clearResultComparison, sync: syncResultComparisons, load: loadResultComparison } =
   createResultComparison({ client, getState: () => state, esc });
@@ -7817,7 +7839,7 @@ function renderReturnBrief({ timelineRendered = false } = {}) {
     const items = Object.values(state.workItems);
     if (!timelineRendered) syncTimelineWork();
     const resultFocus = $("#room-results-list").contains(document.activeElement) ? document.activeElement : null;
-    preserveResultFocus($("#room-results-list"), () => renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || '<li class="empty-note">No completed results yet.</li>'));
+    preserveResultFocus($("#room-results-list"), () => renderContent("#room-results-list", completedResults(state).map(resultRow).join("") || `<li class="empty-note">${esc(uiText("result.empty"))}</li>`));
     if (resultFocus && !resultFocus.isConnected && document.activeElement === document.body) $("#room-results-list").focus({ preventScroll: true });
     resultStatus();
     syncResultComparisons();

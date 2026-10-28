@@ -151,7 +151,7 @@ export function storeTheme(preference) {
 export function organizeRoomSettings(dialog, doc = globalThis.document) {
   if (!dialog || dialog.dataset?.settingsGrouped === "true" || !doc?.createElement) return;
   const groups = [
-    ["Room", ["create-room-details", "room-about", "room-permissions"], "The room’s name, purpose, and instructions."],
+    ["Room", ["room-about", "room-permissions"], "The room’s name, purpose, and instructions."],
     ["Agents & connections", ["room-agent-permissions"], "Who can assign agents."],
     [uiText("settings.usageLimits"), ["usage-panel", "spend-panel"], uiText("settings.usageLimitsHint")],
     ["Advanced", ["advanced-room-tools", "record-panel", "room-health"], "History and owner-only health."]
@@ -162,6 +162,7 @@ export function organizeRoomSettings(dialog, doc = globalThis.document) {
   for (const [label, ids, hint] of groups) {
     const nodes = ids.map(id => dialog.querySelector(`#${id}`)).filter(Boolean);
     if (!nodes.length) continue;
+    for (const node of nodes) if (node.tagName === "DETAILS") node.querySelector(":scope > summary")?.classList.add("section-summary");
     const section = doc.createElement("section");
     section.className = "settings-group";
     const titleId = `settings-group-${label.toLowerCase().replace(/[^a-z]+/g, "-").replace(/^-|-$/g, "")}`;

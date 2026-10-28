@@ -19,12 +19,15 @@ for(const width of [390,1440]) for(const theme of ['light','dark']) {
   await page.goto(origin);await signInFixture(page,f.keys.owner);await page.locator('#main').waitFor();
   await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
   const scan=async()=>{const result=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();assert.deepEqual(result.violations.map(v=>({id:v.id,targets:v.nodes.map(n=>n.target)})),[]);};
-  const shot=async name=>{mkdirSync('test-results/atlas-settings',{recursive:true});await page.screenshot({path:`test-results/atlas-settings/${name}-${width}-${theme}.png`});};
+  const shot=async name=>{const dir=process.env.ROOM_DESIGN_SETTINGS_DIR||'test-results/atlas-settings';mkdirSync(dir,{recursive:true});await page.screenshot({path:`${dir}/${name}-${width}-${theme}.png`});};
   await openSettings(page,'room-permissions');
   assert.equal(await page.locator('#room-permissions > summary').textContent(),'Access & privacy');
   assert.equal(await page.locator('#room-permissions').evaluate(e=>e.closest('section').querySelector('h3').textContent),'Room');
   assert.equal(await page.locator('#room-agent-permissions').evaluate(e=>e.closest('section').querySelector('h3').textContent),'Agents & connections');
   assert.equal(await page.getByRole('heading',{name:'Usage & limits',exact:true}).count(),1);
+  assert.equal(await page.locator('#create-room-details').count(),0);
+  const labels=await page.locator('#usage-panel > summary, #spend-panel > summary').evaluateAll(nodes=>nodes.map(node=>({justify:getComputedStyle(node).justifyContent,height:node.getBoundingClientRect().height})));
+  assert.ok(labels.every(row=>row.justify==='flex-start'&&row.height>=44));
   const toggle=page.locator('#history-visibility-toggle');const before=await toggle.isChecked();
   await page.locator('#history-visibility-control').click();await page.waitForFunction(before=>document.querySelector('#history-visibility-toggle').checked!==before,before);
   await page.waitForFunction(()=>!document.querySelector('#history-visibility-toggle').disabled);
@@ -44,5 +47,11 @@ for(const width of [390,1440]) for(const theme of ['light','dark']) {
   await scan();await shot('agents');await page.keyboard.press('Escape');
   page=await (await browser.newContext({viewport:{width,height:900},reducedMotion:'reduce'})).newPage();await page.goto(origin+'/?account=1');await signInFixture(page,f.store.issueAccountAccessKey(account.id));await page.locator('#account-rooms-panel').waitFor();await page.evaluate(theme=>document.documentElement.setAttribute('data-theme',theme),theme);
   await scan();await shot('account');assert.deepEqual(errors,[]);
+  await page.locator('[data-account-room="commons"]').click();await page.locator('#main').waitFor();
+  await clickChrome(page,'#room-actions-open');await page.locator('[data-room-action="create-room"]').click();
+  await page.locator('#account-room-title').waitFor();
+  assert.equal(await page.evaluate(()=>document.activeElement.id),'account-room-title');
+  assert.equal(await page.locator('#settings-dialog').isVisible(),false);
+  await shot('create-route');
  });
 }

@@ -10,7 +10,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
-import { openSearch } from "./room-chrome.mjs";
+import { openSearch, ensureSidebarOpen, ensureSidebarClosed } from "./room-chrome.mjs";
 
 for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["narrow", { width: 320, height: 780 }]]) {
   test(`composer ${label}: keyboard recovery, discussion errors, composition, and access cleanup`, { timeout: 60000 }, async t => {
@@ -199,7 +199,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(await requestButton.isVisible(), false);
     await page.locator("#request-exit").click();
     await recipient.selectOption("", { force: true });
-    assert.equal(await requestButton.isVisible(), false);
+    assert.equal(await requestButton.isVisible(), true, "a request can start before choosing its recipient");
     assert.equal(await requestButton.evaluate(node => node.parentElement.className), "composer-options-panel");
     await recipient.selectOption("owner", { force: true });
     assert.equal(await requestButton.isVisible(), false);
@@ -330,11 +330,12 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await input.fill("Keep this thread reply");
     await input.focus();
     await input.evaluate(e => e.setSelectionRange(5, 9, "backward"));
+    // No server receipt exists: this exercises recovery rather than SSE confirmation.
     const commandIds = [];
     let loseResponse = true;
     await page.route("**/api/rooms/commons/commands", async route => {
       commandIds.push(route.request().postDataJSON().id);
-      if (loseResponse) { loseResponse = false; await route.fetch(); await route.abort("failed"); }
+      if (loseResponse) { loseResponse = false; await route.abort("failed"); }
       else await route.continue();
     });
     await page.keyboard.press("Control+Enter");
@@ -366,6 +367,19 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     assert.equal(messages.length, 1); assert.equal(messages[0].replyToId, "reply"); assert.equal(messages[0].toMemberId, "maya");
     await page.unroute("**/api/rooms/commons/commands");
 
+    // A lost HTTP response is still confirmed when the committed event arrives.
+    let confirmedAttempts = 0;
+    await page.route("**/api/rooms/commons/commands", async route => {
+      confirmedAttempts++; await route.fetch(); await route.abort("failed");
+    });
+    await input.fill("Confirmed through the event stream");
+    await input.focus(); await page.keyboard.press("Control+Enter");
+    await waitForSaved();
+    assert.equal(await status.textContent(), "");
+    assert.equal(confirmedAttempts, 1);
+    assert.equal(store.snapshot(owner, "commons").state.messages.filter(m => m.body === "Confirmed through the event stream").length, 1);
+    await page.unroute("**/api/rooms/commons/commands");
+
     // Explicit opt-in survives reload only after authenticating the same room.
     await input.fill("Recover this thread after reload");
     page.once("dialog", dialog => dialog.accept());
@@ -373,6 +387,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.locator("#main").waitFor({ state: "visible" });
     assert.equal(await input.inputValue(), "Recover this thread after reload");
     await page.locator("#thread-back").click();
+    await ensureSidebarOpen(page); await page.locator('#channel-list [data-channel="general"]').click(); await ensureSidebarClosed(page);
     assert.equal(await input.inputValue(), "A separate room draft");
     const stored = await page.evaluate(() => sessionStorage.getItem("project-room:drafts:v3"));
     assert.match(stored, /A separate room draft/);
@@ -389,7 +404,7 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.keyboard.press("Control+Enter");
     await intercepted.promise;
     assert.equal(await page.locator("#message-form").getAttribute("aria-busy"), "true");
-    await page.locator("#topbar-search-toggle").click();
+    await openSearch(page);
     await page.locator("#message-search").fill("short story");
     release.resolve();
     await waitForSaved();

@@ -119,6 +119,7 @@ export async function openMemberProfile(page, memberId) {
 
 // Secondary controls moved into their existing account/room contexts.
 export async function clickChrome(page, selector) {
+  if (selector === "#create-channel-button") await ensureSidebarOpen(page);
   if (selector === "#choose-room") selector = "#nav-rooms";
   const control = page.locator(selector);
   if (selector === "#share-link-create" && !(await control.isVisible())) await page.locator("#share-custom-summary").click();

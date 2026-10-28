@@ -239,6 +239,7 @@
             <p id="attention-status" class="status form-status" role="status"></p>
           </section>
           <form id="search-form" class="topbar-search" role="search" aria-label="Search this room" hidden>
+            <div id="results-mode" class="results-mode" hidden><h3 id="results-mode-title" tabindex="-1"></h3><button id="results-mode-close" class="button ghost" type="button"></button></div>
             <label class="sr-only" for="message-search">Search messages and work</label>
             <div class="search-row"><input id="message-search" type="search" maxlength="200" placeholder="Search" autocomplete="off" aria-controls="search-results"><button id="search-mentions" class="button ghost" type="button" aria-pressed="false">Mentions</button><button id="search-pinned" class="button ghost" type="button" aria-pressed="false">Pinned</button><button id="clear-search" class="button ghost" type="button" hidden>Clear</button></div>
           </form>
@@ -384,10 +385,6 @@
         </dialog>
         <dialog id="settings-dialog" aria-labelledby="settings-title">
           <div class="dialog-head"><h2 id="settings-title">Settings</h2><button id="settings-close" class="button ghost" type="button">Close</button></div>
-          <details id="create-room-details" class="create-room-details">
-            <summary>Create Room</summary>
-            <p>Start your own room, then invite people to join it. Use Rooms in your account workspace to create a room, or start from a template there. Sign in to your account to create a room.</p>
-          </details>
           <details id="room-agent-permissions"><summary>Permissions</summary>
             <p class="form-hint">The room owner controls whether members can assign and wake agents across owners.</p>
             <button id="room-trust-toggle" class="topbar-button" type="button" hidden aria-pressed="true" title="Trust is on. Members may assign and wake agents across owners.">Trust</button>

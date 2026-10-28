@@ -5,6 +5,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, rmSync } from "node:fs";
 import { chromium } from "playwright";
+import AxeBuilder from "@axe-core/playwright";
 import { textVersion } from "../server/text-results.mjs";
 import { createResultsFixture } from "./results-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
@@ -40,8 +41,9 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   browser = await chromium.launch({ headless: true });
-  const p = await browser.newPage({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
+  const context = await browser.newContext({ viewport: mobile ? { width: 390, height: 844 } : { width: 1440, height: 1000 },
     isMobile: mobile, hasTouch: mobile, reducedMotion: "reduce" });
+  const p = await context.newPage();
   p.setDefaultTimeout(8000);
   await p.addInitScript(value => localStorage.setItem("project-room-theme", value), theme);
   const errors = [], outside = [], writes = [];
@@ -52,15 +54,17 @@ async function setup(t, { mobile = false, guest = false, theme = "dark", expecte
   });
   await p.goto(origin); await signInFixture(p, f.keys[guest ? "guest" : "owner"]);
   await p.locator("#main").waitFor({ state: "visible" });
+  await p.evaluate(theme=>document.documentElement.setAttribute("data-theme",theme),theme);
   p.on("request", request => { if (request.method() !== "GET" && new URL(request.url()).pathname.startsWith("/api/rooms/") && !new URL(request.url()).pathname.endsWith("/typing")) writes.push(request.url()); });
   t.after(() => { assert.deepEqual(errors, []); assert.deepEqual(outside, []); assert.equal(writes.length, expectedWrites); });
   const row = id => p.locator(`#room-results-list [data-result-work-id="${id}"]`);
-  const open = async () => { await ensureSidebarClosed(p); if (await p.locator("#search-form").isHidden()) await clickChrome(p, "#topbar-search-toggle"); await p.locator("#message-search").fill("has:result"); };
+  const open = async () => { await ensureSidebarClosed(p); await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click(); };
   const read = () => row(privateResult ? "private-result" : "native-result").locator("[data-read-result]").click();
   const ready = () => p.waitForFunction(body => document.querySelector("#result-body").textContent === body, f.body);
   const capture = async name => {
-    mkdirSync("test-results/room-results-20260908", { recursive: true });
-    await p.screenshot({ path: `test-results/room-results-20260908/${name}.png` });
+    const directory = process.env.ROOM_DESIGN_RESULTS_DIR || "test-results/room-results-20260908";
+    mkdirSync(directory, { recursive: true });
+    await p.screenshot({ path: `${directory}/${name}.png` });
   };
   return { ...f, p, row, open, read, ready, capture };
 }
@@ -234,7 +238,7 @@ test("returning from a result preserves an uncertain send's exact target and ret
   f.send("producer", T.MESSAGE_POSTED, { messageId: "result-peer-reply", body: "Which part needs another look?", replyToId: resultId });
   await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
   await messageAction(p, "result-peer-reply", "reply");
-  await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest");
+  await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest", { force: true });
   await p.locator("#message-input").fill("Please expand the second point");
   const attempts = [];
   await p.route("**/rooms/commons/commands", route => {
@@ -247,7 +251,7 @@ test("returning from a result preserves an uncertain send's exact target and ret
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   await f.read(); await f.ready();
   assert.equal(await p.locator("#result-discuss").isDisabled(), true, "an uncertain send owns the existing reply target");
-  await p.locator("#close-result").click(); await p.locator("#clear-search").click();
+  await p.locator("#close-result").click(); await p.locator("#results-mode-close").click();
   assert.equal(await p.locator("#message-input").inputValue(), "Please expand the second point");
   await send.click(); await p.waitForFunction(() => !document.querySelector("#message-input").value);
   assert.equal(attempts.length, 2);
@@ -367,13 +371,13 @@ for (const mobile of [false, true]) test(`public result preserves an authored pr
   const resultId = f.state().workItems["native-result"].receipt.nativeText.messageId;
   f.send("producer", T.MESSAGE_POSTED, { messageId: "private-draft-thread", body: "Discuss the result here", replyToId: resultId });
   await f.open(); await f.read(); await f.ready(); await p.locator("#result-discuss").click();
-  await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest");
+  await openComposerOptions(p); await p.locator("#message-to-select").selectOption("guest", { force: true });
   await p.locator("#message-input").fill("Private follow-up for the guest");
   await p.locator("#thread-back").click();
   await clickChrome(p, "#room-actions-open"); await p.locator('[data-room-action="results"]').click();
   await f.read(); await f.ready(); await p.locator("#result-discuss").click();
   assert.equal(await p.locator("#result-dialog").isVisible(), true, "protected destination draft refuses the handoff");
-  await p.locator("#close-result").click(); await p.locator("#clear-search").click();
+  await p.locator("#close-result").click(); await p.locator("#results-mode-close").click();
   await p.locator(`[data-message-record-id="${resultId}"] [data-message-action="thread"]`).click();
   assert.equal(await p.locator("#message-input").inputValue(), "Private follow-up for the guest");
   assert.equal(await p.locator("#message-to-select").inputValue(), "guest", "public result navigation does not change an authored audience");
@@ -388,7 +392,7 @@ for (const mobile of [false, true]) test(`inline result leaves conversation usab
   if (mobile) await p.locator("#message-input").fill("My next thought while reading");
   await card.locator("[data-read-result]").click(); await f.ready();
   assert.equal(await (mobile ? p.locator("#main > #result-dialog.result-mobile") : p.locator("#main > #result-dialog.result-docked")).count(), 1, "reader uses the available screen space");
-  assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
+  assert.match(await p.locator("#result-status").innerText(), /Submitted by/, "reader attributes the submitted result without claiming review");
   assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   assert.equal(await p.locator("dialog:modal").count(), 0);
@@ -513,7 +517,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
   await card.locator("[data-read-result]").click();
   await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);
   assert.equal(await p.locator("#main > #result-dialog.result-docked").count(), 1, "desktop result remains beside conversation");
-  assert.equal(await card.locator(".work-card-header").innerText(), "Completed", "completion is stated once, without a second DONE badge");
+  assert.match(await p.locator("#result-status").innerText(), /Submitted by/, "reader attributes the submitted result without claiming review");
   assert.equal(await card.locator('[data-portable-mode="result"]').count(), 0, "external AI return has one entry inside Use my AI, not a competing card action");
   assert.equal(await card.locator(".work-details").evaluate(node => node.open), false, "reading collapses secondary work controls");
   await p.locator("#result-discuss").click();
@@ -582,6 +586,7 @@ test("stalled clipboard preserves download and fences copies across collaboratio
   await p.locator("#close-result").click();
   await f.row("native-result").locator("[data-result-work]").click();
   const card = p.locator('[data-work-record-id="native-result"]');
+  if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
   await card.locator("[data-copy-result]").click();
   const input = p.locator("#result-copy-preview"), copy = p.locator("#result-copy-button");
   await input.fill("My next draft");
@@ -598,6 +603,7 @@ test("stalled clipboard preserves download and fences copies across collaboratio
   await p.waitForFunction(() => !document.getElementById("packet-copy").disabled);
   assert.equal(await p.locator("#portable-status").textContent(), "", "old copy cannot report success on another view");
   await p.locator("#portable-close").click();
+  if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
   await card.locator("[data-copy-result]").click();
   assert.equal(await input.inputValue(), "My next draft");
   await copy.click();
@@ -799,4 +805,28 @@ test('short result opens the original conversation without a preview or changing
   assert.equal(await p.locator('dialog:modal').count(),0);
   assert.equal(await p.locator('#message-input').inputValue(),'Keep my unrelated draft.');
   assert.equal(f.state().messages.find(message=>message.id==='short-answer-text').body,body);
+});
+
+for (const mobile of [false, true]) for (const theme of ["light", "dark"]) test(`Results mode has a readable label and returns to the draft: ${mobile ? "phone" : "desktop"} ${theme}`, async t => {
+  const f = await setup(t, { mobile, theme }), p = f.p;
+  const draft = "Keep my thought while finding results";
+  await p.locator("#message-input").fill(draft);
+  await f.open();
+  assert.equal(await p.locator("#results-mode-title").textContent(), "Results");
+  assert.equal(await p.locator("#message-search").isVisible(), false);
+  assert.equal(await p.locator("#search-mentions").isVisible(), false);
+  assert.equal(await p.locator("#room-results-list .result-row").count(), 2);
+  assert.deepEqual((await new AxeBuilder({ page: p }).include("#search-form").withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations, []);
+  await f.capture(`labelled-results-${mobile ? "phone" : "desktop"}-${theme}`);
+  await p.locator("#results-mode-close").click();
+  assert.equal(await p.locator("#message-input").inputValue(), draft);
+  assert.equal(await p.locator("#search-results").isVisible(), false);
+  assert.equal(await p.evaluate(() => document.activeElement.id), "conversation-title");
+  await clickChrome(p, "#topbar-search-toggle");
+  assert.equal(await p.locator("#message-search").isVisible(), true);
+  f.reopen("native-result"); f.reopen("approved-result");
+  await f.open(); await p.locator("#room-results-list .empty-note").waitFor();
+  assert.equal(await p.locator("#room-results-list .empty-note").count(), 1);
+  assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+  await f.capture(`empty-results-${mobile ? "phone" : "desktop"}-${theme}`);
 });

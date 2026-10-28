@@ -1,4 +1,4 @@
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, ensureSidebarOpen, ensureSidebarClosed } from "./room-chrome.mjs";
 // Synthetic human journeys against a disposable real service, not participant research.
 import { join } from "node:path";
 import { openRequestJournal, runRequestOnce } from "../client/request-runner.mjs";
@@ -11,6 +11,10 @@ import { createAcceptanceFixture } from "./acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { signInFixture } from "./auth-signin.mjs";
 
+async function chooseRecipient(page, memberId) {
+  await page.locator("#request-recipient").click();
+  await page.locator(`#new-direct-people [data-direct-member="${memberId}"]`).click();
+}
 async function setup(t, viewport = { width: 1280, height: 900 }) {
   const fixture = createAcceptanceFixture({ dmConsent: true }), errors = [];
   const server = createRoomServer({ store: fixture.store, streamInterval: 60 });
@@ -22,12 +26,17 @@ async function setup(t, viewport = { width: 1280, height: 900 }) {
   });
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); });
   browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });
-  async function login(who) {
+  async function login(who, peer) {
     const page = await browser.newPage({ viewport, reducedMotion: "reduce" });
     page.setDefaultTimeout(8000); page.on("pageerror", error => errors.push(error.message));
     await page.goto(`http://127.0.0.1:${server.address().port}`);
     await signInFixture(page, fixture.keys[who]);
     await page.locator("#main").waitFor({ state: "visible" });
+    const request = Object.values(fixture.store.room("commons").state.replyRequests ?? {}).find(row => row.requesterId === who || row.recipientId === who);
+    const partner = peer || (request ? (request.requesterId === who ? request.recipientId : request.requesterId) : who === "owner" ? "guest" : "owner");
+    await ensureSidebarOpen(page); await page.locator("#new-direct-message").click();
+    await page.locator(`#new-direct-people [data-direct-member="${partner}"]`).click();
+    await ensureSidebarClosed(page);
     return page;
   }
   const send = (who, type, data) => fixture.store.command(fixture.keys[who], "commons", { id: crypto.randomUUID(), type, data });
@@ -51,7 +60,7 @@ for (const width of [1280, 390, 320]) test(`request journey at ${width}px: reque
   await input(owner).fill("Keep my ordinary draft");
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
   await input(owner).fill("Which agenda should we use?");
-  await owner.locator("#message-to-select").selectOption("guest");
+  await chooseRecipient(owner, "guest");
   await input(owner).press("Enter"); await saved(owner);
   assert.equal(await input(owner).inputValue(), "Keep my ordinary draft");
   const id = Object.keys(f.state().replyRequests)[0];
@@ -109,7 +118,7 @@ test("stale answer keeps text, explicit refresh updates context, decline and can
   assert.equal(await input(guest).inputValue(), "A considered answer");
   await input(guest).press("Enter"); await saved(guest);
   assert.equal(f.state().replyRequests.first.status, "answered");
-  await guest.locator("#thread-back").click();
+  assert.equal(await guest.locator("#thread-back").isVisible(), false, "confirmed private answer returns to its DM");
   await mode(guest, "second", "declined"); await input(guest).fill("I do not have the relevant context.");
   await guest.screenshot({ path: "test-results/request-decline-mobile.png", fullPage: true });
   assert.equal(await guest.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
@@ -149,7 +158,7 @@ test("lost committed answer remains exact and read-only across reload, then retr
 test("unconfirmed receipt locks the exact request; ordinary drafts remain separate", { timeout: 60000 }, async t => {
   const f = await setup(t), page = await f.login("owner");
   await input(page).fill("Ordinary draft"); await openComposerOptions(page); await page.locator("#request-reply").click();
-  await input(page).fill("An explicit question"); await page.locator("#message-to-select").selectOption("guest");
+  await input(page).fill("An explicit question"); await chooseRecipient(page, "guest");
   let alter = true; const commands = [];
   await page.route("**/api/rooms/commons/commands", async route => {
     commands.push(route.request().postDataJSON());
@@ -192,7 +201,7 @@ test("original conversation shows host progress and recovery without changing th
 
 for (const width of [1280, 390]) test(`coding result stays readable and escaped at ${width}px`, { timeout: 60000 }, async t => {
   const f = await setup(t, { width, height: 900 });
-  const owner = await f.login("owner");
+  const owner = await f.login("owner", "producer");
   f.request("inspect-code", "producer");
   const body = hostReplyBody({ body: "Fixed the parser.", codeResult: {
     repositoryUrl: "https://example.com/repo", baseRevision: "a".repeat(40),
@@ -250,7 +259,7 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
     const posted = f.state().messages.find(message => message.body === "Add keyboard support");
     assert.equal(posted.replyToId, "follow-answer"); assert.equal(posted.toMemberId, "guest");
     assert.equal(f.state().replyRequests["follow-original"].status, "answered");
-    await page.locator("#thread-back").click();
+    assert.equal(await page.locator("#thread-back").isVisible(), false, "confirmed private follow-up returns to its DM");
     assert.equal(await input(page).inputValue(), "Keep my normal draft");
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1), true);
     assert.deepEqual(f.errors, []);
@@ -260,10 +269,10 @@ for (const viewport of [{ width: 1280, height: 900 }, { width: 390, height: 844 
 
 test("host answer survives closing the requester and returning in an independent browser session", { timeout: 60000 }, async t => {
   const f = await setup(t, { width: 390, height: 844 });
-  const owner = await f.login("owner");
+  const owner = await f.login("owner", "producer");
   await openComposerOptions(owner); await owner.locator("#request-reply").click();
   await input(owner).fill("Summarize the local reference task.");
-  await owner.locator("#message-to-select").selectOption("producer");
+  await chooseRecipient(owner, "producer");
   await input(owner).press("Enter"); await saved(owner);
   const id = Object.keys(f.state().replyRequests)[0];
   assert.ok(id);

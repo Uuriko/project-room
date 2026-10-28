@@ -662,5 +662,10 @@ export default {
   "rooms.join.recovery.join_unavailable": "Use a valid invitation; do not retry public admission unchanged.",
   "rooms.join.recovery.membership_exists": "Use the existing membership or request a new invitation; do not recreate removed access.",
   "rooms.join.recovery.requester_unavailable": "Decline the request or wait for the account to be restored; do not grant access by another identity.",
-  "rooms.join.recovery.visibility_changed": "Read join-settings again before deciding whether to save."
+  "rooms.join.recovery.visibility_changed": "Read join-settings again before deciding whether to save.",
+  "result.modeTitle": "Results",
+  "result.searchTitle": "Search results",
+  "result.backToChat": "Back to chat",
+  "result.empty": "No completed results yet.",
+  "rooms.createAction": "Create room"
 };

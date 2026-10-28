@@ -26,13 +26,15 @@ for (const [width, account, height = 900] of [[1440, false], [390, false], [320,
     await page.goto(`http://127.0.0.1:${server.address().port}/?room=commons`);
     await signInFixture(page, key);
     await page.locator('#main').waitFor({ state: 'visible' });
-    await page.locator('.room-topbar #session-menu').waitFor();
+    await ensureSidebarOpen(page);await page.locator('#session-menu').waitFor();await ensureSidebarClosed(page);
     assert.equal(await page.locator('.app-shell > .topbar').isVisible(), false);
-    for (const selector of ['#topbar-search-toggle', '#topbar-updates', '#room-more > summary', '#session-menu-button']) {
+    for (const selector of ['#topbar-search-toggle', '#topbar-updates', '#room-more > summary']) {
+      if (selector === '#topbar-search-toggle' && !await page.locator(selector).isVisible()) await page.locator('#room-more > summary').click();
       const box = await page.locator(selector).boundingBox();
       assert.ok(box && box.x >= 0 && box.x + box.width <= width + 1, `${selector} remains in viewport`);
       assert.ok(box.width >= 24 && box.height >= 24, `${selector} has a usable target`);
     }
+    await page.evaluate(()=>{document.querySelector('#room-more').open=false;});
     assert.ok(await page.locator('#conversation-title').boundingBox());
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     if (account) {
@@ -61,10 +63,10 @@ for (const [width, account, height = 900] of [[1440, false], [390, false], [320,
       mkdirSync('test-results/layout', { recursive: true });
       await page.screenshot({ path: `test-results/layout/composer-${width}x${height}.png` });
     }
-    await page.locator('#session-menu-button').click();
+    await clickChrome(page, '#session-menu-button');
     assert.equal(await page.locator('#signout-button').isVisible(), true);
     await page.keyboard.press('Escape');
-    assert.equal(await page.evaluate(() => document.activeElement.id), 'session-menu-button');
+    assert.equal(await page.evaluate(() => document.activeElement.id), width < 900 ? 'sidebar-toggle' : 'session-menu-button');
     await ensureSidebarOpen(page);
     await clickChrome(page, '#room-actions-open');
     await page.locator('#room-actions-dialog').waitFor();
@@ -100,7 +102,7 @@ for (const [width, account, height = 900] of [[1440, false], [390, false], [320,
     });
     assert.equal(overflow.ok, true, `large text reflows without horizontal overflow (scroll ${overflow.scroll} inner ${overflow.inner}${overflow.nodes.length ? `; ${overflow.nodes.join("; ")}` : ""})`);
     await page.evaluate(() => document.documentElement.style.fontSize = '');
-    await page.locator('#session-menu-button').click();
+    await clickChrome(page, '#session-menu-button');
     await page.locator('#signout-button').click();
     await page.locator('#auth-panel').waitFor({ state: 'visible' });
     assert.equal(await page.locator('.app-shell > .topbar').isVisible(), true);
@@ -125,7 +127,7 @@ for (const width of [390, 1280]) for (const theme of ['light', 'dark']) {
     await page.locator('#main').waitFor({ state: 'visible' });
     await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
     await page.locator('#message-input').fill('Keep my draft through navigation');
-    assert.equal(await page.locator('#composer-hint').isVisible(), width >= 500);
+    assert.ok(await page.locator('#message-input').getAttribute('aria-description'), 'keyboard guidance remains available to assistive technology');
     assert.equal(await page.locator('.app-shell > #workspace-nav').count(), 0, 'no redundant bottom navigation in a conversation');
     if (width < 500) {
       assert.equal(await page.locator('.app-shell').evaluate(node => parseFloat(getComputedStyle(node).paddingBottom)), 0);
