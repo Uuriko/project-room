@@ -21,6 +21,7 @@ import { identityRoomSeats } from "../server/membership-resolution.mjs";
 import { collectNeedsMe } from "../server/needs-me.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { resolveCatalogAgent } from "../server/capability-visibility.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -63,9 +64,7 @@ async function fixture(t) {
   const guest = await seatGuest(f, origin, ownerKey, "GuestSeat");
   // Control: a fully linked member identity in the same room.
   const linked = f.store.identities.create("seat-linked");
-  f.store.identities.link(ownerKey, "commons", {
-    identityId: linked.identityId, memberId: "seat-linked", displayName: "SeatLinked", permissions: [],
-  });
+  linkWithProof(f.store, ownerKey, "commons", linked, { memberId: "seat-linked", displayName: "SeatLinked", permissions: [] });
   // Control: an identity seated in neither table.
   const stranger = f.store.identities.create("seat-stranger");
   return { f, ownerKey, guest, linked, stranger };
