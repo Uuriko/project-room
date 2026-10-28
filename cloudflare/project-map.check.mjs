@@ -13,13 +13,14 @@ import { Miniflare } from 'miniflare';
 const fixture = `
 import entry, { ProjectRoom } from './room.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { linkWithProof } from '../tests/helpers/link-with-proof.mjs';
 export class MapTestRoom extends ProjectRoom {
  async fetch(request) {
   if (new URL(request.url).pathname === '/__fixture/setup' && request.method === 'POST') {
    this.store.initialize(initialRoom());
    const ownerKey = this.store.issueAccessKey('commons','owner');
    const identity = this.store.identities.create('Map reader');
-   this.store.identities.link(ownerKey,'commons',{identityId:identity.identityId,memberId:'reader',displayName:'Map reader',permissions:[]});
+   linkWithProof(this.store,ownerKey,'commons',identity,{memberId:'reader',displayName:'Map reader',permissions:[]});
    return Response.json({ownerKey,readerSecret:identity.secret,readerKey:this.store.issueAccessKey('commons','reader')});
   }
   return super.fetch(request);
