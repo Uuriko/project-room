@@ -316,3 +316,16 @@ test("actual retry CLI refuses malformed reports and observes both local version
   assert.deepEqual(origin.requests.toSorted(), versionPaths.toSorted());
   assert.deepEqual(entry.requests.toSorted(), versionPaths.map(path => `/room${path}`).toSorted());
 });
+
+
+test("target revision in an HTTP503 version response cannot pass smoke or propagation retry", async t => {
+  const origin = await door(t, "/canonical", { path: "/api/version", status: 503, body: { sourceRevision: revision } });
+  const entry = await door(t, "/room");
+  const result = await runSmoke(origin, entry, true);
+  assert.equal(result.code, 1);
+  const failure = result.report.checks.find(check => check.name === `version ${origin.url}/api/version`);
+  assert.equal(failure.pass, false);
+  assert.equal(failure.status, 503);
+  assert.equal(failure.got, revision);
+  assert.equal(propagationRetry(result.report, { sha: revision, origin: origin.url, entry: entry.url }), false);
+});

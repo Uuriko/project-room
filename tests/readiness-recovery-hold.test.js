@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { timeoutOnlyEvidence } from '../scripts/readiness-recovery-hold.mjs';
-import { heldRecovery } from '../scripts/deploy-recovery.mjs';
+import { heldRecovery, recoveryDescription } from '../scripts/deploy-recovery.mjs';
 const sha = 'a'.repeat(40), origin = 'https://canonical.example', entry = 'https://entry.example/room';
 const fixture = () => ({ ok: false, sha, origin, entry, checks: [origin, entry].flatMap(door => [
   ...['/api/version', '/api/version/worker'].map(path => ({ name: `version ${door}${path}`, pass: true, status: 200, got: sha })),
@@ -22,6 +22,11 @@ test('only complete digest-bound timeout evidence holds recovery, never calls it
   assert.equal(timeoutOnlyEvidence(raw, options), true);
   const held = heldRecovery({ targetSha: sha, candidateCodeSchemaVersion: 42 }, raw, options);
   assert.equal(held.releaseFailed, true);
+  const description = recoveryDescription(held);
+  assert.match(description, /RECOVERY HELD — MANUAL DIAGNOSIS REQUIRED/);
+  assert.match(description, /prod: recovery_held/);
+  assert.match(description, /entry: recovery_held/);
+  assert.doesNotMatch(description, /ROLLBACK VERIFIED/);
   assert.match(held.status, /RECOVERY HELD/);
   assert.ok(Object.values(held.workers).every(worker => worker.rollbackAttempted === false));
   assert.equal(heldRecovery({ targetSha: sha }, raw, { ...options, prodOutcome: 'failure' }), null);

@@ -271,10 +271,10 @@ async function main() {
     for (;;) {
       const results = await Promise.all(doors.map(get));
       results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; statuses[doors[i]] = r.status; });
-      if (doors.every(d => last[d] === sha) || Date.now() > deadline) break;
+      if (doors.every(d => statuses[d] === 200 && last[d] === sha) || Date.now() > deadline) break;
       await sleep(10000);
     }
-    for (const d of doors) record(`version ${d}`, last[d] === sha, { got: last[d], status: statuses[d] });
+    for (const d of doors) record(`version ${d}`, statuses[d] === 200 && last[d] === sha, { got: last[d], status: statuses[d] });
   }
 
   for (const door of [origin, entry]) {
