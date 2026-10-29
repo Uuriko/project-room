@@ -1463,7 +1463,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       // runPure's mapping, plus 409 for a stale round (same as the update
       // route's round precondition).
       if (error instanceof ClaimError && error.code === "work_claim_conflict") {
-        reject(409, error.code, `${error.message} — re-read the claim and retry with the current round.`);
+        reject(409, error.code, "The release basis does not match the current claim. Use claimedAt and history.length + (historyOmitted ?? 0) from the same fresh read; review the current owner before retrying.");
       }
       if (error instanceof ClaimError) reject(422, error.code, error.message);
       throw error;
