@@ -1564,12 +1564,13 @@ test("Updates refresh live without stealing focus and filter permission decision
   new AccessRequests(store).requestForMember(applicant,'commons',{permissions:['accept_work'],requestId:'live-permission'});
   await page.waitForFunction(()=>document.querySelector('#updates-count').textContent==='3');
   const decision=page.locator('[data-access-request-id="live-permission"]');await decision.waitFor();
-  assert.equal(await decision.getByRole('button',{name:'Approve partial',exact:true}).count(),0);
+  const decisionTitle=(await decision.locator('.attention-title').textContent()).trim();
+  assert.equal(await decision.getByRole('button',{name:`Approve partial — ${decisionTitle}`,exact:true}).count(),0);
   assert.equal(await page.locator('.updates-row').filter({hasText:'Applicant wants more permissions'}).count(),0);
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   mkdirSync('test-results',{recursive:true});await page.screenshot({path:'test-results/refined-updates-phone.png'});
   await selectUpdatesFilter('Mentions','mentions');assert.equal(await decision.isVisible(),false);
-  await selectUpdatesFilter('Needs me','needs');await decision.getByRole('button',{name:'Approve',exact:true}).click();
+  await selectUpdatesFilter('Needs me','needs');await decision.getByRole('button',{name:`Approve — ${decisionTitle}`,exact:true}).click();
   await page.waitForFunction(()=>document.querySelector('#updates-count').textContent==='2');
   await page.locator('#updates-close').click();assert.equal(await page.locator('#message-input').inputValue(),'Keep my conversation draft');
   assert.deepEqual(errors,[]);

@@ -100,7 +100,9 @@ async function ask(page, memberId = "requester", { keyboard = false } = {}) {
 async function decide(page, label, expectedStatus = 200) {
   const reply = page.waitForResponse(response => response.request().method() === "POST"
     && /\/access-requests\/[^/]+\/decide$/.test(new URL(response.url()).pathname));
-  await attentionRow(page).getByRole("button", { name: label, exact: true }).click();
+  const row = attentionRow(page);
+  const itemTitle = (await row.locator(".attention-title").textContent()).trim();
+  await row.getByRole("button", { name: `${label} — ${itemTitle}`, exact: true }).click();
   const response = await reply;
   assert.equal(response.status(), expectedStatus, await response.text());
   return response.json();
@@ -146,7 +148,7 @@ for (const width of [390, 1280]) test(`a basic member requests by keyboard at ${
   await page.locator("#room-actions-query").fill("board");
   await page.locator('[data-room-action="board"]').press("Enter");
   const card = page.locator('article[data-claim-id="permission-work"]');
-  await card.getByRole("button", { name: "Claim", exact: true }).click();
+  await card.getByRole("button", { name: "Claim — Permission browser work", exact: true }).click();
   await page.locator('[aria-labelledby="board-col-claimed"] article[data-claim-id="permission-work"]').waitFor();
   assert.equal(await page.locator("#board-status").textContent(), "Claimed 'Permission browser work'");
   assert.equal(f.store.workClaims.get("commons", "permission-work").owner, "requester");
@@ -158,28 +160,29 @@ test("an admin can cancel partial review, approve only selected permissions, and
   await ask(member);
   const admin = await f.login("admin"), row = attentionRow(admin);
   await row.waitFor();
+  const itemTitle = (await row.locator(".attention-title").textContent()).trim();
   assert.equal(await row.locator(".attention-kind").textContent(), "Permission request");
-  assert.equal(await row.getByRole("button", { name: "Approve", exact: true }).isDisabled(), true,
+  assert.equal(await row.getByRole("button", { name: `Approve — ${itemTitle}`, exact: true }).isDisabled(), true,
     "an admin is not offered a grant it does not hold");
   assert.match(await row.textContent(), /You cannot grant: Complete work/);
   assert.deepEqual(f.permissions("requester"), []);
   let writes = 0;
   admin.on("request", request => { if (request.method() === "POST" && /\/decide$/.test(new URL(request.url()).pathname)) writes++; });
   const sequence = f.store.room("commons").sequence;
-  await row.getByRole("button", { name: "Approve partial", exact: true }).click();
+  await row.getByRole("button", { name: `Approve partial — ${itemTitle}`, exact: true }).click();
   const selection = row.locator("fieldset");
   await selection.waitFor();
   assert.equal(await selection.getByRole("checkbox").count(), 2);
   assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isDisabled(), true);
   assert.equal(await selection.getByRole("checkbox", { name: "Complete work", exact: true }).isChecked(), false);
   await selection.getByRole("checkbox", { name: "Accept work", exact: true }).uncheck();
-  assert.equal(await row.getByRole("button", { name: "Approve selected", exact: true }).isDisabled(), true);
+  assert.equal(await row.getByRole("button", { name: `Approve selected — ${itemTitle}`, exact: true }).isDisabled(), true);
   await row.getByRole("button", { name: "Cancel", exact: true }).click();
   await selection.waitFor({ state: "detached" });
   assert.equal(writes, 0, "opening, selecting and cancelling sends no decision");
   assert.equal(f.store.room("commons").sequence, sequence, "cancel appends no room event");
   assert.equal(f.pending().length, 1);
-  const partialButton = row.getByRole("button", { name: "Approve partial", exact: true });
+  const partialButton = row.getByRole("button", { name: `Approve partial — ${itemTitle}`, exact: true });
   assert.equal(await partialButton.evaluate(node => node === document.activeElement), true, "Cancel returns focus to partial review");
 
   await partialButton.click();
@@ -322,7 +325,8 @@ test("ownership transfer closes a partial review and clears the owner-only rollu
   await row.waitFor();
   const ownerDetail = page.locator("#attention-list > li").filter({ hasText: title });
   await ownerDetail.waitFor();
-  await row.getByRole("button", { name: "Approve partial", exact: true }).click();
+  const itemTitle = (await row.locator(".attention-title").textContent()).trim();
+  await row.getByRole("button", { name: `Approve partial — ${itemTitle}`, exact: true }).click();
   await row.locator("fieldset").waitFor();
   const held = f.hold(), captured = deferred();
   await page.route("**/api/rooms/commons/access-requests?status=pending", async route => {
@@ -359,6 +363,7 @@ test("stream-driven request refresh preserves action focus but never takes it ba
     permissions: ["accept_work", "complete_work"], requestId: "focus-browser-request" });
   const page = await f.login("owner"), row = attentionRow(page);
   await row.waitFor();
+  const itemTitle = (await row.locator(".attention-title").textContent()).trim();
   const isQueue = response => response.request().method() === "GET"
     && new URL(response.url()).pathname === "/api/rooms/commons/access-requests";
   const refreshDone = () => page.waitForFunction(() => !document.querySelector("#attention-refresh").disabled);
@@ -369,7 +374,7 @@ test("stream-driven request refresh preserves action focus but never takes it ba
     if (request.method() === "POST" && /\/access-requests\/[^/]+\/decide$/.test(new URL(request.url()).pathname)) decisions++;
   });
   for (const label of ["Approve", "Decline", "Approve partial"]) {
-    const action = row.getByRole("button", { name: label, exact: true });
+    const action = row.getByRole("button", { name: `${label} — ${itemTitle}`, exact: true });
     await action.focus();
     const refreshed = page.waitForResponse(isQueue);
     unrelatedMessage(`Unrelated activity while focused on ${label}`);
@@ -385,7 +390,7 @@ test("stream-driven request refresh preserves action focus but never takes it ba
     await held.promise;
     await route.fulfill({ response });
   });
-  await row.getByRole("button", { name: "Approve", exact: true }).focus();
+  await row.getByRole("button", { name: `Approve — ${itemTitle}`, exact: true }).focus();
   unrelatedMessage("The reader moves away during a pending refresh");
   await captured.promise;
   await page.locator("#updates-close").click();
