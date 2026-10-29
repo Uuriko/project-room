@@ -182,6 +182,7 @@ export class DurableDatabase {
 }
 
 export const durableStorage = {
+  clockSemantics: 'io-bound',
   version(db) {
     const hit = cacheOf(db);
     if (hit.versionKnown) return hit.version;

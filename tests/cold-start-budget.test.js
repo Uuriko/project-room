@@ -241,4 +241,6 @@ test("successful writable startup total includes work after the legacy cold-star
   assert.equal(complete.initializationMs, 50, "backfill interval is included in the new total");
   assert.equal(complete.legacyColdStartMs, old.durationMs);
   assert.equal(store.initializationMs, complete.initializationMs);
+  assert.equal(complete.cpuMeasured, false);
+  assert.equal(complete.clockSemantics, "runtime-dependent");
 });
