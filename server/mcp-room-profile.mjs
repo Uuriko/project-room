@@ -253,6 +253,17 @@ function validRoomArgs(name, args) {
     return typeof args.requestId === "string" && args.requestId.length > 0 && args.requestId.length <= 64
       && ["approve", "deny"].includes(args.decision) && permsOk && noteOk;
   }
+  if (name === "room_request_access") {
+    const permsOk = args.requestedPermissions === undefined || validPermissionList(args.requestedPermissions);
+    const nameOk = args.displayName === undefined || typeof args.displayName === "string" && args.displayName.trim().length > 0 && args.displayName.length <= 80;
+    const noteOk = args.note === undefined || args.note === null || typeof args.note === "string" && args.note.length <= 500;
+    const refOk = args.referredBy === undefined || args.referredBy === null || typeof args.referredBy === "string" && args.referredBy.length <= 80;
+    const reqOk = args.requestId === undefined || typeof args.requestId === "string" && args.requestId.length >= 1 && args.requestId.length <= 64;
+    return permsOk && nameOk && noteOk && refOk && reqOk;
+  }
+  if (name === "room_access_request_status") {
+    return typeof args.requestId === "string" && args.requestId.length > 0 && args.requestId.length <= 64;
+  }
   if (name === "room_create_agent_invite") {
     const ownerOk = args.ownerEquivalent === undefined || args.ownerEquivalent === true || args.ownerEquivalent === false;
     const hasScope = args.profile !== undefined || args.permissions !== undefined || args.ownerEquivalent !== undefined;
@@ -543,6 +554,37 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_merge_members") {
     return store.pairing.merge(secret, args.roomId, { keepMemberId: args.keepMemberId, retireMemberId: args.retireMemberId });
+  }
+  if (name === "room_request_access") {
+    // Joiner-side access request (UT2 04-02 F1): the same service call as
+    // POST /api/access-requests, filed for the CALLER's identity with its
+    // secret as proof — the caller never names another identityId. Runs
+    // before any membership auth: not being a member is the normal case.
+    const filed = new AccessRequests(store).request(args.roomId, {
+      identityId: identity.identityId,
+      displayName: args.displayName ?? identity.displayName,
+      requestedPermissions: args.requestedPermissions ?? [],
+      ...(args.note !== undefined ? { note: args.note } : {}),
+      ...(args.referredBy !== undefined ? { referredBy: args.referredBy } : {}),
+      ...(args.requestId !== undefined ? { requestId: args.requestId } : {})
+    }, secret);
+    if (filed.status !== "pending") return filed;
+    // The service's next[] teaches the REST poll path; add the MCP twin so
+    // an MCP-only joiner is never routed off the surface it is on.
+    return Object.freeze({
+      ...filed,
+      next: Object.freeze([
+        ...(filed.next ?? []),
+        Object.freeze({ action: "poll-status-mcp", tool: "room_access_request_status",
+          arguments: Object.freeze({ requestId: filed.requestId }),
+          description: "Poll your request's status over MCP with room_access_request_status." })
+      ])
+    });
+  }
+  if (name === "room_access_request_status") {
+    // Identity-scoped read (UT2 04-02 F1b): only the requesting identity
+    // can read its request; anyone else gets the service's bare 404.
+    return new AccessRequests(store).status(args.requestId, identity.identityId, secret);
   }
   if (name === "room_check_access" && args.roomId === undefined) {
     const allowed = mcpRoomAllowlist(store, secret);
@@ -1094,6 +1136,7 @@ const MCP_ROOM_WRITE_TOOLS = new Set([
   "add_land_item", "remove_land_item", "report_tip",
   "room_put_file", "room_discard_file", "room_commit_file",
   "room_decide_access_request", "room_create_agent_invite", "room_revoke_agent_invite",
+  "room_request_access",
   "bond_propose", "bond_accept", "bond_decline", "bond_revoke",
   "dm_posted",
 ]);
