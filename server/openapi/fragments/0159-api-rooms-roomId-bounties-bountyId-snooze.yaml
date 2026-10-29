@@ -1,0 +1,36 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/snooze:
+    post:
+      summary: Snooze a proposed bounty
+      description: |
+        Poster-only triage decision: the proposal stays open (PROPOSED)
+        with a defer-until date; a snoozed proposal is protected from
+        expired-unfunded finalization while deferred. Emits `bounty.snoozed`.
+        API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [until]
+              properties:
+                until: { type: string, format: date-time }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The snoozed bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }
