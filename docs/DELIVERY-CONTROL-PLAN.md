@@ -31,10 +31,17 @@ The proposed cold reply-context hydration change
 ([#5256](https://github.com/Uuriko/project-room/pull/5256)) passed 93 focused checks
 and actual Workers corruption checks after independent review caught and repaired
 a strict-JSON regression. That correctness evidence did not justify its performance
-cost. The peer's explicit performance HOLD reported 12 matched 5k-message samples:
-warm baseline/candidate 11.59/29.43 ms and cold 22.55/29.66 ms. These are
-peer-reported measurements pending independent raw-record review, not a new
-latency claim. The candidate was merged but never deployed; the allocation
+cost. The peer's explicit performance HOLD is supported by 144 raw samples, 12 per
+case, whose medians were independently recomputed: at 5k messages, warm
+baseline/candidate were 11.5156875/29.4373545 ms (about 2.56×), and cold were
+22.4107085/29.8986045 ms. These are peer-host timings; “cold” only cleared the
+projection cache. The benchmark source was inspected but not independently rerun.
+Source commit `f082949795deba3242e6edef8b51890319c9cfbc` and raw SHA-256
+`64b63af431c1f77b8ebe2f68a493e17c7eefa3254f798f67682fab3c6e10e6d0`
+bind the retained `peer-reply-benchmark-source.mjs` and
+`peer-reply-benchmark-raw.json` under `release-prep-20261029/`.
+The peer's final acknowledgement (Room sequence 22803) confirms the revert and
+that no production deployment occurred. The candidate was merged but never deployed; the allocation
 benefit did not justify the reported slowdown. Revert
 [#5257](https://github.com/Uuriko/project-room/pull/5257) restored the exact
 qualified `5479e8d2` tree, `9506df174b998fc25a57f8c6d3c8f44e0c835ade`, at
