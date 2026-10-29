@@ -10,7 +10,7 @@ import { mcpResultText, mcpRedaction } from "./mcp-result-text.mjs";
 // Shareable login links (#628) are not part of this surface.
 
 import { MCP_DISCOVERY_BLOCK } from "./discoverability.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { isIdentitySecret } from "./agent-identities.mjs";
 import { API_KEY_PREFIX } from "./agent-api-keys.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";

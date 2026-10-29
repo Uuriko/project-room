@@ -1,6 +1,6 @@
 import sanitizeHtml from './vendor/gmail-html-sanitizer.mjs';
 import { randomBytes } from 'node:crypto';
-import { ServiceError } from './store.mjs';
+import { ServiceError } from './service-error.mjs';
 import { htmlToText } from './mime-message.mjs';
 export const gmailAttachmentLimit = 10 * 1024 * 1024;
 const fail = (code, message) => { throw new ServiceError(422, code, message); };

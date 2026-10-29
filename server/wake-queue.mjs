@@ -14,7 +14,7 @@
 
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { wakeQueueLimits as limits } from "./wake-queue-limits.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 
