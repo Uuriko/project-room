@@ -25,7 +25,81 @@ export const GENESIS_PREV_HASH = "0".repeat(64);
 // Throws a TypeError on values that have no JSON representation (undefined,
 // functions, symbols, bigint) so silent data loss can never sneak into a
 // receipt hash.
-export function canonicalJson(value) {
+//
+// Implementation (PERF-50 B3-a): the fast path deep-sorts a validated copy
+// ("presort") and lets the native JSON.stringify emit the bytes — several
+// times faster than per-node string building, with byte-identical output.
+// The presort enforces this serializer's stricter contract itself
+// (non-finite numbers and non-JSON values throw, Dates become their ISO
+// string), because JSON.stringify would otherwise silently render them as
+// null / drop them. Two shapes a plain-object copy cannot reproduce are
+// detected during the presort and fall back to the original recursive
+// serializer (canonicalJsonRecursive below) for the whole value:
+//   - objects with integer-like keys: a JS object orders those keys
+//     numerically, not in the sorted UTF-16 order the canonical form
+//     requires, so no presorted copy can carry the right order;
+//   - sparse arrays: the recursive form renders a hole as an empty slot
+//     ("[1,,3]"), where JSON.stringify would render null.
+class CanonicalFallback extends Error {}
+
+// Returns the value JSON.stringify must emit for `value`: the value itself
+// when its subtree is already in canonical order (plain data only — a
+// subtree JSON.stringify would treat specially, via a prototype toJSON or
+// a wrapper object, is always rebuilt), otherwise a sorted plain copy
+// sharing every unchanged child.
+function presortCanonical(value) {
+  if (value === null) return null;
+  const t = typeof value;
+  if (t === "string" || t === "boolean") return value;
+  if (t === "number") {
+    if (!Number.isFinite(value)) throw new TypeError("canonicalJson: non-finite number is not JSON-serializable");
+    return value;
+  }
+  if (Array.isArray(value)) {
+    let out = null;
+    for (let i = 0; i < value.length; i++) {
+      if (!(i in value)) throw new CanonicalFallback();
+      const child = presortCanonical(value[i]);
+      if (out !== null) out[i] = child;
+      else if (child !== value[i]) { out = value.slice(); out[i] = child; }
+    }
+    if (out !== null) return out;
+    // Reuse the array itself only when stringify cannot divert on it.
+    return typeof value.toJSON === "function" ? value.slice() : value;
+  }
+  if (t === "object") {
+    if (value instanceof Date) return value.toISOString();
+    const keys = Object.keys(value);
+    let ordered = true;
+    for (let i = 1; i < keys.length; i++) if (keys[i] < keys[i - 1]) { ordered = false; break; }
+    const emitKeys = ordered ? keys : keys.slice().sort();
+    const children = new Array(emitKeys.length);
+    let changed = !ordered;
+    for (let i = 0; i < emitKeys.length; i++) {
+      const k = emitKeys[i];
+      const c0 = k.charCodeAt(0);
+      if (c0 >= 48 && c0 <= 57 && String(k >>> 0) === k) throw new CanonicalFallback();
+      children[i] = presortCanonical(value[k]);
+      if (children[i] !== value[k]) changed = true;
+    }
+    // Reuse the object itself only when nothing changed AND it is plain
+    // (Object.prototype or null prototype) with no callable toJSON for
+    // stringify to divert on; anything else is rebuilt as a plain copy.
+    if (!changed) {
+      const proto = Object.getPrototypeOf(value);
+      if ((proto === Object.prototype || proto === null) && typeof value.toJSON !== "function")
+        return value;
+    }
+    const out = {};
+    for (let i = 0; i < emitKeys.length; i++) out[emitKeys[i]] = children[i];
+    return out;
+  }
+  throw new TypeError(`canonicalJson: ${t} is not JSON-serializable`);
+}
+
+// The original recursive serializer, retained verbatim as the fallback for
+// the shapes named above. Its output defines the canonical bytes.
+function canonicalJsonRecursive(value) {
   if (value === null) return "null";
   const t = typeof value;
   if (t === "string") return JSON.stringify(value);
@@ -34,13 +108,22 @@ export function canonicalJson(value) {
     return JSON.stringify(value);
   }
   if (t === "boolean") return value ? "true" : "false";
-  if (Array.isArray(value)) return "[" + value.map(canonicalJson).join(",") + "]";
+  if (Array.isArray(value)) return "[" + value.map(canonicalJsonRecursive).join(",") + "]";
   if (t === "object") {
     if (value instanceof Date) return JSON.stringify(value.toISOString());
     const keys = Object.keys(value).sort();
-    return "{" + keys.map(k => JSON.stringify(k) + ":" + canonicalJson(value[k])).join(",") + "}";
+    return "{" + keys.map(k => JSON.stringify(k) + ":" + canonicalJsonRecursive(value[k])).join(",") + "}";
   }
   throw new TypeError(`canonicalJson: ${t} is not JSON-serializable`);
+}
+
+export function canonicalJson(value) {
+  try {
+    return JSON.stringify(presortCanonical(value));
+  } catch (e) {
+    if (e instanceof CanonicalFallback) return canonicalJsonRecursive(value);
+    throw e;
+  }
 }
 
 function sha256Hex(text) {
