@@ -101,6 +101,11 @@ h1 {
   max-width:570px;
   margin:0
 }
+.intro-note {
+  color:var(--muted);
+  max-width:570px;
+  margin:14px 0 0
+}
 .intro {
   padding-bottom:48px
 }
