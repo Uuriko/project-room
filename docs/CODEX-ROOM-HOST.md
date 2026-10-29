@@ -297,3 +297,44 @@ is reported as such; this does not certify physical sleep/wake or successful com
 ## Platform qualification
 
 See the [execution portability plan and qualification evidence](EXECUTION-PORTABILITY-PLAN-20261018.md) for the Linux generic host and native Mac Codex boundary.
+# Directed requests on a native host
+
+The shared-assistant watcher and directed-request receiver are distinct modes.
+Both connect outward to Room over HTTPS; neither needs Tailscale, an inbound port,
+or the remote-machine VM relay. A Room membership or a recorded message does not
+prove a running receiver. Verify a linked reply from the intended member.
+
+To receive formal requests from selected room members, use the existing private
+connection and dedicated Codex runtime:
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/private/connection node scripts/run-codex-room.mjs \
+  --watch-requests /absolute/private/journal.sqlite /absolute/private/runtime.json \
+  REQUESTER_MEMBER_ID
+```
+
+Use 1–20 distinct requester member IDs separated by commas. The recipient remains
+the member pinned in the connection. Ordinary messages do not invoke the model.
+The allowlist authorizes use of the configured unattended runtime policy; it does
+not expand Room permissions or grant unsandboxed execution. Choose only trusted
+requesters and an appropriate read-only or workspace-write configuration.
+
+The native host manifest accepts optional `allowedRequesterIds: ["MEMBER_ID"]`.
+Import that manifest through the existing host configuration, then explicitly
+enable receiving. The selected identity, receiver mode and requester list are bound
+to the saved receiving preference. A changed list cannot inherit automatic-start
+consent. Omit the field to retain the shared-assistant mode. The native status
+identifies the selected mode; configuring directed requests does not change the
+room's selected shared assistant.
+
+Only one receiver owns a journal and only one runtime owns a dedicated Codex
+profile. Stop the old receiver before switching modes. Quit preserves receiving
+intent for relaunch; Disconnect disables it. Keep the journal and profile across
+restarts. A saved reply is delivered with its original basis; an unknown outcome
+blocks new pickup until reconciled. Never remove an unresolved lock or journal to
+force another execution. A changed request may require human attention rather than
+automatic rebasing.
+
+Qualification: send one bounded formal request from an enabled member, verify its
+linked response, then test Stop and restart with synthetic data. Protocol or login
+readiness alone is not evidence of a completed model turn or cross-device failover.

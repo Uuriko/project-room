@@ -1,0 +1,135 @@
+  /api/rooms/{roomId}/access-review:
+    get:
+      summary: Owner access review (read-only)
+      description: |
+        Periodic access-review report for one room: active members and their grants,
+        guests with expiry and status, invitation links with remaining joins, pending
+        one-time agent invite codes (unredeemed and unrevoked, by hash-free inviteId),
+        agent identities and connections with state, and last activity per member.
+        Owner-only by ID (the room owner's account session, room key, or agent
+        identity bearer; other members get 403 owner_required). Shares the per-credential read allowance of every room
+        read. The report never carries a token, secret or hash; removed members are
+        absent. `node scripts/access-review.mjs` prints the same object from a store
+        file or from this route.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200':
+          description: Access review report
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  format: { type: string, enum: [project-room-access-review-v1] }
+                  roomId: { type: string }
+                  roomTitle: { type: string }
+                  ownerId: { type: string }
+                  generatedAt: { type: string, format: date-time }
+                  lastActivityAt: { type: string, format: date-time, nullable: true }
+                  counts:
+                    type: object
+                    properties:
+                      members: { type: integer }
+                      guests: { type: integer }
+                      shareLinks: { type: integer }
+                      pendingInvites: { type: integer }
+                      agentIdentities: { type: integer }
+                      agentConnections: { type: integer }
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        kind: { type: string, enum: [human, agent] }
+                        role: { type: string, nullable: true }
+                        permissions: { type: array, items: { type: string } }
+                        revision: { type: integer }
+                        accountableHumanId: { type: string, nullable: true }
+                        identityId: { type: string, nullable: true }
+                        agentType: { type: string, nullable: true, description: First-party Connect catalog type; present only on members created from the agent catalog }
+                        accountBound: { type: boolean }
+                        membershipOrigin: { type: string, enum: [bootstrap, added, invitation] }
+                        joinedAt: { type: string, format: date-time, nullable: true }
+                        liveAccessKeys: { type: integer, description: "Count of unexpired, unrevoked keys; never the keys" }
+                        latestAccessKeyExpiresAt: { type: string, format: date-time, nullable: true }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+                  guests:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        kind: { type: string, enum: [human, agent] }
+                        permissions: { type: array, items: { type: string } }
+                        joinedAt: { type: string, format: date-time, nullable: true }
+                        expiresAt: { type: string, format: date-time, nullable: true }
+                        status: { type: string, enum: [active, expired] }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+                  shareLinks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        role: { type: string }
+                        permissions: { type: array, items: { type: string } }
+                        issuerMemberId: { type: string }
+                        createdAt: { type: string, format: date-time }
+                        expiresAt: { type: string, format: date-time }
+                        maxJoins: { type: integer }
+                        joins: { type: integer }
+                        remainingJoins: { type: integer }
+                        status: { type: string, enum: [active, full, expired, cancelled, authority_changed] }
+                  pendingInvites:
+                    type: array
+                    description: One-time agent invite codes neither redeemed nor revoked; never the code or its stored hash
+                    items:
+                      type: object
+                      properties:
+                        inviteId: { type: string, description: Short hash-free handle that DELETE /agent-invites takes }
+                        displayName: { type: string, nullable: true }
+                        permissions: { type: array, items: { type: string } }
+                        inviterMemberId: { type: string }
+                        createdAt: { type: string, format: date-time }
+                        expiresAt: { type: string, format: date-time }
+                        status: { type: string, enum: [active, expired] }
+                  agentIdentities:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        identityId: { type: string }
+                        displayName: { type: string }
+                        memberId: { type: string }
+                        linkedAt: { type: string, format: date-time }
+                        memberActive: { type: boolean }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+                  agentConnections:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        memberId: { type: string }
+                        displayName: { type: string }
+                        generation: { type: integer }
+                        memberRevision: { type: integer }
+                        permissions: { type: array, items: { type: string } }
+                        sponsorMemberId: { type: string }
+                        createdAt: { type: string, format: date-time }
+                        updatedAt: { type: string, format: date-time }
+                        expiresAt: { type: string, format: date-time }
+                        status: { type: string, enum: [key_issued, expired, revoked, access_changed, disconnected] }
+                        firstActionAt: { type: string, format: date-time, nullable: true }
+                        lastActivityAt: { type: string, format: date-time, nullable: true }
+        '403':
+          description: Not the room owner (owner_required)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorBody'
+  # JDOT-MEMBER-PERMS begin: reviewed member requests and the shared queue.
