@@ -6444,7 +6444,9 @@ paths:
         and `expectedHistoryLength` must match the current item, so a stale
         replay or a delayed duplicate cannot destroy a newer claim generation
         (E5/D4). A stale round is refused with 409 `work_claim_conflict`
-        ("The claim changed since it was read") — re-read the claim and retry.
+        (release basis mismatch) — re-read the claim, include historyOmitted in
+        the count, and review the current owner before retrying. A mismatch
+        can be a miscount; it does not prove the claim changed after the read.
         API keys need `rooms:write`.
       parameters:
         - $ref: '#/components/parameters/RoomId'
@@ -18269,6 +18271,7 @@ components:
         poster: { type: string }
         claimant: { type: string, nullable: true }
         verifier: { type: string, nullable: true }
+        disputeDecider: { type: string, nullable: true, description: "Designated dispute decider, or the designated verifier when no separate decider was chosen. Eligibility is checked when a dispute opens; this value does not confirm an active seat. Null when neither was designated." }
         watchers: { type: array, items: { type: string } }
         deadline: { type: string, format: date-time }
         stateChangedAt: { type: string, format: date-time }
