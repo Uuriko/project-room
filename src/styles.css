@@ -319,6 +319,8 @@ h3 { margin: .8rem 0 .45rem; font-size: 1.05rem; line-height: 1.3; letter-spacin
 .timeline { flex: 1 1 auto; min-height: 10rem; overflow-y: auto; margin: 0; padding: .75rem 1.5rem 1rem; list-style: none; scrollbar-gutter: stable; }
 .timeline > .empty-note { color: var(--muted); }
 .tl-work { margin: .6rem 0; }
+.conversation-work { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: .35rem; max-width: 100%; }
+.conversation-work-summary { flex-basis: 100%; color: var(--muted); overflow-wrap: anywhere; }
 .tl-work .work-card { border: 1px solid var(--line); border-radius: .65rem; background: var(--panel-raised); padding: .85rem 1rem; }
 .tl-work .work-card h3 { margin: .3rem 0 .2rem; font-size: .95rem; }
 .tl-work .work-next-step { margin: .15rem 0; }
@@ -1844,6 +1846,18 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
   select, input, textarea, .composer-row { border-color: ButtonText; }
   .composer-row:focus-within { border-color: Highlight; }
   select:focus, input:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { border-color: Highlight; outline-color: Highlight; }
+}
+/* Icons grow with the reader's text size. At the default size these match
+   the previous pixel sizes exactly. */
+svg[width="20"][height="20"] { width: 1.25rem; height: 1.25rem; }
+.composer-row { grid-template-columns: minmax(0, 1fr) max(44px, 2.75rem); }
+.icon-button { width: max(36px, 2.25rem); height: max(36px, 2.25rem); min-width: max(36px, 2.25rem); min-height: max(36px, 2.25rem); }
+.composer-row > button[type="submit"] { min-width: max(44px, 2.75rem); min-height: max(44px, 2.75rem); }
+@media (pointer: coarse) { .icon-button { width: max(44px, 2.75rem); height: max(44px, 2.75rem); min-width: max(44px, 2.75rem); min-height: max(44px, 2.75rem); } }
+@media (max-width: 520px) {
+  .room-topbar { grid-template-columns: max(44px, 2.75rem) minmax(0, 1fr); }
+  .room-topbar .icon-button { width: max(44px, 2.75rem); height: max(44px, 2.75rem); min-width: max(44px, 2.75rem); min-height: max(44px, 2.75rem); }
+  .composer-row > button[type="submit"] { flex-basis: max(44px, 2.75rem); }
 }
 /* The phone menu drawer dims the room behind it. A tap on the dimmed area
    lands outside the sidebar, which the existing outside-click handler
