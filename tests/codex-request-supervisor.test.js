@@ -1,4 +1,5 @@
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import assert from "node:assert/strict";
 import { join } from "node:path";
 import { rmSync } from "node:fs";
@@ -69,7 +70,9 @@ async function fixture(t, mode = "complete") {
     server.closeStreams(); server.closeAllConnections(); await new Promise(r => server.close(r));
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
-  return { post, run, rpc, directory, connection, cwd: f.directory, client: new RoomAgentClient(connection), get db() { return db; },
+  const cancel = id => f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "reply_request.cancelled",
+    data: { requestMessageId: id, expectedRequestRevision: 0, reason: "No longer needed" } });
+  return { post, cancel, run, rpc, directory, connection, cwd: f.directory, client: new RoomAgentClient(connection), get db() { return db; },
     get connects() { return connects; }, reopen() { db.close(); db = openRequestJournal(journal); } };
 }
 
@@ -286,4 +289,70 @@ test("saved row from another scope cannot suppress a selected current request wi
   assert.equal((await f.client.replyContext(id)).request.status, "answered");
   assert.equal(f.rpc.starts, 1);
   assert.equal(f.db.prepare("SELECT delivered FROM request_runs WHERE id=?").get("host-another-room").delivered, 0);
+});
+
+test("definitely refused saved delivery stays suppressed across restart without losing its original answer", async t => {
+  const f = await fixture(t), id = f.post();
+  const original = RoomAgentClient.prototype.replyAction;
+  RoomAgentClient.prototype.replyAction = async () => { throw Object.assign(new Error("Synthetic outage"), { status: 503 }); };
+  try {
+    await assert.rejects(runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+      execute: async () => ({ body: "Preserved canceled answer" }) }), /Synthetic outage/);
+  } finally { RoomAgentClient.prototype.replyAction = original; }
+  const saved = f.db.prepare("SELECT * FROM request_runs").get();
+  f.cancel(id);
+  let attempts = 0;
+  RoomAgentClient.prototype.replyAction = async function (...args) { attempts++; return original.apply(this, args); };
+  try {
+    const first = f.run({ allowedRequestIds: ["future-request"] });
+    await waitUntil(() => attempts >= 1);
+    await delay(1150); first.controller.abort(); await first.promise;
+    assert.equal(attempts, 1);
+    f.reopen();
+    const second = f.run({ allowedRequestIds: ["future-request"] });
+    await delay(1150); second.controller.abort(); await second.promise;
+    assert.equal(attempts, 1);
+    const retained = f.db.prepare("SELECT * FROM request_runs").get();
+    assert.equal(retained.response, saved.response); assert.equal(retained.id, saved.id);
+    assert.equal(retained.attempt_id, saved.attempt_id); assert.equal(retained.delivered, 0);
+    assert.equal(f.connects, 0);
+    // An explicit reconciliation attempt remains possible, and still cannot reexecute.
+    await assert.rejects(runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+      execute: () => assert.fail("Cancelled request reexecuted") }));
+    assert.equal(attempts, 2);
+  } finally { RoomAgentClient.prototype.replyAction = original; }
+});
+
+test("legacy journal migration retains saved operation and uses indexed retry scan", async t => {
+  const f = await fixture(t), path = join(f.cwd, "legacy.sqlite");
+  const legacy = new DatabaseSync(path);
+  legacy.exec("CREATE TABLE request_runs(id TEXT PRIMARY KEY,response TEXT,delivered INTEGER NOT NULL DEFAULT 0,attempt_id TEXT)");
+  legacy.prepare("INSERT INTO request_runs VALUES(?,?,0,?)").run("original-op", '{"body":"retained"}', "original-attempt");
+  legacy.close();
+  const upgraded = openRequestJournal(path);
+  try {
+    assert.deepEqual({ ...upgraded.prepare("SELECT * FROM request_runs").get() }, {
+      id: "original-op", response: '{"body":"retained"}', delivered: 0, attempt_id: "original-attempt", delivery_refused: 0
+    });
+    const plan = upgraded.prepare("EXPLAIN QUERY PLAN SELECT rowid,id,response FROM request_runs WHERE delivered=0 AND delivery_refused=0 AND response IS NOT NULL AND rowid>? ORDER BY rowid LIMIT 50").all(0);
+    assert.ok(plan.some(row => row.detail.includes("request_runs_retryable_delivery")));
+    assert.ok(plan.every(row => !row.detail.includes("TEMP B-TREE")));
+  } finally { upgraded.close(); }
+});
+
+test("explicit confirmed reconciliation clears refusal without changing or rerunning saved operation", async t => {
+  const f = await fixture(t), id = f.post();
+  const original = RoomAgentClient.prototype.replyAction;
+  RoomAgentClient.prototype.replyAction = async () => { throw Object.assign(new Error("Synthetic definite refusal"), { status: 409 }); };
+  try {
+    await assert.rejects(runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+      execute: async () => ({ body: "Exact retained answer" }) }), /Synthetic definite refusal/);
+  } finally { RoomAgentClient.prototype.replyAction = original; }
+  const saved = f.db.prepare("SELECT * FROM request_runs").get();
+  assert.equal(saved.delivery_refused, 1);
+  await runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+    execute: () => assert.fail("Saved answer reexecuted") });
+  const recovered = f.db.prepare("SELECT * FROM request_runs").get();
+  assert.equal(recovered.delivery_refused, 0); assert.equal(recovered.delivered, 1);
+  assert.equal(recovered.response, saved.response); assert.equal(recovered.attempt_id, saved.attempt_id);
 });
