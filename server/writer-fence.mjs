@@ -622,10 +622,12 @@ export function registerWriter(db) {
 
 export function installWriterFence(db) {
   if (!db.isTransaction) throw new Error("Writer fence installation requires the migration transaction");
+  // Invocation-local metadata only: synchronous validation must not reuse a
+  // prior startup snapshot after a migration, repair or failed transaction.
+  const triggers = new Map(db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all().map(row => [row.name, row.sql]));
   for (const { name, sql } of writerFenceDefinitions) {
-    const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name);
-    if (!existing) db.exec(sql);
-    else if (existing.sql !== sql) throw new Error("Database writer fence requires operator reconciliation");
+    if (!triggers.has(name)) db.exec(sql);
+    else if (triggers.get(name) !== sql) throw new Error("Database writer fence requires operator reconciliation");
   }
   db.exec(`PRAGMA user_version=${STORE_SCHEMA_VERSION}`);
 }
@@ -634,8 +636,9 @@ export function verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
   const histories = writerVersions.filter(v => v <= version).flatMap(fenceDefinitions);
   if (version >= 28) histories.push(...deployedV28FenceDefinitions);
   const expected = new Map(histories.map(def => [def.name, def.sql]));
-  for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
-    if (expected.get(row.name) !== row.sql) throw new Error("Database writer fence requires operator reconciliation");
+  const triggers = new Map(db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all().map(row => [row.name, row.sql]));
+  for (const [name, sql] of triggers) {
+    if (expected.get(name) !== sql) throw new Error("Database writer fence requires operator reconciliation");
   }
   // The fence guarantees every table present is fenced; a missing table is a
   // schema-presence concern, not a fence concern. Purely additive tables are
@@ -645,7 +648,7 @@ export function verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
   const prefix = `writer_v${version}_`;
   for (const { name, sql } of fenceDefinitions(version)) {
     if (!present.has(name.slice(prefix.length).replace(/_(insert|update|delete)$/, ""))) continue;
-    if (db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name)?.sql !== sql) {
+    if (triggers.get(name) !== sql) {
       throw new Error("Database writer fence requires operator reconciliation");
     }
   }
