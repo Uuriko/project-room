@@ -1394,6 +1394,7 @@ const sameSession = (generation, roomId, memberId) => generation === client.gene
 const initials = text => esc(String(text ?? "").split(/\s+/).map(w => w.match(/[\p{L}\p{N}]/u)?.[0] ?? "").join("").slice(0, 2).toUpperCase() || "?");
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const time = value => timeFormat.format(new Date(value));
+const messageActionTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
 function safeUrl(value) { try { const u = new URL(value); return u.protocol === "https:" ? esc(u.href) : "#"; } catch { return "#"; } }
 const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(character => character.charCodeAt(0).toString(16).padStart(2, "0")).join("")}`;
 // Keep application-owned fragments outside the valid record-id alphabet. Earlier
@@ -2647,7 +2648,8 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   // identity (author + time), mirroring the "Link to message by … at …"
   // label in messageContent — a bare "More actions for this message" was
   // character-identical on every message.
-  const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for message by ${esc(displayName(m.authorId))} at ${esc(time(m.createdAt))}" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
+  const actionName = esc(uiText("message.actionsAccessibleName", { author: displayName(m.authorId), time: messageActionTimeFormat.format(new Date(m.createdAt)) }));
+  const menu = overflow ? ['<details class="message-more"><summary aria-label="', actionName, '" title="More actions">⋯</summary><div class="message-more-menu">', overflow, "</div></details>"].join("") : "";
   return `<div class="message-links">${requestControls(m)}${linked.map(i => {
     const summary = session.member.kind === "human" ? (i.state === S.BLOCKED ? i.blocker?.reason : i.receipt?.summary) : null;
     return `<span class="conversation-work"><a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">${esc(i.title)}</a>${doneChip(i)}${summary ? `<span class="conversation-work-summary">${esc(clipGraphemes(summary, 240))}${summary.length > 240 ? "…" : ""}</span>` : ""}</span>`;

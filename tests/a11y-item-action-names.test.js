@@ -85,6 +85,6 @@ test("timeline overflow: the message-more summary names the message (author iden
   // built from the message's author identity, like the adjacent
   // "Link to message by … at …" label in messageContent.
   const appSource = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  assert.match(appSource, /<summary aria-label="More actions for message by \$\{esc\(displayName\(m\.authorId\)\)\}/, "summary aria-label carries the author identity");
+  assert.ok(appSource.includes('uiText("message.actionsAccessibleName", { author: displayName(m.authorId)'), "summary uses the catalogued author/time name");
   assert.ok(!appSource.includes('aria-label="More actions for this message"'), "the identical-on-every-message label is gone");
 });

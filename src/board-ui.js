@@ -768,7 +768,7 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
   // the link-PR input ("Pull request URL for ${item.title}") and reassign
   // select ("Reassign ${item.title}") patterns below — bare verbs left a
   // screen-reader user with ten indistinguishable "Claim" buttons.
-  const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}" aria-label="${escapeHtml(label)} — ${escapeHtml(item.title || item.id)}">${label}</button>`;
+  const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: label, item: item.title || item.id }))}">${label}</button>`;
   const actions = [];
   if (item.workItemId) {
     const work = workItems?.[item.workItemId];
