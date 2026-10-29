@@ -73,6 +73,8 @@ unknown outcomes remain visible rather than being relabeled complete.
    Preserve slower and failed trials. Expand tooling only when a repeated need
    or measured bottleneck warrants it; stop research when the decision is answerable.
    Do not aggregate unrelated test totals into a product-quality claim.
+   Use the [active comparison and measurement protocol](COLLABORATION-EXPERIMENTS.md#measuring-development-inside-project-room--active-protocol-2026-10-29)
+   to separate Room benefit from additional workers and count coordination cost.
 
 Initial coordination: this laptop owns release recovery, canonical catalogue
 integration and backend/agent repairs; the other laptop owns supplemental local
