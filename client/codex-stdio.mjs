@@ -75,7 +75,13 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
   let nextId = 1, buffer = "", closed = false, initialization, cleanup;
   const MAX = 1024 * 1024;
   const kill = signal => { if (child.pid) try { process.kill(-child.pid, signal); } catch { /* group exited */ } };
-  const alive = () => { if (!child.pid) return false; try { process.kill(-child.pid, 0); return true; } catch { return false; } };
+  const alive = () => {
+    if (!child.pid) return false;
+    try { process.kill(-child.pid, 0); return true; }
+    // Only ESRCH proves absence. EPERM can also describe a zombie-only group
+    // on macOS; an inconclusive probe must not release the private profile.
+    catch (error) { return error.code !== "ESRCH"; }
+  };
   const settle = () => cleanup ??= (async () => {
     kill("SIGTERM");
     if (alive()) await new Promise(resolve => setTimeout(resolve, 200));
