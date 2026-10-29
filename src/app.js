@@ -2229,10 +2229,21 @@ function restoreActiveChannel() {
   } catch { /* private mode: stay on the main channel */ }
 }
 function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
-function setActiveChannel(id) {
+function leaveWorkSelection() {
+  if (!activeWorkNavigationId) return false;
+  activeWorkNavigationId = null;
+  if (/^#pr-record\/work\//.test(location.hash)) {
+    activeWorkNavigation = null;
+    history.replaceState(workHistoryState(), "", "#pr-view/rooms");
+    syncWorkReturnControl();
+  }
+  return true;
+}
+function setActiveChannel(id, preserveWork = false) {
   if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
+  const leftWork = !preserveWork && leaveWorkSelection();
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
-  if (next === activeChannelId && !currentThreadId && !requestMode && !assistantDraft) return;
+  if (next === activeChannelId && !currentThreadId && !requestMode && !assistantDraft) { if (leftWork) renderMessages(); return; }
   saveComposer();
   viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null;
@@ -2425,11 +2436,11 @@ function renderMessages() {
   // after them on every arrival. They are repainted after each render.
   list.querySelectorAll(":scope > [data-claim-update]").forEach(node => node.remove());
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
-  // Work cards are never windowed: only message rows are. Work is few next to
-  // messages, and hiding older cards would make that work unreachable from the
-  // timeline (the crowded reconnect gate pins all 81 cards). Cards older than the
-  // first shown message simply render above it, after the pager.
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
+  // Human conversations expose work through their source messages. A full
+  // record is mounted only when opened from a link, search, or Updates.
+  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries(
+    session?.member.kind === "human" ? activeWorkNavigationId : undefined
+  ).filter(e => e.channelId === activeChannelId);
   const ordered = [];
   // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
   const mentionable = state ? Object.values(state.members) : [];
@@ -2611,7 +2622,10 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const deleteHtml = own ? `<button class="message-to-work" data-message-action="delete" data-message-id="${esc(m.id)}" type="button">Delete message</button>` : "";
   const overflow = [saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
   const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
-  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
+  return `<div class="message-links">${requestControls(m)}${linked.map(i => {
+    const summary = session.member.kind === "human" ? (i.state === S.BLOCKED ? i.blocker?.reason : i.receipt?.summary) : null;
+    return `<span class="conversation-work"><a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">${esc(i.title)}</a>${doneChip(i)}${summary ? `<span class="conversation-work-summary">${esc(clipGraphemes(summary, 240))}${summary.length > 240 ? "…" : ""}</span>` : ""}</span>`;
+  }).join("")}${replyHtml}${threadHtml}${menu}</div>`;
 }
 function messageFileChips(messageId) {
   const files = roomFilesByMessage.get(messageId) ?? [];
@@ -3058,8 +3072,9 @@ function persistDrafts() {
   if (!session) return;
   recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
 }
-function switchThread(threadId, focusComposer = false) {
+function switchThread(threadId, focusComposer = false, preserveWork = false) {
   if (!state || busy || composerFiles.some(file => file.status === "uploading") || (threadId && !conversation.threads.has(threadId))) return;
+  if (!preserveWork) leaveWorkSelection();
   const leavingResultQuestion = Boolean(requestMode?.resultEventId);
   requestEpoch++; requestReading = false;
   if (threadId !== currentThreadId || requestMode || assistantDraft) {
@@ -3076,8 +3091,11 @@ function switchThread(threadId, focusComposer = false) {
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
 function revealMessage(id) {
-  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) { pendHashReveal(id); return; }
+  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) {
+    activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
+  }
   if (!state || busy || !conversation.byId.has(id)) return;
+  activeWorkNavigationId = null;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   if ($("#later-dialog")?.open) $("#later-dialog").close();
@@ -3118,9 +3136,11 @@ function revealWorkTimeline(id) {
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   workspaceUI?.showRooms();
-  switchThread(null);
-  const channelId = timelineWorkEntries().find(entry => entry.item.id === id)?.channelId;
-  if (channelId && channelId !== activeChannelId) setActiveChannel(channelId);
+  activeWorkNavigationId = id;
+  switchThread(null, false, true);
+  const channelId = timelineWorkEntries(id)[0]?.channelId;
+  if (channelId && channelId !== activeChannelId) setActiveChannel(channelId, true);
+  renderMessages();
   return workRecord(id);
 }
 // JDOT-COH-NAV begin
@@ -3226,7 +3246,7 @@ async function revealClaimRecord(id) {
 }
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
-  if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id)) {
+  if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id) && !client.owesHistory) {
     notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "focus";
@@ -3317,13 +3337,15 @@ async function restoreWorkOrigin(ticket) {
   // origin that was not the board closes it again (a work record's
   // destination never had it open).
   if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
-  if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId);
-  switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null);
+  if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId, true);
+  switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null, false, true);
   if (origin.mode) setRequestMode(origin.mode);
   activeWorkNavigationId = null;
   const priorOrigin = currentWorkOrigin(origin.previous);
   const priorTarget = priorOrigin?.target;
   const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget ?? "");
+  activeWorkNavigationId = priorWork ? decodeFragment(priorWork[1]) : null;
+  renderMessages();
   if (priorWork) {
     const id = decodeFragment(priorWork[1]), card = id && workRecord(id);
     if (card) {
@@ -3762,7 +3784,8 @@ function releaseSubmission(ticket, { restoreFocus = false } = {}) {
 // Unified timeline: work items render inline in #message-list, interleaved
 // chronologically with messages (Discord/Slack-style). Work cards follow the
 // active channel: a card shows when its proposal message is in the channel.
-function timelineWorkEntries() {
+function timelineWorkEntries(onlyId) {
+  if (onlyId === null) return [];
   const now = Date.now();
   const draftsByWork = new Map();
   for (let index = state.messages.length - 1; index >= 0; index--) {
@@ -3776,6 +3799,7 @@ function timelineWorkEntries() {
     draftsByWork.get(message.workItemId).push(message);
   }
   return Object.values(state.workItems)
+    .filter(item => onlyId === undefined || item.id === onlyId)
     .map(item => {
       const proposals = draftsByWork.get(item.id) ?? [];
       // proposals is built newest-first via reverse iteration; the most recent
@@ -5227,6 +5251,9 @@ $("#main").addEventListener("click", e => {
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
   if (busy) return;
+  if (link.dataset.openMessage && link.closest("[data-work-record-id]")) {
+    navigateWorkRecord("message", link.dataset.openMessage); return;
+  }
   // JDOT-COH-NAV begin
   if (!link.dataset.openWork) { updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++; $("#work-navigation-return").hidden = true; }
   // JDOT-COH-NAV end

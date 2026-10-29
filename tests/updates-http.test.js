@@ -53,6 +53,27 @@ function addAgent(store, roomId, ownerKey, memberId = "agent", displayName = "Re
   return store.issueAccessKey(roomId, memberId);
 }
 
+test("source-less human assignment remains discoverable through Updates as its next action changes", async t => {
+  const f = serve(t);
+  const command = (type, data) => f.store.command(f.ownerKey, "commons", { id: randomUUID(), type, data });
+  command(T.WORK_PROPOSED, { workItemId: "assigned", title: "Prepare the launch note", definitionOfDone: "A note",
+    accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
+  const read = async () => {
+    const response = await f.request("/api/rooms/commons/updates?state=actionable", { token: f.ownerKey });
+    assert.equal(response.status, 200);
+    return response.body.items.filter(item => item.sourceRef?.workItemId === "assigned");
+  };
+  const initial = await read();
+  assert.equal(initial.length, 1);
+  assert.equal(initial[0].kind, "work_assigned");
+  command(T.WORK_ACCEPTED, { workItemId: "assigned", expectedRevision: 0 });
+  const accepted = await read();
+  assert.equal(accepted.length, 1);
+  assert.notEqual(accepted[0].id, initial[0].id);
+  command(T.WORK_STARTED, { workItemId: "assigned", expectedRevision: 1 });
+  assert.deepEqual(await read(), [], "in-progress work does not demand another action");
+});
+
 function persistedUpdates(store) {
   return {
     marks: store.db.prepare("SELECT * FROM private_update_marks ORDER BY room_id, member_id, item_id").all(),
