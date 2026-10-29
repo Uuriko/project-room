@@ -22,7 +22,8 @@ and #5238–#5248 at `c47c3fc79cc3af65db095f0b653d6dedb9e24454`, tree
 was deliberately **cancelled before runtime publication**, after the peer observed
 an orientation HTTP 422 even though the default pilot's version endpoints had
 converged. A later SDK orientation read passed with HTTP 200 and 123 work items;
-source inspection confirmed the route exists. Staggered per-room propagation is
+source inspection confirmed the route exists. The peer later confirmed both
+orientation reads returned HTTP 200 (Room sequence 22761). Staggered per-room propagation is
 a hypothesis, not a proven routing defect. No speculative patch was applied.
 
 Independent strict/live verification subsequently passed on stable `c47c3fc`
@@ -41,7 +42,8 @@ The release is not described as having all CI checks green.
 
 Private receipts under `release-prep-20261029/` preserve these distinct outcomes:
 `cohesive-verification/verify-8Osog2/receipt.json`, `cohesive-client-live.json`,
-`cohesive-orientation-live.json`, `cohesive-runtime-publication.json` and
+`cohesive-orientation-live.json`, `cohesive-peer-convergence.json`,
+`cohesive-runtime-publication.json` and
 `cohesive-release-claim.json`. The prior verified `0faa43b` release and earlier
 readiness failures remain below; incident #5177 is not closed by this checkpoint.
 
