@@ -15,7 +15,6 @@ import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../src/service-origin.js";
-import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
 import { CONTENT_TRUST, markIfOther, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
 
@@ -563,40 +562,30 @@ export class RoomAgentClient {
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
-  // Agents named before they have a seat. Reading the room snapshot assembles
-  // the network. It grants no access, mints no identity, and issues no invite.
+  // The service assembles canonical introduction history and applies viewer
+  // visibility and verifier authority. A recent-message snapshot is incomplete.
   async outsideAgents({ signal } = {}) {
-    const snapshot = await this.snapshot({ signal });
-    // Conservative verifier set: the client honors verify records from the
-    // room owner only (it cannot see delegation grants). The server's fuller
-    // set is authoritative; this just lets the client display verified links.
-    const ownerId = snapshot.state?.room?.ownerId;
-    const verifiers = typeof ownerId === "string" && ownerId ? new Set([ownerId]) : null;
-    return {
-      contractVersion: 1,
-      grantsAccess: false,
-      evaluatedThrough: snapshot.sequence,
-      agents: assembleOutsideAgents(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, { verifiers })
-    };
+    return this.#outsideAgentResponse(await this.#request("/outside-agents", undefined, signal));
   }
-  // Name an agent who has no seat. The post is an ordinary room message.
-  // Reading it grants no access, mints no identity, and issues no invite.
-  // The same introducer cannot rewrite the card; a second member adds a sighting.
+  #outsideAgentResponse(value) {
+    if (!value || value.contractVersion !== 1 || value.grantsAccess !== false
+      || !Number.isSafeInteger(value.evaluatedThrough) || value.evaluatedThrough < 0
+      || !Array.isArray(value.agents) || value.agents.some(agent => !agent || typeof agent.externalRef !== "string")) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid outside-agent network");
+    }
+    return value;
+  }
   async recordOutsideAgent(input, { signal } = {}) {
     if (!this.#memberId) throw new RoomClientError(422, "member_required", "A saved seat needs its member id to record an outside agent");
-    const snapshot = await this.snapshot({ signal });
-    let plan;
-    try {
-      plan = planOutsideAgentRecord(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, this.#roomId, this.#memberId, input);
-    } catch (error) {
-      if (error?.code) throw new RoomClientError(error.status ?? 422, error.code, error.message);
-      throw error;
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || Object.keys(input).some(key => !["externalRef", "displayName", "origin", "reach", "note"].includes(key))) {
+      throw new RoomClientError(422, "invalid_outside_agent", "Choose public agent facts only");
     }
-    if (plan.recorded !== "replay") {
-      await this.command({ id: plan.commandId, type: "message.posted", data: { messageId: plan.commandId, body: plan.body } }, { signal });
+    const value = this.#outsideAgentResponse(await this.#request("/outside-agents", { ...input, action: "introduce" }, signal));
+    if (!["introduce", "sighting", "replay"].includes(value.recorded) || value.externalRef !== input?.externalRef) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid outside-agent receipt");
     }
-    const network = await this.outsideAgents({ signal });
-    return { ...network, recorded: plan.recorded, externalRef: plan.externalRef };
+    return value;
   }
   // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
   // routed mentions, each with its next step. A read; nothing is marked.
