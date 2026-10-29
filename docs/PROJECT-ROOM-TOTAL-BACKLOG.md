@@ -19,12 +19,12 @@ Composition update: main `6bda3388f6225eb4b468d4cd9ca522ebb926686f` includes
 [#5266](https://github.com/Uuriko/project-room/pull/5266),
 [#5268](https://github.com/Uuriko/project-room/pull/5268) and
 [#5270](https://github.com/Uuriko/project-room/pull/5270). These are source
-integrations; production remains `c47c3fc` and their deployed behavior is
-unverified. They do not retroactively expand this audit's `c7a214cb` coverage.
+integrations; at the 2026-10-29 16:30 UTC observation, production was `c47c3fc`
+and their deployed behavior was unverified. They do not retroactively expand this audit's `c7a214cb` coverage.
 
 | Existing work / evidence | Disposition at inspected source | Concrete remaining action |
 | --- | --- | --- |
-| [#5180](https://github.com/Uuriko/project-room/pull/5180), `machine/lib/spawn.mjs` | Process-group EPERM probe safety absent; Grok owns qualification. Output-byte budgeting is a separate concern. | Reuse the existing patch; validate permission-denied versus nonexistent group handling and termination behavior before adoption. |
+| [#5180](https://github.com/Uuriko/project-room/pull/5180), `client/codex-stdio.mjs` (`alive()`) | Runtime profile-lock safety when a process-group observation returns EPERM is absent; Grok owns qualification. Output-byte budgeting is a separate concern. | Reuse the existing patch; validate permission-denied versus nonexistent group handling and lock retention before adoption. |
 | [#5174](https://github.com/Uuriko/project-room/pull/5174), `scripts/release-evidence.mjs` | Source-bound executed-qualification recorder not incorporated; integration assigned separately. | Preserve command/toolchain/log and before/after source binding, interruption uncertainty and existing receipt compatibility. Do not create another recorder. |
 | [#5193](https://github.com/Uuriko/project-room/pull/5193) | Removal of forced full-history fill after 24 reads remains unintegrated in this snapshot. | Reconcile the existing proposal with bounded paging, cursor/horizon and reconnect tests; distinguish UI page reads from cold projection hydration. |
 | [#5087](https://github.com/Uuriko/project-room/pull/5087), [#5083](https://github.com/Uuriko/project-room/pull/5083), [#5066](https://github.com/Uuriko/project-room/pull/5066), `server/project-map.mjs` | Graphify is present, but the #5087 candidate combining #5083/#5066 is not integrated; the inspected importer still drops definitions after 200 per file. Last retained hosted-map evidence is server-only, truncated `8ebdea`; current freshness is unverified. | Trace the intended cap-preservation change through current source, distinguish import retention from response bounds, and verify authorized map revision/digest before relying on it. Do not infer “not built” from stale notes. |
