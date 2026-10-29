@@ -1,0 +1,484 @@
+# Metric registry — frozen definitions (freeze-now, 2026-10-26).
+#
+# This file is the single home for frozen product-metric definitions,
+# product event-taxonomy definitions, and verdict reason codes, per
+# MEASUREMENT-PLAN §0 S3 (PR-IMPROVE-100 wave, ratified dispositions
+# 07-3 / 08-4 / 09-2 / 09-4 / 10-2). Format borrowed from dbt
+# MetricFlow's YAML shape (name, type, explicit numerator/denominator);
+# the MetricFlow engine is KILLED — this file is an artefact, not a
+# platform. Context/limitations prose per metric follows the CHAOSS
+# template (cluster-07 lane-10).
+#
+# Rules (enforced by scripts/metric-registry-check.mjs, wired into
+# scripts/check.mjs):
+#   1. A ratio metric without a denominator fails.
+#   2. A metric without a first_decision fails — ornaments cannot register.
+#   3. A report citing a metric id must cite its version (id@version).
+#   4. Editing a frozen definition (numerator/denominator/definition)
+#      without a version bump fails.
+#   5. Entries are never deleted. A retired metric, event, or reason
+#      code stays in this file with status: killed (tombstone) —
+#      deleting an entry rewrites history.
+#
+# Taxonomy is not metrics (cluster-10 lane-07, standing rule): event
+# names + required fields freeze at emission time, append-only, with a
+# version field; a new meaning is a new event, never a rename or reuse.
+# Metric definitions freeze separately, below. Adding an event never
+# changes an existing metric's count.
+#
+# DEFINITIONS ONLY. This file freezes what the words mean. It emits no
+# events, computes no metrics, and builds no reports; instrumentation
+# lands under its own charters and must cite id@version from here.
+#
+# Discipline carried by every entry (MEASUREMENT-PLAN): exact counts
+# with denominators; server-authoritative events only; counts before
+# rates; no percentages below pooled n≈50; right-censored cohorts are
+# printed, never dropped; insider/drill, attended/unattended, and
+# claimed/verified series are never blended. Until Invariant 17 is
+# provisioned (signer unwired), every "verified" figure names the
+# product verification event, not cryptographic verification.
+
+registry_version: 1
+
+metrics:
+  # ─── Review Latency v1 — cluster-08 lane-05 (disposition 08-4) ───
+  # Three clocks, two experiencers. Never averaged together. Percentile
+  # SLA is PARKED until pooled verdicts n≥50 in the external series.
+  - id: RL_agent_verdict_wait
+    name: "Review latency — agent verdict wait (RL-A)"
+    type: duration
+    version: 1
+    status: adopted
+    owner: experience measurables owner
+    numerator: "Per-submission duration in seconds: verdict_event_at − submitted_at, keyed by work_item_id + worker_id, server timestamps only."
+    denominator: "Submissions receiving a verdict (accept / reject / rework) in the window; submitted-but-unverdicted submissions are printed as a censored count with the age of the oldest, never dropped."
+    source_events: [work.verdict_ready, work.verdict_given]
+    exclusions: "Drill/insider items (separate series, never blended); items withdrawn by the poster before verdict (counted as withdrawn_count, excluded from durations). Verdicts flagged acceptance_without_review are included but printed as their own line; if that flag exceeds 10% of verdicts in a week, the week's RL numbers carry a DEGRADED marker."
+    first_decision: "Set the review-ageing cap — items awaiting verdict >7d trigger a named human action (review, return, or release the claim) — before any percentile SLA is discussed."
+    instrumentation_lh: 1
+    limitations: "The three RL clocks share one instrumentation build (2–3 lh total, cluster-08 lane-05 estimate). Reporting: median + full ordered list below n=20; ageing counts (>48h, >7d awaiting verdict) every week regardless of n. No percentile SLA at v1."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-08 lane-05" }
+
+  - id: RL_poster_supply_wait
+    name: "Review latency — poster supply wait (RL-P1)"
+    type: duration
+    version: 1
+    status: adopted
+    owner: experience measurables owner
+    numerator: "Per-item duration in seconds: first_claim_at − posted_at, keyed by work_item_id, server timestamps only."
+    denominator: "Work items posted in the window; unclaimed items are printed as a censored count with their ages, never dropped."
+    source_events: [work.claimed]
+    exclusions: "Drill/insider items (separate series, never blended); items withdrawn by the poster before any claim (counted as withdrawn_count, excluded from durations)."
+    first_decision: "Set the review-ageing cap — items awaiting verdict >7d trigger a named human action (review, return, or release the claim) — before any percentile SLA is discussed."
+    instrumentation_lh: 1
+    limitations: "Reported from the poster's cohort (poster_id), separately from RL-A, never averaged with it: the poster-side and agent-side waits are different experiencers and an SLA copied from one to the other will be wrong."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-08 lane-05" }
+
+  - id: RL_poster_outcome_wait
+    name: "Review latency — poster outcome wait (RL-P2)"
+    type: duration
+    version: 1
+    status: adopted
+    owner: experience measurables owner
+    numerator: "Per-submission duration in seconds: verdict_event_at − submitted_at — the same durations as RL_agent_verdict_wait, grouped and reported from the poster's cohort (poster_id)."
+    denominator: "Submissions receiving a verdict in the window, grouped by poster; submitted-but-unverdicted submissions are printed as a censored count with the age of the oldest, never dropped."
+    source_events: [work.verdict_ready, work.verdict_given]
+    exclusions: "Drill/insider items (separate series, never blended); items withdrawn by the poster before verdict (counted as withdrawn_count, excluded from durations). Verdicts flagged acceptance_without_review are included but printed as their own line."
+    first_decision: "Set the review-ageing cap — items awaiting verdict >7d trigger a named human action (review, return, or release the claim) — before any percentile SLA is discussed."
+    instrumentation_lh: 1
+    limitations: "Same events as RL-A by design; a different grouping and a different decision, so reported separately, never averaged with RL-A."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-08 lane-05" }
+
+  # ─── C04 revenue definitions v1 — cluster-09 lane-08 (disp. 09-2) ───
+  # Frozen pre-launch, effective the day pricing ships; events captured
+  # from that day. A host is the paying identity on a room's paid plan
+  # (server billing record); a host may hold many rooms.
+  - id: C04_host_conversion
+    name: "C04 host conversion"
+    type: ratio
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    numerator: "Hosts with ≥1 paid room-day in their first 30 days after first room creation."
+    denominator: "Hosts who created ≥1 room in the cohort month and reached day 30; censored hosts (not yet at day 30) are listed separately, never dropped. Cohort = creation month."
+    source_events: []
+    exclusions: "Insider/fleet hosts are a separate labelled series, never blended. Counts only until the denominator reaches 50 — no conversion percentage is displayed below that floor."
+    first_decision: "The first pricing review: is $25/room/mo converting — run on this pre-committed definition, not a retro-fitted one."
+    instrumentation_lh: 1
+    limitations: "Source of truth is the server billing record mirrored into our own event log at capture time; vendor (billing rail) dashboards are reported figures, never the definition's source. The event-capture list rides the pricing build; source_events is filled by the version that charters capture, without changing this definition."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-08" }
+
+  - id: C04_room_expansion
+    name: "C04 room expansion"
+    type: ratio
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    numerator: "Paid rooms added by existing paying hosts in period P beyond their first paid room."
+    denominator: "Paying hosts at the start of period P."
+    source_events: []
+    exclusions: "Insider/fleet hosts are a separate labelled series, never blended. Also printed with every reading: paid rooms per paying host as a distribution, not just a mean."
+    first_decision: "The first pricing review: is the paid unit the room, or actually the (multi-room) host — the evidence for any per-host pricing proposal."
+    instrumentation_lh: 1
+    limitations: "See C04_host_conversion@1 limitations on billing source of truth and event capture."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-08" }
+
+  - id: C04_churn_by_host
+    name: "C04 churn-by-host"
+    type: ratio
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    numerator: "Hosts churning in period P. A host churns on the first day after their last paid room-day with no paid room for 30 consecutive days (frozen window)."
+    denominator: "Hosts paying at the start of period P."
+    source_events: []
+    exclusions: "Insider/fleet hosts are a separate labelled series, never blended. Re-subscription within 90 days is a RETURN, reported separately, and does not erase the churn. Every churn carries its intervention log entry (what we did, when). No churn model is built from this definition until ~150–200 churn events exist."
+    first_decision: "The first pricing review: is $25/room/mo retaining hosts — run on this pre-committed definition, not a retro-fitted one."
+    instrumentation_lh: 1
+    limitations: "Churn is defined by the 30-day no-paid-room rule because hosts end by letting rooms lapse; a cancel click is not the churn event and must not be substituted without a version bump. Revenue lines are never blended (room subscription / settlement fees with X1 shape noted per period / pool-credit 5% / managed-round 10% / compute pass-through reported gross and at $0 margin); refunds are netted in the month refunded, with gross printed too."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-08" }
+
+  # ─── Abuse rates v1 — cluster-09 lane-05 (disposition 09-4) ───
+  # Frozen before the first open pool. All rates are server-authoritative,
+  # per pool, per period. The C13-D6 figure of 75–95% non-payable claims
+  # stays labelled ASSUMPTION in every document until a measured rate
+  # from these definitions replaces it; thereafter cite measured-with-n.
+  - id: ABUSE_claim_rejection_rate
+    name: "Abuse — claim rejection rate by verdict reason code"
+    type: ratio
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    numerator: "Claims receiving a final non-payable verdict in period P, split by the frozen verdict reason codes in verdict_reason_codes below (FRAUD-SYBIL / DUPLICATE-COLLUSIVE / QUALITY-INSUFFICIENT / SPEC-NONCOMPLIANT / OTHER). Reason code is recorded server-side at verdict time; retro-coding is fabrication."
+    denominator: "Claims receiving any final verdict in period P. Pending claims are excluded from the denominator and counted in a PENDING line."
+    source_events: [work.verdict_given]
+    exclusions: "Drill/insider pools are not the open-pool population and never feed this rate. If OTHER exceeds 10% of rejections, the split is invalid until recoded."
+    first_decision: "At the first open pool's close: set claim-rate limits and staged-settlement thresholds from the measured FRAUD-SYBIL share, not from the 75–95% assumption."
+    instrumentation_lh: 1
+    limitations: "The five reason-code shares must sum to this rejection rate exactly in the first pool report (proving measurement, cluster-09 lane-05). A definition with zero variance for 2 pools is reviewed for retirement."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
+
+  - id: ABUSE_payable_rate
+    name: "Abuse — payable rate (complement of the rejection rate)"
+    type: ratio
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    numerator: "Claims receiving a final payable verdict in period P."
+    denominator: "Claims receiving any final verdict in period P — the identical denominator to ABUSE_claim_rejection_rate@1. Pending claims are excluded and counted in a PENDING line."
+    source_events: [work.verdict_given]
+    exclusions: "Never reported without the rejection rate's denominator alongside; drill/insider pools never feed this rate."
+    first_decision: "At the first open pool's close: set claim-rate limits and staged-settlement thresholds from the measured FRAUD-SYBIL share, not from the 75–95% assumption."
+    instrumentation_lh: 0
+    limitations: "This entry exists so the complement can never acquire a second, drifting definition; it is the arithmetic complement of ABUSE_claim_rejection_rate@1 and carries no independent instrumentation."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (complement clause), cluster-09 lane-05" }
+
+  - id: ABUSE_heldout_divergence
+    name: "Abuse — held-out scoring divergence"
+    type: ratio
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    numerator: "Claims where the visible-band outcome and the held-out scoring component disagree on payable / non-payable."
+    denominator: "Claims scored by both the visible band and the held-out component."
+    source_events: [work.verdict_given]
+    exclusions: "The held-out component is never exposed in claimant feedback (banded feedback only, per C13-D6); exposing it invalidates the instrument, not just the period."
+    first_decision: "Whether banded feedback is coarse enough — read from the divergence trend at the first open pool's close."
+    instrumentation_lh: 0
+    limitations: "Reported as a count + share. Divergence is measurable from day one only because the held-out component is hidden by design; that design constraint is part of this definition."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
+
+  - id: ABUSE_ring_signal_rate
+    name: "Abuse — ring signal rate"
+    type: ratio
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    numerator: "Claims flagged by ≥1 structural signal: shared funder/worker graph edge, reciprocal-claim edge, or controlling-identity change (per C13-D8, derived structurally from the payment/task graphs)."
+    denominator: "All claims with final verdicts in period P."
+    source_events: [work.verdict_given]
+    exclusions: "Flags are signals, not verdicts: a flag-only rejection is forbidden by this definition — a human verdict is required — which keeps the rate honest. IP/device fingerprints are not a primary signal (agent claimants legitimately share infrastructure)."
+    first_decision: "Where the first abuse dollar goes when pools open (defence ordering by cost signature, disposition 09-9)."
+    instrumentation_lh: 1
+    limitations: "Kill criterion for the weakest signal: ring-flag precision (flags later confirmed by human verdict) below 20% over the first 200 flagged claims retires that signal rather than tuning it silently."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
+
+  - id: ABUSE_repeat_claimant_concentration
+    name: "Abuse — repeat-claimant concentration (top-10 share)"
+    type: ratio
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    numerator: "Claims in period P filed by the 10 claimant identities with the most claims in P."
+    denominator: "All claims in period P, printed as a count with the share."
+    source_events: [work.claimed]
+    exclusions: "None at v1; identities are server identities, not devices or IPs."
+    first_decision: "At the first open pool's close: set claim-rate limits per identity from the measured concentration, not from the 75–95% assumption."
+    instrumentation_lh: 0
+    limitations: "The cheapest Sybil smoke detector in the set; a share without its denominator count is a citation defect under registry rule 3's discipline."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
+
+# ─── Product event taxonomy v1 — cluster-10 lane-07 (disp. 10-2) ───
+# Definitions only: names + required fields frozen here; emission is a
+# separate build (10–12 lh estimate for F-A/F-B/F-E + server halves of
+# F-C) and is OUT OF SCOPE for the freeze. Every event carries the
+# common fields (server-authoritative timestamp, room_id, actor_id,
+# version field v) plus its family fields. No free-text payloads; IDs
+# and enums only — secrets/content excluded by construction. Events
+# live in an ops store, never in the per-room hot projection.
+# F-F (door/funnel) is owned by FUNNEL-COUNT-1 (#4890): referenced,
+# never duplicated here.
+events:
+  # F-A Work lifecycle — answers review-latency + bounce questions and
+  # supplies SVOW's numerator inputs.
+  - id: work.claimed
+    family: F-A work lifecycle
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A work item is claimed by a worker. Emitted at the existing claim state transition, server-side."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id, worker_id]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  - id: work.delivered
+    family: F-A work lifecycle
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A worker delivers (submits) work on a claimed item; this is the submission event the review-latency clocks start from."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id, worker_id]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  - id: work.verdict_ready
+    family: F-A work lifecycle
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A delivered item becomes ready for verdict (enters the review queue)."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  - id: work.verdict_given
+    family: F-A work lifecycle
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A verdict is given on a delivered item. outcome is an enum (accept / reject / rework for work verdicts; payable / non-payable with a frozen verdict reason code for pool claims). acceptance_without_review is recorded when the verdict skips review (C17-5 flag)."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id, outcome]
+    optional_fields: [reason_code, acceptance_without_review]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  - id: work.bounced
+    family: F-A work lifecycle
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A delivered item is bounced back to the worker. reason_code is a frozen enum at emission time; new reasons are new codes, never a reused code with a new meaning."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id, reason_code]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  # F-B Proof/receipt — answers whether the proof layer is used.
+  - id: receipt.issued
+    family: F-B proof/receipt
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A receipt is issued for a work item."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id, receipt_id]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  - id: receipt.viewed
+    family: F-B proof/receipt
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A receipt is viewed. viewer_role distinguishes the task's own parties from third parties; the event carries task linkage so the activation question (receipt viewed for own task ≤24h) is answerable."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id, receipt_id, viewer_role]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  - id: receipt.verified
+    family: F-B proof/receipt
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A receipt verification is attempted/completed. result is an enum. In the unsigned era (Invariant 17 unprovisioned), result names the product verification event, not cryptographic verification, and reports must say so."
+    required_fields: [server_timestamp, room_id, actor_id, v, receipt_id, result]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  # F-C Sync/client — server halves are v1 (emit with the freeze's
+  # follow-on build); client halves are defined now, emission deferred
+  # to the sync layer build (status: parked, names/fields frozen).
+  - id: sync.pull
+    family: F-C sync/client
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A client pulls a sync window from the server. window_bytes is the window size in bytes; events_applied is the count the server served for the window."
+    required_fields: [server_timestamp, room_id, actor_id, v, window_bytes, events_applied]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (server half), cluster-10 lane-07" }
+  - id: sync.bootstrap
+    family: F-C sync/client
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A client bootstraps a room replica from the server. bytes is the bootstrap payload size in bytes."
+    required_fields: [server_timestamp, room_id, actor_id, v, bytes]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (server half), cluster-10 lane-07" }
+  - id: sync.optimistic_applied
+    family: F-C sync/client
+    version: 1
+    status: parked
+    owner: product instrumentation owner
+    definition: "A client applies an optimistic local change before server confirmation. Client-half event: name and fields frozen now, emission lands with the sync layer."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (client half, emission deferred), cluster-10 lane-07" }
+  - id: sync.rejected
+    family: F-C sync/client
+    version: 1
+    status: parked
+    owner: product instrumentation owner
+    definition: "The server rejects an optimistic change. reason is a frozen enum at emission time. Client-half event: name and fields frozen now, emission lands with the sync layer."
+    required_fields: [server_timestamp, room_id, actor_id, v, reason]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (client half, emission deferred), cluster-10 lane-07" }
+  - id: sync.rebased
+    family: F-C sync/client
+    version: 1
+    status: parked
+    owner: product instrumentation owner
+    definition: "Pending client changes are rebased onto newly pulled server state. Client-half event: name and fields frozen now, emission lands with the sync layer."
+    required_fields: [server_timestamp, room_id, actor_id, v]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (client half, emission deferred), cluster-10 lane-07" }
+  # F-D Presence/wake (product side) — design already adopted (C09-A
+  # funnel). Defined now so the five stages are emitted as countable
+  # events when Wake Steps resume; emission is parked with that build.
+  - id: wake.accepted
+    family: F-D presence/wake
+    version: 1
+    status: parked
+    owner: product instrumentation owner
+    definition: "A wake request is accepted. Stage 1 of the five-stage wake funnel (C09-A), as a countable product event."
+    required_fields: [server_timestamp, room_id, actor_id, v]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (emission parked on Wake Steps), cluster-10 lane-07" }
+  - id: wake.received
+    family: F-D presence/wake
+    version: 1
+    status: parked
+    owner: product instrumentation owner
+    definition: "A wake is received by the target seat. Stage 2 of the five-stage wake funnel (C09-A)."
+    required_fields: [server_timestamp, room_id, actor_id, v]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (emission parked on Wake Steps), cluster-10 lane-07" }
+  - id: wake.acknowledged
+    family: F-D presence/wake
+    version: 1
+    status: parked
+    owner: product instrumentation owner
+    definition: "A wake is acknowledged by the target seat. Stage 3 of the five-stage wake funnel (C09-A)."
+    required_fields: [server_timestamp, room_id, actor_id, v]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (emission parked on Wake Steps), cluster-10 lane-07" }
+  - id: wake.claimed
+    family: F-D presence/wake
+    version: 1
+    status: parked
+    owner: product instrumentation owner
+    definition: "The woken seat claims the work the wake pointed at. Stage 4 of the five-stage wake funnel (C09-A)."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (emission parked on Wake Steps), cluster-10 lane-07" }
+  - id: wake.processed
+    family: F-D presence/wake
+    version: 1
+    status: parked
+    owner: product instrumentation owner
+    definition: "The woken seat processes the woken work to a terminal handling state. Stage 5 of the five-stage wake funnel (C09-A)."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition (emission parked on Wake Steps), cluster-10 lane-07" }
+  # F-E Money — answers how much unsigned settlement history
+  # accumulates per week. Amounts are banded, never raw.
+  - id: settlement.initiated
+    family: F-E money
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A settlement is initiated for a work item / lot."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  - id: settlement.completed
+    family: F-E money
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A settlement completes. amount_band is a banded enum, never a raw amount."
+    required_fields: [server_timestamp, room_id, actor_id, v, work_item_id, amount_band]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+  - id: receipt.signing
+    family: F-E money
+    version: 1
+    status: adopted
+    owner: product instrumentation owner
+    definition: "A receipt signing is attempted at settlement. result is an enum including absent — the count of settlements with result=absent is the unsigned-history accumulation measure for Invariant 17."
+    required_fields: [server_timestamp, room_id, actor_id, v, receipt_id, result]
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-10 lane-07" }
+
+# ─── Verdict reason codes v1 — cluster-09 lane-05 (disp. 09-4) ───
+# Frozen before the first open pool. Recorded server-side at verdict
+# time on work.verdict_given (reason_code). New meanings are new codes;
+# retired codes stay here as tombstones (registry rule 5).
+verdict_reason_codes:
+  - code: FRAUD-SYBIL
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    definition: "The claim is fraudulent or filed through a Sybil identity. Defence class: identity and claim-rate limits."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
+  - code: DUPLICATE-COLLUSIVE
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    definition: "The claim duplicates another claim or is part of a collusive set. Defence class: structural graph signals (C13-D8)."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
+  - code: QUALITY-INSUFFICIENT
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    definition: "An honest claim whose delivered work does not meet the brief's quality bar. Defence class: clearer specs and staged work — not identity defences."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
+  - code: SPEC-NONCOMPLIANT
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    definition: "The claim does not comply with the pool/lot specification (wrong scope, missing required elements) regardless of work quality."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
+  - code: OTHER
+    version: 1
+    status: adopted
+    owner: economics measurables owner
+    definition: "A final non-payable verdict fitting none of the codes above. If OTHER exceeds 10% of rejections in a period, the reason-code split is invalid until recoded (ABUSE_claim_rejection_rate@1)."
+    change_log:
+      - { version: 1, date: 2026-10-26, note: "initial frozen definition, cluster-09 lane-05" }
