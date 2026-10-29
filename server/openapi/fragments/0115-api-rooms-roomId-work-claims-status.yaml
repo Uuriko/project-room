@@ -1,0 +1,39 @@
+  /api/rooms/{roomId}/work-claims/status:
+    get:
+      summary: Live revision compared with GitHub main
+      description: |
+        Returns this server's live source revision, the last known GitHub
+        main head (cached, and refreshed inside the pull-poll rate-limit
+        budget), how many commits live is behind main when that count is
+        known, and when the head was checked. behind is 0 when the two
+        revisions match and null when the count is not known. Reading this
+        also closes land and deploy claims whose revision is now live.
+        API keys need `rooms:read`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: refresh
+          in: query
+          schema: { type: string, enum: ['1'] }
+          description: |
+            `refresh=1` skips the 60s deploy-status cache and polls GitHub
+            now. Only a member with Board write access may force it; anyone
+            else reads the shared cached value.
+      responses:
+        '200':
+          description: Live and main
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [live, main, behind, checkedAt]
+                properties:
+                  live: { type: string }
+                  main: { type: [string, 'null'] }
+                  behind: { type: [integer, 'null'] }
+                  checkedAt: { type: [string, 'null'], format: date-time }
+                  stale: { type: boolean, description: True while the GitHub pull-poll budget is held and the cached value is served }
+                  heldUntil: { type: [string, 'null'], format: date-time, description: When the pull-poll budget releases, when stale }
+                  eventsRemaining: { type: [integer, 'null'], description: Room event budget left before Board writes are limited to the owner and claim managers }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope (API key without rooms:read) or access_denied (bearer account sessions are not accepted) }
+        '429': { description: Rate limit exceeded (rate_limited). }
