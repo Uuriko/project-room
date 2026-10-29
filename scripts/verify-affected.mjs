@@ -160,7 +160,7 @@ export function selectTests({ changed, tests, reverse, read, timings = {}, budge
     const ms = estimate(test);
     const mustKeep = info.via === "changed";
     if (!mustKeep && (ms >= SLOW_MS || spent + ms > budgetMs)) {
-      skipped.push({ test, ...info, ms });
+      skipped.push({ test, ...info, ms, reason: ms >= SLOW_MS ? "slow_check_limit" : "budget" });
       continue;
     }
     selected.push({ test, ...info, ms });
