@@ -88,13 +88,17 @@ function mergeRecentMessages(held, read) {
 // marks held history that is only that window.
 const FILL_DELAY_MS = 250;
 // Lazy history (opt-in, `lazyHistory: true`): the first windowed read is not
-// followed by the background fill. Older history loads when the reader asks
-// for it (loadHistory(): scrolling up, "Show earlier messages", search, a
-// deep link to an older message). Until then every covered event re-reads the
-// cheap window instead of applying a delta, so after this many windowed reads
-// on a partial window the fill runs anyway: past it, holding full history
-// (and applying deltas) costs less than re-reading windows.
-const LAZY_FILL_AFTER_READS = 24;
+// followed by the background fill. Older history loads only when the reader
+// asks for it (loadHistory(): scrolling up, "Show earlier messages", search,
+// a deep link to an older message). Until then every covered event re-reads
+// the cheap window instead of applying a delta. No count of windowed reads
+// ever fills on its own: a fill reconstructs the room's whole history, so it
+// is the reader's explicit act, never the client's silent one. (Until
+// 2026-10-28 a budget of 24 windowed reads forced the fill anyway, on the
+// theory that re-reading windows had by then cost more than the fill; in a
+// busy room 24 events arrive in seconds, so in practice every open tab paid
+// a whole-history fill — paged, or one unqueried snapshot read when paging
+// could not prove a merge — shortly after opening.)
 // Session liveness under delta sync: a covered event applies locally with no
 // read, so the snapshot read's second job — noticing a dead room credential
 // (401/403) — needs its own cadence while connected. The probe in
@@ -135,7 +139,6 @@ export class RoomClient {
     this.backfilling = false;
     this.lazyHistory = Boolean(lazyHistory);
     this.historyWanted = false;
-    this.partialReads = 0;
     this.deltaStats = { applied: 0, fallback: 0, reasons: {} };
     // Liveness: when the last snapshot-path read proved the credential, and
     // the pending probe timer (see scheduleLiveness). The interval is an
@@ -418,7 +421,6 @@ export class RoomClient {
             flight.retiredFullReads = (flight.retiredFullReads ?? 0) + 1;
             if (flight.retiredFullReads >= 2 && covered < flight.fullSequence) covered = flight.fullSequence;
           }
-          if (partial && holding?.partial) this.partialReads++;
           if (snapshot.sequence >= this.sequence) {
             this.sequence = snapshot.sequence;
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
@@ -445,12 +447,13 @@ export class RoomClient {
     return flight.promise;
   }
   // Whether the owed fill should run now. Eager clients always fill; a lazy
-  // client fills a partial window only once the reader asked for history or
-  // re-reading windows has cost more than the fill would. Owed history over
-  // a full held one (a failed read) always fills: deltas wait on it.
+  // client fills a partial window only once the reader asked for history
+  // (historyWanted, set by loadHistory()). No windowed-read count promotes
+  // itself into a fill. Owed history over a full held one (a failed read)
+  // always fills: deltas wait on it.
   fillWanted() {
     const held = this.heldMessages();
-    return !this.lazyHistory || !held?.partial || this.historyWanted || this.partialReads >= LAZY_FILL_AFTER_READS;
+    return !this.lazyHistory || !held?.partial || this.historyWanted;
   }
   // True while a lazy client holds only the newest window of the room.
   get owesHistory() {
@@ -495,9 +498,19 @@ export class RoomClient {
       this.backfilling = true;
       (async () => {
         try {
-          // Paged history first; the legacy full read is the fallback
-          // whenever paging cannot prove a contiguous merge (backfill()).
-          if (!await this.backfill()) await this.refresh(null, { fill: true });
+          // Paged history first (backfill()). The legacy full read remains
+          // the fallback for eager clients, and whenever the held history
+          // is already complete — a failed read over a full hold owes a
+          // re-read, and deltas wait on it. For a lazy client holding only
+          // a window, a paging walk that cannot prove a contiguous merge
+          // does NOT escalate to the unqueried snapshot read: the window
+          // stays partial, owesHistory keeps the pager on screen, and the
+          // next reader gesture retries the paged fill. For the lazy
+          // client a whole-history load is the reader's explicit act.
+          if (!await this.backfill()) {
+            const heldAfter = this.heldMessages();
+            if (heldAfter && (!heldAfter.partial || !this.lazyHistory)) await this.refresh(null, { fill: true });
+          }
         } finally { if (generation === this.generation) this.backfilling = false; }
       })().then(() => { this.fillDelay = 1000; }, error => {
         if (generation !== this.generation || this.session !== session) return;
@@ -557,9 +570,10 @@ export class RoomClient {
   // are head-anchored, so a mutation mid-walk restarts the chain (bounded)
   // instead of splicing two heads. The records are the server's history
   // read model, the same surface the recent window serves (edit-history
-  // bodies ride neither). Returns false — the legacy full read takes over —
-  // whenever contiguity cannot be proved; auth failures throw, like
-  // refresh()'s reads.
+  // bodies ride neither). Returns false whenever contiguity cannot be
+  // proved; the caller (scheduleFill) decides what a false means — for a
+  // partial window it means stay partial, never a full read. Auth failures
+  // throw, like refresh()'s reads.
   async backfill() {
     const generation = this.generation, session = this.session;
     const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
@@ -576,7 +590,8 @@ export class RoomClient {
       try { result = await this.conversation({ limit: 100, cursor }); }
       catch (error) {
         // A server without the history endpoint (or a garbled page) is a
-        // paging failure, not a fill failure: the legacy read takes over.
+        // paging failure, not a fill failure: backfill declines and the
+        // caller decides (a partial window stays partial).
         if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") throw error;
         return false;
       }
@@ -1258,7 +1273,7 @@ export class RoomClient {
     this.generation++; clearTimeout(this.streamRetry); this.streamRetry = null; this.streamRetryDelay = 1000;
     clearTimeout(this.refreshRetry); this.refreshRetry = null; this.refreshRetryDelay = 1000;
     clearTimeout(this.fillTimer); this.fillTimer = null; this.fillDelay = 1000;
-    this.historyWanted = false; this.partialReads = 0;
+    this.historyWanted = false;
     clearTimeout(this.livenessTimer); this.livenessTimer = null;
     this.refreshInterrupted = false;
     this.stream?.close(); this.stream = null;
