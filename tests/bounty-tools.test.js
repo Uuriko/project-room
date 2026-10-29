@@ -153,3 +153,18 @@ test("bounty_list tells agents awards are valueless room credits", () => {
   assert.ok(description.includes("valueless") && description.includes("reputation receipt"),
     "bounty_list must carry the honest framing: awards are valueless credits paying in reputation receipts");
 });
+
+// #5160: the MCP posting flow is where bounty pricing guidance lives now
+// (successor to the deleted board panel in #4017). Both the pre-post read
+// (bounty_list) and the post itself must tell the poster the guidance is
+// there, that it comes from settled receipts only, and that it never
+// blocks posting.
+test("bounty posting tools advertise settled-receipts pricing guidance (#5160)", () => {
+  for (const name of ["bounty_list", "bounty_post"]) {
+    const entry = bountyTools.find(tool => tool.name === name);
+    assert.ok(entry, `${name} must exist`);
+    assert.ok(entry.description.includes("pricingGuidance"), `${name} names the pricingGuidance result field`);
+    assert.ok(entry.description.includes("Settled receipts only"), `${name} labels guidance as settled receipts only`);
+    assert.ok(entry.description.includes("never blocks posting"), `${name} states guidance never blocks posting`);
+  }
+});

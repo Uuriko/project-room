@@ -450,3 +450,13 @@ test("publishBountyEvent maps the journal event to the fanout envelope", () => {
   assert.equal(event.data.before, "proposed");
   assert.equal(event.data.after, "funded");
 });
+
+test("list route carries pricingGuidance: cold-start state, and the listing still succeeds (#3524)", async () => {
+  const { store } = makeStore();
+  const res = await call(store, { method: "GET", route: "list" });
+  assert.equal(res.statusCode, 200);
+  assert.deepEqual(res.body.bounties, []);
+  assert.equal(res.body.pricingGuidance.state, "no-settled-history");
+  assert.equal(res.body.pricingGuidance.sampleCount, 0);
+  assert.equal(res.body.pricingGuidance.paidRangeCredits, null);
+});
