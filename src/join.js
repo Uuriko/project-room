@@ -187,9 +187,21 @@ export function formatInviteExpiry(expiresAt, nowMs = Date.now()) {
   return `in ${days} day${days === 1 ? "" : "s"}`;
 }
 
+// The server's suggested replacement for a refused display name is only
+// echoed when it is itself clean: the guard strips hidden/bidi marks when
+// it builds the suggestion, and this keeps a marked string from ever being
+// presented as the fix (F-U1C3-1).
+function cleanNameSuggestion(value) {
+  if (typeof value !== "string") return null;
+  const suggestion = value.trim();
+  if (!suggestion || suggestion.length > 80) return null;
+  if (/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}\u202A-\u202E\u2066-\u2069]/u.test(suggestion)) return null;
+  return suggestion;
+}
+
 // Maps a failed preview/join call to a message with a next step.
 // Every branch names what happened and what to do — no dead ends.
-export function joinErrorMessage({ status, code, action = "join" } = {}) {
+export function joinErrorMessage({ status, code, action = "join", detail = null } = {}) {
   const again = "Check your connection and try again.";
   if ((code === "request_timeout" || code === "preview_timeout") && action === "join") {
     return { title: uiText("join.timedOut.title"), message: uiText("join.timedOut.message"), retry: true };
@@ -213,6 +225,27 @@ export function joinErrorMessage({ status, code, action = "join" } = {}) {
     case "invalid_invite_name":
     case "invalid_join":
       return { title: "Check the name", message: "Enter a name of 1–80 characters to join.", retry: true };
+    case "display_name_unavailable": {
+      // The server refused the name itself (reserved, already used,
+      // confusable, or carrying hidden/bidi marks a pasted name often
+      // brings) and sent its reason plus a cleaned suggestion in the
+      // error detail. Name that cause and present the suggestion as a
+      // suggestion — the name in the form is never changed silently.
+      const lead = {
+        reserved: "That display name is reserved.",
+        duplicate: "That display name is already used in this room.",
+        confusable: "That display name is too easy to confuse with a member already in this room.",
+        control_characters: "That display name contains hidden or control characters.",
+      }[detail?.displayNameReason] ?? "That display name isn't available.";
+      const suggestion = cleanNameSuggestion(detail?.suggestion ?? detail?.displayName);
+      return {
+        title: "Name not available",
+        message: suggestion
+          ? `${lead} You could use "${suggestion}" instead — change the name to it, or edit it, then try again.`
+          : `${lead} Edit the name and try again.`,
+        retry: true,
+      };
+    }
     case "rate_limited":
       return { title: "Too many tries", message: "Slow down and try again in a minute.", retry: true };
     default:
@@ -285,7 +318,22 @@ export async function apiFetch(url, { method = "GET", data, timeoutMs = API_TIME
       if (controller.signal.aborted) return { ok: false, status: 0, error: { code: "request_timeout" } };
       /* non-JSON body */
     }
-    if (!response.ok) return { ok: false, status: response.status, error: body?.error ?? { code: "request_failed" } };
+    if (!response.ok) {
+      const error = body?.error ?? { code: "request_failed" };
+      // The server merges error detail onto the TOP LEVEL of the error
+      // body, not inside `error` (mergeErrorDetail in src/agent-error.mjs):
+      // for display_name_unavailable that is the reason and the suggested
+      // replacement name. Keep those fields reachable for the mapper
+      // instead of dropping them here (F-U1C3-1).
+      if (error && typeof error === "object" && body && typeof body === "object") {
+        const detail = {};
+        for (const key of ["displayNameReason", "suggestion", "displayName"]) {
+          if (typeof body[key] === "string") detail[key] = body[key];
+        }
+        if (Object.keys(detail).length) error.detail = detail;
+      }
+      return { ok: false, status: response.status, error };
+    }
     return { ok: true, status: response.status, body };
   } finally {
     clearTimeout(timer);
@@ -464,7 +512,7 @@ async function boot() {
   const preview = await apiFetch(`${apiBase}/agent-invites/preview`, { method: "POST", data: { code } });
   if (seq !== bootSeq) return;
   if (!preview.ok) {
-    fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, action: "preview" }));
+    fail(joinErrorMessage({ status: preview.status, code: preview.error?.code, detail: preview.error?.detail, action: "preview" }));
     return;
   }
   renderConsent(preview.body);
@@ -488,7 +536,7 @@ async function boot() {
     if (!joined.ok) {
       if (button) button.disabled = false;
       // A dead code stays dead: surface the reason instead of a retry loop.
-      const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, action: "join" });
+      const mapped = joinErrorMessage({ status: joined.status, code: joined.error?.code, detail: joined.error?.detail, action: "join" });
       if (["invite_unavailable", "invite_revoked", "invite_expired", "invite_already_used", "invite_authority_changed"].includes(joined.error?.code)) fail(mapped);
       else if (statusEl) statusEl.textContent = mapped.message;
       return;
