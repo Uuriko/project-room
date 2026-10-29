@@ -11,6 +11,8 @@ export class OrientationTestRoom extends HttpTestRoom {
       data: { memberId: 'reader', displayName: 'Reader', kind: 'agent', permissions: [] } });
     this.store.command(owner, 'commons', { id: 'orientation-message', type: 'message.posted',
       data: { messageId: 'conversation-only', body: 'Conversation body must not enter orientation.' } });
+    this.store.command(owner, 'commons', { id: 'orientation-work', type: 'work.proposed',
+      data: { workItemId: 'inspect', title: 'Inspect storage', definitionOfDone: 'Prove bounded reads', mode: 'read', accountableMemberId: 'owner' } });
     return Response.json({ token: this.store.issueAccessKey('commons', 'reader') });
   }
 }

@@ -30,6 +30,10 @@ test('Workers HTTP orientation preserves agent identity and excludes conversatio
     assert.equal(packet.viewerAccountId, null);
     assert.equal(packet.roomId, 'commons');
     assert.deepEqual(Object.keys(packet.state).sort(), ['members', 'room', 'workItems']);
+    assert.equal(packet.state.workItems.inspect.title, 'Inspect storage');
+    assert.equal(packet.state.workItems.inspect.definitionOfDone, 'Prove bounded reads');
+    assert.equal(packet.state.workItems.inspect.accountableMemberId, 'owner');
+    assert.equal(JSON.stringify(packet).includes(token), false);
     assert.equal(JSON.stringify(packet).includes('Conversation body must not enter orientation.'), false);
     assert.equal((await call(path)).status, 401);
     for (const suffix of ['&view=work', '&messages=recent', '&unknown=1']) {
