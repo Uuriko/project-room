@@ -19,20 +19,27 @@ import { writeFileSync } from "node:fs";
 
 export const REQUIRED_CHECKS = ["test", "contract", "lint", "browser", "cloudflare"];
 // Files regenerated at landing time. A conflict only in these does not block.
+// Exact paths only: a suffix match would let any file named like these through.
 export const GENERATED = new Set([
   "scripts/CANDIDATE-MANIFEST.json",
   "docs/openapi.yaml",
   "skills/project-room/references/errors-catalog.md",
+  "plugins/project-room/skills/project-room/references/errors-catalog.md",
   "tests/fixtures/mcp-catalog.snapshot.json"
 ]);
-export const isGenerated = path => GENERATED.has(path) || /(^|\/)errors-catalog\.md$/.test(path);
+export const isGenerated = path => GENERATED.has(path);
 
 // Required checks are green when each named check's latest run succeeded.
 export function checksGreen(runs, required = REQUIRED_CHECKS) {
+  // The newest run of each check wins. Check-run ids only grow, so they order
+  // runs even when a queued rerun has no started_at yet; a queued or running
+  // rerun is therefore "not green", never masked by an older success.
+  const order = run => [Number(run.id ?? 0), String(run.started_at ?? "\uffff")];
+  const newer = (a, b) => { const [ia, sa] = order(a), [ib, sb] = order(b); return ia !== ib ? ia > ib : sa > sb; };
   const latest = new Map();
   for (const run of runs) {
     const prev = latest.get(run.name);
-    if (!prev || String(run.started_at ?? "") > String(prev.started_at ?? "")) latest.set(run.name, run);
+    if (!prev || newer(run, prev)) latest.set(run.name, run);
   }
   const missing = required.filter(name => latest.get(name)?.conclusion !== "success");
   return { green: missing.length === 0, missing };
@@ -123,6 +130,8 @@ async function main() {
       for (const path of conflicts) {
         const entry = tryGit(["ls-tree", tip, "--", path]).out;
         if (entry) { const [meta, ] = entry.split("\t"); const [mode, , blob] = meta.split(" "); sh("git", ["update-index", "--cacheinfo", `${mode},${blob},${path}`], { env }); }
+        // Gone on the batch side (deleted there): keep it gone; the train regenerates.
+        else sh("git", ["update-index", "--force-remove", "--", path], { env });
       }
       finalTree = sh("git", ["write-tree"], { env });
     }

@@ -15,10 +15,17 @@ test("required checks must each be green at their latest run", () => {
   assert.deepEqual(checksGreen(runs), { green: true, missing: [] });
 });
 
+test("a queued rerun with no start time beats an older success", () => {
+  const base = ["contract", "lint", "browser", "cloudflare"].map((name, i) => ({ id: 10 + i, name, conclusion: "success", started_at: "2026-10-28T01:00:00Z" }));
+  const runs = [...base, { id: 1, name: "test", conclusion: "success", started_at: "2026-10-28T01:00:00Z" }, { id: 99, name: "test", conclusion: null, started_at: null }];
+  assert.deepEqual(checksGreen(runs), { green: false, missing: ["test"] });
+});
+
 test("generated files are recognised in both errors-catalog copies", () => {
   assert.equal(isGenerated("scripts/CANDIDATE-MANIFEST.json"), true);
   assert.equal(isGenerated("plugins/project-room/skills/project-room/references/errors-catalog.md"), true);
   assert.equal(isGenerated("server/store.mjs"), false);
+  assert.equal(isGenerated("customer-owned/errors-catalog.md"), false, "exact paths only, no suffix match");
 });
 
 test("batches keep order, cap size, and defer PRs that conflict with the batch", () => {
