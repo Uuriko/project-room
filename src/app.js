@@ -1,9 +1,11 @@
+import { createDirectConversationWindow, createMessageSelection, createConversationDirectory } from "./direct-conversation-window.js";
 import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
 import { installResultReader } from "./result-reader.js";
 import { uiText } from "./strings.js";
+import { directDraftKey, directDraftPeer, directMessagePeer } from "./conversation.js";
 import { createSigninNavigation } from "./signin-navigation.js";
 import { installOwnerProjectOffers } from "./owner-project-offers-ui.js";
 import { createMemberDisplayNames } from "./member-display-names.js";
@@ -359,6 +361,7 @@ let navigationBoardEpoch = 0;
 // JDOT-COH-NAV end
 // Phase 2 channels: the visible channel; persisted per room, defaults to the main channel.
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
+let activeDirectMemberId = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
 let confirmedWorkNavigation = null;
@@ -366,24 +369,44 @@ let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
 let choosingComposerRecipient = false;
-// A message deep link whose target is older than the first (windowed)
-// snapshot cannot reveal on arrival: revealMessage no-ops while the id is
-// not held. A pending hash reveal remembers such a target until a fill or
-// sync snapshot first holds it, then reveals it exactly once. It is
-// cancelled when the user takes over first — another hash, another room,
-// a thread/channel switch, or a reader scroll (the noteReaderScroll
-// gesture tracker below) — so the late reveal never steals the view.
+// A deep link resolves its selected message and bounded reply ancestry.
+// Navigation and identity fences prevent a late response stealing the view.
 let pendingHashReveal = null;
 let requestRuns = {}, requestRunsReading = false, requestRunsReadKey = "";
 let assistantDraft = null;
 let requestMode = null, requestReading = false, requestEpoch = 0;
-const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : assistantDraft ? `assistant:${assistantDraft.runId}` : currentThreadId ?? channelDraftKey(activeChannelId);
-const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+const composerKey = () => requestMode ? replyDraftKey(requestMode, currentThreadId) : assistantDraft ? `assistant:${assistantDraft.runId}` : currentThreadId ?? (activeDirectMemberId ? directDraftKey(activeDirectMemberId) : channelDraftKey(activeChannelId));
+const conversationViewKey = () => currentThreadId ? `thread:${currentThreadId}` : activeDirectMemberId ? directDraftKey(activeDirectMemberId) : `room:${activeChannelId}`;
 // The room timeline renders only its newest TIMELINE_WINDOW root messages; the
 // "Show earlier messages" control adds another page. A room with thousands of
 // messages otherwise builds thousands of rows (and layout reads over them) on
 // open. timelineWindow maps a view key to how many roots that view shows.
 const TIMELINE_PAGER_KEY = "pager:earlier";
+const directDirectory = createConversationDirectory({ read: query => client.conversations(query), changed: () => { if (state) renderDirectMessages(); } });
+const selectedMessage = createMessageSelection({
+  read: query => client.conversation(query),
+  changed: () => {
+    if (!state) return;
+    rebuildConversation(); renderMessages();
+    retryPendingHashReveal();
+    if (selectedMessage.view().error && pendingHashReveal) {
+      pendingHashReveal = null;
+      notice(SOURCE_UNAVAILABLE_NOTICE, true);
+    }
+  },
+});
+const directWindow = createDirectConversationWindow({
+  read: query => client.conversation(query),
+  changed: () => { if (state && activeDirectMemberId) { rebuildConversation(); renderMessages(); } },
+});
+function rebuildConversation() {
+  const pair = directWindow.view();
+  const selected = activeDirectMemberId && pair.peerMemberId === activeDirectMemberId
+    ? [...(pair.anchorMessage ? [pair.anchorMessage] : []), ...pair.messages] : [];
+  const records = new Map([...selectedMessage.view().messages, ...selected, ...(state?.messages ?? [])].map(message => [message.id, message]));
+  conversation = conversationIndex([...records.values()].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt)));
+}
+
 const timelineWindow = new Map();
 let timelineRevealing = false;
 const viewPositions = new Map(), pendingPins = new Set(), locallyOwnedMessageIds = new Set();
@@ -461,6 +484,7 @@ const client = new RoomClient({
     snapshotAuditView = snapshot.auditView ?? "full";
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
+    if (presenceBoundary) { selectedMessage.clear(); directDirectory.clear(); }
     if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
     const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
@@ -526,11 +550,14 @@ const client = new RoomClient({
       const saved = recovery.read(draftScope(identity), state);
       if (saved) {
         drafts = saved.drafts; currentThreadId = saved.threadId;
+        activeDirectMemberId = saved.directMemberId ?? directMessagePeer(conversation.byId.get(saved.threadId), session.member.id);
         if (state.channels?.[saved.channelId] && !state.channels[saved.channelId].archivedAt) activeChannelId = saved.channelId;
         syncChannelChrome();
         const draft = drafts.get(saved.activeKey);
         requestMode = draft.mode ?? null;
+        if (!requestMode && draft.toMemberId) activeDirectMemberId = draft.toMemberId;
         restoreComposer(draft);
+        syncChannelChrome();
         updateReply(); renderMessages(); syncRequestComposer(); renderComposerError();
       }
       if (!location.hash) restoreResultSelection();
@@ -564,7 +591,7 @@ const client = new RoomClient({
     submitOperationId += 1; busy = false;
     displayNames = createMemberDisplayNames({});
     state = null; session = null; pendingMessage = null; pendingWork = null; pendingAction = null; offerContextVersion = null; actionEpoch++;
-    pendingHashReveal = null;
+    pendingHashReveal = null; selectedMessage.clear(); directDirectory.clear();
     // JDOT-COH-NAV begin
     clearWorkNavigation(); updatesUi?.reset();
     // JDOT-COH-NAV end
@@ -608,6 +635,8 @@ const client = new RoomClient({
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
+    directWindow.clear();
+    if (!sessionExpired) activeDirectMemberId = null;
     choosingComposerRecipient = false;
     if (!sessionExpired) {
       drafts = new ConversationDrafts();
@@ -1646,7 +1675,7 @@ function syncComposerChrome() {
   const bar = $("#composer-toolbar");
   // Room chat is the default. Direct messaging is an explicit action in
   // Message options; never hide an already-addressed private draft.
-  if (bar) bar.hidden = !composerAudiencePickerVisible({
+  if (bar) bar.hidden = Boolean(activeDirectMemberId && !requestMode) || !composerAudiencePickerVisible({
     recipientId: to,
     requestMode: Boolean(requestMode),
     choosingRecipient: choosingComposerRecipient,
@@ -1663,7 +1692,8 @@ function syncComposerChrome() {
     // surprise. No row / pending / approved needs no callout.
     const audience = composerAudienceNote(state?.members, to);
     if (audience) {
-      note.textContent = audience;
+      note.textContent = activeDirectMemberId && !requestMode ? uiText("direct.private") : audience;
+      note.title = audience;
       const consent = dmConsentPeerSummary(dmConsents, state.members, session?.member?.id, to);
       if (consent && consent.outgoing === "blocked") {
         note.textContent += " They aren't accepting DMs from you.";
@@ -2037,7 +2067,8 @@ function renderContent(selector, html) {
 }
 function render() {
   ownerOffersUI.sync();
-  conversation = conversationIndex(state.messages);
+  selectedMessage.sync(client.sequence);
+  rebuildConversation();
   const members = Object.values(state.members), active = members.filter(m => m.active !== false);
   // R350-n1: a seat whose identity signed out for good can't read a direct message.
   selectOptions("#message-to-select", active.filter(m => m.identityRevoked !== true), "Everyone");
@@ -2243,6 +2274,7 @@ $("#event-list").addEventListener("click", event => {
 // their proposal message (the main channel when there is none).
 function channelStorageKey() { return `pr-channel:${activeChannelRoomId ?? "none"}`; }
 function restoreActiveChannel() {
+  activeDirectMemberId = null;
   activeChannelId = DEFAULT_CHANNEL_ID;
   try {
     const saved = localStorage.getItem(channelStorageKey());
@@ -2266,11 +2298,12 @@ function setActiveChannel(id, preserveWork = false) {
   if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
   const leftWork = !preserveWork && leaveWorkSelection();
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
-  if (next === activeChannelId && !currentThreadId && !requestMode && !assistantDraft) { if (leftWork) renderMessages(); return; }
+  if (next === activeChannelId && !activeDirectMemberId && !currentThreadId && !requestMode && !assistantDraft) { if (leftWork) renderMessages(); return; }
   saveComposer();
   viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null;
   currentThreadId = null; assistantDraft = null;
+  activeDirectMemberId = null;
   activeChannelId = next;
   try { localStorage.setItem(channelStorageKey(), activeChannelId); } catch { /* private mode */ }
   restoreComposer(drafts.get(composerKey()));
@@ -2280,6 +2313,7 @@ function setActiveChannel(id, preserveWork = false) {
 }
 
 function syncChannelChrome() {
+  $("#main").classList.toggle("direct-conversation", Boolean(activeDirectMemberId));
   // If the active channel was archived elsewhere, fall back to the main channel.
   if (state && activeChannelId !== DEFAULT_CHANNEL_ID && state.channels[activeChannelId]?.archivedAt
     && !busy && !requestReading && !composerFiles.some(file => file.status === "uploading")) {
@@ -2287,17 +2321,17 @@ function syncChannelChrome() {
     return;
   }
   const name = activeChannel()?.name ?? DEFAULT_CHANNEL_ID;
-  setText("#conversation-title", `# ${name}`);
+  setText("#conversation-title", activeDirectMemberId ? displayName(activeDirectMemberId) : `# ${name}`);
   const input = $("#message-input");
-  if (input) input.placeholder = `Message #${name}`;
-  renderChannels();
+  if (input) input.placeholder = activeDirectMemberId ? uiText("direct.compose", { name: displayName(activeDirectMemberId) }) : `Message #${name}`;
+  renderChannels(); renderDirectMessages();
 }
 function renderChannels() {
   const list = $("#channel-list");
   if (!list || !state) return;
   const ownerView = Boolean(session && state.room.ownerId === session.member.id && can("manage_members"));
   const html = channelList(state).filter(c => !c.archivedAt).map(c => {
-    const active = c.id === activeChannelId;
+    const active = !activeDirectMemberId && c.id === activeChannelId;
     const manage = ownerView && c.id !== DEFAULT_CHANNEL_ID
       ? `<button type="button" class="icon-button channel-manage" data-channel-manage="${esc(c.id)}" aria-label="Channel settings, ${esc(c.name)}" title="Channel settings">⋯</button>` : "";
     return `<li class="channel-row"><button type="button" class="channel${active ? " is-active" : ""}" data-channel="${esc(c.id)}"${active ? ' aria-current="page"' : ""}><span aria-hidden="true">#</span><span class="channel-name">${esc(c.name)}</span></button>${manage}</li>`;
@@ -2309,6 +2343,88 @@ function renderChannels() {
   list.innerHTML = html; list._html = html;
   if (focused) list.querySelector(`[data-channel="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
 }
+function visibleConversationMessages() {
+  if (!conversation) return [];
+  const self = session?.member?.id;
+  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || []
+    : activeDirectMemberId ? [...conversation.byId.values()] : conversation.roots;
+  return messages.filter(message => activeDirectMemberId
+    ? directMessagePeer(message, self) === activeDirectMemberId
+    : !message.toMemberId && (currentThreadId || messageChannelId(message) === activeChannelId));
+}
+function openDirectMessage(memberId) {
+  if (!Object.hasOwn(state?.members ?? {}, memberId) || state.members[memberId].active === false || state.members[memberId].identityRevoked || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
+  saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
+  requestEpoch++; requestReading = false; requestMode = null; assistantDraft = null;
+  leaveWorkSelection();
+  currentThreadId = null; activeDirectMemberId = memberId;
+  activeChannelId = DEFAULT_CHANNEL_ID;
+  restoreComposer(drafts.get(composerKey()));
+  $("#message-delivery").hidden = true;
+  $("#also-send-to-channel").checked = false;
+  renderTyping([]);
+  syncChannelChrome(); updateReply(); syncRequestComposer(); renderMessages(); renderComposerError(); persistDrafts();
+  $("#message-input").focus();
+}
+function renderDirectMessages() {
+  const list = $("#direct-message-list");
+  if (!state || !list) return;
+  directDirectory.sync(client.generation, client.sequence);
+  const directory = directDirectory.view();
+  list.setAttribute("aria-busy", String(directory.loading));
+  const peers = new Set([...directory.peers.map(peer => peer.memberId), ...state.messages.map(message => directMessagePeer(message, session?.member?.id)).filter(Boolean)]);
+  for (const [key, draft] of drafts.entries) if (directDraftPeer(key) && (draft.body.trim() || draft.files?.length || draft.pending)) peers.add(directDraftPeer(key));
+  if (activeDirectMemberId) peers.add(activeDirectMemberId);
+  const ids = [...peers].filter(id => Object.hasOwn(state.members, id));
+  const signature = JSON.stringify([activeDirectMemberId, ids.map(id => [id, displayName(id)]), directory.cursor, Boolean(directory.error), directory.loading]);
+  if (list.dataset.signature === signature) return;
+  const focused = list.contains(document.activeElement) ? document.activeElement.dataset.directMember : null;
+  list.replaceChildren(...ids.map(id => directPersonRow(id, id === activeDirectMemberId)));
+  if (directory.error || directory.cursor) {
+    const row = document.createElement("li"), button = document.createElement("button");
+    button.type = "button"; button.className = "channel"; button.dataset.directPage = directory.error ? "retry" : "more";
+    button.textContent = uiText(directory.error ? "direct.retryList" : "direct.moreList");
+    button.disabled = directory.loading; row.append(button); list.append(row);
+  }
+  list.dataset.signature = signature;
+  if (focused) list.querySelector(`[data-direct-member="${CSS.escape(focused)}"]`)?.focus({ preventScroll: true });
+}
+function directPersonRow(id, active = false) {
+  const row = document.createElement("li"), button = document.createElement("button");
+  button.type = "button"; button.className = active ? "channel is-active" : "channel";
+  button.dataset.directMember = id; button.textContent = displayName(id);
+  if (active) button.setAttribute("aria-current", "page");
+  row.append(button); return row;
+}
+function renderDirectPeople() {
+  const query = $("#new-direct-search").value.trim().toLocaleLowerCase();
+  const members = Object.values(state?.members ?? {}).filter(member => member.id !== session?.member?.id
+    && member.active !== false && !member.identityRevoked && displayName(member.id).toLocaleLowerCase().includes(query));
+  const list = $("#new-direct-people");
+  list.replaceChildren(...members.map(member => directPersonRow(member.id)));
+  if (!members.length) { const empty = document.createElement("li"); empty.className = "empty-note"; empty.textContent = uiText("direct.noMatches"); list.append(empty); }
+}
+$("#new-direct-message").setAttribute("aria-label", uiText("direct.newMessage"));
+$("#new-direct-message").title = uiText("direct.newMessage");
+$("#new-direct-search").placeholder = uiText("direct.findPerson");
+$("#new-direct-message").addEventListener("click", () => {
+  $("#new-direct-search").value = ""; renderDirectPeople();
+  $("#new-direct-dialog").showModal(); $("#new-direct-search").focus();
+});
+$("#new-direct-close").addEventListener("click", () => $("#new-direct-dialog").close());
+$("#new-direct-search").addEventListener("input", renderDirectPeople);
+for (const selector of ["#direct-message-list", "#new-direct-people"]) $(selector).addEventListener("click", event => {
+  const page = event.target.closest("[data-direct-page]");
+  if (page) { if (page.dataset.directPage === "retry") void directDirectory.retry(); else void directDirectory.more(); return; }
+  const button = event.target.closest("[data-direct-member]");
+  if (!button) return;
+  openDirectMessage(button.dataset.directMember);
+  if (activeDirectMemberId === button.dataset.directMember) {
+    $("#new-direct-dialog").close();
+    if ($("#sidebar-toggle").getAttribute("aria-expanded") === "true") $("#sidebar-toggle").click();
+    $("#message-input").focus();
+  }
+});
 // One-tap replies and a task nudge under the latest message in view
 // (src/chat-suggestions.js). Plain chat stays the default; structure is one tap away.
 const dismissedSuggestions = new Set();
@@ -2316,8 +2432,7 @@ let askAgentTimer = null;
 function syncChatSuggestions() {
   const box = $("#chat-suggestions");
   if (!box) return;
-  const messages = !state || !session ? [] : currentThreadId ? conversation.threads.get(currentThreadId) || []
-    : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const messages = !state || !session ? [] : visibleConversationMessages();
   const latest = messages.at(-1);
   // "Ask @Agent" is for the channel view: a thread already has its own replies.
   const ask = latest && !currentThreadId
@@ -2363,6 +2478,7 @@ $("#chat-suggestions")?.addEventListener("click", e => {
 // The server expires beats after 10s, so a missing update clears itself;
 // this also clears on snapshot refresh and when the viewer sends.
 function renderTyping(typists) {
+  if (activeDirectMemberId) typists = [];
   const el = $("#typing-indicator");
   if (!el) return;
   const names = (typists ?? []).map(t => t.displayName || t.memberId).filter(Boolean).slice(0, 3);
@@ -2377,7 +2493,11 @@ function renderTyping(typists) {
   el.hidden = false;
 }
 function renderMessages() {
-  const list = $("#message-list"), view = currentThreadId ? `thread:${currentThreadId}` : `room:${activeChannelId}`;
+  directWindow.select(activeDirectMemberId, client.generation);
+  directWindow.pin(activeDirectMemberId ? currentThreadId : null);
+  if (activeDirectMemberId) directWindow.sync(client.sequence);
+  const pairWindow = directWindow.view();
+  const list = $("#message-list"), view = conversationViewKey();
   const sameView = list.dataset.view === view;
   if (!sameView) syncChatSuggestions();
   // The read-horizon anchor is recomputed when the view changes (room vs
@@ -2385,19 +2505,21 @@ function renderMessages() {
   // fetches and re-renders.
   if (view !== lastHorizonView && state) {
     lastHorizonView = view;
-    const threadKey = currentThreadId ?? "";
-    const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
-    if (horizonCache.has(threadKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(threadKey));
+    const { cacheKey } = readPositionScope();
+    const messages = visibleConversationMessages();
+    if (horizonCache.has(cacheKey)) horizonAnchorId = horizonAnchorFor(messages, horizonCache.get(cacheKey));
     else { horizonAnchorId = null; void applyHorizonAnchor(); }
   }
   // Lazy history: a reply whose thread root is older than the held window
   // indexes as a root; it stays in its (unloaded) thread, as it would with
   // full history, instead of posing as a top-level message.
   const owesHistory = client.owesHistory;
-  const allMessages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId && !(owesHistory && m.replyToId));
-  if (owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
-  const showPager = !currentThreadId && owesHistory;
-  const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
+  const allMessages = visibleConversationMessages().filter(message => currentThreadId || activeDirectMemberId || !(owesHistory && message.replyToId));
+  if (!activeDirectMemberId && owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
+  const showPager = !currentThreadId && (activeDirectMemberId ? Boolean(pairWindow.cursor || pairWindow.error) : owesHistory);
+  // Private history is already loaded in explicit 50-message pages. A second
+  // 200-record display cap would hide successfully fetched older pages forever.
+  const shownLimit = currentThreadId || activeDirectMemberId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));
@@ -2443,8 +2565,8 @@ function renderMessages() {
   syncComposerAudienceLabel();
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
-    $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
-    setText("#thread-context", `${messages.length - 1} ${messages.length === 2 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
+    $("#thread-title").textContent = root ? `Thread with ${name(root.authorId)}` : uiText(pairWindow.loading ? "direct.loadingThread" : "direct.unavailableThread");
+    setText("#thread-context", `${Math.max(0, messages.length - 1)} ${messages.length === 2 ? "reply" : "replies"} · ${messages.some(message => message.toMemberId) ? "includes private messages" : "visible to everyone in this room"}`);
   }
 
   // Retain unchanged message nodes so new arrivals do not discard text selection or focus.
@@ -2461,7 +2583,7 @@ function renderMessages() {
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
   // Human conversations expose work through their source messages. A full
   // record is mounted only when opened from a link, search, or Updates.
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries(
+  const workEntries = currentThreadId || activeDirectMemberId || !state ? [] : timelineWorkEntries(
     session?.member.kind === "human" ? activeWorkNavigationId : undefined
   ).filter(e => e.channelId === activeChannelId);
   const ordered = [];
@@ -2554,6 +2676,9 @@ function renderMessages() {
       more.textContent = uiText("timeline.earlier");
       pager.append(more);
     }
+    const more = pager.querySelector("button");
+    more.disabled = Boolean(activeDirectMemberId && pairWindow.loading);
+    more.textContent = activeDirectMemberId && pairWindow.error ? uiText("direct.retry") : uiText("timeline.earlier");
     merged.push(pager);
   }
   messages.forEach((message, index) => {
@@ -2561,8 +2686,16 @@ function renderMessages() {
     merged.push(ordered[index]);
   });
   while (wi < workEntries.length) merged.push(workById.get(workEntries[wi++].item.id));
-  const showInvite = Boolean(session?.member?.id && state?.members?.[session.member.id]?.active !== false);
-  if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
+  const showInvite = Boolean(!activeDirectMemberId && session?.member?.id && state?.members?.[session.member.id]?.active !== false);
+  if (!messages.length && activeDirectMemberId && (pairWindow.loading || pairWindow.error)) {
+    const item = document.createElement("li"); item.className = "empty-note";
+    item.textContent = uiText(pairWindow.error ? "direct.loadFailed" : "direct.loading");
+    if (pairWindow.error) {
+      const retry = document.createElement("button"); retry.type = "button"; retry.className = "text-button";
+      retry.dataset.directRetry = ""; retry.textContent = uiText("direct.retry"); item.append(retry);
+    }
+    list.replaceChildren(item);
+  } else if (!messages.length && !workEntries.length) list.innerHTML = `<li class="empty-note">No messages yet. <button type="button" class="text-button" data-empty-write>Write the first one</button>${showInvite ? ' · <button type="button" class="text-button" data-empty-invite>Invite someone</button>' : ""}</li>`;
   else {
     list.querySelectorAll(":scope > .empty-note").forEach(n => n.remove());
     merged.forEach((node, i) => { if (list.children[i] !== node) list.insertBefore(node, list.children[i] || null); });
@@ -2929,7 +3062,7 @@ function restoreComposer(draft) {
     select.add(new Option("Previous recipient unavailable", draft.toMemberId));
     select.options[select.options.length - 1].disabled = true;
   }
-  select.value = draft.toMemberId; replyToId = draft.replyToId; pendingMessage = draft.pending;
+  select.value = draft.toMemberId || activeDirectMemberId || ""; replyToId = draft.replyToId; pendingMessage = draft.pending;
   syncComposerChrome();
   autosizeComposer();
 }
@@ -2981,11 +3114,8 @@ function requestControls(message) {
 function syncRequestComposer() {
   const mode = requestMode, active = Boolean(mode) || requestReading;
   $("#request-mode-bar").hidden = !active;
-  const requestButton = $("#request-reply"), recipientId = $("#message-to-select").value;
-  const members = state?.members;
-  const recipient = members && Object.hasOwn(members, recipientId) ? members[recipientId] : null;
-  const agentTarget = !active && recipientId !== session?.member.id && recipient?.active !== false && recipient?.kind === "agent";
-  const requestHost = agentTarget ? $("#composer-toolbar") : $("#composer-options .composer-options-panel");
+  const requestButton = $("#request-reply");
+  const requestHost = $("#composer-options .composer-options-panel");
   if (requestButton.parentElement !== requestHost) requestHost.append(requestButton);
   requestButton.hidden = !state || active;
   const request = mode?.requestMessageId && state?.replyRequests?.[mode.requestMessageId];
@@ -3062,18 +3192,11 @@ async function openRequestMode(kind, id) {
   }
 }
 const composerOptions = $("#composer-options");
-const startDirectMessage = document.createElement("button");
-startDirectMessage.id = "composer-direct-message";
-startDirectMessage.type = "button";
-startDirectMessage.className = "button ghost";
+const startDirectMessage = $("#composer-direct-message");
 startDirectMessage.textContent = uiText("composer.directMessage");
-startDirectMessage.hidden = true;
-composerOptions.querySelector(".composer-options-panel").prepend(startDirectMessage);
 startDirectMessage.addEventListener("click", () => {
   if (!state || busy || requestReading) return;
-  choosingComposerRecipient = true;
-  syncComposerChrome();
-  $("#message-to-select").focus();
+  $("#new-direct-message").click();
 });
 composerOptions.addEventListener("click", event => {
   if (!event.target.closest("button")) return;
@@ -3088,7 +3211,7 @@ composerOptions.addEventListener("keydown", event => {
 document.addEventListener("click", event => {
   if (!composerOptions.contains(event.target)) composerOptions.open = false;
 });
-$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }); });
+$("#request-reply").addEventListener("click", () => { if (!state || busy || requestReading) return; setRequestMode({ kind: "request" }, { toMemberId: $("#message-to-select").value }); });
 document.addEventListener("click", event => {
   const resume = event.target.closest("[data-resume-credit]");
   if (resume && state && !busy && !requestReading) {
@@ -3121,19 +3244,20 @@ function switchThread(threadId, focusComposer = false, preserveWork = false) {
   requestEpoch++; requestReading = false;
   if (threadId !== currentThreadId || requestMode || assistantDraft) {
     saveComposer(); viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
+    if (threadId) activeDirectMemberId = directMessagePeer(conversation.byId.get(threadId), session.member.id);
     currentThreadId = threadId; requestMode = null; assistantDraft = null;
     restoreComposer(drafts.get(composerKey()));
     // "Also send to channel" is per-send, off by default in every thread.
     $("#also-send-to-channel").checked = false;
   }
-  updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
+  syncChannelChrome(); updateReply(); renderMessages(); renderComposerError(); syncRequestComposer();
   persistDrafts();
   if (leavingResultQuestion) renderReturnBrief();
   if (focusComposer) $("#message-input").focus();
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
 function revealMessage(id) {
-  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) {
+  if (state && !busy && !conversation.byId.has(id)) {
     activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
   }
   if (!state || busy || !conversation.byId.has(id)) return;
@@ -3143,8 +3267,15 @@ function revealMessage(id) {
   if ($("#later-dialog")?.open) $("#later-dialog").close();
   workspaceUI?.showRooms();
   const message = conversation.byId.get(id);
-  if (messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
-  switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+  const peer = directMessagePeer(message, session.member.id);
+  if (peer) {
+    openDirectMessage(peer);
+    if (message.replyToId) switchThread(conversation.rootById.get(id));
+  }
+  else {
+    if (activeDirectMemberId || messageChannelId(message) !== activeChannelId) setActiveChannel(messageChannelId(message));
+    switchThread(message.replyToId ? conversation.rootById.get(id) : null);
+  }
   expandTimelineTo(id);
   const row = [...$("#message-list").querySelectorAll("[data-message-record-id]")]
     .find(node => node.dataset.messageRecordId === id);
@@ -3181,7 +3312,7 @@ function revealWorkTimeline(id) {
   activeWorkNavigationId = id;
   switchThread(null, false, true);
   const channelId = timelineWorkEntries(id)[0]?.channelId;
-  if (channelId && channelId !== activeChannelId) setActiveChannel(channelId, true);
+  if (activeDirectMemberId || channelId && channelId !== activeChannelId) setActiveChannel(channelId ?? DEFAULT_CHANNEL_ID, true);
   renderMessages();
   return workRecord(id);
 }
@@ -3520,24 +3651,23 @@ function revealEvent(id, requireExisting = false) {
 function decodeFragment(value) {
   try { return decodeURIComponent(value); } catch { return null; }
 }
-// Remember a message deep-link target the held history does not contain
-// yet, with the navigation context at arm time, so the retry can tell a
-// still-waiting cold load apart from a user who has since gone elsewhere.
+// Resolve a message outside the held window without walking room history.
+// Keep the navigation context so late results cannot steal the current view.
 function pendHashReveal(messageId) {
   pendingHashReveal = { hash: location.hash, messageId, roomId: state.room?.id ?? session?.roomId,
-    generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, readerScrollAt };
-  client.loadHistory();
+    generation: client.generation, threadId: currentThreadId, channelId: activeChannelId, peerMemberId: activeDirectMemberId, readerScrollAt };
+  selectedMessage.select(messageId, client.generation);
+  selectedMessage.sync(client.sequence);
 }
-// Runs on every snapshot. The pending reveal fires only when this
-// snapshot first holds the target and nothing about the navigation
-// context changed since it was armed; any change cancels it for good.
+// Runs after selected reads and snapshots. Reveal only while the original
+// navigation context is still current.
 function retryPendingHashReveal() {
   const pending = pendingHashReveal;
   if (!pending) return;
   if (!state || client.generation !== pending.generation
     || (state.room?.id ?? session?.roomId) !== pending.roomId
     || location.hash !== pending.hash
-    || currentThreadId !== pending.threadId || activeChannelId !== pending.channelId
+    || currentThreadId !== pending.threadId || activeChannelId !== pending.channelId || activeDirectMemberId !== pending.peerMemberId
     || readerScrollAt !== pending.readerScrollAt) { pendingHashReveal = null; return; }
   if (busy || !conversation?.byId.has(pending.messageId)) return;
   pendingHashReveal = null;
@@ -3587,9 +3717,7 @@ function revealLocationHash() {
   if (current) {
     const id = decodeFragment(current[2]);
     if (id !== null && current[1] === "message") {
-      // Held already: reveal now (and drop any pending twin). Not held
-      // yet — an older message still behind the background fill: pend it
-      // for the first snapshot that holds it instead of dropping it.
+      // Held already: reveal now. Otherwise resolve exactly this record.
       if (conversation.byId.has(id)) { pendingHashReveal = null; revealMessage(id); }
       else pendHashReveal(id);
       return;
@@ -4560,8 +4688,8 @@ function submitRequest(form) {
 // Widen the root-timeline window so the message with this id is rendered.
 function expandTimelineTo(id) {
   if (currentThreadId) return;
-  const view = `room:${activeChannelId}`;
-  const roots = conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const view = conversationViewKey();
+  const roots = visibleConversationMessages();
   const current = timelineWindow.get(view) ?? TIMELINE_WINDOW, next = windowToInclude(roots, id, current);
   if (next > current) {
     timelineWindow.set(view, next);
@@ -4570,9 +4698,15 @@ function expandTimelineTo(id) {
   }
 }
 $("#message-list").addEventListener("click", e => {
+  if (e.target.closest("[data-direct-retry]")) { void directWindow.retry(); return; }
   if (e.target.closest("[data-timeline-earlier]")) {
+    if (activeDirectMemberId) {
+      timelineRevealing = true;
+      if (directWindow.view().error) void directWindow.retry(); else void directWindow.older();
+      return;
+    }
     if (client.loadHistory()) return; // older history first; it renders on arrival
-    const view = `room:${activeChannelId}`;
+    const view = conversationViewKey();
     timelineWindow.set(view, (timelineWindow.get(view) ?? TIMELINE_WINDOW) + TIMELINE_WINDOW);
     timelineRevealing = true;
     renderMessages();
@@ -5310,7 +5444,7 @@ for (const scroller of [$("#message-list"), window]) {
     if (!readerScrolling()) return;
     noteReaderScroll();
     // Lazy history: reading up toward the oldest held message loads the rest.
-    if (client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
+    if (!activeDirectMemberId && client.owesHistory && (scroller === window ? scrollY : $("#message-list").scrollTop) < 600) client.loadHistory();
     if (scroller !== window && pinScrollTop !== null) {
       const pinned = $("#message-list").scrollTop === pinScrollTop; pinScrollTop = null;
       if (pinned) return;
@@ -6966,6 +7100,15 @@ let activityBadgeTimer = null, activityBadgeAt = 0, attentionBadgesBusy = false;
 let horizonAnchorId = null; // first message after the read horizon; the "New messages" divider rides on it
 let horizonCache = new Map(), lastHorizonView = null; // threadKey -> lastReadMessageId
 let horizonAdvanceTimer = null;
+let horizonOperations = new Map();
+function nextHorizonOperation(key) {
+  const revision = (horizonOperations.get(key) ?? 0) + 1;
+  horizonOperations.set(key, revision); return revision;
+}
+function readPositionScope() {
+  const threadId = currentThreadId ?? "", peerMemberId = currentThreadId ? null : activeDirectMemberId;
+  return { threadId, peerMemberId, cacheKey: peerMemberId ? directDraftKey(peerMemberId) : threadId };
+}
 function nearBottomOfList() {
   const list = $("#message-list");
   if (!list || !state) return false;
@@ -6977,18 +7120,25 @@ function scheduleHorizonAdvance() {
   // scrolls. Only fires while the user holds the bottom of the view, so an
   // explicit Mark unread never gets wiped without a scroll.
   clearTimeout(horizonAdvanceTimer);
-  horizonAdvanceTimer = setTimeout(() => { horizonAdvanceTimer = null; void advanceHorizon(); }, 1500);
+  const generation = client.generation, view = conversationViewKey();
+  horizonAdvanceTimer = setTimeout(() => {
+    horizonAdvanceTimer = null;
+    if (generation === client.generation && view === conversationViewKey()) void advanceHorizon();
+  }, 1500);
 }
 async function advanceHorizon() {
   if (!state || !session || !client.session || !nearBottomOfList()) return;
-  const threadKey = currentThreadId ?? "";
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const messages = visibleConversationMessages();
   const latest = messages.length ? messages[messages.length - 1].id : null;
-  if (!latest || horizonCache.get(threadKey) === latest) return;
+  if (!latest || horizonCache.get(cacheKey) === latest) return;
+  const operation = nextHorizonOperation(cacheKey);
   try {
-    await client.setReadHorizon(threadKey, latest);
-    if (!state) return;
-    horizonCache.set(threadKey, latest);
+    const receipt = await client.setReadHorizon(threadId, latest, peerMemberId);
+    if (!receipt || !state || generation !== client.generation || horizonOperations.get(cacheKey) !== operation) return;
+    horizonCache.set(cacheKey, latest);
+    if (view !== conversationViewKey()) return;
     horizonAnchorId = null; // everything in view is read; the divider clears
     renderMessages();
   } catch { /* best-effort; the next scroll retries */ }
@@ -7001,7 +7151,7 @@ function resetAttention() {
   $("#later-list").replaceChildren(); delete $("#later-list")._content;
   setText("#later-status", "");
   savedMessageIds = new Set(); savedIdsBusy = false;
-  horizonAnchorId = null; horizonCache = new Map(); lastHorizonView = null;
+  horizonAnchorId = null; horizonCache = new Map(); horizonOperations = new Map(); lastHorizonView = null;
   clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
   for (const dialog of ["#later-dialog"]) { const node = $(dialog); if (node?.open) node.close(); }
 }
@@ -7061,29 +7211,40 @@ async function applyHorizonAnchor() {
   // Room-level horizon ("" thread) anchors the "New messages" divider on room
   // open and after mark-unread; the thread view anchors on its own horizon.
   if (!state || !session) return;
-  const threadKey = currentThreadId ?? "";
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const operation = nextHorizonOperation(cacheKey);
   try {
-    const horizon = await client.readHorizon(threadKey);
+    const horizon = await client.readHorizon(threadId, peerMemberId);
+    if (!horizon || !state || generation !== client.generation || horizonOperations.get(cacheKey) !== operation) return;
     const lastRead = horizon?.lastReadMessageId ?? null;
-    horizonCache.set(threadKey, lastRead);
-    const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+    horizonCache.set(cacheKey, lastRead);
+    if (view !== conversationViewKey()) return;
+    const messages = visibleConversationMessages();
     horizonAnchorId = horizonAnchorFor(messages, lastRead);
-  } catch { horizonAnchorId = null; }
-  if (state) renderMessages();
+  } catch { if (generation !== client.generation || view !== conversationViewKey() || horizonOperations.get(cacheKey) !== operation) return; horizonAnchorId = null; }
+  if (state && generation === client.generation && view === conversationViewKey()) renderMessages();
 }
 async function markMessageUnread(messageId) {
   if (!state || !session || !conversation.byId.has(messageId)) return;
-  const messages = currentThreadId ? conversation.threads.get(currentThreadId) || [] : conversation.roots.filter(m => messageChannelId(m) === activeChannelId);
+  clearTimeout(horizonAdvanceTimer); horizonAdvanceTimer = null;
+  const { threadId, peerMemberId, cacheKey } = readPositionScope();
+  const generation = client.generation, view = conversationViewKey();
+  const messages = visibleConversationMessages();
   const index = messages.findIndex(m => m.id === messageId);
   if (index < 0) { notice("That message isn't in this view.", true); return; }
   const previous = index > 0 ? messages[index - 1].id : null;
+  const operation = nextHorizonOperation(cacheKey);
   try {
-    await client.setReadHorizon(currentThreadId ?? "", previous);
-    horizonCache.set(currentThreadId ?? "", previous);
+    const receipt = await client.setReadHorizon(threadId, previous, peerMemberId);
+    if (!receipt || !state || generation !== client.generation || horizonOperations.get(cacheKey) !== operation) return;
+    horizonCache.set(cacheKey, previous);
+    if (view !== conversationViewKey()) return;
     horizonAnchorId = messageId;
     renderMessages();
     notice(index === 0 ? "Marked everything unread." : "Marked unread from here.");
   } catch (error) {
+    if (generation !== client.generation || view !== conversationViewKey() || horizonOperations.get(cacheKey) !== operation) return;
     notice(`Couldn't mark unread: ${error.message}`, true);
   }
 }
