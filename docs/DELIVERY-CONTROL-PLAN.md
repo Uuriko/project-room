@@ -49,6 +49,16 @@ because the PR was still draft; after it was marked ready, the guarded merge
 succeeded and the merge slot was released/read back as unclaimed. This test-only
 repair was not redeployed and does not erase the original CI failures.
 
+The inherited selected-work navigation assertions were subsequently corrected in
+[test-only #5252](https://github.com/Uuriko/project-room/pull/5252), merged at
+`ee846dc21f2576e9880b98d88ad2544b0c1288b8`. Thirty browser cases across eight
+scripts passed. This repairs the tested navigation contract; it does not erase
+original failures or imply a product deployment. A separate mobile usability
+observation remains unresolved: Search results stay open above the selected
+card, consuming the viewport (`offer-mobile-choices.png`, private screenshot).
+Passing reachability checks does not establish that this layout is convenient;
+no product fix is claimed for that observation.
+
 Private receipts under `release-prep-20261029/` preserve these distinct outcomes:
 `cohesive-verification/verify-8Osog2/receipt.json`, `cohesive-client-live.json`,
 `cohesive-orientation-live.json`, `cohesive-peer-convergence.json`,
@@ -173,6 +183,30 @@ readiness requests. Twelve reply-context invocations in one minute charged
 in 320 ms despite the caller exceeding its one-second deadline. These are
 contention leads, not proof that one route explains every timeout. Keep the
 readiness contract and investigate the shared-object work before changing it.
+
+An independently inspected external telemetry bundle
+([source commit](https://github.com/Uuriko/project-room/commit/d2b7bb138b975f0b0966e7beec02c20f409697cb))
+preserves 400 requests in 40 complete cycles during 2026-10-29 06:00–06:22 UTC,
+across the earlier `2d72`/`eaa` serving window. All nine manifest hashes matched;
+the 205,165-byte dataset SHA-256 is
+`ffbe429d0c612ec4d1987550c60798d73c2dc91b27a332d2b52c84643b673c0c`.
+Independent counting found 32/80 readiness responses were HTTP 503, all reporting
+a 1,000 ms DO timeout (17 canonical, 15 entry). Entry `/join` total latency p95
+was 3,914 ms and maximum 7,941 ms; these are HTTP request measurements, not
+browser rendering, sign-in or completed-join timings. Expected entry-home 302
+responses were recorded without following their redirects.
+
+The telemetry supports the historical incident evidence, not a current `c47`
+health assessment or causal before/after speedup. Its `/api/version` control is
+DO-backed, not the Worker-only endpoint. All curl records show one private
+remote address and HTTP/1.1, while proxy configuration was not captured; the
+reported wait phase includes unresolved network/proxy/server time and cannot
+exclude network effects or isolate DO dispatch, constructor and handler costs.
+Capture logs and the checkpoint referenced by the report were not included, so
+their exit-status claims were not independently verified. Any future bounded
+comparison should retain source, vantage/proxy metadata and a Worker-only
+control, then correlate request identifiers with stored Cloudflare timings.
+The bundle was inspected offline; no continuous probe was enabled.
 
 The original manual two-laptop trial did not verify native execution. Both laptops ran the
 same pinned-source native-host guard tests: 10 passed on each, but the peer ran
