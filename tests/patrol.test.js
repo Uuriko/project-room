@@ -529,6 +529,24 @@ test("operator status names the parked room the public health surface cannot", (
   } finally { store.close(); }
 });
 
+test("operator status exposes the bounded patrol finding detail hidden from public health", () => {
+  const store = openStore();
+  try {
+    for (let i = 1; i <= 4; i++) post(store, `m${i}`, `message ${i}`);
+    const head = headOf(store);
+    store.db.prepare("DELETE FROM commands WHERE room_id='alpha' AND sequence>?").run(head - 1);
+    store.db.prepare("DELETE FROM events WHERE room_id='alpha' AND sequence>?").run(head - 1);
+    store.patrolTick();
+
+    const [row] = operatorStatus(store).patrolFindings;
+    assert.equal(row.room_id, "alpha");
+    assert.equal(row.sequence, head);
+    assert.equal(row.invariant, "sequence");
+    assert.equal(row.kind, "head_gap");
+    assert.deepEqual(row.detail, { roomSequence: head, loggedThrough: head - 1 });
+  } finally { store.close(); }
+});
+
 test('large idempotency look-back stays within Workers SQL binding limits', () => {
   const store = openStore();
   store.roomFlood={consume(){}};
