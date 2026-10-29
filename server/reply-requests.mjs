@@ -41,9 +41,17 @@ function decode(token, kind, binding) {
 // local notice acknowledgement, history checkpoint and human read cursor are separate.
 export class ReplyRequests {
   constructor(store) { this.store = store; }
-  read(token, roomId, expectedSessionBinding, fn) {
+  read(token, roomId, expectedSessionBinding, fn, { requestsOnly = false } = {}) {
     return this.store.readTransaction(() => {
-      const auth = this.store.authenticate(token, roomId, expectedSessionBinding), room = this.store.room(roomId);
+      const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+      let room;
+      if (requestsOnly) {
+        // Listing needs no conversation bodies, event history or work payloads.
+        // Keep auth and the selected metadata at the same committed sequence.
+        const row = this.store.db.prepare("SELECT sequence,json_extract(projection,'$.replyRequests') AS requests FROM rooms WHERE id=?").get(roomId);
+        if (!row) fail("room_not_found", "Room not found", 404);
+        room = { sequence: row.sequence, state: { replyRequests: row.requests ? JSON.parse(row.requests) : {} } };
+      } else room = this.store.room(roomId);
       return { contractVersion: 1, roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
         viewerSessionRevision: auth.sessionRevision ?? null, ...fn({ auth, room }), scope };
@@ -61,7 +69,7 @@ export class ReplyRequests {
       // At most 500 retained subjects; no bodies and no mutable paging boundary.
       if (Buffer.byteLength(JSON.stringify({ requests, nextReads })) > 1048576) fail("reply_list_too_large", "Narrow the current request selection", 413);
       return { evaluatedThrough: room.sequence, selection: { direction, status }, requests, nextReads };
-    });
+    }, { requestsOnly: true });
   }
   selected(token, roomId, requestMessageId, options = {}) {
     if (!validId(requestMessageId)) fail("invalid_reply_selection", "Choose one request");

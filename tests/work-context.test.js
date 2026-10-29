@@ -477,3 +477,15 @@ test("selected work reply pointers are bounded, detached and do not change compl
   const other = selectedWorkContext({ state, workItemId: item.id, viewerId: "owner", sequence: snapshot.sequence, now: 50000 });
   assert.equal(other.replyRequestContext.total, 0); assert.equal(other.replyRequestContext.nextRead, null);
 });
+
+test("selected source lookup respects a late member history floor without full hydration", async t => {
+  const f = await fixture(t);
+  f.send("owner", T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: "since_join" });
+  f.send("owner", T.MEMBER_ADDED, { memberId: "late-reader", displayName: "Late reader", kind: "human", permissions: [] });
+  const key = f.store.issueAccessKey("commons", "late-reader");
+  t.mock.method(f.store, "room", () => { throw new Error("unexpected full hydration"); });
+  const view = f.store.workContext(key, "commons", "test-handoff", { includeSource: true });
+  assert.equal(view.context.source.status, "unavailable");
+  assert.deepEqual(view.accessSummary.conversation.sourceMessageIds, []);
+  assert.equal(view.accessSummary.conversation.sourceAvailability, "unavailable");
+});
