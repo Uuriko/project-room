@@ -35,7 +35,8 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
   const live = state.messages ?? [];
   const archived = 'room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))';
   const params = marker ? [roomId, marker.throughSeq, marker.retainedJson] : [];
-  function* records({ bodyPrefix = null, descending = false, afterId = null, beforeSequence = null, visibility = null } = {}) {
+  function* records({ bodyPrefix = null, descending = false, afterId = null, beforeSequence = null, beforeId = null, visibility = null } = {}) {
+    if (beforeId !== null && (beforeSequence === null || typeof beforeId !== 'string' || !beforeId || beforeId.length > 256)) throw new TypeError('Message tie-break requires a sequence cursor');
     if (beforeSequence !== null && (!descending || afterId !== null || !Number.isSafeInteger(beforeSequence) || beforeSequence < 0)) throw new TypeError('Sequence cursor requires descending order and no ID cursor');
     if (afterId !== null && typeof afterId !== 'string') throw new TypeError('Message cursor must be an ID');
     if (bodyPrefix !== null && typeof bodyPrefix !== 'string') throw new TypeError('Message prefix must be text');
@@ -65,7 +66,7 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
     const ids = live.map(m => m.id);
     const seqs = messageSequences(store.db, roomId, ids);
     const order = (a,b) => a.seq - b.seq || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
-    let cursor = beforeSequence === null ? null : { seq: beforeSequence, id: '' };
+    let cursor = beforeSequence === null ? null : { seq: beforeSequence, id: beforeId ?? '' };
     if (afterId !== null) {
       const row = seqs.has(afterId) ? {message_id:afterId,seq:seqs.get(afterId)} : store.db.prepare(`SELECT message_id,seq FROM messages WHERE room_id=? AND message_id=?
         AND (seq<=? OR message_id IN (SELECT value FROM json_each(?)))`).get(roomId, afterId, marker.throughSeq, JSON.stringify(ids));

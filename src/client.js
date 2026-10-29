@@ -671,30 +671,34 @@ export class RoomClient {
     const generation = this.generation, session = this.session;
     const anchored = () => this.live && this.live.generation === generation && this.live.session === session ? this.live : null;
     let before = anchored()?.snapshot?.messagesPage?.before;
+    let beforeId = anchored()?.snapshot?.messagesPage?.beforeId ?? null;
     const held0 = this.heldMessages();
     if (!held0?.partial || !Number.isSafeInteger(before)) return false;
     let older = [], more = false;
     const seen = new Set(held0.messages.map(message => message.id));
     for (let pageIndex = 0; pageIndex < 40; pageIndex++) {
-      const page = await this.request(this.path(`/messages?before=${before}&limit=100`), { fresh: true });
+      const params = new URLSearchParams({ before: String(before), limit: "100" });
+      if (beforeId !== null) params.set("beforeId", beforeId);
+      const page = await this.request(this.path(`/messages?${params}`), { fresh: true });
       if (generation !== this.generation || this.session !== session) return false;
       if (!this.ownsResponse(page, session)) { this.endAccess(); throw new Error(uiText("error.connection_changed")); }
       const batch = [];
       for (const message of page.messages ?? []) if (message?.id && !seen.has(message.id)) { seen.add(message.id); batch.push(message); }
       older = [...batch, ...older];
       const next = page.messagesPage?.before;
+      const nextId = page.messagesPage?.beforeId ?? null;
       more = Boolean(page.messagesPage?.hasMore);
-      if (!more || !Number.isSafeInteger(next) || next === before) {
-        if (Number.isSafeInteger(next)) before = next;
+      if (!more || !Number.isSafeInteger(next) || next === before && nextId === beforeId) {
+        if (Number.isSafeInteger(next)) { before = next; beforeId = nextId; }
         more = false;
         break;
       }
-      before = next;
+      before = next; beforeId = nextId;
     }
     const heldNow = this.heldMessages(), live = anchored();
     if (!heldNow || !live) return false;
     const messages = [...older, ...heldNow.messages];
-    const snapshot = { ...live.snapshot, state: { ...live.snapshot.state, messages }, messagesPage: { ...(live.snapshot.messagesPage ?? {}), before, hasMore: more } };
+    const snapshot = { ...live.snapshot, state: { ...live.snapshot.state, messages }, messagesPage: { ...(live.snapshot.messagesPage ?? {}), before, beforeId, hasMore: more } };
     this.held = { ...heldNow, messages: messages.slice(), partial: more, owesFull: false, fullSequence: live.snapshot.sequence };
     this.live = { generation, session, snapshot };
     this.onSnapshot(snapshot, session);

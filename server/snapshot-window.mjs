@@ -25,7 +25,7 @@ export function messageSeqs(db, roomId, ids) {
 export function messagesPageOf(messages, seqs, hasMore) {
   const oldest = messages[0];
   const before = oldest && seqs.has(oldest.id) ? seqs.get(oldest.id) : null;
-  return { before, hasMore: Boolean(hasMore) };
+  return { before, beforeId: before === null ? null : oldest.id, hasMore: Boolean(hasMore) };
 }
 
 // Newest items whose JSON fits in budget. One oversized item is kept so a
@@ -147,9 +147,10 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
   };
 }
 
-export function readMessagePage(store, token, roomId, { before = null, limit = SNAPSHOT_WINDOW_MESSAGES, expectedSessionBinding = null } = {}) {
+export function readMessagePage(store, token, roomId, { before = null, beforeId = null, limit = SNAPSHOT_WINDOW_MESSAGES, expectedSessionBinding = null } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > SNAPSHOT_WINDOW_MESSAGES) fail(422, "invalid_snapshot_view", "Choose a page of at most 100 messages");
   if (before !== null && (!Number.isSafeInteger(before) || before < 0)) fail(422, "invalid_snapshot_view", "Choose a message cursor");
+  if (beforeId !== null && (before === null || typeof beforeId !== "string" || !beforeId || beforeId.length > 256)) fail(422, "invalid_snapshot_view", "Choose a valid message cursor");
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const room = store.room(roomId);
@@ -158,7 +159,7 @@ export function readMessagePage(store, token, roomId, { before = null, limit = S
     // Filter archive visibility in SQL so private history does not require
     // decoding unrelated message bodies. The working set keeps authority.
     const selected = [];
-    for (const message of repository.records({ descending: true, beforeSequence: before,
+    for (const message of repository.records({ descending: true, beforeSequence: before, beforeId,
       visibility: { viewerId: auth.member.id, floor: store.historyFloor(roomId, auth.member.id) } })) {
       selected.push(message);
       if (selected.length > limit) break;
@@ -174,7 +175,7 @@ export function readMessagePage(store, token, roomId, { before = null, limit = S
       roomId,
       sequence: room.sequence,
       messages,
-      messagesPage: { before: pageBefore, hasMore },
+      messagesPage: { before: pageBefore, beforeId: pageBefore === null ? null : oldest.id, hasMore },
       viewerId: auth.member.id,
       viewerAccountId: auth.account?.id ?? null,
       viewerAuthEpoch: auth.account?.authEpoch ?? null,

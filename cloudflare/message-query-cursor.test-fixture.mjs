@@ -15,7 +15,7 @@ export class MessageCursorRoom extends DurableObject {
    count:measure('count',()=>q.countMetadata(f.visible)),first:measure('first',()=>[...q.firstPostedAtByAuthor()])};
   result.sequencePage=measure('sequencePage',()=>{
    const page=[];
-   for(const message of q.records({descending:true,beforeSequence:9000,visibility:{viewerId:'viewer'}})){
+   for(const message of q.records({descending:true,beforeSequence:9000,beforeId:'m018001',visibility:{viewerId:'viewer'}})){
     page.push(message);if(page.length===6)break;
    }
    return page;

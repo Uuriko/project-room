@@ -104,3 +104,38 @@ test("the shared window fitter and bootstrap builder are the modules the read us
   assert.ok(fitted.state.messages.length >= 1);
   assert.ok(fitted.state.messages.length < messages.length);
 });
+
+// A reply and its channel copy share a posting sequence. A page boundary
+// between them must preserve both records, including after compaction.
+for (const limit of [1,100]) test(`message pages continue through shared sequences before and after archive (limit ${limit})`, async t => {
+  const f = await listening(t);
+  f.store.roomFlood = { consume() {} };
+  for (const [id, extra] of [["cursor-root", {}], ["cursor-reply", { replyToId: "cursor-root", alsoSendToChannel: true }]]) {
+    f.store.command(f.keys.owner, "commons", { id: randomUUID(), type: "message.posted", data: { messageId: id, body: limit === 100 ? id + "x".repeat(12000) : id, ...extra } });
+  }
+  const headers = { Authorization: `Bearer ${f.keys.owner}` };
+  const get = async query => {
+    const response = await fetch(`${f.origin}/api/rooms/commons/messages?${query}`, { headers });
+    assert.equal(response.status, 200); return response.json();
+  };
+  const walk = async () => {
+    const ids = []; let query = `limit=${limit}`;
+    for (let i=0; i<20; i++) {
+      const page = await get(query);
+      ids.unshift(...page.messages.map(message => message.id));
+      if (!page.messagesPage.hasMore) return ids;
+      const { before, beforeId } = page.messagesPage;
+      assert.ok(Number.isSafeInteger(before)); assert.equal(typeof beforeId, "string");
+      query = new URLSearchParams({ limit: String(limit), before: String(before), beforeId }).toString();
+    }
+    assert.fail("cursor did not converge");
+  };
+  const before = await walk();
+  assert.deepEqual(before.slice(-3), ["cursor-root", "cursor-reply", "cursor-reply:channel"]);
+  while (!f.store.backfillMessages({limit:1000}).done) { /* certify archive */ }
+  assert.equal(f.store.checkMessagesParity().ok,true);
+  assert.equal(f.store.archiveMessages("commons",{keepNewest:1,dryRun:false}).ok,true);
+  assert.deepEqual(await walk(),before);
+  const malformed = await fetch(`${f.origin}/api/rooms/commons/messages?beforeId=cursor-reply`,{headers});
+  assert.equal(malformed.status,422);
+});
