@@ -9,6 +9,7 @@ import { dmConsentEventVisible, dmEventVisibility } from "./dm-event-visibility.
 import { peerEventVisible, visibleBonds } from "./bonds.mjs";
 import { redactMessageTree, redactSnapshotState } from "./redact-read.mjs";
 import { ServiceError } from "./service-error.mjs";
+import { readAgentOrientation } from "./agent-orientation.mjs";
 
 export const SNAPSHOT_WINDOW_MESSAGES = 100;
 export const SNAPSHOT_WINDOW_BYTES = 30 * 1024;
@@ -120,6 +121,10 @@ function viewerFilter(store, roomId, viewerId) {
 
 // The member snapshot. windowed uses the shared message window and byte budget.
 export function readRoomSnapshot(store, token, roomId, fence, { view = "full", helpContext = false, offerContext = false, auditView = "full", windowed = false, visibility = null } = {}) {
+  if (view === "orientation") {
+    if (helpContext || offerContext || auditView !== "full" || windowed) fail(422, "invalid_snapshot_view", "Orientation does not accept snapshot context options");
+    return readAgentOrientation(store, token, roomId, fence);
+  }
   const snapshot = store.snapshot(token, roomId, fence, view, helpContext, offerContext, auditView, windowed ? SNAPSHOT_WINDOW_MESSAGES : null);
   if (view === "work") {
     delete snapshot.state.agentHalts;

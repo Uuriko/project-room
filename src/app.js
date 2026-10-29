@@ -6279,6 +6279,8 @@ function openCatchUp() {
 function selectWorkView(view) {
   if (view !== "results") return;
   if ($("#settings-dialog").open) $("#settings-dialog").close();
+  $("#main").classList.remove("sidebar-open");
+  $("#sidebar-toggle").setAttribute("aria-expanded", "false");
   $("#search-form").hidden = false;
   $("#topbar-search-toggle").setAttribute("aria-expanded", "true");
   $("#message-search").value = "has:result";

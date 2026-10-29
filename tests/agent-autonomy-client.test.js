@@ -332,3 +332,64 @@ test("agent client: createAgentInvite falls back to explicit permissions when pr
     strict.createAgentInvite({ profile: "collaborate" }),
     error => error.code === "invalid_request");
 });
+
+
+test("outside agent discovery and retries survive the recent-message window", async t => {
+  const { origin, keys, store, client } = await fixture(t);
+  const input = { externalRef: "bus:older", displayName: "Older agent", origin: "bus", reach: "bus:older" };
+  await client("agent").recordOutsideAgent(input);
+  let now = Date.now(); store.now = () => now;
+  const owner = store.issueAccessKey("commons", "owner");
+  for (let i = 0; i < 110; i++) {
+    now += 2000;
+    store.command(owner, "commons", { id: `filler-${i}`, type: "message.posted", data: { messageId: `filler-${i}`, body: "Unrelated conversation " + "x".repeat(1000) } });
+  }
+  const routes = [];
+  const agent = new RoomAgentClient({ origin, roomId: "commons", memberId: "agent", token: keys.agent,
+    fetchImpl: (url, options) => { routes.push(new URL(url).pathname); return fetch(url, options); } });
+  assert.equal((await agent.outsideAgents()).agents.find(row => row.externalRef === input.externalRef)?.displayName, input.displayName);
+  const before = store.room("commons").sequence;
+  assert.equal((await agent.recordOutsideAgent(input)).recorded, "replay");
+  assert.equal(store.room("commons").sequence, before);
+  assert.equal(routes.includes("/api/rooms/commons"), false, "no broad snapshot transfer");
+  assert.equal(routes.includes("/api/rooms/commons/commands"), false, "service owns introduction and retry");
+  const snapshotBytes = Buffer.byteLength(JSON.stringify(await client("agent").snapshot()));
+  const networkBytes = Buffer.byteLength(JSON.stringify(await agent.outsideAgents()));
+  assert.ok(networkBytes < snapshotBytes / 10);
+  t.diagnostic(`snapshot=${snapshotBytes} bytes; outside-agent service=${networkBytes} bytes; server hydration not measured`);
+});
+
+
+test("outside-agent service retry survives a lost receipt without snapshot fallback", async t => {
+  const { origin, keys, store } = await fixture(t);
+  const input = { externalRef: "bus:lost", displayName: "Lost receipt", origin: "bus" };
+  const routes = []; let drop = true;
+  const agent = new RoomAgentClient({ origin, roomId: "commons", memberId: "agent", token: keys.agent,
+    fetchImpl: async (url, options) => {
+      const path = new URL(url).pathname; routes.push(path);
+      const response = await fetch(url, options);
+      if (path.endsWith("/outside-agents") && options.method === "POST" && drop) { drop = false; await response.text(); throw new TypeError("Lost committed response"); }
+      return response;
+    } });
+  await assert.rejects(agent.recordOutsideAgent(input), /Lost committed response/);
+  const committed = store.room("commons").sequence;
+  assert.equal((await agent.recordOutsideAgent(input)).recorded, "replay");
+  assert.equal(store.room("commons").sequence, committed);
+  assert.deepEqual(routes, ["/api/session", "/api/rooms/commons/outside-agents", "/api/session", "/api/rooms/commons/outside-agents"]);
+  await assert.rejects(agent.recordOutsideAgent({ ...input, action: "verify" }), { code: "invalid_outside_agent" });
+  store.revoke(keys.agent);
+  await assert.rejects(agent.outsideAgents(), error => error.status === 401);
+});
+
+test("outside-agent client rejects malformed or privilege-granting summaries", async t => {
+  const { origin, keys } = await fixture(t);
+  for (const bad of [null, { contractVersion: 1, grantsAccess: true, evaluatedThrough: 1, agents: [] },
+    { contractVersion: 1, grantsAccess: false, evaluatedThrough: -1, agents: [] },
+    { contractVersion: 1, grantsAccess: false, evaluatedThrough: 1, agents: [null] }]) {
+    const calls = [];
+    const agent = new RoomAgentClient({ origin, roomId: "commons", memberId: "agent", token: keys.agent,
+      fetchImpl: (url, options) => { calls.push(new URL(url).pathname); return url.endsWith("/api/session") ? fetch(url, options) : Promise.resolve(Response.json(bad)); } });
+    await assert.rejects(agent.outsideAgents(), { code: "invalid_response" });
+    assert.equal(calls.length, 2);
+  }
+});

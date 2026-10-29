@@ -1,4 +1,5 @@
 import { canAdministerRoom } from '../src/room-administration.js';
+import { addressesAssistant } from '../src/conversation-intent.js';
 import { enforceAutonomyTierForAction, getTier } from './autonomy-tiers.mjs';
 import { validId, messageChannelId, MAX_MESSAGE_BODY_CHARS } from '../src/events.js';
 import { messageRepository, messageThreadRoot } from './message-repository.mjs';
@@ -180,7 +181,7 @@ export class RoomAssistant {
         for (const id of input.fileIds) this.store.roomAttachments.commit(postToken, roomId, { id, messageId: sourceMessageId });
         result = this.apply(roomId, { ...input.intent,
           requestId: `submit-${createHash('sha256').update(input.requestId).digest('hex')}`,
-          ...(input.intent.action === 'invoke' ? { runId: `run-${sourceMessageId}` } : {}), sourceMessageId
+          ...(input.intent.action === 'invoke' ? { runId: assistantRunId(sourceMessageId) } : {}), sourceMessageId
         }, authorize, postToken).result;
       } else if (input.action === 'configure') {
         if (!isAdmin) fail('assistant_denied', 'A room administrator configures its assistant', 403);
@@ -214,8 +215,19 @@ export class RoomAssistant {
           source(input.sourceMessageId);
           const coordinator = state.members[config.coordinatorMemberId];
           if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) fail('assistant_not_connected', 'Connect an authorized room assistant before asking for work');
-          if (run || this.store.db.prepare("SELECT 1 FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, input.sourceMessageId)) fail('assistant_run_exists', 'This message already has a shared request');
-          run = { id: input.runId, sourceMessageId: input.sourceMessageId, initiatorId: actor.id,
+          const existing = run || this.store.db.prepare("SELECT value FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, input.sourceMessageId);
+          if (existing) {
+            const prior = run ?? JSON.parse(existing.value);
+            // The server derives this same run from a plain addressed post
+            // (see invokeFromPlainPost): a submit whose client intent lagged
+            // that derivation replays the identical request, so an exact
+            // match is a receipt, not a conflict. Anything else stays refused.
+            const replayed = prior.id === input.runId && prior.initiatorId === actor.id && prior.attemptId == null
+              && prior.inputs.length === 1 && prior.inputs[0].memberId === actor.id && prior.inputs[0].sourceMessageId === input.sourceMessageId;
+            if (!replayed) fail('assistant_run_exists', 'This message already has a shared request');
+            run = prior;
+          }
+          if (!run) run = { id: input.runId, sourceMessageId: input.sourceMessageId, initiatorId: actor.id,
             coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
             createdAt: this.store.now(), updatedAt: this.store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: input.sourceMessageId, status: 'pending' }], activity: [] };
         } else {
@@ -380,5 +392,50 @@ export class RoomAssistant {
       if (input.action !== 'draft') this.store.db.prepare('INSERT INTO room_assistant_ops VALUES(?,?,?,?,?)').run(roomId, actor.id, input.requestId, canonical, JSON.stringify(response));
       return response;
     });
+  }
+}
+
+
+// fo-qa-c10-202610280645: a valid 128-character source messageId composed as
+// `run-${messageId}` is 132 characters, past the 128-character room ID cap, so
+// later assistant actions would reject the run and its producer could never
+// claim it. Both run-deriving paths (atomic submit and plain-post derivation)
+// share one deterministic bounded helper: `run-${id}` when it fits, otherwise
+// a 60-hex-digit digest of the source id, so the same source id always maps to
+// the same run id on either path.
+export function assistantRunId(sourceMessageId) {
+  const composed = `run-${sourceMessageId}`;
+  if (composed.length <= 128) return composed;
+  return `run-${createHash('sha256').update(sourceMessageId).digest('hex').slice(0, 60)}`;
+}
+
+// fo-qa-c10-202610280645: the client routes an ask only from its assistant
+// projection, and that projection can lag the configure write, so the first
+// ask in a freshly configured room rides the plain message path and no run
+// starts. The server owns the configuration, so after a plain shared post it
+// derives the same invoke the client would have sent with a fresh read.
+// Reply-based continuations stay client-routed. Derivation never throws and
+// never refuses the post: "posting a message stays open" holds here too.
+export function invokeFromPlainPost(store, roomId, state, actor, data, messageId) {
+  try {
+    if (!store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get()) return;
+    const configRow = store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId);
+    if (!configRow) return;
+    const config = JSON.parse(configRow.value);
+    if (!config.coordinatorMemberId) return;
+    const coordinator = state.members[config.coordinatorMemberId];
+    if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) return;
+    if (actor.kind !== 'human' || isGuestAgentMemberId(actor.id)) return;
+    const isAdmin = canAdministerRoom(state, actor.id) && actor.permissions.includes('manage_members');
+    if (!isAdmin && !actor.permissions?.includes('steer')) return;
+    if (data?.toMemberId || data?.replyToId || typeof data?.body !== 'string' || typeof data?.messageId !== 'string' || !validId(data.messageId)) return;
+    if (!addressesAssistant(data.body, config.name || 'Room')) return;
+    if (store.db.prepare("SELECT 1 FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, messageId)) return;
+    const run = { id: assistantRunId(messageId), sourceMessageId: messageId, initiatorId: actor.id,
+      coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
+      createdAt: store.now(), updatedAt: store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: messageId, status: 'pending' }], activity: [] };
+    store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO UPDATE SET value=excluded.value').run(roomId, run.id, JSON.stringify(run));
+  } catch (error) {
+    console.error(`assistant intent derivation failed for room ${roomId} message ${messageId}:`, error?.message ?? error);
   }
 }
