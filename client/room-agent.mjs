@@ -898,18 +898,27 @@ export class RoomAgentClient {
     const path = params.size ? `/work-claims?${params}` : "/work-claims";
     const page = await this.#request(path, undefined, signal);
     if (cursor || limit !== undefined || !page?.hasMore || typeof page.nextCursor !== "string") return page;
-    const claims = [...(page.claims ?? [])];
+    if (page.hasMore !== true || !Array.isArray(page.claims)) {
+      return { ...page, claims: Array.isArray(page.claims) ? page.claims : [], hasMore: true };
+    }
+    const claims = [...page.claims];
     let next = page.nextCursor;
     const seen = new Set();
+    let done = false;
     for (let hop = 0; hop < 20 && next && !seen.has(next); hop += 1) {
       seen.add(next);
       const moreParams = new URLSearchParams(params);
       moreParams.set("cursor", next);
       const more = await this.#request(`/work-claims?${moreParams}`, undefined, signal);
-      claims.push(...(more?.claims ?? []));
-      next = more?.hasMore && typeof more.nextCursor === "string" ? more.nextCursor : null;
+      // Stop at the malformed page: a later terminal page cannot certify
+      // completeness after omitted claims or contradictory continuation data.
+      const terminal = more?.hasMore === false && more.nextCursor == null;
+      const continuation = more?.hasMore === true && typeof more.nextCursor === "string" && more.nextCursor.length > 0;
+      if (!Array.isArray(more?.claims) || (!terminal && !continuation)) break;
+      claims.push(...more.claims);
+      done = terminal;
+      next = !done ? more.nextCursor : null;
     }
-    const done = next === null;
     return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
   projectMap(args, { signal } = {}) {
