@@ -37,17 +37,41 @@ body-at-rest modes passed. Fresh authorization, work corruption refusal and
 full-cache isolation remain checked. Selected-message mention resolution
 (#5212) also uses fresh membership without hydrating room history. SQLite still
 scans projection JSON; these changes do not complete A1, normalize all storage,
-or prove a readiness cure. Their deployment is tracked by exact source in
-[run 40827203823](https://github.com/Uuriko/project-room/actions/runs/40827203823),
-not inferred from merged status.
+or prove a readiness cure. [Run 40827203823](https://github.com/Uuriko/project-room/actions/runs/40827203823)
+deployed `eaa97768eb0c21f0ed22d47ed27d20286abeb6be`: all four version
+endpoints converged and authenticated work reads succeeded. Both workflow and
+independent verification failed the two readiness probes. Recovery held for
+diagnosis; no rollback or runtime publication occurred, and the deployment
+claim was released. The prior runtime package remains the published version.
+See [the preserved failure and recovery evidence](https://github.com/Uuriko/project-room/issues/5177#issuecomment-6489451932).
 
-Remaining read debt includes archived-page cursor ties and byte trimming
-(#5206), retained-message processing, default orientation/board call chains,
+Archived history pagination (#5206) is merged at `01e41ab8`, not deployed.
+It seeks by sequence and message ID, preserves shared-sequence siblings across
+count and byte boundaries, and stops after a page plus lookahead. The composed
+source passed 47 checks, including cold-work and conversation regressions.
+The five-result archive fixture previously loaded 266 bodies; it now loads at
+most one 128-row batch. This bounds materialization, not every SQL row examined.
+
+Remaining read debt includes reply-context event scans and repeated message
+materialization, retained-message processing, default orientation/board call chains,
 verified archive hydration and full projection scan cost. Preserve private
 message, history-floor, index repair and corruption-recovery semantics while
 reducing those reads. The 4 MiB projection cap remains unchanged.
 
-The two-laptop execution trial remains unverified. Inventory existing native
+Stored production logs show expensive reply-context calls alongside slow
+readiness requests. Twelve reply-context invocations in one minute charged
+18,694 ms CPU. A traced readiness failure included a storage RPC that completed
+in 320 ms despite the caller exceeding its one-second deadline. These are
+contention leads, not proof that one route explains every timeout. Keep the
+readiness contract and investigate the shared-object work before changing it.
+
+The two-laptop native execution trial remains unverified. Both laptops ran the
+same pinned-source native-host guard tests: 10 passed on each, but the peer ran
+them manually and its native receiver was stopped. The manual run does not
+populate the native request journal; replaying the open request through that
+receiver could execute it again. Return the retained result for the original
+request, establish the stopped receiver's cause, then use a separate native
+trial to prove interrupted delivery and retry behavior. Inventory existing
 host journals, directed requests and saved results before extending scheduling.
 A protocol fixture or an independently run remote command is not evidence of
 cross-host dispatch, interrupted delivery or duplicate-result recovery. Retain
