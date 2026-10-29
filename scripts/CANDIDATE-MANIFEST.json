@@ -76,7 +76,7 @@
     "src/board.css": "sha256:3a52248f665c3ef8871a1a815b93cd084827f88d91be0dc7c4237668f6cccb2d",
     "src/browser-session.js": "sha256:49fdffa1e396531f24a2441b76c5ba249cbbdac69a348cf90ff9b2037adc8b6b",
     "src/chat-suggestions.js": "sha256:60acc6b5c3de53a09dce6aa615f73b34a20bf5fc8a6f1061854afe2c51cc7901",
-    "src/client.js": "sha256:d7678e46cbe3b8f94f9ff6cc1238d82deef9f0fc85238f70ff55f98aa120d3a3",
+    "src/client.js": "sha256:0e56a7990cbf3f0368ec12041dd2bf3a975871836035bf701cef737d61251a8b",
     "src/clipboard.js": "sha256:849b3e4c3cfbb4e5859bf052674496c3d2e140ebd0ef2da540abd442db0a4ae6",
     "src/composer-files.js": "sha256:c82b382b8e7b66bcc915f614a2d9b4084601c5efa267be56e22a87cb19c1d84d",
     "src/conversation-intent.js": "sha256:518fa45e3c1a14e2a28c11bb29e98f821aea18549a8b8321b88a84b8eb39a591",
