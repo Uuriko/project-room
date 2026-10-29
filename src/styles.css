@@ -557,6 +557,10 @@ details[open] > .section-summary::before { transform: rotate(45deg); }
 #connection-details > summary { cursor: pointer; min-height: 28px; padding-block: .3rem; font-size: .75rem; }
 #connection-explanation { position: absolute; z-index: 15; top: 100%; right: 1rem; margin: .25rem 0 0; width: min(26rem, calc(100vw - 2rem)); padding: 1rem; border: 1px solid var(--line); border-radius: .75rem; background: var(--panel-raised); box-shadow: var(--shadow); line-height: 1.5; overflow-wrap: anywhere; }
 #people-hint:empty { display: none; }
+/* #3340: account-home Needs Attention badge sits in the cockpit heading
+   (the .count-chip rules carry its shape); per-room deep-link lines are
+   compact rows above the Decisions queue. */
+.cockpit-room-line { margin: .25rem 0; }
 /* #662: owner "needs your attention" card. */
 .needs-attention { margin: 0 1rem .5rem; padding: .6rem 1rem; border: 1px solid var(--line); border-radius: .65rem; background: rgb(255 255 255 / 4%); }
 .needs-attention[hidden] { display: none; }
@@ -1827,4 +1831,10 @@ body:has(#account-rooms-panel:not([hidden])) #invite-people-button { display: no
   select, input, textarea, .composer-row { border-color: ButtonText; }
   .composer-row:focus-within { border-color: Highlight; }
   select:focus, input:focus, textarea:focus, button:focus-visible, a:focus-visible, summary:focus-visible { border-color: Highlight; outline-color: Highlight; }
+}
+/* The phone menu drawer dims the room behind it. A tap on the dimmed area
+   lands outside the sidebar, which the existing outside-click handler
+   treats as close. */
+@media (max-width: 940px) {
+  .community-shell.sidebar-open::after { content: ""; position: fixed; inset: 0; z-index: 39; background: rgb(0 0 0 / 55%); }
 }

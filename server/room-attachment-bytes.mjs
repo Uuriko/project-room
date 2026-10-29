@@ -142,11 +142,23 @@ export class RoomAttachmentBytes {
         COALESCE(SUM(CASE WHEN state='staged' AND uploader_id=? THEN 1 ELSE 0 END), 0) AS stagedCount,
         COALESCE(SUM(CASE WHEN state IN ('staged','committed') THEN 1 ELSE 0 END), 0) AS records
         FROM room_attachments WHERE room_id=?`).get(auth.member.id, auth.member.id, roomId);
-      if (usage.roomBytes + bytes.length > attachmentLimits.roomBytes
-        || usage.memberBytes + bytes.length > attachmentLimits.memberBytes
-        || usage.stagedCount + 1 > attachmentLimits.stagedPerMember
-        || usage.records + 1 > attachmentLimits.recordsPerRoom) {
-        fail(409, "attachment_quota", "This room cannot store another file of that size");
+      // Name the limit that refused, with what is used and what is left, so an
+      // agent can split the file or stop instead of retrying blind. Committed
+      // files never expire and staged ones count until their staging deadline,
+      // so the uploader's own total includes files other members cannot see.
+      const limits = [
+        ["uploader_bytes", usage.memberBytes, attachmentLimits.memberBytes, bytes.length, "bytes"],
+        ["room_bytes", usage.roomBytes, attachmentLimits.roomBytes, bytes.length, "bytes"],
+        ["staged_files", usage.stagedCount, attachmentLimits.stagedPerMember, 1, "files"],
+        ["room_files", usage.records, attachmentLimits.recordsPerRoom, 1, "files"]
+      ];
+      const refused = limits.find(([, used, max, adding]) => used + adding > max);
+      if (refused) {
+        const [limit, used, max, adding, unit] = refused, remaining = Math.max(0, max - used);
+        const error = new ServiceError(409, "attachment_quota",
+          `This file needs ${adding} ${unit === "bytes" ? "bytes" : "file slot"}; the ${limit.replace("_", " ")} limit has ${remaining} ${unit} left of ${max}. Nothing was stored`);
+        error.detail = { quota: { limit, used, max, remaining, requested: adding, unit } };
+        throw error;
       }
       const expiresAt = now + attachmentLimits.lifetimeMs;
       this.db.prepare(`INSERT INTO room_attachments(

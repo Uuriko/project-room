@@ -411,3 +411,82 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   release();
   assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
 });
+
+
+test('SDK repository and branch reach creation, claiming, and convenience reclaim over HTTP', async t => {
+  const { owner } = await fixture(t);
+  const created = await owner.workClaimCreate({ id: 'repo-direct', repo: 'acme/widgets', branch: 'codex/create' });
+  assert.equal(created.repo, 'acme/widgets'); assert.equal(created.branch, 'codex/create');
+  const claimed = await owner.claimWorkItem('repo-direct', { repo: 'acme/other', branch: 'codex/claim' });
+  assert.equal(claimed.repo, 'acme/other'); assert.equal(claimed.branch, 'codex/claim');
+  const convenient = await owner.workClaim('repo-convenience', { repo: 'acme/widgets', branch: 'codex/new' });
+  assert.equal(convenient.repo, 'acme/widgets'); assert.equal(convenient.branch, 'codex/new');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const reclaimed = await owner.workClaim('repo-convenience', { repo: 'acme/changed', branch: 'codex/reclaim' });
+  assert.equal(reclaimed.repo, 'acme/changed'); assert.equal(reclaimed.branch, 'codex/reclaim');
+  await owner.workRelease('repo-convenience', roundOf(await owner.workClaimGet('repo-convenience')));
+  const retained = await owner.workClaim('repo-convenience');
+  assert.equal(retained.repo, 'acme/changed'); assert.equal(retained.branch, 'codex/reclaim');
+  assert.equal((await owner.workClaimGet('repo-convenience')).repo, 'acme/changed');
+});
+
+test('SDK invalid repository and branch declarations reach server validation', async t => {
+  const { owner } = await fixture(t);
+  for (const fields of [{ repo: 'invalid repo' }, { branch: 'invalid branch' }]) {
+    await assert.rejects(owner.workClaimCreate({ id: 'bad-repo-create', ...fields }), invalid);
+    await assert.rejects(owner.workClaim('bad-repo-convenience', fields), invalid);
+    await assert.rejects(owner.workClaimGet('bad-repo-create'), error => error.status === 404);
+    await assert.rejects(owner.workClaimGet('bad-repo-convenience'), error => error.status === 404);
+  }
+  await owner.workClaimCreate({ id: 'bad-repo-existing', repo: 'acme/widgets', branch: 'main' });
+  await assert.rejects(owner.claimWorkItem('bad-repo-existing', { repo: 'invalid repo' }), invalid);
+  await assert.rejects(owner.workClaim('bad-repo-existing', { branch: 'invalid branch' }), invalid);
+  const unchanged = await owner.workClaimGet('bad-repo-existing');
+  assert.equal(unchanged.state, 'unclaimed'); assert.equal(unchanged.repo, 'acme/widgets'); assert.equal(unchanged.branch, 'main');
+});
+
+
+test('SDK preserves incomplete coverage on malformed continuation pages and cursor cycles', async () => {
+  for (const more of [
+    { claims: [], hasMore: true },
+    { claims: [], hasMore: true, nextCursor: 42 },
+    { claims: [], nextCursor: null },
+    { claims: [], hasMore: false, nextCursor: 'repeat' },
+    { claims: [], hasMore: true, nextCursor: 'repeat' },
+    { hasMore: false, nextCursor: null }
+  ]) {
+    let reads = 0;
+    const client = new RoomAgentClient({ origin: 'https://room.example', roomId: 'commons', token: 'a'.repeat(43),
+      fetchImpl: async () => {
+        reads += 1;
+        return new Response(JSON.stringify(reads === 1 ? { claims: [], hasMore: true, nextCursor: 'repeat' } : more),
+          { headers: { 'content-type': 'application/json' } });
+      }
+    });
+    const result = await client.workClaims();
+    assert.equal(result.hasMore, true, JSON.stringify(more));
+    assert.equal(reads, 2, 'malformed/cyclic metadata never causes an unbounded walk');
+  }
+});
+
+
+test('malformed first or middle pages cannot be hidden by a later terminal page', async () => {
+  const first = { claims: [{ id: 'first' }], hasMore: true, nextCursor: 'middle' };
+  const terminal = { claims: [{ id: 'last' }], hasMore: false, nextCursor: null };
+  for (const pages of [
+    [{ hasMore: true, nextCursor: 'middle' }, terminal],
+    [{ claims: [], hasMore: 'true', nextCursor: 'middle' }, terminal],
+    [{ claims: [], hasMore: 1, nextCursor: 'middle' }, terminal],
+    [first, { hasMore: true, nextCursor: 'terminal' }, terminal],
+    [first, { claims: [], hasMore: false, nextCursor: 'terminal' }, terminal],
+    [first, { claims: [], nextCursor: 'terminal' }, terminal]
+  ]) {
+    let reads = 0;
+    const client = new RoomAgentClient({ origin: 'https://room.example', roomId: 'commons', token: 'a'.repeat(43),
+      fetchImpl: async () => new Response(JSON.stringify(pages[reads++]), { headers: { 'content-type': 'application/json' } }) });
+    const result = await client.workClaims();
+    assert.equal(result.hasMore, true);
+    assert.equal(reads, pages.length - 1, 'stop before the terminal page can erase an earlier gap');
+    assert.equal(result.claims.some(claim => claim.id === 'last'), false);
+  }
+});
