@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { RoomStore } from '../server/store.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
+import { observeSelectedRuns } from '../server/request-runs.mjs';
 import { readAgentWork } from '../server/routes/agent-work.mjs';
 import { linkWithProof } from './helpers/link-with-proof.mjs';
 
@@ -60,4 +61,23 @@ test('pickup refuses a corrupt canonical message entity even when no body is ret
   f.store.db.prepare("UPDATE messages SET body='drift' WHERE message_id='open'").run();
   f.store._projectionCache?.clear();
   assert.throws(() => f.read(), /projection_corrupt/);
+});
+
+
+test('selected run query searches both primary-key columns rather than enumerating room history', t => {
+  const f = fixture(); t.after(() => f.store.close());
+  const requests = f.store.replyRequests.list(f.worker.secret, 'commons').requests;
+  const prepare = f.store.db.prepare.bind(f.store.db); let plan;
+  f.store.db.prepare = sql => {
+    const statement = prepare(sql);
+    if (!sql.includes('json_each(?) selected')) return statement;
+    return { all: (...args) => {
+      plan = prepare('EXPLAIN QUERY PLAN ' + sql).all(...args);
+      return statement.all(...args);
+    } };
+  };
+  assert.equal(observeSelectedRuns(f.store, 'commons', requests).open.state, 'working');
+  const detail = plan.map(row => row.detail).join('\n');
+  assert.match(detail, /SEARCH r USING INDEX .*\(room_id=\? AND opening_id=\?\)/,
+    'selected openings must drive full primary-key searches: ' + detail);
 });
