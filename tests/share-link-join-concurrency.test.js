@@ -116,18 +116,48 @@ const KNOWN_ERROR_NAMES = ["SQLITE_BUSY", "SQLITE_LOCKED", "SQLITE_FULL", "SQLIT
   "ERR_MODULE_NOT_FOUND", "ERR_INVALID_ARG_TYPE", "ERR_UNHANDLED_ERROR", "ERR_OUT_OF_RANGE", "ENOMEM", "EMFILE", "ENFILE", "EAGAIN", "ENOSPC",
   "RangeError", "TypeError", "ReferenceError", "SyntaxError", "AssertionError", "heap out of memory"];
 const ERROR_SHAPED = /\b(?:SQLITE_[A-Z0-9_]+|ERR_[A-Z0-9_]+|E[A-Z]{3,12}|[A-Za-z]+Error)\b/g;
+const MODULE_NOT_FOUND_SHAPE = /Cannot find (?:module|package) '([^'\r\n]+)'/;
+// The one carved exception to the finite-set rule above (C8-01 diagnosis,
+// RC-2b): when a child dies at import time, the missing module's specifier
+// is an import-graph fact, never an argument value — child secrets travel
+// in argv, not in the import graph. It is surfaced only in shapes that
+// cannot carry an argument value: a bare package name, a path under the
+// repo root (which covers its node_modules), or a repo-relative path.
+// Anything else — any other characters, any other root, e.g. a
+// secret-shaped token — collapses to the constant "other", exactly like
+// unknown error names above. A surfaced specifier is truncated to 200
+// chars. Without this, a module-load failure in a spawned child is
+// undiagnosable from CI logs (only ERR_MODULE_NOT_FOUND survives).
+function missingModuleSpecifier(text) {
+  const match = MODULE_NOT_FOUND_SHAPE.exec(text);
+  if (!match) return undefined;
+  const specifier = match[1].slice(0, 200);
+  if (/^[a-z0-9@][a-z0-9./_-]*$/.test(specifier) && !specifier.includes("..")) return specifier;
+  if (specifier.startsWith(REPO + "/") && /^[a-z0-9./_-]+$/.test(specifier.slice(REPO.length))) return specifier;
+  if ((specifier.startsWith("./") || specifier.startsWith("../")) && /^[a-z0-9./_-]+$/.test(specifier)) {
+    const resolved = join(REPO, specifier);
+    if (resolved === REPO || resolved.startsWith(REPO + "/")) return specifier;
+  }
+  return "other";
+}
 export function describeChildFailure(error, stderr) {
   const text = String(stderr ?? "");
   const known = KNOWN_ERROR_NAMES.filter(name => new RegExp(`(?<![A-Za-z0-9_])${name}(?![A-Za-z0-9_])`).test(text));
   const unknownShaped = (text.match(ERROR_SHAPED) ?? []).some(token => !KNOWN_ERROR_NAMES.includes(token));
   const code = error?.code;
-  return {
+  const described = {
     code: Number.isInteger(code) && code >= 0 && code <= 255 ? code : typeof code === "string" ? (KNOWN_ECODES.has(code) ? code : "other") : null,
     signal: typeof error?.signal === "string" ? (KNOWN_SIGNALS.has(error.signal) ? error.signal : "other") : null,
     killed: error?.killed === true,
     stderrBytes: Buffer.byteLength(text),
     errorNames: [...known.slice(0, 5), ...(unknownShaped ? ["other"] : [])],
   };
+  // Threaded through runRacers' failure objects unchanged (they spread this
+  // return value), so the outcomesOf assertion message in CI logs names the
+  // missing module on the next module-load failure.
+  const missingModule = missingModuleSpecifier(text);
+  if (missingModule !== undefined) described.missingModule = missingModule;
+  return described;
 }
 
 function runRacers(dir, childFile, argSets) {
@@ -364,4 +394,33 @@ test("unknown but error-shaped names, codes and signals collapse to a constant i
 test("the child RESULT line carries no free-form error text", () => {
   assert.ok(!/message\s*:/.test(JOIN_CHILD + JOIN_AGENT_CHILD), "child result must not include error.message");
   assert.match(JOIN_CHILD, /log\(\{ ok: false, status:/);
+});
+
+test("module-not-found failures name the missing module, and only the missing module", () => {
+  const err = () => Object.assign(new Error("x"), { code: 1, signal: null, killed: false });
+  // Bare package names, in both of Node's module-not-found shapes.
+  assert.equal(describeChildFailure(err(), "Error [ERR_MODULE_NOT_FOUND]: Cannot find package 'some-missing-package'\nRequire stack:").missingModule,
+    "some-missing-package");
+  assert.equal(describeChildFailure(err(), "Error: Cannot find module '@scope/missing-pkg'").missingModule,
+    "@scope/missing-pkg");
+  // A path under the repo root (children import server/store.mjs by path).
+  const repoPath = join(REPO, "server", "no-such-module.mjs");
+  assert.equal(describeChildFailure(err(), `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${repoPath}'`).missingModule,
+    repoPath);
+  // A repo-relative path.
+  assert.equal(describeChildFailure(err(), "Error: Cannot find module './server/no-such-module.mjs'").missingModule,
+    "./server/no-such-module.mjs");
+  // A secret-shaped specifier collapses to the constant, never echoes.
+  const secret = "pri_" + "S3cr3tValue".repeat(4);
+  const out = describeChildFailure(err(), `Error [ERR_MODULE_NOT_FOUND]: Cannot find module '${secret}'`);
+  assert.equal(out.missingModule, "other");
+  assert.ok(!JSON.stringify(out).includes(secret.slice(0, 12)), "diagnostic must not contain the secret-shaped specifier");
+  // A path outside the repo root is not copied either.
+  assert.equal(describeChildFailure(err(), "Error: Cannot find module '/etc/somewhere/else.mjs'").missingModule,
+    "other");
+  // Truncation: a surfaced specifier is at most 200 chars.
+  const longName = "a".repeat(250);
+  assert.equal(describeChildFailure(err(), `Error: Cannot find module '${longName}'`).missingModule.length, 200);
+  // No module-not-found shape -> no field at all (the finite-set shape is unchanged).
+  assert.ok(!("missingModule" in describeChildFailure(err(), "SQLITE_BUSY: database is locked")));
 });
