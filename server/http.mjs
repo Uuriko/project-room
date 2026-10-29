@@ -1418,7 +1418,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           expectedRevision = created.session.sessionRevision;
           setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
         }
-        const started = signIn.begin({ slotToken, expectedRevision });
+        const started = signIn.begin({ slotToken, expectedRevision, selectAccount: url.searchParams.get("switch") === "1" });
         res.statusCode = 302;
         res.setHeader("Location", started.authorizationUrl);
         return res.end();
@@ -1480,7 +1480,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // the room list, invite redemption, and "New room" creation live.
           // The error path is reserved for genuine failures (denied consent,
           // bad state), which the client surfaces with a real message.
-          return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1");
+          return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}&google=signed-in` : "/?account=1&google=signed-in");
         } catch (error) {
           // Log only a bounded error identifier, never callback URLs, tokens,
           // provider bodies, emails, or arbitrary exception messages.

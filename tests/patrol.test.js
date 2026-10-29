@@ -698,3 +698,36 @@ test("settle: the seq-18850 history replays clean (created, claimed, pr_linked, 
     assert.deepEqual(store.patrolFindings(), []);
   } finally { store.close(); }
 });
+
+// The update route lets the owner collapse in_progress -> done in one step
+// under the default self_attested review policy (updateWork's `collapse`;
+// any other policy refuses it with work_not_delivered). Patrol used to file
+// that documented move as claim_legality/illegal_transition, so one honest
+// agent following llms.txt kept the patrol job failing in production.
+test("a self-attested in_progress -> done collapse files nothing", () => {
+  const store = openStore();
+  try {
+    const { item, now } = honestClaim(store, "task-collapse");
+    const done = updateWork(item, "owner", { state: "done", now: now + 3 });
+    assert.equal(done.state, "done");
+    driveClaim(store, done, "state_changed", now + 3);
+    const result = store.patrolTick();
+    assert.equal(result.fresh, 0);
+    assert.deepEqual(store.patrolFindings(), []);
+  } finally { store.close(); }
+});
+
+test("the collapse exemption is verb-scoped: blocked -> done still files", () => {
+  const store = openStore();
+  try {
+    const { item, now } = honestClaim(store, "task-blocked-done");
+    const blocked = updateWork(item, "owner", { state: "blocked", now: now + 3 });
+    driveClaim(store, blocked, "state_changed", now + 3);
+    const forged = { ...blocked, state: "done",
+      history: [...(blocked.history ?? []), { at: new Date(now + 10).toISOString(), agentId: "owner", action: "state:done", note: "forged" }] };
+    driveClaim(store, forged, "state_changed", now + 10);
+    store.patrolTick();
+    const kinds = store.patrolFindings().map(f => `${f.invariant}/${f.kind}`);
+    assert.ok(kinds.includes("claim_legality/illegal_transition"), kinds.join(","));
+  } finally { store.close(); }
+});

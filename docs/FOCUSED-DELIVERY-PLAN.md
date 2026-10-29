@@ -22,6 +22,95 @@ without reconstructing the project or losing control. Physical sleep/wake,
 installed-host adoption and human productivity evidence remain separate from
 protocol fixtures and synthetic measurements.
 
+## Sustained two-laptop execution — 2026-10-29
+
+This sequence expands investigation across F1–F6 while keeping implementation
+small enough to integrate. It is an execution plan under this page, not another
+feature backlog. The owner asked for continued work without creating a Codex goal
+or a scheduled routine. Progress follows useful evidence and available access;
+unknown outcomes remain visible rather than being relabeled complete.
+
+1. **Finish the current release.** Verify the exact merged source at both public
+   entry points, retain the original failed rollout report, and run independent
+   strict/live and authenticated checks. Complete runtime packaging and publication
+   separately from Worker deployment; activate the matching Graphify map with its
+   actual coverage limits. Do not upload the Workers again to retry packaging.
+   Finish with a receipt and release the shared deploy role.
+2. **Close recurring reliability failures.** Reproduce the wake listener's handling
+   of rate limits and non-JSON proxy failures; retain HTTP status and retry guidance
+   without accepting malformed success payloads. Review the patrol lifecycle fix
+   against the actual allowed transitions, including invalid transitions. Reconcile
+   older integrity diagnostic/repair PRs before selecting one; public health alone
+   cannot justify a data repair. Investigate recurring readiness timeouts using
+   retained attempt timing and exact Worker/room-service revisions. Prefer bounded
+   diagnosis and a safe verification/publication resume path over another upload.
+3. **Exercise complete human and agent journeys.** The other laptop independently
+   checks hosted sign-in and return, naming any unavailable real-provider session.
+   This laptop tests a fresh agent's discovery, read, action, interrupted response,
+   retry and recovery. Extend an existing fixture for each reproduced failure.
+   Next UI probes include startup module failure, keyboard action discovery and
+   item-specific accessible names. A source hypothesis is not a reproduced bug;
+   browser semantics are not a real screen-reader session.
+4. **Reconcile what already exists.** Use the existing ecosystem catalogue, backlog
+   IDs and PRs. The other laptop contributes its supplemental asset inventory,
+   local preservation evidence and documentation contradictions; this laptop
+   integrates canonical pointers and archive decisions. For each selected piece,
+   choose retain, connect, finish, merge, supersede or defer with its source and
+   reason. Preserve unique content and restoration evidence before retirement.
+   Generated copies are not automatically duplicate authorities. No bulk closure
+   or deletion follows from filenames, titles or an inventory count.
+5. **Integrate the next useful slice.** Keep one implementation owner and a second
+   laptop or agent for review/testing. Hand off exact source/tree, changed scope,
+   test commands/results, limitations and the next action. Receiver acknowledgement
+   establishes receipt, not execution. Compose compatible fixes, run affected
+   checks, merge and verify the actual shipped journey. Reuse unchanged evidence.
+   Move immediately to the strongest remaining reproduced failure when a slice is
+   complete; an unavailable credential or human session blocks only that dependent
+   check, not unrelated useful work.
+6. **Measure whether the process helps.** For ordinary tasks, observe time to find
+   the right context, time to an accepted result, rework/duplicate effects and
+   maintenance cost. Include setup, review, compute and documentation effort.
+   Preserve slower and failed trials. Expand tooling only when a repeated need
+   or measured bottleneck warrants it; stop research when the decision is answerable.
+   Do not aggregate unrelated test totals into a product-quality claim.
+
+Initial coordination: this laptop owns release recovery, canonical catalogue
+integration and backend/agent repairs; the other laptop owns supplemental local
+preservation, documentation contradictions and independent hosted journeys.
+Live room ownership supersedes these dated assignments. Research can proceed
+concurrently, but implementation still uses the bounded active slices below.
+
+### Archived handbook decisions retained in this plan
+
+The other laptop supplied sanitized revision-33 excerpts on 2026-10-29 (room
+message `handbook-content-reconcile`, sequence 23111). These are historical design
+decisions, not fresh status or a complete archive migration. Their useful content
+maps to the existing outcomes:
+
+- F3/F4 share one work record from human request through acknowledgement and
+  progress to an inspectable result. Human and agent interactions can differ
+  without creating competing work models. Participation and resource pooling
+  remain owner-controlled.
+- F2/F3 use existing execution/context contracts for scope, exact source,
+  workspace, budget, timeout, idempotency, cancellation and result destination.
+  Validate those protocols before inventing another adapter. A laptop being
+  healthy, listening and authorized are different observations; laptops are not
+  the sole production availability strategy. Coordination is event-driven and
+  does not depend on a Codex scheduled routine.
+- F5 evaluates adoption by problem, integration cost, license, owner, exit path
+  and an executable test. Contributions can include prompts, skills, tests,
+  reviews, translations and fixtures. Marketplace/payment expansion remains
+  deferred until the basic contribution loop is demonstrated.
+- F6 preserves exact revisions, failed evidence and recovery/setup costs. Large
+  framework, CRDT, cache, secrets or billing additions need demonstrated demand;
+  deferral is not a permanent rejection. Install tools for a supported task, not
+  merely because a catalogue lists them.
+
+Historical status blocks, obsolete SHAs and duplicated queues remain archived.
+The current index and this scope page own navigation and active outcomes. Further
+archive content requires its own reconciliation; these excerpts do not establish
+that every surviving decision has been migrated.
+
 ## Active list — six outcomes
 
 | ID | Outcome and bounded scope | Finish condition |
