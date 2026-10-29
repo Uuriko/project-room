@@ -29,6 +29,10 @@ test('production DO wiring is opt-in and records readiness plus partial request 
       const result=await response.json();assert.equal(result.ready.ok,true);assert.equal(result.status,200);
       const initialized=result.startupRows.find(row=>row.event==='room.do_initialized');
       const first=result.startupRows.find(row=>row.phase==='first_request');
+      assert.equal(initialized.clockSemantics,'io-bound');
+      assert.equal(initialized.cpuMeasured,false);
+      assert.equal(first.clockSemantics,'io-bound');
+      assert.equal(first.cpuMeasured,false);
       assert.ok(Number.isFinite(initialized.initializationMs));
       assert.ok(Number.isFinite(initialized.storeInitializationMs));
       assert.ok(initialized.initializationMs>=initialized.storeInitializationMs);

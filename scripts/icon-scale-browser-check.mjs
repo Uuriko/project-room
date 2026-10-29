@@ -46,6 +46,12 @@ test("Icons scale with text size and keep default sizes at 100%", { timeout: 900
       return [selector, { button: Math.round(b.width), svg: Math.round(s.width), inside: s.left >= b.left - 0.5 && s.right <= b.right + 0.5 && s.top >= b.top - 0.5 && s.bottom <= b.bottom + 0.5, tall: Math.round(b.height) }];
     })), ICONS);
     result.overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
+    result.sendContained = await page.evaluate(() => {
+      const row = document.querySelector(".composer-row"), send = row?.querySelector('button[type="submit"]');
+      if (!row || !send || send.getClientRects().length === 0) return true;
+      const r = row.getBoundingClientRect(), b = send.getBoundingClientRect();
+      return b.left >= r.left && b.right <= r.right && b.top >= r.top && b.bottom <= r.bottom;
+    });
     result.toggleClear = await page.evaluate(() => {
       const toggle = document.querySelector("#sidebar-toggle"), title = document.querySelector(".conversation-heading");
       if (!toggle || !title || toggle.getClientRects().length === 0) return true;
@@ -56,7 +62,7 @@ test("Icons scale with text size and keep default sizes at 100%", { timeout: 900
     return result;
   };
 
-  for (const width of [1280, 390]) {
+  for (const width of [1280, 390, 320]) {
     const normal = await sizes(width, 0);
     const large = await sizes(width, 32);
     for (const selector of ICONS) {
@@ -69,6 +75,7 @@ test("Icons scale with text size and keep default sizes at 100%", { timeout: 900
       assert.ok(large[selector].tall >= 40, `${selector} button is tall enough for its icon (${width}px)`);
     }
     assert.equal(normal.toggleClear && large.toggleClear, true, `menu button does not overlap the room title (${width}px)`);
+    assert.equal(normal.sendContained && large.sendContained, true, `Send stays inside the composer at default and 200% text (${width}px)`);
     assert.equal(large.overflow, false, `no horizontal page overflow at 200% text (${width}px)`);
     assert.ok(Object.values(normal).filter(v => v && typeof v === "object").length >= 3, `most icons measured at ${width}px`);
   }
