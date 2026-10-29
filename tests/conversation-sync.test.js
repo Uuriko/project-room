@@ -328,7 +328,7 @@ for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} pri
   if (storage === 'archive') {
     while (!f.store.backfillMessages({ limit: 1000 }).done) {}
     f.store.checkMessagesParity();
-    assert.equal(f.store.archiveMessages('commons', { keepNewest: 2, dryRun: false }).ok, true);
+    assert.equal(f.store.archiveMessages('commons', { keepNewest: 3, dryRun: false }).ok, true);
     f.store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=NULL WHERE room_id='commons'").run();
   }
   const first = await f.get({ peerMemberId: 'alice', limit: 2 });
@@ -350,6 +350,15 @@ for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} pri
   f.post('public-during-private-read', 'Unrelated public update');
   assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint })).value.mode, 'not_modified');
   assert.deepEqual((await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor })).value.messages.map(m => m.id), ['pair-1', 'pair-2']);
+  // A reply is still private at the persisted event envelope. It must not
+  // qualify for the public-only append exception, even after a public post.
+  f.post('private-reply-after-public', 'Private reply stays in the pair', { toMemberId: 'alice', replyToId: 'pair-4' });
+  const afterReply = await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint });
+  assert.equal(afterReply.value.mode, 'replace');
+  assert.equal(afterReply.value.messages.at(-1).id, 'private-reply-after-public');
+  assert.equal(afterReply.value.messages.at(-1).toMemberId, 'alice');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor })).value.mode, 'reset');
+  assert.equal((await f.get({ messageId: 'private-reply-after-public' }, f.bob)).status, 404);
   f.command(f.owner, 'message.edited', { messageId: storage === 'archive' ? 'public-during-private-read' : 'pair-0', body: 'Changed record requires invalidation', expectedMessageRevision: 0 });
   assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint })).value.mode, 'replace');
   assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor })).value.mode, 'reset');
