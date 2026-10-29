@@ -38,6 +38,18 @@ function signer(store) {
   };
 }
 
+// A short, proven public-only append cannot change private records or authority.
+// Anything else (including a long gap) keeps the conservative reset contract.
+function publicOnlyAppend(store, roomId, saved, sequence) {
+  if (!Number.isSafeInteger(saved?.sequence) || sequence <= saved.sequence || sequence - saved.sequence > 100) return false;
+  const anchor = store.db.prepare('SELECT id FROM events WHERE room_id=? AND sequence=?').get(roomId, saved.sequence)?.id ?? null;
+  if (anchor !== saved.anchor) return false;
+  const rows = store.db.prepare(`SELECT json_extract(body,'$.type') AS type,
+    json_extract(body,'$.data.toMemberId') AS recipient FROM events
+    WHERE room_id=? AND sequence>? AND sequence<=? ORDER BY sequence LIMIT 101`).all(roomId, saved.sequence, sequence);
+  return rows.length === sequence - saved.sequence && rows.every(row => row.type === 'message.posted' && !row.recipient);
+}
+
 function archivedConversationRows(store,roomId,{viewerId,channelId,peerMemberId,messageId,floor,limit,afterId}) {
   const repository=messageRepository(store,roomId,store.room(roomId,{verifyBodyHashes:true}).state);
   const candidates=messageId===null ? repository.records({descending:true,afterId,visibility:{viewerId,channelId,peerMemberId,floor}}) : [repository.get(messageId)];
@@ -82,7 +94,9 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       ...(channelId !== null ? { channelId } : {}), ...(peerMemberId !== null ? { peerMemberId } : {}) };
     const reset = () => ({ ...base, mode: "reset", messages: [], nextCursor: null, checkpoint: null });
     if ((cursor !== null || since !== null) && (!saved || saved.scope !== scope || saved.kind !== (cursor !== null ? "page" : "checkpoint"))) return reset();
-    if (cursor !== null && (saved.sequence !== head.sequence || saved.anchor !== anchor || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
+    const sameHead = saved?.sequence === head.sequence && saved?.anchor === anchor;
+    const privateAppend = peerMemberId !== null && !sameHead && publicOnlyAppend(store, roomId, saved, head.sequence);
+    if (cursor !== null && ((!sameHead && !privateAppend) || !Number.isSafeInteger(saved.before) || saved.before < 0)) return reset();
     // Certification covers the full record and query columns at this exact
     // head. Never replay or perform a full parity scan on a read request.
     const indexed = Boolean(store.db.prepare(`SELECT 1 FROM messages_backfill_cursor
@@ -177,11 +191,11 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
       before: selected.at(-1).position, indexed, archiveMerged,
       ...(indexed ? { beforeId: selected.at(-1).messageId } : {}),
       ...(archiveMerged ? {beforeMessageId:selected.at(-1).messageId} : {}) }) : null;
-    // Include sequence/anchor: any intervening room mutation invalidates older
-    // cached pages, even if the changed message is outside this latest window.
-    const version = digest([head.sequence, anchor, messages]);
-    const checkpoint = messageId === null && cursor === null ? signed.encode({ kind: "checkpoint", scope, version }) : null;
-    if (since !== null && saved.version === version) return { ...base, mode: "not_modified", nextCursor, checkpoint };
+    // Private latest-window equality is sufficient only at the same head or
+    // after a proven short public-only append. Other changes invalidate older pages.
+    const version = peerMemberId !== null ? digest([indexed, archiveMerged, messages]) : digest([head.sequence, anchor, messages]);
+    const checkpoint = messageId === null && cursor === null ? signed.encode({ kind: "checkpoint", scope, version, sequence: head.sequence, anchor }) : null;
+    if (since !== null && saved.version === version && (peerMemberId === null || sameHead || privateAppend)) return { ...base, mode: "not_modified", nextCursor, checkpoint };
     return withContentTrust({
       ...base, mode: "replace",
       ...(addressing ? { addressing } : {}),

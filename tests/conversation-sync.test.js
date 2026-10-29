@@ -347,6 +347,13 @@ for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} pri
   assert.equal((await f.get({ peerMemberId: 'alice', channelId: 'general' })).status, 422);
   assert.equal((await f.get({ peerMemberId: '' })).status, 422);
   assert.deepEqual((await f.get({ peerMemberId: 'nonexistent' })).value.messages, []);
+  f.post('public-during-private-read', 'Unrelated public update');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint })).value.mode, 'not_modified');
+  assert.deepEqual((await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor })).value.messages.map(m => m.id), ['pair-1', 'pair-2']);
+  f.command(f.owner, 'message.edited', { messageId: storage === 'archive' ? 'public-during-private-read' : 'pair-0', body: 'Changed record requires invalidation', expectedMessageRevision: 0 });
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, since: first.value.checkpoint })).value.mode, 'replace');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 2, cursor: first.value.nextCursor })).value.mode, 'reset');
+
 });
 
 test('private pair reads honor reactivation history floors and reauthorize conditional cursors', async t => {
@@ -416,4 +423,17 @@ for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} pri
   assert.equal(page.status, 200);
   assert.deepEqual(page.value.peers.map(p => p.memberId), ['bob']);
   assert.equal(page.value.nextCursor, null);
+});
+
+test('private continuation public-append proof is capped at one hundred events', async t => {
+  const f = await setup(t);
+  f.store.roomFlood = { consume() {} };
+  f.post('bounded-private-first', 'one', { toMemberId: 'alice' });
+  f.post('bounded-private-second', 'two', { toMemberId: 'alice' });
+  const first = (await f.get({ peerMemberId: 'alice', limit: 1 })).value;
+  for (let i = 0; i < 100; i++) f.post(`bounded-public-${i}`, 'public only');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 1, since: first.checkpoint })).value.mode, 'not_modified');
+  f.post('bounded-public-over', 'one beyond proof budget');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 1, since: first.checkpoint })).value.mode, 'replace');
+  assert.equal((await f.get({ peerMemberId: 'alice', limit: 1, cursor: first.nextCursor })).value.mode, 'reset');
 });

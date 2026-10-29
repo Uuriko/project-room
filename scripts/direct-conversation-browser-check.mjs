@@ -80,6 +80,17 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   });
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(historyReads.some(url => !url.searchParams.has('peerMemberId')), false, 'private scrolling must not fetch unrelated history');
+  if (width === 1440) {
+    await page.locator('#message-list [data-message-record-id="private-history-0"]').waitFor();
+    const updated = page.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith('/conversation') && url.searchParams.get('peerMemberId') === 'alice' && url.searchParams.has('since');
+    });
+    send(owner, T.MESSAGE_POSTED, { messageId: 'unrelated-live-update', body: 'Public update while reading private history' });
+    await updated;
+    await page.waitForFunction(() => !document.querySelector('#message-list [data-timeline-earlier]')?.disabled);
+    assert.equal(await page.locator('#message-list [data-message-record-id="private-history-0"]').count(), 1, 'unrelated public activity must not remove the private page being read');
+  }
   await input.fill('Alice draft');
   await open('Bob');
   assert.equal(await input.inputValue(), '');

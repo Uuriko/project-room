@@ -1180,6 +1180,9 @@ paths:
         Responses and encrypted continuations bind the selected peer; switching peers
         or dropping the selector resets the continuation. Unknown peers return an empty
         page and do not reveal other members' private relationships.
+        Private-pair continuations can survive a proven public-only append of at most
+        100 events, preserving the private page being read. Any other intervening
+        event, changed storage domain, or longer gap retains conservative invalidation.
       parameters:
         - { name: roomId, in: path, required: true, schema: { type: string } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
