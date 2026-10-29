@@ -410,7 +410,8 @@ all allowlisted runtime imports and candidate-manifest drift. It warns about Nod
 does not install or switch runtimes, and leaves cold-package and full-suite
 qualification intact. The Node engine range remains unchanged.
 
-This section owns the next concrete tasks; the six outcomes below remain the scope.
+At the October 18 checkpoint, this section listed the next concrete tasks.
+For current selection, use the six outcomes and execution pointers above.
 The release candidate is PR #4114; `93727acb` preserves the existing fresh-base i18n ratchet, and `b9c4afed` adds direct storage-module tests to
 repair the coverage gate at `0ddf0908`, without changing its runtime. New continuity
 work is isolated on `codex/work-brief-continuity-20261018`. Final local qualification is recorded in [validation evidence](work-brief-validation.json).
