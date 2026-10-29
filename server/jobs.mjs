@@ -449,6 +449,7 @@ export const JOBS = Object.freeze([
       // and therefore failing — signal.
       let scanReportedFailures = false;
       let scanParkedCount = 0;
+      let scanParkedRooms = new Set();
       try {
         integrity = ctx.room?.verifyRoomIntegrity
           ? await ctx.room.verifyRoomIntegrity()
@@ -489,9 +490,11 @@ export const JOBS = Object.freeze([
           // sufficient: its stored message is the allowlisted
           // backfill-stop line, or its block row carries event_id
           // NULL — the blocks table's own encoding of a head the log
-          // does not reach. If the block map cannot be read, no
-          // record is partitioned on the map's evidence (the message
-          // leg still applies): the partition fails closed.
+          // does not reach. Partitioning requires positive
+          // corroboration from the block map (see
+          // isCorroboratedEventPark below): if the map cannot be read,
+          // or carries no same-room row with a non-null event_id, the
+          // record stays fatal — the partition fails closed.
           //
           // Every other failure keeps the tick failing, with the
           // detail chosen from the fatal set only: a parked room must
@@ -507,14 +510,31 @@ export const JOBS = Object.freeze([
             return blocksByRoom !== null && blocksByRoom.has(failure.recordId)
               && blocksByRoom.get(failure.recordId) === null;
           };
+          // #4930 cure (independent review, room seqs 23355/23365/
+          // 23366): a failure is downgraded to parked ONLY on positive
+          // corroboration — the block map was read, it carries a row
+          // for THIS room, and that row's event_id is non-null (a
+          // stored event). A missing row, an unreadable map
+          // (blocksByRoom === null), or a row for a different room
+          // leaves the failure FATAL. The partition this replaces
+          // parked every non-gap failure on no evidence at all, so an
+          // empty block table, a failed map read, and a wrong-room
+          // block each produced a false healthy summary.
+          const isCorroboratedEventPark = failure => {
+            if (blocksByRoom === null || !blocksByRoom.has(failure.recordId)) return false;
+            const eventId = blocksByRoom.get(failure.recordId);
+            return eventId !== null && eventId !== undefined && eventId !== "";
+          };
           const parked = [];
           const fatal = [];
           for (const failure of failures) {
             if (failure.step === "messages_backfill" && typeof failure.recordId === "string"
-              && failure.recordId !== "" && !isLogGapPark(failure)) parked.push(failure);
+              && failure.recordId !== "" && !isLogGapPark(failure)
+              && isCorroboratedEventPark(failure)) parked.push(failure);
             else fatal.push(failure);
           }
           scanParkedCount = parked.length;
+          scanParkedRooms = new Set(parked.map(failure => failure.recordId));
           const summary = {};
           for (const key of ["matched", "skipped", "verified", "invitations", "checked", "swept", "deferredSkips", "verifiedRooms", "budgetExceeded"]) {
             if (typeof integrity?.[key] === "number") summary[key] = integrity[key];
@@ -600,8 +620,30 @@ export const JOBS = Object.freeze([
         // the partition just rode as blockedFailures: those rooms are
         // already named in the summary, and failing the tick for them
         // would re-zero the signal the partition exists to save.
+        // #4930 cure: the coverage check above is an identity check,
+        // never a count. The suppression this replaces compared
+        // scanParkedCount === blockedRooms, so a standing block for a
+        // DIFFERENT room satisfied it whenever the counts happened to
+        // match (seq 23366). Suppression now requires the standing
+        // skipped=0 room set, read here, to equal the set of rooms the
+        // partition just parked — and the parked count to equal that
+        // set's size, so duplicate records for one room cannot cover
+        // a second room either. An unreadable standing set never
+        // suppresses: the guard fails closed.
+        let standingBlockRooms = null;
+        try {
+          standingBlockRooms = new Set(store.db.prepare(
+            "SELECT room_id FROM messages_backfill_blocks WHERE skipped=0"
+          ).all().map(row => row.room_id));
+        } catch { standingBlockRooms = null; }
+        const guardCoveredByScan = scanReportedFailures
+          && Number(observed?.gapBlocks) === 0
+          && standingBlockRooms !== null
+          && scanParkedCount === scanParkedRooms.size
+          && standingBlockRooms.size === scanParkedRooms.size
+          && [...standingBlockRooms].every(roomId => scanParkedRooms.has(roomId));
         if (blockedRooms > 0 && !summaryFailed(integrity)
-          && !(scanReportedFailures && scanParkedCount === blockedRooms && Number(observed?.gapBlocks) === 0)) {
+          && !guardCoveredByScan) {
           const failure = integrityFailure({ integritySubcheck: "messages_backfill" });
           if (token(observed.blockReason)) failure.failureDetail.reason = observed.blockReason;
           if (token(observed.blockComponent)) failure.failureDetail.component = observed.blockComponent;
