@@ -6281,10 +6281,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         let dmAncestor = null;
         for (let m = byId.get(command.data.replyToId); m && !seen.has(m.id); m = byId.get(m.replyToId)) {
           seen.add(m.id);
-          // Reply requests are directed but room-threaded by design: members may
-          // clarify or comment under them (tests/reply-requests.test.js).
-          if (m.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, m.id)
-              && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
+          // Directed requests have participant-only context reads too. Knowing
+          // their ID must not let a bystander inject public request context.
+          if (m.toMemberId && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
             fail(422, "command_rejected", "Reply must reference a message in this Room");
           }
           if (!dmAncestor && m.toMemberId) dmAncestor = m;
