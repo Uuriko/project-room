@@ -285,7 +285,12 @@ for (const mobile of [false, true]) test(`channel finder ${mobile ? "touch" : "k
     assert.match(await p.locator('#room-actions-status').textContent(), /send.*finish|sending/i);
     assert.equal(await p.locator('#conversation-title').textContent(), '# studio');
     release(); await p.locator('#message-list .message-body').filter({ hasText: 'Deliberate pending send' }).waitFor();
-    await query.press('Enter');
+    // The row paints optimistically before the send settles, so the guard can
+    // still hold for a moment: retry until the finished send lets Enter through.
+    for (let tries = 0; tries < 40 && await p.locator('#conversation-title').textContent() !== '# general'; tries++) {
+      await query.press('Enter');
+      if (await p.locator('#conversation-title').textContent() !== '# general') await p.waitForTimeout(100);
+    }
     assert.equal(await p.locator('#conversation-title').textContent(), '# general');
     await p.unroute('**/api/rooms/commons/commands');
   }
