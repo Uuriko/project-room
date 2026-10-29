@@ -95,7 +95,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
     : state.messages.find(message => message.id === item.sourceMessageId)) : null;
   const linked = candidate && (!candidate.toMemberId || candidate.authorId === viewerId || candidate.toMemberId === viewerId)
     && messageInHistory(candidate, floor) ? candidate : null;
-  const message = includeSource ? linked : null;
+  const message = includeSource && linked && !linked.deletedAt ? linked : null;
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };
   const next = nextWorkStep(item, now, state.room.ownerId);

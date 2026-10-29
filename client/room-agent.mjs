@@ -1041,9 +1041,13 @@ export class RoomAgentClient {
   async workRelease(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal });
   }
-  // Selected task only; the normal authenticated snapshot never leaves this client.
+  // Retrieve only selected work and its explicitly requested source before export.
   async workPacket(workItemId, options = {}) {
-    return workPacket((await this.snapshot()).state, workItemId, options);
+    const { signal, ...packetOptions } = options;
+    const selected = await this.workContext(workItemId, { includeSource: packetOptions.includeSource ?? false, signal });
+    const source = selected.context.source;
+    return workPacket({ room: { id: selected.roomId }, workItems: { [workItemId]: selected.work },
+      messages: source.status === "included" ? [source.message] : [] }, workItemId, packetOptions);
   }
   changes(after = 0, limit = 50, { signal } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
