@@ -222,3 +222,23 @@ test("deferred open leaves a legacy projection until the integrity job repairs i
     } finally { reopened.close(); }
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
+
+
+test("successful writable startup total includes work after the legacy cold-start record", t => {
+  let clock = 0, legacySeen = false; const records = [];
+  t.mock.method(performance, "now", () => clock);
+  t.mock.method(console, "error", value => {
+    try { const row = JSON.parse(value); records.push(row); if (row.event === "room.cold_start") legacySeen = true; } catch { /* unrelated diagnostic */ }
+  });
+  const store = new RoomStore(":memory:", { now: () => {
+    if (legacySeen) clock += 50; // Backfill's real now() call occurs after the old timing boundary.
+    return Date.parse("2026-10-29T00:00:00Z");
+  } });
+  t.after(() => store.close());
+  const old = records.find(row => row.event === "room.cold_start");
+  const complete = records.find(row => row.event === "room.store_initialized");
+  assert.equal(old.durationMs, 0, "legacy metric keeps its original boundary");
+  assert.equal(complete.initializationMs, 50, "backfill interval is included in the new total");
+  assert.equal(complete.legacyColdStartMs, old.durationMs);
+  assert.equal(store.initializationMs, complete.initializationMs);
+});

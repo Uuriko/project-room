@@ -839,3 +839,42 @@ test("#3712: a projected basis survives a subsequent sync", () => {
   assert.deepEqual(resynced.attestations, row.attestations);
   assert.equal(close3712(resynced), true);
 });
+
+
+test("settled many-room backfill avoids returning the corpus and still retries pending rooms", t => {
+  const f = fixture(t), db = f.store.db;
+  for (let i = 0; i < 128; i++) f.store.initialize(initialRoom(`settled-${i}`));
+  assert.equal(f.store.backfillWorkItemClaims().rooms, 129);
+  // Observe actual SQLite results, not a fake query implementation. This cost
+  // contract allows SQL/index changes while forbidding corpus materialization.
+  const prepare = db.prepare.bind(db); let returned = 0; const plans = [];
+  db.prepare = sql => {
+    const statement = prepare(sql), all = statement.all.bind(statement);
+    statement.all = (...args) => {
+      const rows = all(...args); returned += rows.length;
+      if (/^SELECT/i.test(sql.trim())) plans.push(...prepare(`EXPLAIN QUERY PLAN ${sql}`).all(...args));
+      return rows;
+    };
+    return statement;
+  };
+  let settled;
+  try { settled = f.store.backfillWorkItemClaims(); } finally { db.prepare = prepare; }
+  assert.equal(settled.rooms, 0);
+  assert.equal(returned, 0, "settled room/marker rows must stay in SQLite, not be materialized in JavaScript");
+  t.diagnostic(`settled selection query plan: ${JSON.stringify(plans)}`);
+  const version = db.prepare("SELECT version FROM work_item_board_backfill WHERE room_id='commons'").get().version;
+  db.prepare("UPDATE work_item_board_backfill SET version=? WHERE room_id='settled-0'").run(version - 1);
+  f.store.initialize(initialRoom("new-room"));
+  f.store.initialize(initialRoom("retry-room"));
+  const good = db.prepare("SELECT projection FROM rooms WHERE id='retry-room'").get().projection;
+  db.prepare("UPDATE rooms SET projection='invalid-json' WHERE id='retry-room'").run();
+  const pending = f.store.backfillWorkItemClaims();
+  assert.equal(pending.rooms, 3);
+  assert.deepEqual(pending.errors, ["retry-room: projection_unparseable"]);
+  assert.equal(db.prepare("SELECT version FROM work_item_board_backfill WHERE room_id='retry-room'").get(), undefined);
+  assert.equal(f.store.backfillWorkItemClaims().rooms, 1, "only the failed room remains pending");
+  db.prepare("UPDATE rooms SET projection=? WHERE id='retry-room'").run(good);
+  assert.equal(f.store.backfillWorkItemClaims().rooms, 1);
+  assert.equal(f.store.backfillWorkItemClaims().rooms, 0);
+  assert.equal(f.store.backfillWorkItemClaims({ force: true }).rooms, 131);
+});
