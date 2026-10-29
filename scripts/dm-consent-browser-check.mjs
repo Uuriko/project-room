@@ -29,7 +29,8 @@ test("DM consent browser journey: request, approve, revoke, block, errors", { ti
   }
   const aliceKey = store.issueAccessKey("commons", "alice");
   const bobKey = store.issueAccessKey("commons", "bob");
-  const server = createRoomServer({ store, streamInterval: 60 });
+  // The browser fixture drives more reads per credential than the production burst; keep the wider window here only.
+  const server = createRoomServer({ store, streamInterval: 60, credentialReadBurst: 600, credentialWriteBurst: 600 });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = `http://127.0.0.1:${server.address().port}`;
   let browser;

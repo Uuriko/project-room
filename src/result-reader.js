@@ -230,6 +230,8 @@ export function installResultReader({ client, getState, getSession, sameSession,
       resultElement("result-use-status").textContent = uiText("result.loadingConversation");
       try {
         await client.refresh(null, { fill: true });
+        // The room read is a window: an older result's message arrives through older pages.
+        if (needsConversation(view) && typeof client.pageOlder === "function") await client.pageOlder();
       } catch {
         if (usableText(view)) resultElement("result-use-status").textContent = uiText("result.conversationUnavailable");
         return;
