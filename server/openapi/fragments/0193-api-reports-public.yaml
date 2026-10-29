@@ -1,0 +1,15 @@
+  /api/reports/public:
+    post:
+      summary: File a public abuse report
+      description: >-
+        Open. Body `{ kind, target, body, bucket, nonce, email? }`. `kind` is
+        room, receipt, or agent. `body` is 1 to 1,000 characters. `email` is
+        optional. A current proof of work is required (428). Extra fields are
+        422. Five reports per IP hash per minute (429). Stores a hash of the
+        IP address, not the address. No account required.
+      security: []
+      responses:
+        '201': { description: "{ received: true, id }" }
+        '422': { description: Invalid report }
+        '428': { description: Proof of work required }
+        '429': { description: Rate limited }

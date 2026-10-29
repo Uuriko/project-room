@@ -129,7 +129,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -806,7 +806,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -922,6 +922,15 @@
         "openWorldHint": true
       }
     },
+    "room_map": {
+      "inputSchema": "9cfc8cae8778bdcc",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_mcp_snippet": {
       "inputSchema": "99334726611ccf58",
       "annotations": {
@@ -935,6 +944,15 @@
       "inputSchema": "7e9ced24c319704f",
       "annotations": {
         "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_merge_members": {
+      "inputSchema": "d4341a4572f425c3",
+      "annotations": {
+        "readOnlyHint": false,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -996,6 +1014,15 @@
     },
     "room_read_board": {
       "inputSchema": "7dac81175f92cec4",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    "room_read_bootstrap": {
+      "inputSchema": "9c4dedb9bd1af453",
       "annotations": {
         "readOnlyHint": true,
         "destructiveHint": false,
@@ -1319,7 +1346,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "5a81992641ec2856",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -1507,6 +1534,15 @@
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": true
+      }
+    },
+    "room_map": {
+      "inputSchema": "9cfc8cae8778bdcc",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
       }
     },
     "room_mcp_snippet": {
@@ -2317,7 +2353,7 @@
       }
     },
     "webhook_subscribe": {
-      "inputSchema": "b5c80c2eebfd171a",
+      "inputSchema": "5a81992641ec2856",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
@@ -2501,7 +2537,7 @@
       }
     },
     "room_join": {
-      "inputSchema": "ef021780b7f53fec",
+      "inputSchema": "34e5b7126703bc7b",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": false,
