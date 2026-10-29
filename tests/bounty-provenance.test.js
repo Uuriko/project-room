@@ -16,7 +16,6 @@ import { sessionInstanceIdFor } from "../server/records-provenance.mjs";
 const ROOM = "room-test";
 const JILL = "id:agent/jill";       // poster
 const GROK = "id:agent/grokbot";    // worker
-const INSTINCT = "id:agent/instinct"; // designated verifier
 
 let nowMs = 1_786_000_000_000;
 const isoFuture = ms => new Date(nowMs + ms).toISOString();
