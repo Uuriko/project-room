@@ -17,6 +17,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { signInFixture } from "./auth-signin.mjs";
 import { makeTestSigner } from "./helpers/signed-evidence.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "../tests/helpers/link-with-proof.mjs";
 
 const command = (type, data, id = crypto.randomUUID()) => ({ id, type, data });
 
@@ -61,7 +62,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   store.command(agent, "commons", command(T.WORK_STARTED, { workItemId: "work-build", expectedRevision: 1 }));
 
   const identity = store.identities.create("Signal agent");
-  store.identities.link(owner, "commons", { identityId: identity.identityId, memberId: "signal-agent", displayName: "Signal agent", permissions: ["accept_work", "complete_work"] });
+  linkWithProof(store, owner, "commons", identity, { memberId: "signal-agent", displayName: "Signal agent", permissions: ["accept_work", "complete_work"] });
   setTier(store.db, "commons", "signal-agent", "t2_standard", { updatedBy: "owner", nowMs: observedAt });
   store.command(owner, "commons", command(T.WORK_PROPOSED, { workItemId: "signal-work", title: "Check the observation path", definitionOfDone: "Live signals observed", accountableMemberId: "signal-agent", mode: "read" }));
   const server = createRoomServer({ store, streamInterval: 60 });
@@ -105,27 +106,16 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.locator("#people-panel").screenshot({ path: "test-results/people-rail-create-room.png" });
   await clickChrome(page, "#invite-people-button");
   await page.locator("#share-link-dialog").waitFor({ state: "visible" });
-  await page.locator("#growth-agent-code").click();
-  await page.locator("#agent-invite-dialog").waitFor({ state: "visible" });
-  assert.match(await page.locator("#agent-invite-dialog").innerText(), /Choose what it can do/);
-  await page.locator("#agent-invite-mint").click();
-  const code = page.locator("#agent-invite-link");
-  await code.waitFor({ state: "visible" });
-  assert.match(await code.getAttribute("href"), /\/join\/RM-/);
-  assert.equal(await page.locator("#agent-invite-code").count(), 0);
-  assert.equal(await code.textContent(), await code.getAttribute("href"), "selectable link remains available when clipboard fails");
-  assert.match(await page.locator("#agent-invite-share").textContent(), /agent-inbox.mjs join/);
-  await page.evaluate(() => { Object.defineProperty(navigator, "clipboard", { configurable: true,
-    value: { writeText: async text => { globalThis.copiedAgentInvite = text; } } }); });
-  await page.locator("#agent-invite-copy").click();
-  assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /\/join\/RM-/);
-  assert.match(await page.evaluate(() => globalThis.copiedAgentInvite), /^https?:\/\/[^/]+\/join\/RM-/);
-  await page.locator("#agent-invite-dialog").screenshot({ path: "test-results/agent-invite-connection.png" });
+  assert.equal(await page.locator("#growth-agent-code").isVisible(), false, "no competing code setup action");
+  await page.locator("#share-link-create").click();
+  await page.locator("#share-link-result").waitFor({ state: "visible" });
+  const invitation = await page.locator("#share-link-url").inputValue();
+  assert.match(invitation, /^https?:\/\/[^/]+\/(?:join\/|#join\/)/, "one invitation link for people and agents");
+  assert.equal(await page.locator("#share-link-copy").isEnabled(), true);
   await page.setViewportSize({ width: 390, height: 844 });
-  assert.equal(await page.locator("#agent-invite-dialog").evaluate(node => node.scrollWidth <= node.clientWidth), true, "invitation URL wraps inside the mobile dialog");
-  await page.locator("#agent-invite-dialog").screenshot({ path: "test-results/agent-invite-connection-mobile.png" });
+  assert.equal(await page.locator("#share-link-dialog").evaluate(node => node.scrollWidth <= node.clientWidth), true, "invitation fits on mobile");
+  await page.locator("#share-link-dialog").screenshot({ path: "test-results/room-invitation-mobile.png" });
   await page.setViewportSize({ width: 1360, height: 900 });
-  await page.locator("#agent-invite-close").click();
   await page.locator("#share-link-close").click();
   await page.locator("#share-link-dialog").waitFor({ state: "hidden" });
   await page.evaluate(() => { location.hash = "#room/commons"; });

@@ -8,6 +8,7 @@ import { AccessRequests, REQUEST_TTL_MS } from "../server/access-requests.mjs";
 import { MemberPermissionRequests } from "../server/member-permission-requests.mjs";
 import { createRateLimiter } from "../server/identity-ratelimit.mjs";
 import { MEMBER_PERMISSION_ROUTES } from "../server/routes/member-permissions.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // These real HTTP/store cases own the room-authenticated member contract.
 // The existing upgrade tests retain identity-secret and recovery coverage.
@@ -19,7 +20,7 @@ async function setup(t, kind = "agent") {
   if (kind === "agent") {
     identity = store.identities.create("Member Requester");
     memberId = identity.identityId;
-    store.identities.link(owner, "commons", { identityId: memberId, permissions: [] });
+    linkWithProof(store, owner, "commons", identity, { permissions: [] });
   } else {
     store.command(owner, "commons", { id: randomUUID(), type: "member.added",
       data: { memberId, displayName: "Human Requester", kind: "human", permissions: [] } });
@@ -66,6 +67,11 @@ for (const kind of ["agent", "human"]) test(`${kind} requests permissions and re
   assert.equal((await f.request(`/api/rooms/commons/work-claims/board_${kind}/claim`, f.token, {})).status, 200);
   const outcome = (await f.feed(f.token)).body.notifications.find(item => item.requestId === input.requestId && item.kind === "access_decision");
   assert.equal(outcome.outcome, "approved");
+  assert.equal(outcome.messageId, approved.body.decisionMessageId);
+  assert.equal((await f.feed(f.token)).body.notifications.filter(item => item.requestId === input.requestId).length, 1);
+  const feed = await f.feed(f.token);
+  assert.equal((await f.request("/api/rooms/commons/cursor", f.token, { sequence: feed.body.sequence })).status, 200);
+  assert.equal((await f.feed(f.token)).body.notifications.some(item => item.requestId === input.requestId), false);
   const after = f.store.room("commons").sequence;
   assert.equal((await f.decide(input.requestId, { decision: "approve" })).status, 409);
   assert.equal(f.store.room("commons").sequence, after);
@@ -244,7 +250,7 @@ test("lapsed member pendings are expired on create and do not consume the cap (#
   store.initialize(initialRoom("commons"));
   const owner = store.issueAccessKey("commons", "owner");
   const identity = store.identities.create("Member Requester");
-  store.identities.link(owner, "commons", { identityId: identity.identityId, permissions: [] });
+  linkWithProof(store, owner, "commons", identity, { permissions: [] });
   const access = new AccessRequests(store, {
     rateLimiter: createRateLimiter({ capacity: 100, refillPerSecond: 100 })
   });
