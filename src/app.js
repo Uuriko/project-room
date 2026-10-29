@@ -1580,7 +1580,7 @@ function syncSessionMenu() {
     const accountExpiry = !state && accountClient.session?.authenticated ? accountClient.session.expiresAt : null;
     const formatted = signedIn ? formatSessionExpiry(roomExpiry ?? accountExpiry) : null;
     if (formatted) {
-      expiryEl.textContent = `${roomExpiry != null ? "Session" : "Account session"} expires ${formatted}`;
+      expiryEl.textContent = `Signed in until ${formatted}`;
       expiryEl.hidden = false;
     } else {
       expiryEl.textContent = "";
@@ -5086,7 +5086,8 @@ function renderRoomActions() {
   })));
   $("#room-actions-list").replaceChildren(...groups);
   const counts = [!tasksOnly ? `${shown.length} of ${channels.length} channels` : "", !channelsOnly ? `${shownTasks.length} of ${tasks.length} tasks` : ""].filter(Boolean);
-  $("#room-actions-count").textContent = `Showing ${counts.join("; ")}. Loaded in this room.${channels.length > shown.length || tasks.length > shownTasks.length ? " Type more to refine the list." : ""}`;
+  const partial = channels.length > shown.length || tasks.length > shownTasks.length;
+  $("#room-actions-count").textContent = partial ? `Showing ${counts.join("; ")}. Loaded in this room. Type more to refine the list.` : "";
   $("#room-actions-empty").hidden = shown.length + shownTasks.length + entries.length > 0;
   $("#room-actions-status").textContent = "";
 }
