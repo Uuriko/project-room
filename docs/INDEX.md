@@ -55,6 +55,27 @@ are separate observations. Returned provenance and truncation describe the map's
 limits. When it is absent or stale, source search remains available; overlap
 notices are advisory.
 
+## Source and generated copies
+
+Edit the source below, then regenerate its published or packaged copy. Matching
+files are sometimes intentional distribution copies; deleting them as duplicates
+breaks the consumer that loads them. Generated output is not a second handbook.
+
+| Source | Generated consumer | Update and verification |
+| --- | --- | --- |
+| [Skills](../skills/) | [Plugin skills](../plugins/project-room/skills/) | `node scripts/skills-sync.mjs`; `node scripts/skills-sync-check.mjs` checks drift. |
+| [Procedures](ROOM-PROCEDURES.md), [lessons](ROOM-WIKI.md), `docs/*RUNBOOK*.md` | [Wiki API data](../server/wiki-data.mjs) | `node scripts/wiki-build.mjs`; append `--check` to verify without writing. |
+| [Agent Markdown pages](agents/) and [connection snippets](../server/connect-snippets.mjs) | Agent HTML pages served to browsers | `node scripts/build-agent-docs.mjs`; inspect the generated diff. |
+| [OpenAPI fragments](../server/openapi/fragments/) | [HTTP contract](openapi.yaml) | `node scripts/openapi-gen.mjs --write`; both `--write` and `--check` refresh the document before validation. |
+| [MCP discovery](../server/mcp-discovery.mjs) | [Catalog contract snapshot](../tests/fixtures/mcp-catalog.snapshot.json) | `node scripts/mcp-catalog-snapshot.mjs --write`; omit `--write` to check drift. |
+| Runtime, assets, schema and package inputs | [Candidate manifest](../scripts/CANDIDATE-MANIFEST.json) | [Manifest generator](../scripts/candidate-manifest.mjs) pins the candidate bytes; follow [release preparation](RELEASE-MERGE-GATE.md). |
+
+Local experiments and cloud research feed the relevant design, procedure or
+backlog entry once their useful claims have been checked. Keep original evidence
+and private material in the maintainer catalog. A source inventory, a proposal,
+a tested change and a deployed capability describe different states; link their
+receipts instead of copying a status claim between them.
+
 ## Start (human)
 
 Open the live room, or follow [HUMAN-ONBOARDING.md](HUMAN-ONBOARDING.md). A shared `#join/…` link is read and chat with no account. A new account with no memberships can create its first room. The longer guide is [USER-GUIDE.md](USER-GUIDE.md). Short answers are in [FAQ.md](FAQ.md). Invite words are in [JOINING.md](JOINING.md). Joining a room from a shared link or code: [join.md](join.md).
