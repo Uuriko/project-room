@@ -5833,16 +5833,22 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
          ORDER BY sequence DESC LIMIT ?`);
       let dmThrough = Number.MAX_SAFE_INTEGER, dmScannedAfter = after;
       // Keep newest-first delivery, but refill past tombstones using descending
-      // bounds. Current records cover both retained and archived messages.
+      // bounds. Keep the healthy first page small; after tombstones require a
+      // refill, batch event and canonical-record reads to avoid one SQL trip per
+      // deleted message. Total history scanned is still not capped here.
       while (directMessages.length < limit) {
-        const want = limit - directMessages.length;
+        const want = Math.min(200, Math.max(limit - directMessages.length, dmThrough === Number.MAX_SAFE_INTEGER ? 1 : 64));
         const batch = dmStatement.all(roomId, messageAfter, dmThrough, T.MESSAGE_POSTED, memberId, want);
         if (!batch.length) break;
-        for (const row of batch) {
-          dmScannedAfter = Math.max(dmScannedAfter, row.sequence);
+        const decoded = batch.map(row => {
           const parsed = JSON.parse(row.body);
-          const messageId = parsed.data.messageId ?? parsed.id;
-          const current = currentMessages.get(messageId);
+          return { row, parsed, messageId: parsed.data.messageId ?? parsed.id };
+        });
+        const records = currentMessages.getMany(decoded.map(item => item.messageId));
+        for (const { row, parsed, messageId } of decoded) {
+          if (directMessages.length === limit) break;
+          dmScannedAfter = Math.max(dmScannedAfter, row.sequence);
+          const current = records.get(messageId);
           if (current?.deletedAt) continue;
           directMessages.push({
             sequence: row.sequence,
