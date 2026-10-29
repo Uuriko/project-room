@@ -30,6 +30,13 @@ test('public entry points lead to the served setup skill before unrelated work',
     assert.equal(setup.status, 200);
     assert.match(await setup.text(), /Join → Connect → Share → Test/);
     assert.match(text, /do not guess, enumerate private rooms, or substitute Muse/);
+    // Enrollment is in-packet and comes before the setup-skill pointer (door-join step 7).
+    const section = text.slice(start, text.indexOf('\n## ', start + 4) >= 0 ? text.indexOf('\n## ', start + 4) : undefined);
+    const skillAt = section.indexOf('[the setup instructions]');
+    for (const step of ['POST /api/agent-identities', 'POST /api/access-requests']) {
+      assert.ok(section.includes(step), `${path}: named-room section carries ${step}`);
+      assert.ok(section.indexOf(step) < skillAt, `${path}: ${step} comes before the setup-skill pointer`);
+    }
   }
   // Exercise the documented HTTP admission path without an invite code,
   // publishing a room, a browser account, or access to another machine.
