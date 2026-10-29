@@ -748,10 +748,16 @@ test('Worker gzip probe: a client that offers gzip receives a gzipped tools/list
     assert.ok(plainBytes >= 2048, `anonymous tools/list must exceed the compression threshold, got ${plainBytes}`);
     const gz = await post({ 'Accept-Encoding': 'gzip' });
     assert.equal(gz.status, 200);
-    // dispatchFetch moves Content-Encoding to MF-Content-Encoding; either
-    // header naming the wire encoding is acceptable evidence of gzip.
-    assert.equal(gz.headers.get('content-encoding') ?? gz.headers.get('mf-content-encoding'), 'gzip');
+    // The wire evidence is the bytes: across the Durable Object /
+    // Miniflare boundary the encoding header is not reliably delivered
+    // (see dispatch-decode.mjs), so assert the gzip magic, the saving,
+    // and the decode equality; when a header does name the encoding it
+    // must name gzip (Content-Encoding, or MF-Content-Encoding where
+    // dispatchFetch moved it).
+    const wireEncoding = gz.headers.get('content-encoding') ?? gz.headers.get('mf-content-encoding');
+    if (wireEncoding) assert.equal(wireEncoding, 'gzip');
     const wire = new Uint8Array(await gz.arrayBuffer());
+    assert.equal(wire[0], 0x1f); assert.equal(wire[1], 0x8b);
     assert.ok(wire.byteLength < plainBytes, `gzipped wire body (${wire.byteLength}) must be smaller than the plain body (${plainBytes})`);
     assert.deepEqual(JSON.parse(gunzipSync(wire).toString('utf8')), plainJson);
   } finally { await mf.dispose(); }

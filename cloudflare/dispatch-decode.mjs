@@ -21,13 +21,41 @@ import { gunzipSync, brotliDecompressSync, inflateSync } from "node:zlib";
 // and a body whose bytes do not match the named encoding (already
 // decoded upstream) is returned as a plain response over the same bytes,
 // so the helper is safe to apply twice or across mixed transports.
+const GZIP_MAGIC = [0x1f, 0x8b];
+const hasGzipMagic = buf => buf?.length >= 2 && buf[0] === GZIP_MAGIC[0] && buf[1] === GZIP_MAGIC[1];
+
 export async function decodeDispatchResponse(response) {
   response = await response;
   const encoding = response?.headers?.get?.("mf-content-encoding")
     ?? response?.headers?.get?.("content-encoding");
-  if (!encoding || encoding.trim().toLowerCase() === "identity") return response;
+  if (!encoding || encoding.trim().toLowerCase() === "identity") {
+    // Headers and bodies are not reliably paired across the
+    // Durable Object / Miniflare boundary: a diagnostic run at head
+    // 63696773 (cloudflare job 123223032105) saw an encoding header on
+    // exactly two responses in the whole suite — both a plain 67-byte
+    // security.txt body carrying a stale "gzip" header — while the
+    // failing JSON responses carried no encoding header at all and
+    // still arrived gzipped. So when no header names an encoding, sniff
+    // the body through a clone: gzip-magic bytes are peeled (bounded,
+    // while the magic survives); anything else returns the original
+    // response untouched, body never consumed.
+    try {
+      if (!response || response.body === null || typeof response.clone !== "function") return response;
+      const sniffed = new Uint8Array(await response.clone().arrayBuffer());
+      if (!hasGzipMagic(sniffed)) return response;
+      let body = sniffed;
+      for (let extra = 0; extra < 4 && hasGzipMagic(body); extra++) {
+        try { body = gunzipSync(body); } catch { return response; }
+      }
+      if (hasGzipMagic(body)) return response;
+      const headers = new Headers(response.headers);
+      headers.delete("mf-content-encoding");
+      headers.delete("content-encoding");
+      headers.set("content-length", String(body.byteLength));
+      return new Response(body, { status: response.status, statusText: response.statusText, headers });
+    } catch { return response; }
+  }
   const bytes = new Uint8Array(await response.arrayBuffer());
-  console.log(`[dispatch-decode] encoding=${JSON.stringify(encoding)} bytes=${bytes.length} head=${[...bytes.slice(0, 12)].map(b => b.toString(16).padStart(2, "0")).join(" ")}`);
   if (!bytes.length) {
     return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
@@ -58,7 +86,6 @@ export async function decodeDispatchResponse(response) {
   for (let extra = 0; extra < 3 && body[0] === 0x1f && body[1] === 0x8b; extra++) {
     try { body = gunzipSync(body); peeled = true; } catch { break; }
   }
-  console.log(`[dispatch-decode] peeled=${peeled} finalBytes=${body.length} finalHead=${[...body.slice(0, 12)].map(b => b.toString(16).padStart(2, "0")).join(" ")}`);
   if (!peeled) {
     return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
