@@ -349,6 +349,7 @@ optional.push("src/agent-signin-page.js"); // Agent sign-in page logic (public a
 optional.push("src/join-watchdog.js"); // Join page loader watchdog (public asset, loaded by join.html)
 optional.push("server/access-review.mjs");
 optional.push("server/access-requests.mjs", "server/identity-ratelimit.mjs");
+optional.push("server/practice-room.mjs"); // #602: well-known practice room constants + provisioning (imported by server/access-requests.mjs)
 optional.push("server/pairing.mjs", "server/routes/pairing.mjs", "src/pairing-ui.js"); // device-code pairing, reconnect-by-key, and member merge (imported by server/store.mjs, server/routes/table.mjs, and src/app.js)
 optional.push("server/routes/agent-invite-redeem.mjs"); // agent invite redeem and fetch-only availability (imported by server/routes/table.mjs)
 optional.push("server/member-permission-requests.mjs", "server/routes/member-permissions.mjs"); // reviewed member permissions and their RT aliases

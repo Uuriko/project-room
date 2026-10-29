@@ -24,6 +24,18 @@
 // pending. Auto-approvals are audit-logged as member.added events whose
 // request row carries decided_by='auto-approve'.
 //
+// One room is special-cased in code, not in config (issue #602): the
+// well-known practice room (PRACTICE_ROOM_ID, server/practice-room.mjs).
+// A fresh join request to that room — and only that room — carrying
+// exactly the fixed chat-scope set (no elevated permissions; chat is
+// base membership) is auto-approved inline under the same fail-closed
+// guards, with the room's system owner as the standing authorizer. Any
+// other request to the practice room, and any request to any other room
+// without a configured rule, follows the normal pending path. Reaching
+// this code at all requires a verified pri_ identity: request() proves
+// the identity's secret before tryAutoApprove runs, and anonymous or
+// unverified callers never get here.
+//
 // The module is storage-agnostic: it takes the RoomStore (for the db handle,
 // transactions, auth, and the identities helper) and exports its schema for
 // store.mjs to apply, following the agent-identities.mjs pattern.
@@ -39,6 +51,8 @@ import { createRateLimiter } from "./identity-ratelimit.mjs";
 // precedent (same Workers bundle, same optional list in
 // scripts/runtime-package.mjs).
 import { event, EVENT_TYPES as T, isRoomArchived, memberCan, ownMember } from "../src/events.js";
+import { PRACTICE_ROOM_ID, PRACTICE_ROOM_OWNER_ID, PRACTICE_CHAT_PERMISSIONS,
+  PRACTICE_ROOM_LABEL, PRACTICE_CHAT_SCOPE_DESCRIPTION } from "./practice-room.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { assertAdmissibleMemberName, assertMemberDisplayNameAvailable, checkAgentDisplayName } from "./display-name-guard.mjs";
 import { applyEventWithGrowth, growthCollector } from "../src/growth-emit.js";
@@ -492,12 +506,30 @@ export class AccessRequests {
     if (!row || !isPending(row.status) || row.room_id !== roomId) return { approved: false, pendingNote: null };
     if (this.upgradeBasis(row)) return { approved: false, pendingNote:
       "Additional permissions for an existing member require an authorized review; this request waits for a decision." };
-    const config = this.getAutoApproveConfig(row.room_id);
-    if (!config) return { approved: false, pendingNote: null };
     const requested = requestContents(row).permissions;
-    if (!requested.length || !requested.every(p => config.permissions.includes(p))) {
-      return { approved: false, pendingNote:
-        `This room auto-approves ${config.permissions.join(", ")}; the requested ${requested.join(", ") || "read/chat access"} is outside the rule, so it waits for an owner decision.` };
+    // Resolve the standing rule for this room. The practice room's rule
+    // is the code constant from server/practice-room.mjs — hard-scoped to
+    // the one room id, granting exactly the fixed chat-scope set (the
+    // empty elevated-permission set); no config row can widen it, and it
+    // never applies to any other room. Every other room uses its
+    // owner-configured rule, if it has one.
+    let rule;
+    if (row.room_id === PRACTICE_ROOM_ID) {
+      if (requested.length) {
+        return { approved: false, pendingNote:
+          `The practice room auto-approves ${PRACTICE_CHAT_SCOPE_DESCRIPTION} only: file a request with no additional permissions to be admitted inline. The requested ${requested.join(", ")} is outside the chat scope, so it waits for a room owner decision.` };
+      }
+      rule = { permissions: PRACTICE_CHAT_PERMISSIONS, authorizerId: PRACTICE_ROOM_OWNER_ID,
+        decisionNote: "auto-approved under the practice room's standing chat-scope rule (#602)" };
+    } else {
+      const config = this.getAutoApproveConfig(row.room_id);
+      if (!config) return { approved: false, pendingNote: null };
+      if (!requested.length || !requested.every(p => config.permissions.includes(p))) {
+        return { approved: false, pendingNote:
+          `This room auto-approves ${config.permissions.join(", ")}; the requested ${requested.join(", ") || "read/chat access"} is outside the rule, so it waits for an owner decision.` };
+      }
+      rule = { permissions: config.permissions, authorizerId: config.updatedBy,
+        decisionNote: `auto-approved under standing rule set by ${config.updatedBy}` };
     }
     // Verified-only rooms never auto-approve: the identity must be verified
     // first. Mirrors the AgentIdentities.link() gate exactly.
@@ -511,7 +543,7 @@ export class AccessRequests {
     // rule whose author lost membership administration stops admitting.
     // Fail-closed to pending — the owner queue is the safe default.
     let authorizerActive = false;
-    try { authorizerActive = memberCan(this.store.room(row.room_id).state, config.updatedBy, "manage_members"); }
+    try { authorizerActive = memberCan(this.store.room(row.room_id).state, rule.authorizerId, "manage_members"); }
     catch { authorizerActive = false; }
     if (!authorizerActive) {
       return { approved: false, pendingNote:
@@ -556,7 +588,7 @@ export class AccessRequests {
       idempotencyKey: createHash("sha256").update(`access-request:auto-approve:${requestId}`).digest("hex"),
       type: T.MEMBER_ADDED,
       roomId: row.room_id,
-      actorId: config.updatedBy,
+      actorId: rule.authorizerId,
       at: new Date(now).toISOString(),
       data: {
         memberId: row.identity_id,
@@ -585,7 +617,7 @@ export class AccessRequests {
       this.store.referrals.record({ roomId: row.room_id, referrerMemberId, refereeMemberId: row.identity_id, via: "request", at: now });
     }
     this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by='auto-approve', decision_note=? WHERE request_id=?")
-      .run(now, `auto-approved under standing rule set by ${config.updatedBy}`, requestId);
+      .run(now, rule.decisionNote, requestId);
     const updated = rowToRequest(this.db.prepare("SELECT * FROM access_requests WHERE request_id=?").get(requestId));
     return { approved: true, response: this.autoApproveResponse(updated, row.identity_id, requested) };
   }
@@ -603,6 +635,11 @@ export class AccessRequests {
           description: "You are a member now. Orient to the room: members, open work items, and how to claim work." }),
         Object.freeze({ action: "see-membership", method: "GET", path: `/api/rooms/${encodeURIComponent(row.roomId)}/presence`,
           description: "Confirm your membership and granted permissions in the room's member list." }),
+        // Issue #602: the practice room's untrusted-public label rides the
+        // join flow itself, not just the room's charter — a self-joined
+        // member sees it in the response that admits them.
+        ...(row.roomId === PRACTICE_ROOM_ID ? [Object.freeze({ action: "practice-room-rules",
+          description: `${PRACTICE_ROOM_LABEL} Your grant is ${PRACTICE_CHAT_SCOPE_DESCRIPTION}.` })] : []),
       ]),
     });
   }
