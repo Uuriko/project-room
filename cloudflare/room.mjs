@@ -114,9 +114,18 @@ function splitBackupTokens(env) {
 // Reads that carry the job list: refresh the heartbeat snapshot first.
 const JOB_LIST_READS = new Set(['/api/owner/overview']);
 
+// Re-arm the job alarm after a request only when it ran a write statement.
+// An unknown counter (a database without writeStatements) keeps the old
+// always-arm path.
+export function shouldArmAfterRequest(before, after) {
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return true;
+  return after !== before;
+}
+
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    const initializationStarted = performance.now();
     // DurableObject stores the context on this.ctx. Keep this.state and this.env
     // as aliases so existing reads of either name stay valid.
     this.state = ctx;
@@ -208,6 +217,11 @@ export class ProjectRoom extends DurableObject {
       }
     });
     this.handler = httpServerHandler(this.server);
+    // Successful non-maintenance initialization, before the first RPC/fetch.
+    // Includes RoomStore, bootstrap, provider configuration and HTTP adapter.
+    this.initializationMs = Math.round(performance.now() - initializationStarted);
+    console.info(JSON.stringify({ event: 'room.do_initialized', initializationMs: this.initializationMs,
+      storeInitializationMs: this.store.initializationMs }));
   }
   #sqlScope(kind, operation, fn, options) {
     if (!this.sqlCosts) return fn();
@@ -235,6 +249,7 @@ export class ProjectRoom extends DurableObject {
         const line = {
           event: 'room.cold_start', phase: 'first_request',
           constructMs: cold.durationMs, firstRequestMs: appMs,
+          storeInitializationMs: this.store.initializationMs, durableObjectInitializationMs: this.initializationMs,
           rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
         };
         if (cold.phases) line.phases = cold.phases;
@@ -278,7 +293,22 @@ export class ProjectRoom extends DurableObject {
       // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
       this.ctx.waitUntil(this.#sqlScope('background', 'other', () => Promise.resolve(flushRoomGuide(this.store))));
       // A commit in this request may have queued webhook, land, or claim work.
-      this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
+      // A request that wrote nothing cannot have: job state only changes
+      // through writes, alarm() re-arms after every run, and the cron
+      // ensureJobAlarm is the backstop. Skipping saves earliestFutureAlarm's
+      // ~20 statements (incl. a full work_claims scan) on every read.
+      // Acknowledge only successfully reconciled writes. A failed boot or
+      // post-write reconciliation must remain owed on the next read. A newer
+      // request also prevents an older completion from advancing its watermark.
+      const writes = this.store.db?.writeStatements;
+      if (!this.alarmArmedSinceBoot || shouldArmAfterRequest(this.requestAlarmWrites, writes)) {
+        const generation = this.requestAlarmGeneration = (this.requestAlarmGeneration ?? 0) + 1;
+        this.ctx.waitUntil(this.#armJobAlarm().then(() => {
+          if (generation !== this.requestAlarmGeneration) return;
+          this.alarmArmedSinceBoot = true;
+          this.requestAlarmWrites = writes;
+        }).catch(() => {}));
+      }
     }
   }
 

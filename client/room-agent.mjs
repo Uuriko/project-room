@@ -494,15 +494,22 @@ export class RoomAgentClient {
   }
   async #checkIdentityConnection({ signal } = {}) {
     // Identity checks need current membership and ownership, not message history.
-    // Require the existing versioned work view; never fall back to a full room.
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=work`, undefined, signal);
+    // Require the versioned identity view; never fall back to a full room.
+    let snapshot;
+    try { snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=identity`, undefined, signal); }
+    catch (error) {
+      if (error instanceof RoomClientError && error.status === 422 && error.code === "invalid_snapshot_view") {
+        throw new RoomClientError(422, "invalid_snapshot_view", "This server does not support identity preflight version 1. Deploy the matching server before using this client; no broader read was attempted.");
+      }
+      throw error;
+    }
     const member = snapshot?.state?.members?.[this.#memberId];
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
     // grant — allow the CLI connect/check ladder when this identity is the
     // room owner. Non-owner agents require the server's explicit owner-grant marker.
     const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
-    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "work" || snapshot.snapshotVersion !== 1
+    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "identity" || snapshot.snapshotVersion !== 1
       || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
       || snapshot.viewerAccountId !== null || snapshot.viewerAuthEpoch !== null
       || snapshot.viewerSessionBinding !== null || snapshot.viewerSessionRevision !== null
@@ -898,18 +905,27 @@ export class RoomAgentClient {
     const path = params.size ? `/work-claims?${params}` : "/work-claims";
     const page = await this.#request(path, undefined, signal);
     if (cursor || limit !== undefined || !page?.hasMore || typeof page.nextCursor !== "string") return page;
-    const claims = [...(page.claims ?? [])];
+    if (page.hasMore !== true || !Array.isArray(page.claims)) {
+      return { ...page, claims: Array.isArray(page.claims) ? page.claims : [], hasMore: true };
+    }
+    const claims = [...page.claims];
     let next = page.nextCursor;
     const seen = new Set();
+    let done = false;
     for (let hop = 0; hop < 20 && next && !seen.has(next); hop += 1) {
       seen.add(next);
       const moreParams = new URLSearchParams(params);
       moreParams.set("cursor", next);
       const more = await this.#request(`/work-claims?${moreParams}`, undefined, signal);
-      claims.push(...(more?.claims ?? []));
-      next = more?.hasMore && typeof more.nextCursor === "string" ? more.nextCursor : null;
+      // Stop at the malformed page: a later terminal page cannot certify
+      // completeness after omitted claims or contradictory continuation data.
+      const terminal = more?.hasMore === false && more.nextCursor == null;
+      const continuation = more?.hasMore === true && typeof more.nextCursor === "string" && more.nextCursor.length > 0;
+      if (!Array.isArray(more?.claims) || (!terminal && !continuation)) break;
+      claims.push(...more.claims);
+      done = terminal;
+      next = !done ? more.nextCursor : null;
     }
-    const done = next === null;
     return { ...page, claims, hasMore: !done, nextCursor: done ? null : next };
   }
   projectMap(args, { signal } = {}) {
