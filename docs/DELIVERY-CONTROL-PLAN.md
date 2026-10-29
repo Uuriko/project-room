@@ -33,12 +33,18 @@ followed that verification: the downloaded
 [runtime package](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-c47c3fc)
 verified 632 archive files against 631 source files, with archive SHA-256
 `3bf1f3f7fc0e9112800a75d0e7847429bcefd25695522bd620b7b34d12f5914e`;
-the API confirmed it latest. The deployment claim was released and read back as
+the API confirmed it latest. The peer independently verified the 632-file
+published runtime and a 200 orientation response in 112 ms (Room sequence 22769).
+The deployment claim was released and read back as
 unclaimed. This is an independently verified release and publication checkpoint,
 **not a successful deployment-workflow run**. At this checkpoint,
 [CI run 40857577869](https://github.com/Uuriko/project-room/actions/runs/40857577869)
-was still running with browser shards 2 and 6 failed; diagnosis was in progress.
-The release is not described as having all CI checks green.
+reported 26 failures, all reproduced on baseline `8b19` in
+[run 40838212637](https://github.com/Uuriko/project-room/actions/runs/40838212637).
+They are inherited failures, not harmless results; CI is not green. The test-only
+repair [#5250](https://github.com/Uuriko/project-room/pull/5250) remains open.
+Its landing attempt refused before merging when the expected landing facts did
+not match; the merge slot was released. No test-only repair deployment is implied.
 
 Private receipts under `release-prep-20261029/` preserve these distinct outcomes:
 `cohesive-verification/verify-8Osog2/receipt.json`, `cohesive-client-live.json`,
