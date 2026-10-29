@@ -129,8 +129,8 @@ test("anonymous catalog is exactly the packet's seven tools", async () => {
 test("outside identity gets the packet's seven public-work tools plus four join readers", async () => {
   const names = await toolsList(undefined, outsiderSecret);
   // Packet: "Outside identities get seven public-work tools plus four
-  // documents by default."
-  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL]);
+  // documents by default, plus room_check_access for room discovery."
+  assert.deepEqual(names, [...JOIN_READERS, ...PUBLIC_WORK_ALL, "room_check_access"]);
 });
 
 test("member core profile is the packet's 18 essential tools plus the 4 join readers", async () => {

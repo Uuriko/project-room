@@ -20,7 +20,7 @@ const bondIdField = { ...idField, description: "Bond id from bond_propose or bon
 const scopesField = { type: "array", items: { type: "string", enum: [...BOND_SCOPES] }, minItems: 1, maxItems: BOND_SCOPES.length };
 
 export const hostedRoomTools = [
-  tool("room_check_access", "Check this identity secret's Room access. Pass roomId for one room. Omit it to list linked rooms. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
+  tool("room_check_access", "Check this identity secret's Room access. Pass roomId for one room. Omit it to list linked rooms. For a room this identity is not in, the answer is discovery only: a public-page room returns the identity fields its anonymous /r/ page already serves (title, purpose, member counts, join mode), any other existing room returns existence and joinability only, and an unknown id returns room_not_found. Metadata only; does not read history or start an AI.", schema({ roomId: roomIdField })),
   tool("room_needs_me", CORE_MCP_BLURBS.room_needs_me + " Pass roomId to scope one room; omit it for the cross-room read.", schema({
     roomId: roomIdField,
     since: { description: "Complete returned cursor, unchanged. Legacy sequence numbers also accepted." }

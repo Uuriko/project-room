@@ -44,7 +44,14 @@ export const MCP_TOOL_FOCUSES = Object.freeze({
 
 export function listedMcpTools(profile = "core", aliases = false, agent = null, focus = undefined) {
   const outside = focus === "public_work" || (profile === "core" && focus === undefined && agent && !(agent.memberships ?? []).some(member => member.active !== false));
-  if (outside) return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions].map(withOpenWorldHint);
+  if (outside) {
+    // room_check_access rides the outside catalog too: its non-member leg
+    // is the room-discovery verb (MCP-ROOM-DISCOVERY Option B), and a
+    // discovery verb a fresh identity cannot see repeats the 04-02 F3
+    // defect. It is an existing tool, not a new one.
+    const discovery = hostedMcpToolDefs.find(entry => entry.name === "room_check_access");
+    return [...MCP_JOIN_TOOLS, ...publicWorkMcpDefinitions, ...(discovery ? [discovery] : [])].map(withOpenWorldHint);
+  }
   const focusedNames = focus === undefined ? null : new Set([...FOCUS_COMMON_TOOLS, ...MCP_TOOL_FOCUSES[focus]]);
   // profile "lean" (opt-in): a short front door plus room_search_actions and
   // room_run_action for the long tail. The meta tools are listed only here;
