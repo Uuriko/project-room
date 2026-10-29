@@ -364,7 +364,16 @@ export function buildWorkClaimPage(items, roomId, viewerId, query = new URLSearc
     // its pull record (verified / asserted / pending; link-less claims
     // keep pullRequest null, which reads as "none").
     const stamped = stampClaimPage({ ...metadata, ...page,
-      claims: page.claims.map(item => withPullSettlement(summarizeClaimHistory(item, LIST_HISTORY_ENTRIES))) }, viewerId);
+      claims: page.claims.map(item => {
+        const summarized = summarizeClaimHistory(item, LIST_HISTORY_ENTRIES);
+        // The board tail is truncated to LIST_HISTORY_ENTRIES, but the
+        // release / reassign / update round bindings validate against the
+        // FULL history length. Name that length on the record itself, so a
+        // binding derived only from this documented read can succeed: the
+        // tail's history.length alone always conflicts once the full
+        // history outgrows the tail (UT2 L5, round-2 claims).
+        return withPullSettlement({ ...summarized, historyLength: claimHistoryLength(summarized) });
+      }) }, viewerId);
     return view === "summary" ? withContentTrust({ ...stamped, claims: stamped.claims.map(summarizeBoardClaim) }) : stamped;
   };
   if (params.has("queue")) {
