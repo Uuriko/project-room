@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
 import { AgentWakeClient } from '../client/agent-wake.mjs';
+import { decodeDispatchResponse } from './dispatch-decode.mjs';
 
 // Fixture-only setup/revocation/state. Every adapter read/register/poll/ACK
 // traverses the real production Worker entry and authenticated HTTP routes.
@@ -46,7 +47,19 @@ test('actual Worker wake setup/poll survives disposal, ordinary mention releases
   const config = { modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { ROOM: { className: 'WakeTestRoom', useSQLite: true } }, bindings: { ROOM_ORIGIN: origin }, durableObjectsPersist: persistence };
   let worker = new Miniflare(config);
-  const fetchImpl = (url, options) => worker.dispatchFetch(url, options);
+  // dispatchFetch returns the raw wire body: it does not decode
+  // Content-Encoding (the encoding is moved to MF-Content-Encoding), and
+  // it rewrites the offered Accept-Encoding to "br, gzip" on the way in,
+  // so offering identity alone cannot stop the Worker gzipping a >=2 KB
+  // JSON body. Offer identity, and decode at this boundary what the
+  // transport still encoded (see dispatch-decode.mjs). The Worker's gzip
+  // path for gzip-offering clients is pinned by
+  // tests/response-compression.test.js and the http.check.mjs gzip probe.
+  const fetchImpl = (url, options = {}) => {
+    const headers = new Headers(options.headers);
+    headers.set('Accept-Encoding', 'identity');
+    return decodeDispatchResponse(worker.dispatchFetch(url, { ...options, headers }));
+  };
   const api = (path, body, token) => fetchImpl(origin + path, { method: body === undefined ? 'GET' : 'POST',
     headers: { ...(token ? { Authorization: 'Bearer ' + token } : {}), ...(body === undefined ? {} : { 'Content-Type': 'application/json', Origin: origin }) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });

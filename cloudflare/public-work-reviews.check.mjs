@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
+import { decodeDispatchResponse } from './dispatch-decode.mjs';
 
 // Dedicated local-only provisioning/observation fixture. The real store,
 // public-claim kernel, review policy and SQLite transactions perform all writes.
@@ -57,7 +58,7 @@ test('actual Worker review verification/acceptance and exact journals survive di
  const origin='https://room.example.test';
  const config={modules:true,script:bundled.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'ReviewTestRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:origin},durableObjectsPersist:persistence};
  let worker=new Miniflare(config);
- const call=(path,input)=>worker.dispatchFetch(origin+'/__review/'+path,{method:input?'POST':'GET',headers:{Host:'room.example.test',...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify(input)}:{})});
+ const call=(path,input)=>decodeDispatchResponse(worker.dispatchFetch(origin+'/__review/'+path,{method:input?'POST':'GET',headers:{Host:'room.example.test','Accept-Encoding':'identity',...(input?{'Content-Type':'application/json'}:{})},...(input?{body:JSON.stringify(input)}:{})}));
  const json=async(response,status=200)=>{assert.equal(response.status,status,await response.clone().text());return response.json();};
  const reopen=async()=>{await worker.dispose();worker=new Miniflare(config);};
  try{
@@ -85,7 +86,7 @@ test('actual Worker review verification/acceptance and exact journals survive di
   assert.deepEqual(await json(await call('decide',{receiptId:receipt.receiptId,body:decision})),accepted);
   const contributor=await json(await call('contributor',{receiptId:receipt.receiptId,secret:producer.secret}));
   assert.equal(contributor.review.state,'accepted');assert.equal(JSON.stringify(contributor).includes('Private verifier reasoning'),false);
-  assert.equal((await worker.dispatchFetch(origin+'/api/public-work/receipts/'+receipt.receiptId)).status,200);
+  assert.equal((await decodeDispatchResponse(worker.dispatchFetch(origin+'/api/public-work/receipts/'+receipt.receiptId))).status,200);
   const denied=await json(await call('decide',{receiptId:receipt.receiptId,body:{...decision,requestId:'late-reject',expectedReviewRevision:2,decision:'rejected'}}),409);
   assert.equal(denied.error.code,'review_final');assert.deepEqual(await json(await call('state')),persisted);
  }finally{await worker.dispose();await rm(persistence,{recursive:true,force:true});}

@@ -8,6 +8,7 @@ import { Miniflare } from 'miniflare';
 import { connectRoom } from '../client/agent-setup.mjs';
 import { readAgentConnection } from '../client/agent-connection.mjs';
 import { AgentWakeClient } from '../client/agent-wake.mjs';
+import { decodeDispatchResponse } from './dispatch-decode.mjs';
 const fixture = `
 import entry, { ProjectRoom } from './room.mjs';
 import { AgentRooms } from '../server/agent-rooms.mjs';
@@ -33,7 +34,11 @@ test('actual Worker supports setup-saved scoped credential and default lease-fen
  const bundled = await build({stdin:{contents:fixture,resolveDir:process.cwd(),sourcefile:'scoped-fixture.mjs'},bundle:true,write:false,format:'esm',platform:'neutral',external:['node:*','cloudflare:*']});
  const origin='https://room.example.test';
  const worker=new Miniflare({modules:true,script:bundled.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'ScopedTestRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:origin}});
- const fetchImpl=(url,options)=>worker.dispatchFetch(url,options);
+ // dispatchFetch returns the raw wire body without decoding Content-Encoding
+ // and rewrites the offered Accept-Encoding on the way in, so offering
+ // identity alone cannot stop the Worker gzipping a >=2 KB JSON body:
+ // offer identity, and decode at this boundary (see dispatch-decode.mjs).
+ const fetchImpl=(url,options={})=>{const headers=new Headers(options.headers);headers.set('Accept-Encoding','identity');return decodeDispatchResponse(worker.dispatchFetch(url,{...options,headers}));};
  const post=(path,body,token)=>fetchImpl(origin+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',...(token?{Authorization:'Bearer '+token}:{})},body:JSON.stringify(body)});
  try {
   const f=await (await post('/__fixture/setup',{})).json();
