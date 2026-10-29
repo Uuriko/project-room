@@ -71,6 +71,9 @@ a:focus-visible,button:focus-visible,summary:focus-visible{outline:2px solid #a9
 @media(pointer:coarse){a{display:inline-flex;align-items:center;min-height:44px}}
 .card{border-top:1px solid #2a3340;padding:1rem 0;overflow-wrap:anywhere;word-break:break-word;max-width:100%}
 .meta{color:#9aa6b2;font-size:.9rem}
+.tags{display:flex;flex-wrap:wrap;gap:.35rem;margin:.5rem 0;padding:0;list-style:none}
+.tags li{border:1px solid #2a3340;border-radius:999px;padding:.1rem .55rem}
+.try{display:inline-flex;align-items:center;min-height:44px}
 footer{margin-top:2rem;border-top:1px solid #2a3340;padding-top:1rem;color:#9aa6b2}
 img,svg,table{max-width:100%}`;
 
@@ -320,23 +323,58 @@ ${shell(`<a href="/templates">Templates</a>`)}
   };
 }
 
+// Test fixtures and internal tokens stay off the public card. The match is
+// the published name and id, not a substring inside an ordinary word.
+const TEST_IDENTITY = /(?:^|[^a-z0-9])(?:qa-|dogfood)|(?:^|[^a-z0-9])test(?![a-z0-9])/i;
+const INTERNAL_TOKEN = /\b(?:id|ai)_[A-Za-z0-9_-]+/g;
+
+function scrubDirectoryText(value) {
+  return String(value ?? "").replace(INTERNAL_TOKEN, "").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function directoryCardPublic(agent) {
+  if (TEST_IDENTITY.test(String(agent?.agentId ?? "")) || TEST_IDENTITY.test(String(agent?.name ?? ""))) return null;
+  const name = scrubDirectoryText(agent?.name);
+  const description = scrubDirectoryText(agent?.description);
+  if (!name) return null;
+  const skills = (Array.isArray(agent?.skills) ? agent.skills : [])
+    .filter(skill => typeof skill === "string")
+    .map(scrubDirectoryText)
+    .filter(skill => skill && !TEST_IDENTITY.test(skill));
+  return { ...agent, name, description, skills };
+}
+
 export function agentDirectoryView(store, { ref = "", cursor = null } = {}) {
   const queried = queryDirectoryEntries(store, { cursor: cursor || null });
   if (queried.error) return queried;
-  const cards = queried.agents.map(agent => ({
-    ...agent,
-    inviteHref: withRef(`/?start=invite-agent&agent=${encodeURIComponent(agent.agentId)}`, ref),
-    untrusted: true,
-  }));
+  const cards = queried.agents.flatMap(agent => {
+    const pub = directoryCardPublic(agent);
+    if (!pub) return [];
+    return [{
+      ...pub,
+      inviteHref: withRef(`/?start=invite-agent&agent=${encodeURIComponent(agent.agentId)}`, ref),
+      tryHref: withRef("/demo", ref),
+      untrusted: true,
+    }];
+  });
   const description = "Agents who published a public card. Invite one into your room with your own referral link.";
   const nextHref = queried.nextCursor ? withRef(`/agents?cursor=${encodeURIComponent(queried.nextCursor)}`, ref) : "";
-  const list = cards.length ? cards.map(agent => `<article class="card">
+  const list = cards.length ? cards.map(agent => {
+    const tags = agent.skills.length
+      ? `<ul class="tags">${agent.skills.map(skill => `<li>${escapeHtml(skill)}</li>`).join("")}</ul>`
+      : `<p class="meta">No skills listed</p>`;
+    const receipts = `${agent.receiptCount} public ${agent.receiptCount === 1 ? "receipt" : "receipts"}`;
+    const rooms = `${agent.roomCount} public ${agent.roomCount === 1 ? "room" : "rooms"}`;
+    return `<article class="card">
 <h2>${escapeHtml(agent.name)}</h2>
 <p>${escapeHtml(agent.description)}</p>
-<p class="meta">${agent.skills.length ? escapeHtml(agent.skills.join(", ")) : "No skills listed"} · ${agent.receiptCount} public ${agent.receiptCount === 1 ? "receipt" : "receipts"} · ${agent.roomCount} public ${agent.roomCount === 1 ? "room" : "rooms"}</p>
+${tags}
+<p class="meta">${escapeHtml(receipts)} · ${escapeHtml(rooms)}</p>
 <p><a href="${escapeHtml(agent.inviteHref)}">Invite to my room</a></p>
+<p><a class="try" href="${escapeHtml(agent.tryHref)}">Try in a qa room</a></p>
 <p><a href="${escapeHtml(reportHref("agent", agent.agentId))}">Report</a></p>
-</article>`).join("") : `<p>No agents have published a public card yet.</p>`;
+</article>`;
+  }).join("") : `<p>No agents have published a public card yet.</p>`;
   const more = nextHref ? `<p><a href="${escapeHtml(nextHref)}">More agents</a></p>` : "";
   const html = `${head({ title: "Project Room — agents", description, path: "/agents" })}
 ${shell(`<a href="/templates">Templates</a>`)}
