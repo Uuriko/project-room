@@ -1,3 +1,4 @@
+import { createJobAlarmReconciler } from "./job-alarm-reconciler.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
@@ -578,23 +579,16 @@ export class ProjectRoom extends DurableObject {
   }
   async #armJobAlarmBody({ retryDelayMs = 0 } = {}) {
     if (this.paused || !this.store) return { armed: false, alarmAt: null };
-    const now = Date.now();
-    const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
-    let when = earliestFutureAlarm(JOBS, {
-      env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker"
+    this.jobAlarmReconciler ??= createJobAlarmReconciler({
+      storage: this.ctx.storage,
+      calculate: async () => {
+        const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+        return earliestFutureAlarm(JOBS, {
+          env: this.env, store: this.store, now: Date.now(), lastRan: lastRanFrom(stored), runtime: "worker"
+        });
+      }
     });
-    if (retryDelayMs > 0) {
-      const retryAt = now + retryDelayMs;
-      when = when == null ? retryAt : Math.min(when, retryAt);
-    }
-    const current = await this.ctx.storage.getAlarm();
-    if (when == null) {
-      if (current != null) await this.ctx.storage.deleteAlarm();
-      return { armed: false, alarmAt: null };
-    }
-    if (current != null && current <= when) return { armed: false, alarmAt: current };
-    await this.ctx.storage.setAlarm(when);
-    return { armed: true, alarmAt: when };
+    return this.jobAlarmReconciler({ retryDelayMs });
   }
   // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
@@ -680,8 +674,17 @@ export default {
     // invite redeem hit the same handlers as origin (www /api/* is Webflow).
     if (isEdgeDoorUrl(request.url)) {
       const inbound = new URL(request.url);
-      const path = rewriteRoomApiPrefix(inbound.pathname) + inbound.search;
-      request = new Request(new URL(path, roomOrigin(env).origin), request);
+      const pathname = rewriteRoomApiPrefix(inbound.pathname);
+      const target = new URL(pathname + inbound.search, roomOrigin(env).origin);
+      // OAuth state is bound to a host-only account cookie. Start on the
+      // canonical callback host before creating either the slot or state;
+      // an internal rewrite would set the cookie on the public entry host.
+      if (request.method === 'GET' && pathname === '/api/auth/google/start') {
+        return finish(new Response(null, { status: 302, headers: {
+          Location: target.href, 'Cache-Control': 'no-store'
+        } }), 'worker');
+      }
+      request = new Request(target, request);
     } else if (EDGE_DOOR_HOSTS.includes(new URL(request.url).hostname)) {
       // The /room* route also catches /rooms, /roommates and similar lookalikes
       // (an exact pattern would drop /room?ref= query strings). Those are simply
