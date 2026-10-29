@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
+import { RoomAgentClient } from '../client/room-agent.mjs';
 
 for (const bodiesAtRest of [false, true]) for (const count of [10, 100]) {
   test(`cold work HTTP reads avoid unrelated ${count} message bodies (at-rest ${bodiesAtRest})`, async t => {
@@ -31,6 +32,10 @@ for (const bodiesAtRest of [false, true]) for (const count of [10, 100]) {
     const guard = t.mock.method(store, 'room', () => { throw new Error('work read hydrated full conversation'); });
     const url = `http://127.0.0.1:${server.address().port}/api/rooms/commons?view=work`;
     for (let attempt = 0; attempt < 2; attempt++) {
+      const board = await new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token }).board();
+      assert.equal(board.counts.total, 1);
+      assert.equal(board.columns.proposed[0].id, 'one');
+      assert.equal(JSON.stringify(board).includes('unrelated-'), false);
       const response = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
       const value = await response.json();
       assert.equal(response.status, 200, JSON.stringify(value));
