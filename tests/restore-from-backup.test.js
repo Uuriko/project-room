@@ -16,7 +16,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { exportNdjsonStream, exportNdjsonText, exportTrailer, createTableDigests, REPLAY_SKIPPED_TABLES } from "../server/room-export.mjs";
 import {
-  operatorRestoreResponse, operatorRestoreFromBackupResponse, RESTORE_MAX_BYTES,
+  operatorRestoreResponse, operatorRestoreFromBackupResponse, RESTORE_MAX_BYTES, createBackupReplaySession,
 } from "../server/restore-ndjson.mjs";
 import { writeKvBackup, backupObjectKey, backupPartKey, BACKUP_KV_PART_BYTES } from "../cloudflare/room-backup.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -594,8 +594,31 @@ for (const failure of ["rows", "permit", "foreign-keys"]) {
     assert.equal(response.status, 422);
     const result = await response.json();
     assert.equal(result.error.code, "restore_verification_failed");
+    assert.equal(result.error.message, "Restore requires operator reconciliation", "cleanup must preserve the original failure");
     if (failure === "rows") assert.ok(prepare("SELECT count(*) AS n FROM rooms").get().n > 0,
       "failed cleanup really leaves restored data behind");
     assert.equal(result.error.cleanupFailed, true, "operator must not mistake this destination for empty and retryable");
   });
 }
+
+
+test("final foreign-key restoration failure aborts the otherwise successful replay", t => {
+  const seeded = seedStore(t);
+  const target = openStore(t, "restore-final-fk-failed-");
+  const session = createBackupReplaySession(target);
+  session.writeText(exportNdjsonText(seeded.db));
+  const original = new Error("Injected final foreign-key restoration failure");
+  const exec = target.db.exec.bind(target.db);
+  let attempts = 0;
+  t.mock.method(target.db, "exec", (sql, ...args) => {
+    if (sql === "PRAGMA foreign_keys=ON" && ++attempts === 1) throw original;
+    return exec(sql, ...args);
+  });
+  assert.throws(() => session.finish(), error => error === original);
+  const cleanup = session.abort();
+  assert.equal(cleanup.cleaned, true);
+  assert.equal(cleanup.skipped, false, "failed finalization must not look like a successful settled restore");
+  assert.equal(target.db.prepare("SELECT count(*) AS n FROM rooms").get().n, 0);
+  assert.equal(target.db.prepare("PRAGMA foreign_keys").get().foreign_keys, 1);
+  assert.strictEqual(session.abort(), cleanup, "repeat abort preserves the original outcome without deleting again");
+});
