@@ -56,7 +56,7 @@ export function openCodexStdio(config, { allowedThreadIds = [], onAttention = ()
     throw new Error("Dedicated process HOME cannot be a symlink");
   mkdirSync(privateHome, { recursive: true, mode: 0o700 }); chmodSync(privateHome, 0o700);
   const lock = join(settings.codexHome, ".room-runtime.lock");
-  try { mkdirSync(lock, { mode: 0o700 }); } catch { throw new Error("Dedicated runtime is active or unresolved; reconcile its process before clearing .room-runtime.lock"); }
+  try { mkdirSync(lock, { mode: 0o700 }); } catch { throw Object.assign(new Error("Dedicated runtime is active or unresolved; reconcile its process before clearing .room-runtime.lock"), { code: "runtime_profile_locked" }); }
   const args = ["app-server", "--listen", "stdio://", "-c", 'cli_auth_credentials_store="file"',
     "-c", 'shell_environment_policy.inherit="none"', "-c", `approval_policy=${JSON.stringify(settings.policy.approvalPolicy)}`,
     "-c", `sandbox_mode=${JSON.stringify(settings.policy.sandbox)}`,
@@ -184,7 +184,7 @@ export async function checkCodexProtocol(rpc, config, { threadId } = {}) {
     const resumed = await rpc.request("thread/resume", { threadId: id, cwd: config.cwd, ...config.policy });
     if (resumed.thread?.id !== id) throw new Error("invalid resume");
     return { status: "protocol_ready", modelTurnExecuted: false, historyRead: true, resume: true };
-  } catch { throw new Error("Codex runtime lacks the required thread history/read/resume protocol or is unavailable. Use a qualified standalone Codex release (tested rust-v0.162.1) and run --check before starting Room work."); }
+  } catch { throw Object.assign(new Error("Codex runtime lacks the required thread history/read/resume protocol or is unavailable. Use a qualified standalone Codex release (tested rust-v0.162.1) and run --check before starting Room work."), { code: "runtime_protocol_unavailable" }); }
 }
 
 

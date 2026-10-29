@@ -173,3 +173,44 @@ for (const priorState of ["inProgress", "interrupted"]) test(`shared runtime ${p
   await run.promise;
   assert.equal(f.rpc.starts, priorState === "inProgress" ? 0 : 1);
 });
+
+
+test("explicit request selection skips older work from the same requester", async t => {
+  const f = await fixture(t), old = f.post(), fresh = f.post(), controller = new AbortController();
+  await f.run({ controller, allowedRequestIds: [fresh], emit: e => { if (e.status === "delivered") controller.abort(); } }).promise;
+  assert.equal((await f.client.replyContext(old)).request.status, "open");
+  assert.equal((await f.client.replyContext(fresh)).request.status, "answered");
+  assert.equal(f.rpc.starts, 1);
+});
+
+test("saved reply survives narrowed selection and unresolved successor fence without rerun", async t => {
+  const f = await fixture(t), id = f.post(), first = new AbortController();
+  const dropping = { ...f.connection, fetchImpl: async (url, options) => {
+    if (options.method === "POST" && new URL(url).pathname.endsWith("/commands")) throw new TypeError("Synthetic delivery unavailable");
+    return fetch(url, options);
+  } };
+  await f.run({ controller: first, connection: dropping, allowedRequestIds: [id], emit: e => {
+    if (e.status === "needs_attention") first.abort();
+  } }).promise;
+  assert.equal(f.rpc.starts, 1);
+  assert.equal(f.db.prepare("SELECT count(*) n FROM request_runs WHERE response IS NOT NULL AND delivered=0").get().n, 1);
+  f.reopen();
+  const denied = f.run({ allowedRequesterIds: ["reviewer"], allowedRequestIds: ["another-selected-request"] });
+  await delay(150); denied.controller.abort(); await denied.promise;
+  assert.equal((await f.client.replyContext(id)).request.status, "open", "saved delivery still requires enabled requester");
+  assert.equal(f.connects, 1);
+  f.db.prepare("INSERT INTO request_runs(id,attempt_id) VALUES(?,?)").run("unresolved-other", "other-attempt");
+  const retry = new AbortController();
+  await f.run({ controller: retry, allowedRequestIds: ["another-selected-request"], emit: e => {
+    if (e.status === "delivered") retry.abort();
+  } }).promise;
+  assert.equal((await f.client.replyContext(id)).request.status, "answered");
+  assert.equal(f.rpc.starts, 1); assert.equal(f.connects, 1);
+});
+
+test("empty, invalid and duplicate explicit request selections refuse before connecting", async t => {
+  const f = await fixture(t);
+  for (const ids of [[], [""], ["a", "a"], ["constructor"], ["-starts-wrong"], ["a,b"], ["a\n"], ["x".repeat(129)], Array.from({ length: 21 }, (_, i) => "id-" + i)])
+    await assert.rejects(f.run({ allowedRequestIds: ids }).promise, /valid request IDs/);
+  assert.equal(f.connects, 0);
+});

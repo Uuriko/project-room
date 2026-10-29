@@ -135,3 +135,47 @@ for (const mismatch of ["origin", "roomId", "memberId", "malformed", "incomplete
     assert.equal((result.stdout + result.stderr).includes(connection.token), false);
   });
 }
+
+
+test("failure status retains only bounded codes after exit and never crosses watcher ownership", t => {
+  const f = setup(t), directory = `${f.journal}.watch`, owner = new WatchJournal(directory);
+  const writer = createCodexStatusWriter(directory, { origin: "https://room.example", roomId: "room", memberId: "agent" });
+  writer.event({ type: "host_failure", code: "runtime_profile_locked", message: "PRIVATE-ERROR", token: "SECRET" });
+  writer.event({ type: "host_status", status: "stopped" });
+  writer.close(); owner.close();
+  assert.equal(readCodexHostStatus(f.journal).failureCode, "runtime_profile_locked");
+  assert.doesNotMatch(readFileSync(join(directory, "status.json"), "utf8"), /PRIVATE-ERROR|SECRET/);
+  const nextOwner = new WatchJournal(directory);
+  const nextWriter = createCodexStatusWriter(directory, { origin: "https://room.example", roomId: "room", memberId: "agent" });
+  t.after(() => { nextWriter.close(); nextOwner.close(); });
+  assert.equal(readCodexHostStatus(f.journal).failureCode, undefined);
+  nextWriter.event({ type: "host_failure", code: "arbitrary-secret-value" });
+  assert.equal(readCodexHostStatus(f.journal).failureCode, "host_failed");
+  assert.doesNotMatch(readFileSync(join(directory, "status.json"), "utf8"), /arbitrary-secret-value/);
+});
+
+test("directed CLI preserves profile lock diagnosis without clearing the lock or starting a model", t => {
+  const f = setup(t), connectionDir = join(f.root, "room");
+  saveAgentConnection(connectionDir, { version: 1, origin: "https://fixture.invalid", roomId: "selected", memberId: "agent", token: "t".repeat(43) });
+  const lock = join(f.root, "profile", ".room-runtime.lock"); mkdirSync(lock, { mode: 0o700 });
+  const result = spawnSync(process.execPath, [cli, "--watch-requests", f.journal, f.config, "peer"], {
+    encoding: "utf8", timeout: 5000, env: { ROOM_AGENT_CONFIG: connectionDir, PATH: "/unavailable" }
+  });
+  assert.equal(result.status, 1, result.stderr);
+  assert.equal(readCodexHostStatus(f.journal).failureCode, "runtime_profile_locked");
+  assert.equal(existsSync(lock), true);
+});
+
+
+test("retry diagnostics clear on recovery and never expose unknown service errors", t => {
+  const f = setup(t), directory = `${f.journal}.watch`, owner = new WatchJournal(directory);
+  const writer = createCodexStatusWriter(directory, { origin: "https://room.example", roomId: "room", memberId: "agent" });
+  t.after(() => { writer.close(); owner.close(); });
+  writer.event({ type: "host_status", status: "retrying_room", code: "runtime_profile_locked" });
+  assert.equal(readCodexHostStatus(f.journal).failureCode, "runtime_profile_locked");
+  writer.event({ type: "host_status", status: "protocol_qualified" });
+  assert.equal(readCodexHostStatus(f.journal).failureCode, undefined);
+  writer.event({ type: "host_status", status: "retrying_room", code: "PRIVATE-ERROR" });
+  assert.equal(readCodexHostStatus(f.journal).failureCode, undefined);
+  assert.doesNotMatch(readFileSync(join(directory, "status.json"), "utf8"), /PRIVATE-ERROR/);
+});

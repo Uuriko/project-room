@@ -9,6 +9,7 @@ import CoreGraphics
     private let host: LocalRoomHost
     private let hostState = NSTextField(wrappingLabelWithString: "")
     private let hostToggle = NSButton(title: "Start agent", target: nil, action: nil)
+    private let hostRetry = NSButton(title: "Retry agent", target: nil, action: nil)
     private let macConnect = NSButton(title: "Connect Mac tools…", target: nil, action: nil)
     private let hostConnect = NSButton(title: "Set up agent…", target: nil, action: nil)
     private let state = NSTextField(wrappingLabelWithString: "")
@@ -40,7 +41,8 @@ import CoreGraphics
         hostConnect.target = self; hostConnect.action = #selector(setupHost); hostConnect.bezelStyle = .rounded
         hostToggle.target = self; hostToggle.action = #selector(toggleHost); hostToggle.bezelStyle = .rounded
         macConnect.target = self; macConnect.action = #selector(connectMacTools); macConnect.bezelStyle = .rounded
-        let hostControls = NSStackView(views: [hostConnect, macConnect, hostToggle]); hostControls.spacing = 8
+        hostRetry.target = self; hostRetry.action = #selector(retryHost); hostRetry.bezelStyle = .rounded
+        let hostControls = NSStackView(views: [hostConnect, macConnect, hostToggle, hostRetry]); hostControls.spacing = 8
         let importHost = NSButton(title: "Import existing host configuration…", target: self, action: #selector(connectHost)); importHost.bezelStyle = .rounded
         let advanced = NSButton(checkboxWithTitle: "Advanced", target: self, action: #selector(toggleAdvanced(_:)))
         advancedControls.orientation = .vertical; advancedControls.alignment = .leading; advancedControls.spacing = 8
@@ -112,6 +114,11 @@ import CoreGraphics
             self.refresh()
         }
     }
+    @objc private func retryHost() {
+        hostIssue = nil
+        do { try host.start() } catch { hostIssue = "Could not retry. Check agent setup or another running host." }
+        refresh()
+    }
     @objc private func toggleHost() {
         hostIssue = nil
         if host.snapshot()["running"] as? Bool == true || host.snapshot()["receivingEnabled"] as? Bool == true {
@@ -127,6 +134,7 @@ import CoreGraphics
         let agent = host.snapshot(), running = agent["running"] as? Bool == true, stopping = agent["stopping"] as? Bool == true
         hostState.stringValue = hostIssue ?? (agent["message"] as? String ?? "Agent status unavailable")
         hostToggle.title = stopping ? "Stopping…" : (running || agent["receivingEnabled"] as? Bool == true) ? "Disconnect agent" : "Start agent"
+        hostRetry.isHidden = running || stopping || agent["receivingEnabled"] as? Bool != true
         hostToggle.isEnabled = agent["configured"] as? Bool == true && !stopping
         hostConnect.isEnabled = !running
         macConnect.isEnabled = agent["configured"] as? Bool == true && !running && !stopping
