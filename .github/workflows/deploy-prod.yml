@@ -44,6 +44,10 @@ on:
         description: "Optional note for the receipt"
         required: false
         type: string
+      runtime_revision:
+        description: "Optional immutable runtime correction suffix, such as r2; existing assets are never replaced"
+        required: false
+        type: string
       probe_override:
         description: "Only when ROOM_ONBOARDING_GATE is 1: deploy even if the staging onboarding probe fails, recording this reason"
         required: false
@@ -91,6 +95,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - name: Validate runtime correction suffix
+        env:
+          REVISION: ${{ inputs.runtime_revision }}
+        run: |
+          if [[ -n "$REVISION" && ! "$REVISION" =~ ^r([2-9]|[1-9][0-9]+)$ ]]; then
+            echo "::error::runtime_revision must be empty or r2, r3, ..."; exit 1
+          fi
       - name: Resolve the commit and check deployment policy
         id: gate
         env:
@@ -403,7 +414,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ needs.gate.outputs.sha }}
+          # Tools come from the immutable workflow revision, not an older target.
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -420,16 +432,17 @@ jobs:
           OUT="$RUNNER_TEMP/project-room-runtime"
           node scripts/runtime-package.mjs create "$GITHUB_WORKSPACE" "$SHA" "$OUT"
           node scripts/runtime-package.mjs verify "$OUT" "$SHA"
-          tar -C "$OUT" -czf "$RUNNER_TEMP/project-room-runtime.tar.gz" .
+          python3 scripts/runtime-archive.py "$OUT" "$RUNNER_TEMP/project-room-runtime.tar.gz" --expected-commit "$SHA"
       - name: Publish the runtime release
         env:
           GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ inputs.runtime_revision }}
           SHA: ${{ needs.gate.outputs.sha }}
         run: |
           set -euo pipefail
           SHORT="${SHA:0:7}"
           DATE="$(date -u +%Y-%m-%d)"
-          TAG="runtime-${DATE}-${SHORT}"
+          TAG="runtime-${DATE}-${SHORT}${REVISION:+-${REVISION}}"
           verify_release() {
             python3 scripts/verify-runtime-release.py --repository "$GITHUB_REPOSITORY" \
               --tag "$TAG" --sha "$SHA" --expected "$RUNNER_TEMP/project-room-runtime" \
