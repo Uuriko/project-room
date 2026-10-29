@@ -886,6 +886,24 @@ export function publicReceiptById(store, id) {
         };
       }
     } catch { /* graceful fallback */ }
+    // The settlement's dispute decider (L2-H5-1): the single-task read
+    // already publishes it as settlement.disputeDecider, composed by the
+    // settlement view from the escrow bounty (dispute_decider ??
+    // verifier, the escrow read's own composition). Resolve the same
+    // value here through the receipt's settlement link so the human
+    // receipt page can name who may rule — and who ruled — a dispute on
+    // this work. Disclose-only: the same id, no name, no new fact.
+    try {
+      const offerId = store.db.prepare("SELECT offer_id AS offerId FROM public_work_receipts WHERE receipt_id=?").get(id)?.offerId;
+      const bountyId = offerId
+        ? store.db.prepare("SELECT bounty_id AS bountyId FROM public_work_settlements WHERE offer_id=?").get(offerId)?.bountyId
+        : null;
+      const bounty = bountyId
+        ? store.db.prepare("SELECT dispute_decider AS disputeDecider, verifier FROM bounty_records WHERE bounty_id=?").get(bountyId)
+        : null;
+      const disputeDecider = cleanText(bounty?.disputeDecider ?? bounty?.verifier ?? null, 256);
+      if (disputeDecider) pub.settlement = { ...(pub.settlement ?? {}), disputeDecider };
+    } catch { /* a store predating the settlement rail has no decider to show */ }
   }
   return pub;
 }

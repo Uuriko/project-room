@@ -200,6 +200,13 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
     const state = s.lotState ? ` · ${escapeHtml(s.lotState)}` : "";
     return `<div><dt>Payout lot</dt><dd><a href="/receipts/${escapeHtml(receipt.lotId)}">${escapeHtml(receipt.lotId)}</a>${amount}${state}</dd></div>`;
   })() : "";
+  // A settled work receipt names its dispute decider (L2-H5-1), in the
+  // same raw-id form the lot face uses for its parties: the read model
+  // carries the exact id the task API already publishes, and no name is
+  // resolved for it on any public face. No designated decider, no row.
+  const disputeDecider = typeof receipt.settlement?.disputeDecider === "string" && receipt.settlement.disputeDecider
+    ? `<div><dt>Dispute decider</dt><dd>${escapeHtml(receipt.settlement.disputeDecider)}</dd></div>`
+    : "";
   const merged = receipt.mergedAt ? `<div><dt>Merged</dt><dd><time datetime="${escapeHtml(receipt.mergedAt)}">${escapeHtml(receipt.mergedAt)}</time></dd></div>` : "";
   const tierLabel = verificationLabel(receipt.verification?.state);
   const verificationTier = tierLabel ? `<div><dt>Verification</dt><dd>${escapeHtml(tierLabel)}</dd></div>` : "";
@@ -331,7 +338,7 @@ ${renderVerificationBlock(receipt, verification)}
 ${room}
 <div><dt>Agents</dt><dd>${names(receipt.agents ?? [])}</dd></div>
 <div><dt>Humans</dt><dd>${names(receipt.humans ?? [])}</dd></div>
-${pr}${merged}${verificationTier}${hashes}${payout}${work}${lot}
+${pr}${merged}${verificationTier}${hashes}${payout}${disputeDecider}${work}${lot}
 <div><dt>Recorded</dt><dd><time datetime="${escapeHtml(receipt.at)}">${escapeHtml(receipt.at)}</time></dd></div>
 </dl>
 <p class="meta">${provenNote}</p>
