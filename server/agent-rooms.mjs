@@ -44,6 +44,9 @@ export const AGENT_ROOM_LIMIT = 100;
 // Self-serve creation budget: 3 rooms per identity per 24 hours.
 export const AGENT_ROOM_CREATE_CAPACITY = 3;
 export const AGENT_ROOM_CREATE_REFILL_PER_SECOND = AGENT_ROOM_CREATE_CAPACITY / 86400;
+// A lost-response retry of room create inside this window returns the room
+// and no credential. A later replay does the same. Replacement is rotate.
+export const ONBOARDING_REPLAY_WINDOW_MS = 60_000;
 
 export const agentRoomSchema = `
 CREATE TABLE IF NOT EXISTS agent_room_ownership (
@@ -74,6 +77,18 @@ const AGENT_STARTER_TITLE = "Post your plan, then close this task";
 // ACT-3a: board-first next. Existing moves stay after the starter task.
 // ACT-3b adds humanClaimUrl once S1 and C have landed. M has not landed, so
 // there are no MCP equivalents yet. room start waits on DX-1a (bin/room.mjs).
+export function onboardingRotateNext(roomId, withinReplayWindow = true) {
+  const when = withinReplayWindow
+    ? "A replay inside 60 seconds does not include a credential."
+    : "This replay is past the 60 second window and does not include a credential.";
+  return {
+    action: "rotate",
+    method: "POST",
+    path: `/api/agent-rooms/${encodeURIComponent(roomId)}/token/rotate`,
+    description: `${when} POST this path with the identity secret to revoke the room onboarding token and issue a new one.`,
+  };
+}
+
 export function roomCreateNext(roomId) {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   const starterUpdate = `${room}/work-claims/${encodeURIComponent(AGENT_STARTER_ID)}/update`;
@@ -223,13 +238,20 @@ export class AgentRooms {
   }
 
   // Shared shape for both idempotency keys (client roomId, client requestId):
-  // the original room, a fresh onboarding token, and the duplicate flag so
-  // the HTTP layer answers 200 on a replay.
-  #duplicateCreateResponse(roomId, memberId, identityId, displayName) {
+  // the original room and the duplicate flag, so the HTTP layer answers 200
+  // on a replay. The stored key is hash-only, so a replay cannot hand the
+  // original credential back. Inside the 60s lost-response window, and after
+  // it, the replay returns mcpToken null and next rotate. It does not revoke.
+  // POST /api/agent-rooms/{id}/token/rotate is the replacement.
+  #duplicateCreateResponse(roomId, memberId, identityId) {
+    const row = this.store.db.prepare(
+      "SELECT created_at AS createdAt FROM agent_room_ownership WHERE identity_id=? AND room_id=?"
+    ).get(identityId, roomId);
+    const age = row ? this.store.now() - row.createdAt : 0;
+    const next = onboardingRotateNext(roomId, age <= ONBOARDING_REPLAY_WINDOW_MS);
     return { roomId, ownerMemberId: memberId, identityId, duplicate: true,
-      mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId, roomId, label: displayName }),
-      starter: starterView(this.store, roomId),
-      next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+      mcpToken: null, starter: starterView(this.store, roomId),
+      next, nextActions: [next] };
   }
 
   // Self-serve room creation. secret is the caller's pri_ identity secret
@@ -289,7 +311,7 @@ export class AgentRooms {
             && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
             && hadStarter(prior.room_id) === wantStarter;
           if (!same) fail(409, "request_conflict", "requestId was already used for a different room");
-          return this.#duplicateCreateResponse(prior.room_id, memberId, identity.identityId, displayName);
+          return this.#duplicateCreateResponse(prior.room_id, memberId, identity.identityId);
         }
       }
       if (this.store.db.prepare("SELECT 1 FROM rooms WHERE id=?").get(roomId)) {
@@ -299,7 +321,7 @@ export class AgentRooms {
           && state.room.kind === kind && ownMember(state.members, memberId)?.displayName === displayName
           && hadStarter(roomId) === wantStarter;
         if (!same) fail(409, "room_exists", "That room id is already in use");
-        return this.#duplicateCreateResponse(roomId, memberId, identity.identityId, displayName);
+        return this.#duplicateCreateResponse(roomId, memberId, identity.identityId);
       }
       // The creation budget is spent here, past the idempotency short-circuit,
       // because it is a budget on rooms created and a replay creates none.
@@ -340,6 +362,29 @@ export class AgentRooms {
       return { roomId, ownerMemberId: memberId, identityId: identity.identityId, duplicate: false, starter,
         mcpToken: this.store.agentPlugin.issueOnboardingMcpToken({ identityId: identity.identityId, roomId, label: displayName }),
         next: roomCreateNext(roomId), nextActions: nextActionsForRoomCreate(roomId) };
+    });
+  }
+
+  // Replace this identity's onboarding credential for the room. One
+  // transaction revokes that identity's live onboarding keys for the room
+  // and inserts the replacement. The caller must already be linked. A room
+  // token is not an identity secret.
+  rotateOnboardingToken(secret, roomId) {
+    if (typeof roomId !== "string" || !validId(roomId) || roomId.length > 64) {
+      fail(422, "invalid_room_request", "roomId must be 1 to 64 letters, digits, dots, colons, underscores or hyphens");
+    }
+    return this.store.transaction(() => {
+      const identity = this.store.identities.resolveGlobalIdentitySecret(secret);
+      if (!identity) refuseRoomToken(secret);
+      if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
+      const link = this.store.identities.resolveIdentityLink(identity.identityId, roomId);
+      if (!link) fail(404, "room_not_found", "No such room");
+      return {
+        roomId,
+        mcpToken: this.store.agentPlugin.rotateOnboardingMcpToken({
+          identityId: identity.identityId, roomId, label: link.member.displayName,
+        }),
+      };
     });
   }
 
