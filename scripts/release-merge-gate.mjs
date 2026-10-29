@@ -69,6 +69,12 @@ export function claimsFromPages(pages) {
   if (pages.some(page => page?.hasMore !== false || !Array.isArray(page.claims))) fail('Incomplete claim pagination; no collision verdict is safe');
   return pages.flatMap(page => page.claims);
 }
+export async function collisionClaims(grant, readClaims) {
+  // Validate malformed keys even when no scan would otherwise be needed.
+  problemKeyCheck(grant, []);
+  if (!grant.problemKeys?.length) return [];
+  return claimsFromPages(await Promise.all(['claimed', 'in_progress', 'blocked'].map(state => readClaims({ state }))));
+}
 // All writes pass through this adapter so a durable journal records exact input
 // BEFORE each uncertain GitHub call. No shell interpolation or secret logging.
 export async function guardedMerge(candidate, io, { apply = true } = {}) {
@@ -189,8 +195,8 @@ async function main() {
     const access = await room.checkConnection();
     const slot = await room.workClaimGet('MERGE-SLOT');
     const pause = await room.workClaimGet('RELEASE-PAUSE');
-    const pages = await Promise.all(['claimed', 'in_progress', 'blocked'].map(state => room.workClaims({ state })));
-    const claims = claimsFromPages(pages);
+    const grant = grantOf(slot, access.memberId, candidate);
+    const claims = await collisionClaims(grant, options => room.workClaims(options));
     const fullProtection = gh(['api', `repos/${repo}/branches/main/protection`]);
     const protection = landingProtection(fullProtection);
     return { identity: access.memberId, slot, pause,
