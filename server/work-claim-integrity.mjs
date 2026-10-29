@@ -1,3 +1,4 @@
+import { normalizeWorkDependencies } from "../src/work-dependencies.js";
 // Board integrity guards (SEC-2 with the Q3-A addendum).
 //
 // Pure helpers the work-claim routes call before the claim state machine:
@@ -67,12 +68,24 @@ export function assertBoardLeaseHours(reject, data) {
   }
 }
 
-export function assertDependsOnKnown(reject, data, { selfId, has }) {
+export function assertDependsOnKnown(reject, data, { selfId, has, get }) {
   if (!data || !Array.isArray(data.dependsOn)) return;
+  try { normalizeWorkDependencies(data.dependsOn, selfId); }
+  catch (error) { invalid(reject, "dependsOn", error.message); }
   for (const id of data.dependsOn) {
     if (typeof id !== "string") continue; // the state machine reports the shape
     if (id === selfId) invalid(reject, "dependsOn", "a claim cannot depend on itself");
     if (!has(id)) invalid(reject, "dependsOn", `no claim "${id.slice(0, 128)}" in this room`);
+  }
+  if (!get) return;
+  const pending = [...data.dependsOn], seen = new Set();
+  while (pending.length) {
+    const id = pending.pop();
+    if (id === selfId) invalid(reject, "dependsOn", "dependencies cannot form a cycle");
+    if (seen.has(id)) continue;
+    if (seen.size >= 4096) invalid(reject, "dependsOn", "dependency graph exceeds the validation bound");
+    seen.add(id);
+    for (const next of get(id)?.dependsOn ?? []) pending.push(next);
   }
 }
 

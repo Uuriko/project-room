@@ -98,7 +98,9 @@ import { InboxAttachmentBytes, inboxAttachmentBytesSchema } from "./inbox-attach
 import { BountyEscrow, bountyEscrowSchema, convergeBountyDeployedSchema } from "./bounty-escrow.mjs"; // Escrowed bounties, agent work exchange slice 1.
 import { selectedWorkContext, currentWorkRecord } from "./work-context.mjs";
 import { workItemChanges, mayWriteBoardClaims } from "../src/workflow.js";
-import { backfillAllRoomsWorkItemBoard, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
+import { assertDependsOnKnown } from "./work-claim-integrity.mjs";
+import { normalizeWorkDependencies } from "../src/work-dependencies.js";
+import { backfillAllRoomsWorkItemBoard, boardClaimId, backfillRoomWorkItems, diffRoomWorkItems, syncWorkItemClaim, WORK_ITEM_BOARD_SYNC_TYPES } from "./work-item-board.mjs";
 import { discussionWindow, selectedWorkDiscussion } from "./work-discussion.mjs";
 import { AgentConnections, agentConnectionSchema } from "./agent-connections.mjs";
 import { GuestAgentLinks, guestLinkExchangeSchema, isRoomAccessToken, isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -748,7 +750,7 @@ const shapes = {
   [T.CHANNEL_CREATED]: "channelId name",
   [T.CHANNEL_RENAMED]: "channelId name",
   [T.CHANNEL_ARCHIVED]: "channelId",
-  [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId labels",
+  [T.WORK_PROPOSED]: "workItemId title definitionOfDone accountableMemberId verifierMemberId independentVerificationRequired ownerDecisionRequired humanDecisionMakerId mode sourceMessageId labels dependsOn",
   [T.WORK_ACCEPTED]: work,
   [T.WORK_HELP_UPDATED]: `${work} expectedHelpRevision status scope expiresAt`,
   [HELP_OFFER_OPENED]: `${work} offerId expectedHelpRevision helpEventId plan`,
@@ -825,7 +827,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "dependsOn", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -5695,6 +5697,14 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
+        dependencies: (() => {
+          const claim = this.workClaims.get(roomId, boardClaimId(workItemId));
+          const ids = claim?.dependsOn ?? room.state.workItems[workItemId].dependsOn ?? [];
+          return ids.map(id => {
+            const dep = this.workClaims.get(roomId, id);
+            return { id, state: dep?.state ?? "missing", satisfied: Boolean(dep && dep.state === "done" && !dep.premiseFlag && !dep.supersededBy) };
+          });
+        })(),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
     });
@@ -6425,6 +6435,26 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         } catch (error) {
           if (error instanceof EvidenceError) throw new ServiceError(error.code === "duplicate_evidence" ? 409 : 422, error.code, error.message);
           throw error;
+        }
+      }
+      // Live dependency admission uses the same Board IDs and transaction as
+      // the mirror. Replay never consults mutable Board state.
+      const dependencyItem = state.workItems?.[incoming.data.workItemId];
+      if ([T.WORK_PROPOSED, T.WORK_ACCEPTED, T.CLAIM_ACQUIRED, T.WORK_STARTED].includes(incoming.type)) {
+        const claimId = boardClaimId(incoming.data.workItemId);
+        const current = this.workClaims.get(roomId, claimId);
+        const deps = incoming.type === T.WORK_PROPOSED ? (dependencyItem?.dependsOn ?? [])
+          : current?.dependsOn ?? dependencyItem?.dependsOn ?? [];
+        try { normalizeWorkDependencies(deps, claimId); }
+        catch (error) { fail(422, "invalid_claim_input", error.message); }
+        assertDependsOnKnown(fail, { dependsOn: deps }, { selfId: claimId,
+          has: id => this.workClaims.has(roomId, id), get: id => this.workClaims.get(roomId, id) });
+        if ([T.CLAIM_ACQUIRED, T.WORK_STARTED].includes(incoming.type)) {
+          const unmet = deps.filter(id => {
+            const dep = this.workClaims.get(roomId, id);
+            return !dep || dep.state !== "done" || dep.premiseFlag || dep.supersededBy;
+          });
+          if (unmet.length) fail(409, "work_claim_dependencies_unmet", `Dependencies not done: ${unmet.join(", ")}`);
         }
       }
       if (incoming.type === T.CLAIM_ACQUIRED) {

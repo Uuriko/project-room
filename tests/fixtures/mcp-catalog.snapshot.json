@@ -995,7 +995,7 @@
       }
     },
     "room_propose_work": {
-      "inputSchema": "7b6b1a6cdf8d0680",
+      "inputSchema": "c2d5db347f25c4a1",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1582,7 +1582,7 @@
       }
     },
     "room_propose_work": {
-      "inputSchema": "7b6b1a6cdf8d0680",
+      "inputSchema": "c2d5db347f25c4a1",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
