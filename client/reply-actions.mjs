@@ -67,6 +67,9 @@ export function buildReplyCommand(identity, name, args) {
     if (missing.length) throw Object.assign(new Error(
       `room_respond_to_request is missing required context field(s): ${missing.join(", ")}. Copy contextEventId, contextSequence and workItemId exactly from the responseActions template in room_read_request (its answerBasis plus the request's workItemId); do not omit or refresh them.`),
       { code: "invalid_reply_action", status: 422 });
+    if (!Object.hasOwn(data, "body")) throw Object.assign(new Error(
+      "room_respond_to_request requires body: supply your answer or reason for declining; keep the inspected context unchanged."),
+      { code: "invalid_reply_action", status: 422 });
   }
   if (type === "message.posted") replyPostMode(data);
   const command = { id: requestId, type, data };
