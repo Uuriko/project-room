@@ -26,6 +26,12 @@ const coverage = spawnSync(process.execPath, ["scripts/journey-coverage.mjs"], {
 if (coverage.status !== 0) process.exit(coverage.status || 1);
 const shadows = spawnSync(process.execPath, ["scripts/check-no-shadow-imports.mjs"], { stdio: "inherit" });
 if (shadows.status !== 0) process.exit(shadows.status || 1);
+// Store SCC ratchet (SIMPLIFY-2026-10 §6, deep-pass S-01): the store.mjs
+// strongly connected component and its intra-component edges may only
+// shrink versus scripts/store-scc-baseline.json; no server module may
+// import ServiceError from store.mjs.
+const storeScc = spawnSync(process.execPath, ["scripts/check-store-scc.mjs"], { stdio: "inherit" });
+if (storeScc.status !== 0) process.exit(storeScc.status || 1);
 // --- Route documentation gate (batch RT) ---
 // docs/openapi.yaml must parse, every served template must stay documented,
 // and every documented operation must be a route-table row or a legacy

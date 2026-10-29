@@ -21,7 +21,7 @@ import { charterContext } from "../src/room-charter.js";
 import { annotateOrientation, claimNote, withContentTrust } from "./content-trust.mjs";
 import { orientSections } from "./updates.mjs";
 import { fleetSelf } from "./agent-fleet.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { messageVisibleToViewer, summaryHistoryFloor } from "./history-visibility.mjs"; // QA4 Q4-SEC-1
 import { availableClaimsFromBoard, memoizeBoardList } from "./available-work.mjs";
 

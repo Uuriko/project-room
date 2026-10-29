@@ -30,7 +30,7 @@
 import { createHash } from "node:crypto";
 import { validId } from "../src/events.js";
 import { tableExists } from "./db-util.mjs";
-import { ServiceError } from "./store.mjs";
+import { ServiceError } from "./service-error.mjs";
 import { appendOperatorAction } from "./operator-actions.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
