@@ -35,11 +35,21 @@ bootstrap exposed zero nonparticipant requests for that viewer. No second Worker
 upload was used. This does not establish global privacy or human sign-in success.
 
 Runtime publication was skipped by the failed workflow. Local preparation then
-found an advertised-asset packaging mismatch, so publication remains pending its
-repair and exact-source verification. Graphify activation is also a separate
-receipt. The earlier runtime/map checkpoint below describes the prior release,
-not the newly deployed source. Existing parity diagnostics still require operator
-access; no speculative data repair was made.
+found the new Google-return module missing from the runtime asset lists. Corrected
+packaging tooling `455618ee` built the unchanged deployed source and passed local
+preflight plus remote download verification. Release
+[`runtime-2026-10-29-b2f7dad`](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-b2f7dad)
+was created without promotion, verified, then promoted to latest. Its archive
+SHA-256 is `121b581099d8909e51b09ac620afa7e0041f3a37bd5691ff9e35753a33ceeb34`.
+No additional Worker upload was needed.
+
+Graphify for the same source was published and matched on three REST and three
+fresh MCP reads, digest
+`ddd30527a4ebf6460b397b8a2fe2d4ed6c5c24f3940ea174bf9b6a26bf16e6db`.
+It remains server-only and truncated, without authenticated source attestation.
+Existing parity diagnostics still require operator access; no speculative data
+repair was made. The earlier runtime/map checkpoint below describes the prior
+release, not the newly deployed source.
 
 ### Verified release checkpoint — 2026-10-29, 18:26 UTC
 
