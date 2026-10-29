@@ -77,10 +77,16 @@ a separate dependency cleanup remains worthwhile.
 
 The peer accepted and started even browser shards (Room 23003/23006). Local shard
 1 passed 23 tests; shard 3 passed 147, failed zero and skipped one. Shard 5 is
-running. The skip is the old large-history DOM bound test in
+complete: 162 passed, zero failed. All three local receipts match the frozen
+source/run/plan and report success: 332 passed, zero failed, one skipped,
+542,467 ms sequential runtime. The skip is the old large-history DOM bound test in
 `scripts/chat-performance-browser-check.mjs`, marked pending windowing since
-October 7; source review is checking whether that skip is stale. Do not count it
-as executed coverage. Original receipts, JUnit, selection and logs are retained.
+October 7. Read-only source review confirms initial root windowing now exists;
+the same test explicitly enabled on frozen source passed separately (27 initial
+DOM items, 2,000 server-side historical messages retained). The original shard
+result still contains one skip. This test does not prove permanent virtualization,
+client full-history bounds, or total sign-in latency. A test-only follow-up removes
+the obsolete opt-in. Original receipts, JUnit, selection and logs are retained.
 
 The candidate Graphify server map was rebuilt at 2457a65e: 416 files, 7,912 nodes,
 14,290 edges, zero model calls. Artifact size 1,479,235 bytes; SHA-256
