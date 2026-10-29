@@ -35,7 +35,8 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
   const live = state.messages ?? [];
   const archived = 'room_id=? AND seq<=? AND message_id NOT IN (SELECT value FROM json_each(?))';
   const params = marker ? [roomId, marker.throughSeq, marker.retainedJson] : [];
-  function* records({ bodyPrefix = null, descending = false, afterId = null, beforeSequence = null, beforeId = null, visibility = null } = {}) {
+  function* records({ bodyPrefix = null, descending = false, afterId = null, beforeSequence = null, beforeId = null, visibility = null, omitBodies = false } = {}) {
+    if (typeof omitBodies !== 'boolean') throw new TypeError('Message body projection must be boolean');
     if (beforeId !== null && (beforeSequence === null || typeof beforeId !== 'string' || !beforeId || beforeId.length > 256)) throw new TypeError('Message tie-break requires a sequence cursor');
     if (beforeSequence !== null && (!descending || afterId !== null || !Number.isSafeInteger(beforeSequence) || beforeSequence < 0)) throw new TypeError('Sequence cursor requires descending order and no ID cursor');
     if (afterId !== null && typeof afterId !== 'string') throw new TypeError('Message cursor must be an ID');
@@ -88,7 +89,11 @@ export function messageQueries(store, roomId, state, marker = state.messagesArch
       // Descending pages have two upper bounds. Bind their intersection to the
       // archive range so SQLite cannot keep choosing the original archive end.
       const pageParams = descending ? [roomId, Math.min(marker.throughSeq, sequence), marker.retainedJson] : params;
-      const rows = store.db.prepare(`SELECT message_id,seq,record_json,body FROM messages WHERE ${archived}
+      // Keep the canonical JSON record and its validation semantics; projecting
+      // away body text avoids materializing unrelated history in metadata readers.
+      // Do not substitute denormalized columns for canonical ownership fields.
+      const recordColumns = omitBodies ? "CASE WHEN json_valid(record_json) THEN json_remove(record_json,'$.body') ELSE record_json END AS record_json,NULL AS body" : 'record_json,body';
+      const rows = store.db.prepare(`SELECT message_id,seq,${recordColumns} FROM messages WHERE ${archived}
         AND seq ${cursorBound} ? AND (seq ${compare} ? OR (seq=? AND message_id ${compare} ?))
         ${visibleSql}
         ${bodyPrefix === null ? '' : 'AND substr(body,1,length(?))=?'} ORDER BY seq ${direction},message_id ${direction} LIMIT 128`)
