@@ -14,6 +14,7 @@ import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
 import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, memberRowName } from "./conversation.js";
+import { presenceGroups } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 function clipGraphemes(text, maxUnits) {
@@ -346,6 +347,8 @@ let agentInvitesUI = null;
 let instructionsUI = null;
 let workspaceUI = null;
 let state = null, session = null, pendingMessage = null, pendingWork = null, pendingAction = null;
+// Sidebar roster (NEXT-6): split at this many current members; stack this many avatars.
+const PRESENCE_SPLIT_MIN = 7, PRESENCE_STACK_MAX = 4;
 // JDOT-COH-NAV begin
 let updatesUi = null, resetNavigationBoard = null, navigationBoardReady = null, navigationBoardRevealClaim = null;
 const SOURCE_UNAVAILABLE_NOTICE = "That source is no longer available in this room.";
@@ -618,7 +621,7 @@ const client = new RoomClient({
     $("#auth-panel").setAttribute("aria-busy", pendingSignout ? "true" : "false");
     $("#identity-label").textContent = "Not signed in";
     $("#identity-label").removeAttribute("title");
-    for (const id of ["message-list", "event-list", "presence-list", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status", "record-export-status"]) {
+    for (const id of ["message-list", "event-list", "presence-list", "presence-avatars", "summary-grid", "reply-context", "source-context", "action-context", "action-fields", "cursor-label", "presence-count", "event-count", "rb-attention-list", "rb-involving-list", "rb-history-list", "decision-list", "usage-grid", "usage-period", "usage-status", "record-export-status"]) {
       const node = $(`#${id}`); node.replaceChildren(); delete node._content;
     }
     $("#usage-refresh").hidden = true; $("#record-export-html").disabled = false; exportRequest += 1;
@@ -2046,13 +2049,18 @@ function render() {
   };
   const connectionStale = $("#connection-status").dataset.interrupted === "true";
   const presenceStale = connectionStale || presenceUnrefreshed || presenceObservationAged();
-  const presenceRow = m => {
-    // #660: prefer the server-derived presence entry when we have one; it
-    // carries the authoritative working state plus owner/scope projection.
+  // #660: prefer the server-derived presence entry when we have one; it
+  // carries the authoritative working state plus owner/scope projection.
+  const rowPresence = m => {
     const serverPresence = m.active === false ? null : presenceStates.get(m.id);
     const merged = serverPresence ? { ...m, ...serverPresence } : m;
     const agent = m.kind === "agent" && m.active !== false;
-    const presence = (connectionStale || agent && presenceStale) ? "unknown" : memberPresence(merged, railCtx);
+    return (connectionStale || agent && presenceStale) ? "unknown" : memberPresence(merged, railCtx);
+  };
+  const presenceRow = m => {
+    const serverPresence = m.active === false ? null : presenceStates.get(m.id);
+    const agent = m.kind === "agent" && m.active !== false;
+    const presence = rowPresence(m);
     const availability = connectionStale ? uiText("connection.staleAvailability") : agent && presenceStale ? (presenceUnrefreshed ? "Availability not refreshed" : "Availability needs refresh") : presenceLabel(presence);
     // Keep names readable; duplicate names retain their IDs and every exact
     // identity remains available in the member disclosure and action choices.
@@ -2153,7 +2161,23 @@ function render() {
   const presenceNote = connectionStale ? uiText("connection.stalePresenceNote") : presenceUnrefreshed ? "Availability could not refresh. Try again." : presenceStale ? "Availability needs refresh. Reports older than 60 seconds need another check." : "";
   const checked = presenceCheckedAt ? `${presenceStale ? "Last successful check" : "Last checked"}: ${time(new Date(presenceCheckedAt).toISOString())}` : "";
   const presenceRefresh = `<div class="presence-refresh"><button type="button" class="text-button" data-refresh-presence data-focus-key="refresh-presence">Refresh availability</button><span class="presence-check-note">${esc([presenceNote, checked].filter(Boolean).join(" "))}</span></div>`;
-  renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${people.length ? `<p class="presence-heading">People</p>${people.map(presenceRow).join("")}` : ""}${agents.length ? `<p class="presence-heading">Agents</p>${agents.map(presenceRow).join("")}` : ""}${removedAgentsHtml}`);
+  // NEXT-6: list who is around now; everyone else waits behind one
+  // disclosure. Small rooms and rooms with no live presence signal (stale or
+  // not yet loaded) are not split, so nobody disappears for a bad reason.
+  const roster = [...people.filter(m => m.active !== false), ...agents];
+  const groups = presenceGroups(roster, rowPresence, session?.member?.id, { splitMin: PRESENCE_SPLIT_MIN });
+  const split = groups.split, aroundIds = new Set(groups.around.map(m => m.id)), others = groups.others;
+  // Removed humans (active === false) keep their old place at the end of People.
+  const shownPeople = split ? people.filter(m => aroundIds.has(m.id)) : people;
+  const shownAgents = split ? agents.filter(m => aroundIds.has(m.id)) : agents;
+  const othersHtml = others.length
+    ? `<details class="presence-more"><summary data-focus-key="presence-more">${esc(uiText("presence.moreMembers", { count: others.length }))}</summary>${others.map(presenceRow).join("")}</details>` : "";
+  const stack = groups.around.slice(0, PRESENCE_STACK_MAX);
+  const stackMore = roster.length - stack.length;
+  renderContent("#presence-avatars", `${stack.map(m => `<span class="member-avatar ${m.kind === "agent" ? "agent" : "person"}"><span>${initials(m.displayName)}</span></span>`).join("")}${stackMore > 0 ? `<span class="presence-avatars-more">+${stackMore}</span>` : ""}`);
+  renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${shownPeople.length ? `<p class="presence-heading">People</p>${shownPeople.map(presenceRow).join("")}` : ""}${shownAgents.length ? `<p class="presence-heading">Agents</p>${shownAgents.map(presenceRow).join("")}` : ""}${othersHtml}${removedAgentsHtml}`);
+  // Presence refreshes itself; the manual control only needs weight when stale.
+  $("#presence-list .presence-refresh")?.classList.toggle("is-fresh", !presenceNote);
   // JDOT-MEMBER-PERMS-UI begin
   memberPermissionsUI.sync();
   ownerAttentionCard.sync();
@@ -3446,8 +3470,11 @@ function revealMember(id) {
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   $("#people-panel").open = true;
-  focusRecord([...$("#presence-list").querySelectorAll("[data-member-record-id]")]
-    .find(node => node.dataset.memberRecordId === id));
+  const row = [...$("#presence-list").querySelectorAll("[data-member-record-id]")]
+    .find(node => node.dataset.memberRecordId === id);
+  const group = row?.closest(".presence-more");
+  if (group) group.open = true;
+  focusRecord(row);
 }
 function revealRoom() {
   if (!state || busy) return;

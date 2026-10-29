@@ -1382,6 +1382,11 @@ summary { overflow-wrap: anywhere; }
 .session-menu-panel #identity-label { max-width: none; padding: .5rem; white-space: normal; overflow-wrap: anywhere; border-bottom: 1px solid var(--line); }
 .connection-bar:has(#connection-status[data-state="connected"]):not(:focus-within) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .count-chip:empty { display: none; }
+/* NEXT-6: the Participants header shows who is around as an avatar stack. */
+.presence-avatars { display: inline-flex; align-items: center; margin-left: auto; padding-left: .55rem; }
+.presence-avatars .member-avatar { width: 1.4rem; font-size: var(--text-xs); }
+.presence-avatars-more { margin-left: .35rem; color: var(--muted); font-size: var(--text-xs); }
+.presence-more > summary { margin: .4rem 0; color: var(--muted); font-size: var(--text-xs); cursor: pointer; }
 .field { display: grid; gap: .4rem; margin-bottom: 1rem; }
 .field > span, #verifier-label { color: var(--muted); font-size: .85rem; font-weight: 600; }
 .dialog-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .5rem; margin-top: 1rem; }
@@ -1738,6 +1743,11 @@ body:has(#main:not([hidden])) .site-footer { display: none; }
 .member-observation, .member-pause-explanation, .presence-check-note { color: var(--muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .presence-refresh { margin-bottom: .75rem; }
 .presence-check-note { display: block; }
+/* Presence refreshes itself every 30s. While fresh (checked under 60s ago) the
+   timestamp says nothing new, so only a quiet control remains; stale keeps both. */
+.presence-refresh.is-fresh { margin-bottom: .5rem; }
+.presence-refresh.is-fresh .text-button { color: var(--muted); font-weight: 600; }
+.presence-refresh.is-fresh .presence-check-note { display: none; }
 .member-owned-by { overflow-wrap: anywhere; }
 
 #room-actions-list section { display: grid; gap: .15rem; }
