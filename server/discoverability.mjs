@@ -760,8 +760,8 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
       next = [{ command: "Ask the room owner for an invite code, then retry POST /api/agent-invites/redeem with { code, displayName }" }];
     }
   } else if (httpStatus === 403 && scope.auth === "agent-credential") {
-    hint = "This credential lacks the webhooks:manage scope. Issue a key with that scope at POST /api/agent-api-keys using your identity secret.";
-    next = [{ path: "/api/agent-api-keys", method: "POST" }, { tool: "room_check_access" }];
+    hint = "This credential lacks the webhooks:manage scope. Issue a key with that scope at POST /api/agent-keys using your identity secret.";
+    next = [{ path: "/api/agent-keys", method: "POST" }, { tool: "room_check_access" }];
   } else if (httpStatus === 404 && scope.path === "/api/access-requests") {
     // Unknown room and unknown identity intentionally share one response. A
     // cold agent can still learn the public mint-first path without learning
