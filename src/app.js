@@ -2517,7 +2517,9 @@ function renderMessages() {
   const allMessages = visibleConversationMessages().filter(message => currentThreadId || activeDirectMemberId || !(owesHistory && message.replyToId));
   if (!activeDirectMemberId && owesHistory && (currentThreadId ? !conversation.byId.has(currentThreadId) : !allMessages.length)) client.loadHistory();
   const showPager = !currentThreadId && (activeDirectMemberId ? Boolean(pairWindow.cursor || pairWindow.error) : owesHistory);
-  const shownLimit = currentThreadId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
+  // Private history is already loaded in explicit 50-message pages. A second
+  // 200-record display cap would hide successfully fetched older pages forever.
+  const shownLimit = currentThreadId || activeDirectMemberId ? Infinity : timelineWindow.get(view) ?? TIMELINE_WINDOW;
   const { messages, hidden: hiddenCount } = windowTimeline(allMessages, shownLimit);
   const revealing = timelineRevealing; timelineRevealing = false;
   const previous = new Map([...list.children].map(e => [e.dataset.key, e]));

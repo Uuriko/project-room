@@ -23,7 +23,7 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   send(alice, T.MESSAGE_POSTED, { messageId: 'alice-private', body: 'Private hello', toMemberId: 'owner' });
   if (width === 1440) {
     store.roomFlood = { consume() {} };
-    for (let i = 0; i < 60; i++) send(alice, T.MESSAGE_POSTED, { messageId: `private-history-${i}`, body: `Earlier private note ${i}`, toMemberId: "owner" });
+    for (let i = 0; i < 240; i++) send(alice, T.MESSAGE_POSTED, { messageId: `private-history-${i}`, body: `Earlier private note ${i}`, toMemberId: "owner" });
     for (let i = 0; i < 120; i++) send(owner, T.MESSAGE_POSTED, { messageId: `busy-${i}`, body: `Unrelated public discussion ${i}` });
   }
   send(owner, T.MESSAGE_POSTED, { messageId: 'public-topic', body: 'Public room topic' });
@@ -68,7 +68,22 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   assert.equal(await input.inputValue(), '');
   assert.equal(await page.locator('#composer-toolbar').isVisible(), false);
   assert.equal(await page.locator('#message-list').getByText('Public room topic', { exact: true }).count(), 0);
-  if (width === 1440) await page.locator('[data-timeline-earlier]').click();
+  if (width === 1440) {
+    // The earlier deep link also retains its single selected oldest record.
+    for (const expected of [101, 151, 201, 241]) {
+      const older = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname.endsWith('/conversation') && url.searchParams.get('peerMemberId') === 'alice' && url.searchParams.has('cursor');
+      });
+      await page.locator('[data-timeline-earlier]').click();
+      assert.equal((await older).status(), 200);
+      await page.waitForFunction(count => document.querySelectorAll('#message-list [data-message-record-id]').length === count, expected);
+    }
+    assert.equal(await page.locator('[data-timeline-earlier]').count(), 0, 'exhausted private history has no dead-end pager');
+    const pages = historyReads.filter(url => url.searchParams.has('cursor'));
+    assert.equal(pages.length, 4, 'one bounded request per explicit earlier-page action');
+    assert.ok(pages.every(url => url.searchParams.get('limit') === '50'));
+  }
   await page.locator('#message-list').getByText('Private hello', { exact: true }).waitFor();
   assert.ok(historyReads.some(url => url.pathname.endsWith('/conversation') && url.searchParams.get('peerMemberId') === 'alice'));
   assert.equal(historyReads.some(url => url.pathname.endsWith('/messages') || !url.searchParams.has('peerMemberId')), false, 'opening an old DM never fills unrelated room history');
@@ -121,7 +136,23 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   await page.waitForFunction(() => document.querySelector('#conversation-title').textContent === 'Alice');
   assert.equal(await input.inputValue(), '');
   await input.fill('Alice after send');
-  if (width === 1440) await page.locator('[data-timeline-earlier]').click();
+  if (width === 1440) {
+    // Reload starts with a fresh window; the sent message adds one record.
+    historyReads.length = 0;
+    for (const expected of [100, 150, 200, 242]) {
+      const older = page.waitForResponse(response => {
+        const url = new URL(response.url());
+        return url.pathname.endsWith('/conversation') && url.searchParams.get('peerMemberId') === 'alice' && url.searchParams.has('cursor');
+      });
+      await page.locator('[data-timeline-earlier]').click();
+      assert.equal((await older).status(), 200);
+      await page.waitForFunction(count => document.querySelectorAll('#message-list [data-message-record-id]').length === count, expected);
+    }
+    assert.equal(await page.locator('[data-timeline-earlier]').count(), 0, 'exhausted private history has no dead-end pager');
+    const pages = historyReads.filter(url => url.searchParams.has('cursor'));
+    assert.equal(pages.length, 4, 'one bounded request per explicit earlier-page action');
+    assert.ok(pages.every(url => url.searchParams.get('limit') === '50'));
+  }
   await page.locator('[data-message-record-id="alice-private"] [data-message-action="reply"]').click();
   assert.equal(await page.locator('#message-to-select').inputValue(), 'alice');
   await input.fill('Reply only to Alice');
