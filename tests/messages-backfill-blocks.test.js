@@ -10,12 +10,11 @@ import { EVENT_TYPES as T, event, replay } from "../src/events.js";
 // A stored event the current reducer rejects (written before a validation
 // tightening, or by a path that bypassed it) used to wedge the messages
 // backfill forever: fillRoom threw on the same chunk every tick, the throw
-// aborted the whole sweep (healthy rooms included), and the deferred-step
-// cursor never advanced past messages_backfill. The backfill now diagnoses
-// the room to the exact event, parks it in messages_backfill_blocks, and
-// proceeds with every other room; the deferred batch records the block as a
-// durable named per-room failure (reported every tick until repaired) and
-// keeps the standing set in its result.
+// aborted the whole sweep, and one row in messages_backfill_blocks then
+// parked the whole room. The backfill now quarantines that event (the row
+// stays, the serving projection's copy is what the table publishes) and
+// keeps filling the room and every other room. A log that ends before the
+// room head still parks the room.
 
 function open(t) {
   const directory = mkdtempSync(join(tmpdir(), "project-room-messages-backfill-blocks-"));
@@ -83,53 +82,46 @@ test("a poisoned room is parked by name and healthy rooms still backfill", t => 
     messageEvent("zzz", "ev-z2", T.MESSAGE_POSTED, { messageId: "z2", body: "z second" }, 11)
   ]);
 
+  const accusation = { roomId: "aaa", sequence: poisonSeq, eventId: "ev-standin", error: "Invalid messageId" };
   const first = store.backfillMessages({ limit: 1000 });
   assert.equal(first.done, true);
-  assert.deepEqual(first.blocked, [{
-    roomId: "aaa", sequence: poisonSeq, eventId: "ev-standin", error: "Invalid messageId", fresh: true
-  }]);
+  assert.deepEqual(first.blocked, []);
+  assert.deepEqual(first.quarantined, [{ ...accusation, fresh: true }]);
   assert.deepEqual(blocks(store), [{ room_id: "aaa", sequence: poisonSeq, event_id: "ev-standin", error: "Invalid messageId" }]);
-  assert.equal(rows(store, "zzz").length, 2, "the healthy room's rows are written despite the poisoned room sorting first");
-  assert.equal(rows(store, "aaa").length, 0, "the poisoned room's chunk rolled back; nothing partial is written");
+  assert.equal(store.db.prepare("SELECT skipped, reason, component FROM messages_backfill_blocks WHERE room_id='aaa'").get().skipped, 1);
+  assert.equal(rows(store, "zzz").length, 2, "the healthy room's rows are written");
+  assert.deepEqual(rows(store, "aaa").map(row => row.message_id), ["bad id@x", "tail"],
+    "the tail is replayed and the rejected message is kept from the serving projection");
+  assert.match(store.db.prepare("SELECT body FROM events WHERE id='ev-standin'").get().body, /bad id@x/,
+    "the rejected event row stays in the log");
 
   const second = store.backfillMessages({ limit: 1000 });
   assert.equal(second.done, true);
-  assert.deepEqual(second.blocked, [{
-    roomId: "aaa", sequence: poisonSeq, eventId: "ev-standin", error: "Invalid messageId", fresh: false
-  }]);
+  assert.deepEqual(second.quarantined, [{ ...accusation, fresh: false }]);
 
   const parity = store.checkMessagesParity();
   assert.equal(parity.ok, true);
-  assert.equal(parity.roomId, "zzz", "parity certifies the healthy room; the parked room is not caught up and is skipped");
+  const other = store.checkMessagesParity();
+  assert.equal(other.ok, true);
 });
 
-test("the deferred batch records a fresh block by name, then advances past messages_backfill", async t => {
+test("the deferred batch keeps moving when one event is quarantined", async t => {
   const store = open(t);
-  const poisonSeq = poisonedRoom(store, "aaa");
+  poisonedRoom(store, "aaa");
   let completed = 0;
-  let reported = 0;
   for (let i = 0; i < 12; i += 1) {
-    const result = await store.runDeferredIntegrityBatch({});
+    await store.runDeferredIntegrityBatch({});
     completed += 1;
-    if (result.failures.some(f => f.step === "messages_backfill" && f.recordId === "aaa")) reported += 1;
   }
-  assert.equal(completed, 12, "every tick completes: parking keeps the batch cadence, no throw");
-  assert.ok(reported > 0, "the block is reported as a named per-room failure (room, not an anonymous throw)");
+  assert.equal(completed, 12, "every tick completes");
   const recorded = store.db.prepare(
-    "SELECT record_id AS recordId, code FROM integrity_failures WHERE step='messages_backfill'"
-  ).all().map(row => ({ ...row }));
-  assert.deepEqual(recorded, [{ recordId: "aaa", code: "messages_backfill_failed" }],
-    "the failure is durable, keyed by room");
-  // The standing block stays visible in the result of the tick that runs
-  // messages_backfill (the step cursor cycles back to it).
-  let withBlocked = null;
-  for (let i = 0; i < 12 && !withBlocked; i += 1) {
-    const result = await store.runDeferredIntegrityBatch({});
-    if (result.blocked) withBlocked = result;
-  }
-  assert.deepEqual(withBlocked?.blocked, [{
-    roomId: "aaa", sequence: poisonSeq, eventId: "ev-standin", error: "Invalid messageId", fresh: false
-  }]);
+    "SELECT record_id AS recordId FROM integrity_failures WHERE step='messages_backfill' AND record_id<>''"
+  ).all();
+  assert.deepEqual(recorded, [], "a quarantined event is not a per-room integrity failure");
+  const row = store.db.prepare("SELECT skipped, reason, component FROM messages_backfill_blocks WHERE room_id='aaa'").get();
+  assert.equal(row.skipped, 1);
+  assert.equal(row.reason, "reducer_rejected");
+  assert.equal(row.component, "messages");
 });
 
 test("a head sequence the log no longer reaches parks the room with the stopped-at reason", t => {

@@ -13,6 +13,7 @@ import { backupObjectKey, verifiedRecentBackup } from "../cloudflare/room-backup
 import { EVENT_TYPES as T } from "../src/events.js";
 import { RELIEF_REASON, relieveProjections } from "../server/store-relief.mjs";
 import { jobByName } from "../server/jobs.mjs";
+import { compactSummary } from "../cloudflare/job-heartbeat.mjs";
 
 const KEEP = 100;
 const RECOVERY = Object.freeze({ key: "fixture-backup", target: "kv", ageDays: 0 });
@@ -101,8 +102,8 @@ test("the store-growth job still fails by name when relief cannot clear the brea
   const summary = await jobByName("store-growth").run(f.store, { recoveryPoint: () => RECOVERY });
   assert.equal(summary.errors, 1);
   assert.equal(summary.failureDetail?.code, "store_growth_limit");
-  assert.equal(summary.relief?.attempted, 1);
-  assert.equal(summary.relief?.relieved, 0);
+  assert.equal(summary.reliefAttempted, 1);
+  assert.equal(summary.reliefRelieved, 0);
 });
 
 // QA delta 17987: the automatic path archives only behind a verified recent
@@ -129,9 +130,15 @@ test("the store-growth job fails closed when no backup is found", async t => {
   const summary = await jobByName("store-growth").run(f.store, { recoveryPoint: () => null });
   assert.equal(summary.errors, 1);
   assert.equal(summary.failureDetail?.code, "store_growth_limit");
-  assert.equal(summary.relief?.backupMissing, 1);
-  assert.equal(summary.relief?.attempted, 0);
+  assert.equal(summary.reliefBackupMissing, 1);
+  assert.equal(summary.reliefAttempted, 0);
   assert.deepEqual(f.actions(), []);
+  // The relief outcome survives the heartbeat's flat-number filter, so
+  // /api/health/jobs shows why relief did or did not run.
+  const published = compactSummary(summary);
+  assert.equal(published.reliefBackupMissing, 1);
+  assert.equal(published.reliefAttempted, 0);
+  assert.equal(typeof published.maxProjectionBytes, "number");
 });
 
 test("verifiedRecentBackup accepts today or yesterday, and answers null otherwise", async () => {

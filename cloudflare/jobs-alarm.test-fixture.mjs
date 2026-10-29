@@ -7,6 +7,12 @@ import { runCronJobs } from "./job-heartbeat.mjs";
 export class JobsProbe extends ProjectRoom {
   constructor(ctx, env) {
     super(ctx, env);
+    this.eligibilityCount = 0;
+    const prepare = this.store.db.prepare.bind(this.store.db);
+    this.store.db.prepare = sql => {
+      if (sql.includes("SELECT 1 AS hit FROM pending_channel_updates LIMIT 1")) this.eligibilityCount++;
+      return prepare(sql);
+    };
     this.gmailRuns = 0;
     this.channelRuns = 0;
   }
@@ -30,6 +36,7 @@ export class JobsProbe extends ProjectRoom {
     if (this.drainFailureArmed) throw new Error("seeded webhook drain failure");
     return super.drainWebhookDeliveries();
   }
+  takeEligibilityCount() { const count = this.eligibilityCount; this.eligibilityCount = 0; return count; }
   jobRunCounts() {
     return { gmailRuns: this.gmailRuns, channelRuns: this.channelRuns };
   }
@@ -131,6 +138,7 @@ function room(env, request) {
 export default {
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname === "/probe/eligibility-count") return Response.json({ count: await room(env, request).takeEligibilityCount() });
     if (url.pathname === "/scheduled") {
       await worker.scheduled({ cron: "*/30 * * * *" }, env, ctx);
       const probe = env.ROOM.getByName("invite-only-pilot");

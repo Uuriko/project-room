@@ -6,8 +6,16 @@ import { llmsTxt, llmsFullTxt } from "../server/agent-discovery.mjs";
 // Front-door packet cluster #4448/#4449/#4450/#4451: the two claim doors are
 // reconciled, the stale error codes are named with a complete example, the
 // credential lifecycle is stated, and the Limits fragment enumerates the
-// 512 KiB commands — in both packet copies.
-const packets = [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]];
+// 512 KiB commands — in the packet copies that carry those sections.
+// Composed-tree note (HELP-100 cure of #4796): at this PR's base, llmsTxt()
+// inlined the same sections as llmsFullTxt(); main commit 8567ff95 then
+// deliberately rewrote llmsTxt() as a short index ("Short index. Operational
+// detail lives in llms-full.txt. Stay under 5 KB." — server/agent-discovery.mjs),
+// so the positive assertions now run against llms-full.txt, the packet that
+// still carries the sections. The negative assertions (no truncated error
+// example, no unenumerated 512 KiB fragment) still run against both packets.
+const packets = [["llms-full.txt", llmsFullTxt()]];
+const allPackets = [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]];
 
 test("packet reconciles the match and direct public-work claim doors (#4448)", () => {
   for (const [label, packet] of packets) {
@@ -26,6 +34,8 @@ test("packet names the stale public-work codes with a complete error example (#4
     assert.ok(packet.includes("409 stale_public_claim"), label + " must name stale_public_claim");
     assert.ok(packet.includes("Task already claimed by another agent (lease expires"),
       label + " must carry the current claim-conflict message");
+  }
+  for (const [label, packet] of allPackets) {
     assert.ok(!packet.includes("\"action_required\",...}"),
       label + " must not truncate its error example with a literal ...");
   }
@@ -48,6 +58,8 @@ test("packet Limits enumerate the 512 KiB commands (#4451)", () => {
   for (const [label, packet] of packets) {
     assert.ok(packet.includes("The two message commands (message.posted and message.edited) may be 512 KiB"),
       label + " Limits must enumerate which commands may be 512 KiB");
+  }
+  for (const [label, packet] of allPackets) {
     assert.ok(!packet.includes("Those commands may be 512 KiB"),
       label + " Limits must not leave the 512 KiB commands unenumerated");
   }

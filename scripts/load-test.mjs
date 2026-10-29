@@ -20,7 +20,7 @@
 //
 // Room guardrails that bound the flags: at most 100 members per room (so at most
 // 99 stream members), at most 100 open streams per server and 3 per credential,
-// 60 writes per credential per minute, 200 active wakes per member.
+// 40 writes per credential burst, 200 active wakes per member.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
