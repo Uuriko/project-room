@@ -9,6 +9,23 @@ export const REQUIRED = ['test', 'contract', 'lint', 'browser', 'cloudflare'];
 const SHA = /^[a-f0-9]{40}$/;
 const fail = message => { throw new Error(message); };
 
+// Keep remote text, headers, URLs and response bodies out of operator logs.
+// Preserve the failing read and machine-readable metadata even when Room returns
+// an HTML outage page and the SDK message is only "Room request failed".
+export async function roomRead(phase, operation) {
+  try { return await operation(); }
+  catch (cause) {
+    const detail = { phase };
+    if (Number.isInteger(cause?.status) && cause.status >= 100 && cause.status <= 599) detail.status = cause.status;
+    if (typeof cause?.code === 'string' && /^[a-z][a-z0-9_]{0,63}$/.test(cause.code)) detail.code = cause.code;
+    else if (cause?.name === 'TimeoutError') detail.code = 'timeout';
+    else if (cause?.name === 'AbortError') detail.code = 'aborted';
+    else if (cause instanceof TypeError) detail.code = 'transport_failed';
+    if (Number.isSafeInteger(cause?.retryAfterMs) && cause.retryAfterMs >= 0) detail.retryAfterMs = cause.retryAfterMs;
+    throw new Error(`Room read failed ${JSON.stringify(detail)}`, { cause });
+  }
+}
+
 export function protectionPlan(current) {
   if (!current || typeof current.strict !== 'boolean' || !Array.isArray(current.checks)) fail('Read complete existing required-check protection first');
   const checks = current.checks.map(({ context, app_id }) => ({ context, app_id: app_id ?? -1 }));
@@ -192,11 +209,11 @@ async function main() {
   const { RoomAgentClient } = await import('../client/room-agent.mjs');
   const room = new RoomAgentClient({ ...readAgentConnection(connection), roomId: 'muse-room', fetchImpl: (url, options) => fetch(url, { ...options, signal: AbortSignal.timeout(55000) }) });
   const inspect = async () => {
-    const access = await room.checkConnection();
-    const slot = await room.workClaimGet('MERGE-SLOT');
-    const pause = await room.workClaimGet('RELEASE-PAUSE');
+    const access = await roomRead('connection', () => room.checkConnection());
+    const slot = await roomRead('merge-slot', () => room.workClaimGet('MERGE-SLOT'));
+    const pause = await roomRead('release-pause', () => room.workClaimGet('RELEASE-PAUSE'));
     const grant = grantOf(slot, access.memberId, candidate);
-    const claims = await collisionClaims(grant, options => room.workClaims(options));
+    const claims = await collisionClaims(grant, options => roomRead(`collision-claims-${options.state}`, () => room.workClaims(options)));
     const fullProtection = gh(['api', `repos/${repo}/branches/main/protection`]);
     const protection = landingProtection(fullProtection);
     return { identity: access.memberId, slot, pause,
