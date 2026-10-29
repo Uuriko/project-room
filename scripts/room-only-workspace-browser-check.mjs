@@ -102,9 +102,20 @@ for (const target of ["commons", "unavailable-room"]) test(`Google return restor
   await page.evaluate(async room => { const { stashGoogleRoom } = await import("/src/google-room-return.js"); stashGoogleRoom(room); }, target);
   const reads = [];
   page.on("request", r => { const u = new URL(r.url()); if (u.pathname === "/api/session") reads.push(u.search); });
+  let accountBeforeApp = false;
+  const accountStarted = target === "commons"
+    ? page.waitForRequest(r => new URL(r.url()).pathname === "/api/account-session", { timeout: 2000 }).then(() => true, () => false)
+    : null;
+  if (target === "commons") await page.route(origin + "/src/app.js", async route => {
+    // Hold the heavy module until the independent account read begins. The
+    // fallback deadline prevents a serialized implementation hanging the test.
+    accountBeforeApp = await accountStarted;
+    await route.continue();
+  });
   await page.goto(origin + "/?room=wrong-fallback&google=signed-in");
   if (target === "commons") await page.locator("#main").waitFor({ state: "visible" });
   else await page.locator('[data-account-room="commons"]').waitFor();
+  if (target === "commons") assert.equal(accountBeforeApp, true, "account restore overlaps the blocked app download");
   assert.deepEqual(reads, [`?room=${target}`], "exactly one authorized room restore, no old-cookie probe or fallback-room read");
   assert.equal(new URL(page.url()).searchParams.has("google"), false);
   assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:google-room-return:v1")), null);
