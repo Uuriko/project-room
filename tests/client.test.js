@@ -265,12 +265,28 @@ test("a delayed logout response cannot end a replacement session", async () => {
   assert.equal(ended, 0);
   assert.equal(client.session.member.id, "other");
 });
+function assertUiHooks(html, app) {
+  const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(new Set(ids).size, ids.length, "static HTML IDs must be unique");
+  // Some controls are created on demand. Only an explicit literal assignment
+  // counts; comparisons and computed IDs do not establish a matching hook.
+  const assigned = [...app.matchAll(/\b[A-Za-z_$][\w$]*\.id\s*=\s*(["'])([a-z-]+)\1\s*;/g)].map(m => m[2]);
+  const declared = new Set([...ids, ...assigned]);
+  for (const match of app.matchAll(/\$\("#([a-z-]+)"\)/g)) assert.ok(declared.has(match[1]), `Missing UI hook ${match[1]}`);
+}
+
+test("UI hook validation requires a static declaration or literal programmatic assignment", () => {
+  assert.doesNotThrow(() => assertUiHooks('<main id="main"></main>', 'button.id = "composer-direct-message"; $("#composer-direct-message"); $("#main");'));
+  for (const declaration of ['', 'button.id === "missing";', 'button.id = name;', 'button.id = "missing" + suffix;']) {
+    assert.throws(() => assertUiHooks('', `${declaration} $("#missing");`), /Missing UI hook missing/);
+  }
+  assert.throws(() => assertUiHooks('<p id="same"></p><p id="same"></p>', ''), /static HTML IDs must be unique/);
+});
+
 test("connected UI hooks exist and demo controls are not exposed", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
-  assert.equal(new Set(ids).size, ids.length);
-  for (const match of app.matchAll(/\$\("#([a-z-]+)"\)/g)) assert.ok(ids.includes(match[1]), `Missing UI hook ${match[1]}`);
+  assertUiHooks(html, app);
   assert.doesNotMatch(app, /from "\.\/(seed|storage)\.js"/);
   assert.doesNotMatch(html, /actor-select|reset-button|4 here now|Simulate actor/);
   assert.match(html, /id="main"[^>]*hidden/);
