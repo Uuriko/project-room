@@ -8,7 +8,7 @@ const browserType = browserEngine === 'webkit' ? webkit : chromium;
 import { createAcceptanceFixture } from './acceptance-fixture.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
-import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed } from './room-chrome.mjs';
+import { clickChrome, openCatchUpPanel, openSettings, closeSettings, ensureSidebarClosed, openSearch } from './room-chrome.mjs';
 import { signInFixture } from './auth-signin.mjs';
 
 
@@ -27,8 +27,14 @@ function deferredResultResponse() {
   return { promise, resolve };
 }
 
-async function openHumanResult(page, workId) {
+async function openHumanResult(page, workId, title = workId) {
   const task = page.locator(`[data-work-record-id="${workId}"]`), details = task.locator('details.work-details');
+  if (!await task.isVisible()) {
+    await openSearch(page);
+    await page.locator('#message-search').fill(title);
+    await page.locator(`#search-list [data-open-work="${workId}"]`).click();
+    await task.waitFor({state:'visible'});
+  }
   if (!await details.evaluate(node => node.open)) await details.locator(':scope > summary').click();
   await task.locator('[data-action="complete"]').click();
   await page.locator('#human-share-result').waitFor({state:'visible'});
@@ -125,9 +131,7 @@ test('two humans share public assistant prompts, constraints, confirmed activity
   await owner.locator('#human-advanced').check(); assert.equal(await owner.locator('#human-advanced').isChecked(),true);
   await owner.locator('#human-advanced').uncheck();
   await owner.keyboard.press('Escape');
-  const resultTask = owner.locator('[data-work-record-id="human-result-task"]');
-  await resultTask.locator('details.work-details > summary').click();
-  await resultTask.locator('[data-action="complete"]').click();
+  await openHumanResult(owner,'human-result-task','Write a short result');
   const humanResultBody = 'A result written by a human, without protocol fields.';
   await owner.locator('#human-share-result textarea').fill(humanResultBody);
   // The task changes after opening the result editor. The real server rejects
