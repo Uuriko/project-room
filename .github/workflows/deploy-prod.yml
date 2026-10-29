@@ -424,9 +424,15 @@ jobs:
           SHORT="${SHA:0:7}"
           DATE="$(date -u +%Y-%m-%d)"
           TAG="runtime-${DATE}-${SHORT}"
+          verify_release() {
+            python3 scripts/verify-runtime-release.py --repository "$GITHUB_REPOSITORY" \
+              --tag "$TAG" --sha "$SHA" --expected "$RUNNER_TEMP/project-room-runtime" \
+              --receipt "$RUNNER_TEMP/runtime-publication-verification.json"
+          }
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            verify_release
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest
-            echo "Release ${TAG} already exists; marked latest."
+            echo "Release ${TAG} already exists; target and asset verified before marking latest."
             exit 0
           fi
           gh release create "$TAG" \
@@ -434,5 +440,14 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$SHA" \
             --title "$TAG" \
-            --latest \
+            --latest=false \
             --notes "Node agent runtime from deployed commit ${SHORT}. Node 24.19+."
+          verify_release
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest
+      - name: Retain runtime publication verification
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-publication-verification-${{ needs.gate.outputs.sha }}
+          path: ${{ runner.temp }}/runtime-publication-verification.json
+          if-no-files-found: ignore
