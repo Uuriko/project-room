@@ -14,6 +14,9 @@ import { RoomClientError } from './room-agent.mjs';
 export function isTransientWakeError(error) {
   if (error instanceof ConnectionError) return error.code === 'request_timeout';
   if (error instanceof RoomClientError) {
+    // HTTP authorization is authoritative even if an intermediary supplies a
+    // conflicting JSON code. A timeout label cannot revive rejected access.
+    if (error.status === 401 || error.status === 403) return false;
     if (error.code === 'request_timeout') return true;
     return error.status === 0 || error.status === 429 || (error.status >= 500 && error.status <= 599);
   }
