@@ -18,6 +18,7 @@
     "test:browser": "node scripts/browser-suites.mjs --run",
     "test:browser:ci": "node scripts/browser-ci.mjs",
     "check": "node scripts/check.mjs",
+    "perf:budget": "node scripts/perf-budget.mjs",
     "gate": "bash scripts/pre-push.sh",
     "lint": "node scripts/lint.mjs && node scripts/lint-design-tokens.mjs && node scripts/reachability.mjs --check && node scripts/i18n-harness.mjs --check && node scripts/build-ui-strings.mjs --check",
     "build:og-atlas": "node scripts/build-og-atlas.mjs",
