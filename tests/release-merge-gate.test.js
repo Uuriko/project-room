@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTEXT, REQUIRED, protectionPlan, landingProtection, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, guardedMerge, openAuthorizations } from '../scripts/release-merge-gate.mjs';
+import { CONTEXT, REQUIRED, protectionPlan, landingProtection, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, collisionClaims, guardedMerge, openAuthorizations } from '../scripts/release-merge-gate.mjs';
 const candidate = { repo: 'Uuriko/project-room', pr: 4102, head: 'a'.repeat(40), base: 'b'.repeat(40) };
 const grant = { kind: 'room.release-merge.v1', ...candidate, purpose: 'deploy-fix', directiveMessageId: 'owner-directive', problemKeys: ['release:landing'], workClaimId: 'source-work' };
 const protection = { enforceAdmins: true, strict: false, checks: [...REQUIRED.map(context => ({ context, app_id: 15368 })), { context: CONTEXT, app_id: -1 }] };
@@ -172,9 +172,10 @@ test('actual merge CLI performs two complete scans, journals the validated grant
   const bin = join(root, 'bin'), connection = join(root, 'connection');
   mkdirSync(bin); mkdirSync(connection, { mode: 0o700 });
   const requests = [];
+  let keys = grant.problemKeys;
   const server = createServer((req, res) => {
     requests.push(req.url); res.setHeader('content-type', 'application/json');
-    const v = view();
+    const v = view(); v.slot.history[0].note = JSON.stringify({ ...grant, problemKeys: keys });
     if (req.url === '/api/session') return res.end(JSON.stringify({ authMode: 'room', roomId: 'muse-room',
       member: { id: 'coordinator', kind: 'agent', active: true, revision: 0, permissions: [] },
       expiresAt: Date.now() + 3600000, account: null, csrf: null, sessionBinding: null, sessionRevision: null }));
@@ -206,19 +207,20 @@ else process.exit(9);
 console.log(JSON.stringify(out));
 `, { mode: 0o700 });
   const run = promisify(execFile), script = new URL('../scripts/release-merge-gate.mjs', import.meta.url).pathname;
-  for (const statusRequired of [true, false]) for (const changed of [false, true]) {
+  for (const keyMode of ['present', 'absent', 'empty']) for (const statusRequired of [true, false]) for (const changed of [false, true]) {
+    keys = keyMode === 'present' ? grant.problemKeys : keyMode === 'empty' ? [] : undefined;
     writeFileSync(fixture, JSON.stringify({ info, base: candidate.base, protection: { enforce_admins: { enabled: true }, required_status_checks: statusRequired ? { strict: false, checks: [{ context: CONTEXT }] } : null } }));
     requests.length = 0;
-    const calls = join(root, `calls-${statusRequired}-${changed}.jsonl`), journal = join(root, `journal-${statusRequired}-${changed}.json`);
+    const calls = join(root, `calls-${keyMode}-${statusRequired}-${changed}.jsonl`), journal = join(root, `journal-${keyMode}-${statusRequired}-${changed}.json`);
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FIXTURE_DATA: fixture, FIXTURE_CALLS: calls, FIXTURE_JOURNAL: journal, CHANGE_HEAD: changed ? '1' : '0' };
     const command = run(process.execPath, [script, 'merge', '--pr', String(candidate.pr), '--head', candidate.head, '--base', candidate.base, '--state', journal, '--connection', connection, '--apply'], { env });
     if (changed) await assert.rejects(command, /head\/base/); else await command;
     const observed = readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(observed.filter(x => x.a.includes('graphql')).length, statusRequired ? 2 : 0);
     // One explicit identity check plus the SDK's fresh preflight on each
-    // of five selected reads per inspection remains intact.
-    assert.equal(requests.filter(url => url === '/api/session').length, 12);
-    assert.equal(requests.filter(url => url.includes('/work-claims?')).length, 6);
+    // of each remaining selected read per inspection remains intact.
+    assert.equal(requests.filter(url => url === '/api/session').length, keyMode === 'present' ? 12 : 6);
+    assert.equal(requests.filter(url => url.includes('/work-claims?')).length, keyMode === 'present' ? 6 : 0);
     assert.deepEqual(observed.filter(x => x.input?.context === CONTEXT).map(x => x.input.state), statusRequired ? ['success', 'failure'] : []);
     assert.equal(observed.filter(x => x.a.includes('PUT')).length, changed ? 0 : 1);
     const saved = JSON.parse(readFileSync(journal));
@@ -253,4 +255,15 @@ test('status-free merge still refuses required check, pause, ownership and prote
     }, status: async x => writes.push(x), merge: async x => writes.push(x) }));
     assert.deepEqual(writes, []);
   }
+});
+
+test('collision scans validate keys and retain conflicts and incomplete-page refusals', async () => {
+  let reads = 0;
+  const read = async () => { reads++; return { claims: [{ id: 'peer', owner: 'peer', state: 'claimed', problemKey: 'release:landing' }], hasMore: false }; };
+  for (const problemKeys of [null, 'key', [''], [123]]) await assert.rejects(collisionClaims({ ...grant, problemKeys }, read), /problemKeys/);
+  assert.equal(reads, 0);
+  const claims = await collisionClaims(grant, read);
+  assert.equal(reads, 3);
+  assert.throws(() => problemKeyCheck(grant, claims), /held by peer/);
+  await assert.rejects(collisionClaims(grant, async () => ({ claims: [], hasMore: true })), /Incomplete/);
 });
