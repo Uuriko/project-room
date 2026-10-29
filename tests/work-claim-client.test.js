@@ -490,3 +490,27 @@ test('malformed first or middle pages cannot be hidden by a later terminal page'
     assert.equal(result.claims.some(claim => claim.id === 'last'), false);
   }
 });
+
+test('discovery release instructions work with a truncated board read and reject stale rounds', async t => {
+  const { llmsFullTxt } = await import('../server/agent-discovery.mjs');
+  const releaseInstruction = llmsFullTxt().split('\n').find(line => line.includes('/work-claims/{claimId}/release'));
+  assert.match(releaseInstruction, /history\.length \+ \(historyOmitted \?\? 0\)/);
+  const { owner, store } = await fixture(t);
+  await owner.workClaimCreate({ id: 'listed-release' });
+  let item = await owner.claimWorkItem('listed-release');
+  for (let i = 0; i < 4; i++) item = updateWork(item, 'owner', { note: `Progress ${i}` });
+  store.workClaims.set('commons', item);
+  const listed = (await owner.workClaims()).claims.find(claim => claim.id === item.id);
+  assert.equal(listed.history.length, 3);
+  assert.ok(listed.historyOmitted > 0);
+  const basis = { expectedClaimedAt: listed.claimedAt,
+    expectedHistoryLength: listed.history.length + (listed.historyOmitted ?? 0) };
+  await assert.rejects(owner.releaseWorkItem(item.id, { ...basis, expectedHistoryLength: listed.history.length }),
+    error => error.status === 409 && error.code === 'work_claim_conflict');
+  assert.equal((await owner.workClaimGet(item.id)).owner, 'owner');
+  assert.equal((await owner.releaseWorkItem(item.id, basis)).state, 'unclaimed');
+  await owner.claimWorkItem(item.id);
+  await assert.rejects(owner.releaseWorkItem(item.id, basis),
+    error => error.status === 409 && error.code === 'work_claim_conflict');
+  assert.equal((await owner.workClaimGet(item.id)).state, 'claimed');
+});
