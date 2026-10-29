@@ -8,6 +8,7 @@ import { DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { BOND_REFUSAL_CODES } from "./friend-bond.js";
 import { humanErrorMessage } from "./error-copy.js";
 import { requestFailureMessage } from "./share-links.js";
+import { isBootSummary, deriveBootSummary, mergeWorkDetail } from "./boot-summary.js";
 
 // C2: the read-only "what this agent can access" preview must describe exactly the
 // selected work the browser asked about and repeat the server's own omission list;
@@ -115,7 +116,7 @@ const CONNECTED_STATUS = "Connected to room service · no peer read or processin
 const FRESH_OPEN_MS = 2000;
 
 export class RoomClient {
-  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
+  constructor({ fetcher = globalThis.fetch.bind(globalThis), events = globalThis.EventSource, accountClient = null, auditView = "full", lazyHistory = false, summaryBoot = false, onSnapshot = () => {}, onStatus = () => {}, onAccessEnded = () => {}, onTyping = () => {}, onConsentChange = () => {}, onOptimistic = null, onSendSettled = null } = {}) {
     if (!["full", "activity"].includes(auditView)) throw new RangeError(uiText("record.invalidView"));
     this.auditView = auditView;
     Object.assign(this, { fetcher, events, accountClient, onSnapshot, onStatus, onAccessEnded, onTyping, onConsentChange, onOptimistic, onSendSettled });
@@ -134,6 +135,14 @@ export class RoomClient {
     this.windowOmitted = null;
     this.backfilling = false;
     this.lazyHistory = Boolean(lazyHistory);
+    this.summaryBoot = Boolean(summaryBoot);
+    // Summary-first boot: while summaryHeld, the delivered snapshot is the
+    // boot summary (see boot-summary.js) and detailOwed names the views
+    // whose detail loadViewDetail() still has to fetch.
+    this.summaryHeld = false;
+    this.summaryUnsupported = false;
+    this.detailOwed = new Set();
+    this.detailFlight = null;
     this.historyWanted = false;
     this.partialReads = 0;
     this.deltaStats = { applied: 0, fallback: 0, reasons: {} };
@@ -372,7 +381,13 @@ export class RoomClient {
           flight.again = false; flight.revisit = false; flight.fullNow = false; flight.sequence = 0;
           const auditView = this.auditView;
           const attempt = this.readAttempts = (this.readAttempts ?? 0) + 1;
-          const read = await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView, fresh: true });
+          // Summary-first boot: the first read of a summaryBoot client asks
+          // for the summary contract instead of the windowed snapshot;
+          // bootSummaryRead() falls back to the windowed read (staged mode)
+          // when the server does not serve the contract yet.
+          const bootSummary = Boolean(this.summaryBoot && !full && !holding && this.sequence === 0);
+          const read = bootSummary ? await this.bootSummaryRead(auditView)
+            : await this.request(this.path(full ? "" : "?messages=recent"), { offerContext: true, auditView, fresh: true });
           if (generation !== this.generation || !this.session) return;
           if (!this.ownsResponse(read)) { this.endAccess(); return; }
           this.lastReadAt = Date.now(); this.provedAttempt = attempt;
@@ -424,7 +439,11 @@ export class RoomClient {
             this.held = { generation, session, messages: Array.isArray(snapshot.state?.messages) ? snapshot.state.messages.slice() : null,
               fullSequence: complete ? snapshot.sequence : (holding?.fullSequence ?? 0),
               partial, owesFull: stopFill ? false : (!complete && (partial || Boolean(holding?.owesFull))) };
-            void this.rememberBoot(snapshot);
+            // A boot summary is not a boot cache: paintBoot must never
+            // warm-paint a state whose detail views are still owed.
+            if (isBootSummary(snapshot)) { this.summaryHeld = true; this.detailOwed = new Set(snapshot.detailOwed ?? ["work"]); }
+            else if (this.summaryHeld) { this.summaryHeld = false; this.detailOwed = new Set(); }
+            if (!isBootSummary(snapshot)) void this.rememberBoot(snapshot);
             this.live = { generation, session, snapshot };
             this.rawTail = Array.isArray(snapshot.state?.eventLog) ? snapshot.state.eventLog.slice(-100) : [];
             this.onSnapshot(snapshot, this.session);
@@ -630,6 +649,9 @@ export class RoomClient {
     if (!event || !DELTA_EVENT_TYPES.has(event.type)) return false;
     const decline = reason => { this.deltaStats.fallback++; const reasons = this.deltaStats.reasons; reasons[reason] = (reasons[reason] ?? 0) + 1; return false; };
     if (this.flight) return decline("flight");
+    // A summary-held state carries no work detail; a delta would advance
+    // a state the board reads as complete. Re-read instead (counted).
+    if (this.summaryHeld) return decline("summary");
     const held = this.heldMessages();
     if (!held || held.partial || held.owesFull || held.fullSequence !== this.sequence) return decline("held");
     const live = this.live;
@@ -699,6 +721,60 @@ export class RoomClient {
     this.live = { generation, session, snapshot };
     this.onSnapshot(snapshot, session);
     return true;
+  }
+  // Boot summary first read. Asks for the summary contract
+  // (GET ?view=summary, RR-D2's scoped projection); a server that does
+  // not serve it yet (422 invalid_snapshot_view, or 404) gets the staged
+  // fallback: the ordinary windowed read, slimmed locally by
+  // deriveBootSummary(). The negative answer is remembered for the
+  // session, so a later boot of this client does not re-probe. Auth
+  // failures and other errors propagate like any boot read.
+  async bootSummaryRead(auditView) {
+    if (!this.summaryUnsupported) {
+      try {
+        const read = await this.request(this.path("?view=summary"), { offerContext: true, auditView, fresh: true });
+        if (isBootSummary(read)) return read;
+        this.summaryUnsupported = true;
+      } catch (error) {
+        if (![404, 422].includes(error?.status)) throw error;
+        this.summaryUnsupported = true;
+      }
+    }
+    const read = await this.request(this.path("?messages=recent"), { offerContext: true, auditView, fresh: true });
+    return deriveBootSummary(read);
+  }
+  // Lazy detail per view: fetch one owed view's scoped detail, merge it
+  // into the held snapshot, and hand the completed snapshot to the app
+  // again. "work" reads the existing ?view=work scoped projection.
+  // Returns false when nothing is owed for the view. Single-flight; a
+  // failed read leaves the detail owed so the next ask retries, except
+  // an auth failure, which ends access like other snapshot-path reads.
+  async loadViewDetail(view) {
+    if (view !== "work" || !this.detailOwed.has("work") || !this.session) return false;
+    if (this.detailFlight) return this.detailFlight;
+    const generation = this.generation, session = this.session;
+    const run = (async () => {
+      try {
+        const detail = await this.request(this.path("?view=work"), { fresh: true });
+        if (generation !== this.generation || this.session !== session) return false;
+        if (!this.ownsResponse(detail, session)) { this.endAccess(); return false; }
+        const live = this.live;
+        if (!live || live.generation !== generation || live.session !== session || !isBootSummary(live.snapshot)) return false;
+        const snapshot = mergeWorkDetail(live.snapshot, detail);
+        this.detailOwed = new Set(snapshot.detailOwed ?? []);
+        if (!this.detailOwed.size) this.summaryHeld = false;
+        this.live = { generation, session, snapshot };
+        this.onSnapshot(snapshot, session);
+        return true;
+      } catch (error) {
+        if (generation !== this.generation || this.session !== session) return false;
+        if ([401, 403].includes(error?.status) || error?.code === "session_binding_changed") this.handleFailure(error);
+        return false;
+      }
+    })();
+    this.detailFlight = run;
+    void run.finally(() => { if (this.detailFlight === run) this.detailFlight = null; }).catch(() => {});
+    return run;
   }
   async bootstrap() {
     return this.request(this.path("/bootstrap"), { fresh: true });

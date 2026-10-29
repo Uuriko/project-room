@@ -255,7 +255,7 @@ const RECEIPT_REF_KEY = "pr-receipt-ref";
 try {
   const refUrl = new URL(location.href);
   const ref = refUrl.searchParams.get("ref");
-  if (ref && ref.length <= 80 && !/[\u0000-\u001f\u007f]/.test(ref)) {
+  if (ref && ref.length <= 80 && !/[^@-^_\u007f]/.test(ref)) {
     window.sessionStorage.setItem(RECEIPT_REF_KEY, ref);
     refUrl.searchParams.delete("ref");
     history.replaceState(history.state, "", refUrl.pathname + refUrl.search + refUrl.hash);
@@ -428,6 +428,9 @@ const client = new RoomClient({
   // Older history loads on a reader gesture, not 250 ms after open: on a busy
   // room the background fill was most of a phone's bytes (~3 MB per open).
   lazyHistory: true,
+  // Summary-first boot (RR-D3): the first paint renders from the boot
+  // summary; board detail loads when the board opens (see openBoard).
+  summaryBoot: true,
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
   onOptimistic(command) {
@@ -7973,6 +7976,10 @@ const ready = (async () => {
       dialog.showModal();
     }
     $("#board-panel").open = true;
+    // Lazy detail per view: the boot summary owes the board its work
+    // items; loading them re-delivers the snapshot, and render() syncs
+    // the board again with detail present.
+    void client.loadViewDetail("work");
     board.sync();
   };
   $("#tasks-board-open").addEventListener("click", openBoard);
