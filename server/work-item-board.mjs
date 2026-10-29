@@ -27,6 +27,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
 import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
+import { ownerHeldClaimCopy } from "../src/agent-error.mjs";
 
 const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
 const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -1102,7 +1103,18 @@ export function syncWorkItemClaim(store, roomId, actorId, incoming, state) {
   // itself is never rewritten here.
   const claimTaking = incoming.type === "claim.acquired" || incoming.type === "claim.renewed";
   if (claimTaking && current && SYNC_ACTIVE.has(current.state) && current.owner && current.owner !== actorId) {
-    refuse(409, "work_claim_conflict", `Work "${claimId}" is held by ${current.owner} — ask them to reassign or release it`);
+    // DC1-A1: when the claim-taking actor is the room owner and the holder
+    // is a current member, serve the owner-release copy instead of the
+    // "reassign" prescription (same builder as the work-claim routes).
+    let boardRefusal = `Work "${claimId}" is held by ${current.owner} — ask them to reassign or release it`;
+    try {
+      const authority = typeof store?.roomAuthority === "function" ? store.roomAuthority(roomId) : null;
+      const holder = authority?.members?.[current.owner] ?? null;
+      if (authority?.ownerId && actorId === authority.ownerId && holder && holder.active !== false) {
+        boardRefusal = ownerHeldClaimCopy({ holder: current.owner, leaseExpiresAt: current.leaseExpiresAt ?? null, roomId, claimId });
+      }
+    } catch { /* authority unavailable: keep the generic refusal */ }
+    refuse(409, "work_claim_conflict", boardRefusal);
   }
 
   const events = roomEvents(store, roomId);

@@ -570,6 +570,27 @@ function publicHint(value, fallback) {
   return typeof value === "string" && value.trim() && value.length < 160 ? value : fallback;
 }
 
+// DC1-A1 (REGISTER-FIX-A lane F2): owner-release copy for a claim held by a
+// current member when the caller is the room owner (the silent-holder
+// configuration). The work-claim routes and the board sync serve this exact
+// text as the refusal message in that configuration — they hold the caller,
+// the holder, the lease and the ids; this layer does not — and agentErrorAx
+// recognises the shape below and mirrors it into hint/next. There is no
+// reassign action on the agent surface: the owner's own release is the
+// first prescription, and the single-item read is named because the board
+// list shows only part of a claim's history, so a list-shaped release
+// round fails with a false stale-round 409.
+export function ownerHeldClaimCopy({ holder, leaseExpiresAt, roomId, claimId } = {}) {
+  const claimPath = `/api/rooms/${roomId}/work-claims/${claimId}`;
+  return leaseExpiresAt
+    ? `This work is held by ${holder} until ${leaseExpiresAt}. There is no reassign action. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it, or wait until ${leaseExpiresAt} and claim it then.`
+    : `This work is held by ${holder}. There is no reassign action. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it.`;
+}
+export function parseOwnerHeldClaimCopy(message) {
+  const match = /^This work is held by (.+?)(?: until (.+?))?\. There is no reassign action\. You can release it yourself now:/.exec(String(message || ""));
+  return match ? { holder: match[1], leaseExpiresAt: match[2] ?? null } : null;
+}
+
 export function agentErrorAx({ httpStatus = 0, code = "request_failed", message = "", roomId, workItemId, commandType } = {}) {
   const reasonCode = publicCode(code);
   const listPath = roomId ? `/api/rooms/${roomId}?view=work` : "/api/session";
@@ -702,6 +723,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   // invite". The message already names the holding owner; the next step
   // names the real recovery (reassign/release), not an invite.
   if (reasonCode === "work_not_owner") {
+    const ownerHeld = parseOwnerHeldClaimCopy(message);
+    if (ownerHeld && roomId && workItemId) {
+      const claimPath = `/api/rooms/${roomId}/work-claims/${workItemId}`;
+      return {
+        status: "action_required", reason: "work_not_owner",
+        hint: ownerHeldClaimCopy({ holder: ownerHeld.holder, leaseExpiresAt: ownerHeld.leaseExpiresAt, roomId, claimId: workItemId }),
+        next: [path(claimPath),
+          command(`Release it yourself: GET ${claimPath} to read the single item (not the board list), then POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read.`),
+          command(ownerHeld.leaseExpiresAt
+            ? `Or message ${ownerHeld.holder} and ask them to release it, or wait until ${ownerHeld.leaseExpiresAt} and claim it then.`
+            : `Or message ${ownerHeld.holder} and ask them to release it.`)]
+      };
+    }
     const owner = /^Work "[^"]+" is owned by (.+?) —/.exec(String(message || ""))?.[1];
     const named = owner && owner !== "nobody" ? owner : null;
     const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;
@@ -724,6 +758,19 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (reasonCode === "work_claim_conflict") {
     const text = String(message || "");
     const self = /you already hold|already claimed by you/i.test(text);
+    const ownerHeld = self ? null : parseOwnerHeldClaimCopy(text);
+    if (ownerHeld && roomId && workItemId) {
+      const claimPath = `/api/rooms/${roomId}/work-claims/${workItemId}`;
+      return {
+        status: "action_required", reason: "work_claim_conflict",
+        hint: ownerHeldClaimCopy({ holder: ownerHeld.holder, leaseExpiresAt: ownerHeld.leaseExpiresAt, roomId, claimId: workItemId }),
+        next: [path(claimPath), readWork,
+          command(`Release it yourself: GET ${claimPath} to read the single item (not the board list), then POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read.`),
+          command(ownerHeld.leaseExpiresAt
+            ? `Or message ${ownerHeld.holder} and ask them to release it, or wait until ${ownerHeld.leaseExpiresAt} and claim it then.`
+            : `Or message ${ownerHeld.holder} and ask them to release it.`)]
+      };
+    }
     const holder = /held by (.+?) —/.exec(text)?.[1];
     const named = holder && holder !== "someone else" ? holder : null;
     const claimPath = roomId && workItemId ? `/api/rooms/${roomId}/work-claims/${workItemId}` : listPath;

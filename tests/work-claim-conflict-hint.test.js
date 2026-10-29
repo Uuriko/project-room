@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { claimWork, ClaimError } from "../server/work-claims.mjs";
 import { createWorkClaimRegistry, handleWorkClaims } from "../server/work-claim-routes.mjs";
-import { agentErrorBody } from "../src/agent-error.mjs";
+import { agentErrorBody, ownerHeldClaimCopy } from "../src/agent-error.mjs";
 
 const T0 = Date.parse("2026-10-08T00:00:00.000Z");
 
@@ -85,5 +85,76 @@ test("H4: a done item is reported as already done, not as held", () => {
     assert.ok(err instanceof ClaimError && err.code === "invalid_claim_input");
     assert.match(err.message, /already done/i);
     assert.doesNotMatch(err.message, /held by|reassign or release/i);
+  }
+});
+
+
+// ---------------------------------------------------------------------------
+// DC1-A1 (REGISTER-FIX-A F2): in the silent-holder configuration (caller is
+// the room owner, holder is a current member) both refusal sites serve the
+// owner-release copy: no "reassign" prescription, the owner's own release
+// first, the single-item read named, holder-ask and lease-wait after it.
+// ---------------------------------------------------------------------------
+const runOwnerRoute = ({ route, id, body = {}, memberId, registry }) => handleWorkClaims({
+  req: { method: "POST", body }, res: {}, url: {}, roomId: "room1",
+  store: { roomAuthority: () => ({ ownerId: "owner1", members: {
+    owner1: { id: "owner1", kind: "agent", active: true, permissions: [] },
+    quill: { id: "quill", kind: "agent", active: true, permissions: ["verify"] },
+    grok: { id: "grok", kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+  } }) },
+  auth: fakeAuth(memberId), workClaimRoute: route, workClaimId: id,
+  helpers: fakeHelpers(), registry,
+});
+
+test("DC1-A1: room owner claiming a member-held item gets the owner-release copy (409)", async () => {
+  const registry = createWorkClaimRegistry();
+  await runOwnerRoute({ route: "create", body: { id: "a1" }, registry, memberId: "quill" });
+  await runOwnerRoute({ route: "claim", id: "a1", registry, memberId: "quill" });
+  const held = registry.get("room1", "a1");
+  const error = await runOwnerRoute({ route: "claim", id: "a1", registry, memberId: "owner1" }).catch(e => e);
+  assert.equal(error.status, 409);
+  assert.equal(error.code, "work_claim_conflict");
+  assert.match(error.message, /held by quill until /);
+  assert.ok(error.message.includes(held.leaseExpiresAt));
+  assert.match(error.message, /There is no reassign action/);
+  assert.doesNotMatch(error.message, /ask them to reassign/i);
+  assert.match(error.message, /GET \/api\/rooms\/room1\/work-claims\/a1 \(use this read, not the board list/);
+  assert.match(error.message, /POST \/api\/rooms\/room1\/work-claims\/a1\/release with expectedClaimedAt and expectedHistoryLength/);
+  assert.ok(error.message.indexOf("You can release it yourself now") < error.message.indexOf("Or message the holder"));
+});
+
+test("DC1-A1: room owner updating a member-held item gets the owner-release copy (403 work_not_owner)", async () => {
+  const registry = createWorkClaimRegistry();
+  await runOwnerRoute({ route: "create", body: { id: "a1u" }, registry, memberId: "quill" });
+  await runOwnerRoute({ route: "claim", id: "a1u", registry, memberId: "quill" });
+  const error = await runOwnerRoute({ route: "update", id: "a1u", body: { state: "blocked" }, registry, memberId: "owner1" }).catch(e => e);
+  assert.equal(error.status, 403);
+  assert.equal(error.code, "work_not_owner");
+  assert.match(error.message, /held by quill until /);
+  assert.match(error.message, /There is no reassign action/);
+  assert.match(error.message, /POST \/api\/rooms\/room1\/work-claims\/a1u\/release/);
+});
+
+test("DC1-A1: a non-owner claimant keeps the previous copy (configuration scope)", async () => {
+  const registry = createWorkClaimRegistry();
+  await runOwnerRoute({ route: "create", body: { id: "a1n" }, registry, memberId: "quill" });
+  await runOwnerRoute({ route: "claim", id: "a1n", registry, memberId: "quill" });
+  const error = await runOwnerRoute({ route: "claim", id: "a1n", registry, memberId: "grok" }).catch(e => e);
+  assert.equal(error.status, 409);
+  assert.match(error.message, /held by quill \u2014 ask them to reassign or release it/);
+});
+
+test("DC1-A1: agentErrorBody mirrors the owner-release copy into hint + next for both codes", () => {
+  const message = ownerHeldClaimCopy({ holder: "quill", leaseExpiresAt: "2026-10-09T00:00:00.000Z", roomId: "room1", claimId: "a1" });
+  for (const [code, httpStatus] of [["work_claim_conflict", 409], ["work_not_owner", 403]]) {
+    const body = agentErrorBody({ httpStatus, code, message, roomId: "room1", workItemId: "a1" });
+    assert.equal(body.error.code, code);
+    assert.doesNotMatch(body.hint, /ask (them|quill) to reassign/i);
+    assert.match(body.hint, /held by quill until 2026-10-09T00:00:00\.000Z/);
+    assert.match(body.hint, /POST \/api\/rooms\/room1\/work-claims\/a1\/release/);
+    assert.ok(body.next.some(step => step.path === "/api/rooms/room1/work-claims/a1"));
+    const commands = body.next.filter(step => step.command).map(step => step.command).join("\n");
+    assert.match(commands, /Release it yourself: GET \/api\/rooms\/room1\/work-claims\/a1/);
+    assert.ok(commands.indexOf("Release it yourself") < commands.indexOf("Or message quill"));
   }
 });
