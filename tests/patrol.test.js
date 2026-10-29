@@ -20,7 +20,7 @@ import { patrolPending, patrolStatus } from "../server/patrol.mjs";
 import { operatorStatus } from "../server/operator-status.mjs";
 import { jobByName } from "../server/jobs.mjs";
 import { applyOutcomes, jobHealthView, runCronJobs } from "../cloudflare/job-heartbeat.mjs";
-import { claimWork, createWork, updateWork } from "../server/work-claims.mjs";
+import { claimWork, createWork, updateWork, closeWhenLive } from "../server/work-claims.mjs";
 import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
 import { event as makeEvent, EVENT_TYPES } from "../src/events.js";
 
@@ -747,5 +747,43 @@ test("the collapse exemption is verb-scoped: blocked -> done still files", () =>
     store.patrolTick();
     const kinds = store.patrolFindings().map(f => `${f.invariant}/${f.kind}`);
     assert.ok(kinds.includes("claim_legality/illegal_transition"), kinds.join(","));
+  } finally { store.close(); }
+});
+
+// Land and deploy claims auto-close when the live revision matches
+// (closeWhenLive, server/work-claims.mjs; driven by claim-pr-sync and the
+// work-claim route): ANY non-terminal state moves to done under the
+// state_changed action. Patrol used to file those as illegal_transition.
+const REV = "0123456789abcdef0123456789abcdef01234567";
+function landClaim(store, id, kind = "land") {
+  const now = Date.now();
+  let item = createWork({ id, title: `Task ${id}`, kind, revision: REV }, { now, agentId: "owner" });
+  driveClaim(store, item, "created", now);
+  item = claimWork(item, "owner", { now: now + 1 });
+  driveClaim(store, item, "claimed", now + 1);
+  return { item, now };
+}
+for (const kind of ["land", "deploy"]) {
+  test(`a ${kind} claim closed by closeWhenLive from claimed files nothing`, () => {
+    const store = openStore();
+    try {
+      const { item, now } = landClaim(store, `task-live-${kind}`, kind);
+      const closed = closeWhenLive(item, REV, now + 5);
+      assert.equal(closed?.state, "done");
+      driveClaim(store, closed, "state_changed", now + 5);
+      assert.equal(store.patrolTick().fresh, 0);
+      assert.deepEqual(store.patrolFindings(), []);
+    } finally { store.close(); }
+  });
+}
+test("the live-close exemption is kind-scoped: an ordinary claimed -> done still files", () => {
+  const store = openStore();
+  try {
+    const { item, now } = claimedOnly(store, "task-plain-live");
+    const forged = { ...item, state: "done", deliveryMode: "production",
+      history: [...(item.history ?? []), { at: new Date(now + 5).toISOString(), agentId: "owner", action: "state:done", note: `live revision matches ${REV}` }] };
+    driveClaim(store, forged, "state_changed", now + 5);
+    store.patrolTick();
+    assert.ok(store.patrolFindings().some(f => f.kind === "illegal_transition"));
   } finally { store.close(); }
 });
