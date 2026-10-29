@@ -1,6 +1,8 @@
 # Release merge gate
 
-Heavy pull-request CI runs when a pull request is about to land. A push by itself does not start those jobs.
+The `ready-to-land` label requests optional hosted qualification. It is not permission to merge or deploy, and an independent review is advisory. A push by itself does not start the label-gated jobs. Choose useful validation for the change as described in [AGENTS.md](../AGENTS.md); reuse unchanged exact-source evidence where it remains applicable.
+
+Actual GitHub protection, the current release lease and deployment workflow checks are separate enforcement. This document describes triggers; it does not waive those checks or require production to be healthy before an unrelated change can merge.
 
 ## ready-to-land
 

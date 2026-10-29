@@ -10,6 +10,12 @@ Anyone whose GitHub account has **write** (or higher) on `Uuriko/project-room`. 
 
 Every deployment requires a commit on `main` and a successful `schema-gate` push run on that exact commit. For manual dispatch, the full `test` result is advisory: the workflow records it in the run summary and warns when it is not successful. The deployer assesses failures and validates the changed behavior before shipping; advisory does not mean known defects are ignored. Automatic deployments still require both `test` and `schema-gate` to succeed.
 
+Merging and deploying are separate decisions. Production need not be healthy
+before an unrelated, qualified change can merge. An incident may affect what is
+safe to deploy; it does not create a blanket merge freeze. Current GitHub lease
+requirements and workflow schema checks still apply as implemented; this guidance
+does not remove them.
+
 ## Deploy
 
 1. Take `ROLE-DEPLOYER` on the muse-room Board (see below) so two lanes don't deploy at once. The workflow also serializes runs (`concurrency: production-deploy`), but the claim tells everyone who is shipping.
@@ -26,9 +32,12 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
    - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema, with an identical recorded writer-fence Git blob. Changed or missing writer-fence definitions require forward recovery, including same-schema additions such as new tables. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
    - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
 4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
-5. Run the shelf checks before calling the deploy done — a green deploy onto an empty shelf ships silently, so both checks gate the receipt:
-   - **Board stocked:** `curl -sS 'https://room.trydemigod.com/api/public-work/tasks?limit=1'` → `claimableCount` must be **> 0**. A drained board (every task submitted, nothing reseeded) fails the receipt until the board is reseeded.
-   - **Gallery fresh:** `curl -sS 'https://room.trydemigod.com/api/public/receipts?limit=1'` → the newest receipt's `at` must be **less than 7 days old**. A frozen gallery fails the receipt the same way; check whether any room has the *Publish receipts from this room* toggle on with work settled since.
+
+Product-health observations are optional follow-up checks, not deployment-receipt
+gates. The public work board may legitimately be empty, and a gallery may have no
+recent receipts. Inspect `GET /api/public-work/tasks?limit=1` or
+`GET /api/public/receipts?limit=1` when useful, report their actual state, and never
+seed fake work or receipts to make a release look healthy.
 
 ### Temporary SQL cost diagnosis
 
