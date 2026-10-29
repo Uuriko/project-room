@@ -14,6 +14,33 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
+### Recovery release checkpoint — 2026-10-29, 19:32 UTC
+
+[PR #5300](https://github.com/Uuriko/project-room/pull/5300) landed
+`b2f7dadf49979d5ddbc44288ac2af4c84b3660d0`, composing Google session recovery,
+account restoration during app download, bounded room return and join-page
+focus/accessibility fixes. It retains the merged cancellation guard and handbook
+navigation/procedures. Final affected browser/manifest checks passed (26), as did
+repository contracts. Independent final Google startup delta checks passed (25).
+These are separate focused observations, not a full-suite or real-Google claim.
+
+[Deployment 40939808567](https://github.com/Uuriko/project-room/actions/runs/40939808567)
+uploaded both Workers after its exact-source schema gate. Its smoke failed on a
+one-second Durable Object readiness timeout; recovery held the candidate rather
+than rolling it back. The original failed report is retained. Independent strict
+and public live smoke passed at 19:32, with all four version endpoints matching
+before and after. A separate saved-identity check accepted the credential and
+returned both bootstraps and participant-selected requests successfully; each
+bootstrap exposed zero nonparticipant requests for that viewer. No second Worker
+upload was used. This does not establish global privacy or human sign-in success.
+
+Runtime publication was skipped by the failed workflow. Local preparation then
+found an advertised-asset packaging mismatch, so publication remains pending its
+repair and exact-source verification. Graphify activation is also a separate
+receipt. The earlier runtime/map checkpoint below describes the prior release,
+not the newly deployed source. Existing parity diagnostics still require operator
+access; no speculative data repair was made.
+
 ### Verified release checkpoint — 2026-10-29, 18:26 UTC
 
 [PR #5292](https://github.com/Uuriko/project-room/pull/5292) landed
