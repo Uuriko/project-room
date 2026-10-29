@@ -137,7 +137,7 @@
     "src/service-origin.js": "sha256:cb4ac28e46f80308f243d39b6ad68412c55a2cacb5bb79a50215d1e362e51414",
     "src/session-expiry.js": "sha256:4215ee5fd849272d6ffede7c1f68da7c93f1ed82f0e4455b82fe24796baa5196",
     "src/share-invite-code.js": "sha256:9c6aa5325048ca5d4d7cb982e47aa4b8c1bb1e0225ce0d4bc08fe0c7ee674021",
-    "src/share-links.js": "sha256:25857b0e3f7d9527df58ae31b1f2c87f4b0d3cca9ee8db9b29177ac54b7dae75",
+    "src/share-links.js": "sha256:d67a91161790d033b6b9542c79dbe607671cd378e1df4648ccf89443332ed552",
     "src/signin-entry.js": "sha256:c797b5df7ed8961ce43bb812725d6ac27ec38401ef4d320e74480d40f05c7b42",
     "src/signin-navigation.js": "sha256:494f2537099c152a1711d4a5c9087f89b67a35d1153ee9658e1aea6d71b35f25",
     "src/spend-pricing-ui.js": "sha256:907de1a2bdbb39ef6c6dab568515946276467dcf7803d4473fbc0ace503e3cff",
