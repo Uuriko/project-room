@@ -169,6 +169,18 @@ export const mentionStateSchema = `
   );
 `;
 
+// A late acknowledgment (made after the mention timed out) is the member
+// saying "handled" for a mention answered outside its thread. It gets its own
+// column because acknowledged_at keeps the FIRST ack: an on-time ack followed
+// by a late one must still register the late one. Additive and idempotent;
+// existing rows read NULL ("no late ack").
+export function ensureMentionLateAckSchema(db) {
+  const exists = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='mention_observations'").get();
+  if (!exists) return;
+  const columns = new Set(db.prepare("PRAGMA table_info(mention_observations)").all().map(column => column.name));
+  if (!columns.has("late_acknowledged_at")) db.exec("ALTER TABLE mention_observations ADD COLUMN late_acknowledged_at INTEGER");
+}
+
 // Member id -> linked agent-identity display name. Mention detection and
 // mention delivery must resolve the same names: every @-resolution path
 // shares this map, or a mention the tracker records as delivered never wakes

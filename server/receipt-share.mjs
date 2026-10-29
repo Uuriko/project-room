@@ -57,6 +57,27 @@ const LEVEL_SCOPE = Object.freeze({
 
 const isLot = receipt => receipt?.source === "bounty-lot" && !!receipt?.lot;
 
+// Proof and delivery outcome are separate facts. A recorded artifact hash
+// must not hide a rejection when the receipt is shared away from its page.
+// Acceptance comes from the receipt stamp, never a passing review check.
+const OUTCOME_LABELS = new Map([
+  ["verified", "Accepted by reviewer"],
+  ["accepted", "Accepted by reviewer"],
+  ["rejected", "Rejected by reviewer"],
+  ["revision_requested", "Changes requested"],
+  ["submitted", "Submitted; awaiting review"],
+]);
+const deliveryOutcomeOf = receipt => {
+  if (receipt?.source !== "public-work") return null;
+  const decision = receipt.review?.state;
+  const state = ["rejected", "revision_requested"].includes(decision) ? decision : receipt.state;
+  return OUTCOME_LABELS.get(state) ?? "Outcome not recorded";
+};
+const badgeLabelOf = receipt => {
+  const outcome = deliveryOutcomeOf(receipt);
+  return outcome ? `${outcome} · ${proofLabelOf(receipt)}` : proofLabelOf(receipt);
+};
+
 // The graded label alone (badge segment, OG badge row). Lot receipts are
 // not proofLevelOf's vocabulary: their record is a ledger movement plus a
 // settlement verdict, so the label names exactly that.
@@ -74,7 +95,8 @@ export function verdictLineOf(receipt) {
       : "Ledger-recorded movement — recorded in the room's credit ledger";
   }
   const level = proofLevelOf(receipt);
-  return `${PROOF_LEVELS[level].label} — ${LEVEL_SCOPE[level]}`;
+  const outcome = deliveryOutcomeOf(receipt);
+  return `${PROOF_LEVELS[level].label} — ${LEVEL_SCOPE[level]}${outcome ? ` — ${outcome}` : ""}`;
 }
 
 // What this record proves, no more. Moved verbatim from receipts-page so
@@ -113,6 +135,8 @@ export const receiptCanonical = receipt => `${ROOM_ORIGIN}/receipts/${receipt.id
 export function receiptJsonLd(receipt, { description } = {}) {
   const property = (name, value) => ({ "@type": "PropertyValue", name, value });
   const additionalProperty = [property("Proof level", proofLabelOf(receipt))];
+  const outcome = deliveryOutcomeOf(receipt);
+  if (outcome) additionalProperty.push(property("Delivery outcome", outcome));
   if (receipt.pullRequest) additionalProperty.push(property("Pull request", receipt.pullRequest));
   for (const hash of receipt.hashes ?? []) {
     additionalProperty.push(property("Hash evidence (stored sha256, not re-verified)", hash));
@@ -170,7 +194,7 @@ const badgeSegmentWidth = text => Math.ceil([...text].length * 6.7) + 12;
 // not in a good/bad color. Colors are the OG card's palette.
 export function receiptBadgeSvg(receipt) {
   const left = "Project Room receipt";
-  const right = proofLabelOf(receipt);
+  const right = badgeLabelOf(receipt);
   const leftWidth = badgeSegmentWidth(left);
   const rightWidth = badgeSegmentWidth(right);
   const width = leftWidth + rightWidth;
@@ -215,7 +239,7 @@ export function receiptOgFields(receipt) {
   return {
     title: receipt.title ?? "",
     subtitle: verdictLineOf(receipt),
-    badges: [proofLabelOf(receipt), receipt.room?.title ?? "", when(receipt.at)].filter(Boolean),
+    badges: [badgeLabelOf(receipt), receipt.room?.title ?? "", when(receipt.at)].filter(Boolean),
     footer: "Project Room receipt · hashes are stored values, not re-verified",
   };
 }
