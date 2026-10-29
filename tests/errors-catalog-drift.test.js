@@ -247,6 +247,22 @@ const REGISTRY_FIXTURES = [
     assert.doesNotMatch(ax.hint, /^Unknown error/);
     assert.match(nextTextOf(ax), /.+/);
   }]),
+  // W-31: the two trial-task verdict 409s shipped by #4720 — the recovery is
+  // the sign-off loop (buyer_signoff_required) and single-use receipt
+  // discipline (receipt_replayed); neither may fall through to Unknown.
+  ["buyer_signoff_required", { httpStatus: 409, message: "Buyer acceptance required" },
+    ax => {
+      assert.equal(ax.reason, "buyer_signoff_required");
+      assert.match(ax.hint, /sign-off loop/);
+      assert.match(nextTextOf(ax), /signoff-loops/);
+      assert.match(nextTextOf(ax), /decision accept/);
+    }],
+  ["receipt_replayed", { httpStatus: 409, message: "Receipt already used" },
+    ax => {
+      assert.equal(ax.reason, "receipt_replayed");
+      assert.match(ax.hint, /single-use/);
+      assert.match(nextTextOf(ax), /fresh, unused signed receipt/);
+    }],
   ["agent_not_registered", { httpStatus: 404, message: "No host has reported for this identity yet — POST /api/agent-heartbeats first, then poll." },
     ax => {
       assert.deepEqual(ax.next[0], { path: "/api/agent-heartbeats" });
@@ -340,8 +356,8 @@ test("registry-migrated codes: shipped envelope equals the registry resolution (
   assert.ok(ERROR_REGISTRY && typeof ERROR_REGISTRY === "object", "ERROR_REGISTRY must be exported from src/agent-error.mjs");
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
-  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
-    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
+  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "buyer_signoff_required", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
+    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "receipt_replayed", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
     "the migrated set is the joining-path set; growing it is a deliberate edit here too");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {
     const shipped = agentErrorAx({ code, ...ctx });
