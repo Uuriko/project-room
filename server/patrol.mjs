@@ -124,6 +124,12 @@ const SETTLE_NEXT = new Map([
 ]);
 const isSettleMove = (action, fromState, nextState) =>
   SETTLE_NEXT.get(action) === nextState && ACTIVE_CLAIM_STATES.includes(fromState);
+// The update route's one-step finish: under the default self_attested
+// review policy the owner may move in_progress straight to done
+// (updateWork's `collapse`); any other policy refuses it with
+// work_not_delivered, so the route, not this table, enforces the policy.
+const isCollapseMove = (action, fromState, nextState) =>
+  action === "state_changed" && fromState === "in_progress" && nextState === "done";
 
 export const PATROL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS patrol_cursor (
@@ -617,6 +623,7 @@ function patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedC
     file(sequence, eventId, "claim_legality", "unknown_state", claimId, { state: nextState, action });
   } else if (prior) {
     if (nextState !== prior.state && !isSettleMove(action, prior.state, nextState)
+      && !isCollapseMove(action, prior.state, nextState)
       && !(LEGAL_NEXT.get(prior.state)?.has(nextState) ?? false)) {
       file(sequence, eventId, "claim_legality", "illegal_transition", claimId,
         { from: prior.state, to: nextState, action });
