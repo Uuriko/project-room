@@ -1,0 +1,35 @@
+  /api/rooms/{roomId}/read-horizon:
+    get:
+      summary: Read the caller's read horizon
+      description: >-
+        Returns the caller's last-read message id for the room (threadId
+        "") or a thread. Query: `threadId?`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: threadId
+          in: query
+          schema: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, viewerId, threadId, lastReadMessageId }" }
+    post:
+      summary: Advance the caller's read horizon
+      description: >-
+        Sets last_read_message_id for the room or thread. "Mark unread"
+        on message M is this endpoint with the id of the message before M.
+        Body: `{ threadId?, lastReadMessageId }`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lastReadMessageId]
+              properties:
+                threadId: { type: string }
+                lastReadMessageId: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, viewerId, threadId, lastReadMessageId }" }
