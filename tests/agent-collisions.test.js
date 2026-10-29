@@ -8,6 +8,7 @@ import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { findAgentOverlaps, collisionAlertsEnabled } from "../server/agent-collisions.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const live = (id, owner, extra) => ({ id, owner, state: "claimed", files: [], ...extra });
 
@@ -48,8 +49,8 @@ async function room(t, featureEnv) {
   const ada = store.identities.create("Ada");
   const bea = store.identities.create("Bea");
   for (const [identity, memberId, displayName] of [[ada, "ada", "Ada"], [bea, "bea", "Bea"]]) {
-    store.identities.link(ownerKey, "commons", {
-      identityId: identity.identityId, memberId, displayName, permissions: ["accept_work", "complete_work"]
+    linkWithProof(store, ownerKey, "commons", identity, {
+      memberId, displayName, permissions: ["accept_work", "complete_work"]
     });
   }
   const server = createRoomServer({ store });
