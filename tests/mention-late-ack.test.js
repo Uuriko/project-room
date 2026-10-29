@@ -8,40 +8,40 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { createTestClock } from "./helpers/test-clock.mjs";
 
 function enrolledAgent(t) {
-  const f = createAcceptanceFixture(), session = f.store.createSession(f.keys.owner), token = randomBytes(32).toString("base64url");
+  const f = createAcceptanceFixture(), clock = createTestClock(f.store.now());
+  f.store.now = clock.now;
+  const session = f.store.createSession(f.keys.owner), token = randomBytes(32).toString("base64url");
   f.store.agentConnections.apply(session.token, "commons", { action: "create", requestId: "mention-enroll", memberId: "mention-agent", displayName: "Scout", access: "chat",
     keyHash: createHash("sha256").update(token).digest("hex"), expiresAt: Date.now() + 3600000, expectedOwnerRevision: 0 }, session.session.sessionBinding);
   // #953: new agents default to t1_readonly; Scout needs write access for message.posted
   setTier(f.store.db, "commons", "mention-agent", "t2_standard", { updatedBy: "owner", nowMs: f.store.now() });
-  return { f, token };
+  return { f, token, clock };
 }
 const say = (f, key, data) => f.store.command(key, "commons", { id: randomUUID(), type: "message.posted", data });
 
 const eventIdOf = (f, messageId) => f.store.db.prepare("SELECT id FROM events WHERE room_id='commons' AND json_extract(body,'$.data.messageId')=?").get(messageId).id;
-const expire = (f, messageId, at) => f.store.db.prepare("UPDATE mention_states SET timeout_at=? WHERE room_id='commons' AND message_event_id=?").run(at, eventIdOf(f, messageId));
+const setDeadline = (f, messageId, at) => f.store.db.prepare("UPDATE mention_states SET timeout_at=? WHERE room_id='commons' AND message_event_id=?").run(at, eventIdOf(f, messageId));
 const open = (f, token) => f.store.agentInbox(token, "commons").directMentions.map(m => m.messageId);
 
 test("a late ack clears a timed-out mention; an on-time ack keeps it open", t => {
-  const { f, token } = enrolledAgent(t);
-  let now = f.store.now();
-  f.store.now = () => now;
+  const { f, token, clock } = enrolledAgent(t);
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   say(f, f.keys.owner, { messageId: "answered-elsewhere", body: "@Scout did the deploy go out?" });
-  now += 1;
+  clock.advance(1);
   say(f, f.keys.owner, { messageId: "acked-in-time", body: "@Scout please look at the logs" });
-  now += 1;
+  clock.advance(1);
   say(f, f.keys.owner, { messageId: "ignored", body: "@Scout ping" });
   assert.deepEqual(open(f, token), ["ignored", "acked-in-time", "answered-elsewhere"]);
 
   // Acked before its deadline, then the deadline passes: still open.
-  const deadline = now + 1000;
-  for (const id of ["answered-elsewhere", "acked-in-time", "ignored"]) expire(f, id, deadline);
   f.store.acknowledgeMention(token, "commons", eventIdOf(f, "acked-in-time"));
-  // Advance time; moving the deadline behind an existing acknowledgement
-  // would retroactively turn the on-time observation into a late one.
-  now = deadline + 1;
+  const deadline = clock.now() + 1000;
+  for (const id of ["answered-elsewhere", "acked-in-time", "ignored"]) setDeadline(f, id, deadline);
+  clock.advance(1001);
+  f.store.flipExpiredMentions("commons");
   assert.deepEqual(open(f, token), ["ignored", "acked-in-time", "answered-elsewhere"], "timing out alone clears nothing");
 
   // Answered in a new message, then acknowledged after the deadline: handled.
@@ -57,13 +57,14 @@ test("a late ack clears a timed-out mention; an on-time ack keeps it open", t =>
 });
 
 test("a late ack never closes a formal reply request or another member's mention", t => {
-  const { f, token } = enrolledAgent(t);
+  const { f, token, clock } = enrolledAgent(t);
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   say(f, f.keys.owner, { messageId: "formal", body: "@Scout please confirm the release window", toMemberId: "mention-agent", requestKind: "reply" });
   say(f, f.keys.owner, { messageId: "shared", body: "@Scout and @guest both look at this" });
   const before = f.store.replyRequests.selected(token, "commons", "formal");
-  const past = f.store.now() - 1;
-  for (const id of ["formal", "shared"]) expire(f, id, past);
+  const deadline = clock.now() + 1000;
+  for (const id of ["formal", "shared"]) setDeadline(f, id, deadline);
+  clock.advance(1001);
   f.store.acknowledgeMention(token, "commons", eventIdOf(f, "formal"));
   const after = f.store.replyRequests.selected(token, "commons", "formal");
   assert.equal(before.request.status, "open");
@@ -78,18 +79,22 @@ test("a late ack never closes a formal reply request or another member's mention
 });
 
 test("an on-time ack followed by a late ack still clears the mention", t => {
-  const { f, token } = enrolledAgent(t);
+  const { f, token, clock } = enrolledAgent(t);
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   say(f, f.keys.owner, { messageId: "seen-then-handled", body: "@Scout can you check the invoices?" });
   const id = eventIdOf(f, "seen-then-handled");
   f.store.acknowledgeMention(token, "commons", id);
   const firstAck = f.store.db.prepare("SELECT acknowledged_at AS at FROM mention_observations WHERE room_id='commons' AND message_event_id=?").get(id).at;
-  expire(f, "seen-then-handled", f.store.now() - 1);
+  const deadline = clock.now() + 1000;
+  setDeadline(f, "seen-then-handled", deadline);
+  clock.advance(1001);
+  f.store.flipExpiredMentions("commons");
   assert.deepEqual(open(f, token), ["seen-then-handled"], "an on-time ack alone keeps it open after the deadline");
   f.store.acknowledgeMention(token, "commons", id);
   assert.deepEqual(open(f, token), [], "the later ack clears it");
   const row = f.store.db.prepare("SELECT acknowledged_at AS at, late_acknowledged_at AS late FROM mention_observations WHERE room_id='commons' AND message_event_id=?").get(id);
   assert.equal(row.at, firstAck, "the first ack time is kept");
   assert.ok(Number.isSafeInteger(row.late), "the late ack is recorded separately");
+  assert.ok(row.at < deadline && deadline < row.late, "first ack precedes the deadline and the later ack follows it");
   assert.equal(f.store.db.prepare("SELECT state FROM mention_states WHERE room_id='commons' AND message_event_id=?").get(id).state, "timed_out", "timed-out history is kept");
 });
