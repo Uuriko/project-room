@@ -1,9 +1,0 @@
-Content-Type: multipart/mixed; boundary=B
-
-preamble junk
---B
-Content-Type: text/plain
-
-one
---B--
-epilogue junk

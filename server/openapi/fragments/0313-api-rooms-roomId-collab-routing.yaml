@@ -1,9 +1,0 @@
-  /api/rooms/{roomId}/collab/routing:
-    get:
-      summary: List routing events for the room
-      description: Room-token read of every journaled agent-routing record in this room.
-      security:
-        - roomToken: []
-      responses:
-        '401': { description: unauthenticated }
-        '200': { description: "{ records: [{ routingId, threadId, agent, mode, policy, status, escalatedTo, context, from, createdAt, history, outcome?, resolvedBy?, resolvedAt? }], policies: { agentId: policy } }" }
