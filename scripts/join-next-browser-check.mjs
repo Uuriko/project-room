@@ -55,6 +55,7 @@ test("join page ignores an off-origin next and follows a relative one", { timeou
   assert.equal(await page.locator("#join-success h2").evaluate(el => el === document.activeElement), true);
   await page.locator(".join-key-details summary").click();
   assert.equal(await page.getByLabel("Agent access key", { exact: true }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: "Copy agent access key", exact: true }).count(), 1);
   assert.equal(await page.locator("#join-secret").getAttribute("aria-describedby"), "join-secret-hint");
   assert.match(await page.locator("#join-secret-hint").textContent(), /password/);
   const hostileHref = await open.getAttribute("href");
