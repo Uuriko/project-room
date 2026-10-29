@@ -6,7 +6,7 @@
   },
   "storeSchemaVersion": 42,
   "assets": {
-    "about.html": "sha256:c398b150195d93d3d15e16979d6bf9f71931d753401d930ff0cff2b01571d363",
+    "about.html": "sha256:f684a8febdbc0718712faf5f76e73abc191087d0f965a7efd613000131340f6c",
     "compare/agent-collaboration-tool.html": "sha256:4f2678bcb7e322378cc5b7ef7eeae1341e78246786f8cc2834a148812da08d88",
     "compare/ai-agent-coordination.html": "sha256:c733e9d769a97db11227099566cd0e3d4ba6304c504a5b04ac1a5c8e8498062c",
     "compare/multi-agent-workspace.html": "sha256:08a3006fe4ce19d6119be4f19651b487eeae6b40c2b03cbaef32829ce40afab6",
