@@ -27,6 +27,13 @@ export const isWorkReference = value => value?._workEntity === 1;
 const digestOf = text => createHash('sha256').update(text).digest('hex');
 const corrupt = () => { throw new Error('work_projection_corrupt: missing or mismatched work record'); };
 
+function hydrateWorkRecord(id, reference, row) {
+  if (!row || reference.id !== id || row.revision !== reference.revision || row.digest !== reference.digest || digestOf(row.body) !== reference.digest) corrupt();
+  const item = JSON.parse(row.body);
+  if (item.id !== id || item.revision !== reference.revision) corrupt();
+  return item;
+}
+
 export function hydrateWorkItems(db, roomId, state) {
   const entries = Object.entries(state?.workItems ?? {});
   if (!entries.some(([, value]) => isWorkReference(value))) return state;
@@ -34,11 +41,7 @@ export function hydrateWorkItems(db, roomId, state) {
   const items = {};
   for (const [id, value] of entries) {
     if (!isWorkReference(value)) { items[id] = value; continue; }
-    const row = rows.get(id);
-    if (!row || value.id !== id || row.revision !== value.revision || row.digest !== value.digest || digestOf(row.body) !== value.digest) corrupt();
-    const item = JSON.parse(row.body);
-    if (item.id !== id || item.revision !== value.revision) corrupt();
-    items[id] = item;
+    items[id] = hydrateWorkRecord(id, value, rows.get(id));
   }
   return { ...state, workItems: items };
 }
@@ -69,5 +72,7 @@ export function readWorkItem(db, roomId, workId) {
   const row = db.prepare("SELECT item.value FROM rooms,json_each(rooms.projection,'$.workItems') AS item WHERE rooms.id=? AND item.key=?").get(roomId, workId);
   if (!row) return null;
   const item = JSON.parse(row.value);
-  return hydrateWorkItems(db, roomId, { workItems: { [workId]: item } }).workItems[workId];
+  if (!isWorkReference(item)) return item;
+  const entity = db.prepare('SELECT revision,digest,body FROM work_entities WHERE room_id=? AND work_id=?').get(roomId, workId);
+  return hydrateWorkRecord(workId, item, entity);
 }

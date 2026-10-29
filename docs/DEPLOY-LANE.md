@@ -137,7 +137,7 @@ must recheck the deployed source rather than treating an old receipt as current.
 After creating a runtime package, create a new archive with:
 
 ```sh
-python3 scripts/runtime-archive.py /absolute/runtime /absolute/new-runtime.tar.gz --expected-commit EXACT_COMMIT
+python3 scripts/runtime-archive.py /absolute/runtime /absolute/project-room-runtime.tar.gz --expected-commit EXACT_COMMIT
 ```
 
 For an older target package, invoke this script from a newer tooling checkout
@@ -151,7 +151,23 @@ metadata; executable files use mode 0755 and other files 0644. Filesystem
 extended attributes and macOS AppleDouble metadata are never archived. The
 output is deterministic for identical content and executable bits within the
 same Python/zlib implementation. This verifies content consistency, not source
-provenance or deployment readiness. Workflow integration is separate.
+provenance or deployment readiness.
+
+Before uploading an immutable runtime release, run the existing verifier locally:
+
+```sh
+python3 scripts/verify-runtime-release.py --preflight-archive /absolute/project-room-runtime.tar.gz --expected /absolute/runtime --sha EXACT_COMMIT
+```
+
+The preflight requires that actual filename, verifies the exact-source package,
+and compares archive contents. It makes no network requests or writes and does
+not certify publication. `gh` treats `path#text` as an asset label, not a filename
+rename. Upload the checked file without a `#` suffix. The production workflow
+runs this preflight before creating a new release. Existing-release retries
+retain remote verification; both paths verify the downloaded asset before
+promoting latest. Manual publication must likewise create with `--latest=false`,
+then run remote verification before promotion. Never overwrite an immutable
+release; a correction uses the existing `-r2` (or subsequent) tag convention.
 
 
 ### Publishing an older runtime target or a corrected archive

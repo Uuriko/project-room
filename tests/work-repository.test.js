@@ -87,3 +87,68 @@ test('corrupt and cross-room references fail closed on cached and direct reads',
   assert.throws(() => readWorkItem(f.store.db, 'commons', 'one'), /work_projection_corrupt/);
 });
 
+for (const count of [1, 30]) test(`selected work context reads one entity payload among ${count} work items`, t => {
+  const f = fixture(t, { now: () => 1793200000000 });
+  for (let i = 0; i < count; i++) f.propose(`item-${i}`);
+  const token = f.store.issueAccessKey('commons', 'owner');
+  const expected = f.store.workContext(token, 'commons', 'item-0', { includeOffers: true });
+  delete expected.offers; delete expected.offerContextVersion;
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  let payloadRows = 0, payloadBytes = 0;
+  t.mock.method(f.store.db, 'prepare', sql => {
+    const statement = prepare(sql);
+    if (!/SELECT .*body FROM work_entities/.test(sql)) return statement;
+    return new Proxy(statement, { get(target, key) {
+      if (key !== 'get' && key !== 'all') return typeof target[key] === 'function' ? target[key].bind(target) : target[key];
+      return (...args) => {
+        const result = target[key](...args);
+        for (const row of (key === 'all' ? result : result ? [result] : [])) {
+          payloadRows++; payloadBytes += Buffer.byteLength(row.body);
+        }
+        return result;
+      };
+    } });
+  });
+  assert.deepEqual(f.store.workContext(token, 'commons', 'item-0'), expected);
+  assert.equal(payloadRows, 1, 'unrelated canonical work payloads must not cross the SQL boundary');
+  assert.ok(payloadBytes < 4000, `selected payload bytes: ${payloadBytes}`);
+  assert.throws(() => f.store.workContext(token, 'commons', 'missing'), error => error.code === 'work_not_found');
+  f.store.revoke(token);
+  assert.throws(() => f.store.workContext(token, 'commons', 'item-0'));
+});
+
+test('selected scope isolates unrelated corruption while offers and selected corruption still refuse', t => {
+  const f = fixture(t); f.propose('one'); f.propose('two');
+  const token = f.store.issueAccessKey('commons', 'owner');
+  f.store.db.prepare("UPDATE work_entities SET body='{}' WHERE work_id='two'").run();
+  assert.equal(f.store.workContext(token, 'commons', 'one').work.id, 'one');
+  assert.throws(() => f.store.workContext(token, 'commons', 'one', { includeOffers: true }), /work_projection_corrupt/);
+  f.store.db.prepare("UPDATE work_entities SET body='{}' WHERE work_id='one'").run();
+  assert.throws(() => f.store.workContext(token, 'commons', 'one'), /work_projection_corrupt/);
+});
+
+test('selected work context is identical across inline, entity and mixed carriers', t => {
+  const f = fixture(t, { workEntities: false, now: () => 1793200000000 });
+  f.propose('one'); f.propose('two');
+  const token = f.store.issueAccessKey('commons', 'owner');
+  const expected = f.store.workContext(token, 'commons', 'one');
+  const inline = raw(f).workItems.one;
+  f.store.migrateWorkProjections();
+  assert.deepEqual(f.store.workContext(token, 'commons', 'one'), expected);
+  f.store.db.prepare("UPDATE rooms SET projection=json_set(projection,'$.workItems.one',json(?)) WHERE id='commons'").run(JSON.stringify(inline));
+  assert.deepEqual(f.store.workContext(token, 'commons', 'one'), expected);
+  assert.equal(raw(f).workItems.two._workEntity, 1);
+});
+
+for (const mutation of [
+  "DELETE FROM work_entities WHERE work_id='one'",
+  "UPDATE work_entities SET revision=revision+1 WHERE work_id='one'",
+  "UPDATE work_entities SET digest=printf('%064d',0) WHERE work_id='one'",
+  "UPDATE rooms SET projection=json_set(projection,'$.workItems.one.id','other') WHERE id='commons'",
+]) test(`selected work refuses invalid entity binding: ${mutation}`, t => {
+  const f = fixture(t); f.propose('one');
+  const token = f.store.issueAccessKey('commons', 'owner');
+  assert.equal(f.store.workContext(token, 'commons', 'one').work.id, 'one');
+  f.store.db.exec(mutation);
+  assert.throws(() => f.store.workContext(token, 'commons', 'one'), /work_projection_corrupt/);
+});

@@ -14,7 +14,7 @@ import { pathToFileURL } from "node:url";
 import { browserPlan } from "./browser-shards.mjs";
 import { canonicalBrowserScript } from "./browser-suites.mjs";
 import { discoverUnitTests } from "./unit-shards.mjs";
-import { buildReverseGraph, changedFiles, parseGitPathList, selectTests } from "./verify-affected.mjs";
+import { buildReverseGraph, changedFiles, parseGitPathList, parseImports, resolveSpecifier, selectTests } from "./verify-affected.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const CODE_EXT = new Set([".js", ".mjs", ".cjs"]);
@@ -81,7 +81,7 @@ function graph(cwd, changed) {
     return cache.get(file);
   };
   const codeFiles = [...known].filter(file => CODE_EXT.has(extname(file)) && !file.startsWith("node_modules/") && existsSync(join(cwd, file)));
-  return { read, reverse: buildReverseGraph(codeFiles, read, known) };
+  return { read, known, codeFiles, reverse: buildReverseGraph(codeFiles, read, known) };
 }
 
 function repoRelativeTests(cwd) {
@@ -110,10 +110,36 @@ export function affectedUnitFiles(base, cwd = root) {
   return selectAffectedUnit(changedFiles(base, cwd), cwd);
 }
 
+// Browser checks load the client over HTTP, so their Node imports cannot
+// describe the served HTML -> client module relationship. Conservatively
+// connect Playwright consumers (and their importers) to the room entry page.
+export function addServedClientEdges({ reverse, read, known, codeFiles }) {
+  const edge = (dependency, consumer) => {
+    if (!reverse.has(dependency)) reverse.set(dependency, new Set());
+    reverse.get(dependency).add(consumer);
+  };
+  if (!known.has("index.html")) return;
+  for (const match of read("index.html").matchAll(/<(?:script|link)\b[^>]*?\b(?:src|href)=["']([^"']+)["']/g)) {
+    const target = resolveSpecifier("index.html", match[1], known);
+    if (target) edge(target, "index.html");
+  }
+  const roomConsumers = new Set(["server/http.mjs"]);
+  for (const file of roomConsumers) {
+    for (const importer of reverse.get(file) ?? []) roomConsumers.add(importer);
+  }
+  for (const file of codeFiles) {
+    if (roomConsumers.has(file) && [...parseImports(read(file))].some(spec => /^(?:playwright|@playwright\/test)(?:\/|$)/.test(spec))) {
+      edge("index.html", file);
+    }
+  }
+}
+
 export function selectAffectedBrowser(changed, cwd = root) {
   const script = canonicalBrowserScript();
   const suite = browserPlan(script).files;
-  const { read, reverse } = graph(cwd, changed);
+  const dependencies = graph(cwd, changed);
+  addServedClientEdges(dependencies);
+  const { read, reverse } = dependencies;
   const timings = loadTimings("browser-ci-durations.json");
   const picked = selectTests({
     changed, tests: suite, reverse, read, timings,
@@ -125,7 +151,9 @@ export function selectAffectedBrowser(changed, cwd = root) {
   const have = new Set(selected.map(row => row.test));
   const files = suite.filter(file => have.has(file));
   if (!files.length) throw new Error("Refusing an empty affected browser suite");
-  return { changed, files, plan: browserPlan(script, { only: files }) };
+  const omitted = picked.skipped.filter(row => !have.has(row.test));
+  return { changed, files, selected, omitted, coverage: "affected", budgetMs: BROWSER_AFFECTED_BUDGET_MS,
+    plan: browserPlan(script, { only: files }) };
 }
 
 export function affectedBrowserFiles(base, cwd = root) {

@@ -1,5 +1,5 @@
 import { isWriteSql } from './sql-write-classification.mjs';
-import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
+import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, readWorkItem } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
@@ -5676,14 +5676,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
-      // Select the supporting aggregates without materializing conversation bodies.
-      // Offers validate cross-work references, so retain the full work aggregate
-      // until that repository migrates; this is not a bounded-work-storage claim.
-      const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.helpOffers','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
+      // Default selected reads hydrate only the selected work payload. Offers
+      // validate cross-work references and still require the broader aggregate.
+      // Both paths scan legacy room JSON; neither is a bounded SQL-work claim.
+      const row = this.db.prepare(includeOffers
+        ? "SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.helpOffers','$.messagesArchive') AS fields FROM rooms WHERE id=?"
+        : "SELECT sequence,json_extract(projection,'$.room','$.members','$.replyRequests','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
       if (!row) fail(404, "room_not_found", "Room not found");
-      const [metadata, members, workItems, replyRequests, helpOffers, messagesArchive] = JSON.parse(row.fields);
-      const state = hydrateWorkItems(this.db, roomId, { room: metadata, members, workItems,
-        ...(replyRequests ? { replyRequests } : {}), ...(helpOffers ? { helpOffers } : {}) });
+      const fields = JSON.parse(row.fields);
+      const [metadata, members] = fields;
+      const selected = includeOffers ? null : readWorkItem(this.db, roomId, workItemId);
+      const [workItems, replyRequests, helpOffers, messagesArchive] = includeOffers ? fields.slice(2)
+        : [selected ? { [workItemId]: selected } : {}, fields[2], null, fields[3]];
+      const state = includeOffers ? hydrateWorkItems(this.db, roomId, { room: metadata, members, workItems,
+        ...(replyRequests ? { replyRequests } : {}), ...(helpOffers ? { helpOffers } : {}) })
+        : { room: metadata, members, workItems, ...(replyRequests ? { replyRequests } : {}) };
       const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
@@ -5720,10 +5727,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || [completionEventId, draftMessageId].some(id => id !== null && !validId(id))
         || completionEventId !== null && draftMessageId !== null) fail(422, "invalid_result_selection", "Choose current result, one completion, or one draft");
-      const room = this.room(roomId);
-      if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
+      const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room') AS metadata,json_type(projection,'$.messagesArchive') AS archive_type FROM rooms WHERE id=?").get(roomId);
+      if (!row) fail(404, "room_not_found", "Room not found");
+      const work = readWorkItem(this.db, roomId, workItemId);
+      if (!work) fail(404, "work_not_found", "Work item not found in this Room");
+      // The full selected receipt history is needed for withdrawn historical
+      // text. Unrelated work and conversation bodies are not result dependencies.
+      const state = { room: JSON.parse(row.metadata), workItems: { [workItemId]: work } };
+      const messages = new Map();
+      const messageRecords = { get: id => {
+        if (!messages.has(id)) messages.set(id, selectedMessageRecord(this, roomId, id, row.archive_type === "object"));
+        return messages.get(id);
+      } };
       let value;
-      try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId, viewerId: auth.member.id, floor: this.historyFloor(roomId, auth.member.id, room.sequence) }); }
+      try { value = selectedWorkResult({ db: this.db, state, workItemId, sequence: row.sequence, now: this.now(), completionEventId, draftMessageId,
+        viewerId: auth.member.id, floor: this.historyFloor(roomId, auth.member.id, row.sequence), messageRecords }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
       return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
@@ -6281,10 +6299,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         let dmAncestor = null;
         for (let m = byId.get(command.data.replyToId); m && !seen.has(m.id); m = byId.get(m.replyToId)) {
           seen.add(m.id);
-          // Reply requests are directed but room-threaded by design: members may
-          // clarify or comment under them (tests/reply-requests.test.js).
-          if (m.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, m.id)
-              && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
+          // Directed requests have participant-only context reads too. Knowing
+          // their ID must not let a bystander inject public request context.
+          if (m.toMemberId && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
             fail(422, "command_rejected", "Reply must reference a message in this Room");
           }
           if (!dmAncestor && m.toMemberId) dmAncestor = m;
