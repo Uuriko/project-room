@@ -1902,6 +1902,10 @@ const ROWS = [
   // D.2.3 divergence snapshot (server/work-item-board.mjs): room-owned
   // monitor state, deleted with the room; lazy-additive, hence optional.
   { table: "work_item_board_divergence", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
+  // RR-D5 read-version counter (server/conditional-get.mjs): per-room
+  // validator state, deleted with the room; the table is lazy-additive
+  // (ensured on the validator path), hence optional.
+  { table: "room_read_versions", key: "room_id", action: "delete", optional: true, match: { room: ["room_id"] } },
   { table: "pairs", key: "room_id", action: "delete", match: { room: ["room_id"] } },
   { table: "pair_code_locks", key: "room_id", action: "delete", match: { room: ["room_id"] } },
   { table: "agent_member_keys", key: "room_id", action: "delete", match: { room: ["room_id"] } },
