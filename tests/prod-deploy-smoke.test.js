@@ -1,4 +1,5 @@
 import test from "node:test";
+import { createHash } from "node:crypto";
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
@@ -178,7 +179,7 @@ for (const filename of ["prod-deploy-smoke.mjs", "live-smoke.mjs"]) {
         cwd: fileURLToPath(new URL("../", import.meta.url)),
         env: { ...process.env, SHA: revision, PROD_ORIGIN: origin.url, ENTRY_ORIGIN: entry.url,
           ROOM_SMOKE_ORIGIN: origin.url, ROOM_SMOKE_GITHUB_API: origin.url,
-          RUNNER_TEMP: directory, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "",
+          RUNNER_TEMP: directory, GITHUB_TOKEN: "", GITHUB_STEP_SUMMARY: "", GITHUB_OUTPUT: join(directory, "step-output"),
           // The prod smoke step retries once after a delay; no wait in tests.
           SMOKE_RETRY_DELAY_SECONDS: "0",
           // The pipeline test runs the literal deploy-prod.yml step, so the
@@ -197,6 +198,8 @@ for (const filename of ["prod-deploy-smoke.mjs", "live-smoke.mjs"]) {
       if (filename === "prod-deploy-smoke.mjs") {
         const first = JSON.parse(readFileSync(join(directory, "prod-smoke-attempt1.log"), "utf8"));
         assert.equal(first.ok, healthy);
+        const digest = createHash("sha256").update(readFileSync(join(directory, "prod-smoke.json"))).digest("hex");
+        assert.equal(readFileSync(join(directory, "step-output"), "utf8"), `report_sha256=${digest}\n`);
         if (!healthy) assert.equal(readdirSync(directory).includes("prod-smoke-attempt2.log"), false, "readiness failure is not retried");
         const upload = job.steps.find(item => item.with?.name === "deploy-recovery-${{ needs.gate.outputs.sha }}");
         assert.match(upload.with.path, /prod-smoke-attempt\*\.log/);
