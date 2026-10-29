@@ -10,10 +10,16 @@
 // computed in JS. Text is stripped of control characters and capped at 120
 // characters before it is wrapped. A title occupies at most 3 lines and the
 // last line ends with an ellipsis when the rest does not fit.
-import { readFileSync } from "node:fs";
+//
+// Asset bytes (og/atlas.json, the atlas PNGs, og/base-receipt.png) arrive
+// through an injected loader: server/http.mjs passes its `loadAsset`, which
+// the Worker backs with the ASSETS binding (the files are bundled by
+// cloudflare/build-assets.mjs via server/public-assets.mjs) and Node backs
+// with the filesystem. The production Worker has no filesystem for these
+// paths, so this module must never read them through node:fs on the Worker
+// path; the only node:fs touch is the dynamically imported default loader
+// below, used when no loader is injected (local dev and tests).
 import { deflateSync, inflateSync } from "node:zlib";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 
 export const OG_WIDTH = 1200;
 export const OG_HEIGHT = 630;
@@ -217,20 +223,44 @@ export function wrapOgText(text, { size, maxWidth, maxLines, atlas }) {
   return lines;
 }
 
-let assetsCache = null;
+// Fallback for callers that inject no loader (Node server tests, the atlas
+// build script, local dev): read the committed files next to this module.
+// The dynamic import keeps node:fs out of the module graph, so the Worker
+// path — which always injects a loader — never touches it.
+async function defaultOgAssetLoader(path) {
+  const { readFile } = await import("node:fs/promises");
+  return readFile(new URL("../" + path, import.meta.url));
+}
 
-function loadAssets() {
-  if (assetsCache) return assetsCache;
-  const dir = join(dirname(fileURLToPath(import.meta.url)), "..", "og");
-  const atlas = JSON.parse(readFileSync(join(dir, "atlas.json"), "utf8"));
+const assetsByLoader = new WeakMap();
+let defaultAssets = null;
+
+async function readAssets(loadAsset) {
+  const atlas = JSON.parse(new TextDecoder().decode(await loadAsset("og/atlas.json")));
   const bitmaps = {};
   for (const [size, entry] of Object.entries(atlas.sizes)) {
-    bitmaps[size] = decodePng(readFileSync(join(dir, entry.file)));
+    bitmaps[size] = decodePng(await loadAsset("og/" + entry.file));
   }
-  const base = decodePng(readFileSync(join(dir, "base-receipt.png")));
+  const base = decodePng(await loadAsset("og/base-receipt.png"));
   if (base.width !== OG_WIDTH || base.height !== OG_HEIGHT) throw new Error("base receipt image must be 1200 by 630");
-  assetsCache = { atlas, bitmaps, base: base.rgba };
-  return assetsCache;
+  return { atlas, bitmaps, base: base.rgba };
+}
+
+function loadAssets(loadAsset) {
+  if (!loadAsset) {
+    if (!defaultAssets) {
+      defaultAssets = readAssets(defaultOgAssetLoader);
+      defaultAssets.catch(() => { defaultAssets = null; });
+    }
+    return defaultAssets;
+  }
+  let pending = assetsByLoader.get(loadAsset);
+  if (!pending) {
+    pending = readAssets(loadAsset);
+    assetsByLoader.set(loadAsset, pending);
+    pending.catch(() => { if (assetsByLoader.get(loadAsset) === pending) assetsByLoader.delete(loadAsset); });
+  }
+  return pending;
 }
 
 function blit(dst, bitmap, glyph, dx, dy, color) {
@@ -273,8 +303,8 @@ function drawLines(dst, lines, { size, x, baseline, color, atlas, bitmaps }) {
   return cursorY;
 }
 
-export async function renderOgPng({ title = "", subtitle = "", badges = [], footer = "" } = {}) {
-  const { atlas, bitmaps, base } = loadAssets();
+export async function renderOgPng({ title = "", subtitle = "", badges = [], footer = "" } = {}, { loadAsset } = {}) {
+  const { atlas, bitmaps, base } = await loadAssets(loadAsset);
   const rgba = new Uint8Array(base);
   const titleLines = wrapOgText(title, { size: TITLE_SIZE, maxWidth: TEXT_MAX_WIDTH, maxLines: 3, atlas });
   let y = titleLines.length
