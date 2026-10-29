@@ -27,6 +27,7 @@ export async function decodeDispatchResponse(response) {
     ?? response?.headers?.get?.("content-encoding");
   if (!encoding || encoding.trim().toLowerCase() === "identity") return response;
   const bytes = new Uint8Array(await response.arrayBuffer());
+  console.log(`[dispatch-decode] encoding=${JSON.stringify(encoding)} bytes=${bytes.length} head=${[...bytes.slice(0, 12)].map(b => b.toString(16).padStart(2, "0")).join(" ")}`);
   if (!bytes.length) {
     return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
@@ -57,6 +58,7 @@ export async function decodeDispatchResponse(response) {
   for (let extra = 0; extra < 3 && body[0] === 0x1f && body[1] === 0x8b; extra++) {
     try { body = gunzipSync(body); peeled = true; } catch { break; }
   }
+  console.log(`[dispatch-decode] peeled=${peeled} finalBytes=${body.length} finalHead=${[...body.slice(0, 12)].map(b => b.toString(16).padStart(2, "0")).join(" ")}`);
   if (!peeled) {
     return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
