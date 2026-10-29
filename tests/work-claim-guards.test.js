@@ -227,12 +227,17 @@ test("releasing an already-unclaimed claim is refused (QA200-MUT-03B)", async ()
   assert.equal(released.status, 200);
   assert.equal(released.value.state, "unclaimed");
   const historyLength = registry.get("room1", "lane").history.length;
-  await assert.rejects(call(registry, "owner", "release", "lane", { ...round, reason: "again" }), error => {
-    // The replay carries the round it already released, which is now stale.
-    assert.equal(error.status, 409);
-    assert.equal(error.code, "work_claim_conflict");
-    return true;
-  });
+  // The replay carries the round it already released, which is now stale.
+  // DC4-A1: the 409 resolves as a body carrying the cure payload — the
+  // claim itself moved (claimed -> unclaimed) since that round was read,
+  // so it is not retryable and no retry is prefilled.
+  const replayed = await call(registry, "owner", "release", "lane", { ...round, reason: "again" });
+  assert.equal(replayed.status, 409);
+  assert.equal(replayed.value.error.code, "work_claim_conflict");
+  assert.equal(replayed.value.error.subcode, "round_and_state_changed");
+  assert.equal(replayed.value.stateChanged, true);
+  assert.deepEqual(replayed.value.stateChange, { from: "claimed", to: "unclaimed", ownerChanged: true });
+  assert.equal(replayed.value.retryable, false);
   assert.equal(registry.get("room1", "lane").history.length, historyLength);
 });
 
@@ -247,15 +252,21 @@ test("release binds the claim round at the HTTP boundary", async () => {
     assert.equal(error.code, "invalid_claim_input");
     return true;
   });
-  // a stale round is refused instead of destroying the claim
+  // a stale round is refused instead of destroying the claim. DC4-A1: the
+  // claim itself never moved (only the caller's claimedAt is wrong), so
+  // the resolved 409 body says the round is stale, hands over the full
+  // current round, and prefills the verbatim retry.
   const stale = { ...round, expectedClaimedAt: new Date(Date.parse(round.expectedClaimedAt) - 1000).toISOString() };
-  await assert.rejects(call(registry, "holder", "release", "lane", { ...stale, reason: "stale" }), error => {
-    assert.equal(error.status, 409);
-    assert.equal(error.code, "work_claim_conflict");
-    assert.match(error.message, /release basis does not match/);
-    assert.match(error.message, /same fresh read/);
-    return true;
-  });
+  const refused = await call(registry, "holder", "release", "lane", { ...stale, reason: "stale" });
+  assert.equal(refused.status, 409);
+  assert.equal(refused.value.error.code, "work_claim_conflict");
+  assert.equal(refused.value.error.subcode, "round_stale");
+  assert.match(refused.value.error.message, /round is stale/);
+  assert.doesNotMatch(refused.value.error.message, /claim has moved|changed since it was read/);
+  assert.equal(refused.value.stateChanged, false);
+  assert.equal(refused.value.retryable, true);
+  assert.deepEqual(refused.value.currentRound, round);
+  assert.deepEqual(refused.value.next[0].body, round);
   assert.equal(registry.get("room1", "lane").state, "claimed");
   assert.equal(registry.get("room1", "lane").owner, "holder");
   // a non-holder is refused with 403 work_not_owner even with a malformed
