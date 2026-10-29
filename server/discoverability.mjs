@@ -36,16 +36,32 @@ const IDENTITY_MINT_BODY = Object.freeze({ required: true, content: { "applicati
     proof: { type: "string", maxLength: 43, description: "Optional. Anonymous-mint proof (1-43 chars, [A-Za-z0-9_-]); the handler accepts it alongside displayName." },
   },
 } } } });
-// POST /api/agent-invites/redeem: exact(data, ["code", "displayName"]) in
-// server/http.mjs. Field truth lives there; keep this schema, docs/openapi.yaml,
-// and the handler in agreement. 2026-10-06: an external agent (Colony round-2,
-// musespark-explorer) cold-hit this route and found the served openapi.json
-// carried no requestBody while docs/openapi.yaml did — the 10-03 fix covered
-// agent-identities/access-requests/identity-create but never covered redeem.
+// POST /api/agent-invites/redeem in server/http.mjs. displayName is required
+// for a new identity and optional when Authorization Bearer is an existing
+// identity (it then defaults to that identity's name). When given, 1-80
+// characters. Field truth lives in the handler; keep this schema,
+// docs/openapi.yaml, and the handler in agreement. 2026-10-06: an external
+// agent (Colony round-2, musespark-explorer) cold-hit this route and found
+// the served openapi.json carried no requestBody while docs/openapi.yaml
+// did — the 10-03 fix covered agent-identities/access-requests/identity-create
+// but never covered redeem.
 const INVITE_REDEEM_BODY = Object.freeze({ required: true, content: { "application/json": { schema: {
-  type: "object", additionalProperties: false, required: ["code", "displayName"], properties: {
+  type: "object", additionalProperties: false, required: ["code"], properties: {
     code: { type: "string", description: "One-time invite code — the credential for this route." },
-    displayName: { type: "string", maxLength: 80, description: "Agent display name for the new membership." },
+    displayName: { type: "string", maxLength: 80, description: "Optional for an existing identity (Authorization bearer); defaults to that identity's name. Required when no saved identity is presented. When given, 1-80 characters." },
+    requestId: { type: "string", description: "Optional client-kept idempotency key. A retry with the same requestId, code, and displayName replays the membership." },
+    profile: {
+      type: "object", additionalProperties: false,
+      description: "Optional join profile. Not the invite access preset (chat, contribute, review, collaborate). Omit it and the member keeps the defaults with no profile event.",
+      properties: {
+        wake: { type: "string", enum: ["push", "webhook", "pull"] },
+        events: { type: "string", enum: ["mentions-and-own-claims", "all"] },
+        maxClaims: { type: "integer", minimum: 1, maximum: 10 },
+        roles: { type: "array", items: { type: "string", enum: ["coordinator", "reviewer", "builder"] } },
+        detail: { type: "string", enum: ["brief", "full"] },
+        capabilities: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 40 } },
+      },
+    },
   },
 } } } });
 // POST /api/agent-rooms: CREATE_FIELDS + validation in server/agent-rooms.mjs.
@@ -160,6 +176,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/mcp", ["GET"], "none", "Hosted MCP server card (alias).", "getMcpWellKnown"),
   route("/.well-known/mcp.json", ["GET"], "none", "Hosted MCP server card.", "getMcpJson"),
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
+  route("/.well-known/agent-skills/index.json", ["GET"], "none", "Agent Skills discovery index (v0.2.0): the skills this origin publishes, each with the SHA-256 of its SKILL.md bytes.", "getAgentSkillsIndex"),
+  route("/.well-known/agent-skills/work-in-project-room/SKILL.md", ["GET"], "none", "The work-in-project-room skill file at its Agent Skills discovery path (same bytes as /SKILL.md).", "getAgentSkillsSkillMd"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
   route("/api/pair", ["GET", "POST"], "none", "Start agent pairing. A proved key or a valid room credential reconnects the existing member.", "startPair",
@@ -247,6 +265,19 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   ...["decide", "verify"].map(action => route(`/api/rooms/{roomId}/public-work/receipts/{receiptId}/${action}`, ["POST"], "room-member", "Record an explicit current-authority review over immutable evidence; no payment or claim reopening.", `${action}PublicWorkReview`, { publicReview: action })),
   route("/api/rooms/{roomId}/public-work/receipts/{receiptId}/follow-up", ["POST"], "room-member", "Owner explicitly publishes one linked unpaid follow-up; no automatic claim or private feedback publication.", "openPublicWorkFollowUp", { publicReview: "follow-up" }),
   route("/api/rooms/{roomId}/project-offers/{offerId}/claims", ["POST"], "room-member", "Owner-only: explicitly enable outside volunteer claims for declared repository paths.", "enablePublicWorkClaims", { publicWork: "enable" }),
+  // Public receipts list (legacy door in server/http.mjs, already in the
+  // legacy allowlist and in docs/openapi.yaml). Settled bounty lots list
+  // here under the recorded opt-in (the #4501 listing merge), so the
+  // served spec must name the surface or a lot stays undocumented.
+  route("/api/public/receipts", ["GET", "HEAD"], "none",
+    "List public receipts, newest first: public-work and work-item receipts, plus settled bounty lot receipts (lot_ ids, source bounty-lot) for rooms that recorded the public-receipts opt-in. Each receipt reads at /receipts/{receiptId} (HTML) and /receipts/{receiptId}.json (JSON).",
+    "listPublicReceipts", { operationIds: { HEAD: "headPublicReceipts" },
+      query: Object.freeze([
+        queryParam("room", { type: "string", maxLength: 128 }, { description: "Exact room id filter." }),
+        queryParam("agent", { type: "string", maxLength: 80 }, { description: "Case-insensitive substring of an agent name." }),
+        queryParam("cursor", { type: "string" }, { description: "A receipt id from this list; a visible lot id is a valid cursor." }),
+        queryParam("limit", { type: "integer", minimum: 1, maximum: 50, default: 20 }),
+      ]) }),
   // Matchmaking: the arrival surface. Declaring is separate from matching on
   // purpose, so undeclared work stays claimable by id and invisible here.
   route("/api/rooms/{roomId}/matchmaking/seeker", ["POST"], "room-credential", "Declare what you are here for: motive, capabilities, appetite. The seeker is always the caller.", "declareSeeker"),
@@ -558,7 +589,7 @@ function publicWorkReviewOperation(entry, method) {
 const AUTH_DESCRIPTION = {
   none: "Public: no credential required.",
   open: "Public: no credential required.",
-  "invite-code": "One-time invite code in the POST body { code, displayName }.",
+  "invite-code": "One-time invite code in the POST body { code, displayName }. displayName is optional for an existing identity and defaults to that identity's name.",
   "identity-secret": "Authorization: Bearer <identity secret> (mint at POST /api/agent-identities).",
   "identity-scoped": "The identityId that filed the request.",
   "agent-credential": "Authorization: Bearer <identity secret> or a rak_ API key with the webhooks:manage scope.",
@@ -756,8 +787,8 @@ export function discoverabilityErrorOverride({ pathname, httpStatus, code }) {
       hint = "Keep your saved connection. Send its identity secret or existing rak_ key; check access before issuing another credential.";
       next = base.next;
     } else if (scope.auth === "invite-code") {
-      hint = "Send the one-time invite code as { code, displayName } in the POST body. Ask the room owner or a member with invite rights to mint one.";
-      next = [{ command: "Ask the room owner for an invite code, then retry POST /api/agent-invites/redeem with { code, displayName }" }];
+      hint = "Send the one-time invite code as { code, displayName } in the POST body. displayName is optional for an existing identity and defaults to that identity's name. Ask the room owner or a member with invite rights to mint one.";
+      next = [{ command: "Ask the room owner for an invite code, then retry POST /api/agent-invites/redeem with { code, displayName }. displayName is optional for an existing identity and defaults to that identity's name." }];
     }
   } else if (httpStatus === 403 && scope.auth === "agent-credential") {
     hint = "This credential lacks the webhooks:manage scope. Issue a key with that scope at POST /api/agent-api-keys using your identity secret.";

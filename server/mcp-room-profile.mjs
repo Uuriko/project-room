@@ -28,6 +28,7 @@ import { memoizeBoardList } from "./available-work.mjs";
 import { walkProvenance, ClaimError } from "./work-claims.mjs";
 import { randomUUID } from "node:crypto";
 import { validId, ROOM_KINDS, MAX_MESSAGE_BODY_CHARS } from "../src/events.js";
+import { joinLinkWithProfile, profileBody, redeemInviteWithProfile, setMemberJoinProfile, checkedJoinProfile, throwJoinProfile } from "./agent-join-profile.mjs";
 import { nextWorkStep } from "../src/workflow.js";
 import { completedResults, searchWork } from "../src/work-selectors.js";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
@@ -163,6 +164,7 @@ function validRoomArgs(name, args) {
   if (args.roomId !== undefined && !validId(args.roomId)) return false;
   if (name === "room_check_access" || name === "room_activation_pack") return true;
   if (name === "room_member_card") return validId(args.memberId);
+  if (name === "room_member_profile") return validId(args.memberId);
   if (name === "squads_list") return true;
   if (name === "room_map") {
     const repoOk = args.repo === undefined || typeof args.repo === "string" && args.repo.length >= 3 && args.repo.length <= 200;
@@ -528,8 +530,8 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_join") {
     const displayName = args.displayName ?? identity.displayName;
-    if (args.linkToken !== undefined) return store.shareLinks.joinAgent(secret, args.linkToken, displayName);
-    if (args.inviteCode !== undefined) return store.invites.redeem(args.inviteCode, { displayName, identitySecret: secret });
+    if (args.linkToken !== undefined) return joinLinkWithProfile(store, secret, args.linkToken, displayName, args.profile);
+    if (args.inviteCode !== undefined) return redeemInviteWithProfile(store, args.inviteCode, { displayName, identitySecret: secret }, args.profile);
     if (args.pairId !== undefined) return store.pairing.pollHeld(args.pairId, identity.identityId);
     const started = store.pairing.start({
       roomId: args.roomId, displayName,
@@ -543,6 +545,39 @@ function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   }
   if (name === "room_merge_members") {
     return store.pairing.merge(secret, args.roomId, { keepMemberId: args.keepMemberId, retireMemberId: args.retireMemberId });
+  }
+  if (name === "room_member_profile") {
+    if (args.profile !== undefined && !mcpKeyGrantsScope(store, secret, "rooms:write")) {
+      throw new ServiceError(403, "insufficient_scope", "API key lacks the rooms:write scope");
+    }
+    const auth = store.authenticate(secret, args.roomId);
+    const state = store.room(args.roomId).state;
+    const member = state.members?.[args.memberId];
+    if (!member) throw new ServiceError(404, "unknown_member", "No such member");
+    if (member.active === false) throw new ServiceError(403, "access_ended", "Membership is no longer active");
+    if (member.kind !== "agent") {
+      throwJoinProfile({
+        code: "join_profile_invalid",
+        message: "Join profiles are for agent members.",
+        next: "Read the member roster. Join profiles belong to agent members.",
+      });
+    }
+    if (auth.member.id !== member.id && auth.member.id !== state.room.ownerId) {
+      throwJoinProfile({
+        code: "join_profile_forbidden",
+        message: "Only this member or the room owner can read or change this join profile.",
+        next: "Retry as this member or the room owner.",
+      });
+    }
+    if (args.profile === undefined) return profileBody(args.roomId, member.id, member);
+    enforceAutonomyTierForAction({
+      db: store.db, roomId: args.roomId, state, actor: auth.member, action: "change a join profile",
+    });
+    const partial = checkedJoinProfile(args.profile, { partial: true });
+    const saved = store.transaction(() => setMemberJoinProfile(store, args.roomId, {
+      actorId: auth.member.id, memberId: member.id, partial,
+    }));
+    return profileBody(args.roomId, member.id, saved.member, saved.unchanged ? { unchanged: true } : {});
   }
   if (name === "room_check_access" && args.roomId === undefined) {
     const allowed = mcpRoomAllowlist(store, secret);

@@ -418,6 +418,7 @@ const AX_NAMED_RECOVERIES = {
   invite_not_active: ["Only an unredeemed invite can be revoked. Read the invite's current state; nothing was revoked.", "Re-read the invite; only an unredeemed one can be revoked."],
   invite_rejected: ["The invite was rejected — the message names why. Fix the named cause; do not retry unchanged.", "Fix the cause named in the message; do not retry unchanged."],
   invite_unavailable: ["This invite code cannot be redeemed. Check for typos or ask the inviter for a fresh code.", "Check the code for typos, or ask the inviter for a fresh code."],
+  join_profile_conflict: [uiText("agentError.joinProfileConflict.hint"), uiText("agentError.joinProfileConflict.next")],
   join_session_lost: ["Your earlier join used another browser session. Return to that session or sign in with the same account; agents should reuse their saved agent identity.", "Return to the original session or sign in with the same account; agents: reuse the saved agent identity."],
   last_login_method: ["Keep at least one active sign-in method. Add another method before removing this one.", "Add another sign-in method first, then remove this one."],
   last_unverified_email: ["Verify an email before removing your last email sign-in method.", "Verify an email first, then remove the unverified one."],
@@ -600,8 +601,10 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
   if (httpStatus === 401 || reasonCode === "unauthenticated") {
     return {
       status: "action_required", reason: "unauthenticated",
-      hint: "Keep your saved connection and check existing access before creating another identity. An expired room token (rak_) recovers with your identity secret.",
+      hint: uiText("agentError.unauthenticated.mintHint"),
       next: [
+        command(uiText("agentError.unauthenticated.mintNext")),
+        path("/llms.txt"),
         tool("room_check_access"),
         path("/api/agent-rooms"),
         path("/api/session"),
@@ -808,6 +811,13 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         : "Ask the owner for a contribute, review, or collaborate profile before creating or claiming work.")]
     };
   }
+  if (reasonCode === "join_profile_forbidden") {
+    return {
+      status: "action_required", reason: "join_profile_forbidden",
+      hint: uiText("agentError.joinProfileForbidden.hint"),
+      next: [command(uiText("agentError.joinProfileForbidden.next"))]
+    };
+  }
   if (httpStatus === 403 || ["access_denied", "owner_required", "host_denied", "proxy_denied", "csrf_denied"].includes(reasonCode)) {
     return {
       status: "action_required",
@@ -883,6 +893,10 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
     };
   }
   if (inputRefused(httpStatus, reasonCode, message) || reasonCode === "work_input_refused") {
+    if (typeof reasonCode === "string" && reasonCode.startsWith("join_profile_")) {
+      const step = publicHint(message, uiText("agentError.joinProfileField.next"));
+      return { status: "action_required", reason: reasonCode, hint: step, next: [command(step)] };
+    }
     if (reasonCode === "invalid_arguments") {
       return {
         status: "action_required", reason: "invalid_arguments",

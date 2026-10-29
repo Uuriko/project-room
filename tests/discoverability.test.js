@@ -154,7 +154,10 @@ test("canonical errors: 401s on listed routes preserve saved connections with re
     const body = await res.json();
     assertCanonicalEnvelope(t, body, `${method} ${path}`);
     const text = JSON.stringify(body);
-    assert.equal(body.next[0].tool, "room_check_access");
+    const first = body.next[0];
+    const firstText = first.command ?? first.path ?? first.tool ?? "";
+    assert.match(firstText, /POST \/api\/agent-identities/, `${method} ${path} leads with the mint`);
+    assert.ok(body.next.some(step => step.tool === "room_check_access"), `${method} ${path} still offers room_check_access`);
     assert.ok(!body.next.some(step => step.method === "POST"), "no automatic credential issuance step");
     assert.match(text, /saved connection/i);
   }
@@ -343,7 +346,7 @@ test("openapi: routes declaring request bodies document them on the served spec"
     // Colony round-2 (musespark-explorer, 2026-10-06): the served spec carried
     // no requestBody for POST /api/agent-invites/redeem while docs/openapi.yaml
     // did — the 10-03 fix covered the enrollment routes but never redeem.
-    "/api/agent-invites/redeem": ["code", "displayName"],
+    "/api/agent-invites/redeem": ["code"],
   };
   for (const [path, required] of Object.entries(ENROLLMENT)) {
     const op = doc.paths[path]?.post;
@@ -359,6 +362,9 @@ test("openapi: routes declaring request bodies document them on the served spec"
       assert.ok(schema.properties?.[field], `POST ${path} defines required field ${field}`);
     }
   }
+  const redeemName = doc.paths["/api/agent-invites/redeem"].post.requestBody.content["application/json"].schema.properties.displayName;
+  assert.match(redeemName.description, /optional for an existing identity/i);
+  assert.equal(redeemName.maxLength, 80);
   // General contract: every route-table-declared body is emitted verbatim —
   // the served spec cannot drift from the table's declared schemas.
   let declared = 0;

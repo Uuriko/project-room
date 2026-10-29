@@ -42,6 +42,7 @@ import {
   updateRequestDigest, requestReplayVerdict, bindReviewerRequestOutcome, reviewerRequestOutcome, reviewerReadingAckMatches, hasCurrentReview,
   openClaimCount, STALE_UNCLAIMED_DAYS,
 } from "./work-claims.mjs";
+import { effectiveOpenClaimLimit } from "../src/agent-join-profile.js";
 import { findDuplicates, DuplicateError } from "./work-duplicates.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { evaluateReceipt } from "./jev-receipts.mjs";
@@ -67,7 +68,7 @@ import { agentErrorBody } from "../src/agent-error.mjs";
 import { SOURCE_REVISION } from "./version.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
-import { isRoomArchived, publicReceipts } from "../src/events.js";
+import { isRoomArchived, ownMember, publicReceipts } from "../src/events.js";
 
 const CLAIM_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
@@ -862,6 +863,18 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
   const roomLike = { workClaims: registry.rawConfig(roomId) };
   const access = resolveWorkClaimAccess(store, roomId, auth);
   const requireWriter = () => { if (!mayWriteWorkClaims(access)) refuseWorkClaims(); };
+  // Profile permission before any holder or owner name. A chat member must
+  // learn they cannot use the board, not who holds the item. Claim managers
+  // may release and reassign without a write profile; reviewers and managers
+  // may still reach the update route's own gates.
+  const requireClaimActor = () => {
+    // Release and reassign stay open to a reviewer who holds the item.
+    // Someone with no work profile is refused before the holder is named.
+    if (!mayWriteWorkClaims(access) && !mayReviewWorkClaims(access) && !mayManageAnyClaim(access)) refuseWorkClaims();
+  };
+  const requireClaimOrReviewActor = () => {
+    if (!mayWriteWorkClaims(access) && !mayReviewWorkClaims(access) && !mayManageAnyClaim(access)) refuseWorkClaims();
+  };
   // Q3-A: with under 10% of the room's event budget left, Board writes from
   // members without claim authority get 409 room_event_budget_low.
   const requireEventBudget = () => assertBoardEventBudget(access.authority?.sequence, { privileged: mayManageAnyClaim(access) });
@@ -1031,7 +1044,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     const assignee = data.assignee;
     if (assignee !== undefined) {
       const members = store.roomAuthority(roomId).members ?? {};
-      const member = typeof assignee === "string" ? members[assignee] : null;
+      const member = typeof assignee === "string" ? ownMember(members, assignee) : null;
       if (!member || member.active === false) {
         reject(422, "work_assignee_unknown_member",
           `assignee "${typeof assignee === "string" ? assignee : "?"}" is not an active member of this room`);
@@ -1047,9 +1060,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     let item = runPure(reject, () => createWork({ id, title: data.title, reviewPolicy, note: data.note, tags: data.tags, files: data.files, dependsOn: data.dependsOn, parentClaimId: data.parentClaimId, evidenceRefs: data.evidenceRefs, pullRequest: data.pullRequest, pullRequests: data.pullRequests, repo: data.repo, branch: data.branch, kind: data.kind, revision: data.revision, squadId: data.squadId, acceptanceCriteria: data.acceptanceCriteria }, { now: nowMs, agentId: caller }));
     if (assignee) {
       const held = registry.list(roomId).filter(entry => entry.owner === assignee && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-      if (held >= config.maxMemberOpenClaims) {
+      const assigneeLimit = effectiveOpenClaimLimit(ownMember(store.roomAuthority(roomId).members, assignee), config.maxMemberOpenClaims);
+      if (held >= assigneeLimit) {
         refuseCap("too_many_open_claims",
-          `${assignee} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          `${assignee} already holds ${assigneeLimit} open claims. Release or finish one before assigning another.`,
           "Release or finish an open claim before assigning another.");
       }
       item = runPure(reject, () => claimWork(item, assignee, {
@@ -1083,6 +1097,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, withProjectMapOverlap(store, roomId, withContentTrust(stampClaim(withPullSettlement(load(claimIdOf(reject, workClaimId))), caller))));
   }
   if (workClaimRoute === "claim" && req.method === "POST") {
+    requireWriter();
     const data = body(req);
     if (!shape(data, { optional: ["note", "leaseHours", "files", "advisory", "dependsOn", "parentClaimId", "evidenceRefs", "pullRequest", "pullRequests", "repo", "branch"] })) invalidInput(reject, "{note?, leaseHours?, files?, advisory?, dependsOn?, parentClaimId?, evidenceRefs?, pullRequest?, pullRequests?, repo?, branch?}");
     if ("advisory" in data && typeof data.advisory !== "boolean") invalidInput(reject, "advisory true or false");
@@ -1100,7 +1115,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       reject(409, "work_claim_conflict",
         `Work "${item.id}" is held by ${item.owner ?? "someone else"} — ask them to reassign or release it`);
     }
-    requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);
@@ -1127,9 +1141,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     }
     Object.assign(data, clientPullRequestInput(reject, boardTextFields(reject, data, { note: { multiline: true } })));
     const held = registry.list(roomId).filter(entry => entry.owner === caller && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-    if (held >= config.maxMemberOpenClaims) {
+    const claimLimit = effectiveOpenClaimLimit(ownMember(store.roomAuthority(roomId).members, caller), config.maxMemberOpenClaims);
+    if (held >= claimLimit) {
       refuseCap("too_many_open_claims",
-        `You already hold ${config.maxMemberOpenClaims} open claims. Release or finish one before claiming another.`,
+        `You already hold ${claimLimit} open claims. Release or finish one before claiming another.`,
         "Release or finish an open claim before claiming another.");
     }
     const claimed = runPure(reject, () => claimWork(item, caller, {
@@ -1176,6 +1191,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
       requiredReading: requiredReadingFor(item.kind) }));
   }
   if (workClaimRoute === "update" && req.method === "POST") {
+    requireClaimOrReviewActor();
     const data = body(req);
     if (!shape(data, { optional: ["state", "note", "deliveryMode", "reviewedBy", "tags", "blobs", "readingAck", "parentClaimId", "evidenceRefs", "delivery", "requestId", "expectedClaimedAt", "expectedHistoryLength"] })) invalidInput(reject, "{state?, note?, deliveryMode?, reviewedBy?, tags?, blobs?, readingAck?, parentClaimId?, evidenceRefs?, delivery?, requestId?, expectedClaimedAt?, expectedHistoryLength?}");
     if (data.requestId !== undefined
@@ -1436,6 +1452,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, closed);
   }
   if (workClaimRoute === "release" && req.method === "POST") {
+    requireClaimActor();
     const data = body(req);
     const item = load(claimIdOf(reject, workClaimId));
     const authority = authorityOver(item);
@@ -1472,6 +1489,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     return json(res, 200, released);
   }
   if (workClaimRoute === "reassign" && req.method === "POST") {
+    requireClaimActor();
     const data = body(req);
     if (!shape(data, { required: ["newOwner", "expectedClaimedAt", "expectedHistoryLength"], optional: ["note"] }))
       invalidInput(reject, "{newOwner, expectedClaimedAt, expectedHistoryLength, note?}");
@@ -1483,7 +1501,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // room membership: the new owner must be a current, active member.
     const members = store.roomAuthority(roomId).members ?? {};
     const target = data.newOwner;
-    const targetMember = typeof target === "string" ? members[target] : null;
+    const targetMember = typeof target === "string" ? ownMember(members, target) : null;
     if (!targetMember || targetMember.active === false) {
       reject(422, "work_reassign_unknown_member",
         `newOwner "${typeof target === "string" ? target : "?"}" is not an active member of this room — reassign names a current memberId`);
@@ -1492,9 +1510,10 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // create-with-assignee do; otherwise reassign bypasses the per-member cap.
     if (target !== item.owner) {
       const held = registry.list(roomId).filter(entry => entry.owner === target && ACTIVE_CLAIM_STATES.includes(entry.state)).length;
-      if (held >= config.maxMemberOpenClaims) {
+      const targetLimit = effectiveOpenClaimLimit(targetMember, config.maxMemberOpenClaims);
+      if (held >= targetLimit) {
         refuseCap("too_many_open_claims",
-          `${target} already holds ${config.maxMemberOpenClaims} open claims. Release or finish one before assigning another.`,
+          `${target} already holds ${targetLimit} open claims. Release or finish one before assigning another.`,
           "Release or finish an open claim before assigning another.");
       }
     }
@@ -1530,6 +1549,7 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // citing their own public progress message, posted in this room after
     // the current lease window began. Renewals are discussed in the channel —
     // a stale holder can't hold work indefinitely without showing progress.
+    requireWriter();
     const data = body(req);
     if (!shape(data, { optional: ["progressMessageId", "note", "leaseHours"] })) invalidInput(reject, "{progressMessageId?, note?, leaseHours?}");
     const item = load(claimIdOf(reject, workClaimId));
@@ -1544,7 +1564,6 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
         : `Work "${item.id}" is not claimed — claim it first, then renew`);
     }
     if (item.owner !== caller) reject(403, "work_not_owner", `Work "${item.id}" is owned by ${item.owner ?? "nobody"} — only the owner can change it`);
-    requireWriter();
     requireEventBudget();
     assertLeaseChoice(data);
     assertBoardLeaseHours(reject, data);

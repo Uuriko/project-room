@@ -34,6 +34,22 @@ import { connectFields, starterFor } from "./routes/agent-connect.mjs";
 import { ONBOARDING_REPLAY_WINDOW_MS, onboardingRotateNext } from "./agent-rooms.mjs";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
+const DEFAULT_INVITE_NAME = "Invited agent";
+
+// A non-blank displayName wins and must be 1-80 characters. Blank (omitted
+// or whitespace) with a resolved identity uses that identity's name, not
+// the invite row's label. With no identity, the invite's stored name, then
+// "Invited agent". The receipt check and the join path share this so a
+// retry that also omits displayName replays instead of conflicting.
+function redeemDisplayName(displayName, existingIdentity, inviteName) {
+  const given = typeof displayName === "string" ? displayName.trim() : "";
+  const identityName = existingIdentity && typeof existingIdentity.displayName === "string"
+    ? existingIdentity.displayName.trim() : "";
+  const stored = typeof inviteName === "string" ? inviteName.trim() : "";
+  const name = given || (existingIdentity ? identityName : "") || stored || DEFAULT_INVITE_NAME;
+  if (!name || name.length > 80) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
+  return name;
+}
 const hash = text => createHash("sha256").update(text).digest("hex");
 // Mirrors the projection compaction in store.mjs: strip replay-only caches.
 const compactState = state => ({ ...state, eventLog: [], seenEvents: {}, seenIdempotencyKeys: {} });
@@ -451,8 +467,7 @@ export class AgentInvites {
       if (requestId !== null) {
         const receipt = this.db.prepare("SELECT * FROM agent_invite_redeem_receipts WHERE request_id=?").get(requestId);
         if (receipt) {
-          const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
-            : row.display_name || DEFAULT_INVITE_NAME;
+          const name = redeemDisplayName(displayName, existingIdentity, row.display_name);
           if (receipt.code_hash !== row.code_hash || receipt.display_name !== name)
             fail(409, "invite_redeem_idempotency_conflict", "This request id already redeemed a different invite.");
           // A caller that presents an identity credential must be the identity
@@ -486,16 +501,14 @@ export class AgentInvites {
       if (row.owner_equivalent === 1 && row.created_by !== room.state.room.ownerId) {
         fail(409, "invite_authority_changed", "Inviter authority changed; ask for a new invite code");
       }
-      // Reserve two event slots: member.added plus the referral.completed
-      // journal event written in the same transaction. A one-slot check would
-      // admit the member at the last slot and then fail journaling the
-      // referral, rolling the whole join back after the fact.
-      if (room.sequence + 1 >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
+      // Invite joins write one room event (member.added, which carries
+      // referredBy). referrals.record journals referral.completed only for
+      // access-request joins (via !== "invite") and guards its own slot, so
+      // one free slot is enough here.
+      if (room.sequence >= PILOT_LIMITS.eventsPerRoom || activeMemberCount(room.state.members) >= PILOT_LIMITS.membersPerRoom) {
         fail(409, "pilot_limit", "Bounded pilot capacity reached; no data was changed");
       }
-      const name = typeof displayName === "string" && displayName.trim() ? displayName.trim()
-        : row.display_name || DEFAULT_INVITE_NAME;
-      if (name.length > 80) fail(422, "invalid_invite_name", "displayName must be 1-80 characters");
+      const name = redeemDisplayName(displayName, existingIdentity, row.display_name);
       // #3382: an already-linked identity redeeming a fresh code must get
       // the reconcile answer BEFORE the name guard runs — when it re-joins
       // under its own member name, the guard's collision IS its own
@@ -768,13 +781,12 @@ const withConnect = (store, roomId, memberId, body) => {
   return { ...body, connect: connectFields(), ...(starter ? { starter } : {}) };
 };
 
-const DEFAULT_INVITE_NAME = "Invited agent";
-
 function replayRedeemNext(roomId, displayName, redeemedAt, now) {
   const age = typeof redeemedAt === "number" ? now - redeemedAt : 0;
   const rotate = onboardingRotateNext(roomId, age <= ONBOARDING_REPLAY_WINDOW_MS);
   return Object.freeze([rotate, ...redeemNext(roomId, displayName)]);
 }
+
 
 const redeemNext = (roomId, displayName) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
@@ -813,7 +825,7 @@ const createNext = (roomId, code) => {
   const room = `/api/rooms/${encodeURIComponent(roomId)}`;
   return Object.freeze([
     Object.freeze({ action: "share-code", description:
-      `Share this one-time code with the invitee out-of-band (chat, email, DM). The invitee joins at POST /api/agent-invites/redeem with { code: "${code}", displayName: "Their Name" } — the code burns on redeem.` }),
+      `Share this one-time code with the invitee out-of-band (chat, email, DM). The invitee joins at POST /api/agent-invites/redeem with { code: "${code}", displayName: "Their Name" } — the code burns on redeem. displayName is optional for an existing identity and defaults to that identity's name.` }),
     Object.freeze({ action: "preview-invite", method: "POST",
       path: "/api/agent-invites/preview",
       description: `See exactly what the invitee sees before redeeming: the room's consent screen (room name, inviter, permissions). Send { code: "${code}" } in the POST body — never put the code in a URL, where access logs and browser history would keep the live credential. No identity data is revealed.` }),

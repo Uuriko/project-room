@@ -102,10 +102,12 @@ export class AgentConnections {
     const keyUse = link ? this.db.prepare(`SELECT last_used_at AS lastUsedAt, last_used_ua AS lastUsedUa
       FROM agent_api_keys WHERE identity_id=? AND instr(scopes_json, ?) > 0
       ORDER BY COALESCE(last_used_at, 0) DESC LIMIT 1`).get(link.identityId, `mcp:room:${row.room_id}`) : null;
+    const read = this.db.prepare("SELECT MAX(updated_at) AS readAt FROM read_horizons WHERE room_id=? AND member_id=?").get(row.room_id, row.member_id);
     return { roomId: row.room_id, memberId: row.member_id, displayName: member.displayName, generation: row.generation,
       memberRevision: member.revision, permissions: member.permissions, expiresAt: row.expires_at, status, firstActionAt,
       identityLastUsedAt: usage?.lastUsedAt ?? null, identityLastUsedUa: usage?.lastUsedUa ?? null,
-      keyLastUsedAt: keyUse?.lastUsedAt ?? null, keyLastUsedUa: keyUse?.lastUsedUa ?? null };
+      keyLastUsedAt: keyUse?.lastUsedAt ?? null, keyLastUsedUa: keyUse?.lastUsedUa ?? null,
+      readAt: Number.isSafeInteger(read?.readAt) ? read.readAt : null };
   }
   assertCredential(credential) {
     const row = this.row(credential.room_id, credential.member_id);

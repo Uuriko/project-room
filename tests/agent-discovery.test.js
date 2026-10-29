@@ -132,10 +132,13 @@ test("short and full packets tell a pasted agent the next action; kits and door 
   assert.ok(afterAt > joinAt, "After paste follows Join");
   assert.ok(routesAt > afterAt, "Routes follow After paste");
   assert.equal(full.includes(AFTER_PASTE_SECTION), true);
-  assert.match(full, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
-  assert.match(full, /#room\/\{roomId\} is not an invite/);
-  assert.match(text, /\[Full agent packet\]\(https:\/\/room\.trydemigod\.com\/llms-full\.txt\)/);
+  assert.match(text, /before the first write/);
+  assert.equal(text.includes("## After paste"), false, "the short index points at the full packet instead of repeating After paste");
   assert.equal(text.includes(AFTER_PASTE_SECTION), false, "the short index points at the full packet instead of embedding After paste");
+  for (const packet of [text, full]) {
+    assert.match(packet, /Humans: open this invite link \(https:\/\/room\.trydemigod\.com\/#join\/…\)/);
+    assert.match(packet, /#room\/\{roomId\} is not an invite/);
+  }
   assert.equal(kitsTxt().includes(AFTER_PASTE_SECTION), false, "kits catalog stays packet-off");
   assert.equal(kitsTxt().includes("## After paste"), false);
   const packetSkill = agentCard().skills.find(row => row.id === "packet");
@@ -195,7 +198,7 @@ test("Room Worker serves llms.txt, llms-full.txt, agent.json and /room aliases",
     // static doc plus `"members": []`.
     const expectedBody = discoveryDoc(path) === discoveryDoc("/skills")
       ? JSON.stringify({ ...JSON.parse(expected.body), members: [] }, null, 2) + "\n"
-      : expected.body;
+      : discoveryDoc(path, origin).body;
     assert.equal(await get.text(), expectedBody, path);
     const head = await fetch(origin + path, { method: "HEAD" });
     assert.equal(head.status, 200, path);
@@ -280,7 +283,7 @@ test("conventional skill/agent filenames serve the same short packet as /llms.tx
       assert.equal(discoveryDoc(path).type, short.type, path);
       const get = await fetch(origin + path);
       assert.equal(get.status, 200, path);
-      assert.equal(await get.text(), short.body);
+      assert.equal(await get.text(), discoveryDoc(path, origin).body);
     }
   }
 });
@@ -396,7 +399,7 @@ test("www leftover synonyms serve the short packet or agent card, not 404", asyn
     const get = await fetch(origin + path);
     assert.equal(get.status, 200, path);
     assert.equal(get.headers.get("content-type"), short.type, path);
-    assert.equal(await get.text(), short.body, path);
+    assert.equal(await get.text(), discoveryDoc(path, origin).body, path);
   }
   for (const path of ["/room/agent.json", "/room/agent.json/"]) {
     assert.equal(discoveryDoc(path).body, card.body, path);
@@ -556,7 +559,7 @@ test("advertised door root redirects to the app; packets stay at /room/llms.txt"
     const plain = await fetch(`${base}${path}`, { headers: { Accept: "text/plain" } });
     assert.equal(plain.status, 200, path);
     assert.match(plain.headers.get("content-type"), /text\/plain/);
-    assert.equal(await plain.text(), llmsTxt());
+    assert.equal(await plain.text(), llmsTxt(base));
   }
   const workspace = await fetch(`${base}/`);
   assert.equal(workspace.status, 200);
@@ -565,7 +568,44 @@ test("advertised door root redirects to the app; packets stay at /room/llms.txt"
   const packet = await fetch(`${base}/room/llms.txt`);
   assert.equal(packet.status, 200);
   assert.match(packet.headers.get("content-type"), /text\/plain/);
-  assert.equal(await packet.text(), llmsTxt());
+  assert.equal(await packet.text(), llmsTxt(base));
+});
+
+test("#3655: a packet served from a non-production origin carries that origin's front-door links", async (t) => {
+  const staging = "https://staging.example.test";
+  const shortPacket = llmsTxt(staging);
+  assert.ok(shortPacket.includes(`[Full agent packet](${staging}/llms-full.txt)`), "llms.txt full-packet link");
+  assert.ok(shortPacket.includes(`[Hosted MCP](${staging}/mcp)`), "llms.txt MCP link");
+  assert.ok(shortPacket.includes(`[Machine-readable card](${staging}/.well-known/agent.json)`), "llms.txt card link");
+  assert.ok(!shortPacket.includes(ROOM_ORIGIN), "llms.txt must not link the production origin");
+  const fullPacket = llmsFullTxt(staging);
+  assert.ok(fullPacket.includes(`[Short agent packet](${staging}/llms.txt)`), "llms-full.txt short-packet link");
+  assert.ok(fullPacket.includes(`[Hosted MCP](${staging}/mcp)`), "llms-full.txt MCP link");
+  assert.ok(fullPacket.includes(`[Machine-readable card](${staging}/.well-known/agent.json)`), "llms-full.txt card link");
+  assert.ok(!fullPacket.includes(ROOM_ORIGIN), "llms-full.txt must not link the production origin");
+  // Default and canonical-origin packets are byte-identical to before.
+  assert.ok(llmsTxt().includes(`[Full agent packet](${ROOM_ORIGIN}/llms-full.txt)`));
+  assert.equal(llmsTxt(ROOM_ORIGIN), llmsTxt());
+  assert.equal(llmsFullTxt(ROOM_ORIGIN), llmsFullTxt());
+  // Invalid origins fall back to the canonical packet instead of
+  // producing links to a non-origin string.
+  assert.equal(llmsTxt("not a url"), llmsTxt());
+  assert.equal(llmsTxt("https://example.test/some/path"), llmsTxt());
+  // discoveryDoc threads the serving origin for the packets and their
+  // aliases only; other docs keep their frozen identity.
+  assert.equal(discoveryDoc("/llms.txt", staging).body, llmsTxt(staging));
+  assert.equal(discoveryDoc("/room/llms.txt", staging).body, llmsTxt(staging));
+  assert.equal(discoveryDoc("/llms-full.txt", staging).body, llmsFullTxt(staging));
+  assert.equal(discoveryDoc("/llms.txt").body, llmsTxt());
+  assert.equal(discoveryDoc("/.well-known/agent.json", staging), discoveryDoc("/.well-known/agent.json"));
+  // Serve path: this server was created with no configured origin, so its
+  // packets describe its own loopback origin, not production.
+  const base = await serve(t);
+  const served = await (await fetch(`${base}/llms.txt`)).text();
+  assert.equal(served, llmsTxt(base));
+  assert.ok(served.includes(`[Hosted MCP](${base}/mcp)`));
+  const servedFull = await (await fetch(`${base}/llms-full.txt`)).text();
+  assert.equal(servedFull, llmsFullTxt(base));
 });
 
 test("edge door predicate: getdasha /room only, prefix preserved", () => {
@@ -686,8 +726,9 @@ test("llms.txt names room.trydemigod.com/mcp as the one canonical MCP URL (QA4 D
 
 test("llms-full.txt documents the work-claims REST contract (issue #1529)", () => {
   const text = llmsFullTxt();
+  assert.equal(llmsTxt().includes("## Work-claim board"), false, "the short index does not repeat the board encyclopedia");
   // The full packet names the board endpoints so an agent can
-  // coordinate machine work without reading openapi. The short index points there.
+  // coordinate machine work without reading openapi.
   assert.match(text, /^## Work-claim board$/m);
   const section = text.slice(text.indexOf("## Work-claim board"));
   assert.match(section, /GET \/api\/rooms\/{roomId}\/work-claims/);
@@ -705,25 +746,31 @@ test("llms-full.txt documents the work-claims REST contract (issue #1529)", () =
 // routes with reasons. The packets must state that coverage rule honestly;
 // an "every route" sentence is docs/live drift the moment it ships.
 // #3022: the short packet's two Board-wakes paragraphs told agents to poll
-// GET /api/agent-wakes/poll with no parameters and no prerequisites; the
-// literal call returns 422 invalid_wake_poll (hostId is required) and then
-// 404 agent_not_registered (a heartbeat must come first). Both paragraphs
-// now interpolate the one WAKE_POLL_INSTRUCTION sentence from the generator,
-// and this test fails if any wake-poll mention in any packet loses the
-// heartbeat-first + hostId shape again — or if a bare poll URL reappears.
+// GET /api/agent-wakes/poll with no parameters and no prerequisites. Both
+// paragraphs now interpolate the one WAKE_POLL_INSTRUCTION sentence from
+// the generator, and this test fails if any wake-poll mention in any
+// packet loses the heartbeat-first + hostId shape again — or if a bare
+// poll URL reappears. #3640: host derivation (tests/agent-wake-poll.test.js)
+// later made the omitted-hostId poll succeed for exactly-one-host agents,
+// so the packet sentence claiming a blanket 422 for polling without hostId
+// became false; the assertions below pin the derived-host truth so the
+// false sentence cannot return.
 test("every packet wake-poll mention teaches heartbeat-first with hostId (#3022)", () => {
   for (const [name, text] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()], ["SKILL.md", skillMd()]]) {
     assert.ok(!text.includes("/api/agent-wakes/poll`"), `${name}: no bare poll URL presented as the instruction`);
     assert.ok(!text.includes("/api/agent-wakes/poll\n"), `${name}: no bare poll URL at line end`);
+    assert.ok(!text.includes("Polling without `hostId` returns 422"), `${name}: no blanket-422 claim for an omitted hostId (#3640)`);
     for (const line of text.split("\n").filter(l => l.includes("Board wakes"))) {
       assert.ok(line.includes("/api/agent-heartbeats"), `${name}: Board-wakes line names the heartbeat-first step`);
       assert.ok(line.includes("agent-wakes/poll?hostId="), `${name}: Board-wakes line polls with ?hostId=`);
-      assert.ok(line.includes("invalid_wake_poll"), `${name}: Board-wakes line names the 422 for a missing hostId`);
+      assert.ok(line.includes("exactly one registered host"), `${name}: Board-wakes line teaches the one-host derivation (#3640)`);
+      assert.ok(line.includes("invalid_wake_poll"), `${name}: Board-wakes line names the 422 for an ambiguous hostId`);
       assert.ok(line.includes("agent_not_registered"), `${name}: Board-wakes line names the 404 before any heartbeat`);
     }
   }
   const wakesLines = llmsFullTxt().split("\n").filter(l => l.includes("Board wakes"));
   assert.equal(wakesLines.length, 2, "llms-full.txt keeps exactly its two Board-wakes paragraphs");
+  assert.equal(llmsTxt().split("\n").filter(l => l.includes("Board wakes")).length, 0, "the short index does not repeat the wake poll");
 });
 
 // The packet golden path (PUBLIC_WORK_SECTION, shared by llms.txt and
@@ -826,6 +873,8 @@ test("llms-full.txt is a section superset of llms.txt and no smaller", () => {
     assert.ok(headings(full).includes(heading), `llms-full.txt missing section: ${heading}`);
   }
   assert.ok(full.length >= text.length, `llms-full.txt (${full.length}) must not be smaller than llms.txt (${text.length})`);
+  assert.ok(text.length < 12000, `llms.txt stays a short index (${text.length} chars)`);
+  assert.match(text, /Bearer <room-mcp-token>/);
 });
 
 test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extended", async t => {

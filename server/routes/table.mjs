@@ -36,6 +36,7 @@ import { CODE_DROP_ROUTES } from "./code-drops.mjs"; // room-native patch exchan
 import { SQUAD_ROUTES } from "./squads.mjs"; // plan-squads
 import { PROJECT_MAP_ROUTES } from "./project-map.mjs";
 import { PUBLIC_AGENT_PAGE_ROUTES } from "./public-agent-page.mjs";
+import { AGENT_JOIN_PROFILE_ROUTES } from "./agent-join-profile.mjs";
 import { PAIRING_ROUTES } from "./pairing.mjs";
 
 export const AUTH_CLASSES = Object.freeze(["none", "room", "account", "bearer", "roomToken", "door", "mcp"]);
@@ -65,7 +66,12 @@ function unknownSchemaTypes(schema, out) {
 }
 
 // Rows land here as groups leave the legacy chain. Do not push; replace the array.
-export const ROUTES = Object.freeze([...AGENT_WORK_ROUTES, ...AGENT_ROOM_TOKEN_ROUTES, ...DEMO_ROUTES, ...DOWNLOAD_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PROJECT_MAP_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
+// The join-profile group's POST /api/agent-invites/redeem row is not mounted:
+// main's AGENT_INVITE_REDEEM_ROUTES owns that method+path (the dispatcher rejects
+// duplicates) and its handler is profile-aware, so the profile GET/PATCH rows are
+// the only rows mounted from AGENT_JOIN_PROFILE_ROUTES.
+const JOIN_PROFILE_MOUNTED_ROUTES = AGENT_JOIN_PROFILE_ROUTES.filter(row => row.id !== "redeem-agent-invite");
+export const ROUTES = Object.freeze([...JOIN_PROFILE_MOUNTED_ROUTES, ...AGENT_WORK_ROUTES, ...AGENT_ROOM_TOKEN_ROUTES, ...DEMO_ROUTES, ...DOWNLOAD_ROUTES, ...FRONT_DOOR_ROUTES, ...HUMAN_PUSH_ROUTES, ...SQUAD_ROUTES, ...PROJECT_MAP_ROUTES, ...PUBLIC_AGENT_PAGE_ROUTES, ...AUTH_ROUTES, ...ROOM_ASSISTANT_ROUTES, ...RECORD_RAIL_ROUTES,
   ...DESKTOP_AUTH_ROUTES, ...ACCOUNT_SESSION_ROUTES, ...SIGNIN_OPTIONS_ROUTES, ...INBOX_ROUTES, ...MEMBER_PERMISSION_ROUTES, ...AGENT_FLEET_ROUTES, ...WANTS_WORK_ROUTES, ...WORK_CLAIM_ROUTES, ...SPEND_GRANT_ROUTES, ...SPEND_PRICING_ROUTES, ...TYPING_ROUTES, ...ROOM_DIGEST_ROUTES, ...ROOM_WINDOW_ROUTES, ...CODE_DROP_ROUTES, ...WAKE_STATUS_ROUTES, ...AGENT_PRESENCE_ROUTES, ...DOOR_FUNNEL_ROUTES, ...VERDICT_INBOX_ROUTES, ...PR_WEBHOOK_ROUTES, ...PAIRING_ROUTES, ...AGENT_INVITE_REDEEM_ROUTES]);
 
 export function assertRouteRow(row) {

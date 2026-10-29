@@ -34,6 +34,12 @@
         is refused with that limit named (`body must be at most 65536 characters`).
         The client `say()` uses the same ceiling. Those two commands may be up
         to 512 KiB (413 `too_large`); every other command stays at 16 KiB.
+        `message.edited` and `message.deleted` require `data.expectedMessageRevision`,
+        the integer revision last read (`0` when the message has never been
+        edited). Missing or not an integer is 422 `invalid_command`:
+        `expectedMessageRevision is required (current revision is N)`. A
+        different integer is 422 `command_rejected`: `Message changed; refresh
+        before editing (current revision is N)`.
         Replies
         are pinned to the thread root's channel. A public thread reply may set
         `alsoSendToChannel: true` to also land as a top-level message in the

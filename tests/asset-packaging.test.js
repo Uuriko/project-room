@@ -8,6 +8,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { assetPaths, buildAssets } from '../cloudflare/build-assets.mjs';
 import { templateAssetPaths, generatedAgentPages } from '../server/public-assets.mjs';
+import { frontDoorHtml } from '../server/github-oauth.mjs';
 
 // Decision #36 (#3254, Option A): the generated agent pages are build output
 // and never committed, so a plain checkout (and every exact-commit package)
@@ -18,7 +19,6 @@ import { templateAssetPaths, generatedAgentPages } from '../server/public-assets
 const absentGenerated = file => generatedAgentPages.includes(file) && !existsSync(new URL('../' + file, import.meta.url));
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
-import { frontDoorHtml } from '../server/github-oauth.mjs';
 
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'room-assets-'));

@@ -30,6 +30,7 @@ export const MCP_TOOL_CONTRACTS = Object.freeze({
   room_read_bootstrap: { access: `read, ${MEMBER}`, cost: READ, rest: "GET /api/rooms/{roomId}/bootstrap" },
   room_create: { access: `write, ${ANY}; hidden from guest and read-only-tier agents`, cost: WRITE, rest: "POST /api/agent-rooms" },
   room_join: { access: `write, ${ANY} with a share link, invite code, or room pairing; hidden from guest and read-only-tier agents`, cost: WRITE, rest: "POST /api/share-links/join-agent or POST /api/agent-invites/redeem or POST /api/pair" },
+  room_member_profile: { access: `write, room member or the room owner; hidden from guest and read-only-tier agents`, cost: "one profile write or a read, starts no AI", rest: "GET or PATCH /api/rooms/{roomId}/members/{memberId}/profile" },
   room_merge_members: { access: `write, room owner or a member with manage_members and decide; hidden from guest and read-only-tier agents`, cost: WRITE, rest: "POST /api/rooms/{roomId}/members/merge" },
   room_put_file: { access: `write, ${MEMBER_WRITE}`, cost: "stages at most 1 MiB; others see nothing until room_commit_file", rest: "POST /api/rooms/{roomId}/files" },
   room_commit_file: { access: `write, ${MEMBER_WRITE}`, cost: WRITE, rest: "POST /api/rooms/{roomId}/files/{id}/commit" },

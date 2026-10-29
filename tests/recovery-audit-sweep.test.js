@@ -10,6 +10,7 @@ import { AccessRequests } from "../server/access-requests.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
 import { emitWorkClaimEvent } from "../server/work-claim-events.mjs";
 import { seedStarter } from "../server/starter-room.mjs";
+import { appendMemberProfile } from "../server/agent-join-profile.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 // A gate for one bug class, found three times in one day.
@@ -172,16 +173,18 @@ function sweep() {
     try { auditRecovery(fixture.store); }
     catch (error) { broke.push(`${T.ACCESS_REQUESTED}: ${error.message}`); }
   } catch { /* reported below, from the log, rather than swallowed here */ }
-  // referral.completed is appended by server/referrals.mjs, not by
-  // store.command, so the step() helper above cannot reach it. Driven through
-  // the real path: the sweep fixture's producer refers a new member.
+  // referral.completed is appended by server/referrals.mjs for access-request
+  // joins, not by store.command, so the step() helper above cannot reach it.
+  // Invite joins keep the referrals table row and do not write this event.
+  // Driven through the real access-request path so replay of the type still
+  // meets the auditors.
   try {
     const referee = fixture.store.identities.create("Sweep referee");
     fixture.store.command(fixture.keys.owner, "commons", {
       id: randomUUID(), type: T.MEMBER_ADDED,
       data: { memberId: referee.identityId, displayName: "Sweep referee", kind: "agent", permissions: ["steer"] },
     });
-    fixture.store.referrals.record({ roomId: "commons", referrerMemberId: "producer", refereeMemberId: referee.identityId, via: "invite" });
+    fixture.store.referrals.record({ roomId: "commons", referrerMemberId: "producer", refereeMemberId: referee.identityId, via: "request" });
     exercised.add(T.REFERRAL_COMPLETED);
     try { auditRecovery(fixture.store); }
     catch (error) { broke.push(`${T.REFERRAL_COMPLETED}: ${error.message}`); }
@@ -307,6 +310,19 @@ function sweep() {
   if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.ROOM_STARTER_SEEDED))
     broke.push(`${T.ROOM_STARTER_SEEDED}: the sweep never got this event into the log, so nothing was audited`);
 
+  // member.profile_set is not a command. The producer agent records a join profile
+  // before the room is archived.
+  try {
+    appendMemberProfile(fixture.store, "commons", {
+      actorId: "producer", memberId: "producer",
+      profile: { wake: "pull", events: "mentions-and-own-claims", maxClaims: 2, roles: ["builder"], detail: "brief", capabilities: ["agenda"] },
+    });
+    exercised.add(T.MEMBER_PROFILE_SET);
+    auditRecovery(fixture.store);
+  } catch (error) { broke.push(`${T.MEMBER_PROFILE_SET}: ${error.message}`); }
+  if (!fixture.store.db.prepare("SELECT 1 FROM events WHERE room_id='commons' AND json_extract(body,'$.type')=? LIMIT 1").get(T.MEMBER_PROFILE_SET))
+    broke.push(`${T.MEMBER_PROFILE_SET}: the sweep never got this event into the log, so nothing was audited`);
+
   // Last, because both end the room's normal life.
   step(T.OWNERSHIP_TRANSFERRED, "owner", { toMemberId: "producer", reason: "handing the room over" });
   step(T.ROOM_ARCHIVED, "producer", { reason: "pilot over" });
@@ -346,11 +362,12 @@ test("the event surface has not grown without this sweep noticing", () => {
   // land.updated is exercised above via report_tip (it is not a command).
   // work_claim.updated is exercised above via emitWorkClaimEvent (it is not a command).
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
+  // member.profile_set is exercised above via appendMemberProfile (it is not a command).
   // agent_invite.minted is exercised above via an owner-level invite mint (it is not a command).
   // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
   // member.merged and pair.requested/approved/denied are not exercised here:
   // they need an agent-pairing flow and two live agent members. They are
   // covered by tests/pairing-flow.test.js and tests/pairing-reconnect.test.js.
-  assert.equal(Object.values(T).length, 71,
+  assert.equal(Object.values(T).length, 72,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });

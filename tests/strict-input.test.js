@@ -13,6 +13,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { llmsFullTxt, llmsTxt } from "../server/agent-discovery.mjs";
+import { applyStrictInputNext } from "../server/strict-input.mjs";
 import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
@@ -68,7 +70,15 @@ async function serve(t) {
 
 async function errorOf(response) {
   const payload = await response.json();
-  return { status: response.status, code: payload.error?.code, message: payload.error?.message ?? "" };
+  return { status: response.status, code: payload.error?.code, message: payload.error?.message ?? "", next: payload.next ?? [] };
+}
+
+function assertNextNames(error, offending, accepted) {
+  const command = error.next[0]?.command ?? "";
+  assert.equal(command, applyStrictInputNext({}, { offending, accepted }).next[0].command);
+  for (const key of offending) assert.match(command, new RegExp(`\\b${key}\\b`), command);
+  if (accepted.length === 0) assert.match(command, /Accepted keys: none/, command);
+  else for (const key of accepted) assert.match(command, new RegExp(`\\b${key}\\b`), command);
 }
 
 test("search names unknown and repeated keys, and cursor walks every match", async t => {
@@ -81,6 +91,7 @@ test("search names unknown and repeated keys, and cursor walks every match", asy
   assert.equal(unknown.code, "invalid_search");
   assert.match(unknown.message, /bogus/);
   assert.match(unknown.message, /after/);
+  assertNextNames(unknown, ["bogus", "after"], ["q", "kind", "limit", "before", "cursor", "auth"]);
 
   const repeated = await errorOf(await request("/api/rooms/commons/search?q=q9page&q=other&kind=messages"));
   assert.equal(repeated.status, 422);
@@ -137,6 +148,8 @@ test("events require a zoned timestamp and a plain integer limit and after", asy
     assert.match(body.message, new RegExp(field), query);
     assert.match(body.message, new RegExp(EXAMPLE), query);
   };
+  const zoned = await errorOf(await request("/api/rooms/commons/events?since=2026-10-24T20:30:00"));
+  assertNextNames(zoned, ["since"], ["after", "limit", "actor", "since", "until", "type", "mentions", "compact", "auth", "tail"]);
   await timestamp("since=2026-10-24T20:30:00", "since");
   await timestamp("since=2026-10-24", "since");
   await timestamp("until=2026-10-24", "until");
@@ -189,6 +202,7 @@ test("typing, wants-work delete, and directory seed refuse a bad body and accept
     assert.equal(unknown.status, 422, `${method} ${path}`);
     assert.equal(unknown.code, code, `${method} ${path}`);
     assert.match(unknown.message, /extra/, `${method} ${path}`);
+    assertNextNames(unknown, ["extra"], []);
     const oversized = await errorOf(await request(path, { method, token, raw: '{"a":'.repeat(3000) + "0" + "}".repeat(3000) }));
     assert.equal(oversized.status, 413, `${method} ${path}`);
     assert.equal(oversized.code, "too_large", `${method} ${path}`);
@@ -233,6 +247,8 @@ test("suppressions and envelope sweep name unknown fields and refuse malformed J
     assert.equal(unknown.status, 422, `${method} ${path} ${unknown.message}`);
     assert.equal(unknown.code, "invalid_input");
     assert.match(unknown.message, /extra/);
+    if (path.endsWith("next-actions-suppressions")) assertNextNames(unknown, ["extra"], ["suppressions"]);
+    else assertNextNames(unknown, ["extra"], []);
     const oversized = await errorOf(await request(path, { method, raw: '{"a":'.repeat(3000) + "0" + "}".repeat(3000) }));
     assert.equal(oversized.status, 413, `${method} ${path}`);
     assert.equal(oversized.code, "too_large");
@@ -252,4 +268,14 @@ test("suppressions and envelope sweep name unknown fields and refuse malformed J
   const blank = await errorOf(await request("/api/rooms/commons/next-actions-suppressions", { method: "PUT", raw: "" }));
   assert.equal(blank.status, 400);
   assert.equal(blank.code, "invalid_json");
+});
+
+test("the agent packet names the strict-key refusal and the sign-in page", () => {
+  const short = llmsTxt();
+  const full = llmsFullTxt();
+  assert.ok(Buffer.byteLength(short) < 5120, `llms.txt is ${Buffer.byteLength(short)} bytes`);
+  assert.match(short, /422/);
+  assert.match(full, /offending key/);
+  assert.doesNotMatch(full, /silently ignored/);
+  assert.match(full, /\/agent-signin\.html/);
 });

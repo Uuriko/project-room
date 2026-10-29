@@ -9,6 +9,19 @@ import { base64LengthForBytes } from "./room-attachment-bytes.mjs";
 import { attachmentLimits } from "./attachment-schema.mjs";
 
 const schema = (properties = {}, required = []) => ({ type: "object", properties, required, additionalProperties: false });
+const joinProfileField = {
+  type: "object",
+  additionalProperties: false,
+  description: "Optional join profile. wake is push, webhook, or pull. events is mentions-and-own-claims (the default) or all. maxClaims is an integer from 1 to 10 (default 2). roles are any of coordinator, reviewer, builder. detail is brief or full. capabilities are at most 20 tags, each at most 40 characters. Omit the object to keep the defaults. This is not the invite access preset.",
+  properties: {
+    wake: { type: "string", enum: ["push", "webhook", "pull"] },
+    events: { type: "string", enum: ["mentions-and-own-claims", "all"] },
+    maxClaims: { type: "integer", minimum: 1, maximum: 10 },
+    roles: { type: "array", items: { type: "string", enum: ["coordinator", "reviewer", "builder"] } },
+    detail: { type: "string", enum: ["brief", "full"] },
+    capabilities: { type: "array", maxItems: 20, items: { type: "string", minLength: 1, maxLength: 40 } },
+  },
+};
 const tool = (name, description, inputSchema, readOnlyHint = true) => ({
   name, description, inputSchema,
   annotations: { readOnlyHint, destructiveHint: false, idempotentHint: true, openWorldHint: false }
@@ -33,14 +46,15 @@ export const hostedRoomTools = [
     requestId: { type: "string", minLength: 1, maxLength: 64, description: "Idempotency key for creates that omit roomId: retrying with the same requestId and parameters returns the original room (duplicate:true); reusing it with different parameters is 409 request_conflict." },
     displayName: { type: "string", minLength: 1, maxLength: 80 }
   }, ["title", "purpose"]), false),
-  tool("room_join", "Join a room this identity is not in yet. Pass linkToken (a #join share link) or inviteCode, not both. Or pass roomId to start device pairing (publicKey and keyProof reconnect an existing member). Pass pairId to poll a pair this identity already started. displayName defaults to this identity's name. Does not mint a new identity.", schema({
+  tool("room_join", "Join a room this identity is not in yet. Pass linkToken (a #join share link) or inviteCode, not both. Or pass roomId to start device pairing (publicKey and keyProof reconnect an existing member). Pass pairId to poll a pair this identity already started. displayName defaults to this identity's name. Optional profile declares wake, events, maxClaims, roles, detail, and capabilities; omit it to keep the defaults. Does not mint a new identity.", schema({
     linkToken: { type: "string", minLength: 1, maxLength: 200 },
     inviteCode: { type: "string", minLength: 1, maxLength: 80 },
     roomId: { type: "string", minLength: 1, maxLength: 128, description: "Room to pair into. Omit when passing linkToken, inviteCode, or pairId alone." },
     pairId: { ...idField, description: "Pair id from a previous room_join. Polls that pair." },
     publicKey: { type: "string", minLength: 1, maxLength: 128, description: "This agent's stable Ed25519 public key." },
     keyProof: { type: "string", minLength: 1, maxLength: 200, description: "Ed25519 signature over the pair proof, canonical base64." },
-    displayName: { type: "string", minLength: 1, maxLength: 80 }
+    displayName: { type: "string", minLength: 1, maxLength: 80 },
+    profile: joinProfileField
   }), false),
   tool("room_merge_members", "Merge two agent members. History, claims, and permissions move to keepMemberId. retireMemberId is retired and the merge is logged. Owner, or a member with both manage_members and decide. Same write as POST /api/rooms/:roomId/members/merge.", schema({
     roomId: roomIdField,
@@ -52,6 +66,11 @@ export const hostedRoomTools = [
     roomId: roomIdField,
     memberId: { ...idField, description: "Room member id whose directory card to read." }
   }, ["roomId", "memberId"])),
+  tool("room_member_profile", "Read or replace this agent's join profile. Same read as GET /api/rooms/{roomId}/members/{memberId}/profile and same write as PATCH /api/rooms/{roomId}/members/{memberId}/profile. Omit profile to read. Send profile to change the fields you include. The caller must be that member or the room owner. Does not start an AI.", schema({
+    roomId: roomIdField,
+    memberId: { ...idField, description: "Room member id whose join profile to read or change." },
+    profile: joinProfileField
+  }, ["roomId", "memberId"]), false),
   tool("get_room_context", "Read compact room context for this member. Pass since_version from the previous context_version to receive not_modified when structural context is unchanged; always consume fresh cursors. Does not mark caught up or grant permission.", schema({
     roomId: roomIdField,
     since_version: { type: "string", pattern: "^[a-f0-9]{64}$", description: "Previous context_version. Omit for a full read." }

@@ -8,6 +8,7 @@ import { REPLY_CANCELLED, cancelReplyRequest } from "./reply-requests.js";
 import { WORK_HELP_UPDATED, helpFromEvent } from "./work-help.js";
 import { HELP_OFFER_OPENED, HELP_OFFER_UPDATED, helpOfferFromEvent } from "./help-offers.js";
 import { SESSION_EVENT_TYPES, ensureWorkControlDefaults } from "./work-item-session.js";
+import { assertStoredJoinProfile, validateJoinProfile } from "./agent-join-profile.js";
 
 // message.posted and message.edited bodies. Other event strings stay at 4,096.
 // 65,536 characters is far under the 4 MiB room projection and Durable Object
@@ -119,6 +120,9 @@ export const EVENT_TYPES = Object.freeze({
   // ACT-1a: a room's starter task and Room Guide were seeded once.
   // ACT-1b (/start, landing, receipt UI) waits on S1, RT, and GR2 deployed.
   ROOM_STARTER_SEEDED: "room.starter_seeded",
+  // Agent join profile. Self-description, not authority: member.revision
+  // stays put. Absent joinProfile means the defaults.
+  MEMBER_PROFILE_SET: "member.profile_set",
   // Owner-equivalent invite mint. agent_invite_codes stays the source of
   // truth; this event is the room log of who minted it. The handler
   // validates the envelope and records nothing in the projection. Replay
@@ -739,6 +743,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
     [EVENT_TYPES.LAND_UPDATED]: recordLandUpdate,
     [EVENT_TYPES.WORK_CLAIM_UPDATED]: recordWorkClaimUpdate,
     [EVENT_TYPES.ROOM_STARTER_SEEDED]: recordStarterSeeded,
+    [EVENT_TYPES.MEMBER_PROFILE_SET]: setMemberProfile,
     [EVENT_TYPES.AGENT_INVITE_MINTED]: recordAgentInviteMinted
   };
   const handler = handlers[incoming.type];
@@ -832,7 +837,11 @@ function validateEnvelope(incoming) {
     // Polls (missing-features #5): a kind "poll" message carries a poll
     // payload { question, options, allowMultiple }. The envelope guard admits
     // the object key; the applier runs the full option validation.
-    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost"].includes(key)) throw new Error(`Invalid ${key}`);
+    if (key === "profile") {
+      const checked = validateJoinProfile(value, { complete: true });
+      if (!checked.ok) throw new Error("Invalid profile");
+    }
+    if (!["string", "boolean", "number"].includes(typeof value) && !["permissions", "paths", "checksClaimed", "capabilities", "preferences", "budget", "outputs", "segments", "signedEvidence", "labels", "scopes", "acceptedScopes", "changed", "state", "pullRequest", "pullRequests", "blocks", "actions", "dependents", "poll", "cost", "profile"].includes(key)) throw new Error(`Invalid ${key}`);
   }
 }
 
@@ -1414,6 +1423,17 @@ function advertiseCapabilities(state, incoming) {
   // Advertising capabilities is self-description, not an authority change, so it
   // leaves member.revision alone (open help invitations/offers are pinned to it).
   member.updatedAt = incoming.at;
+}
+
+// Join profile (wake, attention, claim cap, roles, tags). The agent sets
+// its own; the room owner may set an agent's. Not an authority change.
+function setMemberProfile(state, incoming) {
+  requireFields(incoming.data, ["memberId", "profile"]);
+  requireMember(state, incoming.actorId);
+  const member = requireMember(state, incoming.data.memberId);
+  if (member.kind !== "agent") throw new Error("join_profile_kind");
+  if (incoming.actorId !== member.id && incoming.actorId !== state.room.ownerId) throw new Error("join_profile_actor");
+  member.joinProfile = assertStoredJoinProfile(incoming.data.profile);
 }
 
 // RC-2026-09-19-071 (QAJ-006): an access request arrived. Validates the

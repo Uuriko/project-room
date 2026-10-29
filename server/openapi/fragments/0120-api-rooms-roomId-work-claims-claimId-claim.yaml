@@ -8,7 +8,7 @@
         it (never "release it first"); foreign claimants are told who holds
         it).
         `leaseHours` sets the claim lease in hours (default: the room's
-        configured default, else 24h; max 168h). `null` opts out of leases
+        configured default, else 24h; minimum 0.25, maximum 168). `null` opts out of leases
         and is only accepted from the room owner or a member with
         manage_claims. The item records `claimedAt` and `leaseExpiresAt`.
         Declared files are an exclusive lease: overlap with another live
@@ -29,7 +29,7 @@
               type: object
               properties:
                 note: { type: string }
-                leaseHours: { type: [number, 'null'], exclusiveMinimum: 0, maximum: 168 }
+                leaseHours: { type: [number, 'null'], minimum: 0.25, maximum: 168 }
                 files:
                   type: array
                   items: { type: string, maxLength: 512 }

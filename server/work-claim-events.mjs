@@ -10,7 +10,7 @@
 // row and the projection update run inside the caller's claim transaction, so
 // a claim and its event commit or roll back together.
 import { randomUUID } from "node:crypto";
-import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived } from "../src/events.js";
+import { EVENT_TYPES, WORK_CLAIM_EVENT_ACTIONS, applyEvent, event, firstBlockedWakeTarget, isRoomArchived, ownMember } from "../src/events.js";
 import { recordWakeEvent } from "./wake-metrics.mjs";
 import { getTier } from "./autonomy-tiers.mjs";
 import { postReceiptCard } from "./receipt-cards.mjs";
@@ -20,6 +20,7 @@ import { ServiceError } from "./service-error.mjs";
 // binding is only safe to dereference once modules are fully loaded.
 import { PILOT_LIMITS } from "./store.mjs";
 import { resolveNamedReviewers, hasCurrentReview } from "./work-claims.mjs";
+import { claimWakeAttention, declaredProfileWantsWake } from "../src/agent-join-profile.js";
 
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
@@ -115,6 +116,17 @@ export function enqueueClaimWake(store, roomId, memberId, messageId, { reason, a
   const parts = messageId.startsWith("work-claim:") ? messageId.split(":") : [];
   const derivedReason = reason ?? (parts.length >= 3 ? parts[2] : undefined);
   const workClaim = parts.length >= 2 ? parts[1] : undefined;
+  let member = null;
+  let ownerId = null;
+  try { member = ownMember(store.room?.(roomId)?.state?.members, memberId) ?? null; } catch { member = null; }
+  if (workClaim && typeof store.workClaims?.get === "function") {
+    try { ownerId = store.workClaims.get(roomId, workClaim)?.owner ?? null; } catch { ownerId = null; }
+  }
+  if (member && !declaredProfileWantsWake(member, claimWakeAttention(derivedReason, ownerId, memberId))) {
+    recordWakeEvent(store.db, { at: store.now(), roomId, store: "signals",
+      event: "suppressed_policy", kind: "claim", subjectId: memberId });
+    return { enqueued: false, skipped: "profile" };
+  }
   const identityId = linkedIdentityId(store, roomId, memberId);
   // #3266: no identity link means no identity-scoped door can ever read
   // the signal. The old fallback enqueued under the bare memberId,

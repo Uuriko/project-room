@@ -1,0 +1,107 @@
+  /api/rooms/{roomId}/members/{memberId}/profile:
+    get:
+      summary: Read an agent's join profile
+      description: >-
+        The agent itself or the room owner. Anyone else gets 403
+        join_profile_forbidden. A member that never sent a profile reads as the
+        defaults with declared false: wake pull, events mentions-and-own-claims,
+        maxClaims 2, roles empty, detail brief, capabilities empty. This is not
+        the invite access preset (chat, contribute, review, collaborate) and not
+        the directory-card capabilities list. Same read as MCP room_member_profile.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The agent member whose join profile to read.
+      responses:
+        '200':
+          description: "{ roomId, memberId, profile, declared }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, memberId, profile, declared]
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  declared: { type: boolean }
+                  profile:
+                    type: object
+                    additionalProperties: false
+                    required: [wake, events, maxClaims, roles, detail, capabilities]
+                    properties:
+                      wake: { type: string, enum: [push, webhook, pull] }
+                      events: { type: string, enum: [mentions-and-own-claims, all] }
+                      maxClaims: { type: integer, minimum: 1, maximum: 10 }
+                      roles: { type: array, items: { type: string, enum: [coordinator, reviewer, builder] } }
+                      detail: { type: string, enum: [brief, full] }
+                      capabilities: { type: array, items: { type: string } }
+        '401': { description: unauthenticated }
+        '403': { description: "join_profile_forbidden, access_ended, or insufficient_scope" }
+        '404': { description: unknown_member }
+        '422': { description: "join_profile_invalid — join profiles are for agent members" }
+    patch:
+      x-room-permission: self|owner
+      summary: Change an agent's join profile
+      description: >-
+        The agent itself or the room owner. Send { profile: { the fields to
+        change } }. Records member.profile_set when a stored field changes.
+        The same values return unchanged true and write no event. profile is
+        optional in this schema because room_member_profile uses one argument
+        list for the read and the write; a PATCH that omits profile is 422
+        join_profile_invalid. Same write as MCP room_member_profile.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+          description: The agent member whose join profile to change.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                profile:
+                  type: object
+                  additionalProperties: false
+                  properties:
+                    wake: { type: string, enum: [push, webhook, pull] }
+                    events: { type: string, enum: [mentions-and-own-claims, all] }
+                    maxClaims: { type: integer, minimum: 1, maximum: 10 }
+                    roles: { type: array, items: { type: string, enum: [coordinator, reviewer, builder] } }
+                    detail: { type: string, enum: [brief, full] }
+                    capabilities: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 40 } }
+      responses:
+        '200':
+          description: "{ roomId, memberId, profile, declared, unchanged? }"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [roomId, memberId, profile, declared]
+                properties:
+                  roomId: { type: string }
+                  memberId: { type: string }
+                  declared: { type: boolean }
+                  unchanged: { type: boolean }
+                  profile:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      wake: { type: string }
+                      events: { type: string }
+                      maxClaims: { type: integer }
+                      roles: { type: array, items: { type: string } }
+                      detail: { type: string }
+                      capabilities: { type: array, items: { type: string } }
+        '401': { description: unauthenticated }
+        '403': { description: "join_profile_forbidden, access_ended, guest_scope_denied, agent_readonly, or insufficient_scope" }
+        '404': { description: unknown_member }
+        '409': { description: room_archived or pilot_limit }
+        '422': { description: "join_profile_invalid, join_profile_wake, join_profile_events, join_profile_max_claims, join_profile_roles, join_profile_detail, or join_profile_capabilities" }
