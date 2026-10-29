@@ -14,6 +14,37 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
+### Verified release checkpoint — 2026-10-29, 20:04 UTC
+
+Production is `0bd217f8a76527c2dce09bec435eb091c70858d0` (PR #5313,
+including #5304 and #5309). [Deployment 40944657802](https://github.com/Uuriko/project-room/actions/runs/40944657802)
+passed its first strict smoke, live smoke and runtime publication. Both Workers
+were uploaded once. The new bounded readiness recheck was **not exercised** in
+this successful run; its fixture evidence remains distinct from production proof.
+Earlier independent observations recorded new Workers with the old room-service
+revision; those observations were retained, not counted as successful auth checks.
+
+At 20:04:24 UTC, an independent authenticated check found all four version doors
+matching before and after: both bootstrap reads returned 200, each exposed 182
+participant requests and zero nonparticipant requests, and selected participant
+reads returned 200. This does not claim an exhaustive authorization audit.
+
+The [runtime archive](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-0bd217f)
+was downloaded/verified by the publication job: 635 files, 3,344,131 bytes,
+SHA-256 `02425b1ce4c4e7a7c7c0f81e89e38a9d4681fd0b4890e8be22aa88f551fa036f`.
+A separate latest-release read confirmed this tag. The matching Graphify server
+map was published with compare-and-swap; three REST and three fresh MCP reads
+matched revision and digest
+`598f4f86875392a557ec775da71e2e42a1f913f18fc655eca04cfa9e29936e75`.
+Coverage remains server-only and truncated, not a complete product map.
+
+Shipped changes include explicit private-message composition, permission checks
+for bounty work, actionable reply/name errors, keyboard retry recovery, startup
+retry, wake-error classification and the corrected Google return runtime asset.
+Real Google first-attempt reliability, real screen-reader use and the cause of
+multi-minute Worker/room-service convergence remain open investigations. The next
+claim-history/outcome/decider candidate is separate from this deployed source.
+
 ### Recovery release checkpoint — 2026-10-29, 19:32 UTC
 
 [PR #5300](https://github.com/Uuriko/project-room/pull/5300) landed
