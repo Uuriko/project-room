@@ -718,8 +718,8 @@ for (const [width, colorScheme] of [[1280, 'dark'], [390, 'light']]) {
     await page.locator('#message-input').fill('Keep the existing design thread draft.');
     if (width === 390) {
       await page.locator('#composer-options > summary').click();
+      await page.getByRole('button', { name: 'Direct message…', exact: true }).click();
       await page.locator('#message-to-select').selectOption('producer');
-      await page.locator('#composer-options > summary').click();
     }
     await openSettings(page); await page.locator('#advanced-room-tools > summary').click();
     await page.locator('#human-advanced').check(); await closeSettings(page);

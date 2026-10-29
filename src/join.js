@@ -231,18 +231,18 @@ export function joinErrorMessage({ status, code, action = "join", detail = null 
       // brings) and sent its reason plus a cleaned suggestion in the
       // error detail. Name that cause and present the suggestion as a
       // suggestion — the name in the form is never changed silently.
-      const lead = {
-        reserved: "That display name is reserved.",
-        duplicate: "That display name is already used in this room.",
-        confusable: "That display name is too easy to confuse with a member already in this room.",
-        control_characters: "That display name contains hidden or control characters.",
-      }[detail?.displayNameReason] ?? "That display name isn't available.";
+      const nameErrorKeys = {
+        reserved: ["join.nameUnavailable.reserved.message", "join.nameUnavailable.reserved.suggested"],
+        duplicate: ["join.nameUnavailable.duplicate.message", "join.nameUnavailable.duplicate.suggested"],
+        confusable: ["join.nameUnavailable.confusable.message", "join.nameUnavailable.confusable.suggested"],
+        control_characters: ["join.nameUnavailable.control_characters.message", "join.nameUnavailable.control_characters.suggested"],
+        unavailable: ["join.nameUnavailable.unavailable.message", "join.nameUnavailable.unavailable.suggested"],
+      };
+      const keys = Object.hasOwn(nameErrorKeys, detail?.displayNameReason) ? nameErrorKeys[detail.displayNameReason] : nameErrorKeys.unavailable;
       const suggestion = cleanNameSuggestion(detail?.suggestion ?? detail?.displayName);
       return {
-        title: "Name not available",
-        message: suggestion
-          ? `${lead} You could use "${suggestion}" instead — change the name to it, or edit it, then try again.`
-          : `${lead} Edit the name and try again.`,
+        title: uiText("join.nameUnavailable.title"),
+        message: uiText(keys[suggestion ? 1 : 0], { suggestion }),
         retry: true,
       };
     }
