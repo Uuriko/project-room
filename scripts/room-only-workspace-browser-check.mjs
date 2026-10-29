@@ -82,3 +82,31 @@ test("account-home session replacement clears old rooms and refresh restores the
   assert.equal(await page.locator("#auth-panel").isVisible(), false);
   assert.equal(await page.locator("#auth-error").textContent(), "");
 });
+
+for (const target of ["commons", "unavailable-room"]) test(`Google return restores ${target} without probing revoked room cookies`, { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage(); page.setDefaultTimeout(10000);
+  const account = f.store.accountForMember("commons", "owner");
+  const slot = f.store.createAccountSessionSlot();
+  f.store.loginAccountSession(slot.token, f.store.issueAccountAccessKey(account.id), slot.session.sessionRevision);
+  await page.context().addCookies([{ name: "account_session", value: slot.token, url: origin, httpOnly: true, sameSite: "Strict" }]);
+  await page.goto(origin + "/?account=1");
+  await page.locator('[data-account-room="commons"]').waitFor();
+  await page.evaluate(async room => { const { stashGoogleRoom } = await import("/src/google-room-return.js"); stashGoogleRoom(room); }, target);
+  const reads = [];
+  page.on("request", r => { const u = new URL(r.url()); if (u.pathname === "/api/session") reads.push(u.search); });
+  await page.goto(origin + "/?room=wrong-fallback&google=signed-in");
+  if (target === "commons") await page.locator("#main").waitFor({ state: "visible" });
+  else await page.locator('[data-account-room="commons"]').waitFor();
+  assert.deepEqual(reads, [`?room=${target}`], "exactly one authorized room restore, no old-cookie probe or fallback-room read");
+  assert.equal(new URL(page.url()).searchParams.has("google"), false);
+  assert.equal(await page.evaluate(() => sessionStorage.getItem("project-room:google-room-return:v1")), null);
+  assert.equal(await page.locator("#auth-panel").isVisible(), false);
+});
