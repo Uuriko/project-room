@@ -4821,7 +4821,10 @@ paths:
         session_claimed. The error message is `Claim held by <memberId>`
         and the hint names that holder, the 10-minute heartbeat, and
         supersede. The holder may send the same claim again to renew.
-        Release is set_status done or failed.
+        Release is set_status done or failed. Optional provider/client/model values
+        are bounded declarations at session start, not verified provider identity.
+        Completion can explicitly bind its own finished attempt; omitting that
+        reference leaves completion attribution unknown.
         Budgets (RC-2026-09-19-063): a start may declare maxRounds and
         maxToolCalls alongside the existing bounds. Status changes may report
         cumulative `rounds` and `toolCalls`; reports are monotonic. Exceeding
@@ -4850,6 +4853,9 @@ paths:
                 budget:
                   type: object
                   description: "Declared on the start transition only. Optional keys: maxRuntimeMs, maxAttempts, maxConcurrent, maxSpendCents, maxRounds, maxToolCalls; undeclared quotas read \"unknown\"."
+                provider: { type: string, minLength: 1, maxLength: 100, description: Declared unverified provider at session start only }
+                client: { type: string, minLength: 1, maxLength: 100, description: Declared unverified client at session start only }
+                model: { type: string, minLength: 1, maxLength: 100, description: Declared unverified model at session start only }
                 spendCents: { type: integer, description: Cumulative spend report }
                 rounds: { type: integer, description: Cumulative work-loop rounds report (monotonic) }
                 toolCalls: { type: integer, description: Cumulative tool-call report (monotonic) }
