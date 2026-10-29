@@ -106,13 +106,17 @@ export function parseClaimId({ branch = "", title = "", body = "" } = {}) {
 // Match PR metadata against live claims. Returns { claim, source }, or
 // { ambiguous: ["room:id", ...] } when one token names several live claims,
 // or null. Only owned, active claims whose declared repo (when set) matches
-// the PR's repo are eligible; an ambiguous token never guesses.
+// the PR's repo are eligible; an ambiguous token never guesses. Superseded
+// claims are excluded: autoLinkPullRequest refuses them (not_active), so a
+// superseded match must not eat the link — the next candidate is tried.
+// (liveClaims entries carry the flag on the item, hence the second check.)
 export function findClaimForPull({ branch = "", title = "", body = "", repo = "" } = {}, claims = []) {
   const candidates = parseClaimId({ branch, title, body });
   if (!candidates.length) return null;
   const prRepo = typeof repo === "string" ? repo.toLowerCase() : "";
   const live = (claims ?? []).filter(claim =>
     claim && LIVE_CLAIM_STATES.has(claim.state) && claim.owner &&
+    !claim.supersededBy && !claim.item?.supersededBy &&
     (!claim.repo || !prRepo || String(claim.repo).toLowerCase() === prRepo));
   const byId = new Map();
   for (const claim of live) {
@@ -188,7 +192,7 @@ export function autoLinkPullRequest(store, roomId, claimId, { url, source = "unk
   // No reason: the event projection (src/events.js) only accepts ci_changed /
   // reviewed as reasons; the history entry below carries the detail.
   emitWorkClaimEvent(store, roomId, {
-    actorId: item.owner ?? "system", item: next, action: "state_changed",
+    actorId: "system", item: next, action: "state_changed",
     atMs: nowMs,
   });
   return { linked: true, roomId, claimId, url: parsed.url, source };
@@ -211,14 +215,20 @@ function writeConfig(store, key, value, nowMs) {
     .run(key, JSON.stringify(value), nowMs);
 }
 
+// The journal key is lowercased on write and on read: deliveries arrive
+// with the payload's repo casing while freshness is checked with the
+// claim-declared casing, and GitHub repo names are case-insensitive — a
+// casing difference must not read as stale forever.
+const webhookJournalKey = repo => WEBHOOK_ROOM + String(repo ?? "").toLowerCase();
+
 export function recordWebhookDelivery(store, repo, nowMs = Date.now()) {
   if (!REPO_PATTERN.test(repo ?? "")) return false;
-  writeConfig(store, WEBHOOK_ROOM + repo, { deliveredAt: nowMs }, nowMs);
+  writeConfig(store, webhookJournalKey(repo), { deliveredAt: nowMs }, nowMs);
   return true;
 }
 
 export function webhookDeliveryStale(store, repo, nowMs = Date.now()) {
-  const saved = readConfig(store, WEBHOOK_ROOM + repo);
+  const saved = readConfig(store, webhookJournalKey(repo));
   const at = Number(saved?.deliveredAt);
   return !(Number.isFinite(at) && nowMs - at < WEBHOOK_FRESH_MS);
 }
@@ -420,7 +430,7 @@ export function linkDeployToSettledClaims(store, { revision, nowMs = Date.now() 
         });
         store.workClaims.set(roomId, next);
         emitWorkClaimEvent(store, roomId, {
-          actorId: item.owner ?? "system", item: next, action: "state_changed",
+          actorId: "system", item: next, action: "state_changed",
           atMs: nowMs,
         });
         out.linked += 1;
