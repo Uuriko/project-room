@@ -24,6 +24,7 @@ import { RoomStore } from "../server/store.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { saveAgentConnection } from "../client/agent-connection.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -32,7 +33,7 @@ async function fixture(t, roomId) {
   const owner = store.identities.create("Resilience owner");
   const agent = store.identities.create("Resilience receiver");
   new AgentRooms(store).create(owner.secret, { roomId, title: "Resilience", purpose: "Synthetic listener survival" });
-  store.identities.link(owner.secret, roomId, { identityId: agent.identityId, memberId: "receiver", displayName: "Receiver", permissions: [] });
+  linkWithProof(store, owner.secret, roomId, agent, { memberId: "receiver", displayName: "Receiver", permissions: [] });
   const server = createRoomServer({ store });
   await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
   const origin = "http://127.0.0.1:" + server.address().port;

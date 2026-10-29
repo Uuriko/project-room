@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 test("compact context accepts legacy identities without making a read write auth state", () => {
   const store = new RoomStore(":memory:");
@@ -10,7 +11,7 @@ test("compact context accepts legacy identities without making a read write auth
     store.initialize(initialRoom("commons"));
     const owner = store.issueAccessKey("commons", "owner");
     const identity = store.identities.create("Context reader");
-    store.identities.link(owner, "commons", { identityId: identity.identityId, permissions: [] });
+    linkWithProof(store, owner, "commons", identity, { permissions: [] });
     const legacy = createHash("sha256").update(identity.secret).digest("hex");
     store.db.prepare("UPDATE agent_identities SET secret_hash=? WHERE identity_id=?").run(legacy, identity.identityId);
     const changes = store.db.prepare("SELECT total_changes() AS n").get().n;

@@ -1,0 +1,20 @@
+  /api/rooms/{roomId}/activity-read:
+    post:
+      summary: Mark activity events read
+      description: >-
+        Marks the caller's activity events read by id list. Body:
+        `{ ids: [integer] }`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids: { type: array, items: { type: integer } }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ roomId, viewerId, marked }" }
