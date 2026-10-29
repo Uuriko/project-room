@@ -81,6 +81,34 @@ export function manifestDrift(expected, actual) {
   return drift;
 }
 
+// Human-readable drift report for failure output: the REAL expected-vs-actual
+// values behind every manifestDrift() entry, plus the one-command cure.
+// manifestDrift() stays the terse machine list (tests pin its strings); this
+// is what a reader of a failing check gets, so the cure needs no source dive.
+const MAX_DRIFT_LINES = 25;
+export function formatManifestDrift(expected, actual) {
+  const drift = manifestDrift(expected, actual);
+  if (!drift.length) return "";
+  const lines = drift.slice(0, MAX_DRIFT_LINES).map(entry => {
+    if (entry === "manifest is not an object") return "manifest: the committed file is not a JSON object";
+    if (entry === "manifest keys differ")
+      return `keys: tree [${EXPECTED_KEYS.join(", ")}], committed [${actual && typeof actual === "object" ? Object.keys(actual).sort().join(", ") : "?"}]`;
+    if (entry === "contractVersion") return `contractVersion: committed ${actual?.contractVersion}, tree ${expected.contractVersion}`;
+    if (entry === "storeSchemaVersion") return `storeSchemaVersion: committed ${actual?.storeSchemaVersion}, tree ${expected.storeSchemaVersion}`;
+    if (entry === "runtime") return `runtime: committed ${JSON.stringify(actual?.runtime)}, tree ${JSON.stringify(expected.runtime)}`;
+    const cut = entry.indexOf(":");
+    const section = entry.slice(0, cut), key = entry.slice(cut + 1);
+    const tree = expected[section]?.[key], committed = actual?.[section]?.[key];
+    const state = committed === undefined ? "missing from the committed manifest" : tree === undefined ? "stale pin (file no longer in the tree set)" : "hash differs";
+    return `${entry}: ${state}\n  committed: ${committed ?? "(absent)"}\n  tree:      ${tree ?? "(absent)"}`;
+  });
+  if (drift.length > MAX_DRIFT_LINES) lines.push(`… and ${drift.length - MAX_DRIFT_LINES} more drifted entries`);
+  lines.push("Cure (one command, then re-run this check):",
+    "  node scripts/candidate-manifest.mjs --write",
+    "Then review `git diff scripts/CANDIDATE-MANIFEST.json` — every changed pin should trace to a file this change touched.");
+  return lines.join("\n");
+}
+
 const isMain = process.argv[1] && import.meta.url === new URL(process.argv[1], "file:").href;
 if (isMain) {
   const root = process.cwd(), manifest = buildCandidateManifest(root);
