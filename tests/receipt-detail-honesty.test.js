@@ -102,6 +102,26 @@ test("a check without a decision does not imply a reviewer verdict", () => {
   assert.doesNotMatch(html, /Verification tier: (human|reviewer) verdict/);
 });
 
+test("member-reviewed and ledger receipts do not invent human participation", () => {
+  const cases = [
+    [{ ...publicWorkReceipt, source: "work-claim", verification: { state: "verified" } },
+      "Verification tier: member-reviewed verdict."],
+    ...["human", "agent", undefined].map(kind => [
+      { ...publicWorkReceipt, source: "bounty-lot", lot: { settlement: { settledBy: { id: "reviewer", kind } } } },
+      "Verification tier: recorded ledger movement.",
+    ]),
+  ];
+  for (const [receipt, expected] of cases) {
+    const html = renderReceiptDetailHtml(receipt);
+    assert.ok(html.includes(expected));
+    assert.doesNotMatch(html, /Verification tier: human verdict/);
+    const data = JSON.parse(/<script type="application\/ld\+json">(.*?)<\/script>/s.exec(html)[1]);
+    assert.ok(data.description.includes(expected));
+    assert.match(data.description, /not identity-verified/);
+    assert.match(data.description, /unsigned/);
+  }
+});
+
 test("detail page still shows the core record fields", () => {
   const html = renderReceiptDetailHtml(mergedReceipt);
   assert.match(html, /Fix the needs-attention card overflow/);
