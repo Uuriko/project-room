@@ -212,6 +212,72 @@ test("invitation UI writes a path-aware www /room join URL", async () => {
   }
 });
 
+test("clearing a create result restores the growth kit URL from the referral invite (#4473)", async () => {
+  const nodes = new Map();
+  const node = selector => {
+    if (!nodes.has(selector)) nodes.set(selector, {
+      value: "", textContent: "", hidden: false, disabled: false, open: false, dataset: {}, handlers: {}, attributes: {},
+      setAttribute(name, value) { this.attributes[name] = String(value); }, getAttribute(name) { return this.attributes[name] ?? null; },
+      classList: { toggle() {} },
+      addEventListener(type, handler) { this.handlers[type] = handler; },
+      contains() { return false; }, replaceChildren() {}, showModal() { this.open = true; }, close() { this.open = false; },
+      focus() {},
+    });
+    return nodes.get(selector);
+  };
+  const globals = { document: { querySelector: node }, window: { addEventListener() {} },
+    location: { hostname: "localhost", origin: "http://localhost:52331", pathname: "/" },
+    navigator: { clipboard: { writeText: async () => {} } } };
+  const previous = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+  const member = { id: "owner", kind: "human", revision: 1, permissions: ["manage_members"] };
+  const session = { roomId: "commons", member };
+  const referralToken = "R".repeat(43);
+  const referralUrl = `http://localhost:52331/#join/${referralToken}`;
+  let created;
+  const client = {
+    session, ownsAccountSession: () => true, generation: 0, path: suffix => suffix,
+    async request(path, options) {
+      if (path === "/referrals") {
+        return { invite: { token: referralToken, status: "active", message: "Join me in this room.\n{url}" } };
+      }
+      if (options?.method === "POST") {
+        created = structuredClone(options.data);
+        return { link: { id: "created-link", status: "active", expiresAt: options.data.expiresAt } };
+      }
+      return { links: [] };
+    },
+  };
+  try {
+    for (const [key, value] of Object.entries(globals)) Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
+    const ui = installShareLinks({ client, accountClient: {}, getState: () => ({ room: { id: "commons", ownerId: "owner" }, members: { owner: member } }), getSession: () => session, openRoom() {} });
+    node("#share-link-expiry").value = "24";
+    node("#share-link-limit").value = "2";
+    await node("#invite-people-button").handlers.click();
+    // renderKit populated both kit carriers from the referral invite.
+    assert.equal(node("#growth-invite-url").value, referralUrl);
+    assert.equal(node("#growth-invite-message").value, `Join me in this room.\n${referralUrl}`);
+    await node("#share-link-form").handlers.submit({ preventDefault() {} });
+    // While the result is shown, the created link owns the kit URL field (#3794).
+    const createdUrl = `http://localhost:52331/#join/${created.linkToken}`;
+    assert.equal(node("#share-link-url").value, createdUrl);
+    assert.equal(node("#growth-invite-url").value, createdUrl);
+    // Clearing the result (Create another) restores the referral URL, so the
+    // kit URL field and the invite message agree again.
+    await node("#share-link-another").handlers.click();
+    assert.equal(node("#share-link-result").hidden, true);
+    assert.equal(node("#share-link-url").value, "");
+    assert.equal(node("#growth-invite-url").value, referralUrl);
+    assert.equal(node("#growth-invite-message").value, `Join me in this room.\n${referralUrl}`);
+    ui.resetManagement();
+    assert.equal(node("#growth-invite-url").value, referralUrl);
+  } finally {
+    for (const [key, descriptor] of previous) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+});
+
 test("mint unlocks Create before a hanging clipboard write and never uses origin-only #join/", async () => {
   const nodes = new Map();
   const node = selector => {
