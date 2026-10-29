@@ -43,8 +43,10 @@ export function findUntested(serverDir, testDir) {
   };
   walk(serverDir);
 
+  // Scan both .test.js and .test.mjs test files: a module referenced only
+  // from a .test.mjs test counts as tested, exactly as from a .test.js test.
   const sources = readdirSync(testDir)
-    .filter(name => name.endsWith(".test.js"))
+    .filter(name => name.endsWith(".test.js") || name.endsWith(".test.mjs"))
     .map(name => readFileSync(join(testDir, name), "utf8"));
 
   // 1. Real import specifiers, resolved against the tests/ dir.
@@ -68,7 +70,7 @@ export function findUntested(serverDir, testDir) {
     new RegExp(`(?<![\\w./-])(?:\\.\\./)?server/${esc(rel)}(?!\\.\\w|[\\w/-])`).test(haystack);
 
   const untested = modules.filter(name => !imported.has(name) && !anchored(name));
-  return { modules, untested };
+  return { modules, untested, testFileCount: sources.length };
 }
 
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href;
