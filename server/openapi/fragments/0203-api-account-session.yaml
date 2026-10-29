@@ -1,0 +1,75 @@
+  /api/account-session:
+    get:
+      summary: Browser account-session slot
+      description: >-
+        Open by design: a browser without an `account_session` cookie
+        receives an anonymous slot (Set-Cookie; 20 per address per minute)
+        and `{ authenticated: false, account: null, csrf, sessionBinding }`.
+        The slot grants nothing until `POST` signs in with an account access
+        key; `POST` (sign in) and `DELETE` (sign out) below require the slot
+        cookie plus CSRF. A `GET` carrying `X-Session-Binding` is a bound
+        confirmation of the named session: it never mints a slot, sets a
+        cookie, or replaces a newer sign-in. A matching binding returns the
+        session view; a rotated binding answers `409 session_binding_changed`;
+        a dead, anonymous, expired, or revoked session answers `401
+        unauthenticated`; a malformed binding answers `422
+        invalid_session_binding`.
+      security: []
+      responses:
+        '200': { description: Account session view; never account data for an anonymous caller }
+        '401': { description: unauthenticated }
+        '409': { description: session_binding_changed }
+        '422': { description: invalid_session_binding }
+        '429': { description: rate_limited }
+    post:
+      summary: Sign an account browser slot in
+      description: >-
+        Account-level write: the anonymous slot cookie from `GET` plus
+        `Origin` and `X-CSRF-Token` (the slot's `csrf`) are required. The
+        body carries the account access key and the slot's current
+        `sessionRevision`; the slot is compare-and-swapped to the account
+        for at most eight hours and its CSRF token and session binding
+        change. An existing `room_session` cookie for the same browser is
+        revoked. 10 per address and slot per minute.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [accountAccessKey, expectedSessionRevision]
+              properties:
+                accountAccessKey: { type: string }
+                expectedSessionRevision: { type: integer }
+      responses:
+        '201': { description: "{ authenticated: true, account: { id, revision, authEpoch }, csrf, sessionBinding, sessionRevision, expiresAt, authenticatedUntil }" }
+        '401': { description: account_session_required (no slot cookie) or a wrong account key }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: Stale expectedSessionRevision }
+        '422': { description: invalid_login }
+        '429': { description: rate_limited }
+    delete:
+      summary: Sign an account browser slot out
+      description: >-
+        Account-level write (slot cookie, `Origin`, `X-CSRF-Token`). Body is
+        `{ expectedSessionRevision }`; the slot returns to anonymous with a
+        new CSRF token and binding.
+      security:
+        - accountSession: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [expectedSessionRevision]
+              properties:
+                expectedSessionRevision: { type: integer }
+      responses:
+        '200': { description: Anonymous account session view }
+        '401': { description: account_session_required }
+        '403': { description: origin_denied or csrf_denied }
+        '409': { description: Stale expectedSessionRevision }
+        '422': { description: invalid_logout }
