@@ -11,7 +11,6 @@
 
 import { uiText } from "./strings.js";
 import { formatSessionExpiry } from "./session-expiry.js";
-import { AccountClient } from "./client.js";
 import { submitGeneralAccessRequest, GENERAL_REQUEST_DEFAULT_ROOM_ID } from "./request-access.js";
 import { readAccessRequest } from "./invite-context.js";
 import { parseShareInviteCode } from "./share-invite-code.js";
@@ -332,6 +331,53 @@ function requestIdForJoin(code) {
   return joinRequestId;
 }
 
+// Refresh-proof drafts (door-join step 2): the unsent entry code and the
+// four request fields survive a reload in this tab only (sessionStorage),
+// keyed per room like the existing request stash. Cleared after a sent
+// request or when the entry form navigates to /join/<code>.
+export const JOIN_DRAFT_FIELDS = Object.freeze(["join-enter-code", "join-request-room", "join-request-name", "join-request-note", "join-request-referred"]);
+export const joinDraftKey = roomId => `project-room:join-draft:${String(roomId ?? "")}`;
+export function readJoinDraft(storage, roomId) {
+  try {
+    const value = JSON.parse(storage?.getItem(joinDraftKey(roomId)) ?? "null");
+    if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+    return Object.fromEntries(JOIN_DRAFT_FIELDS.filter(id => typeof value[id] === "string").map(id => [id, value[id].slice(0, 2000)]));
+  } catch { return {}; }
+}
+export function writeJoinDraft(storage, roomId, draft) {
+  try {
+    const kept = Object.fromEntries(JOIN_DRAFT_FIELDS.filter(id => typeof draft?.[id] === "string" && draft[id]).map(id => [id, draft[id]]));
+    if (Object.keys(kept).length) storage?.setItem(joinDraftKey(roomId), JSON.stringify(kept));
+    else storage?.removeItem(joinDraftKey(roomId));
+  } catch { /* storage full or blocked: the form still works without a draft */ }
+}
+export function clearJoinDraft(storage, roomId) {
+  try { storage?.removeItem(joinDraftKey(roomId)); } catch { /* blocked storage */ }
+}
+function wireJoinDraft(roomId) {
+  const storage = globalThis.sessionStorage;
+  const draft = readJoinDraft(storage, roomId);
+  let restoredRequest = false;
+  for (const id of JOIN_DRAFT_FIELDS) {
+    const field = $(id);
+    if (!field) continue;
+    if (draft[id] && !field.dataset.draftRestored && draft[id] !== field.value) {
+      // A prefilled default (the room, a ?ref= referrer) is not something the
+      // visitor typed, so only a changed value reopens the request form.
+      field.value = draft[id];
+      if (id !== "join-enter-code") restoredRequest = true;
+    }
+    field.dataset.draftRestored = "1";
+    if (!field.dataset.draftWired) {
+      field.dataset.draftWired = "1";
+      field.addEventListener("input", () => {
+        writeJoinDraft(storage, roomId, Object.fromEntries(JOIN_DRAFT_FIELDS.map(key => [key, $(key)?.value ?? ""])));
+      });
+    }
+  }
+  if (restoredRequest && $("join-request")) $("join-request").open = true;
+}
+
 // No code in the URL is not an error any more: a human holding a bare
 // code gets the entry form (H-S3). The form navigates to the canonical
 // /join/<code> URL, so the preview/consent flow below stays the only
@@ -342,7 +388,7 @@ function renderEnter() {
   if (roomEl) {
     if (room) {
       const textEl = $("join-enter-room-text");
-      if (textEl) textEl.textContent = `Room "${room}" — enter its invite code below, or if you're already a member:`;
+      if (textEl) textEl.textContent = `You followed a link to "${room}". Enter its invite code below, or if you're already a member:`;
       const openEl = $("join-enter-open");
       if (openEl) openEl.href = roomEntryHref(room);
       roomEl.hidden = false;
@@ -360,12 +406,13 @@ function renderEnter() {
         $("join-enter-code")?.focus();
         return;
       }
+      clearJoinDraft(globalThis.sessionStorage, requestDoorRoom(globalThis.location?.pathname, globalThis.location?.search).roomId);
       globalThis.location.assign(destination);
     });
   }
   renderRequestDoor();
+  wireJoinDraft(requestDoorRoom(globalThis.location?.pathname, globalThis.location?.search).roomId);
   show("join-enter");
-  $("join-enter-code")?.focus();
 }
 
 // The consolidated request-access door (human-map §8.1): the join page is
@@ -415,6 +462,10 @@ function renderRequestDoor() {
       if (submitEl) submitEl.disabled = true;
       if (statusEl) { statusEl.textContent = uiText("join.request.sending"); statusEl.classList.add("visible"); statusEl.classList.remove("error"); }
       try {
+        // Lazy: the room client graph (client.js, events.js, share-links.js,
+        // the work modules) is only needed by a visitor who files a request,
+        // so it stays out of the join page's initial load.
+        const { AccountClient } = await import("./client.js");
         const result = await submitGeneralAccessRequest({
           client: new AccountClient(),
           storage: globalThis.sessionStorage,
@@ -423,6 +474,7 @@ function renderRequestDoor() {
           note: $("join-request-note")?.value,
           referredBy: $("join-request-referred")?.value,
         });
+        clearJoinDraft(globalThis.sessionStorage, roomId);
         form.hidden = true;
         if (statusEl) statusEl.textContent = uiText("join.request.sent", { roomId: result.roomId, requestId: result.requestId });
       } catch (error) {
