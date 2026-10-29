@@ -214,7 +214,7 @@ console.log(JSON.stringify(out));
     const calls = join(root, `calls-${keyMode}-${statusRequired}-${changed}.jsonl`), journal = join(root, `journal-${keyMode}-${statusRequired}-${changed}.json`);
     const env = { ...process.env, PATH: `${bin}:${process.env.PATH}`, FIXTURE_DATA: fixture, FIXTURE_CALLS: calls, FIXTURE_JOURNAL: journal, CHANGE_HEAD: changed ? '1' : '0' };
     const command = run(process.execPath, [script, 'merge', '--pr', String(candidate.pr), '--head', candidate.head, '--base', candidate.base, '--state', journal, '--connection', connection, '--apply'], { env });
-    if (changed) await assert.rejects(command, /head\/base/); else await command;
+    if (changed) await assert.rejects(command, /pr_head_changed.*Qualify the new head/); else await command;
     const observed = readFileSync(calls, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(observed.filter(x => x.a.includes('graphql')).length, statusRequired ? 2 : 0);
     // One explicit identity check plus the SDK's fresh preflight on each
@@ -296,4 +296,31 @@ test('Room read diagnostics distinguish timeout and sanitize malformed metadata 
     assert.equal(failure.message, `Room read failed ${JSON.stringify({ phase: 'connection', ...detail })}`);
     return true;
   });
+});
+
+for (const [code, mutation, action] of [
+  ['pr_not_open', v => { v.pr.state = 'CLOSED'; }, /open PR/],
+  ['pr_is_draft', v => { v.pr.isDraft = true; }, /ready for review/],
+  ['pr_head_changed', v => { v.pr.headRefOid = 'c'.repeat(40); }, /new head/],
+  ['pr_base_branch_changed', v => { v.pr.baseRefName = 'other'; }, /target branch/],
+  ['main_changed', v => { v.main = 'c'.repeat(40); }, /new main/],
+  ['mergeability_unknown', v => { v.pr.mergeable = 'UNKNOWN'; }, /Refresh/],
+  ['merge_conflict', v => { v.pr.mergeable = 'CONFLICTING'; }, /conflicts/],
+  ['mergeability_unavailable', v => { delete v.pr.mergeable; }, /complete/]
+]) test(`candidate refusal identifies ${code} and next action without any mutation`, async () => {
+  const calls = [], current = view(); mutation(current);
+  await assert.rejects(guardedMerge(candidate, {
+    inspect: async () => current,
+    validated: async () => calls.push('journal'),
+    status: async () => calls.push('status'),
+    merge: async () => calls.push('merge')
+  }), error => {
+    assert.equal(error.code, code);
+    assert.equal(error.phase, 'candidate');
+    assert.match(error.action, action);
+    assert.ok(error.message.includes(code));
+    assert.ok(error.message.includes(error.action));
+    return true;
+  });
+  assert.deepEqual(calls, []);
 });

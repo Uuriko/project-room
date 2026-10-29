@@ -15,7 +15,6 @@ import { workOffersContext, MAX_HELP_OFFERS, MAX_PENDING_HELP_OFFERS } from "../
 import { AGENT_ERRORS, resolveAgentErrorAx } from "../src/agent-error.mjs";
 import { sortWorkByCuriosity, viewerHistory } from "../src/curiosity-rank.mjs";
 import { edgeDoorApiPath } from "../src/service-origin.js";
-import { assembleOutsideAgents, planOutsideAgentRecord } from "../src/outside-agents.mjs";
 import { CONTENT_TRUST, markIfOther, stampWorkListing, withContentTrust } from "../server/content-trust.mjs";
 import { validRoomDigest } from "./room-digest.mjs";
 
@@ -177,7 +176,7 @@ function checkedOffers(result) {
   } catch { throw new RoomClientError(200, "invalid_response", "Help offers do not match selected work and participants"); }
 }
 
-function checkedWorkSnapshot(value, roomId) {
+function checkedWorkSnapshot(value, roomId, expectedView = "work") {
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
   const integer = value => Number.isSafeInteger(value) && value >= 0;
   const text = value => typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
@@ -189,11 +188,11 @@ function checkedWorkSnapshot(value, roomId) {
       || !Object.hasOwn(state.members, value.viewerId) || Object.keys(state.members).length > 100 || Object.keys(state.workItems).length > 500) throw new Error();
     if (projected) {
       const help = Object.hasOwn(value, "helpContextVersion") || Object.hasOwn(value, "evaluatedAt");
-      if (value.snapshotView !== "work" || value.snapshotVersion !== 1
+      if (value.snapshotView !== expectedView || value.snapshotVersion !== 1
         || !exact(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision" + (help ? " helpContextVersion evaluatedAt" : ""))
         || help && (value.helpContextVersion !== 1 || typeof value.evaluatedAt !== "string" || !Number.isFinite(Date.parse(value.evaluatedAt)) || new Date(value.evaluatedAt).toISOString() !== value.evaluatedAt)
         || !exact(state, "room members workItems")) throw new Error();
-    } else if (value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
+    } else if (expectedView !== "work" || value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
       || !integer(value.cursor) || value.cursor > value.sequence
       || !Array.isArray(state.messages) || !Array.isArray(state.eventLog)) throw new Error();
     // Legacy compatibility validates the consumed envelope/current records, not
@@ -449,7 +448,7 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
-    const snapshotRead = suffix === "" || suffix === "?view=work";
+    const snapshotRead = suffix === "" || suffix === "?view=work" || suffix === "?view=orientation";
     const boardRead = suffix === "/board" || suffix.startsWith("/board?");
     if (this.#memberId && (snapshotRead || boardRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
@@ -563,40 +562,30 @@ export class RoomAgentClient {
     } finally { controller.abort(); if (reader) await reader.cancel().catch(() => {}); }
   }
   snapshot({ signal } = {}) { return this.#request("", undefined, signal); }
-  // Agents named before they have a seat. Reading the room snapshot assembles
-  // the network. It grants no access, mints no identity, and issues no invite.
+  // The service assembles canonical introduction history and applies viewer
+  // visibility and verifier authority. A recent-message snapshot is incomplete.
   async outsideAgents({ signal } = {}) {
-    const snapshot = await this.snapshot({ signal });
-    // Conservative verifier set: the client honors verify records from the
-    // room owner only (it cannot see delegation grants). The server's fuller
-    // set is authoritative; this just lets the client display verified links.
-    const ownerId = snapshot.state?.room?.ownerId;
-    const verifiers = typeof ownerId === "string" && ownerId ? new Set([ownerId]) : null;
-    return {
-      contractVersion: 1,
-      grantsAccess: false,
-      evaluatedThrough: snapshot.sequence,
-      agents: assembleOutsideAgents(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, { verifiers })
-    };
+    return this.#outsideAgentResponse(await this.#request("/outside-agents", undefined, signal));
   }
-  // Name an agent who has no seat. The post is an ordinary room message.
-  // Reading it grants no access, mints no identity, and issues no invite.
-  // The same introducer cannot rewrite the card; a second member adds a sighting.
+  #outsideAgentResponse(value) {
+    if (!value || value.contractVersion !== 1 || value.grantsAccess !== false
+      || !Number.isSafeInteger(value.evaluatedThrough) || value.evaluatedThrough < 0
+      || !Array.isArray(value.agents) || value.agents.some(agent => !agent || typeof agent.externalRef !== "string")) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid outside-agent network");
+    }
+    return value;
+  }
   async recordOutsideAgent(input, { signal } = {}) {
     if (!this.#memberId) throw new RoomClientError(422, "member_required", "A saved seat needs its member id to record an outside agent");
-    const snapshot = await this.snapshot({ signal });
-    let plan;
-    try {
-      plan = planOutsideAgentRecord(snapshot.state?.messages ?? [], snapshot.state?.members ?? {}, this.#roomId, this.#memberId, input);
-    } catch (error) {
-      if (error?.code) throw new RoomClientError(error.status ?? 422, error.code, error.message);
-      throw error;
+    if (!input || typeof input !== "object" || Array.isArray(input)
+      || Object.keys(input).some(key => !["externalRef", "displayName", "origin", "reach", "note"].includes(key))) {
+      throw new RoomClientError(422, "invalid_outside_agent", "Choose public agent facts only");
     }
-    if (plan.recorded !== "replay") {
-      await this.command({ id: plan.commandId, type: "message.posted", data: { messageId: plan.commandId, body: plan.body } }, { signal });
+    const value = this.#outsideAgentResponse(await this.#request("/outside-agents", { ...input, action: "introduce" }, signal));
+    if (!["introduce", "sighting", "replay"].includes(value.recorded) || value.externalRef !== input?.externalRef) {
+      throw new RoomClientError(200, "invalid_response", "Room returned an invalid outside-agent receipt");
     }
-    const network = await this.outsideAgents({ signal });
-    return { ...network, recorded: plan.recorded, externalRef: plan.externalRef };
+    return value;
   }
   // Agent inbox: direct @mentions waiting for an answer, DMs, assignments and
   // routed mentions, each with its next step. A read; nothing is marked.
@@ -1041,9 +1030,13 @@ export class RoomAgentClient {
   async workRelease(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal } = {}) {
     return this.releaseWorkItem(id, { note, reason, expectedClaimedAt, expectedHistoryLength, signal });
   }
-  // Selected task only; the normal authenticated snapshot never leaves this client.
+  // Retrieve only selected work and its explicitly requested source before export.
   async workPacket(workItemId, options = {}) {
-    return workPacket((await this.snapshot()).state, workItemId, options);
+    const { signal, ...packetOptions } = options;
+    const selected = await this.workContext(workItemId, { includeSource: packetOptions.includeSource ?? false, signal });
+    const source = selected.context.source;
+    return workPacket({ room: { id: selected.roomId }, workItems: { [workItemId]: selected.work },
+      messages: source.status === "included" ? [source.message] : [] }, workItemId, packetOptions);
   }
   changes(after = 0, limit = 50, { signal } = {}) {
     if (!Number.isSafeInteger(after) || after < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new Error("Use a nonnegative checkpoint and a page size from 1 to 100");
@@ -1432,7 +1425,7 @@ export class RoomAgentClient {
     if (sort !== undefined && sort !== "curiosity") throw new RoomClientError(0, "invalid_sort", "Sort is omitted or curiosity");
     const snapshot = focus !== "all" || query !== undefined
       ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal, focus === "help_wanted"), this.#roomId)
-      : await this.snapshot({ signal });
+      : checkedWorkSnapshot(await this.#request("?view=orientation", undefined, signal), this.#roomId, "orientation");
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
     try {

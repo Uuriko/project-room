@@ -90,6 +90,7 @@ test("access preview: a work card shows exactly what an agent can read before a 
   // A quoted @mention replying to the source and an inbox-style excerpt import must add nothing to the preview.
   send(T.MESSAGE_POSTED, { messageId: "quoted-mention", replyToId: "test-request", body: "@Test producer please take this: QUOTED-MENTION-SENTINEL" });
   f.store.command(f.keys.owner, "commons", { id: "inbox-" + "b".repeat(24), type: T.MESSAGE_POSTED, data: { messageId: "excerpt-import", body: "IMPORTED-EXCERPT-SENTINEL" } });
+  await page.locator('#message-list [data-open-work="test-handoff"]').click();
   const card = page.locator('[data-work-record-id="test-handoff"]');
   await card.waitFor();
   await page.locator("#message-list").getByText("IMPORTED-EXCERPT-SENTINEL").waitFor();

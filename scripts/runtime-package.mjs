@@ -80,6 +80,7 @@ optional.push("server/verdict-inbox.mjs", "server/verdict-inbox-read.mjs", "serv
 optional.push("offers.html", "src/project-offers-ui.js", "src/owner-project-offers-ui.js", "src/project-offers.css", "server/project-offers.mjs", "src/contribution-brief.js", "src/paid-work-offers.js");
 optional.push("server/opportunities.mjs"); // opportunity feed v2: read-only open-work discovery (imported by server/http.mjs)
 optional.push("server/conversation-sync.mjs"); // bounded viewer-scoped conversation reads (imported by server/http.mjs)
+optional.push("server/agent-orientation.mjs"); // scoped orientation imported by snapshot-window
 optional.push("server/snapshot-window.mjs"); // shared room-read window (imported by server/http.mjs and server/room-bootstrap.mjs)
 optional.push("server/routes/room-window.mjs"); // windowed bootstrap and older-message page (imported by server/routes/table.mjs)
 optional.push("server/room-bootstrap.mjs"); // one-read room open (imported by server/http.mjs and server/mcp-room-profile.mjs)
@@ -427,6 +428,7 @@ optional.push("server/trial-task-store.mjs", "server/trial-tasks.mjs", "server/v
 optional.push("src/work-reducers.js", "src/message-reducers.js", "src/spend-pricing-ui.js", "src/polls.js", "src/account-client.js");
 optional.push("src/entry.js", "src/signin-entry.js", "src/signin-navigation.js");
 optional.push("server/sql-binds.mjs"); // shared Worker-safe SQL list chunks imported by fleet, wakes, needs-me and restore
+optional.push("server/sql-write-classification.mjs"); // shared by Node cache invalidation and Workers storage
 optional.push("server/html-escape.mjs", "src/html-escape.js"); // one HTML escape, re-exported for server callers
 optional.push("server/db-util.mjs"); // shared sqlite tableExists
 optional.push("server/work-repository.mjs", "server/message-replay-snapshot.mjs", "server/message-entity-projection.mjs", "server/message-repository.mjs", "server/message-queries.mjs", "server/message-command-service.mjs", "server/agent-pause.mjs"); // Archive-aware message domain reads; pause admission asks agent-pause isPaused

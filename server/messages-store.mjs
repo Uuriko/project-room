@@ -1115,7 +1115,13 @@ function fillRoom(store, room, budget, expired, yieldBetween) {
       }
       // The last chunk already stored its event id. Saving here would replace
       // that id with a blank one and the next pass would replay the room.
-      store.transaction(() => { publishRoom(store, room.id, seq, state); });
+      store.transaction(() => {
+        // A final chunk normally publishes before yielding. Recheck its
+        // certificate rather than repeating the full overlay/prune pass and
+        // clearing a parity check completed during that yield. An absent or
+        // invalidated certificate still needs publication.
+        if (!messagesBackfillCaughtUp(db, room.id)) publishRoom(store, room.id, seq, state);
+      });
       return { events, stopped: false, budgetExceeded: false, replaySeq: seq, freshBlock };
     }
     const outcome = store.transaction(() => {
@@ -1431,21 +1437,32 @@ function certifyMessagesParity(store, target = null) {
   for (const row of store.db.prepare("SELECT * FROM messages WHERE room_id=? AND (seq>? OR message_id IN (SELECT value FROM json_each(?)))").all(roomId, archive.throughSeq, archive.retainedJson)) {
     const message = messages.get(row.message_id);
     let record, extras;
-    try { record = JSON.parse(row.record_json); extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
-    catch { /* invalid records fail parity */ }
-    if (!message || !isDeepStrictEqual(record, currentRecord(message))
-      || (extras !== null && !isDeepStrictEqual(extras, reducerExtras(message)))
-      || row.seq !== sequences.get(message.id)
-      || row.author_id !== message.authorId || row.body !== storedBody(message)
-      || row.channel_id !== textOrNull(message.channelId)
-      || row.thread_root_id !== threadRootId(threadMessages, message)
-      || row.reply_to_id !== textOrNull(message.replyToId)
-      || row.to_member_id !== textOrNull(message.toMemberId)
-      || row.work_item_id !== textOrNull(message.workItemId)
-      || row.created_at !== message.createdAt || row.edited_at !== textOrNull(message.editedAt)
-      || row.deleted_at !== textOrNull(message.deletedAt)
-      || row.pinned !== (pinned.has(message.id) ? 1 : 0)) {
-      throw new Error(`messages parity failed for ${roomId}: current record ${row.message_id} differs`);
+    try { record = JSON.parse(row.record_json); } catch { /* invalid records fail parity */ }
+    try { extras = row.reducer_extras_json === null ? null : JSON.parse(row.reducer_extras_json); }
+    catch { /* invalid extras fail parity */ }
+    // Report allowlisted field names only, never stored or expected values.
+    // Operators can distinguish index drift from content/history drift without
+    // copying private message text into failure records or logs.
+    let differences = null;
+    if (!message) differences = ['projection_message'];
+    else {
+      if (!isDeepStrictEqual(record, currentRecord(message))) (differences ??= []).push('record_json');
+      if (extras !== null && !isDeepStrictEqual(extras, reducerExtras(message))) (differences ??= []).push('reducer_extras_json');
+      if (row.seq !== sequences.get(message.id)) (differences ??= []).push('seq');
+      if (row.author_id !== message.authorId) (differences ??= []).push('author_id');
+      if (row.body !== storedBody(message)) (differences ??= []).push('body');
+      if (row.channel_id !== textOrNull(message.channelId)) (differences ??= []).push('channel_id');
+      if (row.thread_root_id !== threadRootId(threadMessages, message)) (differences ??= []).push('thread_root_id');
+      if (row.reply_to_id !== textOrNull(message.replyToId)) (differences ??= []).push('reply_to_id');
+      if (row.to_member_id !== textOrNull(message.toMemberId)) (differences ??= []).push('to_member_id');
+      if (row.work_item_id !== textOrNull(message.workItemId)) (differences ??= []).push('work_item_id');
+      if (row.created_at !== message.createdAt) (differences ??= []).push('created_at');
+      if (row.edited_at !== textOrNull(message.editedAt)) (differences ??= []).push('edited_at');
+      if (row.deleted_at !== textOrNull(message.deletedAt)) (differences ??= []).push('deleted_at');
+      if (row.pinned !== (pinned.has(message.id) ? 1 : 0)) (differences ??= []).push('pinned');
+    }
+    if (differences) {
+      throw new Error(`messages parity failed for ${roomId}: current record ${row.message_id} differs (${differences.join(', ')})`);
     }
   }
   store.transaction(() => store.db.prepare("UPDATE messages_backfill_cursor SET parity_at_seq=applied_seq WHERE room_id=?").run(roomId));

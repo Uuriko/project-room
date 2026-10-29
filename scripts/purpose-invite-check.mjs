@@ -92,7 +92,7 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await stale.locator("#join-link-submit").click();
   await stale.locator("#main").waitFor({ state: "visible" });
   assert.match(await stale.locator("#status").textContent(), /no longer/i);
-  assert.equal(await stale.locator('[data-work-record-id="test-handoff"] .work-details').evaluate(el => el.open), false, "no item force-opened for a stale purpose");
+  assert.equal(await stale.locator('#message-list [data-work-record-id]').count(), 0, "no item mounted for a stale purpose");
   await staleContext.close();
 
   // 4. A plain link (no purpose) still joins without opening any item.
@@ -103,7 +103,7 @@ test("invite for a purpose: link opens the invited work item after join", { time
   await plain.locator("#join-link-name").fill("Plain guest");
   await plain.locator("#join-link-submit").click();
   await plain.locator("#main").waitFor({ state: "visible" });
-  assert.equal(await plain.locator('[data-work-record-id="test-handoff"] .work-details').evaluate(el => el.open), false, "plain link opens no item");
+  assert.equal(await plain.locator('#message-list [data-work-record-id]').count(), 0, "plain link mounts no item");
   await plainContext.close();
 
   assert.deepEqual(errors, [], "no page errors");

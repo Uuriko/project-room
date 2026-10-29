@@ -1,3 +1,4 @@
+import { openWorkFromSearch } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 // Simulated human journeys against disposable first-party data, not human research.
 import test from "node:test";
@@ -41,7 +42,7 @@ function seedRecipes(f) {
 test("recipes desktop: distinct recent definitions prefill a fresh outcome, never mutate state", { timeout: 60000 }, async t => {
   const f = await setup(t), { page } = f;
   seedRecipes(f);
-  await page.locator('[data-work-record-id="recipe-duplicate"]').waitFor();
+  await openWorkFromSearch(page, "recipe-duplicate", "Weekly source review");
   const before = f.snapshot();
   await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#new-work-form").waitFor({ state: "visible" });
@@ -82,7 +83,7 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
   assert.equal(reopened.includes("recipe-newer"), false, "identical definitions stay collapsed behind the newest occurrence");
   await page.keyboard.press("Escape"); await page.locator("#new-work-form").waitFor({ state: "hidden" });
   // A reuse open keeps its own prefilled definition and hides the picker.
-  const card = page.locator('[data-work-record-id="recipe-older"]');
+  const card = await openWorkFromSearch(page, "recipe-older", "Weekly source review");
   if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
   await card.locator("[data-reuse-work]").click();
   await page.locator("#new-work-form").waitFor({ state: "visible" });
@@ -99,7 +100,7 @@ test("recipes desktop: distinct recent definitions prefill a fresh outcome, neve
 test("recipes mobile: picker stays inside the dialog without horizontal overflow", { timeout: 60000 }, async t => {
   const f = await setup(t, { width: 390, height: 844 }), { page } = f;
   seedRecipes(f);
-  await page.locator('[data-work-record-id="recipe-duplicate"]').waitFor();
+  await openWorkFromSearch(page, "recipe-duplicate", "Weekly source review");
   await openComposerOptions(page); await page.locator("#new-work-button").click();
   await page.locator("#new-work-form").waitFor({ state: "visible" });
   assert.equal(await page.locator("#work-recipe-field").isVisible(), true);
