@@ -130,3 +130,22 @@ is public verification, not an authenticated or browser journey. Before/after
 observations bound races but are not a deployment lock. The command never
 uploads, rolls back, or publishes a runtime; publication remains separate and
 must recheck the deployed source rather than treating an old receipt as current.
+
+
+### Portable runtime archive
+
+After creating a runtime package, create a new archive with:
+
+```sh
+python3 scripts/runtime-archive.py /absolute/runtime /absolute/new-runtime.tar.gz --expected-commit EXACT_COMMIT
+```
+
+Use `--node /path/to/node` when Node is not on PATH. The creator invokes the
+existing runtime-package verifier before archiving, then checks the manifest
+hash and every file again. It refuses extras, symlinks, mismatched content and
+existing output. Tar entries are sorted with normalized timestamps and owner
+metadata; executable files use mode 0755 and other files 0644. Filesystem
+extended attributes and macOS AppleDouble metadata are never archived. The
+output is deterministic for identical content and executable bits within the
+same Python/zlib implementation. This verifies content consistency, not source
+provenance or deployment readiness. Workflow integration is separate.
