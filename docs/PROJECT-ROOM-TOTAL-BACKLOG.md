@@ -6,6 +6,31 @@ Captured 2026-10-18; local baseline d3ae60e0. **773 accountable entries**: 288 e
 
 This is the full captured inventory, not a priority shortlist. Existing source requirements remain binding. A task to reconcile or qualify a capability does not assert it has never been built. Schema 41 and earlier measured gains are local qualified checkpoints; the overall architecture overhaul remains incomplete.
 
+## Subsequent reconciliation — 2026-10-29
+
+The older audit below remains bound to its original source. These narrower
+updates prevent its unresolved rows from being mistaken for current missing work:
+
+- **#5193:** incorporated through #5321 at `30367102`, including failed-page
+  gesture retry, retired-session fencing and disconnect cleanup. It was merged,
+  not deployed, at this observation. The preserved before/after evidence covers
+  80 client/history boundary checks; it is not a productivity comparison.
+- **Graphify:** exact `1528c577` map publication passed three REST and three fresh
+  MCP readbacks. Compact edge keys retain normalized contents. Coverage remains
+  server-only/truncated; this does not imply the entire codebase is mapped.
+- **#5180:** merged; current process-group cleanup retains the profile lock until
+  group absence is established. A historical full-suite descendant timing failure
+  remains unexplained: 30 serial controls and 15 focused checks did not reproduce
+  it. Do not reopen the EPERM fix as missing or mark the timing failure resolved.
+- **#5163:** registry pointers adopted in #5319; optional SEO-title change declined.
+  The old mixed PR was closed with that explicit partial disposition.
+- **#5165, #4998, #4983:** Codex owns current-source reconciliation. These remain
+  separate from the live release. Existing fixes require composition evidence;
+  no completion follows merely from their age or a prior passing branch.
+
+For deployed versus merged state, use the [release checkpoint](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045).
+No captured inventory entry below is silently deleted or marked complete.
+
 ## Bounded older-work dispositions — 2026-10-29
 
 This twelve-item audit is bound to source `c7a214cbe1452cec7d293a99a10cd400948dc8f2`.

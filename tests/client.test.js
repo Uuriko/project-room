@@ -485,3 +485,77 @@ test('a first stream open re-reads when the proving read is stale', async t => {
   f.emit('open'); await f.client.flight?.promise;
   assert.equal(f.reads(), before + 1);
 });
+
+test('private conversation client confirms pair selection and refuses public or third-party records', async () => {
+  let payload = { ...snapshot(4), conversationVersion: 1, mode: 'replace', limit: 3,
+    messageId: null, peerMemberId: 'alice', messages: [{ id: 'one', authorId: 'alice', toMemberId: 'human' }], nextCursor: null, checkpoint: null };
+  const requests = [], client = new RoomClient({ fetcher: async url => { requests.push(url); return response(payload); } });
+  client.session = identity();
+  assert.equal((await client.conversation({ limit: 3, peerMemberId: 'alice' })).messages[0].id, 'one');
+  assert.match(requests.at(-1), /peerMemberId=alice/);
+  await assert.rejects(client.conversation({ limit: 3, peerMemberId: 'bob' }), /could not be confirmed/);
+  for (const message of [{ id: 'public', authorId: 'alice' }, { id: 'other', authorId: 'alice', toMemberId: 'bob' }]) {
+    payload = { ...payload, messages: [message] };
+    await assert.rejects(client.conversation({ limit: 3, peerMemberId: 'alice' }), /could not be confirmed/);
+  }
+});
+
+test('read positions preserve explicit action order without blocking another conversation', async () => {
+  const gate = deferred(), requests = [];
+  const client = new RoomClient({ fetcher: async (url, options) => {
+    requests.push({ url, data: options.body ? JSON.parse(options.body) : null });
+    if (requests.length === 1) await gate.promise;
+    return response({ ...snapshot(1), lastReadMessageId: requests.at(-1).data?.lastReadMessageId ?? null });
+  } });
+  client.session = identity();
+  const first = client.setReadHorizon('', 'latest', 'alice');
+  const unread = client.setReadHorizon('', 'earlier', 'alice');
+  const other = client.setReadHorizon('', 'bob-latest', 'bob');
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(requests.map(r => r.data.lastReadMessageId), ['latest', 'bob-latest']);
+  await other; gate.resolve(); await Promise.all([first, unread]);
+  assert.deepEqual(requests.map(r => r.data.lastReadMessageId), ['latest', 'bob-latest', 'earlier']);
+});
+
+test('queued read positions cannot be sent in a replacement account', async () => {
+  const gate = deferred(), requests = [];
+  const client = new RoomClient({ fetcher: async (url, options) => {
+    requests.push({ url, options }); await gate.promise; return response(snapshot(1));
+  } });
+  client.session = identity();
+  const first = client.setReadHorizon('', 'latest', 'alice');
+  const queued = client.setReadHorizon('', 'earlier', 'alice');
+  await new Promise(resolve => setImmediate(resolve));
+  client.endAccess(); client.session = identity('other'); gate.resolve();
+  await Promise.all([first, queued]);
+  assert.equal(requests.length, 1);
+});
+
+test('read-position GET waits for pending writes and a failed write does not poison its queue', async () => {
+  const gate = deferred(), requests = [];
+  const client = new RoomClient({ fetcher: async (url, options) => {
+    requests.push({ url, method: options.method });
+    if (requests.length === 1) { await gate.promise; throw new Error('offline'); }
+    return response({ ...snapshot(1), lastReadMessageId: 'earlier' });
+  } });
+  client.session = identity();
+  const first = client.setReadHorizon('', 'latest', 'alice');
+  const failed = assert.rejects(first, /offline/);
+  const second = client.setReadHorizon('', 'earlier', 'alice');
+  const read = client.readHorizon('', 'alice');
+  await new Promise(resolve => setImmediate(resolve)); assert.equal(requests.length, 1);
+  gate.resolve(); await failed; await second; assert.equal((await read).lastReadMessageId, 'earlier');
+  assert.deepEqual(requests.map(r => r.method), ['POST', 'POST', 'GET']);
+});
+
+test('private directory validates metadata and refuses stale account responses', async () => {
+  let payload = { ...snapshot(1), directoryVersion: 1, mode: 'replace', limit: 50, peers: [{ memberId: 'alice', lastMessageAt: '2026-10-29T00:00:00Z' }], nextCursor: null };
+  const client = new RoomClient({ fetcher: async () => response(payload) });
+  client.session = identity();
+  assert.equal((await client.conversations()).peers[0].memberId, 'alice');
+  payload = { ...payload, peers: [...payload.peers, ...payload.peers] };
+  await assert.rejects(client.conversations(), /could not be confirmed/);
+  const gate = deferred(); client.fetcher = async () => { await gate.promise; return response(payload); };
+  const pending = client.conversations(); client.endAccess(); gate.resolve();
+  await assert.rejects(pending, /changed/i);
+});

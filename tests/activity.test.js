@@ -226,6 +226,40 @@ test("read horizons: set, get, rewind, and validation", async t => {
   assert.equal((await f.call("/api/rooms/commons/read-horizon")).status, 401);
 });
 
+test("private read positions are durable, per viewer and per pair, and reject cross-conversation markers", async t => {
+  const f = await serve(t);
+  seedActivity(f);
+  f.send(f.ownerKey, T.MEMBER_ADDED, { memberId: "other", displayName: "Other", kind: "human", permissions: [] });
+  const otherKey = f.store.issueAccessKey("commons", "other");
+  f.send(f.ownerKey, T.MESSAGE_POSTED, { messageId: "private-a", body: "For Maya", toMemberId: "maya" });
+  f.send(f.mayaKey, T.MESSAGE_POSTED, { messageId: "private-b", body: "For owner", toMemberId: "owner" });
+  f.send(f.mayaKey, T.MESSAGE_POSTED, { messageId: "other-pair", body: "For Other", toMemberId: "other" });
+  const set = (token, data) => f.call("/api/rooms/commons/read-horizon", { method: "POST", token, data });
+  const get = (token, query = "") => f.call(`/api/rooms/commons/read-horizon${query}`, { token });
+  assert.equal((await set(f.mayaKey, { lastReadMessageId: "root" })).status, 200);
+  assert.equal((await set(f.mayaKey, { peerMemberId: "owner", lastReadMessageId: "private-a" })).status, 200);
+  assert.equal((await set(f.mayaKey, { peerMemberId: "other", lastReadMessageId: "other-pair" })).status, 200);
+  assert.equal((await get(f.mayaKey, "?peerMemberId=owner")).body.lastReadMessageId, "private-a");
+  assert.equal((await get(f.mayaKey)).body.lastReadMessageId, "root");
+  assert.equal((await get(f.ownerKey, "?peerMemberId=maya")).body.lastReadMessageId, null);
+  assert.equal((await get(otherKey, "?peerMemberId=owner")).body.lastReadMessageId, null);
+  for (const messageId of ["root", "other-pair", "missing"]) {
+    assert.equal((await set(f.mayaKey, { peerMemberId: "owner", lastReadMessageId: messageId })).status, 404);
+  }
+  assert.equal((await set(otherKey, { peerMemberId: "owner", lastReadMessageId: "private-a" })).status, 404);
+  assert.equal((await set(f.mayaKey, { peerMemberId: "owner", threadId: "root", lastReadMessageId: null })).status, 422);
+  assert.equal((await set(f.mayaKey, { threadId: '["direct","owner"]', lastReadMessageId: "root" })).status, 422);
+  assert.equal((await get(f.mayaKey, "?peerMemberId=owner&peerMemberId=other")).status, 422);
+  assert.equal((await get(f.mayaKey, "?peerMemberId=")).status, 422);
+  assert.equal((await set(f.mayaKey, { peerMemberId: "owner", lastReadMessageId: "private-b" })).status, 200);
+  assert.equal((await set(f.mayaKey, { peerMemberId: "owner", lastReadMessageId: "private-a" })).status, 200, "rewind stays supported");
+  assert.equal(f.store.db.prepare("SELECT last_read_message_id FROM read_horizons WHERE room_id=? AND member_id=? AND thread_id=?")
+    .get("commons", "maya", '["direct","owner"]').last_read_message_id, "private-a", "position is persisted in the existing database");
+  assert.equal((await set(f.mayaKey, { peerMemberId: "owner", lastReadMessageId: null })).status, 200);
+  assert.equal((await get(f.mayaKey, "?peerMemberId=owner")).body.lastReadMessageId, null);
+  assert.equal((await get(f.mayaKey, "?peerMemberId=other")).body.lastReadMessageId, "other-pair");
+});
+
 test("saved messages: save, list, unsave, ownership isolation", async t => {
   const f = await serve(t);
   seedActivity(f);

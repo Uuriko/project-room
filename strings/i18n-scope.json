@@ -36,6 +36,7 @@
   "src/conversation.js",
   "src/curiosity-rank.mjs",
   "src/design-tokens.js",
+  "src/direct-conversation-window.js",
   "src/display-name-guard.js",
   "src/dm-consents.js",
   "src/dm-room-wiring.mjs",

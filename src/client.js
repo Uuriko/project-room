@@ -1,6 +1,6 @@
 import { accountSessionError, sameAccountSession } from "./account-client.js";
 export { AccountClient, IDENTITY_MINT_POW_BITS, IDENTITY_MINT_POW_WINDOW_MS, IDENTITY_MINT_POW_ESCALATION_BITS, escalatedIdentityMintPowBits, solveIdentityMintProof, submitIdentityMint } from "./account-client.js";
-import { applyEvent } from "./events.js";
+import { applyEvent, validId } from "./events.js";
 import { uiText } from "./strings.js";
 import { verifyWorkResult } from "./work-packet.js";
 import { validateCharterRead } from "./room-charter.js";
@@ -804,23 +804,40 @@ export class RoomClient {
       throw error;
     }
   }
-  async conversation({ limit = 50, cursor = null, since = null, messageId = null, channelId = null } = {}) {
+  async conversation({ limit = 50, cursor = null, since = null, messageId = null, channelId = null, peerMemberId = null } = {}) {
     const session = this.session, generation = this.generation;
     if (!session || !this.ownsAccountSession()) throw new Error("Sign in again to read this conversation");
     const query = new URLSearchParams({ limit: String(limit) });
-    for (const [key, value] of Object.entries({ cursor, since, messageId, channelId })) if (value !== null) query.set(key, value);
+    for (const [key, value] of Object.entries({ cursor, since, messageId, channelId, peerMemberId })) if (value !== null) query.set(key, value);
     const result = await this.request(this.path(`/conversation?${query}`));
     if (generation !== this.generation || this.session !== session || !this.ownsAccountSession()) throw new Error("Room identity changed");
     if (!this.ownsResponse(result, session)) { this.endAccess(); throw new Error("Room identity changed"); }
     if (result.conversationVersion !== 1 || !["replace", "not_modified", "reset"].includes(result.mode)
-      || result.limit !== limit || result.messageId !== messageId || (result.channelId ?? null) !== channelId || !Number.isSafeInteger(result.sequence)
+      || result.limit !== limit || result.messageId !== messageId || (result.channelId ?? null) !== channelId || (result.peerMemberId ?? null) !== peerMemberId || !Number.isSafeInteger(result.sequence)
       || ![result.nextCursor, result.checkpoint].every(value => value === null || typeof value === "string")
       || result.mode !== "not_modified" && (!Array.isArray(result.messages) || result.messages.length > limit
         || result.messages.some(message => !message || typeof message.id !== "string" || messageId !== null && message.id !== messageId
-          || channelId !== null && (message.toMemberId || (message.channelId || "general") !== channelId))))
+          || channelId !== null && (message.toMemberId || (message.channelId || "general") !== channelId)
+          || peerMemberId !== null && !(message.authorId === session.member.id && message.toMemberId === peerMemberId
+            || message.authorId === peerMemberId && message.toMemberId === session.member.id))))
       throw new Error("Conversation response could not be confirmed");
     // Callers replace their window and discard older cached pages on `replace`;
     // `reset` requires a fresh latest-page read. Neither is event-log replay.
+    return result;
+  }
+  async conversations({ limit = 50, cursor = null } = {}) {
+    const session = this.session, generation = this.generation;
+    if (!session || !this.ownsAccountSession()) throw new Error(uiText("error.connection_changed"));
+    const query = new URLSearchParams({ limit: String(limit), ...(cursor === null ? {} : { cursor }) });
+    const result = await this.request(this.path(`/conversations?${query}`));
+    if (session !== this.session || generation !== this.generation || !this.ownsAccountSession()) throw new Error(uiText("error.connection_changed"));
+    if (!this.ownsResponse(result, session)) { this.endAccess(); throw new Error(uiText("error.connection_changed")); }
+    if (result.directoryVersion !== 1 || !["replace", "reset"].includes(result.mode) || result.limit !== limit
+      || !Number.isSafeInteger(result.sequence) || !(result.nextCursor === null || typeof result.nextCursor === "string")
+      || !Array.isArray(result.peers) || result.peers.length > limit
+      || result.peers.some(peer => !peer || !validId(peer.memberId) || typeof peer.lastMessageAt !== "string")
+      || new Set(result.peers.map(peer => peer.memberId)).size !== result.peers.length)
+      throw new Error(uiText("direct.invalidDirectory"));
     return result;
   }
   async replyContext(requestMessageId) {
@@ -1077,11 +1094,35 @@ export class RoomClient {
   markActivityReadAll(type = null) {
     return this.roomWrite("/activity-read-all", type ? { type } : {});
   }
-  readHorizon(threadId = "") {
-    return this.roomRead(threadId ? `/read-horizon?threadId=${encodeURIComponent(threadId)}` : "/read-horizon");
+  readPositionOperation(threadId, peerMemberId, write, operation) {
+    const session = this.session, generation = this.generation;
+    if (!session) return Promise.resolve(null);
+    this.readPositionQueues ??= new WeakMap();
+    let queues = this.readPositionQueues.get(session);
+    if (!queues) { queues = new Map(); this.readPositionQueues.set(session, queues); }
+    const key = JSON.stringify([generation, peerMemberId === null ? ["thread", threadId ?? ""] : ["peer", peerMemberId]]);
+    const pending = queues.get(key);
+    const result = (pending ?? Promise.resolve()).catch(() => {}).then(() => {
+      if (session !== this.session || generation !== this.generation || !this.ownsAccountSession()) return null;
+      return operation();
+    });
+    if (write) {
+      queues.set(key, result);
+      const cleanup = () => { if (queues.get(key) === result) queues.delete(key); };
+      void result.then(cleanup, cleanup);
+    }
+    return result;
   }
-  setReadHorizon(threadId, lastReadMessageId) {
-    return this.roomWrite("/read-horizon", { threadId: threadId ?? "", lastReadMessageId });
+  readHorizon(threadId = "", peerMemberId = null) {
+    return this.readPositionOperation(threadId, peerMemberId, false, () => {
+      if (peerMemberId !== null) return this.roomRead(`/read-horizon?peerMemberId=${encodeURIComponent(peerMemberId)}`);
+      return this.roomRead(threadId ? `/read-horizon?threadId=${encodeURIComponent(threadId)}` : "/read-horizon");
+    });
+  }
+  setReadHorizon(threadId, lastReadMessageId, peerMemberId = null) {
+    return this.readPositionOperation(threadId, peerMemberId, true, () => this.roomWrite("/read-horizon", {
+      ...(peerMemberId === null ? { threadId: threadId ?? "" } : { peerMemberId }), lastReadMessageId
+    }));
   }
   savedList() {
     return this.roomRead("/saved");
