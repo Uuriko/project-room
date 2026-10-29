@@ -2,7 +2,7 @@ import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } fro
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
-import { invalidateEditedAssistantInput } from './room-assistant.mjs';
+import { invalidateEditedAssistantInput, invokeFromPlainPost } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
@@ -6452,6 +6452,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (@handles whose target is ambiguous or unknown); they ride the response below.
       let mentionWarnings = null;
       if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
+      // fo-qa-c10-202610280645: a plain shared post that addresses the room
+      // assistant starts its run server-side, so the ask never depends on the
+      // client's projection being fresh. Reply-based continuations stay
+      // client-routed; the derivation itself is silent and never fails the post.
+      if (command.type === T.MESSAGE_POSTED && !command.data.toMemberId && !command.data.replyToId)
+        invokeFromPlainPost(this, roomId, state, auth.member, command.data, command.data.messageId);
       // Attention: write-time activity fan-out (mention/reply/thread_reply).
       // Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
