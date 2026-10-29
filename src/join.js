@@ -254,6 +254,7 @@ function fail({ title, message, retry }) {
   if (titleEl) titleEl.textContent = title;
   if (messageEl) messageEl.textContent = message;
   if (retryEl) retryEl.hidden = !retry;
+  titleEl?.focus();
 }
 
 // Every apiFetch call is bounded by this deadline so a stalled network can
@@ -518,6 +519,7 @@ async function boot() {
     if (secretEl) secretEl.value = identitySecret;
     const openEl = $("join-open-room");
     if (openEl) openEl.href = joinNextHref(roomId);
+    $("join-success-title")?.focus();
   });
 
   $("join-copy-secret")?.addEventListener("click", async () => {
