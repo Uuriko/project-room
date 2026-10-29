@@ -1370,6 +1370,7 @@ export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
+    const initializationStarted = performance.now();
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
@@ -2141,10 +2142,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
     this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
     // Decision #10: backfill projection work items onto the work-claims
-    // board (server/work-item-board.mjs). Runs in both integrity modes —
-    // a deferred (Durable Object) database holds one room, so the pass is
-    // bounded there too; the versioned marker makes repeat opens a single
-    // marker read per room. "manual" defers the pass to an explicit
+    // board (server/work-item-board.mjs). Runs in both integrity modes.
+    // The shared pilot can contain many rooms; current markers avoid their
+    // projection work but selection still scans room metadata.
+    // "manual" defers the pass to an explicit
     // backfillWorkItemClaims() call (tests staging a legacy corpus, or an
     // operator-controlled rollout). A failing room never bricks the
     // open: its marker stays behind and the next open retries it.
@@ -2162,6 +2163,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     configureWorkRepository(this.db, this.workEntities);
     if (this.workEntities && version < 42) this.migrateWorkProjections();
+    // Legacy coldStart.durationMs ends before the backfill above. Keep it
+    // comparable; this separate successful writable-store total includes all
+    // initialization through work repository setup and migration.
+    this.initializationMs = Math.round(performance.now() - initializationStarted);
+    console.error(JSON.stringify({ event: "room.store_initialized", initializationMs: this.initializationMs,
+      legacyColdStartMs: this.coldStart.durationMs }));
   }
 
   // Convert one room atomically; interrupted multi-room runs resume by
