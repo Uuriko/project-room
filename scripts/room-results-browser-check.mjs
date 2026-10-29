@@ -271,6 +271,9 @@ test("creating new work from the composer requires explicit confirmed submission
   await p.locator("#verifier-select").selectOption("reviewer");
   await p.locator("#create-work-button").click();
   await p.locator("#work-dialog").waitFor({ state: "hidden" });
+  await p.locator('#topbar-search-toggle').click();
+  await p.locator('#message-search').fill('Follow up on the result');
+  await p.locator('#search-list [data-open-work]').first().click();
   await p.locator('#message-list [data-work-timeline]').first().waitFor();
   assert.ok(Object.values(f.state().workItems).some(item => item.title === "Follow up on the result" && item.state === "proposed"));
 });
@@ -481,6 +484,7 @@ test("saved scoped channel: human assignment to inline result, continuation and 
     summary: "Local transport result", nextAction: "Read and continue", evidenceMessageId: draft.messageId,
     evidenceMessageEventId: draft.eventId, evidenceVersion: textVersion(body), previousCompletionEventId: null, producerId: f.connection.memberId };
   const completed = await call(first, "room_submit_text_result", completion);
+  await p.locator(`#message-list [data-open-work="${task.id}"]`).first().click();
   const card = p.locator(`[data-work-record-id="${task.id}"]`);
   await card.locator("[data-read-result]").click();
   await p.waitForFunction(text => document.querySelector("#result-body").textContent === text, body);
