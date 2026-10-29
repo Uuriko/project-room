@@ -368,3 +368,16 @@ test("unsigned work.completed names room_text fields, then a room_text completio
   assert.equal(completed.work.receipt.nativeText.messageId, messageId);
   assert.equal(Object.hasOwn(completed.work.receipt, "signedEvidence"), false);
 });
+
+test("owner_required for the attention rollup gets rollup copy, not invite copy (UT-HUMAN F4)", () => {
+  const rollup = agentErrorAx({ httpStatus: 403, code: "owner_required", message: "Only the room owner can view the attention rollup" });
+  assertAx(rollup, { reason: "owner_required" });
+  assert.match(rollup.hint, /attention rollup/);
+  assert.doesNotMatch(rollup.hint, /guest invite|Add agent/);
+  assert.equal(rollup.next.some(step => /guest invite|Add agent/.test(String(step.command || ""))), false);
+  assert.ok(rollup.next.some(step => /attention rollup/.test(String(step.command || ""))));
+  // Control: an unrelated owner_required refusal keeps the invite copy.
+  const other = agentErrorAx({ httpStatus: 403, code: "owner_required", message: "Only the room owner can manage autonomy tiers" });
+  assertAx(other, { reason: "owner_required" });
+  assert.match(other.hint, /guest invite/);
+});
