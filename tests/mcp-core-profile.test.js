@@ -13,6 +13,8 @@ import { API_KEY_PREFIX } from "../server/agent-api-keys.mjs";
 import {
   CORE_MCP_TOOLS, PUBLIC_WORK_MCP_TOOLS, CORE_MCP_BLURBS, HOSTED_ROOM_MCP_TOOLS, MCP_TOOL_NAME_RE
 } from "../src/room-mcp-join.js";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
+import { LEAN_MCP_TOOLS } from "../server/mcp-action-search.mjs";
 
 const JOIN_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet"];
 
@@ -156,7 +158,7 @@ test("room_needs_me and GET /api/needs-me list what changed across rooms", async
     roomId: "ada-east", title: "Ada east", purpose: "Needs me too", kind: "personal", displayName: "Ada"
   }).roomId;
   for (const roomId of [roomA, roomB]) {
-    store.identities.link(ada.secret, roomId, { identityId: bob.identityId, displayName: "Bob", permissions: [] });
+    linkWithProof(store, ada.secret, roomId, bob, { displayName: "Bob", permissions: [] });
     setTier(store.db, roomId, bob.identityId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
   const post = (secret, roomId, id, data) => store.command(secret, roomId, {
@@ -279,6 +281,12 @@ test("room_needs_me and GET /api/needs-me list what changed across rooms", async
   assert.equal(Object.hasOwn(httpBody, "untrusted"), false);
   assert.equal(httpBody.items[0].untrusted, true);
 
+  const scopedHttp = await fetch(`${origin}/api/needs-me?since=${encodeURIComponent(JSON.stringify(second.value.cursor))}&roomId=${encodeURIComponent(roomA)}`, {
+    headers: { Authorization: `Bearer ${ada.secret}` }
+  });
+  assert.equal(scopedHttp.status, 200);
+  assert.deepEqual((await scopedHttp.json()).items, []);
+
   const missing = await fetch(`${origin}/api/needs-me`);
   assert.equal(missing.status, 401);
   const badCursor = await fetch(`${origin}/api/needs-me?since=nope`, {
@@ -296,7 +304,7 @@ test("a fresh default-profile client can discover, answer and verify a formal re
   const { origin, store, rooms } = await serve(t);
   const owner = store.identities.create("Requester"), recipient = store.identities.create("Responder");
   const room = rooms.create(owner.secret, { roomId: "core-requests", title: "Core requests", purpose: "Answer in context", kind: "personal", displayName: "Requester" });
-  store.identities.link(owner.secret, room.roomId, { identityId: recipient.identityId, displayName: "Responder", permissions: [] });
+  linkWithProof(store, owner.secret, room.roomId, recipient, { displayName: "Responder", permissions: [] });
   store.command(owner.secret, room.roomId, { id: "core-question", type: "message.posted", data: {
     messageId: "core-question", body: "Which result should we use?", toMemberId: recipient.identityId, requestKind: "reply"
   } });
@@ -333,7 +341,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   const roomId = rooms.create(owner.secret, {
     roomId: "focused-tools", title: "Focused tools", purpose: "Discover appropriate actions", kind: "personal"
   }).roomId;
-  store.identities.link(owner.secret, roomId, { identityId: reader.identityId, displayName: "Reader", permissions: [] });
+  linkWithProof(store, owner.secret, roomId, reader, { displayName: "Reader", permissions: [] });
   setTier(store.db, roomId, reader.identityId, "t1_readonly", { updatedBy: "owner", nowMs: Date.now() });
   const before = JSON.stringify(store.room(roomId).state);
   const review = await (await rpc(origin, "tools/list", { focus: "review" }, owner.secret)).json();
@@ -346,7 +354,7 @@ test("tools/list focus is explicit, stateless discovery with full-catalog escape
   for (const name of ["room_propose_work", "wake_register", "room_put_file"]) assert.ok(!namesOf(review).includes(name));
   const work = await (await rpc(origin, "tools/list", undefined, owner.secret, "?focus=work")).json();
   assert.equal(work.result.focus, "work");
-  for (const name of ["room_begin_work", "room_record_handoff", "room_acquire_claim", "room_link_work_claim_pr"]) assert.ok(namesOf(work).includes(name));
+  for (const name of ["room_begin_work", "room_record_handoff", "room_acquire_claim", "room_link_work_claim_pr", "room_claim", "room_handoff"]) assert.ok(namesOf(work).includes(name));
   const conversation = await (await rpc(origin, "tools/list", { focus: "conversation" }, owner.secret)).json();
   assert.ok(namesOf(conversation).includes("room_read_messages"));
   assert.ok(!namesOf(conversation).includes("room_record_verification"));
@@ -393,7 +401,7 @@ async function claimLinkFixture(t) {
   const fixture = await serve(t), { origin, store, rooms } = fixture;
   const owner = store.identities.create("Claim room owner"), writer = store.identities.create("Claim writer");
   const roomId = rooms.create(owner.secret, { roomId: "claim-links", title: "Claim links", purpose: "Append PR from hosted MCP", kind: "personal" }).roomId;
-  store.identities.link(owner.secret, roomId, { identityId: writer.identityId, displayName: "Claim writer", permissions: ["accept_work", "complete_work"] });
+  linkWithProof(store, owner.secret, roomId, writer, { displayName: "Claim writer", permissions: ["accept_work", "complete_work"] });
   setTier(store.db, roomId, writer.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
   const client = new RoomAgentClient({ origin, roomId, token: writer.secret });
   await client.workClaim("hosted-pr", { leaseHours: 6 });
@@ -484,7 +492,118 @@ test("hosted claim PR calls honor target-room tier, write profile and membership
   t.after(() => { store.workClaims.transaction = transaction; });
   denied = await call(origin, tool, args, writer.secret);
   assert.equal(removed, true);
-  assert.equal(denied.value.status, 401);
-  assert.equal(denied.value.code, "unauthenticated");
+  assert.equal(denied.value.status, 403);
+  assert.equal(denied.value.code, "no_access");
   assert.deepEqual(store.workClaims.get(roomId, claimed.id), claimed);
+});
+
+
+test("a room-pinned API key defaults roomId and scopes room_needs_me", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Pin owner"), agent = store.identities.create("Pin agent");
+  const roomA = rooms.create(owner.secret, { roomId: "pin-a", title: "Pin A", purpose: "Pinned key", kind: "personal" }).roomId;
+  const roomB = rooms.create(owner.secret, { roomId: "pin-b", title: "Pin B", purpose: "Other room", kind: "personal" }).roomId;
+  for (const roomId of [roomA, roomB]) {
+    linkWithProof(store, owner.secret, roomId, agent, { displayName: "Pin agent", permissions: [] });
+    setTier(store.db, roomId, agent.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
+  }
+  store.command(owner.secret, roomA, { id: "pin-mention-a", type: "message.posted", data: { messageId: "pin-mention-a", body: "@Pin agent in A" } });
+  store.command(owner.secret, roomB, { id: "pin-mention-b", type: "message.posted", data: { messageId: "pin-mention-b", body: "@Pin agent in B" } });
+  const key = API_KEY_PREFIX + store.agentPlugin.issueApiKey({
+    identityId: agent.identityId, scopes: ["rooms:read", "rooms:write", `mcp:room:${roomA}`]
+  }).secret;
+
+  const needs = await call(origin, "room_needs_me", {}, key);
+  assert.equal(needs.body.result.isError, undefined);
+  assert.equal(needs.value.items.length > 0, true);
+  assert.equal(needs.value.items.every(item => item.roomId === roomA), true);
+  assert.equal(needs.value.items.some(item => item.id === "pin-mention-b"), false);
+
+  const other = await call(origin, "room_needs_me", { roomId: roomB }, key);
+  assert.equal(other.body.result.isError, true);
+  assert.equal(other.value.status, 403);
+  assert.equal(other.value.code, "insufficient_scope");
+
+  const messages = await call(origin, "room_read_messages", {}, key);
+  assert.equal(messages.body.result.isError, undefined);
+  assert.equal(messages.value.roomId, roomA);
+  const posted = await call(origin, "room_post_message", { body: "Pinned default write" }, key);
+  assert.equal(posted.body.result.isError, undefined);
+  assert.equal(store.room(roomA).state.messages.some(message => message.body === "Pinned default write"), true);
+});
+
+test("hosted work writes derive requestId and use the current revision when omitted", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Work owner"), agent = store.identities.create("Work agent");
+  const roomId = rooms.create(owner.secret, { roomId: "auto-work", title: "Auto work", purpose: "Revision defaults", kind: "personal" }).roomId;
+  linkWithProof(store, owner.secret, roomId, agent, { displayName: "Work agent", permissions: ["accept_work"] });
+  setTier(store.db, roomId, agent.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
+  for (const workItemId of ["auto-start", "stale-start"]) {
+    store.command(owner.secret, roomId, { id: `propose-${workItemId}`, type: "work.proposed", data: {
+      workItemId, title: workItemId, definitionOfDone: "Start exactly once", accountableMemberId: agent.identityId,
+      mode: "read", independentVerificationRequired: false, ownerDecisionRequired: false
+    } });
+    store.command(agent.secret, roomId, { id: `accept-${workItemId}`, type: "work.accepted", data: { workItemId, expectedRevision: 0 } });
+  }
+  const key = API_KEY_PREFIX + store.agentPlugin.issueApiKey({
+    identityId: agent.identityId, scopes: ["rooms:read", "rooms:write", `mcp:room:${roomId}`]
+  }).secret;
+
+  const started = await call(origin, "room_start_work", { workItemId: "auto-start" }, key);
+  assert.equal(started.body.result.isError, undefined);
+  assert.match(started.value.requestId, /^mcp-[a-f0-9]{64}$/);
+  assert.equal(started.value.appliedRevision, 2);
+  assert.equal(store.room(roomId).state.workItems["auto-start"].state, "working");
+
+  const stale = await call(origin, "room_start_work", { workItemId: "stale-start", expectedRevision: 0 }, key);
+  assert.equal(stale.body.result.isError, true);
+  assert.equal(stale.value.status, 409);
+  assert.equal(stale.value.reason, "stale_revision");
+  assert.deepEqual(stale.value.next, [{ tool: "room_read_work", arguments: { roomId, workItemId: "stale-start" } }]);
+});
+
+test("every lean tool is callable with required business fields after a fresh join", async t => {
+  const { origin, store, rooms } = await serve(t);
+  const owner = store.identities.create("Lean owner"), member = store.identities.create("Lean member"), newcomer = store.identities.create("Lean newcomer");
+  const roomId = rooms.create(owner.secret, { roomId: "lean-room", title: "Lean room", purpose: "Lean contract", kind: "personal" }).roomId;
+  linkWithProof(store, owner.secret, roomId, member, { displayName: "Lean member", permissions: [] });
+  setTier(store.db, roomId, member.identityId, "t2_standard", { updatedBy: owner.identityId, nowMs: Date.now() });
+  store.command(owner.secret, roomId, { id: "lean-request", type: "message.posted", data: {
+    messageId: "lean-request", body: "Answer from the lean list", toMemberId: member.identityId, requestKind: "reply"
+  } });
+  const key = API_KEY_PREFIX + store.agentPlugin.issueApiKey({
+    identityId: member.identityId, scopes: ["rooms:read", "rooms:write", "mcp:wake", `mcp:room:${roomId}`]
+  }).secret;
+
+  const catalog = await (await rpc(origin, "tools/list", { profile: "lean" }, key)).json();
+  assert.deepEqual(namesOf(catalog), [...LEAN_MCP_TOOLS, ...JOIN_TOOLS]);
+  for (const tool of catalog.result.tools) {
+    assert.equal((tool.inputSchema.required ?? []).includes("requestId"), false, `${tool.name} does not require a transport requestId`);
+  }
+
+  const called = async (name, args) => {
+    const result = await call(origin, name, args, key);
+    assert.equal(result.body.result?.isError, undefined, `${name}: ${JSON.stringify(result.value)}`);
+    return result.value;
+  };
+  await called("room_check_access", {});
+  const needs = await called("room_needs_me", {});
+  assert.equal(needs.items.every(item => item.roomId === roomId), true);
+  await called("room_read_messages", {});
+  await called("room_post_message", { body: "Lean post" });
+  const request = await called("room_read_request", { requestMessageId: "lean-request" });
+  const answer = request.responseActions.find(action => action.arguments.responseOutcome === "answered");
+  const responded = await called("room_respond_to_request", { ...answer.arguments, body: "Lean answer" });
+  assert.match(responded.requestId, /^mcp-[a-f0-9]{64}$/);
+  assert.equal(store.room(roomId).state.replyRequests["lean-request"].status, "answered");
+  const found = await called("room_search_actions", { query: "close board claim" });
+  assert.equal(found.matches.some(match => match.name === "room_close_work_claim"), true);
+  await called("room_run_action", { name: "room_check_access", arguments: {} });
+  await called("wake_pause", {});
+
+  const ownerKey = store.issueAccessKey(roomId, owner.identityId);
+  const invite = store.invites.create(ownerKey, roomId, { profile: "chat" });
+  const joined = await call(origin, "room_join", { inviteCode: invite.code }, newcomer.secret);
+  assert.equal(joined.body.result.isError, undefined);
+  assert.equal(joined.value.roomId, roomId);
 });

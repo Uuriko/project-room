@@ -7,6 +7,7 @@ import { buildReplyCommand } from "../client/reply-actions.mjs";
 import assert from "node:assert/strict";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function startServer(t, f) {
   const server = createRoomServer({ store: f.store });
@@ -29,6 +30,59 @@ const post = (origin, path, body, secret = null) => fetch(`${origin}${path}`, {
 });
 const get = (origin, path, secret = null) => fetch(`${origin}${path}`, {
   headers: secret ? { authorization: `Bearer ${secret}` } : {},
+});
+
+for (const archived of [false, true]) for (const deletedCount of [4, 130]) test(`inbox DMs use edited content, refill past deletions, and advance across tombstones (archived=${archived}, deleted=${deletedCount})`, async t => {
+  const fixture = createAcceptanceFixture(), origin = await startServer(t, fixture);
+  const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
+  const store = fixture.store;
+  let clock = Date.now() + 10000; store.now = () => clock;
+  const command = (id, type, data) => { clock += 2001; return store.command(ownerSecret, roomId, { id, type, data }); };
+  command('older-live', 'message.posted', { messageId: 'older-live', body: 'Older instruction', toMemberId: memberId });
+  command('live', 'message.posted', { messageId: 'live', body: 'Original instruction', toMemberId: memberId });
+  command('edit-live', 'message.edited', { messageId: 'live', expectedMessageRevision: 0, body: 'Corrected instruction' });
+  for (let i = 0; i < deletedCount; i++) {
+    command(`dead-${i}`, 'message.posted', { messageId: `dead-${i}`, body: 'Deleted content', toMemberId: memberId });
+    command(`delete-${i}`, 'message.deleted', { messageId: `dead-${i}`, expectedMessageRevision: 0 });
+  }
+  if (archived) {
+    while (!store.backfillMessages({ limit: 1000 }).done) { /* finish fixture backfill */ }
+    assert.equal(store.checkMessagesParity({ roomId }).ok, true);
+    const archive = store.archiveMessages(roomId, { keepNewest: 1, dryRun: false });
+    assert.equal(archive.ok, true, JSON.stringify(archive));
+    assert.equal(store.room(roomId).state.messages.some(message => message.id === 'live'), false);
+  }
+  // A long tombstone run must not turn a one-item request into one SQL
+  // round trip per deleted message. Count real event and archive reads.
+  const prepare = store.db.prepare.bind(store.db);
+  let inboxReads = 0;
+  store.db.prepare = sql => {
+    const statement = prepare(sql);
+    if (sql.includes("SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=?")
+      || sql.includes("SELECT message_id,record_json,body FROM messages WHERE")) {
+      for (const method of ["all", "get"]) {
+        const call = statement[method].bind(statement);
+        statement[method] = (...args) => { inboxReads++; return call(...args); };
+      }
+    }
+    return statement;
+  };
+  const inbox = await (await get(origin, `/api/rooms/${roomId}/agent-inbox?limit=1`, friendSecret)).json();
+  store.db.prepare = prepare;
+  if (deletedCount === 130) assert.ok(inboxReads < 12, `long tombstone refill used ${inboxReads} SQL reads`);
+  assert.deepEqual(inbox.directMessages.map(row => [row.messageId, row.body]), [['live', 'Corrected instruction']]);
+  assert.doesNotMatch(JSON.stringify(inbox), /Original instruction|Deleted content|dead-/);
+  const highestPosted = store.db.prepare("SELECT max(sequence) AS n FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted'").get(roomId).n;
+  assert.equal(inbox.cursor.after, highestPosted, 'filtered newest tombstones still advance the delivery cursor');
+  const pair = store.agentInbox(friendSecret, roomId, { limit: 2 });
+  assert.deepEqual(pair.directMessages.map(row => row.messageId), ['live', 'older-live']);
+  assert.equal(pair.cursor.after, highestPosted, 'mixed refill retains newest-first polling cursor');
+  command('delete-older-live', 'message.deleted', { messageId: 'older-live', expectedMessageRevision: 0 });
+  command('delete-live', 'message.deleted', { messageId: 'live', expectedMessageRevision: 1 });
+  const empty = store.agentInbox(friendSecret, roomId, { limit: 1 });
+  assert.deepEqual(empty.directMessages, []);
+  assert.equal(empty.cursor.after, highestPosted);
+  assert.equal(empty.next.some(step => step.action === 'reply-dm'), false);
 });
 
 // Room with an owner and one approved agent friend; returns their secrets,
@@ -114,7 +168,7 @@ test("inbox discovery finds older open requests outside its DM window through ex
   const { ownerSecret, friendSecret, roomId, memberId } = await roomWithFriend(origin, fixture);
   const store = fixture.store, ownerId = store.authenticate(ownerSecret, roomId).member.id;
   const other = store.identities.create("Other recipient");
-  store.identities.link(ownerSecret, roomId, { identityId: other.identityId, displayName: "Other recipient", permissions: [] });
+  linkWithProof(store, ownerSecret, roomId, other, { displayName: "Other recipient", permissions: [] });
   const ask = (id, secret = ownerSecret, toMemberId = memberId) => store.command(secret, roomId, {
     id, type: "message.posted", data: { messageId: id, body: "Private question " + id, toMemberId, requestKind: "reply" }
   });

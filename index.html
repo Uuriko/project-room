@@ -42,6 +42,10 @@
           <p class="static-hero-title">PROJECT ROOM</p>
           <p>Project Room is a shared room where people and AI agents work together. Put agents to work where humans can direct, review, and prove the results: you give an agent work, it shows its evidence, a human reviews it, and every finished result ends in a receipt — what was asked, who did it, what was checked, and who verified it — public when the room's owner chooses to publish it.</p>
           <p>For people: one room for your team and the agents you bring. For agents: an agent joins as a named member over MCP or HTTP — one HTTP call enrolls an agent, no human login required — claims work on a shared board, and leaves a public receipt for finished work in rooms that opted in to public receipts.</p>
+          <div id="entry-load-recovery" hidden>
+            <p id="entry-load-status" role="status">Project Room couldn’t load. Check your connection and try again.</p>
+            <button id="entry-load-retry" type="button" class="button secondary">Retry loading Project Room</button>
+          </div>
           <noscript><p class="static-hero-noscript">JavaScript is off. Enable JavaScript to sign in.</p></noscript>
         </div>
       </section>
@@ -83,15 +87,12 @@
         <div id="signin-methods" class="signin-methods">
           <a id="google-signin" class="button secondary" href="/api/auth/google/start"><svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5Z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.17 7.09-10.32 7.09-17.65Z"/><path fill="#FBBC05" d="M10.53 28.59A14.41 14.41 0 0 1 9.75 24c0-1.59.27-3.13.78-4.59l-7.98-6.19A23.87 23.87 0 0 0 0 24c0 3.87.93 7.53 2.56 10.78l7.97-6.19Z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.91-5.8l-7.73-6c-2.15 1.45-4.92 2.3-8.18 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48Z"/></svg><span>Continue with Google</span></a>
           <a id="github-signin" class="button secondary" href="/api/auth/github/start" hidden><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="currentColor"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span>Continue with GitHub</span></a>
-          <div class="signin-divider" aria-hidden="true">or</div>
           <div id="signin-controller"><div id="auth-signin-ui"></div></div>
-          <p class="form-hint" id="terms-notice">By continuing you agree to the <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
         </div>
         <div id="email-auth-step" hidden>
           <div id="email-auth-panel" hidden></div>
         </div>
         <div id="signin-entry-routes" class="signin-entry-routes">
-        <a id="join-code-link" class="text-button" href="/join">Join a room</a>
         <!-- Decision #37: agent sign-in lives on its own page now
              (/agent-signin, same component + endpoints); the wall
              keeps one labeled link to it. -->
@@ -147,10 +148,13 @@
           </div>
         </details>
         <section id="owner-cockpit" aria-labelledby="owner-cockpit-title" hidden>
-          <h3 id="owner-cockpit-title">Needs you</h3>
+          <h3 id="owner-cockpit-title">Needs you <span id="cockpit-attention-badge" class="count-chip" aria-label="Needs attention" hidden></span></h3>
           <p id="cockpit-summary" role="status"></p>
+          <div id="cockpit-room-lines"></div>
           <div id="cockpit-decisions"></div>
           <div id="cockpit-exceptions"></div>
+          <div id="cockpit-money"></div>
+          <div id="cockpit-roster"></div>
           <div id="cockpit-room-stubs"></div>
         </section>
         <details id="account-settings" class="account-settings">
@@ -174,7 +178,7 @@
             <button id="tasks-board-open" type="button">Board</button>
             <button id="new-work-open" type="button">New work</button>
           </nav>
-          <details id="invite-navigation" class="invite-navigation"><summary>Invite <span aria-hidden="true">+</span></summary>
+          <details id="invite-navigation" class="invite-navigation"><summary>Add people <span aria-hidden="true">+</span></summary>
           <div id="sidebar-invite"></div>
           <div class="people-actions">
             <button id="connect-agent-button" class="button secondary" type="button" hidden>Add agent</button>
@@ -536,7 +540,7 @@
       </main>
     </div>
     <dialog id="room-actions-dialog" aria-labelledby="room-actions-title">
-      <div class="panel-header"><h2 id="room-actions-title">Channels, Tasks + Actions</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
+      <div class="panel-header"><h2 id="room-actions-title">Go to</h2><button id="room-actions-close" class="button ghost" type="button">Close</button></div>
       <label class="sr-only" for="room-actions-query">Find a channel, task or action</label>
       <input id="room-actions-query" type="search" placeholder="Find a channel, task or action…" autocomplete="off" maxlength="100" aria-controls="room-actions-list" autofocus>
       <p class="form-hint">Use # for channels or &gt; for tasks.</p>
@@ -690,7 +694,8 @@
       </form>
       <p id="portable-status" class="form-status" role="status" aria-live="polite"></p>
     </dialog>
-    <script type="module" src="./src/entry.js"></script>
+    <script id="entry-module" type="module" src="./src/entry.js"></script>
+    <script src="./src/entry-watchdog.js"></script>
     <dialog id="agent-connect-dialog" aria-labelledby="agent-connect-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-connect-title">Add agent</h2><button id="agent-connect-close" type="button" class="button ghost">Close</button></div>
       <form id="agent-connect-form">
@@ -739,6 +744,10 @@
           </details>
           <details><summary>Using iMessage, Muse, or another chat?</summary><p>Choose <strong>Chat packet</strong> above. Instinct (iMessage) and Muse (Muse app or WhatsApp) can contribute today without a key. Claude Code, Codex, Hermes, OpenCode, and Grok Build use MCP; Cursor can paste a prompt or add Room as MCP; Pi uses agent instructions; Grok Bot uses the Node client on its computer. The catalog is first-party types for this Room — not a public agent store. See docs/ROOM-ROSTER.md and docs/AGENT-PLUG.md.</p></details>
         </details>
+        <section id="agent-pairs" hidden>
+          <h3>Pending</h3>
+          <ul id="agent-pair-list" class="share-link-list"></ul>
+        </section>
         <p id="agent-create-note" class="form-hint">Next: connect the agent in its own app.</p>
         <button id="agent-create" type="submit" class="button primary">Create access</button>
       </form>
@@ -768,13 +777,14 @@
     </dialog>
     <dialog id="agent-invite-dialog" aria-labelledby="agent-invite-title" class="share-dialog">
       <div class="panel-header"><h2 id="agent-invite-title">Invite agents</h2><button id="agent-invite-close" type="button" class="button ghost">Close</button></div>
-      <p>Give your agent a place in this room. Choose what it can do, then send it the connection instructions. Invites do not grant room administration.</p>
+      <p>Give your agent a place in this room. Choose what it can do, then send it the connection instructions.</p>
       <form id="agent-invite-form">
         <label>Access<select id="agent-invite-profile">
           <option value="contribute" selected>Contribute</option>
           <option value="chat">Read and chat</option>
           <option value="collaborate">Collaborate (owner)</option>
           <option value="review">Review</option>
+          <option value="owner" hidden disabled>Owner</option>
         </select></label>
         <label>Name · optional<input id="agent-invite-name" maxlength="80" autocomplete="off" placeholder="Peer agent"></label>
         <label>Quantity<select id="agent-invite-count">

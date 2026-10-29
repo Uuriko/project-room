@@ -100,8 +100,10 @@ export function needsMeHtml(items, viewer, members = {}, now = Date.now()) {
   if (!viewer?.id) return "";
   const work = myBoardWork(items, viewer.id, members, now);
   const canWrite = viewer.write !== false;
+  // F-U1A3-1: accessible names carry the item's identity, as on the board
+  // card buttons — bare "Renew" / "Hand off" / "Review" repeat per row.
   const claimButton = (action, label, item) => canWrite
-    ? ["<button type=\"button\" class=\"button secondary needs-me-act\" data-claim-action=\"", action, "\" data-claim-id=\"", esc(item.id), "\" data-focus-key=\"needs-me-", action, ":", esc(item.id), "\">", label, "</button>"].join('') : "";
+    ? ["<button type=\"button\" class=\"button secondary needs-me-act\" data-claim-action=\"", action, "\" data-claim-id=\"", esc(item.id), "\" data-focus-key=\"needs-me-", action, ":", esc(item.id), "\" aria-label=\"", esc(uiText("action.itemAccessibleName", { action: label, item: item.title || item.id })), "\">", label, "</button>"].join('') : "";
   const openButton = (label, item) => ["<button type=\"button\" class=\"button secondary needs-me-act\" data-needs-me-open=\"", esc(item.id), "\">", label, "</button>"].join('');
   const urgent = [
     ...work.expiring.map(({ item, left }) => ({ item, note: left <= 0 ? uiText("board.mine.copy.001") : uiText("board.mine.copy.002", { fragmentA: span(left) }), act: claimButton("renew", "Renew", item) })),

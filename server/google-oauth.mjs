@@ -29,9 +29,20 @@ export function googleSubject(sub) {
 // follow-up is still the cross-site navigation and will not send them.
 // A same-origin HTML return lets the next load include the session.
 export function googlePostLoginPage(href) {
-  if (href !== '/?google=error' && href !== '/?account=1' && !/^\/\?room=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(href)) fail('google_callback_invalid');
+  if (href !== '/?google=error' && href !== '/?account=1' && href !== '/?account=1&google=signed-in' && !/^\/\?room=[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}(?:&google=signed-in)?$/.test(href)) fail('google_callback_invalid');
   const safe = href.replace(/&/g, '&amp;');
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="refresh" content="0;url=${safe}"><title>Opening Project Room</title></head><body><p>Opening Room…</p><p><a href="${safe}">Continue</a></p></body></html>`;
+}
+
+// The provider's cross-site return cannot carry the Strict account cookie.
+// Commit a same-origin document before asking for the bound session. This page
+// does not consume state or exchange a code; completion still verifies both.
+export function googleCallbackResumePage(callbackUrl) {
+  const url = new URL(callbackUrl);
+  if (url.pathname !== GOOGLE_CALLBACK_PATH || url.search.length > 16384) fail('google_callback_invalid');
+  url.searchParams.set('room_oauth_resume', '1');
+  const href = (url.pathname + url.search).replaceAll('&', '&amp;').replaceAll('"', '&quot;').replaceAll("'", '&#39;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="referrer" content="no-referrer"><meta http-equiv="refresh" content="0;url=${href}"><title>Completing sign-in</title></head><body><p>Completing sign-in…</p><p><a href="${href}">Continue</a></p></body></html>`;
 }
 
 export function googleConfig(env = {}, origin) {
@@ -77,7 +88,7 @@ export class GoogleSignIn {
     this.#pendingStore = pendingStore;
   }
 
-  begin({ slotToken, expectedRevision, link = false }) {
+  begin({ slotToken, expectedRevision, link = false, selectAccount = false }) {
     if (!tokenPattern.test(slotToken || '') || !Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
       fail('google_session_required');
     const state = randomBytes(32).toString('base64url');
@@ -101,9 +112,12 @@ export class GoogleSignIn {
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.search = new URLSearchParams({
       client_id: this.#clientId, redirect_uri: this.#redirectUri, response_type: 'code',
-      scope: GOOGLE_SCOPES, access_type: 'online', prompt: 'select_account', include_granted_scopes: 'false',
+      scope: GOOGLE_SCOPES, access_type: 'online', include_granted_scopes: 'false',
       state, code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256'
     }).toString();
+    // Ordinary continuation lets Google reuse its existing session. Linking or
+    // explicit switching must still offer a deliberate identity choice.
+    if (link || selectAccount) url.searchParams.set('prompt', 'select_account');
     return { authorizationUrl: url.href, expiresAt };
   }
 

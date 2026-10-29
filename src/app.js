@@ -1,3 +1,4 @@
+import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
@@ -13,7 +14,7 @@ import { RoomClient, draftCommand, draftRefused, retryUnconfirmed } from "./clie
 import { ReturnBrief, groupBriefHistory } from "./return-brief.js";
 import { attentionPreview, needsAttention, workInvolvingMe, contributionSteps, searchWork, draftFeedback, completedResults, currentResult, roomOrientation } from "./work-selectors.js";
 import { workArrivalAnnouncements } from "./work-announcements.js";
-import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery } from "./conversation.js";
+import { menuOpensUp, TIMELINE_WINDOW, windowTimeline, createTimelinePin, arrivalsAfterShown, windowToInclude, conversationIndex, searchMessages, ConversationDrafts, channelDraftKey, DraftRecovery, draftRecoveryScope, shouldPreserveDrafts, sendsOnEnter, escapeChatAction, messageCluster, mentionQuery, mentionMatches, createBodyHtmlCache, kindLabel, memberStatus, memberHandle, memberPresence, memberDoneChip, presenceLabel, addressMember, shouldAddressPresenceClick, messageMentionsMember, replyAuthorToAddress, composerPlaceholder, removeMention, parseSearchQuery, memberRowName } from "./conversation.js";
 // Clip to at most maxUnits UTF-16 units without splitting a grapheme.
 const graphemes = new Intl.Segmenter("en", { granularity: "grapheme" });
 function clipGraphemes(text, maxUnits) {
@@ -35,6 +36,7 @@ import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { identityIdOf, mergeFriendBonds, bondWithPeer, friendChrome, friendBondCommand, friendFailureMessage, friendFocusTarget, friendMessageHtml } from "./friend-bond.js";
 import { installAgentConnections } from "./agent-connections.js";
+import { installPairing } from "./pairing-ui.js";
 import { catalogById } from "./room-roster.js";
 import { installRoomInstructions } from "./room-instructions.js";
 // JDOT-MEMBER-PERMS-UI begin
@@ -78,17 +80,23 @@ function validatedOAuthReturn(value) {
       && !target.username && !target.password ? target.pathname + target.search : null;
   } catch { return null; }
 }
+function validatedDesktopConsent(value) {
+  const target = validatedOAuthReturn(value);
+  if (!target) return false;
+  const consent = new URL(target, location.origin).searchParams;
+  return consent.getAll("client_id").length === 1 && consent.get("client_id") === "project-room-macos"
+      && consent.getAll("redirect_uri").length === 1 && consent.get("redirect_uri") === location.origin + "/api/auth/desktop/callback"
+      && consent.getAll("state").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("state") || "")
+      && consent.getAll("code_challenge").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("code_challenge") || "")
+      && consent.getAll("code_challenge_method").length === 1 && consent.get("code_challenge_method") === "S256";
+}
 try {
   const params = new URLSearchParams(location.search);
   const target = params.get("oauth") === "login" ? validatedOAuthReturn(params.get("return")) : null;
   if (target) {
     sessionStorage.setItem(oauthReturnKey, target);
-    const providers = params.getAll("provider"), consent = new URL(target, location.origin).searchParams;
-    const nativeConsent = consent.getAll("client_id").length === 1 && consent.get("client_id") === "project-room-macos"
-      && consent.getAll("redirect_uri").length === 1 && consent.get("redirect_uri") === location.origin + "/api/auth/desktop/callback"
-      && consent.getAll("state").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("state") || "")
-      && consent.getAll("code_challenge").length === 1 && /^[A-Za-z0-9_-]{43}$/.test(consent.get("code_challenge") || "")
-      && consent.getAll("code_challenge_method").length === 1 && consent.get("code_challenge_method") === "S256";
+    const providers = params.getAll("provider");
+    const nativeConsent = validatedDesktopConsent(target);
     if (nativeConsent && params.getAll("return").length === 1 && params.getAll("oauth").length === 1
       && providers.length === 1 && ["google", "github"].includes(providers[0])) initialDesktopProvider = providers[0];
     // Consume intent in this document only, so refresh/cancel cannot restart it.
@@ -203,6 +211,20 @@ if (initialGitHubFailed) {
   url.searchParams.delete("github");
   history.replaceState(history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
+// End only the exact native PKCE journey retained in this tab. The server
+// callback restricts the custom scheme response and the app verifies its state.
+// Consume before navigating: browser refresh/retry must not replay cancellation.
+if (initialGoogleFailed || initialGitHubFailed) {
+  try {
+    const target = sessionStorage.getItem(oauthReturnKey);
+    if (validatedDesktopConsent(target)) {
+      const consent = new URL(target, location.origin).searchParams;
+      sessionStorage.removeItem(oauthReturnKey);
+      location.assign("/api/auth/desktop/callback?" + new URLSearchParams({ state: consent.get("state"), error: "access_denied" }));
+      return;
+    }
+  } catch { /* Storage unavailable: retain ordinary browser sign-in recovery. */ }
+}
 const initialJoinFragment = (() => {
   // [QA-Join]: a Google/GitHub OAuth round-trip drops the #join/ fragment (it
   // never reaches the server). Restore a stashed join link one-shot before
@@ -312,7 +334,10 @@ function stashInviteForOAuth() {
 // invitation before the navigation, since the OAuth round-trip drops the
 // #invite/ fragment.
 { const googleButton = $("#google-signin");
-  if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
+  if (googleButton) googleButton.addEventListener("click", () => {
+    stashInviteForOAuth();
+    stashGoogleRoom(roomIdFromNext(new URLSearchParams(location.search).get("next")) || selectedRoomFromLocation());
+  }); }
 { const githubButton = $("#github-signin");
   if (githubButton) githubButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
@@ -336,9 +361,11 @@ let navigationBoardEpoch = 0;
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
+let confirmedWorkNavigation = null;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+let choosingComposerRecipient = false;
 // A message deep link whose target is older than the first (windowed)
 // snapshot cannot reveal on arrival: revealMessage no-ops while the id is
 // not held. A pending hash reveal remembers such a target until a fill or
@@ -409,13 +436,36 @@ const client = new RoomClient({
   lazyHistory: true,
   // Live refresh: a peer's consent decision arrives as dm.consent_changed.
   onConsentChange: () => { void refreshDmConsents(); },
+  onOptimistic(command) {
+    const data = command?.data;
+    const authorId = session?.member?.id;
+    if (!state || !authorId || !state.members?.[authorId] || typeof data?.body !== "string" || !data.body) return;
+    const id = typeof data.messageId === "string" ? data.messageId : command.id;
+    if (state.messages.some(message => message.id === id)) return;
+    state = { ...state, messages: [...state.messages, {
+      id, authorId, body: data.body, createdAt: new Date().toISOString(),
+      replyToId: data.replyToId ?? null, toMemberId: data.toMemberId ?? null,
+      channelId: data.channelId || activeChannelId, pendingSend: true
+    }] };
+    render();
+  },
+  onSendSettled({ command, ok, maybeSaved }) {
+    if (!state || ok) return;
+    const id = command?.data?.messageId || command?.id;
+    state = maybeSaved
+      ? { ...state, messages: state.messages.map(message => message.pendingSend && message.id === id ? { ...message, pendingSend: "maybe" } : message) }
+      : { ...state, messages: state.messages.filter(message => !(message.pendingSend && message.id === id)) };
+    render();
+  },
   onSnapshot(snapshot, identity) {
     snapshotAuditView = snapshot.auditView ?? "full";
     const firstSnapshot = !state;
     const presenceBoundary = firstSnapshot || state.room?.id !== snapshot.state.room?.id || roomGeneration !== client.generation;
     if (presenceBoundary) { recordLoading = null; recordLoadFailed = false; }
     if (presenceBoundary) stopPresencePoll();
-    state = snapshot.state; session = identity;
+    const pendingSends = (state?.messages ?? []).filter(message => message.pendingSend && !snapshot.state.messages.some(held => held.id === message.id));
+    state = pendingSends.length ? { ...snapshot.state, messages: [...snapshot.state.messages, ...pendingSends] } : snapshot.state;
+    session = identity;
     displayNames = createMemberDisplayNames(state.members);
     announceWorkArrivals(snapshot.state.eventLog ?? [], presenceBoundary);
     void refreshRequestRuns();
@@ -488,6 +538,7 @@ const client = new RoomClient({
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
     retryPendingHashReveal();
+    resumeConfirmedWorkNavigation();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -497,6 +548,7 @@ const client = new RoomClient({
     const endedContext = accessEndContext;
     accessEndContext = null;
     const pendingSignout = signoutLoading;
+    if (pendingSignout) $("#google-signin").href = "/api/auth/google/start?switch=1";
     const keepAccount = !leavingPage && !pendingSignout && endedContext !== "account-switch" && accountClient.session?.authenticated;
     // E-H2: an unexpected access end (401/403 session expiry, not sign-out,
     // room/account switch, or page unload) must not destroy the in-flight
@@ -556,6 +608,7 @@ const client = new RoomClient({
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
+    choosingComposerRecipient = false;
     if (!sessionExpired) {
       drafts = new ConversationDrafts();
       $("#message-input").value = "";
@@ -628,7 +681,7 @@ const client = new RoomClient({
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
-      : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
+      : switchedAccount ? uiText("room.session_changed_recovery")
         : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
@@ -698,6 +751,7 @@ function lazyDisclosure({ panel, load, install, onError }) {
 
 remindersUI = installReminders({ client, getState: () => state, onSaved: text => notice(text) });
 agentConnectionsUI = installAgentConnections({ client, getState: () => state });
+installPairing({ client, getState: () => state });
 agentInvitesUI = installAgentInvites({ client, getState: () => state, getSession: () => session });
 instructionsUI = installRoomInstructions({ client, getState: () => state, onSaved: text => notice(text) });
 // #662: owner "needs your attention" card (owner-gated; hidden for everyone else).
@@ -828,7 +882,7 @@ const signinUI = createAuthSigninUI({
     if (invitation.secret) { $("#invitation-email").click(); signinUI.showMagic(); }
     else openEmailAuth("magic", { recordHistory: false });
     setFormStatus($("#auth-link-error"),
-      `${message} Request a new link or continue with Google.`, true);
+      `${message} Log in with your password or continue with Google.`, true);
   },
   onSignedIn: async () => {
     const restoration = accountClient.restore();
@@ -1340,6 +1394,7 @@ const sameSession = (generation, roomId, memberId) => generation === client.gene
 const initials = text => esc(String(text ?? "").split(/\s+/).map(w => w.match(/[\p{L}\p{N}]/u)?.[0] ?? "").join("").slice(0, 2).toUpperCase() || "?");
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const time = value => timeFormat.format(new Date(value));
+const messageActionTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
 function safeUrl(value) { try { const u = new URL(value); return u.protocol === "https:" ? esc(u.href) : "#"; } catch { return "#"; } }
 const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(character => character.charCodeAt(0).toString(16).padStart(2, "0")).join("")}`;
 // Keep application-owned fragments outside the valid record-id alphabet. Earlier
@@ -1359,6 +1414,9 @@ function setConnectionStatus(text) {
   status.dataset.state = connected ? "connected"
     : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
+  // A healthy connection needs no standing label: the bar stays for screen
+  // readers and shows again when the link drops or reconnects.
+  $(".connection-bar")?.classList.toggle("sr-only", connected);
   $("#connection-explanation").textContent = normalized;
   if (state && wasInterrupted !== (status.dataset.interrupted === "true")) queueMicrotask(() => { if (state) render(); });
 }
@@ -1529,7 +1587,7 @@ function syncSessionMenu() {
     const accountExpiry = !state && accountClient.session?.authenticated ? accountClient.session.expiresAt : null;
     const formatted = signedIn ? formatSessionExpiry(roomExpiry ?? accountExpiry) : null;
     if (formatted) {
-      expiryEl.textContent = `${roomExpiry != null ? "Session" : "Account session"} expires ${formatted}`;
+      expiryEl.textContent = `Signed in until ${formatted}`;
       expiryEl.hidden = false;
     } else {
       expiryEl.textContent = "";
@@ -1573,18 +1631,29 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
   $("#guest-upgrade-hint").hidden = true;
   $("#create-account-button")?.click();
 });
+function composerPrivateLabel() {
+  const to = $("#message-to-select")?.value;
+  if (!to) return null;
+  const member = state?.members && Object.hasOwn(state.members, to) ? state.members[to] : null;
+  return member ? uiText("composer.privateTo", { name: member.displayName }) : uiText("composer.privateMessage");
+}
+function syncComposerAudienceLabel() {
+  $("#composer-label").textContent = composerPrivateLabel() || (currentThreadId ? "Reply in this thread" : "Message the room");
+}
 function syncComposerChrome() {
+  syncComposerAudienceLabel();
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
-  // bu-09: the audience picker is the broadcast-vs-DM control and stays
-  // visible whenever there is someone to address. Hiding it until a
-  // recipient was already chosen made room-chat DMs undiscoverable — the
-  // hidden control was the only way to start one.
+  // Room chat is the default. Direct messaging is an explicit action in
+  // Message options; never hide an already-addressed private draft.
   if (bar) bar.hidden = !composerAudiencePickerVisible({
-    members: state?.members ? Object.values(state.members) : [],
-    selfId: session?.member?.id,
+    recipientId: to,
     requestMode: Boolean(requestMode),
+    choosingRecipient: choosingComposerRecipient,
   });
+  const startDirect = $("#composer-direct-message");
+  if (startDirect) startDirect.hidden = !Object.values(state?.members ?? {}).some(member =>
+    member.active !== false && member.identityRevoked !== true && member.id !== session?.member?.id);
   const note = $("#audience-note");
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
@@ -2035,7 +2104,7 @@ function render() {
       ? `<p class="member-observation">Last host report: <time datetime="${esc(new Date(serverPresence.presence.lastSeenAt).toISOString())}">${esc(new Date(serverPresence.presence.lastSeenAt).toLocaleString())}</time></p>` : "";
     const lastReport = agent && presenceStale && serverState
       ? `<p class="member-observation">Last reported availability: ${esc(presenceLabel(serverState))}</p>` : "";
-    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
+    return `<div id="${recordDomId("member", m.id)}" class="presence-member" tabindex="-1" role="group" aria-label="${esc(memberRowName(m, availability))}" data-member-record-id="${esc(m.id)}" data-presence="${esc(presence)}" data-disclosure-host="${esc(m.id)}" data-focus-key="member:${esc(m.id)}"${m.agentType ? ` data-agent-type="${esc(m.agentType)}"` : ""} ${m.active === false ? "" : `title="${esc(`Address ${m.displayName} in chat`)}"`}><div class="member-avatar ${m.kind}" aria-hidden="true"><span>${initials(m.displayName)}</span><i class="presence-dot presence-${esc(presence)}" title="${esc(availability)}"></i></div><div><div class="member-head"><strong class="member-handle${m.kind === "agent" ? " member-handle-agent" : ""}">${esc(handle)}</strong><span class="sr-only">${esc(availability)}</span>${doneChip}${agentPauses.has(m.id) && m.active !== false ? `<span class="pause-chip" data-paused-member="${esc(m.id)}" title="Queued wakes will not start; a running attempt may finish">Wakes paused</span>` : ""}${friendBondHtml(m)}</div>${agent ? `<span class="member-availability">${esc(availability)}</span>` : ""}${workingOnTitle}${agent ? `<p class="member-status member-assignment">${esc(status)}</p>` : ""}<details class="member-profile"><summary data-focus-key="member-profile:${esc(m.id)}" aria-label="Member options for ${esc(m.displayName)}" title="Member options"><span aria-hidden="true">···</span></summary><div class="member-profile-body"><p class="form-hint">Member ID: <code>${esc(m.id)}</code></p><div class="member-profile-badges">${typeChip}${stateChip}${ownerChip}</div><p class="member-status">${esc(status)}</p>${lastReport}${hostReport}${ownedBy}${agentPauses.has(m.id) && agent ? `<p class="member-pause-explanation">Queued wakes will not start; a running attempt may finish.</p>` : ""}${memberActions(m)}${workControl(m)}<details><summary data-focus-key="member-capabilities:${esc(m.id)}">Room capabilities</summary><p>${esc(m.permissions.join(", ") || "conversation only")}</p>${adminControl(m)}${muteControl(m)}</details>${dmConsentDetails(m)}${directoryCardDetails(m)}</div></details></div></div>`;
   };
   // E4: mute is the viewer's own preference; the owner (the appeal path) and yourself are never mutable.
   const muteControl = m => m.id === session?.member?.id || m.id === state.room.ownerId ? "" : `<button type="button" class="text-button mute-toggle" data-mute-member="${esc(m.id)}" data-muted="${isMutedBy(state, session?.member?.id, m.id)}" aria-pressed="${isMutedBy(state, session?.member?.id, m.id)}">${isMutedBy(state, session?.member?.id, m.id) ? `Unmute ${esc(m.displayName)}` : `Mute ${esc(m.displayName)} for me`}</button>`;
@@ -2181,10 +2250,23 @@ function restoreActiveChannel() {
   } catch { /* private mode: stay on the main channel */ }
 }
 function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
-function setActiveChannel(id) {
+function leaveWorkSelection() {
+  // User navigation cancels a pending destination even before its card exists.
+  confirmedWorkNavigation = null;
+  if (!activeWorkNavigationId) return false;
+  activeWorkNavigationId = null;
+  if (/^#pr-record\/work\//.test(location.hash)) {
+    activeWorkNavigation = null;
+    history.replaceState(workHistoryState(), "", "#pr-view/rooms");
+    syncWorkReturnControl();
+  }
+  return true;
+}
+function setActiveChannel(id, preserveWork = false) {
   if (!state || busy || requestReading || composerFiles.some(file => file.status === "uploading")) return;
+  const leftWork = !preserveWork && leaveWorkSelection();
   const next = state.channels[id] && !state.channels[id].archivedAt ? id : DEFAULT_CHANNEL_ID;
-  if (next === activeChannelId && !currentThreadId && !requestMode && !assistantDraft) return;
+  if (next === activeChannelId && !currentThreadId && !requestMode && !assistantDraft) { if (leftWork) renderMessages(); return; }
   saveComposer();
   viewPositions.set(conversationViewKey(), $("#message-list").scrollTop);
   requestEpoch++; requestReading = false; requestMode = null;
@@ -2358,7 +2440,7 @@ function renderMessages() {
   $("#thread-bar").hidden = !currentThreadId;
   syncThreadMuteButton();
   syncAlsoSend();
-  $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
+  syncComposerAudienceLabel();
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
     $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
@@ -2377,11 +2459,11 @@ function renderMessages() {
   // after them on every arrival. They are repainted after each render.
   list.querySelectorAll(":scope > [data-claim-update]").forEach(node => node.remove());
   for (const [id, node] of previous) if (!keep.has(id) && !node.hasAttribute("data-work-timeline")) node.remove();
-  // Work cards are never windowed: only message rows are. Work is few next to
-  // messages, and hiding older cards would make that work unreachable from the
-  // timeline (the crowded reconnect gate pins all 81 cards). Cards older than the
-  // first shown message simply render above it, after the pager.
-  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries().filter(e => e.channelId === activeChannelId);
+  // Human conversations expose work through their source messages. A full
+  // record is mounted only when opened from a link, search, or Updates.
+  const workEntries = currentThreadId || !state ? [] : timelineWorkEntries(
+    session?.member.kind === "human" ? activeWorkNavigationId : undefined
+  ).filter(e => e.channelId === activeChannelId);
   const ordered = [];
   // One members array per pass keeps the body HTML cache keyed (see createBodyHtmlCache).
   const mentionable = state ? Object.values(state.members) : [];
@@ -2562,8 +2644,16 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const editHtml = own ? `<button class="message-to-work" data-message-action="edit" data-message-id="${esc(m.id)}" type="button">Edit message</button>` : "";
   const deleteHtml = own ? `<button class="message-to-work" data-message-action="delete" data-message-id="${esc(m.id)}" type="button">Delete message</button>` : "";
   const overflow = [saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
-  const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
-  return `<div class="message-links">${requestControls(m)}${linked.map(i => `<a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">↳ ${esc(i.title)}</a>${doneChip(i)}`).join("")}${replyHtml}${threadHtml}${menu}</div>`;
+  // F-U1A3-1: the overflow summary's accessible name carries the message's
+  // identity (author + time), mirroring the "Link to message by … at …"
+  // label in messageContent — a bare "More actions for this message" was
+  // character-identical on every message.
+  const actionName = esc(uiText("message.actionsAccessibleName", { author: displayName(m.authorId), time: messageActionTimeFormat.format(new Date(m.createdAt)) }));
+  const menu = overflow ? ['<details class="message-more"><summary aria-label="', actionName, '" title="More actions">⋯</summary><div class="message-more-menu">', overflow, "</div></details>"].join("") : "";
+  return `<div class="message-links">${requestControls(m)}${linked.map(i => {
+    const summary = session.member.kind === "human" ? (i.state === S.BLOCKED ? i.blocker?.reason : i.receipt?.summary) : null;
+    return `<span class="conversation-work"><a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">${esc(i.title)}</a>${doneChip(i)}${summary ? `<span class="conversation-work-summary">${esc(clipGraphemes(summary, 240))}${summary.length > 240 ? "…" : ""}</span>` : ""}</span>`;
+  }).join("")}${replyHtml}${threadHtml}${menu}</div>`;
 }
 function messageFileChips(messageId) {
   const files = roomFilesByMessage.get(messageId) ?? [];
@@ -2781,7 +2871,7 @@ function renderSearch(now = Date.now()) {
   if (!active) searchCollapsed = false;
   $("#search-results").hidden = !active || searchCollapsed;
   if (!active) { $("#search-list").replaceChildren(); $("#search-list")._content = null; $("#search-count").textContent = ""; return; }
-  const loadingOlder = client.loadHistory(); // search covers the whole room, not just the held window
+  const loadingOlder = false; // the first page is the held window; older pages load on scroll
   const result = searchMessages(state, query, 50, { viewer: session?.member, mentionsOnly: mentionsFilterOn(), pinnedOnly });
   const work = only || pinnedOnly ? { work: [], total: 0 } : searchWork(state, parsed.term || query);
   const total = result.total + work.total, shown = result.messages.length + work.work.length;
@@ -2827,6 +2917,7 @@ function confirmSharedSubmission({ command, fileIds }, result) {
   if (acceptedFiles.size) void refreshRoomFiles();
 }
 function restoreComposer(draft) {
+  choosingComposerRecipient = false;
   assistantDraft = draft.assistantDraft ?? null;
   queueMicrotask(() => humanExperience.syncContribution());
   composerFiles = draft.files ?? [];
@@ -2917,7 +3008,7 @@ function syncRequestComposer() {
   send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
-  input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
+  input.placeholder = archived ? "This room is archived." : (!mode && composerPrivateLabel()) || composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
   syncComposerChrome();
 }
@@ -2971,6 +3062,19 @@ async function openRequestMode(kind, id) {
   }
 }
 const composerOptions = $("#composer-options");
+const startDirectMessage = document.createElement("button");
+startDirectMessage.id = "composer-direct-message";
+startDirectMessage.type = "button";
+startDirectMessage.className = "button ghost";
+startDirectMessage.textContent = uiText("composer.directMessage");
+startDirectMessage.hidden = true;
+composerOptions.querySelector(".composer-options-panel").prepend(startDirectMessage);
+startDirectMessage.addEventListener("click", () => {
+  if (!state || busy || requestReading) return;
+  choosingComposerRecipient = true;
+  syncComposerChrome();
+  $("#message-to-select").focus();
+});
 composerOptions.addEventListener("click", event => {
   if (!event.target.closest("button")) return;
   composerOptions.open = false;
@@ -3010,8 +3114,9 @@ function persistDrafts() {
   if (!session) return;
   recovery.write(draftScope(session), drafts, currentThreadId, composerKey());
 }
-function switchThread(threadId, focusComposer = false) {
+function switchThread(threadId, focusComposer = false, preserveWork = false) {
   if (!state || busy || composerFiles.some(file => file.status === "uploading") || (threadId && !conversation.threads.has(threadId))) return;
+  if (!preserveWork) leaveWorkSelection();
   const leavingResultQuestion = Boolean(requestMode?.resultEventId);
   requestEpoch++; requestReading = false;
   if (threadId !== currentThreadId || requestMode || assistantDraft) {
@@ -3028,8 +3133,11 @@ function switchThread(threadId, focusComposer = false) {
   else (currentThreadId ? $("#thread-title") : $("#conversation-title")).focus({ preventScroll: true });
 }
 function revealMessage(id) {
-  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) { pendHashReveal(id); return; }
+  if (state && !busy && !conversation.byId.has(id) && client.owesHistory) {
+    activeWorkNavigationId = null; renderMessages(); pendHashReveal(id); return;
+  }
   if (!state || busy || !conversation.byId.has(id)) return;
+  activeWorkNavigationId = null;
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   if ($("#later-dialog")?.open) $("#later-dialog").close();
@@ -3070,9 +3178,11 @@ function revealWorkTimeline(id) {
   if ($("#settings-dialog")?.open) $("#settings-dialog").close();
   if ($("#catchup-dialog")?.open) $("#catchup-dialog").close();
   workspaceUI?.showRooms();
-  switchThread(null);
-  const channelId = timelineWorkEntries().find(entry => entry.item.id === id)?.channelId;
-  if (channelId && channelId !== activeChannelId) setActiveChannel(channelId);
+  activeWorkNavigationId = id;
+  switchThread(null, false, true);
+  const channelId = timelineWorkEntries(id)[0]?.channelId;
+  if (channelId && channelId !== activeChannelId) setActiveChannel(channelId, true);
+  renderMessages();
   return workRecord(id);
 }
 // JDOT-COH-NAV begin
@@ -3120,6 +3230,7 @@ function syncWorkReturnControl() {
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
 }
 function clearWorkNavigation() {
+  confirmedWorkNavigation = null;
   navigationBoardEpoch++; resetNavigationBoard?.();
   workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
   const button = $("#work-navigation-return");
@@ -3178,7 +3289,7 @@ async function revealClaimRecord(id) {
 }
 function navigateWorkRecord(kind, id, extra = {}) {
   if (!workNavigationContext() || busy) return false;
-  if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id)) {
+  if (kind === "work" ? !Object.hasOwn(state.workItems, id) || state.workItems[id]?.id !== id : !conversation?.byId.has(id) && !client.owesHistory) {
     notice(SOURCE_UNAVAILABLE_NOTICE, true); return false;
   }
   const presentation = extra.presentation ?? "focus";
@@ -3269,13 +3380,15 @@ async function restoreWorkOrigin(ticket) {
   // origin that was not the board closes it again (a work record's
   // destination never had it open).
   if (origin.targetClaimId && origin.type !== "board" && $("#board-dialog").open) $("#board-dialog").close();
-  if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId);
-  switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null);
+  if (activeChannelId !== origin.channelId) setActiveChannel(origin.channelId, true);
+  switchThread(origin.threadId && conversation.threads.has(origin.threadId) ? origin.threadId : null, false, true);
   if (origin.mode) setRequestMode(origin.mode);
   activeWorkNavigationId = null;
   const priorOrigin = currentWorkOrigin(origin.previous);
   const priorTarget = priorOrigin?.target;
   const priorWork = /^#pr-record\/work\/(.+)$/.exec(priorTarget ?? "");
+  activeWorkNavigationId = priorWork ? decodeFragment(priorWork[1]) : null;
+  renderMessages();
   if (priorWork) {
     const id = decodeFragment(priorWork[1]), card = id && workRecord(id);
     if (card) {
@@ -3714,7 +3827,8 @@ function releaseSubmission(ticket, { restoreFocus = false } = {}) {
 // Unified timeline: work items render inline in #message-list, interleaved
 // chronologically with messages (Discord/Slack-style). Work cards follow the
 // active channel: a card shows when its proposal message is in the channel.
-function timelineWorkEntries() {
+function timelineWorkEntries(onlyId) {
+  if (onlyId === null) return [];
   const now = Date.now();
   const draftsByWork = new Map();
   for (let index = state.messages.length - 1; index >= 0; index--) {
@@ -3728,6 +3842,7 @@ function timelineWorkEntries() {
     draftsByWork.get(message.workItemId).push(message);
   }
   return Object.values(state.workItems)
+    .filter(item => onlyId === undefined || item.id === onlyId)
     .map(item => {
       const proposals = draftsByWork.get(item.id) ?? [];
       // proposals is built newest-first via reverse iteration; the most recent
@@ -3820,6 +3935,8 @@ $("#invitation-email").addEventListener("click", () => {
 $("#invitation-google").addEventListener("click", event => {
   if (!confirmInvitationSignin() || !signinUI.canLeave()) { event.preventDefault(); return; }
   stashInviteForOAuth();
+  // Invitation account replacement is an explicit identity choice.
+  event.currentTarget.href = "/api/auth/google/start?switch=1";
 });
 $("#invitation-signin-back").addEventListener("click", () => {
   if (!signinUI.canLeave()) return;
@@ -4100,7 +4217,10 @@ $("#signout-button").addEventListener("click", async () => {
     try {
       const ended = await accountClient.logout();
       if (operation !== signoutOperationId) return;
-      if (ended || !accountClient.session) endAccountAccess();
+      if (ended || !accountClient.session) {
+        endAccountAccess();
+        $("#google-signin").href = "/api/auth/google/start?switch=1";
+      }
     } catch {
       if (operation !== signoutOperationId) return;
       if (!accountClient.session) {
@@ -4164,7 +4284,16 @@ $("#refresh-button").addEventListener("click", async () => {
         const account = await ensureAccountSession();
         if (!account?.authenticated) throw Object.assign(new Error("Account sign-in required"), { status: 401 });
         await client.restore(requestedRoom);
-      } else await client.restore();
+      } else {
+        // Account-home recovery must confirm the browser's current account,
+        // not retry a room cookie that this screen does not own.
+        const account = await accountClient.restore();
+        if (operationId !== refreshOperationId || !account) return;
+        if (account.authenticated) {
+          setFormStatus($("#auth-error"), "");
+          showAccountWorkspace();
+        } else await client.restore();
+      }
     }
     else {
       await client.refresh();
@@ -4248,7 +4377,8 @@ $("#message-form").addEventListener("submit", e => {
     if (!ownsSendingDraft()) return;
     const delivery = $("#message-delivery");
     const savedMessageId = data.messageId || sendingCommand.id;
-    const visible = state.messages.some(message => message.id === savedMessageId);
+    // An optimistic copy is not history: only a held (read-confirmed) copy counts.
+    const visible = state.messages.some(message => message.id === savedMessageId && !message.pendingSend);
     delivery.replaceChildren(document.createTextNode(visible ? uiText("composer.saved") : uiText("composer.savedHistoryPending")));
     const link = document.createElement("a");
     link.href = recordHref("message", savedMessageId); link.textContent = uiText("composer.viewSaved");
@@ -4384,6 +4514,10 @@ $("#channel-archive-button").addEventListener("click", async e => {
 function submitRequest(form) {
   if (!state || busy || requestReading) return;
   const mode = requestMode, key = composerKey(), identity = session, generation = client.generation;
+  const request = mode?.requestMessageId && state.replyRequests?.[mode.requestMessageId];
+  // Keyboard/programmatic submission must respect the terminal-request state
+  // used by the disabled button. An uncertain command still retries unchanged.
+  if (request && request.status !== "open" && !pendingMessage) return;
   if (!$("#message-input").value.trim()) return;
   const hadPending = Boolean(pendingMessage);
   try {
@@ -4621,7 +4755,18 @@ function applyMentionMember(member) {
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
 $("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
-$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
+$("#message-to-select").addEventListener("change", () => {
+  choosingComposerRecipient = false;
+  saveComposer(); syncRequestComposer(); syncComposerChrome();
+  $("#message-input").focus();
+});
+$("#message-to-select").addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !choosingComposerRecipient) return;
+  event.preventDefault(); event.stopPropagation();
+  choosingComposerRecipient = false;
+  syncComposerChrome();
+  $("#message-input").focus();
+});
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
@@ -5008,7 +5153,8 @@ function renderRoomActions() {
   })));
   $("#room-actions-list").replaceChildren(...groups);
   const counts = [!tasksOnly ? `${shown.length} of ${channels.length} channels` : "", !channelsOnly ? `${shownTasks.length} of ${tasks.length} tasks` : ""].filter(Boolean);
-  $("#room-actions-count").textContent = `Showing ${counts.join("; ")}. Loaded in this room.${channels.length > shown.length || tasks.length > shownTasks.length ? " Type more to refine the list." : ""}`;
+  const partial = channels.length > shown.length || tasks.length > shownTasks.length;
+  $("#room-actions-count").textContent = partial ? `Showing ${counts.join("; ")}. Loaded in this room. Type more to refine the list.` : "";
   $("#room-actions-empty").hidden = shown.length + shownTasks.length + entries.length > 0;
   $("#room-actions-status").textContent = "";
 }
@@ -5177,6 +5323,9 @@ $("#main").addEventListener("click", e => {
   if (!link || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
   e.preventDefault();
   if (busy) return;
+  if (link.dataset.openMessage && link.closest("[data-work-record-id]")) {
+    navigateWorkRecord("message", link.dataset.openMessage); return;
+  }
   // JDOT-COH-NAV begin
   if (!link.dataset.openWork) { updatesUi?.cancelPending(); activeWorkNavigation = null; workNavigationEpoch++; $("#work-navigation-return").hidden = true; }
   // JDOT-COH-NAV end
@@ -6084,6 +6233,14 @@ document.addEventListener("click", async e => {
     button.disabled = false;
   }
 });
+function resumeConfirmedWorkNavigation() {
+  const pending = confirmedWorkNavigation;
+  if (!pending) return;
+  if (!pending.current()) { confirmedWorkNavigation = null; return; }
+  if (busy || !Object.hasOwn(state?.workItems ?? {}, pending.id)) return;
+  confirmedWorkNavigation = null;
+  navigateWorkRecord("work", pending.id);
+}
 function sendWorkProposal() {
   if (!state || busy || !workDraftId) return;
   const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
@@ -6091,7 +6248,11 @@ function sendWorkProposal() {
   if (!workRetryLocked) pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
   const entry = pendingWork;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  submit($("#new-work-form"), async current => {
+  const navigationEpoch = workNavigationEpoch, originUrl = location.href;
+  const originThread = currentThreadId, originChannel = activeChannelId;
+  const operationId = submitOperationId + 1;
+  let completedFormEpoch = null;
+  void submit($("#new-work-form"), async current => {
     try {
       const receipt = await client.send(entry.command);
       if (!current() || !sameSession(generation, roomId, memberId)) return;
@@ -6102,8 +6263,21 @@ function sendWorkProposal() {
       throw error;
     }
     setWorkRetry(false);
-    closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
-  }, { failureHint: "Your work proposal was kept; try again." });
+    closeWorkForm();
+    completedFormEpoch = workFormEpoch;
+    notice("Work proposed. The accountable member must accept it; no external action was authorized.");
+  }, { failureHint: "Your work proposal was kept; try again." }).then(() => {
+    // submit releases busy before navigation. An exact receipt is required;
+    // a late save must not move a replacement session or a newer destination.
+    if (completedFormEpoch === null) return;
+    // A confirmed command can outlive a failed refresh. Reuse the client's
+    // recovery snapshots, retaining only this destination intent, never a write.
+    confirmedWorkNavigation = { id: entry.command.data.workItemId, current: () =>
+      completedFormEpoch === workFormEpoch && operationId === submitOperationId
+      && sameSession(generation, roomId, memberId) && navigationEpoch === workNavigationEpoch
+      && location.href === originUrl && currentThreadId === originThread && activeChannelId === originChannel };
+    resumeConfirmedWorkNavigation();
+  });
 }
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
 const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
@@ -6202,6 +6376,8 @@ function openCatchUp() {
 function selectWorkView(view) {
   if (view !== "results") return;
   if ($("#settings-dialog").open) $("#settings-dialog").close();
+  $("#main").classList.remove("sidebar-open");
+  $("#sidebar-toggle").setAttribute("aria-expanded", "false");
   $("#search-form").hidden = false;
   $("#topbar-search-toggle").setAttribute("aria-expanded", "true");
   $("#message-search").value = "has:result";
@@ -6689,7 +6865,7 @@ function ownsPresenceRequest(request) {
 }
 // New room events are coalesced: the feed refetches at most once per window while the tab is visible.
 const NOTIFICATION_COALESCE_MS = 1500;
-const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access", access_decision: "reviewed your access request" };
+const NOTIFICATION_LABELS = { mention: "mentioned you", reply: "replied to you", assignment: "named you on work", work_update: "updated work you are on", access_request: "requested access", access_decision: "reviewed your access request", pair_request: "pair request" };
 const ownsNotifications = ticket => Boolean(ticket) && notificationOwner === ticket && client.generation === ticket.generation && client.session === ticket.session && client.ownsAccountSession();
 function resetNotifications() {
   notificationBefore = null; notificationLoading = false;
@@ -6999,7 +7175,7 @@ async function refreshPresenceStates() {
   const request = { seq: ++presenceSeq, generation: client.generation, room: state };
   presenceRequest = request;
   try {
-    const result = await client.request(client.path("/presence"));
+    const result = await client.request(client.path("/presence"), { fresh: true }); // a refresh is a new read
     if (!ownsPresenceRequest(request)) return;
     const next = new Map();
     for (const entry of result?.members ?? []) {
@@ -7617,8 +7793,17 @@ document.addEventListener("click", event => {
   // The path is fixed at dispatch, so a dialog choice whose handler already
   // re-rendered the menu (detaching the target) still counts as inside it.
   if (event.target.closest("dialog") || event.composedPath().some(node => node.nodeName === "DIALOG")) return;
+  // Focus was in the drawer (or nowhere): hand it back to the toggle, as
+  // Escape does, so it is not stranded inside the hidden sidebar.
+  const strand = document.activeElement === document.body || document.activeElement?.closest?.("#room-sidebar");
   shell.classList.remove("sidebar-open");
   $("#sidebar-toggle").setAttribute("aria-expanded", "false");
+  if (strand) {
+    // Channel selection re-renders its button before this listener runs. The
+    // fixed event path retains that navigation intent after the target detaches.
+    const channelNavigation = event.composedPath().some(node => node.dataset?.channel !== undefined);
+    $(channelNavigation ? "#conversation-title" : "#sidebar-toggle").focus({ preventScroll: true });
+  }
 });
 document.addEventListener("keydown", event => {
   if (event.key !== "Escape") return;
@@ -7737,6 +7922,19 @@ configureAuthPanel();
 if (initialInvitationFragment && !initialInvitationFragment.redirect && !initialPasswordReset) openInvitation(initialInvitationFragment);
 const ready = (async () => {
   const initialResult = await initialSignin;
+  // Returning members land on ?room=... after OAuth. Their pending native
+  // consent owns this navigation before any Room session/snapshot restoration.
+  // Keep account and terms checks; an uncertain read leaves the target for retry.
+  let nativeReturn = null;
+  try { nativeReturn = sessionStorage.getItem(oauthReturnKey); } catch { /* Ordinary navigation remains available. */ }
+  if (new URLSearchParams(location.search).get("oauth") !== "login" && validatedDesktopConsent(nativeReturn)) {
+    const account = await ensureAccountSession();
+    if (account?.authenticated) {
+      if (resumeOAuthConsent()) return;
+      showAccountWorkspace(); // Terms must be accepted before native consent.
+    } else location.assign(nativeReturn); // The consent endpoint requires sign-in.
+    return;
+  }
   if (await resumeEmailVerification()) return;
   if (restoreRoomSession) { await client.restore(); return; }
   if (signedIn) { await landAfterSignIn(); return; }
@@ -7759,6 +7957,20 @@ const ready = (async () => {
     if (initialGoogleFailed) setFormStatus($("#join-link-status"), googleSigninFailureMessage, true);
     return;
   }
+  const googleReturned = new URLSearchParams(location.search).get("google") === "signed-in";
+  if (googleReturned) {
+    // This marker is navigation intent, never authentication. Restore the
+    // current account before using its remembered destination; server room
+    // restoration still checks membership for every target.
+    const account = await ensureAccountSession();
+    const explicitRoom = consumeGoogleRoom();
+    const remembered = account?.authenticated ? readMemberRoom(account.account.id)?.roomId : null;
+    const target = explicitRoom || remembered || selectedRoomFromLocation();
+    const next = new URL(location.href);
+    next.searchParams.delete("google");
+    if (target) { next.searchParams.set("room", target); next.searchParams.delete("account"); }
+    history.replaceState(history.state, "", next.pathname + next.search + next.hash);
+  }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom || accountHomeFromLocation() || new URLSearchParams(location.search).get("oauth") === "login") {
     // Join-flow sessions are room-cookie sessions with no account behind
@@ -7767,7 +7979,7 @@ const ready = (async () => {
     // cookie before the account gate, or a fresh joiner is stranded at the
     // sign-in panel despite holding a working session. A cookie for a
     // different room is dropped and the account flow decides as before.
-    if (requestedRoom && !accountHomeFromLocation()) {
+    if (requestedRoom && !accountHomeFromLocation() && !googleReturned) {
       try {
         const joined = await client.restore();
         if (joined?.roomId === requestedRoom) return;

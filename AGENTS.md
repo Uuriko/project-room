@@ -1,18 +1,12 @@
 # Project Room agent instructions
 
-## Check commands (run before you push)
+## Validation
 
-```sh
-npm run verify:affected   # tests related to your diff vs origin/main, ~30s; --list to preview
-npm run lint              # eslint, design tokens, reachability, i18n, UI strings
-npm test                  # full unit suite (CI runs it sharded, plus browser/cloudflare)
-```
-
-For write-path, storage, snapshot, sync or replay changes, run
-`npm run bench:room -- --sizes 1000` before pushing; use the full defaults for a
-performance PR. Include the complete table in the PR, room post or code-drop check.
-Follow [docs/BENCH.md](docs/BENCH.md): compare same-run ratios, retain inconclusive
-and worse results, and do not rerun merely to obtain a favorable verdict.
+Choose validation proportionate to the change: focused or affected tests, lint,
+browser checks, full suites, or [benchmarks](docs/BENCH.md) when relevant. Pure
+prose needs no tests. Reuse evidence for unchanged source; test meaningful changes
+when composing branches. No command is mandatory merely because you are pushing.
+Report the tested revision, failures and limitations honestly.
 
 Build and maintain `Uuriko/project-room`. Read task-relevant code and docs;
 start with [docs/INDEX.md](docs/INDEX.md) when you need a map.
@@ -28,8 +22,9 @@ grant outside contributors production access or deployment authority.
 ## Rules
 
 1. Never leak secrets or private data. Never ask John or Dasha for keys.
-2. After every deploy, smoke-check prod and roll back if it is broken
-   ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
+2. Serialize production deployments, smoke-check the deployed revision, and
+   recover safely if it is broken; schema changes may require a forward fix
+   rather than rollback ([docs/DEPLOY-LANE.md](docs/DEPLOY-LANE.md)).
 
 Everything else is judgment. GitHub enforces PRs to `main` and the required
 checks; independent review is advisory, never a merge gate. Coordinate in the
@@ -50,3 +45,11 @@ test before adding a rule here.
 - Live agent packet: <https://room.trydemigod.com/llms.txt>.
 - Hosted MCP: <https://room.trydemigod.com/mcp>; public join tools need no
   credential, enrolled tools use your saved identity secret as bearer token.
+
+## Code map before overlapping changes
+
+Use `npm run map:local -- --help` for revision-pinned Graphify queries, or discover
+`room_map` with `room_search_actions` when the hosted map is available. Check the
+returned revision, engine and truncation before using dependencies or overlap
+notices. A map is advisory evidence, not authority or a replacement for reading
+code and testing. If absent/stale, use source search and report the gap.

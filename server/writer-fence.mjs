@@ -45,6 +45,7 @@ export const unfencedAdditiveTables = Object.freeze([
   // path to it, and the manage_members-only config rule plus the
   // never-admin config validation are the integrity gate.
   "room_access_auto_approve",
+  "pairs", "pair_code_locks", "agent_member_keys", "room_join_policy",
   // membership_delegation_grants (owner-granted membership administration
   // for agent identities, RC-2026-09-18-038): purely additive and
   // intentionally NOT fenced — older writers have no code path to it, and
@@ -561,7 +562,11 @@ const PATROL_ADDITIVE_TABLES = Object.freeze(["patrol_cursor", "patrol_claims", 
 // R306 rotation receipts (server/agent-identities.mjs): purely additive,
 // created by ensureIdentitySecretSchema; older writers have no code path to it.
 const IDENTITY_ROTATION_ADDITIVE_TABLES = Object.freeze(["agent_identity_rotation_receipts"]);
-export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES]);
+// project map (server/project-map-store.mjs): per-room code graph, rebuild
+// queue, open pull file sets, and overlap-notice keys. Created on first
+// push. Older writers have no path to these tables.
+const PROJECT_MAP_ADDITIVE_TABLES = Object.freeze(["project_maps", "project_map_queue", "project_map_pulls", "project_map_notices"]);
+export const lazyAdditiveTables = Object.freeze([...OAUTH_PROVIDER_TABLES, ...ABUSE_RATE_TABLES, ...RETIRED_EMISSARY_TABLES, ...RETIRED_OPERATOR_TABLES, ...ANALYTICS_ADDITIVE_TABLES, ...MATCHMAKING_ADDITIVE_TABLES, ...WAKE_LEASE_ADDITIVE_TABLES, ...WAKE_METRICS_ADDITIVE_TABLES, ...RUN_ONCE_ADDITIVE_TABLES, ...WORK_ITEM_BOARD_ADDITIVE_TABLES, ...INTEGRITY_ADDITIVE_TABLES, ...PATROL_ADDITIVE_TABLES, ...IDENTITY_ROTATION_ADDITIVE_TABLES, ...PROJECT_MAP_ADDITIVE_TABLES]);
 // (Audit-fix F-2 intent preserved: analytics tables are lazy/additive, never
 // required — they live in ANALYTICS_ADDITIVE_TABLES above.)
 // messages (MSG-1) is fenced at v37 only. v34–v36 files do not have the
@@ -617,10 +622,12 @@ export function registerWriter(db) {
 
 export function installWriterFence(db) {
   if (!db.isTransaction) throw new Error("Writer fence installation requires the migration transaction");
+  // Invocation-local metadata only: synchronous validation must not reuse a
+  // prior startup snapshot after a migration, repair or failed transaction.
+  const triggers = new Map(db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all().map(row => [row.name, row.sql]));
   for (const { name, sql } of writerFenceDefinitions) {
-    const existing = db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name);
-    if (!existing) db.exec(sql);
-    else if (existing.sql !== sql) throw new Error("Database writer fence requires operator reconciliation");
+    if (!triggers.has(name)) db.exec(sql);
+    else if (triggers.get(name) !== sql) throw new Error("Database writer fence requires operator reconciliation");
   }
   db.exec(`PRAGMA user_version=${STORE_SCHEMA_VERSION}`);
 }
@@ -629,8 +636,9 @@ export function verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
   const histories = writerVersions.filter(v => v <= version).flatMap(fenceDefinitions);
   if (version >= 28) histories.push(...deployedV28FenceDefinitions);
   const expected = new Map(histories.map(def => [def.name, def.sql]));
-  for (const row of db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all()) {
-    if (expected.get(row.name) !== row.sql) throw new Error("Database writer fence requires operator reconciliation");
+  const triggers = new Map(db.prepare("SELECT name,sql FROM sqlite_master WHERE type='trigger' AND name GLOB 'writer_v*'").all().map(row => [row.name, row.sql]));
+  for (const [name, sql] of triggers) {
+    if (expected.get(name) !== sql) throw new Error("Database writer fence requires operator reconciliation");
   }
   // The fence guarantees every table present is fenced; a missing table is a
   // schema-presence concern, not a fence concern. Purely additive tables are
@@ -640,7 +648,7 @@ export function verifyWriterFence(db, version = STORE_SCHEMA_VERSION) {
   const prefix = `writer_v${version}_`;
   for (const { name, sql } of fenceDefinitions(version)) {
     if (!present.has(name.slice(prefix.length).replace(/_(insert|update|delete)$/, ""))) continue;
-    if (db.prepare("SELECT sql FROM sqlite_master WHERE type='trigger' AND name=?").get(name)?.sql !== sql) {
+    if (triggers.get(name) !== sql) {
       throw new Error("Database writer fence requires operator reconciliation");
     }
   }

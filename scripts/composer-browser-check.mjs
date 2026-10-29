@@ -27,7 +27,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     send(T.MESSAGE_POSTED, { messageId: "topic", body: "Which book should we read?" });
     send(T.MESSAGE_POSTED, { messageId: "reply", body: "A short story collection?", replyToId: "topic" });
     send(T.MESSAGE_POSTED, { messageId: "ping", body: "Ping @Room owner" });
-    const server = createRoomServer({ store, streamInterval: 50 });
+    // The browser fixture drives more reads per credential than the production burst; keep the wider window here only.
+    const server = createRoomServer({ store, streamInterval: 50, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     let browser;
@@ -48,6 +49,28 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await login(owner);
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     assert.match(await input.getAttribute("placeholder"), /Message #/);
+
+    // Ordinary chat stays quiet; a real keyboard path reveals private delivery.
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    await input.fill("Keep this unfinished thought");
+    await page.locator("#composer-options-toggle").press("Enter");
+    await page.getByRole("button", { name: "Direct message…", exact: true }).press("Enter");
+    assert.equal(await page.locator("#message-to-select").evaluate(el => el === document.activeElement), true);
+    await page.locator("#message-to-select").press("Escape");
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    assert.equal(await input.inputValue(), "Keep this unfinished thought");
+    await page.locator("#composer-options-toggle").press("Enter");
+    await page.getByRole("button", { name: "Direct message…", exact: true }).press("Enter");
+    await page.locator("#message-to-select").selectOption("maya");
+    assert.equal(await page.locator("#audience-note").isVisible(), true);
+    assert.match(await page.locator("#audience-note").innerText(), /Private.*Maya/);
+    assert.equal(await input.getAttribute("placeholder"), "Private message to Maya");
+    assert.equal(await page.getByRole("textbox", { name: "Private message to Maya", exact: true }).count(), 1);
+    assert.equal(await input.inputValue(), "Keep this unfinished thought");
+    await page.screenshot({ path: `test-results/composer-private-audience-${label}.png` });
+    await page.locator("#message-to-select").selectOption("");
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    await input.fill("");
 
     // A committed write must remain visible when subsequent history reads fail.
     const failRead = route => route.fulfill({ status: 503, contentType: "application/json",
@@ -75,6 +98,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     await page.unroute("**/api/rooms/commons/stream**", failRead);
     await page.locator("#refresh-button").click();
     await page.locator("#main").waitFor({ state: "visible" });
+    // The boot cache can paint the last held window first; the fresh read then adds the saved message.
+    await page.locator('[data-message-record-id="' + savedMessage.id + '"]').waitFor({ state: "attached", timeout: 10000 });
     assert.equal(await page.locator('[data-message-record-id="' + savedMessage.id + '"]').count(), 1);
 
     // Paste must retain overflow rather than silently send a truncated message.
@@ -457,7 +482,7 @@ for (const [label, size] of OWN_SEND_SIZES) {
     send(T.MEMBER_ADDED, { memberId: "maya", displayName: "Maya", kind: "human", permissions: [] });
     send(T.MESSAGE_POSTED, { messageId: "hello", body: "Welcome, Maya" });
     const maya = store.issueAccessKey("commons", "maya");
-    const server = createRoomServer({ store, streamInterval: 40 });
+    const server = createRoomServer({ store, streamInterval: 40, credentialReadBurst: 600, credentialWriteBurst: 600 });
     await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
     const origin = `http://127.0.0.1:${server.address().port}`;
     const browser = await chromium.launch({ headless: true, ...(process.env.ROOM_TEST_CHROMIUM_PATH ? { executablePath: process.env.ROOM_TEST_CHROMIUM_PATH } : {}) });

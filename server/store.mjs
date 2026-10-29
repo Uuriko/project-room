@@ -1,8 +1,9 @@
-import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
+import { isWriteSql } from './sql-write-classification.mjs';
+import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, readWorkItem } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
-import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite } from "./message-command-service.mjs";
-import { messageRepository } from "./message-repository.mjs";
-import { invalidateEditedAssistantInput } from './room-assistant.mjs';
+import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
+import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
+import { invalidateEditedAssistantInput, invokeFromPlainPost } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
@@ -85,6 +86,7 @@ import { HandoffEnvelopeJournal, handoffEnvelopeSchema } from "./work-handoff.mj
 import { buildRoomContext } from "./room-context.mjs";
 import { AgentPluginStore, agentPluginSchema } from "./agent-plugin-store.mjs";
 import { accessRequestSchema } from "./access-requests.mjs";
+import { Pairing, pairingSchema } from "./pairing.mjs";
 import { membershipDelegationSchema, MembershipDelegation } from "./membership-delegation.mjs";
 import { ownerDelegateSchema, OwnerDelegates } from "./owner-delegates.mjs";
 import { agentRoomSchema, ensureAgentRoomRequestIdColumn } from "./agent-rooms.mjs";
@@ -161,7 +163,7 @@ import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queu
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
-  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
+  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema, ensureMentionLateAckSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents, journalActivityFanoutFailure, retryActivityFanoutFailures } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
@@ -279,7 +281,7 @@ function startColdStart() {
 // first stdout write as "listening", and this line is emitted while the
 // store is still opening.
 function logColdStart(started, db, failed, extra = {}) {
-  const record = { event: "room.cold_start", durationMs: Math.round(performance.now() - started.wall) };
+  const record = { event: "room.cold_start", clockSemantics: extra.clockSemantics ?? "runtime-dependent", durationMs: Math.round(performance.now() - started.wall) };
   if (failed) {
     record.failed = true;
     if (failed instanceof Error && failed.message) record.error = failed.message.slice(0, 180);
@@ -315,7 +317,10 @@ function logColdStart(started, db, failed, extra = {}) {
       }
     }
   } catch { /* schema not installed, or the handle is already closing */ }
-  console.error(JSON.stringify(record));
+  // Node reserves stdout for its listening protocol; Cloudflare maps the
+  // console method to severity, so successful opens must use info there.
+  const log = !failed && record.clockSemantics === "io-bound" ? console.info : console.error;
+  log(JSON.stringify(record));
   return record;
 }
 
@@ -1112,14 +1117,15 @@ function agentWakeTargetIds(state, senderMemberId, data, db = null, roomId = "")
 export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureIdentitySecretSchema, "ensureIdentitySecretSchema@2"],
   [ensureIdentityCapacitySchema, "ensureIdentityCapacitySchema@1"],
-  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@1"],
+  [ensureIdentityLinkCodeSchema, "ensureIdentityLinkCodeSchema@2"],
   [ensureAutonomyTiersSchema, "ensureAutonomyTiersSchema@1"],
   [ensureOperatorActionsSchema, "ensureOperatorActionsSchema@1"],
   [ensureGrantsSchema, "ensureGrantsSchema@1"],
   [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
-  [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
+  [ensureAttachmentSchema, "ensureAttachmentSchema@1"],
+  [ensureMentionLateAckSchema, "ensureMentionLateAckSchema@1"]
 ];
 
 // Hash of the DDL this process knows how to apply. A stored match means
@@ -1144,7 +1150,7 @@ function roomSchemaStamp() {
     moderationSchema, accountTermsSchema, publicAbuseSchema, publicUnpublishSchema,
     bountyEscrowSchema, projectOffersSchema, demigodOffersSchema, demigodContractsSchema, buyerSignoffSchema, trialTaskSchema, publicWorkClaimsSchema,
     publicWorkClaimFenceSchema, publicWorkReviewsSchema, publicWorkSuccessorsSchema, publicWorkSettlementSchema,
-    accessRequestSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
+    accessRequestSchema, pairingSchema, membershipDelegationSchema, membershipDelegationJournalSchema,
     ownerDelegateSchema, agentRoomSchema, oauthPendingSchema, gmailSchema, requestRunSchema, roomAssistantSchema,
     directSendSchema, inboxStitchSchema, RETIRED_BOARD_V2_SCHEMA,
     agentKeyRegistrySchema, INTEGRITY_SNAPSHOT_SCHEMA, OPERATOR_ACTIONS_SCHEMA,
@@ -1257,7 +1263,10 @@ const INTEGRITY_PARITY_ARCHIVED = new RegExp(
 const INTEGRITY_PARITY_MISSING = new RegExp(
   `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): stored message body missing$`);
 const INTEGRITY_PARITY_RECORD = new RegExp(
-  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): current record (${INTEGRITY_MESSAGE_ID}) differs$`);
+  `^messages parity failed for (${INTEGRITY_MESSAGE_ID}): current record (${INTEGRITY_MESSAGE_ID}(?::channel)?) differs(?: \\(([a-z_, ]+)\\))?$`);
+const INTEGRITY_PARITY_FIELDS = new Set(['projection_message', 'record_json', 'reducer_extras_json', 'seq',
+  'author_id', 'body', 'channel_id', 'thread_root_id', 'reply_to_id', 'to_member_id', 'work_item_id',
+  'created_at', 'edited_at', 'deleted_at', 'pinned']);
 const INTEGRITY_BACKFILL_STOP = new RegExp(
   `^messages backfill stopped at (\\d+) before room (${INTEGRITY_MESSAGE_ID}) reached sequence (\\d+)$`);
 function allowlistedIntegrityMessage(step, error) {
@@ -1270,7 +1279,11 @@ function allowlistedIntegrityMessage(step, error) {
   const missing = INTEGRITY_PARITY_MISSING.exec(text);
   if (missing) return `messages parity failed for ${missing[1]}: stored message body missing`;
   const record = INTEGRITY_PARITY_RECORD.exec(text);
-  if (record) return `messages parity failed for ${record[1]}: current record ${record[2]} differs`;
+  if (record) {
+    const fields = record[3]?.split(', ') ?? [];
+    if (fields.length <= INTEGRITY_PARITY_FIELDS.size && fields.every(field => INTEGRITY_PARITY_FIELDS.has(field)))
+      return `messages parity failed for ${record[1]}: current record ${record[2]} differs${fields.length ? ` (${fields.join(', ')})` : ''}`;
+  }
   if (/^messages parity failed for /.test(text)) return "messages parity failed: stored messages disagree with the projection";
   const backfill = INTEGRITY_BACKFILL_STOP.exec(text);
   if (backfill) return `messages backfill stopped at ${backfill[1]} before room ${backfill[2]} reached sequence ${backfill[3]}`;
@@ -1308,6 +1321,13 @@ const PROJECTION_CACHE_MAX_BYTES = 64 * 1024 * 1024;
 // SQLite accepts quoted/schema-qualified table names and OR conflict clauses.
 // They must invalidate too now that metadata-only commits keep their cache.
 const ROOMS_WRITE = /\b(?:insert(?:\s+or\s+\w+)?\s+into|update(?:\s+or\s+\w+)?|delete\s+from|replace\s+into)\s+(?:(?:\w+|"[^"]+"|`[^`]+`|\[[^\]]+\]|'[^']+')\s*\.\s*)?(?:rooms\b|"rooms"|`rooms`|\[rooms\]|'rooms')/i;
+// Exact controls used by nodeStorage do not change entity contents. Keep
+// rollback and every other PRAGMA conservative; never exempt SQL prefixes.
+const ENTITY_CACHE_READ_CONTROLS = new Set([
+  "BEGIN", "BEGIN IMMEDIATE", "COMMIT", "SAVEPOINT room_isolated_write", "RELEASE room_isolated_write",
+  "PRAGMA query_only", "PRAGMA query_only=ON", "PRAGMA query_only=0", "PRAGMA query_only=1"
+]);
+const mayMutateMessageEntities = sql => !ENTITY_CACHE_READ_CONTROLS.has(sql) && isWriteSql(sql);
 const EVENT_APPEND = /\binsert\s+into\s+events\b/i;
 
 function deepFreeze(value) {
@@ -1347,6 +1367,10 @@ function freezeJsonState(value) {
 class ProjectionCache {
   constructor() { this.entries = new Map(); this.bytes = 0; }
   clear() { this.entries.clear(); this.bytes = 0; }
+  delete(roomId) {
+    const entry = this.entries.get(roomId);
+    if (entry) { this.entries.delete(roomId); this.bytes -= entry.weight; }
+  }
   lookup(roomId, sequence) {
     const entry = this.entries.get(roomId);
     if (!entry || entry.sequence !== sequence) return null;
@@ -1354,10 +1378,10 @@ class ProjectionCache {
     this.entries.set(roomId, entry);
     return entry.value;
   }
-  insert(roomId, sequence, value, weight) {
+  insert(roomId, sequence, value, weight, messageEntities = false) {
     const prior = this.entries.get(roomId);
     if (prior) { this.entries.delete(roomId); this.bytes -= prior.weight; }
-    this.entries.set(roomId, { sequence, value, weight });
+    this.entries.set(roomId, { sequence, value, weight, messageEntities });
     this.bytes += weight;
     while (this.entries.size > PROJECTION_CACHE_MAX_ROOMS || (this.bytes > PROJECTION_CACHE_MAX_BYTES && this.entries.size > 1)) {
       const oldest = this.entries.keys().next().value;
@@ -1372,6 +1396,7 @@ export class RoomStore {
   constructor(filename, { now = () => Date.now(), readOnly = false, database, storagePlatform = nodeStorage, storageFailureThreshold = STORAGE_FAILURE_THRESHOLD, stitch = null, identityHashKey = undefined, integrity = "eager",
     workEntities = true, bodiesAtRest = globalThis.process?.env?.["ROOM_BODIES_AT_REST"] === "1",
     verifyProjectionCache = globalThis.process?.env?.["ROOM_VERIFY_PROJECTION_CACHE"] === "1", maintainMessageCertification = false, messageProjectionWindow = null, messageEntityProjection = false, workItemBoardBackfill = "auto" } = {}) {
+    const initializationStarted = performance.now();
     // Phase 1a: store large message bodies outside rooms.projection.
     this.bodiesAtRest = bodiesAtRest === true;
     this.verifyProjectionCache = verifyProjectionCache === true;
@@ -1420,6 +1445,7 @@ export class RoomStore {
     this.ownerDelegates = new OwnerDelegates(this);
     this.keyRegistry = new AgentKeyRegistry(this); // Slice 9: Ed25519 public-key registry (bound at identity issuance).
     this.invites = new AgentInvites(this);
+    this.pairing = new Pairing(this);
     this.referralInvites = new ReferralInvites(this);
     this.referrals = new Referrals(this);
     this.accountLogins = new AccountLoginMethods(this);
@@ -1725,6 +1751,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // impact), so no schema version bump: IF NOT EXISTS is idempotent here
       // and the v0 block above covers fresh databases.
       this.db.exec(agentInviteSchema);
+      // CREATE IF NOT EXISTS does not add columns to a table that already
+      // exists. owner_equivalent records an owner-level invite (default 0).
+      // This runs before the writer fence is installed.
+      const inviteColumns = new Set(this.db.prepare("PRAGMA table_info(agent_invite_codes)").all().map(column => column.name));
+      if (!inviteColumns.has("owner_equivalent")) {
+        this.db.exec("ALTER TABLE agent_invite_codes ADD COLUMN owner_equivalent INTEGER NOT NULL DEFAULT 0");
+      }
       // Signed referral invites: purely additive (no data migration, no
       // fence impact); the ledger is written only by the mint/redeem paths
       // and holds no credential data (tokens are bearer strings, never
@@ -1858,6 +1891,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
       this.db.exec(mentionStateSchema);
+      ensureMentionLateAckSchema(this.db);
       // Attention (mark unread / save for later / activity feed): purely
       // additive side tables (no events, no projection impact): IF NOT
       // EXISTS is idempotent, no schema version bump, intentionally outside
@@ -1960,6 +1994,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // the writer fence (see unfencedAdditiveTables). Applied here (not only in
       // createRoomServer) so store-only fixtures and the recovery audit see it.
       this.db.exec(accessRequestSchema);
+      this.db.exec(pairingSchema);
       // "Who referred you?" free text on access requests (referral
       // attribution): converge deployed databases that predate the column.
       {
@@ -2130,13 +2165,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       this.rememberSchemaStamp();
       phase("checksum");
       phases.checksum = { ms: 0, rowsRead: 0 };
-    }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases }); this.db.close(); throw error; }
+    }); } catch (error) { this.coldStart = logColdStart(coldStart, this.db, error, { integrity: this.integrityMode, phases: this.coldStartPhases, clockSemantics: this.storagePlatform.clockSemantics ?? "runtime-dependent" }); this.db.close(); throw error; }
     this.coldStart = logColdStart(coldStart, this.db, false, this.coldStartExtra(deferIntegrity));
     // Decision #10: backfill projection work items onto the work-claims
-    // board (server/work-item-board.mjs). Runs in both integrity modes —
-    // a deferred (Durable Object) database holds one room, so the pass is
-    // bounded there too; the versioned marker makes repeat opens a single
-    // marker read per room. "manual" defers the pass to an explicit
+    // board (server/work-item-board.mjs). Runs in both integrity modes.
+    // The shared pilot can contain many rooms; current markers avoid their
+    // projection work but selection still scans room metadata.
+    // "manual" defers the pass to an explicit
     // backfillWorkItemClaims() call (tests staging a legacy corpus, or an
     // operator-controlled rollout). A failing room never bricks the
     // open: its marker stays behind and the next open retries it.
@@ -2154,6 +2189,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     }
     configureWorkRepository(this.db, this.workEntities);
     if (this.workEntities && version < 42) this.migrateWorkProjections();
+    // Legacy coldStart.durationMs ends before the backfill above. Keep it
+    // comparable; this separate successful writable-store total includes all
+    // initialization through work repository setup and migration.
+    this.initializationMs = Math.round(performance.now() - initializationStarted);
+    const logInitialized = this.storagePlatform.clockSemantics === "io-bound" ? console.info : console.error;
+    logInitialized(JSON.stringify({ event: "room.store_initialized", initializationMs: this.initializationMs,
+      legacyColdStartMs: this.coldStart.durationMs, clockSemantics: this.storagePlatform.clockSemantics ?? "runtime-dependent", cpuMeasured: false }));
   }
 
   // Convert one room atomically; interrupted multi-room runs resume by
@@ -2192,7 +2234,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
   }
 
   coldStartExtra(deferIntegrity) {
-    const extra = { integrity: this.integrityMode, phases: this.coldStartPhases };
+    const extra = { integrity: this.integrityMode, phases: this.coldStartPhases, clockSemantics: this.storagePlatform.clockSemantics ?? "runtime-dependent" };
     if (!deferIntegrity) return extra;
     extra.skipEventCount = true;
     // The checksum runs in verifyRoomIntegrity, not on this wake.
@@ -3384,31 +3426,74 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.close();
   }
   // Invalidate both parsed reads and unpublished command candidates.
-  _dropProjectionCache() {
-    this._projectionCache?.clear();
-    for (const pending of this._pendingProjectionFrames ?? []) pending.clear();
+  _dropProjectionCache(roomId = null) {
+    if (roomId === null) this._projectionCache?.clear();
+    else this._projectionCache?.delete(roomId);
+    for (const pending of this._pendingProjectionFrames ?? []) {
+      if (roomId === null) pending.clear();
+      else pending.delete(roomId);
+    }
+  }
+  _dropMessageEntityCache() {
+    for (const [roomId, entry] of this._projectionCache?.entries ?? []) {
+      if (entry.messageEntities) this._projectionCache.delete(roomId);
+    }
+    for (const pending of this._pendingProjectionFrames ?? []) {
+      for (const [roomId, entry] of pending) if (entry.messageEntities) pending.delete(roomId);
+    }
   }
   _queueProjectionCache(roomId, sequence, state, projection) {
     const pending = this._pendingProjectionFrames?.at(-1);
     if (!pending || state.messages?.some(message => typeof message?.bodyRef === "string" || message?._nul === 1)
       || !freezeJsonState(state)) return;
     const bodyWeight = (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0);
-    pending.set(roomId, { sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
+    pending.set(roomId, { messageEntities: this.messageEntityProjection, sequence, value: Object.freeze({ sequence, state }), weight: Buffer.byteLength(projection) + bodyWeight + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) });
   }
   _armProjectionWatch() {
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
     this._projectionWatch = true;
     const invalidate = () => this._dropProjectionCache();
+    // Only these literal statements prove one affected room. Unknown SQL,
+    // work entity writes, bulk statements and exec retain global invalidation.
+    const scopedUpdates = new Map([
+      ["UPDATE rooms SET projection=? WHERE id=?", 1],
+      ["UPDATE rooms SET sequence=?,projection=? WHERE id=?", 2],
+      ["UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?", 3]
+    ]);
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
       if (typeof sql !== "string" || typeof stmt.run !== "function") return stmt;
+      if (mayMutateMessageEntities(sql)) {
+        // Any mutation can change entities through a trigger or maintenance.
+        // Conservative invalidation applies only to entity-dependent caches.
+        const invalidateEntities = () => this._dropMessageEntityCache();
+        for (const method of ["run", "get", "all"]) {
+          if (typeof stmt[method] !== "function") continue;
+          const execute = stmt[method].bind(stmt);
+          stmt[method] = (...args) => {
+            invalidateEntities();
+            try { return execute(...args); } finally { invalidateEntities(); }
+          };
+        }
+        if (typeof stmt.iterate === "function") {
+          const iterate = stmt.iterate.bind(stmt);
+          stmt.iterate = function* (...args) {
+            invalidateEntities();
+            try { yield* iterate(...args); } finally { invalidateEntities(); }
+          };
+        }
+      }
       const roomsWrite = ROOMS_WRITE.test(sql) || /^\s*(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql), eventAppend = EVENT_APPEND.test(sql);
       if (!roomsWrite && !eventAppend) return stmt;
       const run = stmt.run.bind(stmt);
       stmt.run = (...args) => {
         const result = run(...args);
-        if (roomsWrite) invalidate();
+        if (roomsWrite) {
+          const roomIndex = scopedUpdates.get(sql);
+          const roomId = roomIndex === undefined ? null : args[roomIndex];
+          this._dropProjectionCache(typeof roomId === "string" && args.length === roomIndex + 1 ? roomId : null);
+        }
         // Every events insert in the codebase binds (roomId, sequence, ...)
         // positionally; anything else is ignored rather than guessed at.
         if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
@@ -3419,7 +3504,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (typeof this.db.exec === "function") {
       const exec = this.db.exec.bind(this.db);
       this.db.exec = sql => {
-        const result = exec(sql);
+        const entityWrite = typeof sql === "string" && mayMutateMessageEntities(sql);
+        if (entityWrite) this._dropMessageEntityCache();
+        let result;
+        try { result = exec(sql); }
+        finally { if (entityWrite) this._dropMessageEntityCache(); }
         if (typeof sql === "string" && (ROOMS_WRITE.test(sql) || /\b(?:INSERT(?: OR \w+)? INTO|UPDATE|DELETE FROM) work_entities\b/i.test(sql))) invalidate();
         return result;
       };
@@ -3470,7 +3559,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     // Savepoints collect candidates separately, but never publish before
-    // the outer commit. Every rooms write invalidates all earlier candidates.
+    // the outer commit. A scoped rooms write invalidates that room's earlier candidates;
+    // unknown writes and rollbacks invalidate every candidate.
     const boundary = outermost || isolated;
     const frames = this._pendingProjectionFrames ??= [];
     if (boundary) frames.push(new Map());
@@ -3489,7 +3579,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         for (const [id, entry] of pending) frames.at(-1)?.set(id, entry);
       } else {
         const cache = this._projectionCache ??= new ProjectionCache();
-        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight);
+        for (const [id, entry] of pending) cache.insert(id, entry.sequence, entry.value, entry.weight, entry.messageEntities);
       }
       // Publish committed appends only after the cache promotion above, so
       // streams woken by the flush observe the post-commit projection state.
@@ -3549,17 +3639,19 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         return hit;
       }
     }
-    const { value, weight } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
-    cache.insert(roomId, meta.sequence, value, weight);
+    const { value, weight, messageEntities } = this._readProjection(roomId, meta.sequence, { verifyBodyHashes });
+    cache.insert(roomId, meta.sequence, value, weight, messageEntities);
     return value;
   }
   _readProjection(roomId, sequence, { verifyBodyHashes = false } = {}) {
     const row = (this._roomProjectionStmt ??= this.db.prepare("SELECT projection FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
-    const { state: parsed, missing } = hydrateProjection(this.db, roomId, JSON.parse(row.projection), { verifyBodyHashes });
+    const raw = JSON.parse(row.projection);
+    const messageEntities = raw.messages?.some(message => message?._entity === 1) ?? false;
+    const { state: parsed, missing } = hydrateProjection(this.db, roomId, raw, { verifyBodyHashes });
     if (missing.length) this._restoreBodiesFromLog(roomId, sequence, parsed, missing);
     const state = deepFreeze(parsed);
-    return { value: Object.freeze({ sequence, state }),
+    return { value: Object.freeze({ sequence, state }), messageEntities,
       weight: Buffer.byteLength(row.projection) + Buffer.byteLength(JSON.stringify(state.workItems ?? {})) + (state.messages ?? []).reduce((n, m) => n + (m?.body?.length ?? 0), 0) };
   }
   // dm-consents: consent rows live in the dm_consents side table, but the
@@ -4629,7 +4721,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         fail(403, "insufficient_scope", "This key is limited to its room");
       }
       const resolved = roomId ? this.identities.resolveIdentityLink(record.identityId, roomId) : null;
-      if (!resolved) fail(401, "unauthenticated", "API key identity has no access to this room");
+      if (!resolved) fail(403, "no_access", "This identity has no access to this room");
       return {
         account: null, member: resolved.member, roomId, identityId: resolved.identityId,
         credentialHash: hash(token), credentialScope: "room", kind: "api-key",
@@ -4638,8 +4730,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       };
     }
     if (isIdentitySecret(token)) {
-      const resolved = this.identities.resolveIdentityAuth(token, roomId);
-      if (!resolved) fail(401, "unauthenticated", "Unknown identity or no access to this room");
+      const identity = this.identities.resolveGlobalIdentitySecret(token);
+      if (!identity) fail(401, "unauthenticated", "Unknown identity secret");
+      const resolved = roomId ? this.identities.resolveIdentityLink(identity.identityId, roomId) : null;
+      if (!resolved) fail(403, "no_access", "This identity has no access to this room");
       // Owner delegates (server/owner-delegates.mjs): an active per-room
       // grant stamps a COPY of the member — never the shared authority
       // object — so the explicit delegate gates downstream can recognize
@@ -4779,6 +4873,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const { memberId } of rows) if (Object.hasOwn(members, memberId)) members[memberId] = { ...members[memberId], identityRevoked: true };
     return { ...room, state: { ...room.state, members } };
   }
+  workProjection(roomId) {
+    // Read only work-view fields. Never populate the canonical full-room cache
+    // with this partial state, and preserve work entity integrity checks.
+    const row = (this._workProjectionStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.agentHalts') AS fields FROM rooms WHERE id=?")).get(roomId);
+    if (!row) fail(404, "room_not_found", "Room not found");
+    const [room, members, workItems, agentHalts] = JSON.parse(row.fields);
+    const state = hydrateWorkItems(this.db, roomId, { room, members, workItems, agentHalts: agentHalts ?? {} });
+    return { sequence: row.sequence, state: deepFreeze(state) };
+  }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
@@ -4787,7 +4890,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!["full", "activity"].includes(auditView) || auditView !== "full" && view !== "full") fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
-      const room = this.withIdentityRevoked(roomId, this.room(roomId));
+      const room = this.withIdentityRevoked(roomId, view === "work" ? this.workProjection(roomId) : this.room(roomId));
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
@@ -4806,7 +4909,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           const visible = message => messageInHistory(message, floor)
             && (!message.toMemberId || message.authorId === auth.member.id || message.toMemberId === auth.member.id);
           messages = repository.recent(messageLimit, visible);
-          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countMetadata(visible)-messages.length,older:"conversation"};
+          messagesWindow = {mode:"recent",limit:messageLimit,omitted:repository.countViewerVisible(auth.member.id, floor)-messages.length,older:"conversation"};
           const pinned = repository.getMany((pins ?? []).map(pin=>pin.messageId));
           pins = (pins ?? []).filter(pin=>pinned.has(pin.messageId) && visible(pinned.get(pin.messageId)));
         } else {
@@ -5577,9 +5680,24 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
-      const room = this.room(roomId), now = this.now();
+      // Default selected reads hydrate only the selected work payload. Offers
+      // validate cross-work references and still require the broader aggregate.
+      // Both paths scan legacy room JSON; neither is a bounded SQL-work claim.
+      const row = this.db.prepare(includeOffers
+        ? "SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.helpOffers','$.messagesArchive') AS fields FROM rooms WHERE id=?"
+        : "SELECT sequence,json_extract(projection,'$.room','$.members','$.replyRequests','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
+      if (!row) fail(404, "room_not_found", "Room not found");
+      const fields = JSON.parse(row.fields);
+      const [metadata, members] = fields;
+      const selected = includeOffers ? null : readWorkItem(this.db, roomId, workItemId);
+      const [workItems, replyRequests, helpOffers, messagesArchive] = includeOffers ? fields.slice(2)
+        : [selected ? { [workItemId]: selected } : {}, fields[2], null, fields[3]];
+      const state = includeOffers ? hydrateWorkItems(this.db, roomId, { room: metadata, members, workItems,
+        ...(replyRequests ? { replyRequests } : {}), ...(helpOffers ? { helpOffers } : {}) })
+        : { room: metadata, members, workItems, ...(replyRequests ? { replyRequests } : {}) };
+      const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: messageRepository(this, roomId, room.state),
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
@@ -5613,10 +5731,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || [completionEventId, draftMessageId].some(id => id !== null && !validId(id))
         || completionEventId !== null && draftMessageId !== null) fail(422, "invalid_result_selection", "Choose current result, one completion, or one draft");
-      const room = this.room(roomId);
-      if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
+      const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room') AS metadata,json_type(projection,'$.messagesArchive') AS archive_type FROM rooms WHERE id=?").get(roomId);
+      if (!row) fail(404, "room_not_found", "Room not found");
+      const work = readWorkItem(this.db, roomId, workItemId);
+      if (!work) fail(404, "work_not_found", "Work item not found in this Room");
+      // The full selected receipt history is needed for withdrawn historical
+      // text. Unrelated work and conversation bodies are not result dependencies.
+      const state = { room: JSON.parse(row.metadata), workItems: { [workItemId]: work } };
+      const messages = new Map();
+      const messageRecords = { get: id => {
+        if (!messages.has(id)) messages.set(id, selectedMessageRecord(this, roomId, id, row.archive_type === "object"));
+        return messages.get(id);
+      } };
       let value;
-      try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId, viewerId: auth.member.id, floor: this.historyFloor(roomId, auth.member.id, room.sequence) }); }
+      try { value = selectedWorkResult({ db: this.db, state, workItemId, sequence: row.sequence, now: this.now(), completionEventId, draftMessageId,
+        viewerId: auth.member.id, floor: this.historyFloor(roomId, auth.member.id, row.sequence), messageRecords }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
       return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
@@ -5764,26 +5893,50 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
-      const directMessages = this.db.prepare(
-        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>?
+      const floor = this.historyFloor(roomId, memberId, this.room(roomId).sequence);
+      const historyAfter = floor ? floor.sequence - 1 : 0;
+      const messageAfter = Math.max(after, historyAfter);
+      const directMessages = [];
+      const currentMessages = messageRepository(this, roomId);
+      const dmStatement = this.db.prepare(
+        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
-         ORDER BY sequence DESC LIMIT ?`)
-        .all(roomId, after, T.MESSAGE_POSTED, memberId, limit)
-        .map(row => {
+         ORDER BY sequence DESC LIMIT ?`);
+      let dmThrough = Number.MAX_SAFE_INTEGER, dmScannedAfter = after;
+      // Keep newest-first delivery, but refill past tombstones using descending
+      // bounds. Keep the healthy first page small; after tombstones require a
+      // refill, batch event and canonical-record reads to avoid one SQL trip per
+      // deleted message. Total history scanned is still not capped here.
+      while (directMessages.length < limit) {
+        const want = Math.min(200, Math.max(limit - directMessages.length, dmThrough === Number.MAX_SAFE_INTEGER ? 1 : 64));
+        const batch = dmStatement.all(roomId, messageAfter, dmThrough, T.MESSAGE_POSTED, memberId, want);
+        if (!batch.length) break;
+        const decoded = batch.map(row => {
           const parsed = JSON.parse(row.body);
-          return {
+          return { row, parsed, messageId: parsed.data.messageId ?? parsed.id };
+        });
+        const records = currentMessages.getMany(decoded.map(item => item.messageId));
+        for (const { row, parsed, messageId } of decoded) {
+          if (directMessages.length === limit) break;
+          dmScannedAfter = Math.max(dmScannedAfter, row.sequence);
+          const current = records.get(messageId);
+          if (current?.deletedAt) continue;
+          directMessages.push({
             sequence: row.sequence,
-            messageId: parsed.data.messageId ?? null,
+            messageId,
             from: parsed.actorId,
-            body: parsed.data.body,
+            body: current ? current.body : parsed.data.body,
             at: parsed.at,
             channel: "room",
             ...(parsed.data.requestKind === "reply" && parsed.data.requestPolicyVersion === 1
               && [parsed.actorId, parsed.data.toMemberId].includes(memberId) ? {
-                requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: parsed.data.messageId ?? parsed.id } }
+                requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: messageId } }
               } : {}),
-          };
-        });
+          });
+        }
+        if (batch.length < want) break;
+        dmThrough = batch[batch.length - 1].sequence - 1;
+      }
       const assignments = this.collab.listAssignments(roomId)
         .filter(record => record.status === "assigned"
           && record.assignee?.kind === "agent" && record.assignee?.id === memberId)
@@ -5806,10 +5959,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
-      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after });
+      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after: messageAfter });
       // A delivery cursor is not an acknowledgement. Keep bounded standing
       // attention visible when a poll advances beyond an unanswered mention.
-      const pending = this.openDirectMentions(roomId, memberId, limit + 1, this.now());
+      const pending = this.openDirectMentions(roomId, memberId, limit + 1, this.now(), { after: historyAfter });
       const attention = Object.freeze({
         pendingMentions: pending.slice(0, limit).map(({ sequence, replyToId, from, state, private: isPrivate }) =>
           Object.freeze({ sequence, replyToId, from, state, private: isPrivate })),
@@ -5825,10 +5978,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
       // only messages posted in this room, never another room's DM traffic.
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
-      // The poll cursor: the highest sequence either event-log list
-      // returned, or the caller's own `after` when nothing was newer.
+      // The poll cursor includes scanned DM tombstones as well as returned
+      // events, or the caller's own `after` when nothing was newer.
       // Standing lists carry no sequence and never move it.
-      const cursorAfter = Math.max(after,
+      const cursorAfter = Math.max(after, dmScannedAfter,
         ...directMessages.map(row => row.sequence),
         ...directMentions.map(row => row.sequence));
       const inbox = stampInbox({
@@ -5871,8 +6024,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const rows = [];
     try {
       const stmt = this.db.prepare(
-        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
+        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body,
+                o.acknowledged_at AS acknowledgedAt, o.late_acknowledged_at AS lateAcknowledgedAt
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         LEFT JOIN mention_observations o ON o.room_id=m.room_id AND o.message_event_id=m.message_event_id
+           AND o.mentioned_member_id=m.mentioned_member_id
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
            AND e.sequence>? AND e.sequence<=?
          ORDER BY e.sequence DESC LIMIT ?`
@@ -5897,6 +6053,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           // Filter before consuming page slots: otherwise newer expired rows
           // answered late can hide an older unresolved mention indefinitely.
           if (row.state === "timed_out" && currentById.hasReply(memberId, logged.data.messageId ?? row.eventId)) continue;
+          // An explicit ack after the deadline is the member saying "handled"
+          // for a mention they answered outside the thread. Without this the
+          // open list only ever grows. An ack before the deadline keeps the
+          // mention open as today.
+          if (row.state === "timed_out" && (Number.isSafeInteger(row.lateAcknowledgedAt)
+            || (Number.isSafeInteger(row.acknowledgedAt) && Number.isSafeInteger(row.timeoutAt) && row.acknowledgedAt > row.timeoutAt))) continue;
           if (rows.length < limit) rows.push(row);
         }
         if (batch.length < want) break;
@@ -6020,6 +6182,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         if (prior.fingerprint !== fingerprint) fail(409, "idempotency_conflict", "Command ID already used for different content");
         return { sequence: prior.sequence, event: JSON.parse(prior.body), duplicate: true };
       }
+      // Exact replays of commands committed before the pause returned above.
+      refusePausedAgentWrite(this, roomId, auth.member, command);
       // Live chat posts and replies only. The replay above, importEvents,
       // initialize, and projection replay do not reach this line.
       if (this.roomFlood.consume(roomId, auth.member.id, command.type)) {
@@ -6139,10 +6303,9 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         let dmAncestor = null;
         for (let m = byId.get(command.data.replyToId); m && !seen.has(m.id); m = byId.get(m.replyToId)) {
           seen.add(m.id);
-          // Reply requests are directed but room-threaded by design: members may
-          // clarify or comment under them (tests/reply-requests.test.js).
-          if (m.toMemberId && !Object.hasOwn(room.state.replyRequests ?? {}, m.id)
-              && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
+          // Directed requests have participant-only context reads too. Knowing
+          // their ID must not let a bystander inject public request context.
+          if (m.toMemberId && m.authorId !== auth.member.id && m.toMemberId !== auth.member.id) {
             fail(422, "command_rejected", "Reply must reference a message in this Room");
           }
           if (!dmAncestor && m.toMemberId) dmAncestor = m;
@@ -6195,7 +6358,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
             ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
           }
-          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION }
+          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION,
+            // Server-derived (callers cannot send it): the credential route this
+            // response arrived on. See ANSWER_CREDENTIALS in src/reply-requests.js.
+            ...(requestMode === "respond" ? { answerCredential: auth.kind === "session" && auth.credentialScope === "account-session"
+              && auth.account && auth.member.kind === "human" ? "account_session" : "room_credential" } : {}) }
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
           : command.data
       });
@@ -6300,6 +6467,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Persist the message domain in the same transaction as event/receipt.
         // A failure rolls back both the entity and its projection reference.
         messageWrite.persistEntities();
+        // fo-qa-c10-202610280645: a plain shared post that addresses the room
+        // assistant starts its run server-side, so the ask never depends on the
+        // client's projection being fresh. Reply-based continuations stay
+        // client-routed. Eligible posts and their derived run commit atomically;
+        // storage failure rolls both back for an exact-command retry.
+        if (command.type === T.MESSAGE_POSTED && !command.data.toMemberId && !command.data.replyToId)
+          invokeFromPlainPost(this, roomId, state, auth.member, command.data, command.data.messageId);
         if (incoming.type === T.MESSAGE_EDITED) {
           invalidateEditedAssistantInput(this.db, roomId, incoming.data.messageId, this.now());
         }
@@ -6308,7 +6482,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // transaction rewrite the log and advance the room sequence.
         if (command.type === T.MESSAGE_DELETED && typeof command.data?.messageId === "string") {
           const redacted = commitMessageRedaction(this.db, {
-            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId, bodiesAtRest: this.bodiesAtRest
+            roomId, state, actorId: incoming.actorId, at: incoming.at, messageId: command.data.messageId, bodiesAtRest: this.bodiesAtRest,
+            retainedMessageIds: messageWrite.retainedMessageIds
           });
           state = redacted.state;
         }
@@ -6809,6 +6984,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         VALUES(?,?,?,1,?) ON CONFLICT(room_id,message_event_id,mentioned_member_id)
         DO UPDATE SET acknowledged=1, acknowledged_at=COALESCE(mention_observations.acknowledged_at,excluded.acknowledged_at)`)
         .run(roomId, messageEventId, auth.member.id, this.now());
+      // An ack after the deadline also records the late ack itself, so an
+      // on-time ack followed by a late one still reads as handled.
+      if (mine.state === "timed_out") this.db.prepare(
+        `UPDATE mention_observations SET late_acknowledged_at=COALESCE(late_acknowledged_at,?)
+         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?`
+      ).run(this.now(), roomId, messageEventId, auth.member.id);
       if (mine.state !== "delivered") return this.mentionView(roomId, messageEventId, auth.member.id);
       assertTransitionMention("delivered", "acknowledged");
       this.db.prepare(

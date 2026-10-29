@@ -220,6 +220,16 @@ test("required merge-gate jobs stay present and the unit suite is one job", () =
   assert.equal(workflow.jobs.unit.strategy, undefined);
   const runs = workflow.jobs.unit.steps.map(step => step.run).filter(Boolean).join("\n");
   assert.match(runs, /unit-ci\.mjs --all/);
+  assert.match(runs, /unit-ci\.mjs --affected/);
+  assert.equal(String(workflow.jobs["browser-shards"].if).includes("github.event_name != 'push'"), false);
+  const safety = workflow.jobs["safety-net"];
+  assert.ok(safety, "safety-net job is missing");
+  const safetyRun = safety.steps.map(step => step.run).filter(Boolean).join("\n");
+  assert.equal(String(safety.if).includes("ready-to-land"), false);
+  assert.match(String(safety.if), /pull_request/);
+  assert.match(safetyRun, /npm run lint/);
+  assert.match(safetyRun, /--run-stories/);
+  assert.match(safetyRun, /--run-page-weight/);
   const coverageIf = String(workflow.jobs.coverage.if);
   assert.match(coverageIf, /schedule/);
   assert.match(coverageIf, /workflow_dispatch/);
@@ -248,6 +258,7 @@ test("heavy pull-request jobs wait for ready-to-land", () => {
     expectsLabel("test.yml", id, String(testWf.jobs[id].if));
   }
   assert.equal(String(testWf.jobs.coverage.if).includes("ready-to-land"), false);
+  assert.equal(String(testWf.jobs["safety-net"].if).includes("ready-to-land"), false);
 
   for (const file of ["schema-gate.yml", "machine.yml", "relay.yml"]) {
     const wf = open(file);
@@ -296,5 +307,24 @@ import('node:fs').then(({appendFileSync})=>{const args=process.argv.slice(2);app
     const calls = readFileSync(log, "utf8").trim().split("\n").filter(Boolean).map(line => JSON.parse(line));
     assert.deepEqual(calls, fail ? [["test"]] : [["test"], ["run", "test:browser"]]);
     assert.equal(result.status, fail ? 17 : 0, result.stdout + result.stderr);
+  }
+});
+
+
+test("invariant diagnostics survive a failed gate without changing its result", () => {
+  const steps = parse(readFileSync(join(WORKFLOWS, "pr-gates.yml"), "utf8")).jobs.gates.steps;
+  const gate = steps.find(step => step.id === "invariants");
+  assert.notEqual(gate["continue-on-error"], true);
+  for (const name of ["Upload invariant results", "Comment invariant results on PR"]) {
+    const condition = steps.find(step => step.name === name).if;
+    // GitHub implicitly prepends success() unless a status function occurs.
+    const explicitStatus = /\b(always|success|failure|cancelled)\(\)/.test(condition);
+    for (const conclusion of ["success", "failure", "skipped", "cancelled"]) {
+      const source = condition.replaceAll("always()", "true")
+        .replaceAll("github.event_name", JSON.stringify("pull_request"))
+        .replaceAll("steps.invariants.conclusion", JSON.stringify(conclusion));
+      const runs = (explicitStatus || conclusion === "success") && Function(`return (${source})`)();
+      assert.equal(runs, ["success", "failure"].includes(conclusion), `${name}: ${conclusion}`);
+    }
   }
 });

@@ -26,7 +26,7 @@ import { hydrateWorkItems } from "./work-repository.mjs";
 // second run writes nothing.
 import { createHash } from "node:crypto";
 import { emitWorkClaimEvent } from "./work-claim-events.mjs";
-import { openClaimCount, roomWorkClaimConfig, workOf } from "./work-claims.mjs";
+import { openClaimCount, roomWorkClaimConfig, workOf, normalizeClaimRepository } from "./work-claims.mjs";
 
 const WORK_ITEM_BOARD_BACKFILL_VERSION = 1;
 const WORK_ITEM_BOARD_BACKFILL_TABLE = "work_item_board_backfill";
@@ -560,7 +560,7 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
       ...(existing?.pullRequests ?? []),
     ].map(pull => [pull.url, pull])).values()].slice(0, MAX_PULLS),
     updatedAt: isoOrNull(item.updatedAt) ?? isoOrNull(item.createdAt) ?? iso(nowMs),
-    repo: claimForScope ? (claimForScope.repository ?? null) : null,
+    repo: claimForScope ? (normalizeClaimRepository(claimForScope.repository) ?? null) : null,
     branch: claimForScope ? (claimForScope.ref ?? null) : null,
     chain: chain.slice(-MAX_CHAIN),
     supersededBy: item.state === "superseded" && typeof item.supersededBy === "string" ? boardClaimId(item.supersededBy) : null,
@@ -990,10 +990,14 @@ export function backfillAllRoomsWorkItemBoard(store, { nowMs = Date.now(), force
   // both lazy tables, which is what the purge registry's optional entry
   // and the health reader assume.
   store.db.exec(WORK_ITEM_BOARD_DIVERGENCE_SCHEMA);
-  const markers = new Map(store.db.prepare(`SELECT room_id, version FROM ${WORK_ITEM_BOARD_BACKFILL_TABLE}`).all().map(row => [row.room_id, row.version]));
-  const roomIds = store.db.prepare("SELECT id FROM rooms").all().map(row => row.id);
-  for (const roomId of roomIds) {
-    if (!force && markers.get(roomId) === WORK_ITEM_BOARD_BACKFILL_VERSION) continue;
+  // A shared store can contain many settled rooms. Keep their IDs/markers
+  // in SQLite; only pending rooms need projection reads and JS allocation.
+  // This still scans room metadata and probes the marker primary-key index.
+  const rooms = force ? store.db.prepare("SELECT id FROM rooms").all()
+    : store.db.prepare(`SELECT rooms.id FROM rooms LEFT JOIN ${WORK_ITEM_BOARD_BACKFILL_TABLE} AS marker
+        ON marker.room_id = rooms.id WHERE marker.version IS NULL OR marker.version != ?`)
+      .all(WORK_ITEM_BOARD_BACKFILL_VERSION);
+  for (const { id: roomId } of rooms) {
     const report = store.transaction(() => backfillRoomWorkItems(store, roomId, { nowMs }));
     aggregate.rooms += 1;
     aggregate.items += report.items;

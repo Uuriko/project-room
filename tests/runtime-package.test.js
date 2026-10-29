@@ -15,6 +15,11 @@ import { frozenRecoveryFixture } from "../scripts/frozen-runtime-fixture.mjs";
 
 const repository = fileURLToPath(new URL("../", import.meta.url));
 
+test("every currently served asset is registered in the exact-source runtime", () => {
+  assert.deepEqual(publicAssets, assetPaths);
+  for (const path of assetPaths) assert.ok(allowed.has(path), `Missing runtime asset: ${path}`);
+});
+
 test("exact-commit runtime package verifies cold, excludes private state and preserves populated committed-schema data", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-package-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
@@ -64,6 +69,8 @@ test("exact-commit runtime package verifies cold, excludes private state and pre
     const packagedWorkActions = existsSync(join(destination, "client/work-actions.mjs"))
       ? readFileSync(join(destination, "client/work-actions.mjs"), "utf8") : "";
     const toolCount = !existsSync(join(destination, "client/help-actions.mjs")) ? 27
+      : packagedTools.includes('"room_map"') ? 47
+      : packagedWorkActions.includes('"room_claim"') ? 46
       : packagedTools.includes("\"room_close_work_claim\"") ? 44
       : packagedTools.includes("...assistantTools") ? 43
       : packagedTools.includes('"room_link_work_claim_pr"') ? 41

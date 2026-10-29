@@ -14,6 +14,7 @@ import { callHostedStdioTool } from "../server/mcp-full-profile.mjs";
 import { createHostedRoomMcp } from "../server/mcp-room-profile.mjs";
 import { validateReplyRead } from "../client/reply-actions.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function fixture(t, extra = []) {
   const store = new RoomStore(":memory:"); t.after(() => store.close());
@@ -119,7 +120,7 @@ test("explicit answer appends once, retains exact historical retries and does no
   assert.equal(request.status, "answered"); assert.equal(request.revision, 1);
   assert.equal(request.responseMessageId, command.data.messageId); assert.equal(request.terminalActorId, "agent");
   assert.equal(request.contextEventId, q.receipt.event.id); assert.equal(request.responseContextSequence, q.receipt.sequence);
-  f.post("owner", { body: "Later comment", replyToId: request.id });
+  f.post("guest", { body: "Later comment", replyToId: request.id });
   const sequence = f.store.room("commons").sequence;
   assert.equal(f.send("agent", command).event.id, saved.event.id); assert.equal(f.send("guest", q.command).duplicate, true);
   assert.equal(f.store.room("commons").sequence, sequence);
@@ -140,20 +141,22 @@ test("request bundles reject missing, null, mixed, spoofed and proposal fields w
     assert.throws(() => f.send("agent", f.answer(q, q.receipt, patch)));
   }
   const missing = f.answer(q); delete missing.data.workItemId; assert.throws(() => f.send("agent", missing));
-  assert.throws(() => f.send("reviewer", f.answer(q)), /requested participant/);
+  assert.throws(() => f.send("reviewer", f.answer(q)), /Reply must reference a message in this Room/);
   assert.equal(auditRecovery(f.store).dataSha256, after);
 });
 
+// Fresh directed-thread writes require a participant, including the Room owner.
+// These context fixtures use the requester; historical reducer replay is unchanged.
 test("ordinary clarification changes context, but independent request/work branches do not", t => {
   const f = fixture(t), q = f.open(), subject = q.command.data.messageId;
   const clarification = f.post("guest", { messageId: "clarification", body: "Consider accessibility too.", replyToId: subject });
   assert.equal(f.state().replyRequests[subject].contextEventId, clarification.event.id);
   assert.equal(f.state().replyRequests[subject].revision, 0);
   assert.throws(() => f.send("agent", f.answer(q)), /Stale reply request context/);
-  const nested = f.open("owner", { messageId: "nested", replyToId: subject });
+  const nested = f.open("guest", { messageId: "nested", replyToId: subject });
   f.post("agent", { messageId: "nested-child", body: "Different question", replyToId: nested.command.data.messageId });
   f.send("owner", { id: "work", type: "work.proposed", data: { workItemId: "other-work", title: "Independent", definitionOfDone: "Text", accountableMemberId: "agent", mode: "read" } });
-  f.post("owner", { messageId: "different-work", workItemId: "other-work", body: "Separate work", replyToId: subject });
+  f.post("guest", { messageId: "different-work", workItemId: "other-work", body: "Separate work", replyToId: subject });
   f.post("agent", { messageId: "different-work-child", body: "Still separate", replyToId: "different-work" });
   let at = Date.now();
   f.store.now = () => at;
@@ -219,7 +222,7 @@ test("request map is bounded and unsupported event policies cannot be silently i
 test("selected exchange freezes pages, exposes basis only after context is drained, and stays read-only", t => {
   const f = fixture(t), q = f.open(), id = q.command.data.messageId;
   const clarify = f.post("guest", { messageId: "context", body: "Exact clarification 🪷", replyToId: id });
-  f.open("owner", { messageId: "independent", replyToId: id });
+  f.open("guest", { messageId: "independent", replyToId: id });
   const before = auditRecovery(f.store), first = f.store.replyRequests.selected(f.keys.agent, "commons", id, { limit: 1 });
   assert.equal(first.current.answerBasis, null); assert.equal(first.page.hasMore, true);
   assert.deepEqual(first.page.items.map(row => row.kind), ["opened"]);
@@ -336,11 +339,11 @@ test("zero checkpoints, post-terminal comments and pasted-draft provenance stay 
   const f = fixture(t);
   f.send("owner", { id: "propose", type: "work.proposed", data: { workItemId: "work", title: "Agenda", definitionOfDone: "Clear agenda", accountableMemberId: "agent", mode: "read" } });
   const q = f.open("guest", { workItemId: "work" }), id = q.command.data.messageId;
-  const draft = f.post("owner", { messageId: "pasted", body: "Draft", replyToId: id, workItemId: "work", packetId: "packet", basisRevision: 0 });
+  const draft = f.post("guest", { messageId: "pasted", body: "Draft", replyToId: id, workItemId: "work", packetId: "packet", basisRevision: 0 });
   const context = f.store.replyRequests.selected(f.keys.agent, "commons", id);
   assert.deepEqual(context.page.items.at(-1).message.proposal, { packetId: "packet", basisRevision: 0, submittedAtRevision: 0, attribution: "manual-unverified" });
   f.send("agent", f.answer(q, draft));
-  f.post("owner", { messageId: "after-answer", body: "Thanks", replyToId: id });
+  f.post("guest", { messageId: "after-answer", body: "Thanks", replyToId: id });
   assert.equal(f.store.replyRequests.selected(f.keys.agent, "commons", id).page.items.at(-1).message.id, "after-answer");
   const history = f.store.replyRequests.history(f.keys.agent, "commons");
   assert.equal(history.page.items.some(row => row.message?.id === "after-answer"), false);
@@ -547,7 +550,7 @@ test("hosted needs-me discovers private incoming requests without exposing their
   const f = fixture(t), owner = f.store.identities.create("Host"), peer = f.store.identities.create("Responder");
   const rooms = new AgentRooms(f.store);
   const created = rooms.create(owner.secret, { roomId: "hosted-replies", title: "Replies", purpose: "Answer questions", kind: "personal", displayName: "Host" });
-  f.store.identities.link(owner.secret, created.roomId, { identityId: peer.identityId, displayName: "Responder", permissions: [] });
+  linkWithProof(f.store, owner.secret, created.roomId, peer, { displayName: "Responder", permissions: [] });
   f.store.dmConsents.request(created.roomId, created.ownerMemberId, peer.identityId, "Fixture");
   f.store.dmConsents.decide(created.roomId, peer.identityId, created.ownerMemberId, "approve");
   const send = command => f.store.command(owner.secret, created.roomId, command);
@@ -582,4 +585,181 @@ test("reply audit rejects an access change for an inherited member id", () => {
   ];
   assert.throws(() => auditReplyRequests(state, history), /Reply request history requires operator reconciliation/);
   assert.equal(Object.hasOwn(Object.prototype.toString, "active"), false);
+});
+
+test("selected archived reply context does not refetch every message in ID batches", t => {
+  const f = fixture(t, Array.from({ length: 600 }, (_, i) => event({
+    roomId: "commons", actorId: "owner", type: "message.posted",
+    data: { messageId: `unrelated-history-${i}`, body: `Unrelated history ${i}` }
+  })));
+  const q = f.open();
+  f.post("guest", { messageId: "selected-context", body: "Additional context", replyToId: q.command.data.messageId, toMemberId: "agent" });
+  const before = f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* certify archive */ }
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 1, dryRun: false }).ok, true);
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  f.store.db.prepare = sql => {
+    assert.ok(!sql.startsWith("SELECT message_id,record_json,body FROM messages WHERE")
+      || !sql.includes("message_id IN (SELECT value FROM json_each(?))"), "ownership traversal must supply the same records used by the page");
+    return prepare(sql);
+  };
+  const after = f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  assert.deepEqual(after.page, before.page);
+  assert.deepEqual(after.responseActions, before.responseActions);
+});
+
+test("selected archived context keeps unrelated body text out of SQL result materialization", t => {
+  const secret = "unselected-archive-body-" + "x".repeat(2000);
+  const f = fixture(t, Array.from({ length: 300 }, (_, i) => event({
+    roomId: "commons", actorId: "owner", type: "message.posted",
+    data: { messageId: `body-history-${i}`, body: secret }
+  })));
+  const q = f.open();
+  f.post("guest", { body: "Selected clarification", replyToId: q.command.data.messageId, toMemberId: "agent" });
+  const before = f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* certify archive */ }
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 1, dryRun: false }).ok, true);
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  f.store.db.prepare = sql => {
+    const statement = prepare(sql);
+    if (!sql.includes("FROM messages")) return statement;
+    return new Proxy(statement, { get(target, key) {
+      const value = Reflect.get(target, key, target);
+      if (typeof value !== "function") return value;
+      return (...args) => {
+        const result = value.apply(target, args);
+        if (key === "all" || key === "get") assert.ok(!JSON.stringify(result)?.includes(secret), "unrelated archive bodies must not cross SQL result boundary");
+        return result;
+      };
+    } });
+  };
+  const after = f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  assert.deepEqual(after.page, before.page);
+  assert.deepEqual(after.preparation, before.preparation);
+  assert.deepEqual(after.responseActions, before.responseActions);
+});
+
+test("metadata context traversal preserves canonical corruption rejection outside the selected exchange", t => {
+  const f = fixture(t, [event({ roomId: "commons", actorId: "owner", type: "message.posted",
+    data: { messageId: "unrelated-corruption", body: "Unrelated" } })]);
+  const q = f.open();
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* certify archive */ }
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 1, dryRun: false }).ok, true);
+  const original = f.store.db.prepare("SELECT record_json FROM messages WHERE message_id=?").get("unrelated-corruption").record_json;
+  const record = JSON.parse(original);
+  const read = () => f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  for (const invalid of ["{invalid", "null", "[]", "{id:'unrelated-corruption'}",
+    JSON.stringify({ ...record, id: "wrong-id" }), JSON.stringify({ ...record, authorId: "guest" }),
+    JSON.stringify({ ...record, createdAt: "wrong-time" })]) {
+    f.store.db.prepare("UPDATE messages SET record_json=? WHERE message_id=?").run(invalid, "unrelated-corruption");
+    assert.throws(read, undefined, "unrelated canonical corruption must still refuse the entire read");
+  }
+  f.store.db.prepare("UPDATE messages SET record_json=?,author_id=?,reply_to_id=? WHERE message_id=?")
+    .run(original, "guest", q.command.data.messageId, "unrelated-corruption");
+  assert.deepEqual(read().page.items.map(item => item.message.id), [q.command.data.messageId],
+    "denormalized ownership columns cannot override the canonical record");
+});
+
+for (const count of [10, 100]) test(`request listing avoids full room hydration with ${count} unrelated messages`, async t => {
+  const f = fixture(t);
+  const answered = f.open('guest', {}, 'cold-answered');
+  f.send('agent', f.answer(answered));
+  f.open('guest', {}, 'cold-open');
+  f.store.roomFlood = { consume() {} };
+  for (let i = 0; i < count; i++) f.post('owner', { body: `UNRELATED-LIST-${i} ` + 'x'.repeat(2000) });
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  // Capture the prior full-projection behavior as the semantic oracle.
+  const read = f.store.replyRequests.read.bind(f.store.replyRequests);
+  f.store.replyRequests.read = (token, roomId, binding, fn) => read(token, roomId, binding, fn);
+  const selections = [];
+  for (const actor of ['agent', 'guest', 'reviewer']) for (const direction of ['incoming', 'outgoing', 'both']) for (const status of ['open', 'answered', 'all']) {
+    const options = { direction, status };
+    selections.push({ actor, options, expected: await new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token: f.keys[actor] }).replyRequests(options) });
+  }
+  f.store.replyRequests.read = read;
+  f.store._dropProjectionCache();
+  const guard = t.mock.method(f.store, 'room', () => { throw new Error('request list hydrated full room'); });
+  for (const { actor, options, expected } of selections) {
+    const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token: f.keys[actor] });
+    const actual = await client.replyRequests(options);
+    assert.deepEqual(actual, expected);
+    assert.equal(JSON.stringify(actual).includes('UNRELATED-LIST-'), false);
+  }
+  assert.equal(guard.mock.callCount(), 0);
+  f.store.revoke(f.keys.agent);
+  await assert.rejects(new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token: f.keys.agent }).replyRequests());
+});
+
+test("request reads respect since-join history after member reactivation", async t => {
+  const f = fixture(t);
+  const frozen = Date.now() + 10000; f.store.now = () => frozen;
+  f.send('owner', { id: 'floor-policy', type: 'room.history_visibility_set', data: { historyVisibility: 'since_join' } });
+  const old = f.open('guest', { body: 'Private before reactivation' }, 'before-reactivation');
+  f.post('guest', { messageId: 'older-context', body: 'Older context', replyToId: old.command.data.messageId });
+  const oldRead = f.store.replyRequests.history(f.keys.agent, 'commons', { limit: 1 });
+  f.send('owner', { id: 'remove-agent', type: 'member.access_changed', data: { memberId: 'agent', active: false, permissions: f.state().members.agent.permissions, expectedMemberRevision: f.state().members.agent.revision ?? 0 } });
+  f.send('owner', { id: 'restore-agent', type: 'member.access_changed', data: { memberId: 'agent', active: true, permissions: f.state().members.agent.permissions, expectedMemberRevision: f.state().members.agent.revision ?? 0 } });
+  f.keys.agent = f.store.issueAccessKey('commons', 'agent');
+  const fresh = f.open('guest', { body: 'Visible after reactivation' }, 'after-reactivation');
+  assert.deepEqual(f.store.replyRequests.list(f.keys.agent, 'commons').requests.map(r => r.id), [fresh.command.data.messageId]);
+  assert.throws(() => f.store.replyRequests.selected(f.keys.agent, 'commons', old.command.data.messageId), { code: 'reply_request_not_found' });
+  const history = f.store.replyRequests.history(f.keys.agent, 'commons');
+  assert.deepEqual(history.page.items.map(i => i.message?.id), [fresh.command.data.messageId]);
+  assert.equal(JSON.stringify(history).includes('Private before reactivation'), false);
+  assert.equal(f.store.replyRequests.selected(f.keys.agent, 'commons', fresh.command.data.messageId).current.answerBasis.contextEventId, fresh.receipt.event.id);
+  assert.ok(oldRead.page.nextCursor);
+  assert.throws(() => f.store.replyRequests.history(f.keys.agent, 'commons', { cursor: oldRead.page.nextCursor }), { code: 'invalid_reply_cursor' });
+  assert.equal(f.store.replyRequests.list(f.keys.guest, 'commons', { direction: 'outgoing' }).requests.length, 2);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.closeStreams(); server.closeAllConnections(); server.close(resolve); }));
+  const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', memberId: 'agent', token: f.keys.agent });
+  assert.deepEqual((await client.replyRequests()).requests.map(r => r.id), [fresh.command.data.messageId]);
+  await assert.rejects(client.replyContext(old.command.data.messageId), /not found/i);
+  assert.equal(JSON.stringify(await client.replyHistory()).includes('Private before reactivation'), false);
+  const hosted = await callHostedStdioTool(f.store, f.keys.agent, 'room_list_requests', { roomId: 'commons' });
+  assert.deepEqual(hosted.value.requests.map(r => r.id), [fresh.command.data.messageId]);
+  await assert.rejects(callHostedStdioTool(f.store, f.keys.agent, 'room_read_request', { roomId: 'commons', requestMessageId: old.command.data.messageId }), /not found/i);
+
+});
+
+test('follow-up preparation refuses prior exchanges hidden by a new history policy', t => {
+  const f = fixture(t), frozen = Date.now() + 10000; f.store.now = () => frozen;
+  const old = f.open();
+  f.send('agent', f.answer(old, old.receipt, { messageId: 'old-answer' }));
+  for (const active of [false, true]) f.send('owner', { id: crypto.randomUUID(), type: 'member.access_changed', data: {
+    memberId: 'agent', active, permissions: f.state().members.agent.permissions, expectedMemberRevision: f.state().members.agent.revision ?? 0
+  } });
+  f.keys.agent = f.store.issueAccessKey('commons', 'agent');
+  const follow = f.open('guest', { replyToId: 'old-answer' });
+  assert.equal(f.store.replyRequests.selected(f.keys.agent, 'commons', follow.command.data.messageId).preparation.previousExchanges.length, 1);
+  f.send('owner', { id: 'restrict-history', type: 'room.history_visibility_set', data: { historyVisibility: 'since_join' } });
+  assert.throws(() => f.store.replyRequests.selected(f.keys.agent, 'commons', follow.command.data.messageId), { code: 'reply_follow_up_unavailable' });
+  assert.equal(f.store.replyRequests.selected(f.keys.guest, 'commons', follow.command.data.messageId).preparation.previousExchanges.length, 1);
+  f.send('owner', { id: 'restore-history', type: 'room.history_visibility_set', data: { historyVisibility: 'all' } });
+  assert.equal(f.store.replyRequests.selected(f.keys.agent, 'commons', follow.command.data.messageId).preparation.previousExchanges.length, 1);
+});
+
+for (const outcome of ['answered', 'cancelled']) test(`history checkpoints do not disclose hidden ${outcome} exchanges after reactivation`, t => {
+  const f = fixture(t), frozen = Date.now() + 10000; f.store.now = () => frozen;
+  f.send('owner', { id: 'set-history', type: 'room.history_visibility_set', data: { historyVisibility: 'since_join' } });
+  const checkpoint = f.store.replyRequests.history(f.keys.agent, 'commons').page.completedCheckpoint;
+  const old = f.open('guest', { body: 'Hidden terminal question' });
+  if (outcome === 'answered') f.send('agent', f.answer(old, old.receipt, { body: 'Hidden terminal answer' }));
+  else f.send('guest', f.cancel(old, { reason: 'Hidden cancellation reason' }));
+  for (const active of [false, true]) f.send('owner', { id: crypto.randomUUID(), type: 'member.access_changed', data: {
+    memberId: 'agent', active, permissions: f.state().members.agent.permissions, expectedMemberRevision: f.state().members.agent.revision ?? 0
+  } });
+  f.keys.agent = f.store.issueAccessKey('commons', 'agent');
+  const fresh = f.open('guest', { body: 'Current question' });
+  const history = f.store.replyRequests.history(f.keys.agent, 'commons', { checkpoint });
+  assert.deepEqual(history.page.items.map(item => item.requestMessageId), [fresh.command.data.messageId]);
+  assert.equal(JSON.stringify(history).includes('Hidden'), false);
+  assert.deepEqual(f.store.replyRequests.list(f.keys.agent, 'commons', { status: 'all' }).requests.map(r => r.id), [fresh.command.data.messageId]);
+  assert.throws(() => f.store.replyRequests.selected(f.keys.agent, 'commons', old.command.data.messageId), { code: 'reply_request_not_found' });
 });

@@ -1,4 +1,4 @@
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openConversationWork } from "./room-chrome.mjs";
 // Simulated human journeys. Clipboard outcomes are controlled; no user text or
 // system clipboard is read/written and no live service is involved.
 import test from "node:test";
@@ -48,9 +48,13 @@ async function setup(t, mobile = false) {
   const login = async () => { await page.locator("#auth-panel").waitFor({ state: "visible" }); if (initialLogin) { await signInFixture(page, f.keys.owner); initialLogin = false; }
     else await signInFixtureInPlace(page, f.store, f.keys.owner); await page.locator("#main").waitFor({ state: "visible" }); };
   await login(); posts.length = 0;
+  const beforeNavigation = snapshot();
+  await openConversationWork(page, "test-handoff");
+  assert.deepEqual(posts, [], "opening contextual work does not publish");
+  assert.deepEqual(snapshot(), beforeNavigation, "opening contextual work does not mutate room state");
   const card = page.locator('[data-work-record-id="test-handoff"]'), dialog = page.locator("#result-copy-dialog"), input = page.locator("#result-copy-preview"), copy = page.locator("#result-copy-button");
   const open = async () => {
-    await card.waitFor();
+    await openConversationWork(page, "test-handoff");
     assert.equal(await card.locator("[data-copy-result]").isVisible(), true, "summary copying is directly discoverable");
     await card.locator("[data-copy-result]").click(); await dialog.waitFor({ state: "visible" });
   };

@@ -106,7 +106,7 @@ const CHALLENGE_WINDOW_SMALL_MS = 24 * 3600 * 1000; // micro-bounties (< 1 credi
 export const CHALLENGE_WINDOW_MS = 3 * 24 * 3600 * 1000;
 export const DISPUTE_TIMEOUT_MS = 14 * 24 * 3600 * 1000; // unresolved disputes default to RELEASE
 export const MAX_CREDITS = 1000000;
-const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
+export const POOL_ACCOUNT = "pool"; // room pool: the 1% fee recipient (the commons, not a participant)
 const RULE_ACTOR = Object.freeze({ kind: "rule", id: "escrow-keeper" }); // mechanical transitions
 
 // Journal kinds eligible for an Ed25519-signed, externally verifiable
@@ -133,7 +133,7 @@ export const BOUNTY_GROUPS = Object.freeze(["proposed", "funded", "claimed", "in
 // AI verifier lane judges against the pinned rubric. Chosen at post time,
 // pinned at fund time, immutable after.
 export const APPROVAL_MODES = Object.freeze(["human", "agent"]);
-function stateGroup(state) {
+export function stateGroup(state) {
   switch (state) {
     case "proposed": return "proposed";
     case "funded": return "funded";
@@ -1302,7 +1302,11 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
-      disputeDecider: row.dispute_decider ?? null,
+      // Disclose the designated decider, falling back to the designated verifier.
+      // disputeBounty checks eligibility before seating; this read does not
+      // confirm an active seat. _mutable/_saveBounty preserve the raw column,
+      // including NULL for a verifier-only designation.
+      disputeDecider: row.dispute_decider ?? row.verifier ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
@@ -2485,7 +2489,8 @@ export class BountyEscrow {
       const bounty = this._mutable(row);
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
       const dispute = this._disputes.get(bounty.disputeId);
-      check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
+      check(dispute.decider === lane, "not_authorized",
+        `only the seated decider may rule (seated decider: ${dispute.decider})`);
       // Defense in depth: seating now refuses a challenger-designee, but a
       // dispute seated before that exclusion existed (or recorded by any
       // other path) still cannot be ruled on by the party who raised it.

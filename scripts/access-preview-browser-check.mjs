@@ -90,6 +90,7 @@ test("access preview: a work card shows exactly what an agent can read before a 
   // A quoted @mention replying to the source and an inbox-style excerpt import must add nothing to the preview.
   send(T.MESSAGE_POSTED, { messageId: "quoted-mention", replyToId: "test-request", body: "@Test producer please take this: QUOTED-MENTION-SENTINEL" });
   f.store.command(f.keys.owner, "commons", { id: "inbox-" + "b".repeat(24), type: T.MESSAGE_POSTED, data: { messageId: "excerpt-import", body: "IMPORTED-EXCERPT-SENTINEL" } });
+  await page.locator('#message-list [data-open-work="test-handoff"]').click();
   const card = page.locator('[data-work-record-id="test-handoff"]');
   await card.waitFor();
   await page.locator("#message-list").getByText("IMPORTED-EXCERPT-SENTINEL").waitFor();
@@ -180,7 +181,8 @@ for (const pending of [26, 60]) test(`owner attention pages ${pending} pending r
   assert.deepEqual(await rows.locator(".attention-title").allTextContents(), first);
   await next.click();
   await page.waitForFunction(() => document.querySelector("#attention-range").textContent.includes("Showing 26"));
-  await rows.first().getByRole("button", { name: "Deny", exact: true }).click();
+  const deniedTitle = (await rows.first().locator(".attention-title").textContent()).trim();
+  await rows.first().getByRole("button", { name: `Deny — ${deniedTitle}`, exact: true }).click();
   await page.waitForFunction(total => document.querySelector("#attention-count").textContent === String(total), pending - 1);
   assert.match(await page.locator("#attention-range").textContent(), new RegExp(`Showing 1[–-]25 of ${pending - 1}`));
   assert.equal(await previous.isDisabled(), true, "a decision returns to refreshed first page");

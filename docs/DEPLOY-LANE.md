@@ -10,6 +10,10 @@ Anyone whose GitHub account has **write** (or higher) on `Uuriko/project-room`. 
 
 Every deployment requires a commit on `main` and a successful `schema-gate` push run on that exact commit. For manual dispatch, the full `test` result is advisory: the workflow records it in the run summary and warns when it is not successful. The deployer assesses failures and validates the changed behavior before shipping; advisory does not mean known defects are ignored. Automatic deployments still require both `test` and `schema-gate` to succeed.
 
+Merging and deploying are separate decisions. Production need not be healthy
+before an unrelated, qualified change can merge. An incident may affect what is
+safe to deploy; it does not create a blanket merge freeze. Actual repository protection and workflow schema checks still apply.
+
 ## Deploy
 
 1. Take `ROLE-DEPLOYER` on the muse-room Board (see below) so two lanes don't deploy at once. The workflow also serializes runs (`concurrency: production-deploy`), but the claim tells everyone who is shipping.
@@ -26,9 +30,37 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
    - on failure, first checks whether either deployment changed. It restores a prior Worker only when its independently recorded source/schema is known and its code schema is at least the candidate schema, with an identical recorded writer-fence Git blob. Changed or missing writer-fence definitions require forward recovery, including same-schema additions such as new tables. Lower or unknown schemas leave the candidate deployed and report **ROLL FORWARD REQUIRED**. A rollback is reported as verified only after exact version allocation and source-revision readback;
    - posts a receipt to muse-room when the `ROOM_RECEIPT_TOKEN` secret exists.
 4. Post or confirm the receipt in muse-room and release `ROLE-DEPLOYER`.
-5. Run the shelf checks before calling the deploy done — a green deploy onto an empty shelf ships silently, so both checks gate the receipt:
-   - **Board stocked:** `curl -sS 'https://room.trydemigod.com/api/public-work/tasks?limit=1'` → `claimableCount` must be **> 0**. A drained board (every task submitted, nothing reseeded) fails the receipt until the board is reseeded.
-   - **Gallery fresh:** `curl -sS 'https://room.trydemigod.com/api/public/receipts?limit=1'` → the newest receipt's `at` must be **less than 7 days old**. A frozen gallery fails the receipt the same way; check whether any room has the *Publish receipts from this room* toggle on with work settled since.
+
+Product-health observations are optional follow-up checks, not deployment-receipt
+gates. The public work board may legitimately be empty, and a gallery may have no
+recent receipts. Inspect `GET /api/public-work/tasks?limit=1` or
+`GET /api/public/receipts?limit=1` when useful, report their actual state, and never
+seed fake work or receipts to make a release look healthy.
+
+### Temporary SQL cost diagnosis
+
+The production Durable Object defaults to `ROOM_SQL_COST_LOG=0`. The entry Worker
+and staging omit it and remain off. For a bounded investigation, explicitly set
+production to `1`, qualify and deploy that revision, then collect a short
+ordinary-traffic sample of `room.sql_cost`,
+group by `scopeKind` and `operation`, and retain `unscoped`, `late` and unknown
+counter totals. The records contain fixed categories and numeric counters, never
+SQL text, bindings, request paths or identity values. Existing request logs are
+separate and are not redacted by this option.
+
+`coverage: adapter-observed` excludes direct raw SQL such as writer-permit updates
+and `changes()` probes. These are SQL row/statement counters, not CPU, latency or
+queue duration. Request summaries end at response headers and say `complete:false`;
+streaming work may finish later. Child jobs and explicitly scoped background work
+do not count toward their parent. Unscoped and late totals flush on the next scoped
+completion and can be lost if the isolate ends first.
+
+After capturing evidence, set `env.production.vars.ROOM_SQL_COST_LOG` to `"0"` in
+`cloudflare/wrangler.jsonc`, regenerate `scripts/CANDIDATE-MANIFEST.json`, qualify
+and deploy the change through the same lane. Use an explicit `"0"`, rather than
+removing the variable: deployment preserves existing bindings with `--keep-vars`.
+Verify the production Worker variable and absence of new `room.sql_cost` records
+after disablement. Do not increase deadlines or generate a load test for this sample.
 
 ### Optional auto-deploy
 
@@ -71,3 +103,85 @@ The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour 
 | `ROOM_AGENT_CARD_SIGNING_KEY` | deploy-prod, staging | The build signs the agent card and fails closed without it. Custody: [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). |
 | `CLOUDFLARE_ACCOUNT_ID` | optional | Only needed if the token can see more than one account. |
 | `ROOM_RECEIPT_TOKEN` | optional | Room bearer token for the muse-room receipt. Without it the run skips the receipt. |
+
+### Reverify an already deployed revision without uploading Workers
+
+From a clean checkout of the exact deployed commit, run the checkpoint CLI from
+this or another clean tooling checkout:
+
+```sh
+node /path/to/tooling/scripts/release-checkpoint.mjs --mode verify \
+  --expected-revision FULL_40_CHARACTER_SHA --output /outside/checkout/receipts \
+  --prior-report /path/to/original-failed-prod-smoke.json
+```
+
+The target need not be on main (for example, an intentional rollback). Both the
+target and tooling revision/tree are recorded. All four version endpoints must
+return HTTP200 and the target SHA before and after strict production smoke and
+public live-smoke. Each run creates a new attempt directory; the original failed
+report is copied byte-for-byte with its digest and is never overwritten. Omit
+`--prior-report` when there is no earlier failed smoke. Keep output outside both
+checkouts so receipts do not dirty source verification.
+
+Only explicit-target main lag/divergence findings become advisory; the original
+live-smoke report and exit code remain unchanged, alongside the policy result.
+Other failures prevent a verified receipt. Known warnings remain visible. This
+is public verification, not an authenticated or browser journey. Before/after
+observations bound races but are not a deployment lock. The command never
+uploads, rolls back, or publishes a runtime; publication remains separate and
+must recheck the deployed source rather than treating an old receipt as current.
+
+
+### Portable runtime archive
+
+After creating a runtime package, create a new archive with:
+
+```sh
+python3 scripts/runtime-archive.py /absolute/runtime /absolute/project-room-runtime.tar.gz --expected-commit EXACT_COMMIT
+```
+
+For an older target package, invoke this script from a newer tooling checkout
+that contains the creator and a compatible runtime-package verifier. Keep
+`--expected-commit` pinned to the target package commit, not the tooling checkout.
+Use `--node /path/to/node` when Node is not on PATH. The creator invokes the
+existing runtime-package verifier before archiving, then checks the manifest
+hash and every file again. It refuses extras, symlinks, mismatched content and
+existing output. Tar entries are sorted with normalized timestamps and owner
+metadata; executable files use mode 0755 and other files 0644. Filesystem
+extended attributes and macOS AppleDouble metadata are never archived. The
+output is deterministic for identical content and executable bits within the
+same Python/zlib implementation. This verifies content consistency, not source
+provenance or deployment readiness.
+
+Before uploading an immutable runtime release, run the existing verifier locally:
+
+```sh
+python3 scripts/verify-runtime-release.py --preflight-archive /absolute/project-room-runtime.tar.gz --expected /absolute/runtime --sha EXACT_COMMIT
+```
+
+The preflight requires that actual filename, verifies the exact-source package,
+and compares archive contents. It makes no network requests or writes and does
+not certify publication. `gh` treats `path#text` as an asset label, not a filename
+rename. Upload the checked file without a `#` suffix. The production workflow
+runs this preflight before creating a new release. Existing-release retries
+retain remote verification; both paths verify the downloaded asset before
+promoting latest. Manual publication must likewise create with `--latest=false`,
+then run remote verification before promotion. Never overwrite an immutable
+release; a correction uses the existing `-r2` (or subsequent) tag convention.
+
+
+### Publishing an older runtime target or a corrected archive
+
+The runtime publication job checks out tooling at `github.workflow_sha`, the
+immutable commit containing the running workflow. Its package source remains
+`needs.gate.outputs.sha`, the exact deployed commit. The package manifest and
+release verifier must match that target even when it predates the tooling.
+
+For a corrected archive, dispatch with `runtime_revision: r2` (or a later
+integer revision). This chooses `runtime-YYYY-MM-DD-SHORT-r2`; an empty value
+keeps the original tag convention. The suffix is validated before deployment.
+Existing assets are never replaced: an existing selected tag must pass target
+and content verification before promotion, and a new corrected release is
+verified before being marked latest. An invalid original release does not
+silently trigger a new revision. This input selects publication identity; it
+does not bypass deployment policy or change the deployed commit.

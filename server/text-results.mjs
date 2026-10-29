@@ -13,12 +13,12 @@ export const textVersion = body => {
 };
 
 // Retained events, not the truncated browser tail, bind old messages to their post.
-export function storedText(db, state, workItemId, messageId, messageEventId = null) {
+export function storedText(db, state, workItemId, messageId, messageEventId = null, messageRecords = null) {
   const row = messageEventId
     ? db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? AND id=?").get(state.room.id, messageEventId)
     : db.prepare("SELECT sequence,id,body FROM events WHERE room_id=? AND json_extract(body,'$.type')='message.posted' AND coalesce(json_extract(body,'$.data.messageId'),id)=?").get(state.room.id, messageId);
   check(row);
-  const post = JSON.parse(row.body), message = messageRepository({ db }, state.room.id, state).get(messageId);
+  const post = JSON.parse(row.body), message = (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(messageId);
   // A withdrawn message is a tombstone. PRIV-1 nulls the log body; older
   // withdrawals still have the string there. Either way the body returned
   // to a reader is null.
@@ -74,28 +74,28 @@ export function verifyTextCompletion(db, state, work, data, { allowWithdrawn = f
 // floor applies. A withdrawn message keeps its absence shape for its parties,
 // so only the party rule and the floor are checked here; body checks stay in
 // storedText. No viewer named means an internal call (audit, replay): no gate.
-function textVisibleToViewer(db, state, messageId, viewerId, floor) {
+function textVisibleToViewer(db, state, messageId, viewerId, floor, messageRecords = null) {
   if (viewerId === null) return true;
-  const message = messageRepository({ db }, state.room.id, state).get(messageId);
+  const message = (messageRecords ?? messageRepository({ db }, state.room.id, state)).get(messageId);
   if (!message) return false;
   if (message.toMemberId && message.authorId !== viewerId && message.toMemberId !== viewerId) return false;
   return messageInHistory(message, floor);
 }
 
-export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, floor = null }) {
+export function selectedWorkResult({ db, state, workItemId, sequence, now, completionEventId, draftMessageId, viewerId = null, floor = null, messageRecords = null }) {
   const work = state.workItems[workItemId];
   let result;
   const deny = () => { throw new Error("Result text is hidden from this viewer"); };
   if (draftMessageId !== null) {
-    if (!textVisibleToViewer(db, state, draftMessageId, viewerId, floor)) deny();
-    result = { kind: "draft", text: storedText(db, state, workItemId, draftMessageId) };
+    if (!textVisibleToViewer(db, state, draftMessageId, viewerId, floor, messageRecords)) deny();
+    result = { kind: "draft", text: storedText(db, state, workItemId, draftMessageId, null, messageRecords) };
   } else {
     const receipt = completionEventId === null ? work.receipt : [...work.receiptHistory, work.receipt].find(receipt => receipt?.eventId === completionEventId);
     if (completionEventId !== null && !receipt) return null;
     result = !receipt ? { kind: "none" } : { kind: receipt.nativeText ? "room_text" : "external", receipt: structuredClone(receipt),
-      ...(receipt.nativeText ? { text: storedText(db, state, workItemId, receipt.nativeText.messageId, receipt.nativeText.messageEventId) } : {}) };
+      ...(receipt.nativeText ? { text: storedText(db, state, workItemId, receipt.nativeText.messageId, receipt.nativeText.messageEventId, messageRecords) } : {}) };
     if (receipt?.nativeText) {
-      if (!textVisibleToViewer(db, state, receipt.nativeText.messageId, viewerId, floor)) deny();
+      if (!textVisibleToViewer(db, state, receipt.nativeText.messageId, viewerId, floor, messageRecords)) deny();
       check(result.text.evidenceVersion === receipt.evidenceVersion);
     }
   }

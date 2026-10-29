@@ -1,4 +1,4 @@
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, openWorkFromSearch } from "./room-chrome.mjs";
 // Simulated human journeys against disposable first-party data, not human research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -48,7 +48,7 @@ async function setup(t, viewport = { width: 1440, height: 1000 }) {
   const form = page.locator("#new-work-form"), title = page.locator("#work-title-input"), done = page.locator("#work-done-input");
   const open = async (id = "test-handoff") => {
     const card = page.locator(`[data-work-record-id="${id}"]`);
-    await card.waitFor();
+    if (!await card.isVisible()) await openWorkFromSearch(page, id, snapshot().state.workItems[id].title.split(/[\r\n]/)[0]);
     if (!await card.locator(".work-details").evaluate(node => node.open)) await card.locator(".work-details > summary").click();
     await card.locator("[data-reuse-work]").click();
     await form.waitFor({ state: "visible" });
@@ -72,7 +72,7 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
     mutate(T.CLAIM_ACQUIRED, { repository: "fixture/reuse", ref: "test", paths: ["summary.md"], expiresAt: new Date(Date.now() + 600000).toISOString() });
     mutate(T.WORK_COMPLETED, { summary: "Synthetic prior outcome", evidenceUrl: "https://example.invalid/summary", evidenceVersion: "v1", producerId: "owner", nextAction: "Read the summary" });
     const before = f.snapshot(), card = page.locator(`[data-work-record-id="${sourceId}"]`);
-    await card.waitFor(); assert.equal(await card.locator("[data-reuse-work]").isVisible(), false);
+    await openWorkFromSearch(page, sourceId, sourceTitle.split("\n")[0]); assert.equal(await card.locator("[data-reuse-work]").isVisible(), false);
     await f.open(sourceId);
     assert.equal(await f.title.inputValue(), singleLineTitle); assert.equal(await f.done.inputValue(), criteria);
     assert.equal(await f.title.evaluate(node => document.activeElement === node), true);
@@ -87,8 +87,9 @@ for (const [name, viewport] of [["desktop", { width: 1440, height: 1000 }], ["mo
     assert.equal(await page.locator("#assignee-select").evaluate(node => document.activeElement === node), true);
     await f.title.fill("A new weekly summary"); await f.done.fill("Edited criteria kept through live updates."); await f.people();
     await f.title.focus(); await f.title.evaluate(node => node.setSelectionRange(2, 5));
-    // A second entrypoint cannot replace a current draft.
-    await page.locator('[data-reuse-work="test-handoff"]').evaluate(node => node.click());
+    // Re-entering from the still-mounted source cannot reset an edited draft.
+    // Human navigation mounts only the selected work card, not every task.
+    await card.locator("[data-reuse-work]").evaluate(node => node.click());
     assert.equal(await f.title.inputValue(), "A new weekly summary");
     f.send(T.MESSAGE_POSTED, { body: "Synthetic live update during draft" });
     await page.getByText("Synthetic live update during draft", { exact: true }).waitFor({ state: "attached" });

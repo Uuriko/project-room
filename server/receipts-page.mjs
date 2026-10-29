@@ -159,9 +159,18 @@ export function renderVerificationBlock(receipt, verification) {
     return `<li data-check="${escapeHtml(check.id)}" data-status="${escapeHtml(check.status)}"><strong>${escapeHtml(check.label)}</strong> — ${escapeHtml(CHECK_STATUS_WORDS[check.status] ?? check.status)}: ${detail}</li>`;
   }).join("");
   const notChecked = verification.scope.notChecked.map(item => `<li>${escapeHtml(item)}</li>`).join("");
+  // The headline carries the delivery outcome first (N1-F1): the re-check
+  // verdict alone ("Record re-checked") was identical for a verified, a
+  // submitted, and a rejected delivery, so a cropped stamp could not be
+  // told apart across outcomes. The outcome word is the record's own
+  // composed state — the same field the Outcome section below words —
+  // and only a public-work receipt carries one; any other receipt's
+  // headline stays the verdict label alone, with no outcome fabricated.
+  const outcome = receipt.source === "public-work" && receipt.state ? outcomeLabel(receipt.state) : null;
+  const headline = outcome ? `${outcome} — ${verification.verdictLabel}` : verification.verdictLabel;
   return `<section class="receipt-verification" aria-label="Verification">
 <h2>Verification</h2>
-<p class="verification-verdict" data-verdict="${escapeHtml(verification.verdict)}"><strong>${escapeHtml(verification.verdictLabel)}</strong></p>
+<p class="verification-verdict" data-verdict="${escapeHtml(verification.verdict)}"><strong>${escapeHtml(headline)}</strong></p>
 <p>${escapeHtml(verification.summary)}</p>
 <p class="verification-meta">Checked <time datetime="${escapeHtml(verification.checkedAt)}">${escapeHtml(verification.checkedAt)}</time> by ${escapeHtml(verification.scope.by)}.</p>
 <h3>What was checked</h3>
@@ -296,13 +305,13 @@ export function renderReceiptDetailHtml(receipt, { verification = null } = {}) {
   const provenNote = verification
     ? "The verification block above is what the server re-checked, at the time it shows. The record below is the stored receipt it checked."
     : receipt.source === "bounty-lot"
-    ? "Verification tier: human verdict. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? "Verification tier: recorded ledger movement. What was checked: the room's credit ledger recorded this movement and the settlement verdict shown. Credits are the room's internal ledger units, not money. Account ids are as the ledger recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.source === "public-work" && receipt.review?.decidedAt
-    ? "Verification tier: human verdict. What was checked: the room recorded this work and made it public, and the reviewer decision shown above is the room's recorded outcome for this delivery. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? "Verification tier: reviewer verdict. What was checked: the room recorded this work and made it public, and the reviewer decision shown above is the room's recorded outcome for this delivery. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.mergedAt && receipt.pullRequest
     ? "Verification tier: bytes re-verified. What was checked: the server verified the merge against the linked pull request. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.verification?.state === "verified"
-    ? "Verification tier: human verdict (member-verified). What was checked: a room member other than the worker reviewed this delivery and recorded approval, and the room published the record. The server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
+    ? "Verification tier: member-reviewed verdict. What was checked: a room member other than the worker reviewed this delivery and recorded approval, and the room published the record. The server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : receipt.verification?.state === "self_attested"
     ? "Verification tier: bundle unaltered (self-asserted). What was checked: the worker recorded this work as done, and the room published the record. No other member reviewed it, and the server did not verify a merge for this receipt. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned."
     : "Verification tier: bundle unaltered (self-asserted). What was checked: the room recorded this work and made it public. Agent and human names are as the room recorded them, not identity-verified. Hashes are stored values, not re-verified. This record is unsigned.";
