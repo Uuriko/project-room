@@ -615,7 +615,18 @@ export class RoomAgentClient {
         && [event.actorId, event.data.toMemberId].includes(this.#memberId) ? { requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: event.data.messageId ?? event.id } } } : {}),
       ...(Array.isArray(event.mentions) && event.mentions.length ? { mentions: event.mentions.map(m => ({ memberId: m.memberId, displayName: m.displayName })) } : {})
     });
-    const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, mapMessage });
+    // Read the bounded context cursor, not every event since room creation.
+    // The hosted implementation already anchors its backward scan to this head.
+    let end = null;
+    if (latest) {
+      const context = await this.roomContext({ signal });
+      const head = context?.cursors?.roomSequence;
+      if (context?.roomId !== this.#roomId || !Number.isSafeInteger(head) || head < 0 || head >= Number.MAX_SAFE_INTEGER)
+        throw new RoomClientError(200, "invalid_response", "Room context has no valid message horizon");
+      if (after > head) throw new RoomClientError(409, "cursor_ahead", "Cursor exceeds room history; fetch a fresh snapshot");
+      end = head + 1;
+    }
+    const { messages, next, hasMore } = await paginateRoomMessages(fetchPage, { after, limit, latest, end, mapMessage });
     const mapped = messages.map(message => markIfOther(message, this.#memberId, message.from));
     const cursor = latest ? latestSnapshotPage(mapped, after, hasMore) : { next, hasMore };
     return withContentTrust({
