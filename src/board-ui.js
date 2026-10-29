@@ -764,7 +764,11 @@ function cardHtml(item, viewer, members, now, workItems, byId, roomPolicy = null
     const reference = claimReference(id, byId, workItems, `claim-dependency:${item.id}:${index}`, now);
     return `<li>${target?.state === "done" ? "Prerequisite" : "Waiting for"} ${reference} · ${escapeHtml(status)}</li>`;
   }).join("");
-  const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}">${label}</button>`;
+  // F-U1A3-1: the accessible name carries the item's identity, following
+  // the link-PR input ("Pull request URL for ${item.title}") and reassign
+  // select ("Reassign ${item.title}") patterns below — bare verbs left a
+  // screen-reader user with ten indistinguishable "Claim" buttons.
+  const button = (action, label, tone) => `<button type="button" class="button ${tone}" data-claim-action="${action}" data-claim-id="${escapeHtml(item.id)}" data-focus-key="${action}:${escapeHtml(item.id)}" aria-label="${escapeHtml(uiText("action.itemAccessibleName", { action: label, item: item.title || item.id }))}">${label}</button>`;
   const actions = [];
   if (item.workItemId) {
     const work = workItems?.[item.workItemId];
