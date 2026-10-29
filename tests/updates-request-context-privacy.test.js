@@ -64,3 +64,68 @@ test("a request title still shows context the viewer can see", async t => {
   assert.equal(items.length, 1);
   assert.match(items[0].title, /4pm window/, "public context in the thread is the visible title");
 });
+
+test('reactivation hides old message-derived attention and work conversation pointers', async t => {
+  const { store, ownerKey } = serve(t);
+  const agent = addAgent(store, 'commons', ownerKey, 'agent', 'Asked Agent');
+  const frozen = Date.now() + 10000; store.now = () => frozen;
+  const send = (type, data) => store.command(ownerKey, 'commons', { id: randomUUID(), type, data });
+  send(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: 'since_join' });
+  send(T.WORK_PROPOSED, { workItemId: 'linked-work', title: 'Visible work', definitionOfDone: 'Done', accountableMemberId: 'agent', mode: 'read' });
+  const post = (id, data = {}) => send(T.MESSAGE_POSTED, { messageId: id, body: `SECRET-${id}`, ...data });
+  post('old-request', { toMemberId: 'agent', requestKind: 'reply', workItemId: 'linked-work' });
+  post('old-dm', { toMemberId: 'agent' });
+  post('old-mention', { body: 'SECRET-old-mention @Asked Agent please look' });
+  for (const active of [false, true]) {
+    const member = store.room('commons').state.members.agent;
+    send(T.MEMBER_ACCESS_CHANGED, { memberId: 'agent', active, permissions: member.permissions, expectedMemberRevision: member.revision ?? 0 });
+  }
+  const key = store.issueAccessKey('commons', 'agent');
+  post('fresh-request', { body: 'Current question', toMemberId: 'agent', requestKind: 'reply', workItemId: 'linked-work' });
+  const { listRoomUpdates } = await import('../server/updates.mjs');
+  const { roomAttention, collectNeedsMe } = await import('../server/needs-me.mjs');
+  const observations = {
+    updates: listRoomUpdates(store, key, 'commons'),
+    owed: listOwedReplies(store, agent.secret),
+    attention: roomAttention(store, 'commons', 'agent', store.authenticate(key, 'commons').identityId, 0),
+    needsMe: collectNeedsMe(store, agent.secret),
+    work: store.workContext(key, 'commons', 'linked-work')
+  };
+  for (const [name, value] of Object.entries(observations)) await t.test(name, () => {
+    assert.doesNotMatch(JSON.stringify(value), /SECRET-old-|old-request|old-dm|old-mention/);
+    assert.match(JSON.stringify(value), /fresh-request/);
+  });
+  send(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: 'all' });
+  for (const value of [listRoomUpdates(store, key, 'commons'), listOwedReplies(store, agent.secret),
+    roomAttention(store, 'commons', 'agent', store.authenticate(key, 'commons').identityId, 0),
+    collectNeedsMe(store, agent.secret), store.workContext(key, 'commons', 'linked-work')]) {
+    assert.match(JSON.stringify(value), /old-request/);
+  }
+});
+
+test('hidden mention overflow cannot stall visible attention pagination', async t => {
+  const { store, ownerKey } = serve(t);
+  const agent = addAgent(store, 'commons', ownerKey, 'agent', 'Asked Agent');
+  let clock = Date.now() + 10000; store.now = () => clock;
+  const send = (type, data) => { clock += 2001; return store.command(ownerKey, 'commons', { id: randomUUID(), type, data }); };
+  send(T.ROOM_HISTORY_VISIBILITY_SET, { historyVisibility: 'since_join' });
+  for (let i = 0; i < 12; i++) send(T.MESSAGE_POSTED, { messageId: `hidden-${i}`, body: `@Asked Agent SECRET-old-${i}` });
+  for (const active of [false, true]) {
+    const member = store.room('commons').state.members.agent;
+    send(T.MEMBER_ACCESS_CHANGED, { memberId: 'agent', active, permissions: member.permissions, expectedMemberRevision: member.revision ?? 0 });
+  }
+  for (let i = 0; i < 12; i++) send(T.MESSAGE_POSTED, { messageId: `fresh-${i}`, body: `@Asked Agent current ${i}` });
+  const { collectNeedsMe } = await import('../server/needs-me.mjs');
+  const seen = new Set(); let since = 0, page;
+  for (let i = 0; i < 6; i++) {
+    page = collectNeedsMe(store, agent.secret, { since });
+    assert.doesNotMatch(JSON.stringify(page), /hidden-|SECRET-old-/);
+    for (const item of page.items.filter(item => item.kind === 'mention')) {
+      assert.equal(seen.has(item.id), false, 'no duplicate visible mentions'); seen.add(item.id);
+    }
+    since = page.cursor;
+    if (!page.hasMore) break;
+  }
+  assert.equal(page.hasMore, false, 'bounded pagination terminates');
+  assert.deepEqual([...seen].sort(), Array.from({ length: 12 }, (_, i) => `fresh-${i}`).sort());
+});
