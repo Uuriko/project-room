@@ -89,3 +89,38 @@ export function selectedMessageRecord(store, roomId, id, hasArchive = false) {
   const archived = archivedMessageRow(store.db, roomId, id);
   return archived ? decode(archived) : undefined;
 }
+
+// Canonical live metadata in projection order. Validate every referenced entity
+// before dropping bodies; unrelated corruption must not disappear on narrow reads.
+// A null result requests the existing missing-body recovery path, exceptionally.
+export function liveMessageMetadata(store, roomId) {
+  const rows = store.db.prepare(`WITH live AS (
+    SELECT m.key,m.value,
+      CASE WHEN json_type(m.value,'$._entity') IN ('integer','real') AND json_extract(m.value,'$._entity')=1 THEN 1 ELSE 0 END AS entity
+    FROM rooms r,json_each(r.projection,'$.messages') m WHERE r.id=?
+  ) SELECT
+    CASE WHEN live.entity=1 THEN
+      CASE WHEN json_valid(e.record_json) THEN json_remove(e.record_json,'$.body','$.editHistory') ELSE e.record_json END
+      ELSE json_remove(live.value,'$.body','$.bodyRef','$.editHistory') END AS metadata,
+    CASE WHEN live.entity=0 THEN 1 ELSE
+      e.message_id IS NOT NULL AND json_valid(e.record_json) AND json_valid(e.reducer_extras_json)
+      AND json_type(e.record_json,'$.id')='text'
+      AND json_extract(e.record_json,'$.id') IS e.message_id
+      AND ((json_type(e.record_json,'$.body')='text' AND typeof(e.body)='text')
+        OR (json_type(e.record_json,'$.body')='null' AND e.body IS NULL))
+      AND json_extract(e.record_json,'$.body') IS e.body
+      AND json_type(e.reducer_extras_json)='object'
+      AND NOT EXISTS (SELECT 1 FROM json_each(e.reducer_extras_json) WHERE key<>'editHistory')
+      AND (json_type(e.reducer_extras_json,'$.editHistory') IS NULL OR json_type(e.reducer_extras_json,'$.editHistory')='array')
+      AND json_type(live.value,'$.id')='text'
+      AND NOT EXISTS (SELECT 1 FROM json_each(live.value) WHERE key NOT IN ('id','_entity'))
+    END AS valid_entity,
+    CASE WHEN live.entity=0 AND json_type(live.value,'$.bodyRef')='text' THEN
+      NOT EXISTS (SELECT 1 FROM projection_bodies b WHERE b.room_id=? AND b.sha=json_extract(live.value,'$.bodyRef') AND typeof(b.body)='text')
+      ELSE 0 END AS missing_body
+    FROM live LEFT JOIN messages e ON live.entity=1 AND e.room_id=? AND e.message_id=json_extract(live.value,'$.id')
+    ORDER BY CAST(live.key AS INTEGER)`).all(roomId, roomId, roomId);
+  if (rows.some(row => row.valid_entity !== 1)) throw new Error('projection_corrupt: invalid message entity');
+  if (rows.some(row => row.missing_body === 1)) return null;
+  return rows.map(row => JSON.parse(hydrateRecordText(store.db, roomId, row.metadata)));
+}
