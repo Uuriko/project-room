@@ -55,8 +55,22 @@ export function landingProtection(full) {
 const usesLandingStatus = protection => protection.checks.some(check => check.context === CONTEXT);
 export function candidateReady(candidate, info, main, protection) {
   if (!Number.isSafeInteger(candidate.pr) || candidate.pr < 1 || !SHA.test(candidate.head) || !SHA.test(candidate.base)) fail('Full head/base SHAs and positive PR number required');
-  if (info.state !== 'OPEN' || info.isDraft || info.headRefOid !== candidate.head || info.baseRefName !== 'main' || main !== candidate.base ||
-      !['MERGEABLE'].includes(info.mergeable)) fail('PR head/base, draft state or mergeability changed');
+  // Keep the same refusal predicates and ordering, but identify the actual
+  // repair instead of making operators guess among unrelated candidate changes.
+  // Only fixed local text enters the CLI diagnostic; no remote body is echoed.
+  const refuse = (code, action) => {
+    throw Object.assign(new Error(`Candidate changed (${code}). ${action}`), { phase: 'candidate', code, action });
+  };
+  if (info.state !== 'OPEN') refuse('pr_not_open', 'Select an open PR and inspect its current state.');
+  if (info.isDraft) refuse('pr_is_draft', 'Mark the PR ready for review when intended, then inspect it again.');
+  if (info.headRefOid !== candidate.head) refuse('pr_head_changed', 'Qualify the new head and reconcile the exact candidate grant.');
+  if (info.baseRefName !== 'main') refuse('pr_base_branch_changed', 'Reconcile the PR target branch before preparing another candidate.');
+  if (main !== candidate.base) refuse('main_changed', 'Compose against the new main and reconcile affected evidence and the candidate grant.');
+  if (info.mergeable !== 'MERGEABLE') {
+    if (info.mergeable === 'UNKNOWN') refuse('mergeability_unknown', 'Refresh GitHub mergeability before another attempt; no merge was authorized.');
+    if (info.mergeable === 'CONFLICTING') refuse('merge_conflict', 'Resolve the merge conflicts and qualify the resulting head before another attempt.');
+    refuse('mergeability_unavailable', 'Read a complete GitHub mergeability observation before another attempt.');
+  }
   if (!Array.isArray(protection?.checks)) fail('Complete required checks are required');
   if (protection.enforceAdmins !== true) fail('Administrator enforcement must remain enabled');
   for (const required of protection.checks) {
