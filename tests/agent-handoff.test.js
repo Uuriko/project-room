@@ -64,6 +64,8 @@ test("local API handoff: cold action discovery, revision correction, restart, re
   };
   const listed = await rpc("tools/list", { profile: "lean" });
   assert.ok(listed.tools.some(tool => tool.name === "room_search_actions"));
+  assert.ok(listed.tools.some(tool => tool.name === "room_run_action"),
+    "a lean listed-tools-only client can execute its discovered action");
   const found = await rpc("tools/call", { name: "room_search_actions", arguments: { query: "accept assigned work" } });
   const accept = found.structuredContent.matches.find(action => action.name === "room_accept_work");
   assert.ok(accept, "assignment acceptance is discoverable by intent");
