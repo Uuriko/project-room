@@ -140,6 +140,9 @@ After creating a runtime package, create a new archive with:
 python3 scripts/runtime-archive.py /absolute/runtime /absolute/new-runtime.tar.gz --expected-commit EXACT_COMMIT
 ```
 
+For an older target package, invoke this script from a newer tooling checkout
+that contains the creator and a compatible runtime-package verifier. Keep
+`--expected-commit` pinned to the target package commit, not the tooling checkout.
 Use `--node /path/to/node` when Node is not on PATH. The creator invokes the
 existing runtime-package verifier before archiving, then checks the manifest
 hash and every file again. It refuses extras, symlinks, mismatched content and
