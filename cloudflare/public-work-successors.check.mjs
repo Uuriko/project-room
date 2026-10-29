@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
+import { decodeDispatchResponse } from './dispatch-decode.mjs';
 
 // Setup and raw observation are the only fixture routes. Every contribution,
 // decision and follow-up traverses the production HTTP/MCP bridge in workerd.
@@ -45,7 +46,7 @@ test('actual Worker revision follow-up is one durable child with fresh claims an
   const origin = 'https://room.example.test';
   const config = {modules:true,script:bundled.outputFiles[0].text,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],durableObjects:{ROOM:{className:'SuccessorTestRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:origin},durableObjectsPersist:persistence};
   let worker = new Miniflare(config);
-  const api = (path,data,secret) => worker.dispatchFetch(new URL(path,origin),{method:data===undefined?'GET':'POST',headers:{'Accept-Encoding':'identity',...(data===undefined?{}:{Origin:origin,'Content-Type':'application/json'}),...(secret?{Authorization:'Bearer '+secret}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})});
+  const api = (path,data,secret) => decodeDispatchResponse(worker.dispatchFetch(new URL(path,origin),{method:data===undefined?'GET':'POST',headers:{'Accept-Encoding':'identity',...(data===undefined?{}:{Origin:origin,'Content-Type':'application/json'}),...(secret?{Authorization:'Bearer '+secret}:{})},...(data===undefined?{}:{body:JSON.stringify(data)})}));
   const json = async (response,status=200) => {assert.equal(response.status,status,await response.clone().text());return response.json();};
   const call = (name,args,secret) => api('/room/mcp',{jsonrpc:'2.0',id:'successor-mcp',method:'tools/call',params:{name,arguments:args}},secret);
   const value = async response => {const reply=await json(response);assert.equal(reply.error,undefined,JSON.stringify(reply));assert.notEqual(reply.result.isError,true,JSON.stringify(reply));return reply.result.structuredContent;};

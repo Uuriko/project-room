@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { readFileSync } from 'node:fs';
 import { build } from 'esbuild';
 import { Miniflare } from 'miniflare';
+import { decodeDispatchResponse } from './dispatch-decode.mjs';
 
 // Static and discovery responses must not enter invite-only-pilot. A probe
 // that only watches /api/version/worker cannot see this: that route already
@@ -67,13 +68,13 @@ test('static assets and discovery documents do not enter the Durable Object', as
       }
     }
   });
-  const call = (path, { method = 'GET', ip, headers = {} } = {}) => mf.dispatchFetch(origin + path, {
+  const call = (path, { method = 'GET', ip, headers = {} } = {}) => decodeDispatchResponse(mf.dispatchFetch(origin + path, {
     method, redirect: 'manual',
-    // Accept-Encoding: identity — dispatchFetch returns the raw wire body
-    // without decoding Content-Encoding (see agent-wake.check.mjs); a
-    // caller-supplied headers object may still override it.
+    // Accept-Encoding: identity is offered (a caller-supplied headers object
+    // may still override it); dispatchFetch returns the raw wire body
+    // without decoding Content-Encoding regardless — see dispatch-decode.mjs.
     headers: { 'Accept-Encoding': 'identity', ...(ip ? { 'CF-Connecting-IP': ip } : {}), ...headers }
-  });
+  }));
   try {
     const page = await call('/');
     assert.equal(page.status, 200, await page.clone().text());
@@ -260,13 +261,13 @@ test('security.txt is served from the edge when a contact is configured', async 
     bindings: { ROOM_SECURITY_CONTACT: 'security@example.com', ROOM_ORIGIN: 'https://room.example.test' }
   });
   try {
-    const response = await mf.dispatchFetch('https://room.example.test/.well-known/security.txt');
+    const response = await decodeDispatchResponse(mf.dispatchFetch('https://room.example.test/.well-known/security.txt'));
     assert.equal(response.status, 200);
     assert.match(response.headers.get('content-type'), /text\/plain/);
     const body = await response.text();
     assert.match(body, /Contact: mailto:security@example.com/);
     assert.ok(Date.parse(/^Expires: (.+)$/m.exec(body)[1]) > Date.now());
-    const door = await mf.dispatchFetch('https://room.example.test/room/.well-known/security.txt');
+    const door = await decodeDispatchResponse(mf.dispatchFetch('https://room.example.test/room/.well-known/security.txt'));
     assert.equal(door.status, 200);
     assert.match(await door.text(), /Contact: mailto:security@example.com/);
   } finally {

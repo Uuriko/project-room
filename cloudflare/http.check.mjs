@@ -6,16 +6,20 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import { gunzipSync } from 'node:zlib';
-
-// Every `call` helper in this file offers `Accept-Encoding: identity`:
-// Miniflare's dispatchFetch returns the raw wire body and does not decode
-// Content-Encoding (it moves the encoding to MF-Content-Encoding), so a
-// helper that feeds responses to .json() must not let the transport offer
-// an encoding it will not decode. Clients that do offer gzip and decode
-// it are covered by the gzip probe test at the end of this file and by
-// tests/response-compression.test.js.
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
+import { decodeDispatchResponse } from './dispatch-decode.mjs';
+
+// Every `call` helper in this file offers `Accept-Encoding: identity` AND
+// decodes the response at the harness boundary (decodeDispatchResponse):
+// Miniflare's dispatchFetch returns the raw wire body without decoding
+// Content-Encoding (it moves the encoding to MF-Content-Encoding), and it
+// rewrites the offered Accept-Encoding to "br, gzip" on the way in, so the
+// identity offer alone cannot stop the Worker gzipping a >=2 KB JSON body
+// — the offer documents intent, the decode is what keeps .json() reads
+// working. Clients that offer gzip and decode it themselves are covered
+// by the gzip probe test at the end of this file and by
+// tests/response-compression.test.js.
 
 test('shared HTTP service on Workers: secure cookie, invitation, guest message, CSRF and visitor rate limits', async () => {
   const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
@@ -31,10 +35,10 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
       return new Response(await readFile(new URL('..' + pathname, import.meta.url)));
     } }
   });
-  const call = (path, { data, headers = {}, method = data ? 'POST' : 'GET', ip = '192.0.2.1', redirect = 'follow' } = {}) => mf.dispatchFetch(origin + path, {
+  const call = (path, { data, headers = {}, method = data ? 'POST' : 'GET', ip = '192.0.2.1', redirect = 'follow' } = {}) => decodeDispatchResponse(mf.dispatchFetch(origin + path, {
     method, redirect, headers: { Host: new URL(origin).host, 'CF-Connecting-IP': ip, 'Accept-Encoding': 'identity', ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
     ...(data ? { body: JSON.stringify(data) } : {})
-  });
+  }));
   const json = async (response, status = 200) => {
     assert.equal(response.status, status, response.status >= 400 ? await response.clone().text() : 'Unexpected response status');
     return response.json();
@@ -122,15 +126,15 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     // browser inherits invitation/room hashes. Never follow this to production.
     // Lookalikes remain plain 404s, rather than spoofed-host 403s.
     for (const path of ['/room', '/room/']) {
-      const edgeDoor = await mf.dispatchFetch('https://www.getdasha.com' + path + '?ref=x&next=%2Fabout', {
+      const edgeDoor = await decodeDispatchResponse(mf.dispatchFetch('https://www.getdasha.com' + path + '?ref=x&next=%2Fabout', {
         redirect: 'manual', headers: { Accept: 'text/html', 'CF-Connecting-IP': '192.0.2.1' }
-      });
+      }));
       assert.equal(edgeDoor.status, 302);
       assert.equal(edgeDoor.headers.get('location'), new URL('?ref=x&next=%2Fabout', origin + '/').href);
       assert.equal(edgeDoor.headers.get('cache-control'), 'no-store');
       assert.equal(await edgeDoor.text(), '');
     }
-    const lookalike = await mf.dispatchFetch('https://www.getdasha.com/rooms', { headers: { 'CF-Connecting-IP': '192.0.2.1' } });
+    const lookalike = await decodeDispatchResponse(mf.dispatchFetch('https://www.getdasha.com/rooms', { headers: { 'CF-Connecting-IP': '192.0.2.1' } }));
     assert.equal(lookalike.status, 404);
     assert.equal(await lookalike.text(), 'Not found');
     const packet = await call('/room/llms.txt');
@@ -526,7 +530,7 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
       const init = { method: data ? 'POST' : 'GET', headers: { 'CF-Connecting-IP': '192.0.2.8', 'Accept-Encoding': 'identity',
         ...(data ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         ...(data ? { body: JSON.stringify(data) } : {}) };
-      const response = edge ? await mf.dispatchFetch(url, init) : await canonical.fetch(url, init);
+      const response = await decodeDispatchResponse(edge ? mf.dispatchFetch(url, init) : canonical.fetch(url, init));
       assert.ok(response.ok, await response.clone().text()); return response.json();
     };
     const owner = await call(true, '/api/agent-identities', { displayName: 'Cross-entry owner' });
@@ -553,11 +557,11 @@ test('Worker bounty HTTP receipts create distinct durable webhook deliveries wit
     bindings: { ROOM_ORIGIN: origin } };
   let mf = new Miniflare(config);
   const call = async (path, key, data) => {
-    const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
+    const response = await decodeDispatchResponse(mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
       headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1', 'Accept-Encoding': 'identity',
         ...(key ? { Authorization: `Bearer ${key}` } : {}),
         ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}) },
-      ...(data ? { body: JSON.stringify(data) } : {}) });
+      ...(data ? { body: JSON.stringify(data) } : {}) }));
     assert.equal(response.status, data ? 201 : 200, await response.clone().text());
     return response.json();
   };
@@ -593,11 +597,11 @@ test('Worker board v2 routes stay retired', async () => {
     durableObjectsPersist: directory, bindings: { ROOM_ORIGIN: origin } };
   const mf = new Miniflare(config);
   const call = async (path, key, data, status = 410) => {
-    const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
+    const response = await decodeDispatchResponse(mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
       headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1', 'Accept-Encoding': 'identity',
         ...(key ? { Authorization: `Bearer ${key}` } : {}),
         ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}) },
-      ...(data ? { body: JSON.stringify(data) } : {}) });
+      ...(data ? { body: JSON.stringify(data) } : {}) }));
     assert.equal(response.status, status, await response.clone().text());
     return response.json();
   };
@@ -621,10 +625,10 @@ test('Workers password reset commits failed attempts, consumes once and requires
   const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, bindings: { ROOM_ORIGIN: origin } });
-  const call = (path, data, headers = {}) => mf.dispatchFetch(origin + path, {
+  const call = (path, data, headers = {}) => decodeDispatchResponse(mf.dispatchFetch(origin + path, {
     method: data ? 'POST' : 'GET', headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.73', 'Accept-Encoding': 'identity',
       ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
-    ...(data ? { body: JSON.stringify(data) } : {}) });
+    ...(data ? { body: JSON.stringify(data) } : {}) }));
   const json = async (response, status = 200) => {
     assert.equal(response.status, status, await response.clone().text()); return response.json();
   };
@@ -673,10 +677,10 @@ test('Workers held wake poll receives a fresh online mention and fences revoked 
   const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat', 'enable_request_signal', 'request_signal_passthrough', 'enable_nodejs_http_server_modules'],
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, bindings: { ROOM_ORIGIN: origin } });
-  const call = (path, data, headers = {}) => mf.dispatchFetch(origin + path, {
+  const call = (path, data, headers = {}) => decodeDispatchResponse(mf.dispatchFetch(origin + path, {
     method: data ? 'POST' : 'GET', headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.87', 'Accept-Encoding': 'identity',
       ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
-    ...(data ? { body: JSON.stringify(data) } : {}) });
+    ...(data ? { body: JSON.stringify(data) } : {}) }));
   const json = async (response, status = 200) => {
     assert.equal(response.status, status, await response.clone().text()); return response.json();
   };
@@ -732,7 +736,11 @@ test('Worker gzip probe: a client that offers gzip receives a gzipped tools/list
     const post = headers => mf.dispatchFetch(origin + '/mcp', { method: 'POST',
       headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.99', Origin: origin, 'Content-Type': 'application/json', ...headers },
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
-    const plain = await post({ 'Accept-Encoding': 'identity' });
+    // The plain leg reads through the harness decode boundary: dispatchFetch
+    // rewrites the identity offer to "br, gzip" on the way in, so the Worker
+    // still gzips this body and only the decode yields the plain body the
+    // assertions below compare against. The gzip leg stays on the raw wire.
+    const plain = await decodeDispatchResponse(post({ 'Accept-Encoding': 'identity' }));
     assert.equal(plain.status, 200, await plain.clone().text());
     const plainJson = await plain.json();
     assert.ok(Array.isArray(plainJson.result?.tools) && plainJson.result.tools.length > 0);

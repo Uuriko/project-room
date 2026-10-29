@@ -5,6 +5,7 @@ import assert from "node:assert/strict";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import { Miniflare } from "miniflare";
+import { decodeDispatchResponse } from "./dispatch-decode.mjs";
 
 const origin = "https://room.example.test";
 
@@ -29,9 +30,10 @@ async function start() {
 }
 
 async function call(mf, path) {
-  // Accept-Encoding: identity — dispatchFetch returns the raw wire body
-  // without decoding Content-Encoding (see agent-wake.check.mjs).
-  const response = await mf.dispatchFetch(origin + path, { headers: { "Accept-Encoding": "identity" } });
+  // Accept-Encoding: identity is offered, but dispatchFetch rewrites the
+  // offer on the way in and returns the raw wire body without decoding
+  // Content-Encoding — decode at this boundary (see dispatch-decode.mjs).
+  const response = await decodeDispatchResponse(mf.dispatchFetch(origin + path, { headers: { "Accept-Encoding": "identity" } }));
   const body = await response.json();
   return { status: response.status, body };
 }
@@ -43,7 +45,7 @@ test("scheduled() leaves gmail and channel drain disabled when nothing is waitin
     assert.equal(scheduled.status, 200, JSON.stringify(scheduled.body));
     assert.equal(scheduled.body.counts.gmailRuns, 0);
     assert.equal(scheduled.body.counts.channelRuns, 0);
-    const health = await mf.dispatchFetch(origin + "/api/health/jobs", { headers: { "Accept-Encoding": "identity" } });
+    const health = await decodeDispatchResponse(mf.dispatchFetch(origin + "/api/health/jobs", { headers: { "Accept-Encoding": "identity" } }));
     assert.equal(health.status, 200, await health.clone().text());
     const view = await health.json();
     assert.equal(view.status, "ok");
@@ -200,7 +202,7 @@ test("channel drain: an orphaned inflight stamp keeps the stuck clock (#3927 R3)
 
 test("ordinary read burst coalesces alarm eligibility without changing responses", async () => {
   const mf = await start();
-  const read = () => mf.dispatchFetch(origin + "/api/account-session", { headers: { "CF-Connecting-IP": "192.0.2.1", "Accept-Encoding": "identity" } });
+  const read = () => decodeDispatchResponse(mf.dispatchFetch(origin + "/api/account-session", { headers: { "CF-Connecting-IP": "192.0.2.1", "Accept-Encoding": "identity" } }));
   try {
     await (await read()).text(); await new Promise(resolve => setTimeout(resolve, 50));
     await call(mf, "/probe/eligibility-count");
