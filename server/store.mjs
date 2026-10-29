@@ -4826,7 +4826,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const row = (this._workProjectionStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.agentHalts') AS fields FROM rooms WHERE id=?")).get(roomId);
     if (!row) fail(404, "room_not_found", "Room not found");
     const [room, members, workItems, agentHalts] = JSON.parse(row.fields);
-    const state = hydrateWorkItems(this.db, roomId, { room, members, workItems: workItems ?? {}, agentHalts: agentHalts ?? {} });
+    const state = hydrateWorkItems(this.db, roomId, { room, members, workItems, agentHalts: agentHalts ?? {} });
     return { sequence: row.sequence, state: deepFreeze(state) };
   }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null) {
