@@ -73,6 +73,28 @@ and express-rate-limit/ip-address are not imported by relay runtime/client paths
 Both Worker bundles exclude these packages. No live Worker exposure was demonstrated;
 a separate dependency cleanup remains worthwhile.
 
+### Qualification progress — 2026-10-29, 17:23 UTC
+
+The peer accepted and started even browser shards (Room 23003/23006). Local shard
+1 passed 23 tests; shard 3 passed 147, failed zero and skipped one. Shard 5 is
+running. The skip is the old large-history DOM bound test in
+`scripts/chat-performance-browser-check.mjs`, marked pending windowing since
+October 7; source review is checking whether that skip is stale. Do not count it
+as executed coverage. Original receipts, JUnit, selection and logs are retained.
+
+The candidate Graphify server map was rebuilt at 2457a65e: 416 files, 7,912 nodes,
+14,290 edges, zero model calls. Artifact size 1,479,235 bytes; SHA-256
+`d78ed5dc09a80dd48579e89010e128e106c59b13f402a87b008392864fa0f8a6`.
+Local callable lookup finds `workItemHistory` at server/store.mjs:4930. The result
+reports server scope, partial semantics and truncation; this is not hosted
+activation or repository-wide completeness.
+
+Separate follow-up #5286 (`bb338ca57186356c5bc7dab99af9a534623f974f`) changes only
+three relay lockfile records on #5285: body-parser 2.4.0, ip-address 10.7.5 and
+zod 4.6.7. Fresh install, 21 relay tests and dry-run passed; that relay audit has
+zero advisories. Upstream patches may contain non-security fixes. This follow-up
+is not part of the frozen browser candidate; its bounded evidence is separate.
+
 ### Next release preparation — 16:55 UTC
 
 Preparation only: no next release merge or deployment has started. The peer
