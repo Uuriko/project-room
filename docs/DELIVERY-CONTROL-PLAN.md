@@ -14,7 +14,16 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
-Release [40824263799](https://github.com/Uuriko/project-room/actions/runs/40824263799)
+Current release [40831070575](https://github.com/Uuriko/project-room/actions/runs/40831070575)
+deployed `2b1d3ff2713d8091dbbe220b097fc47fff8b3a41`. Four version endpoints,
+authenticated identity and scoped Board reads passed. Workflow readiness
+passed at 56/35 ms; independent verification passed at 94/102 ms, with stable
+source before and after. The downloaded [runtime package](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-2b1d3ff)
+matched the qualified source and was confirmed latest. The deployment claim
+was released. These are point-in-time checks; [incident #5177 remains open](https://github.com/Uuriko/project-room/issues/5177#issuecomment-6490096702)
+for a bounded follow-up comparison, not an indefinite rerun-until-green loop.
+
+Earlier release [40824263799](https://github.com/Uuriko/project-room/actions/runs/40824263799)
 deployed `2d72bb7ffaf911ffa7801113de55e9130e208734`. Both entry points reported
 that source in Worker and application responses; authenticated identity access
 worked. The downloaded [runtime package](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-2d72bb7)
@@ -42,18 +51,32 @@ deployed `eaa97768eb0c21f0ed22d47ed27d20286abeb6be`: all four version
 endpoints converged and authenticated work reads succeeded. Both workflow and
 independent verification failed the two readiness probes. Recovery held for
 diagnosis; no rollback or runtime publication occurred, and the deployment
-claim was released. The prior runtime package remains the published version.
+claim was released. That failed rollout did not replace the prior runtime package.
 See [the preserved failure and recovery evidence](https://github.com/Uuriko/project-room/issues/5177#issuecomment-6489451932).
 
-Archived history pagination (#5206) is merged at `01e41ab8`, not deployed.
+Archived history pagination (#5206) is included in the current verified release.
 It seeks by sequence and message ID, preserves shared-sequence siblings across
 count and byte boundaries, and stops after a page plus lookahead. The composed
 source passed 47 checks, including cold-work and conversation regressions.
 The five-result archive fixture previously loaded 266 bodies; it now loads at
 most one 128-row batch. This bounds materialization, not every SQL row examined.
 
-Remaining read debt includes reply-context event scans and repeated message
-materialization, retained-message processing, default orientation/board call chains,
+Reply-context duplicate traversal (#5219) reduced a local 20k-message fixture
+from 245 to 166 SQL calls and approximately 210 to 60 ms. Metadata/body separation
+(#5224) then removed 2,288,890 bytes of unrelated archive body materialization
+and reduced SQL result bytes from 9,604,671 to 4,786,891. Its additional latency
+effect was inconclusive. Canonical corruption checks, strict JSON validation,
+private-message boundaries and page budgets remain covered. Both changes are
+deployed; their local timings are not production CPU measurements.
+
+The SDK Board read (#5221) now uses the shared authenticated Board service,
+preserving legacy credentials, halts, session binding and read-only claims.
+Runtime dependency completeness and service/HTTP/MCP parity were repaired in
+#5225 before publication. The production Board read passed with the expected
+viewer and revision; default orientation still needs separate work.
+
+Remaining read debt includes global reply-context metadata/event scans,
+retained-message processing, default orientation call chains,
 verified archive hydration and full projection scan cost. Preserve private
 message, history-floor, index repair and corruption-recovery semantics while
 reducing those reads. The 4 MiB projection cap remains unchanged.
@@ -68,15 +91,25 @@ readiness contract and investigate the shared-object work before changing it.
 The two-laptop native execution trial remains unverified. Both laptops ran the
 same pinned-source native-host guard tests: 10 passed on each, but the peer ran
 them manually and its native receiver was stopped. The manual run does not
-populate the native request journal; replaying the open request through that
-receiver could execute it again. Return the retained result for the original
-request, establish the stopped receiver's cause, then use a separate native
-trial to prove interrupted delivery and retry behavior. Inventory existing
+populate the native request journal; the original request was answered with
+the retained result and independently read back as closed, without rerunning.
+The peer receiver was configured for legacy watch mode, and its installed
+request-selection support was absent from main. Reconcile that source divergence
+and configure directed mode before a fresh native trial; do not replace the
+installed watcher with a build that loses its selection or recovery behavior.
+The original stopped process's exit cause remains unknown. Inventory existing
 host journals, directed requests and saved results before extending scheduling.
 A protocol fixture or an independently run remote command is not evidence of
 cross-host dispatch, interrupted delivery or duplicate-result recovery. Retain
 source/toolchain, elapsed time, duplicate execution count and original failures
 for the real trial; report a specific investigated blocker if it cannot run.
+
+The local MCP connector was also stale: its validator rejected the same
+answered-request response that the qualified runtime accepted. A fresh stdio
+process passed. The connector configuration now points to the verified runtime,
+but the existing chat process has not reloaded, so active-tool adoption is not
+yet proved. Identity files, journals and the native app were left intact.
+Treat installed, configured and actively loaded revisions as separate evidence.
 
 ## Reuse and ownership
 
