@@ -584,3 +584,25 @@ test("reply audit rejects an access change for an inherited member id", () => {
   assert.throws(() => auditReplyRequests(state, history), /Reply request history requires operator reconciliation/);
   assert.equal(Object.hasOwn(Object.prototype.toString, "active"), false);
 });
+
+test("selected archived reply context does not refetch every message in ID batches", t => {
+  const f = fixture(t, Array.from({ length: 600 }, (_, i) => event({
+    roomId: "commons", actorId: "owner", type: "message.posted",
+    data: { messageId: `unrelated-history-${i}`, body: `Unrelated history ${i}` }
+  })));
+  const q = f.open();
+  f.post("guest", { messageId: "selected-context", body: "Additional context", replyToId: q.command.data.messageId, toMemberId: "agent" });
+  const before = f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* certify archive */ }
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 1, dryRun: false }).ok, true);
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  f.store.db.prepare = sql => {
+    assert.ok(!sql.startsWith("SELECT message_id,record_json,body FROM messages WHERE")
+      || !sql.includes("message_id IN (SELECT value FROM json_each(?))"), "ownership traversal must supply the same records used by the page");
+    return prepare(sql);
+  };
+  const after = f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  assert.deepEqual(after.page, before.page);
+  assert.deepEqual(after.responseActions, before.responseActions);
+});
