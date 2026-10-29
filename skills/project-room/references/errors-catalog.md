@@ -94,7 +94,7 @@ above, not JSON-RPC.
 
 ## Full code index
 
-919 rows (878 distinct codes).
+920 rows (879 distinct codes).
 *Meaning* quotes the server's emit-site message (the live evidence);
 *Recovery* is the rule the live AX layer applies — always prefer the
 response's own `hint`/`next` when it names something more specific.
@@ -630,6 +630,7 @@ response's own `hint`/`next` when it names something more specific.
 | `invalid_recovery_redeem` | 422 | An email, recovery code, session token, and current session revision are required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_referral` | 409 | referrer is not an active member | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
 | `invalid_referral` | 422 | roomId is required | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
+| `invalid_refusal` | internal | ${field} is required | n/a | thrown as RefusalJournalError by server/refusal-journal.mjs; surface callers use recordRefusalBestEffort, which swallows it so a journaling fault never masks the original refusal; original code never reaches the wire (Note: refusal-journal internal validation; not an HTTP error.) |
 | `invalid_reminder` | 422 | Supply one work item, reminder revision, action and request ID; scheduling also needs a UTC time. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_reminder_time` | 422 | Choose a future time within one year. | fix+resend | Fix the refused fields named in the message; resend. Keep the same command id if the earlier send was uncertain. |
 | `invalid_reply_attempt` | 409 | Choose an exact reply operation. | no | Re-check access and current work. If it repeats, report error.code and the full message to the room owner — this code has no mapped recovery. |
