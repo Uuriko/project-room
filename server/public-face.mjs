@@ -18,8 +18,23 @@ import { messageRepository } from "./message-repository.mjs";
 // The module is shaped like ShareLinks/DmConsents: it takes the RoomStore
 // (db handle, transactions, room state) and exports its schema for
 // store.mjs to apply. Local ServiceError avoids the store.mjs import cycle.
+//
+// RR-D6 snapshot generation: the sanitized face/feed payloads are derived
+// ONCE per room-content version and memoised on the instance (see
+// _snapshot). The memo key is a hash of the room's projection BYTES — not
+// the room sequence alone: RR-C3 §3.2/#932 establish that repair, archive,
+// and history-replacement writes can change read output without advancing
+// the sequence, so a sequence-only key could serve a stale snapshot; a
+// content key re-derives on any byte change. The visibility gates (code
+// enabled, operator unpublish, archived) are still re-checked from
+// SQL/state on EVERY request before the memo is served. Nothing here is a
+// shared or edge cache, and no ETag is emitted (RR-C3 Contract E §3.5
+// keeps public toggle-controlled reads no-store with no etag in v1):
+// the memo lives in the serving process, carries only already-sanitized
+// public fields, and a disable, rotate, unpublish, or archive takes
+// effect on the very next request.
 
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { LEGAL_FOOTER_LINKS } from "./legal-pages.mjs";
 import { refreshListedRoom } from "./public-read-model.mjs";
 import { isUnpublished } from "./legal-store.mjs"; // operator unpublish hides a room or receipt from every public read
@@ -44,6 +59,12 @@ export const PUBLIC_CODE_PREFIX = "pub1.";
 export const MAX_FACE_MESSAGES = 50;
 export const MAX_FEED_LIMIT = 100;
 export const MAX_BODY_CHARS = 2000;
+// RR-D6: bounds for the per-instance snapshot memo. The face payload is
+// capped by MAX_FACE_MESSAGES; the feed list is memoised only up to this
+// many visible messages (a larger room derives its feed per request,
+// exactly as before) so a memo entry stays small even for a huge room.
+export const MAX_SNAPSHOT_ROOMS = 64;
+export const MAX_SNAPSHOT_FEED_MESSAGES = 2000;
 
 const nowMs = () => Date.now();
 
@@ -56,11 +77,17 @@ const handleOf = (state, memberId) => {
   return name || null;
 };
 
+const visiblePublicMessage = m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0;
+
+const capBody = body => body.length > MAX_BODY_CHARS ? body.slice(0, MAX_BODY_CHARS) + " …" : body;
+
 export class PublicFace {
   constructor(store) {
     if (!store || !store.db) fail(500, "face_store_missing", "PublicFace requires a store with a db handle");
     this.store = store;
     this.db = store.db;
+    // RR-D6: roomId -> { key, face, feed } derived snapshots.
+    this._snapshots = new Map();
   }
 
   _roomState(roomId) {
@@ -148,8 +175,8 @@ export class PublicFace {
   }
 
   // Public reads also stop at an archived room, like the other public doors.
-  _publicState(row) {
-    const state = this._roomState(row.room_id);
+  _publicState(row, room = null) {
+    const state = room ? room.state : this._roomState(row.room_id);
     if (typeof state?.room?.archivedAt === "string" && state.room.archivedAt) fail(404, "face_not_found", "No such public face");
     return state;
   }
@@ -188,20 +215,114 @@ export class PublicFace {
     });
   }
 
+  // RR-D6: the memo key for one room's current content. Preferred: a hash
+  // of the projection bytes read straight from the rooms row (the
+  // composite-validator lesson of RR-C3 §3.3 applied to an in-process
+  // memo: content bytes subsume sequence, archivedAt, and every
+  // history-replacement write, because all of them rewrite the row).
+  // Stores without a readable rooms.projection (minimal/fake stores)
+  // fall back to the room sequence; stores that can name neither get no
+  // memo and derive on every call, exactly as before this change.
+  _snapshotKey(row, room) {
+    // A store whose rooms table is unreadable answers that once; the
+    // failure is cached (false) instead of re-thrown on every request.
+    if (this._projectionBytesStmt === undefined) {
+      try { this._projectionBytesStmt = this.db.prepare("SELECT projection FROM rooms WHERE id=?"); }
+      catch { this._projectionBytesStmt = false; }
+    }
+    if (this._projectionBytesStmt) {
+      try {
+        const found = this._projectionBytesStmt.get(row.room_id);
+        if (typeof found?.projection === "string") {
+          return "h:" + createHash("sha256").update(found.projection).digest("hex");
+        }
+      } catch { this._projectionBytesStmt = false; }
+    }
+    return Number.isSafeInteger(room?.sequence) ? `s:${room.sequence}` : null;
+  }
+
+  // RR-D6: the derived snapshot for one room at one content key, or null
+  // when the store cannot key its content (see _snapshotKey). Derivation
+  // runs the same repository reads the per-request paths used to run, so
+  // the memoised payload is byte-for-byte what a fresh derivation from
+  // the same content builds; `fetchedAt` is re-stamped at serve time,
+  // never memoised.
+  _snapshot(row, room) {
+    const key = this._snapshotKey(row, room);
+    if (key === null) return null;
+    const hit = this._snapshots.get(row.room_id);
+    if (hit && hit.key === key) {
+      this._snapshots.delete(row.room_id);
+      this._snapshots.set(row.room_id, hit);
+      return hit;
+    }
+    const state = room.state;
+    const repository = messageRepository(this.store, row.room_id, state);
+    const face = this.sanitize({ ...state, messages: repository.recent(MAX_FACE_MESSAGES, visiblePublicMessage) });
+    let feed = null;
+    const all = [];
+    let overflow = false;
+    for (const message of repository.records()) {
+      if (!visiblePublicMessage(message)) continue;
+      if (all.length >= MAX_SNAPSHOT_FEED_MESSAGES) { overflow = true; break; }
+      all.push(message);
+    }
+    if (!overflow) {
+      feed = Object.freeze(all.map(m => Object.freeze({
+        id: m.id,
+        at: m.createdAt ?? null,
+        from: handleOf(state, m.authorId) ?? "unknown",
+        body: capBody(m.body)
+      })));
+    }
+    const snap = { key, face, feed };
+    this._snapshots.set(row.room_id, snap);
+    while (this._snapshots.size > MAX_SNAPSHOT_ROOMS) {
+      this._snapshots.delete(this._snapshots.keys().next().value);
+    }
+    return snap;
+  }
+
   faceByCode(code) {
     const row = this._resolveCode(code);
-    const state = this._publicState(row);
+    const room = this.store.room(row.room_id);
+    if (!room) fail(404, "room_not_found", "No such room");
+    const state = this._publicState(row, room);
+    const snap = this._snapshot(row, room);
+    if (snap) return Object.freeze({ ...snap.face, fetchedAt: nowMs() });
     const messages = messageRepository(this.store, row.room_id, state).recent(MAX_FACE_MESSAGES, m => m && m.toMemberId == null && typeof m.body === "string" && m.body.length > 0);
     return this.sanitize({ ...state, messages });
   }
 
   feedByCode(code, { after = null, limit = 50 } = {}) {
     const row = this._resolveCode(code);
-    const state = this._publicState(row);
+    const room = this.store.room(row.room_id);
+    if (!room) fail(404, "room_not_found", "No such room");
+    const state = this._publicState(row, room);
     if (after !== null && typeof after !== "string") fail(422, "invalid_feed_cursor", "after must be a message cursor");
     let n = Number(limit);
     if (!Number.isSafeInteger(n) || n < 1) n = 50;
     n = Math.min(n, MAX_FEED_LIMIT);
+    const snap = this._snapshot(row, room);
+    if (snap?.feed) {
+      // The memoised list is the visible-message set repository.records()
+      // yields at this sequence, in the same order — paging it is the same
+      // result the per-request scan produced, and a cursor naming any
+      // message outside the visible set is rejected identically.
+      let start = 0;
+      if (after !== null) {
+        const idx = snap.feed.findIndex(m => m.id === after);
+        if (idx === -1) fail(422, "invalid_feed_cursor", "unknown feed cursor — re-fetch from the start");
+        start = idx + 1;
+      }
+      const page = snap.feed.slice(start, start + n);
+      return Object.freeze({
+        messages: Object.freeze(page),
+        next: page.length ? page[page.length - 1].id : after,
+        hasMore: start + page.length < snap.feed.length,
+        fetchedAt: nowMs()
+      });
+    }
     const repository = messageRepository(this.store, row.room_id, state);
     const visible = message => message && message.toMemberId == null && typeof message.body === 'string' && message.body.length > 0;
     if (after !== null && !visible(repository.get(after))) fail(422, 'invalid_feed_cursor', 'unknown feed cursor — re-fetch from the start');
