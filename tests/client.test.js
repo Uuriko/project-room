@@ -435,7 +435,12 @@ test('unknown event hints and reconnects still fetch snapshots even when room se
     f.notify(value); await f.client.flight.promise;
     assert.equal(f.reads(), before + 1);
   }
+  f.client.stream.readyState = 0;
+  const retryingReads = f.reads();
+  f.emit('error'); await Promise.resolve();
+  assert.equal(f.reads(), retryingReads, 'native CONNECTING retry waits for open');
   for (const type of ['open', 'error']) {
+    f.client.stream.readyState = type === 'error' ? 2 : 1;
     const before = f.reads(); f.emit(type); await f.client.flight.promise;
     assert.equal(f.reads(), before + 1, type);
   }

@@ -1,0 +1,20 @@
+  /api/agent-webhooks/deliveries:
+    get:
+      summary: Read the caller's delivery log across subscriptions
+      description: >-
+        Credential: the `pri_` identity secret or a `rak_` API key with the
+        `webhooks:manage` scope. Identity-scoped: only the caller's own
+        deliveries, newest first, across all their subscriptions. Optional
+        `state` filter (pending/delivered/failed/dead_letter) and `limit`
+        (1-500, default 100). 120 per identity per minute.
+      security:
+        - bearerAuth: []
+      parameters:
+        - { name: state, in: query, required: false, schema: { type: string, enum: [pending, delivered, failed, dead_letter] } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 500 } }
+      responses:
+        '200': { description: "{ deliveries: [{ deliveryId, subscriptionId, eventType, state, attempts, error, createdAt, updatedAt, nextAttemptAt }], next: [...] }" }
+        '401': { description: unauthenticated }
+        '403': { description: insufficient_scope }
+        '422': { description: invalid_state }
+        '429': { description: rate_limited }
