@@ -3,6 +3,19 @@
 // Product code is unchanged — these only teach checks how to reach it.
 /* global document -- page.waitForFunction runs in the browser, not here */
 
+// Humans open a contextual work link; full work cards are not the room's
+// default timeline. Use the same navigation before exercising card controls.
+export async function openConversationWork(page, workId) {
+  const card = page.locator(`[data-work-record-id=${JSON.stringify(workId)}]`);
+  if (!await card.isVisible()) {
+    // A thread can repeat the same work link and also offer a draft shortcut.
+    // Choose its first work-title link, preserving ordinary work navigation.
+    await page.locator(`#message-list .work-link[data-open-work=${JSON.stringify(workId)}]`).first().click();
+    await card.waitFor({ state: "visible" });
+  }
+  return card;
+}
+
 // The sidebar is always on screen at desktop widths and behind the Menu button
 // below 900px. Anything a check reads out of it - the channel list, People, the
 // archived-room note - has to come through here or it is only ever checked on
