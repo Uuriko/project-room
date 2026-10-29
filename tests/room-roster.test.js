@@ -310,3 +310,16 @@ test("Add agent markup lists the four roster names", () => {
   assert.match(css, /#agent-import-checklist/);
   assert.doesNotMatch(readFileSync(join(checkout, "docs/ROOM-ROSTER.md"), "utf8"), /member key cannot/i);
 });
+
+test("the presence refresh control renders only while presence is stale", () => {
+  const app = readFileSync(join(checkout, "src/app.js"), "utf8");
+  assert.match(app, /const presenceRefresh = presenceStale\n/);
+});
+
+test("a never-checked room ages into presence staleness like a checked one", () => {
+  const app = readFileSync(join(checkout, "src/app.js"), "utf8");
+  // presenceObservationAged falls back to the poll-start anchor when no
+  // observation has ever landed (presenceCheckedAt null).
+  assert.match(app, /if \(presenceCheckedAt === null\) \{\n\s*return presencePollStartedAt !== null/);
+  assert.match(app, /presencePollStartedAt = Date\.now\(\);/);
+});

@@ -2,6 +2,7 @@ import { enableHumanAdvanced, ensurePeopleOpen } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 import { openSettings, closeSettings } from "./room-chrome.mjs";
 // People-rail: presence dots, one-line status, loud @agent handles, Done chips.
+// The refresh control shows only while presence is stale.
 // Also checks tip #11 Done-chip spring is instant under prefers-reduced-motion.
 // Real browser + local HTTP service; identities and keys are disposable fixtures.
 import test from "node:test";
@@ -138,9 +139,46 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   const signal = page.locator('[data-member-record-id="signal-agent"]');
   assert.equal(await signal.locator(".member-availability").textContent(), "No live signal");
   assert.equal(await signal.locator(".member-assignment").isVisible(), true, "assignment is visible without opening the profile");
+  // The refresh control shows only while presence is stale, so every explicit
+  // refresh first jumps the wall clock past the 60-second freshness window.
+  // In-flight presence traffic is held during the jump so no automatic fetch
+  // can reset the freshness time ahead of the explicit click.
+  const presenceRoute = /\/api\/rooms\/commons\/presence(?:\?|$)/;
+  let clockOffset = 0;
+  const ageBy = async ms => { clockOffset += ms; await page.clock.setSystemTime(new Date(Date.now() + clockOffset)); };
+  const advance = async ms => { clockOffset += ms; await page.clock.fastForward(ms); };
+  // Hold the presence read of the room under test (the last scenario runs in
+  // resume-room), so the staleness nudge cannot land a fresh observation.
+  const holdForStaleness = async (route = presenceRoute) => {
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    const handler = async route => { await gate; await route.fallback(); };
+    await page.route(route, handler);
+    await ageBy(61000);
+    // The staleness render is qualified inside refreshPresenceStates; nudge it
+    // the same way a returning tab does (the fetch parks on the hold above).
+    await page.evaluate(() => document.dispatchEvent(new Event("visibilitychange")));
+    await page.locator('[data-refresh-presence]').waitFor();
+    return { release, handler };
+  };
+  // The refresh control node is rebuilt on every people-panel render; a real
+  // interval fire between the locator resolve and the click detaches it. Click
+  // through the DOM with a short retry so re-renders cannot eat the click.
+  const clickRefreshControl = async () => {
+    for (let i = 0; i < 50; i++) {
+      if (await page.evaluate(() => { const el = document.querySelector('[data-refresh-presence]'); if (!el) return false; el.click(); return true; })) return;
+      await page.waitForTimeout(100);
+    }
+    throw new Error("refresh control never clickable");
+  };
   const refresh = async () => {
+    const hold = await holdForStaleness();
     const response = page.waitForResponse(response => response.url().endsWith("/api/rooms/commons/presence"));
-    await page.locator('[data-refresh-presence]').click(); await response;
+    await clickRefreshControl();
+    hold.release();
+    await response;
+    // Unroute only this hold: an outer scenario handler (the held old request)
+    // must stay in place until its own scenario releases it.
+    await page.unroute(presenceRoute, hold.handler);
   };
   const heartbeat = async () => {
     const response = await page.request.post(origin + "/api/agent-heartbeats", { headers: { Authorization: `Bearer ${identity.secret}` }, data: { hostId: "signal-host", mode: "pull-only" } });
@@ -157,7 +195,6 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.equal(started.status(), 201); await refresh();
   await signal.locator('.member-availability').filter({ hasText: /^Working$/ }).waitFor();
   assert.match(await signal.locator('.member-working-on').textContent(), /Check the observation path/);
-  const presenceRoute = /\/api\/rooms\/commons\/presence(?:\?|$)/;
   // Browser wall clock and a real transport hold model an aged tab returning;
   // this is an explicit visibility event, not a physically suspended machine.
   await page.locator('#message-input').fill('Resume keeps this unsent draft');
@@ -166,7 +203,7 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   let releaseResume;
   const resumeGate = new Promise(resolve => { releaseResume = resolve; });
   await page.route(presenceRoute, async route => { await resumeGate; await route.continue(); });
-  await page.clock.setSystemTime(new Date(Date.now() + 61000));
+  await ageBy(61000);
   const resumeRequest = page.waitForRequest(request => presenceRoute.test(request.url()));
   await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
   await signal.locator('.member-availability').filter({ hasText: /^Availability needs refresh$/ }).waitFor({ timeout: 3000 });
@@ -194,12 +231,13 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await page.unroute(presenceRoute);
   assert.equal(await profile.locator(':scope > summary').evaluate(node => node === document.activeElement), true);
   assert.match(await signal.locator('.member-working-on').textContent(), /^working on /);
-  assert.doesNotMatch(await page.locator('.presence-check-note').textContent(), /needs refresh|could not refresh/);
+  await page.locator('.presence-refresh').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.presence-refresh').count(), 0, 'fresh presence hides the refresh control and its note');
   // The visible panel must expire without a visibility event or another write.
   let releaseVisible, visibleRequests = 0;
   const visibleGate = new Promise(resolve => { releaseVisible = resolve; });
   await page.route(presenceRoute, async route => { visibleRequests++; await visibleGate; await route.continue(); });
-  await page.clock.fastForward(60001);
+  await advance(60001);
   await signal.locator('.member-availability').filter({ hasText: /^Availability needs refresh$/ }).waitFor();
   assert.equal(visibleRequests, 1, 'intervals share one request for the owned observation');
   assert.match(await signal.locator('.member-working-on').textContent(), /^Last reported working on /);
@@ -207,6 +245,8 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   await signal.locator('.member-availability').filter({ hasText: /^Working$/ }).waitFor();
   await page.unroute(presenceRoute);
   await page.route(presenceRoute, route => route.abort());
+  await advance(61000);
+  await page.locator('[data-refresh-presence]').waitFor();
   await page.locator('[data-refresh-presence]').click();
   await signal.locator('.member-availability').filter({ hasText: /^Availability not refreshed$/ }).waitFor();
   assert.equal(await signal.getAttribute('data-presence'), 'unknown');
@@ -217,8 +257,8 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.equal(await page.locator('[data-refresh-presence]').evaluate(node => node === document.activeElement), true);
   await page.unroute(presenceRoute); await refresh();
   await signal.locator('.member-availability').filter({ hasText: /^Working$/ }).waitFor();
-  assert.equal(await page.locator('[data-refresh-presence]').evaluate(node => node === document.activeElement), true, 'successful refresh retains the explicit retry focus');
-  assert.doesNotMatch(await page.locator('.presence-check-note').textContent(), /could not refresh/);
+  await page.locator('.presence-refresh').waitFor({ state: 'detached' });
+  assert.equal(await page.locator('.presence-refresh').count(), 0, 'a successful retry hides the refresh control again');
   observedAt += 20 * 60 * 1000; await refresh();
   await signal.locator('.member-availability').filter({ hasText: /^Unreachable$/ }).waitFor();
   assert.equal(await signal.locator('.member-working-on').count(), 0);
@@ -298,7 +338,8 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
     if (!holdFirst) { await route.continue(); return; }
     holdFirst = false; sawOld(); await oldReleased; await route.abort();
   });
-  await page.locator('[data-refresh-presence]').click(); await oldHeld;
+  const oldHold = await holdForStaleness();
+  await clickRefreshControl(); oldHold.release(); await oldHeld;
   store.command(owner, 'commons', command(T.MEMBER_ADDED, { memberId: 'snapshot-agent', displayName: 'Snapshot agent', kind: 'agent', permissions: [] }));
   await page.locator('[data-member-record-id="snapshot-agent"]').waitFor();
   await refresh();
@@ -307,17 +348,19 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   releaseOld(); await oldFailed;
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   assert.equal(await signal.locator('.member-availability').textContent(), 'Listening');
-  assert.doesNotMatch(await page.locator('.presence-check-note').textContent(), /could not refresh/);
+  assert.equal(await page.locator('.presence-refresh').count(), 0, 'a stale snapshot failure does not bring the control back');
   await page.unroute(presenceRoute); await refresh();
   // A captured real response from commons must not populate a restored room.
   store.initialize(initialRoom('resume-room'));
   const nextOwner = store.issueAccessKey('resume-room', 'owner');
   store.command(nextOwner, 'resume-room', command(T.MEMBER_ADDED, { memberId: 'signal-agent', displayName: 'Restored signal agent', kind: 'agent', permissions: [] }));
+  const capturedHold = await holdForStaleness();
   let releaseRoom, sawRoom;
   const roomHeld = new Promise(resolve => { sawRoom = resolve; });
   const roomGate = new Promise(resolve => { releaseRoom = resolve; });
   await page.route(presenceRoute, async route => { const response = await route.fetch(); sawRoom(); await roomGate; await route.fulfill({ response }); });
-  await page.locator('[data-refresh-presence]').click(); await roomHeld;
+  capturedHold.release();
+  await clickRefreshControl(); await roomHeld;
   const switched = await page.request.post(origin + '/api/session', { headers: { Origin: origin }, data: { accessKey: nextOwner } });
   assert.equal(switched.status(), 201);
   const restoredPresence = page.waitForResponse(response => response.url().endsWith('/api/rooms/resume-room/presence'));
@@ -335,8 +378,12 @@ test("People rail shows presence, what they're on, loud @handles, and Done chips
   assert.equal(await signal.locator('.member-availability').textContent(), 'No live signal');
   assert.equal(await signal.locator('.member-working-on, .member-owned-by').count(), 0);
   await page.unroute(presenceRoute);
+  const resumePresenceRoute = /\/api\/rooms\/resume-room\/presence(?:\?|$)/;
+  const finalHold = await holdForStaleness(resumePresenceRoute);
   const nextRefresh = page.waitForResponse(response => response.url().endsWith('/api/rooms/resume-room/presence'));
-  await page.locator('[data-refresh-presence]').click(); await nextRefresh;
+  await clickRefreshControl(); finalHold.release();
+  await nextRefresh;
+  await page.unroute(resumePresenceRoute, finalHold.handler);
   assert.equal(await signal.locator('.member-availability').textContent(), 'No live signal', 'obsolete finally cannot block the new room retry');
   assert.equal(errors.join("\n"), "");
 });

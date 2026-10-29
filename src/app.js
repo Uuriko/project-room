@@ -2160,7 +2160,11 @@ function render() {
     ? `<details class="removed-agents"><summary data-focus-key="removed-agents">Removed agents (${removedAgents.length})</summary>${removedAgents.map(presenceRow).join("")}</details>` : "";
   const presenceNote = connectionStale ? uiText("connection.stalePresenceNote") : presenceUnrefreshed ? "Availability could not refresh. Try again." : presenceStale ? "Availability needs refresh. Reports older than 60 seconds need another check." : "";
   const checked = presenceCheckedAt ? `${presenceStale ? "Last successful check" : "Last checked"}: ${time(new Date(presenceCheckedAt).toISOString())}` : "";
-  const presenceRefresh = `<div class="presence-refresh"><button type="button" class="text-button" data-refresh-presence data-focus-key="refresh-presence">Refresh availability</button><span class="presence-check-note">${esc([presenceNote, checked].filter(Boolean).join(" "))}</span></div>`;
+  // Show the refresh control only when presence is stale: a fresh reading
+  // needs no button and no "Last checked" timestamp (Claude follow-up on #5135).
+  const presenceRefresh = presenceStale
+    ? `<div class="presence-refresh"><button type="button" class="text-button" data-refresh-presence data-focus-key="refresh-presence">Refresh availability</button><span class="presence-check-note">${esc([presenceNote, checked].filter(Boolean).join(" "))}</span></div>`
+    : "";
   // NEXT-6: list who is around now; everyone else waits behind one
   // disclosure. Small rooms and rooms with no live presence signal (stale or
   // not yet loaded) are not split, so nobody disappears for a bad reason.
@@ -2176,8 +2180,6 @@ function render() {
   const stackMore = roster.length - stack.length;
   renderContent("#presence-avatars", `${stack.map(m => `<span class="member-avatar ${m.kind === "agent" ? "agent" : "person"}"><span>${initials(m.displayName)}</span></span>`).join("")}${stackMore > 0 ? `<span class="presence-avatars-more">+${stackMore}</span>` : ""}`);
   renderContent("#presence-list", `${presenceRefresh}${dmRequestInbox()}${shownPeople.length ? `<p class="presence-heading">People</p>${shownPeople.map(presenceRow).join("")}` : ""}${shownAgents.length ? `<p class="presence-heading">Agents</p>${shownAgents.map(presenceRow).join("")}` : ""}${othersHtml}${removedAgentsHtml}`);
-  // Presence refreshes itself; the manual control only needs weight when stale.
-  $("#presence-list .presence-refresh")?.classList.toggle("is-fresh", !presenceNote);
   // JDOT-MEMBER-PERMS-UI begin
   memberPermissionsUI.sync();
   ownerAttentionCard.sync();
@@ -6750,12 +6752,20 @@ let friendBonds = [], friendBusy = false, friendSeq = 0, friendDmPeerId = null;
 // prefers these over the local derivation. Never loaded for the public
 // read-only face.
 let presenceStates = new Map(), presenceRequest = null, presenceSeq = 0, presenceTimer = null, presenceAgeTimer = null;
-let presenceUnrefreshed = false, presenceCheckedAt = null;
+let presenceUnrefreshed = false, presenceCheckedAt = null, presencePollStartedAt = null;
 const PRESENCE_REFRESH_MS = 30000;
 // Client display freshness only; this does not determine host reachability.
 const PRESENCE_OBSERVATION_MAX_AGE_MS = 60000;
 function presenceObservationAged() {
-  if (presenceCheckedAt === null) return false;
+  // A room whose poll has never returned a successful observation is stale
+  // once the freshness window passes since the poll started: availability
+  // cannot be called fresh when it has never been observed (presence reset
+  // paths leave presenceCheckedAt null, e.g. a snapshot race discarding the
+  // pre-boundary read).
+  if (presenceCheckedAt === null) {
+    return presencePollStartedAt !== null
+      && Date.now() - presencePollStartedAt >= PRESENCE_OBSERVATION_MAX_AGE_MS;
+  }
   const age = Date.now() - presenceCheckedAt;
   return age < 0 || age >= PRESENCE_OBSERVATION_MAX_AGE_MS;
 }
@@ -7108,6 +7118,7 @@ $("#presence-list").addEventListener("click", event => {
 });
 function startPresencePoll() {
   stopPresencePoll();
+  presencePollStartedAt = Date.now();
   void refreshPresenceStates();
   presenceTimer = setInterval(() => {
     if (document.visibilityState === "visible") void refreshPresenceStates();
@@ -7117,7 +7128,7 @@ function stopPresencePoll() {
   presenceSeq++;
   if (presenceTimer) { clearInterval(presenceTimer); presenceTimer = null; }
   if (presenceAgeTimer) { clearTimeout(presenceAgeTimer); presenceAgeTimer = null; }
-  presenceStates = new Map(); presenceUnrefreshed = false; presenceCheckedAt = null; presenceRequest = null;
+  presenceStates = new Map(); presenceUnrefreshed = false; presenceCheckedAt = null; presenceRequest = null; presencePollStartedAt = null;
 }
 // ---- DM consent ---------------------------------------------------------------
 // The signed-in member's consent pairs drive the People panel's Direct
