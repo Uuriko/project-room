@@ -1302,12 +1302,10 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
-      // F-X4-2 (disclose-only): the view reports the EFFECTIVE decider — the
-      // same composition disputeBounty seats by (designated dispute decider,
-      // else the designated verifier). The stored column is NOT rewritten:
-      // _mutable/_saveBounty keep the raw dispute_decider value, so a
-      // verifier-only bounty still stores NULL and only the read discloses
-      // who will actually seat and rule.
+      // Disclose the designated decider, falling back to the designated verifier.
+      // disputeBounty checks eligibility before seating; this read does not
+      // confirm an active seat. _mutable/_saveBounty preserve the raw column,
+      // including NULL for a verifier-only designation.
       disputeDecider: row.dispute_decider ?? row.verifier ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),

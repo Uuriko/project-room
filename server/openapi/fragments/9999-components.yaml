@@ -626,7 +626,7 @@ components:
         poster: { type: string }
         claimant: { type: string, nullable: true }
         verifier: { type: string, nullable: true }
-        disputeDecider: { type: string, nullable: true, description: "The effective dispute decider: the dispute decider designated at posting, else the designated verifier (who seats as decider when a dispute opens). Null only when neither was designated." }
+        disputeDecider: { type: string, nullable: true, description: "Designated dispute decider, or the designated verifier when no separate decider was chosen. Eligibility is checked when a dispute opens; this value does not confirm an active seat. Null when neither was designated." }
         watchers: { type: array, items: { type: string } }
         deadline: { type: string, format: date-time }
         stateChangedAt: { type: string, format: date-time }
