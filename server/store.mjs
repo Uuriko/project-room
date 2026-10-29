@@ -162,7 +162,7 @@ import { LandQueue, landQueueSchema, migrateLandQueueColumns } from "./land-queu
 import { MembersDirectory, membersDirectorySchema } from "./members-directory.mjs"; // RC-2026-09-24-202: members directory + skill cards.
 import {
   MENTION_TIMEOUT_MS_DEFAULT, MENTION_TIMEOUT_MS_MIN, MENTION_TIMEOUT_MS_MAX,
-  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema,
+  assertTransitionMention, identityNamesForRoom, resolveMentionTargetsInText, mentionStateSchema, ensureMentionLateAckSchema,
   mentionTargetWarnings,
 } from "./mention-lifecycle.mjs"; // #658: mention lifecycle state machine + schema.
 import { activitySchema, recordActivityEvents, journalActivityFanoutFailure, retryActivityFanoutFailures } from "./activity.mjs"; // Attention: activity feed, read horizons, saved messages, thread mutes.
@@ -1116,7 +1116,8 @@ export const ADDITIVE_SCHEMA_ENSURES = [
   [ensureSpendGrantsSchema, "ensureSpendGrantsSchema@3"],
   [ensureAccountProfileSchema, "ensureAccountProfileSchema@1"],
   [ensureVerifiedEmailSchema, "ensureVerifiedEmailSchema@1"],
-  [ensureAttachmentSchema, "ensureAttachmentSchema@1"]
+  [ensureAttachmentSchema, "ensureAttachmentSchema@1"],
+  [ensureMentionLateAckSchema, "ensureMentionLateAckSchema@1"]
 ];
 
 // Hash of the DDL this process knows how to apply. A stored match means
@@ -1863,6 +1864,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // events, no projection impact): IF NOT EXISTS is idempotent, no
       // schema version bump, intentionally outside the writer fence.
       this.db.exec(mentionStateSchema);
+      ensureMentionLateAckSchema(this.db);
       // Attention (mark unread / save for later / activity feed): purely
       // additive side tables (no events, no projection impact): IF NOT
       // EXISTS is idempotent, no schema version bump, intentionally outside
@@ -5879,8 +5881,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     const rows = [];
     try {
       const stmt = this.db.prepare(
-        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body
+        `SELECT m.message_event_id AS eventId, m.state, m.timeout_at AS timeoutAt, e.sequence, e.body,
+                o.acknowledged_at AS acknowledgedAt, o.late_acknowledged_at AS lateAcknowledgedAt
          FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
+         LEFT JOIN mention_observations o ON o.room_id=m.room_id AND o.message_event_id=m.message_event_id
+           AND o.mentioned_member_id=m.mentioned_member_id
          WHERE m.room_id=? AND m.mentioned_member_id=? AND m.state IN ('delivered','acknowledged','timed_out')
            AND e.sequence>? AND e.sequence<=?
          ORDER BY e.sequence DESC LIMIT ?`
@@ -5905,6 +5910,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           // Filter before consuming page slots: otherwise newer expired rows
           // answered late can hide an older unresolved mention indefinitely.
           if (row.state === "timed_out" && currentById.hasReply(memberId, logged.data.messageId ?? row.eventId)) continue;
+          // An explicit ack after the deadline is the member saying "handled"
+          // for a mention they answered outside the thread. Without this the
+          // open list only ever grows. An ack before the deadline keeps the
+          // mention open as today.
+          if (row.state === "timed_out" && (Number.isSafeInteger(row.lateAcknowledgedAt)
+            || (Number.isSafeInteger(row.acknowledgedAt) && Number.isSafeInteger(row.timeoutAt) && row.acknowledgedAt > row.timeoutAt))) continue;
           if (rows.length < limit) rows.push(row);
         }
         if (batch.length < want) break;
@@ -6823,6 +6834,12 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         VALUES(?,?,?,1,?) ON CONFLICT(room_id,message_event_id,mentioned_member_id)
         DO UPDATE SET acknowledged=1, acknowledged_at=COALESCE(mention_observations.acknowledged_at,excluded.acknowledged_at)`)
         .run(roomId, messageEventId, auth.member.id, this.now());
+      // An ack after the deadline also records the late ack itself, so an
+      // on-time ack followed by a late one still reads as handled.
+      if (mine.state === "timed_out") this.db.prepare(
+        `UPDATE mention_observations SET late_acknowledged_at=COALESCE(late_acknowledged_at,?)
+         WHERE room_id=? AND message_event_id=? AND mentioned_member_id=?`
+      ).run(this.now(), roomId, messageEventId, auth.member.id);
       if (mine.state !== "delivered") return this.mentionView(roomId, messageEventId, auth.member.id);
       assertTransitionMention("delivered", "acknowledged");
       this.db.prepare(
