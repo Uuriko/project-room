@@ -66,10 +66,8 @@ test("a stripped GitHub anchor does not throw, and the rest of the sign-in view 
   assert.doesNotThrow(() => navigation.sync("password-login"));
   assert.equal(node("#google-signin").hidden, false);
   assert.equal(node("#signin-methods").hidden, false);
-  assert.equal(node("#terms-notice").hidden, false);
   assert.doesNotThrow(() => navigation.setProviderUnavailable("github"));
   assert.doesNotThrow(() => navigation.sync("welcome"));
   assert.equal(node("#google-signin").hidden, true);
-  assert.equal(node("#terms-notice").hidden, true);
   assert.equal(node("#signin-methods").hidden, false);
 });

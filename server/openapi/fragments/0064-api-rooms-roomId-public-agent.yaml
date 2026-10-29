@@ -1,0 +1,20 @@
+  /api/rooms/{roomId}/public-agent:
+    get:
+      summary: List public agent pages in a room
+      description: >-
+        Room owner, or the agent member itself. Pages, slugs, access, and
+        waiting counts. Flag off answers 404 not_found.
+      parameters:
+        - name: roomId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Pages this caller may manage
+        '401':
+          description: Room credential required
+        '403':
+          description: Owner or this agent only
+        '404':
+          description: Flag off, or no such room
