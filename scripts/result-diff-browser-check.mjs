@@ -1,5 +1,6 @@
 // Simulated human journeys in real browsers against isolated, synthetic rooms.
 import test from "node:test";
+import { openConversationWork, clickWorkAction } from "./room-chrome.mjs";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -62,6 +63,7 @@ async function setup(t, width, { retained = false } = {}) {
 }
 const card = page => page.locator('[data-work-record-id="revision-journey"]');
 async function openResult(page) {
+  await openConversationWork(page, "revision-journey");
   await card(page).locator("[data-read-result]").click();
   await page.locator("#result-body").getByText(/Result [AB]/).waitFor();
 }
@@ -77,7 +79,7 @@ async function review(page, result, summary) {
 for (const width of [1440, 390]) {
   test(`result revision journey ${width}px: review correction, compare resubmission and return`, { timeout: 60000 }, async t => {
     const f = await setup(t, width), reviewer = await f.login("human-checker");
-    await card(reviewer).locator('[data-action="verify"]').click();
+    await clickWorkAction(await openConversationWork(reviewer, "revision-journey"), "verify");
     await reviewer.locator("#action-text-body").getByText(/Result A/).waitFor();
     assert.equal(await reviewer.locator("#action-result-diff").isVisible(), false, "first result has no comparison");
     await review(reviewer, "fail", "Name the owner in the final line");
@@ -88,7 +90,7 @@ for (const width of [1440, 390]) {
     const second = f.complete("Result B\nKeep this line\nOwner: Maya");
     assert.equal(f.item().receipt.nativeText.previousCompletionEventId, f.first.event.id);
     assert.notEqual(f.item().verification?.completionEventId, second.event.id, "A review must not apply to B");
-    await card(reviewer).locator('[data-action="verify"]').click();
+    await clickWorkAction(await openConversationWork(reviewer, "revision-journey"), "verify");
     await reviewer.locator("#action-text-body").getByText(/Result B/).waitFor();
     const diff = reviewer.locator("#action-result-diff");
     await diff.waitFor({ state: "visible" });
@@ -105,7 +107,7 @@ for (const width of [1440, 390]) {
     assert.equal(firstReview.completionEventId, f.first.event.id);
     assert.equal(await reviewer.locator("#action-result-diff").textContent(), "", "closing review clears comparison bytes");
     const owner = await f.login("owner");
-    await card(owner).locator('[data-action="decide"]').click();
+    await clickWorkAction(await openConversationWork(owner, "revision-journey"), "decide");
     await owner.locator("#action-result-diff").getByText(/Resubmitted result/).waitFor();
     assert.match(await owner.locator("#action-text-body").textContent(), /Result B/);
     await owner.locator('#action-fields [name="decision"]').selectOption("approved");
@@ -130,6 +132,7 @@ for (const width of [1440, 390]) {
     assert.match(await reviewer.locator("#result-diff").innerText(), /- Result A/);
     await reviewer.locator("#close-result").click();
     assert.equal(await card(reviewer).locator("[data-read-result]").evaluate(node => node === document.activeElement), true);
+    await openConversationWork(reviewer, "calm-result");
     await reviewer.locator('[data-work-record-id="calm-result"] [data-read-result]').click();
     await reviewer.waitForFunction(() => document.activeElement?.dataset.messageRecordId && document.activeElement.textContent.includes("Only version of this result"));
     assert.equal(await reviewer.locator("#result-dialog").isVisible(), false, "first short result opens in the conversation");
@@ -172,10 +175,10 @@ test("late previous-result read cannot repopulate a different review after cance
     const response = await route.fetch(); captured(); await gate;
     await route.fulfill({ response });
   });
-  await card(page).locator('[data-action="verify"]').click();
+  await clickWorkAction(await openConversationWork(page, "revision-journey"), "verify");
   await held;
   await page.locator("#cancel-action").click();
-  await page.locator('[data-work-record-id="calm-result"] [data-action="verify"]').click();
+  await clickWorkAction(await openConversationWork(page, "calm-result"), "verify");
   await page.locator("#action-text-body").getByText("Only version of this result", { exact: true }).waitFor();
   const delivered = page.waitForResponse(response => new URL(response.url()).searchParams.get("completionEventId") === f.first.event.id);
   release(); await delivered;
