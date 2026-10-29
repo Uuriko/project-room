@@ -23,7 +23,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { randomBytes, randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
@@ -78,9 +78,10 @@ const JOIN_CHILD = childBody(`store.shareLinks.join(process.argv[3], process.arg
 
 const JOIN_AGENT_CHILD = childBody(`store.shareLinks.joinAgent(process.argv[3], process.argv[4], process.argv[5])`);
 
-// Per AGENTS.md: never /tmp (tmpfs is near-full -> SQLITE_FULL); test scratch
-// lives in the worktree .tmp directory.
+// Keep SQLite scratch under this worktree; support a fresh checkout without
+// relying on another test or a manual setup step to create the parent.
 function scratch(t, name) {
+  mkdirSync(join(REPO, ".tmp"), { recursive: true });
   const dir = mkdtempSync(join(REPO, ".tmp", name + "-"));
   t.after(() => { rmSync(dir, { recursive: true, force: true }); });
   return dir;
