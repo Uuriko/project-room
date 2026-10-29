@@ -243,3 +243,47 @@ test("supervisor recovers deselected pending delivery without execution and hono
   assert.equal(recovered.id, saved.id); assert.equal(recovered.attempt_id, saved.attempt_id);
   assert.equal((await f.client.replyContext(id)).request.status, "answered");
 });
+
+test("lost acknowledgment of committed answer reconciles from journal after request leaves open queue", async t => {
+  const f = await fixture(t), id = f.post(); let starts = 0;
+  // Refused old records must not starve a valid saved answer past the batch boundary.
+  for (let n = 0; n < 55; n++) f.db.prepare("INSERT INTO request_runs(id,response,delivered) VALUES(?,?,0)")
+    .run(`invalid-saved-${n}`, "invalid JSON");
+  const original = RoomAgentClient.prototype.replyAction;
+  RoomAgentClient.prototype.replyAction = async function (...args) {
+    await original.apply(this, args);
+    throw new TypeError("Synthetic lost acknowledgment after commit");
+  };
+  try {
+    await assert.rejects(runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+      execute: async () => { starts++; return { body: "Committed exact answer" }; } }), /lost acknowledgment/);
+  } finally { RoomAgentClient.prototype.replyAction = original; }
+  assert.equal((await f.client.replyContext(id)).request.status, "answered");
+  const saved = f.db.prepare("SELECT * FROM request_runs WHERE id NOT LIKE 'invalid-saved-%'").get();
+  assert.equal(saved.delivered, 0);
+  assert.equal((await f.client.agentWork()).requests.some(r => r.id === id), false);
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 3000);
+  try {
+    await f.run({ allowedRequestIds: ["future-request"], controller,
+      emit: event => { if (event.status === "delivered") controller.abort(); } }).promise;
+  } finally { clearTimeout(deadline); }
+  const recovered = f.db.prepare("SELECT * FROM request_runs WHERE id NOT LIKE 'invalid-saved-%'").get();
+  assert.equal(recovered.delivered, 1);
+  assert.equal(recovered.response, saved.response); assert.equal(recovered.id, saved.id);
+  assert.equal(starts, 1); assert.equal(f.connects, 0);
+});
+
+test("saved row from another scope cannot suppress a selected current request with the same ID", async t => {
+  const f = await fixture(t), id = f.post();
+  f.db.prepare("INSERT INTO request_runs(id,response,delivered,attempt_id) VALUES(?,?,0,?)")
+    .run("host-another-room", JSON.stringify({ responseToRequestId: id, body: "Other room saved answer" }), "old-attempt");
+  const controller = new AbortController(), deadline = setTimeout(() => controller.abort(), 3000);
+  try {
+    await f.run({ allowedRequestIds: [id], controller,
+      emit: event => { if (event.status === "delivered") controller.abort(); } }).promise;
+  } finally { clearTimeout(deadline); }
+  assert.equal((await f.client.replyContext(id)).request.status, "answered");
+  assert.equal(f.rpc.starts, 1);
+  assert.equal(f.db.prepare("SELECT delivered FROM request_runs WHERE id=?").get("host-another-room").delivered, 0);
+});
