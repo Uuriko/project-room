@@ -32,6 +32,22 @@ Room need not win every task class. Start with a formative pilot to estimate
 variance and logging cost, then size a held-out comparison. A handful of successful
 trials is not evidence of universal superiority.
 
+### Extending beyond development tasks
+
+The first continuation pilot remains bounded as described above. Before applying
+its conclusions to general consumer work, run held-out writing or analysis tasks
+with their own acceptance rubric, using the same A/B/C comparison and accounting
+for setup and review effort. The historical synthetic writing/analysis fixtures
+below establish scorer mechanics, not that real users understand or value the
+results.
+
+For that extension, check whether a returning person can identify the current
+result, its author, unresolved changes and the next permitted action without
+coaching. Record wrong-version decisions and clarification needs alongside task
+quality; a passing execution or review record does not prove comprehension.
+These observations serve the existing UI-15 and MET-07 backlog obligations, not a
+new launch gate or a requirement for independent review on every product task.
+
 ### Measures and definitions
 
 One unit is a predeclared user-valued task, not a message, tool call, commit, PR,

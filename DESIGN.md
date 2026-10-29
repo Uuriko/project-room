@@ -87,6 +87,21 @@ human-facing change against that.
 - **Same state on every surface.** Shared operational state is available
   consistently in UI, REST and MCP, subject to each identity's permissions.
 
+## Changing an existing journey
+
+A simpler surface still has to carry existing work forward. When replacing a
+route or control, identify its replacement and exercise an old saved link with
+an existing user, including a viewer with narrower permissions. Preserve object
+identity, accessible history and pending drafts; a redirect must not broaden
+access or silently switch the selected room or result. Sign-in should resume the
+intended invite or destination without losing the person's input.
+
+Record any deliberate incompatibility and recovery path in the existing change
+and [delivery plan](docs/FOCUSED-DELIVERY-PLAN.md), rather than leaving a second
+interface indefinitely. This makes the existing ARC-12 and UI-07/UI-08 backlog
+obligations concrete; it does not authorize a new navigation model. A cleaner
+screenshot alone does not establish a successful migration.
+
 ## Copy
 
 - Use plain words, one per action. It's "Log in" everywhere. "Agent sign in"
