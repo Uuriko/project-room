@@ -94,7 +94,7 @@ const parameters = Object.freeze({ type: "object", required: ["roomId"],
 
 // Deliberately non-punitive: queues for reviewers, never strikes or sanctions.
 export const WORK_CLAIM_ROUTES = Object.freeze([
-  Object.freeze({ id: "board-read", method: "GET", path: "/api/rooms/{roomId}/board",
+  Object.freeze({ id: "board-read", method: "GET", path: "/api/rooms/{roomId}/board", parity: "mcp:room_read_board",
     auth: "room", capability: null, scope: "room", handler: getBoardRead,
     schema: { params: parameters, response: { type: "object" } }, events: [] }),
   ...["GET", "HEAD", "POST"].map(method => Object.freeze({ id: `claim-provenance-${method}`, method,

@@ -5822,26 +5822,44 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       const memberId = auth.member.id;
-      const directMessages = this.db.prepare(
-        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>?
+      const floor = this.historyFloor(roomId, memberId, this.room(roomId).sequence);
+      const historyAfter = floor ? floor.sequence - 1 : 0;
+      const messageAfter = Math.max(after, historyAfter);
+      const directMessages = [];
+      const currentMessages = messageRepository(this, roomId);
+      const dmStatement = this.db.prepare(
+        `SELECT sequence, body FROM events WHERE room_id=? AND sequence>? AND sequence<=?
          AND json_extract(body,'$.type')=? AND json_extract(body,'$.data.toMemberId')=?
-         ORDER BY sequence DESC LIMIT ?`)
-        .all(roomId, after, T.MESSAGE_POSTED, memberId, limit)
-        .map(row => {
+         ORDER BY sequence DESC LIMIT ?`);
+      let dmThrough = Number.MAX_SAFE_INTEGER, dmScannedAfter = after;
+      // Keep newest-first delivery, but refill past tombstones using descending
+      // bounds. Current records cover both retained and archived messages.
+      while (directMessages.length < limit) {
+        const want = limit - directMessages.length;
+        const batch = dmStatement.all(roomId, messageAfter, dmThrough, T.MESSAGE_POSTED, memberId, want);
+        if (!batch.length) break;
+        for (const row of batch) {
+          dmScannedAfter = Math.max(dmScannedAfter, row.sequence);
           const parsed = JSON.parse(row.body);
-          return {
+          const messageId = parsed.data.messageId ?? parsed.id;
+          const current = currentMessages.get(messageId);
+          if (current?.deletedAt) continue;
+          directMessages.push({
             sequence: row.sequence,
-            messageId: parsed.data.messageId ?? null,
+            messageId,
             from: parsed.actorId,
-            body: parsed.data.body,
+            body: current ? current.body : parsed.data.body,
             at: parsed.at,
             channel: "room",
             ...(parsed.data.requestKind === "reply" && parsed.data.requestPolicyVersion === 1
               && [parsed.actorId, parsed.data.toMemberId].includes(memberId) ? {
-                requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: parsed.data.messageId ?? parsed.id } }
+                requestKind: "reply", nextRead: { tool: "room_read_request", arguments: { requestMessageId: messageId } }
               } : {}),
-          };
-        });
+          });
+        }
+        if (batch.length < want) break;
+        dmThrough = batch[batch.length - 1].sequence - 1;
+      }
       const assignments = this.collab.listAssignments(roomId)
         .filter(record => record.status === "assigned"
           && record.assignee?.kind === "agent" && record.assignee?.id === memberId)
@@ -5864,10 +5882,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           status: record.status,
           createdAt: record.createdAt,
         }));
-      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after });
+      const directMentions = this.openDirectMentions(roomId, memberId, limit, this.now(), { after: messageAfter });
       // A delivery cursor is not an acknowledgement. Keep bounded standing
       // attention visible when a poll advances beyond an unanswered mention.
-      const pending = this.openDirectMentions(roomId, memberId, limit + 1, this.now());
+      const pending = this.openDirectMentions(roomId, memberId, limit + 1, this.now(), { after: historyAfter });
       const attention = Object.freeze({
         pendingMentions: pending.slice(0, limit).map(({ sequence, replyToId, from, state, private: isPrivate }) =>
           Object.freeze({ sequence, replyToId, from, state, private: isPrivate })),
@@ -5883,10 +5901,10 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // RC-2026-09-24-210: peer-DM bodies are room-scoped — the inbox shows
       // only messages posted in this room, never another room's DM traffic.
       const peerMessages = identityId ? this.bonds.recentMessagesFor(identityId, roomId, limit) : [];
-      // The poll cursor: the highest sequence either event-log list
-      // returned, or the caller's own `after` when nothing was newer.
+      // The poll cursor includes scanned DM tombstones as well as returned
+      // events, or the caller's own `after` when nothing was newer.
       // Standing lists carry no sequence and never move it.
-      const cursorAfter = Math.max(after,
+      const cursorAfter = Math.max(after, dmScannedAfter,
         ...directMessages.map(row => row.sequence),
         ...directMentions.map(row => row.sequence));
       const inbox = stampInbox({
