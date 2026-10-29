@@ -12,6 +12,7 @@ func stamp() -> String { let f = ISO8601DateFormatter(); f.formatOptions = [.wit
 // live room, macOS permission, or installed app is touched.
 if CommandLine.arguments.count > 3, CommandLine.arguments[2].hasPrefix("--") {
     let args = CommandLine.arguments, journal = args[3]
+    try JSONSerialization.data(withJSONObject: Array(args.dropFirst(2))).write(to: URL(fileURLWithPath: journal + ".arguments"))
     if args[2] == "--stop-watch" { fm.createFile(atPath: journal + ".stop", contents: Data()); exit(0) }
     try? fm.removeItem(atPath: journal + ".stop")
     let mode = String(data: try Data(contentsOf: URL(fileURLWithPath: args[4])), encoding: .utf8)!
@@ -65,15 +66,43 @@ try fm.createSymbolicLink(at: discoveredNode, withDestinationURL: URL(fileURLWit
 check(LocalRoomHostSetup.installedExecutable("node", home: discoveryHome, searchPath: "") == discoveredNode.path, "Finder launch discovers user-local executable symlink without PATH")
 check(LocalRoomHostSetup.installedExecutable("../node", home: discoveryHome, searchPath: "") == nil, "discovery accepts only supported tool names")
 
-func fixture(_ name: String) throws -> (LocalRoomHost, URL) {
+func fixture(_ name: String, requesters: [String]? = nil) throws -> (LocalRoomHost, URL) {
     let dir = root.appendingPathComponent(name), connection = dir.appendingPathComponent("connection")
     try fm.createDirectory(at: connection, withIntermediateDirectories:true, attributes:[.posixPermissions:0o700])
     try write(["origin":"https://fixture.invalid","roomId":"fixture","memberId":"agent","token":"fixture-only"], connection.appendingPathComponent("connection.json").path)
     let runtime = dir.appendingPathComponent("runtime.json"); try name.write(to:runtime, atomically:true, encoding:.utf8)
     let manifest = dir.appendingPathComponent("host.json")
-    try write(["version":1,"node":executable,"script":runtime.path,"runtimeConfig":runtime.path,"roomConnection":connection.path], manifest.path)
+    var manifestData: [String: Any] = ["version":1,"node":executable,"script":runtime.path,"runtimeConfig":runtime.path,"roomConnection":connection.path]
+    if let requesters { manifestData["allowedRequesterIds"] = requesters }
+    try write(manifestData, manifest.path)
     let host = try LocalRoomHost(directory:dir.appendingPathComponent("managed")); try host.configure(manifest)
     return (host,dir)
+}
+// Directed mode is opt-in and launches exactly one scoped child without a shell.
+let (directed, directedDir) = try fixture("directed", requesters: ["member-2", "owner_1"])
+check(directed.snapshot()["hostMode"] as? String == "directed_requests", "directed mode visible before start")
+try directed.resumeReceiving()
+check(directed.snapshot()["running"] as? Bool == false, "configuration alone never activates receiving")
+try directed.start()
+let argumentsPath = directed.journalURL!.path + ".arguments"
+check(until { fm.fileExists(atPath: argumentsPath) }, "directed host launched")
+let directedArguments = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: argumentsPath))) as! [String]
+check(directedArguments == ["--watch-requests", directed.journalURL!.path, directedDir.appendingPathComponent("runtime.json").path, "member-2,owner_1"], "directed launch includes exact allowlist and runtime")
+check(until { (directed.snapshot()["message"] as? String ?? "").contains("Directed requests") }, "native status identifies receiving mode")
+check(directed.stopAndWait(), "directed host stops through existing supervisor protocol")
+let directedRestored = try LocalRoomHost(directory: directedDir.appendingPathComponent("managed"))
+check(directedRestored.snapshot()["receivingEnabled"] as? Bool == true, "unchanged directed consent survives relaunch")
+let directedSaved = directedDir.appendingPathComponent("managed/selected-host.json")
+var replaced = try JSONSerialization.jsonObject(with: Data(contentsOf: directedSaved)) as! [String: Any]
+replaced["allowedRequesterIds"] = ["another-member"]
+try write(replaced, directedSaved.path)
+let replacedHost = try LocalRoomHost(directory: directedDir.appendingPathComponent("managed"))
+check(replacedHost.snapshot()["receivingEnabled"] as? Bool == false, "changed directed allowlist cannot inherit receiving consent")
+for invalid: [String] in [[], [""], [" member"], ["member,other"], ["member\n"], ["a", "a"], [String(repeating: "a", count: 129)], (0...20).map { "member-\($0)" }] {
+    replaced["allowedRequesterIds"] = invalid
+    try write(replaced, directedSaved.path)
+    do { _ = try RoomHostManifest.read(directedSaved); check(false, "invalid requester list rejected") }
+    catch { check((error as? LocalToolFailure)?.code == "invalid_allowed_requesters", "empty, unsafe, duplicate or oversized requester list refused") }
 }
 // Guided setup uses only disposable private folders and executables.
 let guided = root.appendingPathComponent("guided")
@@ -86,12 +115,15 @@ for folder in [connectionFolder, workspace, profile] {
 let connectionFile = connectionFolder.appendingPathComponent("connection.json")
 try write(["version": 1, "origin": "https://fixture.invalid", "roomId": "fixture", "memberId": "agent", "token": "fixture-only"], connectionFile.path)
 let beforeConnection = try Data(contentsOf: connectionFile)
-func selection(_ profileURL: URL, writes: Bool = false) -> LocalRoomHostSetup.Selection {
-    .init(node: URL(fileURLWithPath: executable), script: connectionFile, codex: URL(fileURLWithPath: executable), workspace: workspace, profile: profileURL, connection: connectionFolder, allowWrites: writes)
+func selection(_ profileURL: URL, writes: Bool = false, requesters: [String]? = nil) -> LocalRoomHostSetup.Selection {
+    .init(node: URL(fileURLWithPath: executable), script: connectionFile, codex: URL(fileURLWithPath: executable), workspace: workspace, profile: profileURL, connection: connectionFolder, allowWrites: writes, allowedRequesterIds: requesters)
 }
 let setups = guided.appendingPathComponent("setups")
 let generated = try LocalRoomHostSetup.save(selection(profile), directory: setups)
 let generatedManifest = try RoomHostManifest.read(generated)
+check(generatedManifest.allowedRequesterIds == nil, "legacy guided setup remains shared-ask mode")
+let directedSetup = try RoomHostManifest.read(LocalRoomHostSetup.save(selection(profile, requesters: ["member-2"]), directory: setups))
+check(directedSetup.allowedRequesterIds == ["member-2"], "explicit setup selection saves directed requester scope")
 let generatedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: generatedManifest.runtimeConfig))) as! [String: Any]
 check((generatedRuntime["policy"] as? [String: String])?["sandbox"] == "read-only", "guided setup defaults to read-only")
 check(generatedRuntime["macTools"] == nil, "guided setup does not grant computer control")
@@ -119,7 +151,7 @@ do { _ = try LocalRoomHostSetup.save(selection(profile), directory: setups); che
 catch { check((error as? LocalToolFailure)?.code == "setup_private_folder_required", "nonprivate profile refused") }
 let savedAfterFailure = try Data(contentsOf: guided.appendingPathComponent("host/selected-host.json"))
 check(savedBeforeFailure == savedAfterFailure, "failed setup leaves working configuration intact")
-let (setupHost, setupDir) = try fixture("setup")
+let (setupHost, setupDir) = try fixture("setup", requesters: ["member-2"])
 let sourceRuntime = setupDir.appendingPathComponent("runtime.json")
 let runtimeSettings: [String: Any] = ["command": executable, "cwd": setupDir.path,
     "codexHome": root.appendingPathComponent("dedicated-profile").path,
@@ -132,6 +164,7 @@ try setupHost.connectMacTools(executable: URL(fileURLWithPath: executable), conn
 check((setupHost.snapshot()["macTools"] as? [String: String])?["mode"] == "approval_required", "observation selection reports input approval requirement")
 let setupSaved = setupDir.appendingPathComponent("managed/selected-host.json")
 let observedManifest = try RoomHostManifest.read(setupSaved)
+check(observedManifest.allowedRequesterIds == ["member-2"], "connecting Mac tools preserves directed requester consent")
 let observedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: observedManifest.runtimeConfig))) as! [String: Any]
 check((observedRuntime["macTools"] as? [String: Any])?["inputApproval"] as? String == "prompt", "observation setup does not approve input")
 check(observedRuntime["codexHome"] as? String == runtimeSettings["codexHome"] as? String, "dedicated provider profile preserved")
@@ -167,6 +200,9 @@ let restored = try LocalRoomHost(directory:dir.appendingPathComponent("managed")
 check(restored.snapshot()["configured"] as? Bool == true && restored.snapshot()["running"] as? Bool == false, "restores setup without automatic execution")
 try write(["origin":"https://fixture.invalid", "roomId":"fixture", "memberId":"agent", "token":"rotated-fixture-token"], dir.appendingPathComponent("connection/connection.json").path)
 try host.start()
+check(until { fm.fileExists(atPath: host.journalURL!.path + ".arguments") }, "legacy host launched")
+let legacyArguments = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: host.journalURL!.path + ".arguments"))) as! [String]
+check(legacyArguments == ["--watch", host.journalURL!.path, dir.appendingPathComponent("runtime.json").path], "absent allowlist preserves shared-ask launch arguments")
 check(host.snapshot()["running"] as? Bool == true, "same-identity token rotation remains startable")
 do { try host.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: true); check(false, "active configuration refused") }
 catch { print("PASS: active host configuration cannot change") }

@@ -23,6 +23,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
 import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { SKIPPED_RECHECK_MS } from "../server/agent-plugin-store.mjs";
 
 // Fake DNS so the dispatch-time SSRF guard re-validates without touching
@@ -47,8 +48,8 @@ function fixture(t) {
 function seatLinked(f, name) {
   const ownerKey = f.store.issueAccessKey(ROOM, "owner");
   const identity = f.store.identities.create(name);
-  f.store.identities.link(ownerKey, ROOM, {
-    identityId: identity.identityId, memberId: name, displayName: name, permissions: [],
+  linkWithProof(f.store, ownerKey, ROOM, identity, {
+    memberId: name, displayName: name, permissions: [],
   });
   return identity;
 }
@@ -169,8 +170,8 @@ test("dispatch re-check stays fail-closed for an identity seated in neither tabl
   // Seat the identity (link) and drain once the deferral expires: the
   // same pending row is delivered — fail-closed never meant dropped.
   const ownerKey = f.store.issueAccessKey(ROOM, "owner");
-  f.store.identities.link(ownerKey, ROOM, {
-    identityId: stranger.identityId, memberId: "dispatch-late-seat", displayName: "dispatch-late-seat", permissions: [],
+  linkWithProof(f.store, ownerKey, ROOM, stranger, {
+    memberId: "dispatch-late-seat", displayName: "dispatch-late-seat", permissions: [],
   });
   const summary = await plugin.drainWebhookDeliveries({
     fetchImpl, now: T0 + SKIPPED_RECHECK_MS, dnsResolvers: publicDns,
