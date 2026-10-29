@@ -14,7 +14,7 @@ This is the full captured inventory, not a priority shortlist. Existing source r
 4. Attach owner, dependencies, implementation status, exact revision and acceptance evidence as each item is triaged. The current JSON deliberately does not fabricate unknown owners or dependency graphs.
 5. Distinguish proposal, required work, locally qualified, integrated, deployed and verified. A closed issue, merged PR or green unrelated test is not sufficient completion evidence.
 6. Refresh moving inventories and compare changes. Require a disposition for every source obligation; report unread sources, orphaned tasks and unmet acceptance conditions.
-7. Execute B00–B09 from the build-to-completion plan. Newly discovered scope changes that plan through explicit dependency and acceptance updates; it does not erase prior work.
+7. Select execution through the [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). B00–B09 are historical package mappings, not a competing mandatory sequence. Reconcile newly discovered obligations into the retained outcomes with dependency, acceptance and supersession evidence; do not erase prior work.
 8. Complete a task only with evidence; retain superseded/cancelled IDs and the linked replacement or explicit decision.
 
 ## Coverage and limitations
@@ -477,7 +477,7 @@ Acceptance: Exact integrated artifacts pass supported suites and recovery drills
 - [ ] **OPS-09** — Rehearse disaster recovery, credential reissue and first-tick validation; measure RPO/RTO and user impact.
 - [ ] **OPS-10** — Provide operator status for deployment, jobs, backup freshness, integrity, queue health and actionable failures.
 - [ ] **OPS-11** — Define error budgets, alerts and incident ownership without creating noisy polling loops.
-- [ ] **OPS-12** — Publish only after current-session authorization; verify production journeys and running versions after any eventual release.
+- [ ] **OPS-12** — Use existing authorization and serialized deployment; verify production journeys and running versions after release. The historical per-session approval restriction is superseded by standing authorization.
 - [ ] **OPS-13** — Retire compatibility paths, obsolete tables, unused workers, duplicate docs and dead tests only after evidence permits removal.
 - [ ] **OPS-14** — Close backlog items with exact implementation and acceptance evidence; distinguish local, main and production completion.
 
