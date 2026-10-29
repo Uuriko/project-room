@@ -325,15 +325,11 @@ test('snapshot labels update duplicates while preserving focus and selection, an
   assert.deepEqual(errors, []);
 });
 
-// QA-2026-10-07: measurable regression target for the unbounded renderMessages
-// finding. Keep opt-in while the renderer is unwindowed; remove the gate when
-// the fix lands. Workload retains 2,000 total history records and about 1.7 MB
-// of body text, including ten patch-dump-sized messages.
+// Initial root-timeline DOM budget, with 2,000 retained history records and
+// about 1.7 MB of body text including ten patch-dump-sized messages. This
+// checks initial rendering, not a permanent bound after paging or opening threads.
 test('large room history completes initial render with a bounded live message DOM', {
-  timeout: 90000,
-  skip: process.env.ROOM_ENABLE_RENDER_WINDOW_REGRESSION !== '1'
-    ? 'TODO(QA-2026-10-07): enable when renderMessages windowing lands; finding: unbounded full-room DOM render.'
-    : false
+  timeout: 90000
 }, async t => {
   const directory = mkdtempSync(join(tmpdir(), 'project-room-render-window-'));
   const store = new RoomStore(join(directory, 'room.sqlite'));
