@@ -497,7 +497,7 @@ test("replacement reads are one-hop navigation, preserve history, and omit targe
   f.send("owner", T.WORK_SUPERSEDED, { workItemId: "test-handoff", supersededByWorkItemId: "replacement-one", reason: "Changed direction" });
   const before = f.store.snapshot(f.keys.owner, "commons");
   const old = await f.client("producer").workContext("test-handoff");
-  assert.deepEqual(old.next.replacement, { status: "available", workItemId: "replacement-one", nextRead: { tool: "room_read_work", arguments: { roomId: "commons", workItemId: "replacement-one" } } });
+  assert.deepEqual(old.next.replacement, { status: "available", workItemId: "replacement-one", nextRead: { tool: "room_read_work", arguments: { workItemId: "replacement-one" } } });
   assert.equal(old.work.id, "test-handoff");
   assert.equal(old.work.state, "superseded");
   assert.ok(!JSON.stringify(old).includes("REPLACEMENT-"), "old read does not hydrate target content");

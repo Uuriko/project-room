@@ -100,13 +100,13 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   const source = { status: !includeSource ? "not_requested" : !item.sourceMessageId ? "not_linked" : message ? "included" : "unavailable",
     message: message ? pick(message, "id authorId body createdAt") : null };
   const next = nextWorkStep(item, now, state.room.ownerId);
-  // One link, not recursive traversal or target-content hydration. Work is
+  // One link, not recursive traversal or target-content delivery. Work is
   // room-visible; the subsequent selected read rechecks membership and source privacy.
   const replacementId = item.supersededBy;
   if (next.action === "superseded" && typeof replacementId === "string" && replacementId !== item.id) {
     const available = replacementAvailable ?? Object.hasOwn(state.workItems, replacementId);
     next.replacement = { status: available ? "available" : "unavailable", workItemId: replacementId,
-      nextRead: available ? { tool: "room_read_work", arguments: { roomId: state.room.id, workItemId: replacementId } } : null };
+      nextRead: available ? { tool: "room_read_work", arguments: { workItemId: replacementId } } : null };
   }
   const offers = includeOffers ? workOffersContext(state, workItemId, viewerId, new Date(now).toISOString()) : null;
   const participantIds = new Set([viewerId, item.accountableMemberId, item.verifierMemberId, item.humanDecisionMakerId,

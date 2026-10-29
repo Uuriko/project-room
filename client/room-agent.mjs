@@ -765,7 +765,7 @@ export class RoomAgentClient {
     }
     if (Object.hasOwn(result.next, "replacement")) {
       const link = result.next.replacement;
-      const expectedRead = { tool: "room_read_work", arguments: { roomId: this.#roomId, workItemId: result.work.supersededBy } };
+      const expectedRead = { tool: "room_read_work", arguments: { workItemId: result.work.supersededBy } };
       if (!link || result.next.action !== "superseded" || !validId(link.workItemId) || link.workItemId === workItemId
         || link.workItemId !== result.work.supersededBy || !["available", "unavailable"].includes(link.status)
         || (link.status === "available" ? !isDeepStrictEqual(link.nextRead, expectedRead) : link.nextRead !== null))
