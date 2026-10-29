@@ -160,6 +160,8 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/.well-known/mcp", ["GET"], "none", "Hosted MCP server card (alias).", "getMcpWellKnown"),
   route("/.well-known/mcp.json", ["GET"], "none", "Hosted MCP server card.", "getMcpJson"),
   route("/.well-known/governance.json", ["GET"], "none", "Machine-readable governance policy.", "getGovernance"),
+  route("/.well-known/agent-skills/index.json", ["GET"], "none", "Agent-skills discovery index: the skills this origin serves.", "getAgentSkillsIndex"),
+  route("/.well-known/agent-skills/connect/SKILL.md", ["GET"], "none", "Connect skill: redeem an invite code, heartbeat, hold the wake poll, say hello.", "getConnectSkill"),
   route("/openapi.json", ["GET"], "none", "This document: generated OpenAPI 3.1 route inventory.", "getOpenApi"),
   route("/api/health", ["GET"], "none", "Liveness and deployed revision.", "getHealth"),
   route("/api/pair", ["GET", "POST"], "none", "Start agent pairing. A proved key or a valid room credential reconnects the existing member.", "startPair",
