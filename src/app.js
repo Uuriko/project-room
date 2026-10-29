@@ -674,7 +674,7 @@ const client = new RoomClient({
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
-      : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
+      : switchedAccount ? "Your session changed. Private drafts were cleared. Refresh to reconnect, or sign in again."
         : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
@@ -4241,7 +4241,16 @@ $("#refresh-button").addEventListener("click", async () => {
         const account = await ensureAccountSession();
         if (!account?.authenticated) throw Object.assign(new Error("Account sign-in required"), { status: 401 });
         await client.restore(requestedRoom);
-      } else await client.restore();
+      } else {
+        // Account-home recovery must confirm the browser's current account,
+        // not retry a room cookie that this screen does not own.
+        const account = await accountClient.restore();
+        if (operationId !== refreshOperationId || !account) return;
+        if (account.authenticated) {
+          setFormStatus($("#auth-error"), "");
+          showAccountWorkspace();
+        } else await client.restore();
+      }
     }
     else {
       await client.refresh();

@@ -51,3 +51,34 @@ for (const width of [390, 1280]) test(`room-only workspace ${width}: no email su
     assert.equal(response.status, 404, path);
   }
 });
+
+test("account-home session replacement clears old rooms and refresh restores the current account", { timeout: 30000 }, async t => {
+  const f = createAcceptanceFixture(), server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => {
+    await browser.close(); server.closeStreams(); server.closeAllConnections();
+    await new Promise(resolve => server.close(resolve)); f.store.close(); rmSync(f.directory, { recursive: true, force: true });
+  });
+  const page = await browser.newPage(); page.setDefaultTimeout(10000);
+  const key = f.store.issueAccountAccessKey(f.store.accountForMember("commons", "owner").id);
+  await page.goto(origin + "/?account=1"); await signInFixture(page, key);
+  await page.locator('[data-account-room="commons"]').waitFor();
+  // A completed sign-in in another tab replaces the browser slot while this
+  // tab still holds its previous binding. Use the real account HTTP contract.
+  const slot = await (await page.context().request.get(origin + "/api/account-session")).json();
+  const replaced = await page.context().request.post(origin + "/api/account-session", {
+    headers: { Origin: origin, "X-CSRF-Token": slot.csrf, "X-Session-Binding": slot.sessionBinding },
+    data: { accountAccessKey: key, expectedSessionRevision: slot.sessionRevision }
+  });
+  assert.equal(replaced.status(), 201);
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await page.locator("#auth-error").filter({ hasText: /(?:session|browser account) changed/i }).waitFor();
+  assert.equal(await page.locator("#account-rooms-panel").isVisible(), false);
+  assert.equal(await page.locator('[data-account-room]').count(), 0);
+  await page.locator("#refresh-button").click();
+  await page.locator('[data-account-room="commons"]').waitFor();
+  assert.equal(await page.locator("#auth-panel").isVisible(), false);
+  assert.equal(await page.locator("#auth-error").textContent(), "");
+});
