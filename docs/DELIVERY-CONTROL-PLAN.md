@@ -1,6 +1,6 @@
 # Delivery control: implementation plan
 
-Updated 2026-10-28 (America/Los_Angeles). This is the implementation plan for
+Updated 2026-10-29 UTC. This is the implementation plan for
 Project Room owning its development and maintenance workflow. It complements
 [the product architecture plan](ARCHITECTURE-EXECUTION-PLAN.md); it does not
 replace that backlog or make its unfinished work complete.
@@ -21,7 +21,11 @@ passed at 56/35 ms; independent verification passed at 94/102 ms, with stable
 source before and after. The downloaded [runtime package](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-2b1d3ff)
 matched the qualified source and was confirmed latest. The deployment claim
 was released. These are point-in-time checks; [incident #5177 remains open](https://github.com/Uuriko/project-room/issues/5177#issuecomment-6490096702)
-for a bounded follow-up comparison, not an indefinite rerun-until-green loop.
+after the bounded follow-up comparison; this was not a rerun-until-green loop.
+The completed 20-cycle observation returned 40/40 readiness responses with HTTP
+200, with all observed versions still `2b1d3ff`. Canonical/entry elapsed-time
+medians were 108/144 ms, p95 713/519 ms, and maxima 773/831 ms. This limited
+observation does not establish a permanent readiness cure or close the incident.
 
 Earlier release [40824263799](https://github.com/Uuriko/project-room/actions/runs/40824263799)
 deployed `2d72bb7ffaf911ffa7801113de55e9130e208734`. Both entry points reported
@@ -93,10 +97,22 @@ same pinned-source native-host guard tests: 10 passed on each, but the peer ran
 them manually and its native receiver was stopped. The manual run does not
 populate the native request journal; the original request was answered with
 the retained result and independently read back as closed, without rerunning.
-The peer receiver was configured for legacy watch mode, and its installed
-request-selection support was absent from main. Reconcile that source divergence
-and configure directed mode before a fresh native trial; do not replace the
-installed watcher with a build that loses its selection or recovery behavior.
+The peer receiver was configured for legacy watch mode. Selected-request support
+([#5226](https://github.com/Uuriko/project-room/pull/5226)), cancellation recovery
+([#5227](https://github.com/Uuriko/project-room/pull/5227)), and native selection
+([#5229](https://github.com/Uuriko/project-room/pull/5229)) are now merged through
+`46321313bfff5de23ccfb87e4957ef109668494e`. Cancellation qualification passed
+81 checks with one Linux-only skip; an independent cancellation/restart check
+observed one delivery POST across restart. Swift acceptance passed 110 assertions
+using a fake-node fixture, not a live model.
+
+An actual native app was built from a clean checkout of that exact merged source,
+with 52 runtime files; ad-hoc signing and deep strict signature verification
+passed. This is build and provenance evidence, not installed or actively running
+receiver evidence. Reconcile the installed selection and consent configuration,
+then run a fresh directed request through native execution, saved journal and
+interrupted-delivery recovery. Preserve selection and recovery behavior when
+updating the installed watcher. Do not replay the already-answered manual trial.
 The original stopped process's exit cause remains unknown. Inventory existing
 host journals, directed requests and saved results before extending scheduling.
 A protocol fixture or an independently run remote command is not evidence of
@@ -110,6 +126,26 @@ process passed. The connector configuration now points to the verified runtime,
 but the existing chat process has not reloaded, so active-tool adoption is not
 yet proved. Identity files, journals and the native app were left intact.
 Treat installed, configured and actively loaded revisions as separate evidence.
+
+The stream-handover oracle correction
+([#5214](https://github.com/Uuriko/project-room/pull/5214)) preserves the original
+failure and verifies contiguous events, horizon and final content without
+requiring an unnecessary snapshot GET. Its 18 checks include lost-event and
+incorrect-content controls; this is an oracle correction, not a runtime fix.
+The handoff and timeline test-debt fixes
+([#5181](https://github.com/Uuriko/project-room/pull/5181),
+[#5182](https://github.com/Uuriko/project-room/pull/5182)) are merged; duplicate
+[#5230](https://github.com/Uuriko/project-room/pull/5230) was closed.
+
+Private maintainer receipts retain the original failures and exact evidence:
+`release-prep-20261029/execution-checkpoint.json`,
+`readiness-bounded-2b1-summary.json`, `native-selected-build-receipt.json`,
+`PR5229-SWIFT-REVIEW.json`, and `stream-failing-grok-22418.json` (the latter four
+under the same evidence directory). These are local evidence references, not
+public download links; do not publish private logs or identity material.
+Inventory reconciliation remains bounded: ten of 104 bundle dispositions have
+been reviewed in the first pass. This checkpoint does not complete the remaining
+94 decisions or establish incorporation of every historical requirement.
 
 ## Reuse and ownership
 
@@ -142,8 +178,9 @@ only place the evidence exists.
    origins and Worker/application version endpoints, readiness and signed cards.
 4. Run authenticated agent and essential human journeys separately from public
    smoke. Record scope honestly; public health is not sign-in verification.
-5. Publish only the matching artifact. Keep #5177 and the stream-recovery flake
-   open until reproductions and fixes support closure.
+5. Publish only the matching artifact. Keep #5177 open until evidence supports
+   closure; retain the original stream failure alongside the qualified oracle
+   correction without implying an unproved runtime repair.
 
 Exit: a named production revision with distinct deployment, verification and
 publication evidence, plus explicit remaining incidents. No platform feature is
