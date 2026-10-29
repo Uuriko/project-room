@@ -606,3 +606,57 @@ test("selected archived reply context does not refetch every message in ID batch
   assert.deepEqual(after.page, before.page);
   assert.deepEqual(after.responseActions, before.responseActions);
 });
+
+test("selected archived context keeps unrelated body text out of SQL result materialization", t => {
+  const secret = "unselected-archive-body-" + "x".repeat(2000);
+  const f = fixture(t, Array.from({ length: 300 }, (_, i) => event({
+    roomId: "commons", actorId: "owner", type: "message.posted",
+    data: { messageId: `body-history-${i}`, body: secret }
+  })));
+  const q = f.open();
+  f.post("guest", { body: "Selected clarification", replyToId: q.command.data.messageId, toMemberId: "agent" });
+  const before = f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* certify archive */ }
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 1, dryRun: false }).ok, true);
+  const prepare = f.store.db.prepare.bind(f.store.db);
+  f.store.db.prepare = sql => {
+    const statement = prepare(sql);
+    if (!sql.includes("FROM messages")) return statement;
+    return new Proxy(statement, { get(target, key) {
+      const value = Reflect.get(target, key, target);
+      if (typeof value !== "function") return value;
+      return (...args) => {
+        const result = value.apply(target, args);
+        if (key === "all" || key === "get") assert.ok(!JSON.stringify(result)?.includes(secret), "unrelated archive bodies must not cross SQL result boundary");
+        return result;
+      };
+    } });
+  };
+  const after = f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  assert.deepEqual(after.page, before.page);
+  assert.deepEqual(after.preparation, before.preparation);
+  assert.deepEqual(after.responseActions, before.responseActions);
+});
+
+test("metadata context traversal preserves canonical corruption rejection outside the selected exchange", t => {
+  const f = fixture(t, [event({ roomId: "commons", actorId: "owner", type: "message.posted",
+    data: { messageId: "unrelated-corruption", body: "Unrelated" } })]);
+  const q = f.open();
+  while (!f.store.backfillMessages({ limit: 1000 }).done) { /* certify archive */ }
+  assert.equal(f.store.checkMessagesParity().ok, true);
+  assert.equal(f.store.archiveMessages("commons", { keepNewest: 1, dryRun: false }).ok, true);
+  const original = f.store.db.prepare("SELECT record_json FROM messages WHERE message_id=?").get("unrelated-corruption").record_json;
+  const record = JSON.parse(original);
+  const read = () => f.store.replyRequests.selected(f.keys.agent, "commons", q.command.data.messageId);
+  for (const invalid of ["{invalid", "null", "[]", "{id:'unrelated-corruption'}",
+    JSON.stringify({ ...record, id: "wrong-id" }), JSON.stringify({ ...record, authorId: "guest" }),
+    JSON.stringify({ ...record, createdAt: "wrong-time" })]) {
+    f.store.db.prepare("UPDATE messages SET record_json=? WHERE message_id=?").run(invalid, "unrelated-corruption");
+    assert.throws(read, undefined, "unrelated canonical corruption must still refuse the entire read");
+  }
+  f.store.db.prepare("UPDATE messages SET record_json=?,author_id=?,reply_to_id=? WHERE message_id=?")
+    .run(original, "guest", q.command.data.messageId, "unrelated-corruption");
+  assert.deepEqual(read().page.items.map(item => item.message.id), [q.command.data.messageId],
+    "denormalized ownership columns cannot override the canonical record");
+});
