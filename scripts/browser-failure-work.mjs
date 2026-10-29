@@ -61,8 +61,9 @@ export function buildBrowserFailureWork(options) {
   const byId = new Map();
   for (const item of parsed.cases) {
     const script = item.file;
-    if (!scriptPath(script) || !receipt.files.includes(script)) fail('Testcase is outside receipt/source root');
+    if (!scriptPath(script) || !tracked.has(script)) fail('Testcase is outside source root/revision');
     if (item.status !== 'failed') continue;
+    if (!receipt.files.includes(script)) fail('Failed imported testcase lacks receipt entrypoint membership');
     if (!item.name || item.name.length > 512 || /[\u0000-\u001f\u007f]/.test(item.name)) fail('Invalid failed testcase name');
     const id = `browser-failure-${hash(JSON.stringify([repo.toLowerCase(), revision, script, item.name])).slice(0, 40)}`;
     const args = { requestId: `${id}-propose`, workItemId: id,

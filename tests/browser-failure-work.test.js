@@ -85,3 +85,20 @@ test('repository is part of dedup identity, not merely revision and test name', 
   const second = buildBrowserFailureWork({ ...f.options, repo: 'other/room' });
   assert.notEqual(first.failures[0].id, second.failures[0].id);
 });
+
+
+test('tracked imported passing cases are allowed but imported failures remain unsupported', t => {
+  const f = fixture(t);
+  writeFileSync(join(f.dir, 'scripts/helper.mjs'), '// imported tests');
+  const git = args => execFileSync('git', ['-C', f.dir, ...args], { encoding: 'utf8' }).trim();
+  git(['add', 'scripts/helper.mjs']); git(['commit', '-qm', 'helper']);
+  const revision = git(['rev-parse', 'HEAD']), tree = git(['rev-parse', 'HEAD^{tree}']);
+  const options = { ...f.options, revision, tree };
+  const combine = failed => f.xml().replace('</testsuites>', '') + f.xml('imported', '/producer/private-checkout/scripts/helper.mjs', failed).replace('<testsuites>', '');
+  f.save({ ...f.receipt, revision }, combine(false));
+  assert.equal(buildBrowserFailureWork(options).failures.length, 1);
+  f.save({ ...f.receipt, revision }, combine(true));
+  assert.throws(() => buildBrowserFailureWork(options), /Failed imported testcase/);
+  f.save({ ...f.receipt, revision }, combine(false).replace('scripts/helper.mjs', 'scripts/untracked.mjs'));
+  assert.throws(() => buildBrowserFailureWork(options), /outside source root/);
+});
