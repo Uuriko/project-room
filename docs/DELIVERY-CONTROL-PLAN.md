@@ -12,6 +12,40 @@ to do next without reconstructing chat history. A disconnected laptop resumes
 useful work without duplicating a deployment. Each production change has an
 inspectable chain from intent to tested source, artifact, deployment and outcome.
 
+### Current release execution — 2026-10-29, after 18:00 UTC
+
+John authorized completion of the qualified release, final-source Graphify
+activation, a real development-loop exercise, and bounded laptop handoff work.
+The frozen 2457 candidate remains unchanged for evidence comparison. The isolated
+`codex/release-final-1029` composes it with #5286, #5287, #5288, #5290, #5291 and
+this plan. Merge and deployment are still distinct outcomes until recorded below.
+
+The complete two-Mac browser run returned 743 passes, four failures and one skip.
+Two journey failures are fixed by #5288; #5287 enables the initial-history test.
+Canonical Linux run 40926149787 passed visual shard 4 including its negative
+control, without baseline changes. Other canonical failures: journey shard 2
+(the known fixture issue), manual lint missing base history (fixed by #5291),
+and stale generated wiki data (regenerated in the final composition). Canonical
+coverage/unit jobs were still running at this checkpoint. Passing visual tests
+are not retained screenshot evidence for every surface.
+
+#5290 provides explicit failure intake, fixed-source local reproduction and
+work/request/evidence linkage; 23 tests pass including actual subprocess and
+lost-acknowledgement paths. Actual frozen-source Chromium reproduced the known
+journey failure. It was not submitted as duplicate live work after its fix.
+A bounded native selected-request runner is separate work, not yet released.
+
+Read-only stored logs identify parity failure in room `build-together-32f67587`
+at 16:00:39 UTC with three outstanding failures. Exact mismatch details still
+require existing operator access; no data repair is justified by the public
+summary. Patrol's historical claim error is separate. Graphify remains hosted
+at an older revision pending exact final-source publication and REST/MCP checks;
+its server-only truncated map is not repository-wide coverage.
+
+Earlier checkpoints below are historical, including their pending-results and
+preparation-only statements. Preserve original receipts rather than rewriting
+failed attempts as passes.
+
 ### Evidence checkpoint: 2026-10-29 UTC
 
 ### Preparation candidate frozen — 2026-10-29, after 17:13 UTC
