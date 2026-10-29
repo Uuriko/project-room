@@ -143,8 +143,8 @@ export function isValidPublicKey(publicKey) {
   catch { return false; }
 }
 
-// Generate a fresh Ed25519 key pair. The private seed must be stored by the
-// caller; it is never returned by any read path.
+// Generate a fresh Ed25519 key pair. Identity mint returns the private seed
+// once on the create response and does not persist it. No read path returns it.
 export function generateKeyPair() {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519");
   return {
