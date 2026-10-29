@@ -454,8 +454,10 @@ jobs:
             echo "Release ${TAG} already exists; target and asset verified before marking latest."
             exit 0
           fi
+          python3 scripts/verify-runtime-release.py --preflight-archive "$RUNNER_TEMP/project-room-runtime.tar.gz" \
+            --sha "$SHA" --expected "$RUNNER_TEMP/project-room-runtime"
           gh release create "$TAG" \
-            "$RUNNER_TEMP/project-room-runtime.tar.gz#project-room-runtime.tar.gz" \
+            "$RUNNER_TEMP/project-room-runtime.tar.gz" \
             --repo "$GITHUB_REPOSITORY" \
             --target "$SHA" \
             --title "$TAG" \
