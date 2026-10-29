@@ -10,7 +10,7 @@ Active scope: [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). It explicit
 
 Release execution: [integration, recovery and simulated acceptance](RELEASE-ACCEPTANCE-EXECUTION-20261018.md), then the [cross-platform release campaign](CROSS-PLATFORM-RELEASE-PLAN-20261018.md).
 
-Delivery tooling: [release records, integration queue, laptop execution and production feedback](DELIVERY-CONTROL-PLAN.md). This plan extends existing tools; implementation and production status remain separate.
+Delivery tooling: [release records, integration queue, laptop execution and production feedback](DELIVERY-CONTROL-PLAN.md). This plan extends existing tools; implementation and production status remain separate. [Release records](RELEASE-RECORD.md) describe importing and validating evidence from verification attempts.
 
 Planning: [total Project Room backlog](PROJECT-ROOM-TOTAL-BACKLOG.md) — source coverage, execution tasks, all brainstorm proposals, native acceptance checks, and captured open issues/PRs.
 
