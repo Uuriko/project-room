@@ -14,12 +14,30 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
-Current release [40831070575](https://github.com/Uuriko/project-room/actions/runs/40831070575)
+Current integrated release
+[40837088951](https://github.com/Uuriko/project-room/actions/runs/40837088951)
+succeeded on `0faa43b83225ab59f4a7cbaba9fe294b22b40def`, tree
+`cbecffa8755d4502375c65108bb545e20da656fc`. All four version endpoints,
+authenticated identity and scoped Board reads passed. Independent strict and
+live verification passed with stable source before and after: readiness was
+62/68 ms and live-smoke p95 was 286 ms. The
+[runtime package](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-0faa43b)
+was independently downloaded and confirmed latest: 631 archive files against
+630 source files, archive SHA-256
+`39ebc423dc2661c54361dfdf9d4f7ba4a7cd684ad394082858ca357cb90d95d4`.
+The deployment claim was released and read back as unclaimed at
+2026-10-29T07:50:15.919Z. These receipts establish a verified release checkpoint,
+not a permanent readiness cure or completion of the remaining architectural work.
+Private evidence is retained under `release-prep-20261029/` in
+`integrated-verification/verify-tIAQwA/receipt.json`,
+`integrated-runtime-publication.json` and `integrated-release-claim.json`.
+
+Previous release [40831070575](https://github.com/Uuriko/project-room/actions/runs/40831070575)
 deployed `2b1d3ff2713d8091dbbe220b097fc47fff8b3a41`. Four version endpoints,
 authenticated identity and scoped Board reads passed. Workflow readiness
 passed at 56/35 ms; independent verification passed at 94/102 ms, with stable
 source before and after. The downloaded [runtime package](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-2b1d3ff)
-matched the qualified source and was confirmed latest. The deployment claim
+matched the qualified source and was confirmed latest at that checkpoint. The deployment claim
 was released. These are point-in-time checks; [incident #5177 remains open](https://github.com/Uuriko/project-room/issues/5177#issuecomment-6490096702)
 after the bounded follow-up comparison; this was not a rerun-until-green loop.
 The completed 20-cycle observation returned 40/40 readiness responses with HTTP
@@ -77,7 +95,12 @@ The SDK Board read (#5221) now uses the shared authenticated Board service,
 preserving legacy credentials, halts, session binding and read-only claims.
 Runtime dependency completeness and service/HTTP/MCP parity were repaired in
 #5225 before publication. The production Board read passed with the expected
-viewer and revision; default orientation still needs separate work.
+viewer and revision. The SDK selected work-packet improvement
+([#5232](https://github.com/Uuriko/project-room/pull/5232)) is now deployed in
+`0faa43b`. The server selected work-context follow-up
+([#5235](https://github.com/Uuriko/project-room/pull/5235)) is a draft next
+candidate, **not deployed**; its 85 passing tests are peer-reported qualification.
+Default orientation still needs separate work.
 
 Remaining read debt includes global reply-context metadata/event scans,
 retained-message processing, default orientation call chains,
