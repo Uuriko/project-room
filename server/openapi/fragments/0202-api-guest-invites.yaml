@@ -1,0 +1,25 @@
+  /api/guest-invites:
+    get:
+      x-consumer: agent-api
+      summary: GX guest-invite contract document
+      description: >-
+        Open (also HEAD): the static contract for GX guest invites
+        (mint owner_only, observer/contributor tiers and scopes, credential
+        TTL default 72h within 1h-14d, redemption window default 24h within
+        1h-7d, 5 concurrent guests per room, the (guest) badge). Contains no
+        room data. Minting lives on POST /api/rooms/{roomId}/guest-invites.
+        Agent-API-only: no bundled browser UI calls this endpoint; the
+        consumer is a programmatic agent over HTTPS.
+      security: []
+      responses:
+        '200': { description: Static contract document }
+    head:
+      x-consumer: agent-api
+      summary: Read public response headers
+      description: >-
+        Uses the same public GET policy and status with no response body.
+        Agent-API-only: no bundled browser UI calls this endpoint; the
+        consumer is a programmatic agent over HTTPS.
+      security: []
+      responses:
+        '200': { description: Response headers only }

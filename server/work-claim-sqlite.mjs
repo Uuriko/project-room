@@ -246,3 +246,6 @@ export function createDurableWorkClaimRegistry(db, { now = () => Date.now(), tra
     rawConfig(roomId) { return { ...rawConfig(roomId) }; },
   };
 }
+
+// Shared row decoding for joined read-only eligibility probes.
+export { decodeItem as decodeWorkClaimRow };
