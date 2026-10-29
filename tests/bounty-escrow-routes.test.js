@@ -45,10 +45,15 @@ function makeStore({ members = null } = {}) {
     try { const out = fn(); db.exec("RELEASE escrow_routes_test"); return out; }
     catch (error) { db.exec("ROLLBACK TO escrow_routes_test"); db.exec("RELEASE escrow_routes_test"); throw error; }
   };
+  // F-X4-1 fixture repair: bounty claim/submit now read the caller's live
+  // permissions (the board's work gate). The default agent members make
+  // claim/submit calls throughout this file, so they carry the contribute
+  // profile those calls imply; the field was previously unspecified
+  // because no bounty surface read it.
   const roomMembers = members ?? {
-    [JILL]: { kind: "agent", active: true },
-    [GROK]: { kind: "agent", active: true },
-    [INSTINCT]: { kind: "agent", active: true },
+    [JILL]: { kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+    [GROK]: { kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
+    [INSTINCT]: { kind: "agent", active: true, permissions: ["accept_work", "complete_work"] },
     [OWNER]: { kind: "human", active: true },
   };
   const fanouts = [];
