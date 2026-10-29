@@ -185,7 +185,7 @@ do { _ = try LocalRoomHostSetup.save(selection(profile), directory: setups); che
 catch { check((error as? LocalToolFailure)?.code == "setup_private_folder_required", "nonprivate profile refused") }
 let savedAfterFailure = try Data(contentsOf: guided.appendingPathComponent("host/selected-host.json"))
 check(savedBeforeFailure == savedAfterFailure, "failed setup leaves working configuration intact")
-let (setupHost, setupDir) = try fixture("setup", requesters: ["member-2"])
+let (setupHost, setupDir) = try fixture("setup", requesters: ["member-2"], requests: ["reply.1"])
 let sourceRuntime = setupDir.appendingPathComponent("runtime.json")
 let runtimeSettings: [String: Any] = ["command": executable, "cwd": setupDir.path,
     "codexHome": root.appendingPathComponent("dedicated-profile").path,
@@ -199,6 +199,7 @@ check((setupHost.snapshot()["macTools"] as? [String: String])?["mode"] == "appro
 let setupSaved = setupDir.appendingPathComponent("managed/selected-host.json")
 let observedManifest = try RoomHostManifest.read(setupSaved)
 check(observedManifest.allowedRequesterIds == ["member-2"], "connecting Mac tools preserves directed requester consent")
+check(observedManifest.allowedRequestIds == ["reply.1"], "connecting Mac tools preserves selected requests")
 let observedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: observedManifest.runtimeConfig))) as! [String: Any]
 check((observedRuntime["macTools"] as? [String: Any])?["inputApproval"] as? String == "prompt", "observation setup does not approve input")
 check(observedRuntime["codexHome"] as? String == runtimeSettings["codexHome"] as? String, "dedicated provider profile preserved")
@@ -209,6 +210,7 @@ check((managedAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o600, "g
 try setupHost.connectMacTools(executable: URL(fileURLWithPath: executable), connection: nativeConnection, allowInput: true)
 check((setupHost.snapshot()["macTools"] as? [String: String])?["mode"] == "control", "control selection reports configured input exposure")
 let approvedManifest = try RoomHostManifest.read(setupSaved)
+check(approvedManifest.allowedRequestIds == ["reply.1"], "enabling Mac input preserves selected requests")
 let approvedRuntime = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: approvedManifest.runtimeConfig))) as! [String: Any]
 check((approvedRuntime["macTools"] as? [String: Any])?["inputApproval"] as? String == "approve", "explicit owner choice connects input")
 check(!fm.fileExists(atPath: observedManifest.runtimeConfig), "replaced generated runtime removed")
