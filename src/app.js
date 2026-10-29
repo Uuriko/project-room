@@ -1,3 +1,4 @@
+import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
@@ -333,7 +334,10 @@ function stashInviteForOAuth() {
 // invitation before the navigation, since the OAuth round-trip drops the
 // #invite/ fragment.
 { const googleButton = $("#google-signin");
-  if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
+  if (googleButton) googleButton.addEventListener("click", () => {
+    stashInviteForOAuth();
+    stashGoogleRoom(roomIdFromNext(new URLSearchParams(location.search).get("next")) || selectedRoomFromLocation());
+  }); }
 { const githubButton = $("#github-signin");
   if (githubButton) githubButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
@@ -543,6 +547,7 @@ const client = new RoomClient({
     const endedContext = accessEndContext;
     accessEndContext = null;
     const pendingSignout = signoutLoading;
+    if (pendingSignout) $("#google-signin").href = "/api/auth/google/start?switch=1";
     const keepAccount = !leavingPage && !pendingSignout && endedContext !== "account-switch" && accountClient.session?.authenticated;
     // E-H2: an unexpected access end (401/403 session expiry, not sign-out,
     // room/account switch, or page unload) must not destroy the in-flight
@@ -3897,6 +3902,8 @@ $("#invitation-email").addEventListener("click", () => {
 $("#invitation-google").addEventListener("click", event => {
   if (!confirmInvitationSignin() || !signinUI.canLeave()) { event.preventDefault(); return; }
   stashInviteForOAuth();
+  // Invitation account replacement is an explicit identity choice.
+  event.currentTarget.href = "/api/auth/google/start?switch=1";
 });
 $("#invitation-signin-back").addEventListener("click", () => {
   if (!signinUI.canLeave()) return;
@@ -4177,7 +4184,10 @@ $("#signout-button").addEventListener("click", async () => {
     try {
       const ended = await accountClient.logout();
       if (operation !== signoutOperationId) return;
-      if (ended || !accountClient.session) endAccountAccess();
+      if (ended || !accountClient.session) {
+        endAccountAccess();
+        $("#google-signin").href = "/api/auth/google/start?switch=1";
+      }
     } catch {
       if (operation !== signoutOperationId) return;
       if (!accountClient.session) {
@@ -7903,6 +7913,20 @@ const ready = (async () => {
     if (initialGoogleFailed) setFormStatus($("#join-link-status"), googleSigninFailureMessage, true);
     return;
   }
+  const googleReturned = new URLSearchParams(location.search).get("google") === "signed-in";
+  if (googleReturned) {
+    // This marker is navigation intent, never authentication. Restore the
+    // current account before using its remembered destination; server room
+    // restoration still checks membership for every target.
+    const account = await ensureAccountSession();
+    const explicitRoom = consumeGoogleRoom();
+    const remembered = account?.authenticated ? readMemberRoom(account.account.id)?.roomId : null;
+    const target = explicitRoom || remembered || selectedRoomFromLocation();
+    const next = new URL(location.href);
+    next.searchParams.delete("google");
+    if (target) { next.searchParams.set("room", target); next.searchParams.delete("account"); }
+    history.replaceState(history.state, "", next.pathname + next.search + next.hash);
+  }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom || accountHomeFromLocation() || new URLSearchParams(location.search).get("oauth") === "login") {
     // Join-flow sessions are room-cookie sessions with no account behind
@@ -7911,7 +7935,7 @@ const ready = (async () => {
     // cookie before the account gate, or a fresh joiner is stranded at the
     // sign-in panel despite holding a working session. A cookie for a
     // different room is dropped and the account flow decides as before.
-    if (requestedRoom && !accountHomeFromLocation()) {
+    if (requestedRoom && !accountHomeFromLocation() && !googleReturned) {
       try {
         const joined = await client.restore();
         if (joined?.roomId === requestedRoom) return;
