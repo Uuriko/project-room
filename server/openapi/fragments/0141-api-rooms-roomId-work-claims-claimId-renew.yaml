@@ -23,7 +23,7 @@
               type: object
               properties:
                 progressMessageId: { type: string }
-                leaseHours: { type: number }
+                leaseHours: { type: number, minimum: 0.25, maximum: 168 }
                 note: { type: string }
       responses:
         '200':

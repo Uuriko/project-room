@@ -222,8 +222,14 @@ function openApiResponse(request, url) {
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
 }
 
-function discoveryResponse(request, url) {
-  const doc = discoveryDoc(url.pathname);
+function discoveryResponse(request, env, url) {
+  // #3655: the llms packets describe the deployment that serves them. The
+  // edge must rebase them to the configured ROOM_ORIGIN exactly as the
+  // Durable Object's HTTP service does with its configured origin —
+  // otherwise /llms.txt (edge, canonical) and /room (DO, deployment origin)
+  // serve different bytes for the same packet on a non-production deploy.
+  // The origin comes from env, never from the caller-controlled Host.
+  const doc = discoveryDoc(url.pathname, env?.ROOM_ORIGIN);
   const headers = baseHeaders(url);
   headers.set('X-Robots-Tag', 'all');
   headers.set('Link', discoveryLinks(url));
@@ -318,7 +324,7 @@ export async function edgePublicResponse(request, env, url) {
   if (!kind) return null;
   if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
   if (kind === 'openapi') return openApiResponse(request, url);
-  if (kind === 'discovery') return discoveryResponse(request, url);
+  if (kind === 'discovery') return discoveryResponse(request, env, url);
   // #3274: POST / is 404 on Node (the app root is the SPA shell route, not a
   // method-guarded document) but the edge classified '/' as an asset and
   // answered 405. Decide it once, Node's way: 404 with the standard envelope,
