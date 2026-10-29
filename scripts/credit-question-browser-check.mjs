@@ -1,4 +1,4 @@
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, openSearch } from "./room-chrome.mjs";
 import { clickChrome } from "./room-chrome.mjs";
 // Simulated human browser + real scripted MCP subprocess. No external AI inference.
 import test from "node:test";
@@ -47,6 +47,12 @@ for (const mobile of [false, true]) test(`credit question ${mobile ? "mobile" : 
   const input = page.locator("#message-input"), card = page.locator('[data-work-record-id="' + workId + '"]');
   const openWork = async () => {
     if (await page.locator('#thread-back').isVisible()) await page.locator('#thread-back').click();
+    if (!await card.count()) {
+      await openSearch(page);
+      await page.locator('#message-search').fill('A welcome for people who just want to begin');
+      await page.locator('#search-list [data-open-work]').filter({ hasText: 'A welcome for people who just want to begin' }).click();
+      await card.waitFor({ state: 'visible' });
+    }
     if (!await card.locator('.work-details').evaluate(node => node.open)) await card.locator('.work-details > summary').click();
   };
   await input.fill("Keep ordinary room writing.");
