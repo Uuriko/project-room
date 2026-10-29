@@ -1,5 +1,6 @@
 // One authorized read boundary for agent pickup. This is an observation, never
 // a reservation or permission to execute. Reuse the existing request semantics.
+import { observeSelectedRuns } from "../request-runs.mjs";
 import { ownMember } from "../../src/events.js";
 
 // The standing refusals requestRuns.apply checks before a claim
@@ -30,8 +31,7 @@ export function readAgentWork(ctx) {
       ctx.reject(422, 'invalid_request', 'This read does not accept filters');
     const { requests, evaluatedThrough } = ctx.store.replyRequests.list(selected.token, roomId,
       { direction: 'incoming', status: 'open', expectedSessionBinding: fence });
-    const knownRuns = requests.length ? ctx.store.requestRuns.list(selected.token, roomId, fence).runs : {};
-    const runs = Object.fromEntries(requests.filter(request => Object.hasOwn(knownRuns, request.id)).map(request => [request.id, knownRuns[request.id]]));
+    const runs = observeSelectedRuns(ctx.store, roomId, requests);
     const member = auth.member, state = ctx.store.room(roomId).state;
     const pause = ctx.store.wakeQueue.pauseStatus(roomId, member.id);
     const blockedBy = {};
