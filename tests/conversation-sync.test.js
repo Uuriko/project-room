@@ -1,3 +1,4 @@
+import { readConversation } from '../server/conversation-sync.mjs';
 import { createSquad } from "../server/squads.mjs";
 // Test gate: actual HTTP + SQLite protects viewer privacy, current-record
 // reconstruction and reset semantics. Existing full snapshot tests cannot
@@ -13,6 +14,7 @@ import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
 import { constants as sqlite } from 'node:sqlite';
 import { setTier } from '../server/autonomy-tiers.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function setup(t, indexed = false) {
   const directory = mkdtempSync(join(tmpdir(), 'conversation-sync-'));
@@ -90,7 +92,14 @@ test(`${indexed ? 'certified index' : 'projection fallback'}: bounded HTTP conve
 test(`${indexed ? 'certified index' : 'projection fallback'}: conversation payload stays bounded and malformed selections cannot widen it`, async t => {
   const f = await setup(t, indexed);
   for (let i = 0; i < 24; i++) f.post(`large-${i}`, 'x'.repeat(60000));
-  const full = await f.get({}, f.owner, '');
+  const previousFull = process.env.ROOM_SNAPSHOT_FULL_COMPAT;
+  process.env.ROOM_SNAPSHOT_FULL_COMPAT = "1";
+  let full;
+  try { full = await f.get({ full: "1" }, f.owner, ""); }
+  finally {
+    if (previousFull === undefined) delete process.env.ROOM_SNAPSHOT_FULL_COMPAT;
+    else process.env.ROOM_SNAPSHOT_FULL_COMPAT = previousFull;
+  }
   const page = await f.get({ limit: 100 });
   assert.equal(page.status, 200, JSON.stringify(page.value));
   assert.ok(page.value.messages.length < 24 && page.value.messages.length > 0);
@@ -270,8 +279,41 @@ for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'proj
   assert.equal((await f.get({ messageId: 'ambiguous-reply' }, alex)).value.addressing.explicitlyMentioned, false);
   assert.equal((await f.get({ messageId: 'complete-reply' }, alex)).value.addressing.explicitlyMentioned, true);
   const alias = f.store.identities.create('Global Helper');
-  f.store.identities.link(f.owner, 'commons', { identityId: alias.identityId, memberId: 'local-helper', displayName: 'Local helper', permissions: [] });
+  linkWithProof(f.store, f.owner, 'commons', alias, { memberId: 'local-helper', displayName: 'Local helper', permissions: [] });
   f.post('alias-reply', '@Global Helper inspect this', { replyToId: 'topic' });
   assert.equal((await f.get({ messageId: 'alias-reply' }, alias.secret)).value.addressing.explicitlyMentioned, true);
   assert.equal(Object.hasOwn((await f.get({ limit: 10 }, f.alice)).value, 'addressing'), false);
+});
+
+for (const indexed of [false, true]) test(`${indexed ? 'certified index' : 'projection fallback'}: cold selected mentions use fresh roster without room hydration`, async t => {
+  const f = await setup(t);
+  createSquad(f.store, f.owner, 'commons', { name: 'helpers', memberIds: ['alice'] });
+  for (const [id, displayName] of [['alex-one', 'Alex Smith'], ['alex-two', 'Alex Jones']])
+    f.command(f.owner, 'member.added', { memberId: id, displayName, kind: 'agent', permissions: [] });
+  const alex = f.store.issueAccessKey('commons', 'alex-one');
+  const alias = f.store.identities.create('Global Helper');
+  linkWithProof(f.store, f.owner, 'commons', alias, { memberId: 'local-helper', displayName: 'Local helper', permissions: [] });
+  for (const [id, body] of [['direct', '@alice inspect'], ['squad', '@squad/helpers inspect'],
+    ['ambiguous', '@Alex inspect'], ['named', '@Alex Smith inspect'], ['alias', '@Global Helper inspect']]) f.post(id, body);
+  f.post('private', '@alice private', { toMemberId: 'bob' });
+  if (indexed) {
+    while (!f.store.backfillMessages({ limit: 1000 }).done) { /* certify before the cold read */ }
+    f.store.checkMessagesParity();
+  }
+  await f.restart();
+  let hydrationCalls = 0;
+  const read = (messageId, token) => {
+    const spy = t.mock.method(f.store, 'room', () => { hydrationCalls++; throw new Error('Selected roster must not hydrate the room'); });
+    try { return readConversation(f.store, token, 'commons', { messageId }); }
+    finally { spy.mock.restore(); }
+  };
+  for (const [id, token, expected] of [['direct', f.alice, true], ['direct', f.bob, false],
+    ['squad', f.alice, true], ['squad', f.bob, false], ['ambiguous', alex, false],
+    ['named', alex, true], ['alias', alias.secret, true], ['private', f.bob, false]])
+    assert.equal(read(id, token).addressing.explicitlyMentioned, expected, id);
+  assert.throws(() => read('private', f.alice), error => error.status === 404);
+  f.command(f.owner, 'member.access_changed', { memberId: 'alice', expectedMemberRevision: 0,
+    active: false, permissions: ['steer', 'accept_work'] });
+  assert.throws(() => read('direct', f.alice), error => error.status === 401);
+  assert.equal(hydrationCalls, 0);
 });

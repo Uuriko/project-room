@@ -63,12 +63,15 @@ const clip = text => {
 // the whole Board to learn what a listed claim is about. Source order: the
 // first acceptance criterion (what "done" looks like), else the newest
 // history note (create / finish / review notes ride the claim's history).
-const claimSnippet = claim => {
+export const claimSnippet = claim => {
   const criteria = Array.isArray(claim?.acceptanceCriteria) ? claim.acceptanceCriteria : [];
   const criterion = criteria.find(entry => typeof entry === "string" && entry.trim());
   if (criterion) return clip(criterion);
   const history = Array.isArray(claim?.history) ? claim.history : [];
   for (let index = history.length - 1; index >= 0; index -= 1) {
+    // Machine receipts (retention_ack's "retention-ack seen=1 …") are not
+    // a human summary; skip them so the snippet never shows internal keys.
+    if (history[index]?.action === "retention_ack") continue;
     const note = history[index]?.note;
     if (typeof note === "string" && note.trim()) return clip(note);
   }
@@ -361,14 +364,16 @@ export function roomAttention(store, roomId, memberId, identityId, after) {
   if (!member || member.active === false) return [];
   if (!(authority.sequence > after)) return [];
   const state = store.room(roomId).state;
-  let through = mentionHorizon(store, roomId, memberId, after, sessionWatermark(after, authority.sequence));
+  const floor = store.historyFloor(roomId, memberId, authority.sequence);
+  const messageAfter = Math.max(after, floor ? floor.sequence - 1 : 0);
+  let through = mentionHorizon(store, roomId, memberId, messageAfter, sessionWatermark(after, authority.sequence));
   const pendingBonds = identityId ? store.bonds.pendingProposalsFor(identityId) : [];
   const kinds = [
-    mentionsOf(store, roomId, memberId, after, through),
-    roomDmsOf(store, roomId, memberId, after, state),
+    mentionsOf(store, roomId, memberId, messageAfter, through),
+    roomDmsOf(store, roomId, memberId, messageAfter, state),
     peerDmsOf(store, roomId, identityId, after),
     bondRequestsOf(store, roomId, pendingBonds, after),
-    directAsksOf(store, roomId, memberId, after, state),
+    directAsksOf(store, roomId, memberId, messageAfter, state),
     handoffsOf(store, roomId, memberId, after, state)
   ];
   const candidates = [];
@@ -625,7 +630,7 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
-export function collectNeedsMe(store, secret, { since } = {}) {
+export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null } = {}) {
   let identity = null;
   let allowedRooms = null;
   if (typeof secret === "string" && secret.startsWith("rak_")) {
@@ -641,13 +646,17 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   }
   if (!identity) fail(401, "unauthenticated", "Unknown or revoked identity secret");
   const parsed = parseNeedsMeSince(since);
+  if (scopedRoom !== null && (typeof scopedRoom !== "string" || !scopedRoom))
+    fail(422, "invalid_room", "roomId must be a non-empty string");
+  if (scopedRoom !== null && allowedRooms && !allowedRooms.includes(scopedRoom))
+    fail(403, "insufficient_scope", "This key is limited to its room");
   // Seats come from the shared resolver (#3882): identity_links plus
   // guest_members trial seats — a guest seat's room belongs in the inbox
   // with the same membership truth as everywhere else. archivedAt rides
   // from the rooms row; a seat whose room row is gone reads as archived
   // (the old INNER JOIN dropped it the same way).
   const seats = identityRoomSeats(store.db, identity.identityId,
-    { after: parsed.roomAfter ?? "", limit: MAX_ROOMS + 1 });
+    { after: scopedRoom === null ? parsed.roomAfter ?? "" : "", limit: MAX_ROOMS + 1 });
   const roomRows = seats.length ? store.db.prepare(
     `SELECT id, archived_at AS archivedAt FROM rooms WHERE id IN (${seats.map(() => "?").join(",")})`
   ).all(...seats.map(seat => seat.roomId)) : [];
@@ -655,7 +664,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const links = seats.map(seat => ({
     ...seat,
     archivedAt: archivedByRoom.has(seat.roomId) ? archivedByRoom.get(seat.roomId) : 1
-  }));
+  })).filter(link => scopedRoom === null || link.roomId === scopedRoom);
   const items = [];
   const rooms = { ...parsed.rooms };
   const land = { ...parsed.land };
@@ -667,7 +676,7 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   const myClaims = [];
   const actionsNeeded = [];
   let roomAfter = parsed.roomAfter ?? "";
-  let hasMore = links.length > MAX_ROOMS;
+  let hasMore = scopedRoom === null && links.length > MAX_ROOMS;
   for (const link of links.slice(0, MAX_ROOMS)) {
     if (allowedRooms && !allowedRooms.includes(link.roomId)) { roomAfter = link.roomId; continue; }
     if (link.archivedAt) { roomAfter = link.roomId; continue; }
@@ -693,17 +702,19 @@ export function collectNeedsMe(store, secret, { since } = {}) {
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.
     const after = Math.min(roomWatermark(parsed, link.roomId), authority.sequence);
+    const floor = store.historyFloor(link.roomId, link.memberId, authority.sequence);
+    const messageAfter = Math.max(after, floor ? floor.sequence - 1 : 0);
     const landAfter = landWatermark(parsed, link.roomId);
-    let through = mentionHorizon(store, link.roomId, link.memberId, after, sessionWatermark(after, authority.sequence));
+    let through = mentionHorizon(store, link.roomId, link.memberId, messageAfter, sessionWatermark(after, authority.sequence));
     let candidates = [];
     if (authority.sequence > after) {
       const state = store.room(link.roomId).state;
       const kinds = [
-        mentionsOf(store, link.roomId, link.memberId, after, through),
-        roomDmsOf(store, link.roomId, link.memberId, after, state),
+        mentionsOf(store, link.roomId, link.memberId, messageAfter, through),
+        roomDmsOf(store, link.roomId, link.memberId, messageAfter, state),
         peerDmsOf(store, link.roomId, identity.identityId, after),
         bondRequestsOf(store, link.roomId, pendingBonds, after),
-        directAsksOf(store, link.roomId, link.memberId, after, state),
+        directAsksOf(store, link.roomId, link.memberId, messageAfter, state),
         handoffsOf(store, link.roomId, link.memberId, after, state)
       ];
       for (const kind of kinds) {
@@ -746,7 +757,8 @@ export function collectNeedsMe(store, secret, { since } = {}) {
   // R327-1 (r6): tell a paused agent it is paused. Items stay readable (this
   // is a read surface) but carry paused:true; `paused` names each paused room
   // and who holds the pause.
-  const pausedRooms = store.agentHeartbeats?.pausedRoomsOf?.(identity.identityId)?.filter(p => !allowedRooms || allowedRooms.includes(p.roomId)) ?? [];
+  const pausedRooms = store.agentHeartbeats?.pausedRoomsOf?.(identity.identityId)?.filter(p =>
+    (!allowedRooms || allowedRooms.includes(p.roomId)) && (scopedRoom === null || p.roomId === scopedRoom)) ?? [];
   if (pausedRooms.length) {
     const held = new Set(pausedRooms.map(p => p.roomId));
     for (let i = 0; i < items.length; i++) if (held.has(items[i]?.roomId)) items[i] = { ...items[i], paused: true };

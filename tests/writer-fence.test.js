@@ -5,7 +5,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RoomStore } from "../server/store.mjs";
-import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, verifyWriterFence, fenceDefinitions, STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
+import { applicationTables, unfencedAdditiveTables, writerFenceDefinitions, installWriterFence, verifyWriterFence, fenceDefinitions, STORE_SCHEMA_VERSION } from "../server/writer-fence.mjs";
 
 // Construct a synthetic pre-upgrade database. Never use this fixture on user data.
 test("Node read transactions reject nested and direct writes, retain outer writes and restore mode after failures", t => {
@@ -174,4 +174,30 @@ test("v7 to v9 preserves every existing table row and retires a pre-open v7 conn
     assert.throws(() => cached.run(), /project_room_writer_v42|unsupported database writer/);
     assert.equal(current.db.prepare("SELECT count(*) n FROM private_reminders").get().n, 0);
   } finally { current.close(); old.close(); }
+});
+
+test("fence metadata snapshots retain exact SQL validation and refresh after repair", t => {
+  const store = new RoomStore(':memory:'); t.after(() => store.close());
+  const { name, sql } = writerFenceDefinitions[0];
+  let reads = 0;
+  const counted = {
+    prepare(query) { if (query.includes('sqlite_master')) reads++; return store.db.prepare(query); },
+    get isTransaction() { return store.db.isTransaction; },
+    exec(sql) { return store.db.exec(sql); }
+  };
+  verifyWriterFence(counted);
+  assert.equal(reads, 2, 'one trigger snapshot and one table snapshot');
+  reads = 0;
+  assert.throws(() => installWriterFence(counted), /migration transaction/);
+  store.transaction(() => installWriterFence(counted));
+  assert.equal(reads, 1, 'installation reads one trigger snapshot');
+  store.db.exec(`DROP TRIGGER ${name}`);
+  assert.throws(() => verifyWriterFence(counted), /operator reconciliation/);
+  store.db.exec(sql.replace('unsupported database writer', 'drifted'));
+  assert.throws(() => verifyWriterFence(counted), /operator reconciliation/);
+  store.db.exec(`DROP TRIGGER ${name}`);
+  store.db.exec(sql);
+  assert.doesNotThrow(() => verifyWriterFence(counted));
+  store.db.exec('CREATE TRIGGER writer_v999_unknown_insert BEFORE INSERT ON accounts BEGIN SELECT 1; END');
+  assert.throws(() => verifyWriterFence(counted), /operator reconciliation/);
 });

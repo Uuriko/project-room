@@ -1,9 +1,8 @@
-// `GET /api/rooms/{id}?messages=recent`: a room snapshot without the whole
-// message history. A busy room's full snapshot ships every message on each
-// open (muse-room: 5,300+ messages, ~5 MB). The recent view keeps the newest
-// 100 visible messages, never counts hidden DMs, says how many it left out,
-// and the first /conversation page lines up with it so older history pages
-// from there. The default snapshot is unchanged.
+// The default room read and `?messages=recent` are the same window: the newest
+// 100 visible messages, never counting hidden DMs, saying how many were left
+// out. The first /conversation page lines up with that window. `?full=1` is
+// the retired unbounded document and only answers while
+// ROOM_SNAPSHOT_FULL_COMPAT=1, with a Deprecation header.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { rmSync } from "node:fs";
@@ -35,20 +34,37 @@ test("the recent snapshot carries only the newest 100 visible messages and count
     // A DM between two other members: hidden from the producer, never in its window.
     if (i % 10 === 0) f.post(f.keys.owner, `private ${i}`, { toMemberId: "reviewer" });
   }
-  const full = await (await f.get()).json();
+  const previous = process.env.ROOM_SNAPSHOT_FULL_COMPAT;
+  process.env.ROOM_SNAPSHOT_FULL_COMPAT = "1";
+  let full;
+  try {
+    const retired = await f.get("?full=1");
+    assert.equal(retired.status, 200);
+    assert.equal(retired.headers.get("deprecation"), "true");
+    full = await retired.json();
+  } finally {
+    if (previous === undefined) delete process.env.ROOM_SNAPSHOT_FULL_COMPAT;
+    else process.env.ROOM_SNAPSHOT_FULL_COMPAT = previous;
+  }
   const visible = full.state.messages;
-  assert.ok(visible.length > WINDOW + 20, "the full snapshot still carries every visible message");
+  assert.ok(visible.length > WINDOW + 20, "the retired full read still carries every visible message");
   assert.equal(visible.some(message => message.body.startsWith("private")), false);
-  assert.equal(Object.hasOwn(full, "messagesWindow"), false, "the default snapshot is unchanged");
+  assert.equal(Object.hasOwn(full, "messagesWindow"), false, "the retired full read is not a window");
 
   const response = await f.get("?messages=recent");
   assert.equal(response.status, 200);
   const recent = await response.json();
+  const opened = await (await f.get()).json();
+  assert.deepEqual(opened.state.messages.map(message => message.id), recent.state.messages.map(message => message.id),
+    "the default read is the same window");
+  assert.deepEqual(opened.messagesWindow, recent.messagesWindow);
   assert.equal(recent.state.messages.length, WINDOW);
   assert.deepEqual(recent.state.messages.map(message => message.id), visible.slice(-WINDOW).map(message => message.id),
     "the window is the newest visible messages, in order");
   assert.equal(recent.state.messages.at(-1).body, "public 129");
   assert.deepEqual(recent.messagesWindow, { mode: "recent", limit: WINDOW, omitted: visible.length - WINDOW, older: "conversation" });
+  assert.equal(recent.messagesPage.hasMore, true);
+  assert.equal(typeof recent.messagesPage.before, "number");
   assert.equal(recent.sequence, full.sequence, "same head: live sync continues from it");
   assert.deepEqual(recent.state.workItems, full.state.workItems, "everything but messages is the full snapshot");
   assert.deepEqual(recent.state.members, full.state.members);
@@ -91,9 +107,14 @@ test("negotiated chat activity avoids duplicate message bodies while preserving 
   assert.equal(lean.auditView, 'activity'); assert.equal(lean.auditVersion, 1);
   assert.deepEqual(lean.state.messages, full.state.messages);
   assert.deepEqual(lean.state.workItems, full.state.workItems);
-  assert.deepEqual(lean.state.eventLog, full.state.eventLog.filter(e => e.type === 'decision.recorded' || e.data?.workItemId !== undefined));
+  const activityEvent = e => e.type === 'decision.recorded' || e.data?.workItemId !== undefined;
+  assert.ok(lean.state.eventLog.every(activityEvent), 'the activity tail is decisions and work');
+  assert.ok(lean.state.eventLog.some(e => e.type === 'decision.recorded' && e.data.statement === 'Invitation-only pilot.'));
+  assert.ok(lean.state.eventLog.some(e => e.data?.workItemId === 'lean-work'));
+  assert.ok(full.state.eventLog.some(e => e.type === 'decision.recorded' && e.data.statement === 'Invitation-only pilot.'));
+  assert.ok(full.state.eventLog.some(e => e.data?.workItemId === 'lean-work'));
   assert.equal(lean.sequence, full.sequence); assert.equal(lean.cursor, full.cursor);
-  assert.ok(Buffer.byteLength(JSON.stringify(lean)) < Buffer.byteLength(JSON.stringify(full)) * .7, 'fixture payload drops substantially without losing projected messages');
+  assert.ok(Buffer.byteLength(JSON.stringify(lean)) <= Buffer.byteLength(JSON.stringify(full)), 'activity is not larger than the window');
   const fullBody = JSON.stringify(full), leanBody = JSON.stringify(lean);
   t.diagnostic(JSON.stringify({ workload: '30 seeded messages plus decision/work activity', fullBytes: Buffer.byteLength(fullBody), activityBytes: Buffer.byteLength(leanBody), fullGzipBytes: gzipSync(fullBody).length, activityGzipBytes: gzipSync(leanBody).length }));
   assert.equal(Object.hasOwn(full, 'auditView'), false, 'legacy response remains unchanged');

@@ -202,6 +202,75 @@ test("join errors name the problem and the next step", () => {
   assert.match(joinErrorMessage({ status: 500 }).message, /hiccup|try again/i);
 });
 
+test("join maps display_name_unavailable to the server's reason and suggestion (F-U1C3-1)", () => {
+  // A name pasted from an Arabic chat app can carry an invisible mark the
+  // client validator accepts; the server 422s it as control_characters
+  // with a cleaned suggestion. The mapper must name that cause and show
+  // the suggestion — never the length message, never a silent rename.
+  const hidden = joinErrorMessage({
+    status: 422, code: "display_name_unavailable", action: "join",
+    detail: { displayNameReason: "control_characters", suggestion: "خالد" },
+  });
+  assert.equal(hidden.title, "Name not available");
+  assert.equal(hidden.retry, true);
+  assert.match(hidden.message, /hidden or control characters/);
+  assert.match(hidden.message, /خالد/);
+  assert.doesNotMatch(hidden.message, /1–80/);
+  const reserved = joinErrorMessage({
+    status: 422, code: "display_name_unavailable", action: "join",
+    detail: { displayNameReason: "reserved", displayName: "Member" },
+  });
+  assert.match(reserved.message, /reserved/);
+  assert.match(reserved.message, /Member/);
+  const duplicate = joinErrorMessage({
+    status: 422, code: "display_name_unavailable", action: "join",
+    detail: { displayNameReason: "duplicate", suggestion: "Ada 2" },
+  });
+  assert.match(duplicate.message, /already used in this room/);
+  assert.match(duplicate.message, /Ada 2/);
+  const confusable = joinErrorMessage({
+    status: 422, code: "display_name_unavailable", action: "join",
+    detail: { displayNameReason: "confusable", suggestion: "Ada 2" },
+  });
+  assert.match(confusable.message, /too easy to confuse/);
+  // No usable detail: still the real cause family, never the length message.
+  const bare = joinErrorMessage({ status: 422, code: "display_name_unavailable", action: "join" });
+  assert.equal(bare.retry, true);
+  assert.match(bare.message, /isn't available/);
+  assert.doesNotMatch(bare.message, /1–80/);
+  // A suggestion still carrying a bidi mark is never echoed back.
+  const marked = joinErrorMessage({
+    status: 422, code: "display_name_unavailable", action: "join",
+    detail: { displayNameReason: "control_characters", suggestion: "\u202aخالد" },
+  });
+  assert.match(marked.message, /hidden or control characters/);
+  assert.doesNotMatch(marked.message, /\u202a/);
+});
+
+test("apiFetch keeps the server's top-level error detail reachable (F-U1C3-1)", async () => {
+  const result = await apiFetch("/api/join", {
+    method: "POST",
+    data: { displayName: "خالد\u202a", inviteCode: "RM-ABC123" },
+    timeoutMs: 5_000,
+    fetchImpl: async () => ({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        error: { code: "display_name_unavailable", message: "That display name contains hidden or control characters. Suggested name: خالد." },
+        displayNameReason: "control_characters",
+        suggestion: "خالد",
+        displayName: "خالد",
+      }),
+    }),
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.status, 422);
+  assert.equal(result.error.code, "display_name_unavailable");
+  assert.deepEqual(result.error.detail, {
+    displayNameReason: "control_characters", suggestion: "خالد", displayName: "خالد",
+  });
+});
+
 test("apiFetch bounds every call with a timeout, including the join POST (#2979)", async () => {
   assert.equal(API_TIMEOUT_MS, 10_000);
   // A fetch that stalls forever but, like a real fetch, rejects when its

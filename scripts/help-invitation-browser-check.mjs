@@ -1,5 +1,5 @@
 /* global document -- browser-evaluated callbacks */
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, openSearch } from "./room-chrome.mjs";
 // Simulated human UI, actual scripted MCP. Disposable rooms; no model or external work.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -40,6 +40,14 @@ async function setup(t, touch = false) {
   await page.goto(origin);
   await signInFixture(page, f.keys.owner);
   await page.locator("#main").waitFor({ state: "visible" });
+  const selectWork = async (workId, title) => {
+    await openSearch(page);
+    await page.locator("#message-search").fill(title);
+    await page.locator(`#search-list [data-open-work="${workId}"]`).click();
+    await page.locator(`[data-work-record-id="${workId}"]`).waitFor({ state: "visible" });
+    assert.equal(await page.locator('#message-list [data-work-record-id]').count(), 1);
+  };
+  await selectWork(id, "Contributor guide");
   const card = page.locator(`[data-work-record-id="${id}"]`), dialog = page.locator("#action-dialog");
   const save = page.locator("#action-form button[type=submit]"), scope = page.locator("#action-fields [name=scope]");
   const open = async () => {
@@ -53,7 +61,7 @@ async function setup(t, touch = false) {
     assert.equal(auditRecovery(f.store).dataSha256, before);
     return result.result.structuredContent.work;
   };
-  return { ...f, id, item, help, send, page, card, dialog, save, scope, open, list, errors, traffic };
+  return { ...f, id, item, help, send, page, card, dialog, save, scope, open, list, selectWork, errors, traffic };
 }
 
 for (const touch of [false, true]) test(`human help ${touch ? "touch" : "desktop"}: publish, discover, edit and withdraw without assignment`, { timeout: 30000 }, async t => {
@@ -175,6 +183,7 @@ test("human help expiry retires its label without new events and guest cannot pu
   await f.page.locator("#auth-panel").waitFor({ state: "visible" });
   await signInFixture(f.page, f.keys.guest);
   await f.page.locator("#main").waitFor({ state: "visible" });
+  await f.selectWork(f.id, "Contributor guide");
   assert.equal(await f.card.locator("[data-action=help]").count(), 0);
   assert.equal(await f.card.locator('[data-action="end-help"]').count(), 0);
 });
@@ -184,6 +193,7 @@ test("human owner can end another member's invitation but cannot publish on thei
   f.send("producer", "work.accepted", { workItemId: "test-handoff", expectedRevision: 0 });
   f.send("producer", "work.help_updated", { workItemId: "test-handoff", expectedRevision: 1, expectedHelpRevision: 0,
     status: "open", scope: "Help with my agenda", expiresAt: new Date(Date.now() + 3600000).toISOString() });
+  await f.selectWork("test-handoff", "Test: prepare an agenda");
   const other = f.page.locator('[data-work-record-id="test-handoff"]');
   await other.locator(".work-help").waitFor();
   assert.equal(await other.locator("[data-action=help]").count(), 0);

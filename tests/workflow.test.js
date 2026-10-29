@@ -173,3 +173,21 @@ for (const producerId of ["producer", null]) {
     }
   });
 }
+
+
+test("human result entry is visible on first render without changing agent actions or authority", () => {
+  const item = { id: "work", state: "working", mode: "read", accountableMemberId: "producer", revision: 2 };
+  const member = { id: "producer", kind: "human", active: true, permissions: ["complete_work"] };
+  const html = renderWorkActions(item, member, { now: 1000 });
+  const moreAt = html.indexOf('<details class="work-more">');
+  assert.match(html.slice(0, moreAt < 0 ? undefined : moreAt), /data-action="complete"[^>]*>Share result/);
+  assert.equal((html.match(/data-action="complete"/g) || []).length, 1);
+  assert.doesNotMatch(html, /Post evidence/);
+  assert.match(renderWorkActions(item, member, { busy: true }), /data-action="complete"[^>]* disabled/);
+  const agent = renderWorkActions(item, { ...member, kind: "agent" });
+  assert.match(agent.slice(agent.indexOf('<details class="work-more">')), /Post evidence/);
+  assert.doesNotMatch(agent, /Share result/);
+  for (const unauthorized of [{ ...member, permissions: [] }, { ...member, active: false }, { ...member, id: "other" }]) {
+    assert.doesNotMatch(renderWorkActions(item, unauthorized), /data-action="complete"|Share result/);
+  }
+});

@@ -47,6 +47,58 @@ sandbox modes and `approvalPolicy: "never"`; tools outside the configured policy
 are denied, not silently approved. Clearing the environment is not an additional
 OS sandbox; Codex enforces the selected tool sandbox.
 
+### Test jobs that need temporary files
+
+`read-only` is appropriate for inspection, but tests may need to create fixtures,
+sockets or subprocess files even when they never edit source. A native run on
+`46321313` passed 5 of 10 selected tests: the other five failed because its
+read-only sandbox denied temporary writes. The saved failure was recovered after
+an injected lost acknowledgement following publication, with one model turn and
+all 3,915 exported source files unchanged. Delivery recovery did not make the
+test run successful.
+
+For such a job, prepare a separate private scratch directory and set runtime
+`cwd` to it with `sandbox: "workspace-write"`; keep `approvalPolicy: "never"`.
+Put the pinned source export outside that directory. In the requested test
+command, create a temporary child directory under the scratch workspace and set
+`TMPDIR` explicitly for the test process. Use absolute paths for both the Node
+executable and the tests, for example:
+
+```sh
+mkdir -p /absolute/job-scratch/tmp
+TMPDIR=/absolute/job-scratch/tmp /absolute/node --test \
+  /absolute/pinned-source/tests/native-host-binary-resolution.test.js \
+  /absolute/pinned-source/tests/native-host-run-guards.test.js
+```
+
+The dedicated host clears inherited environment variables; setting `TMPDIR` in
+the parent terminal alone does not forward it to model tools. The runtime sends
+its configured `cwd` and sandbox policy on both thread start and resume
+([runtime](../client/codex-runtime.mjs), [process transport](../client/codex-stdio.mjs)).
+This configuration grants writes to the chosen workspace; it does not require an
+unrestricted policy or a different execution engine. Check the actual sandbox
+result and source hashes rather than assuming that a successful protocol check
+proves the test job can run. Keep credentials and the private host journal
+outside the test workspace.
+
+A corrected two-laptop packaged-CLI trial on the same `46321313` source used
+this scratch layout and Node 24.19.0: 10 passed, zero failed or skipped, in
+206.913667 ms (228.638791 ms command wall time). All 3,915 source-file hashes
+remained unchanged. An initial Python wrapper failed before running tests;
+the actual Node test command then ran once. Preserve both that wrapper failure
+and the earlier read-only test failures when comparing results.
+
+The corrected trial also injected acknowledgement loss after the result was
+committed (HTTP 201, Room sequence 22618). Restart reconciled the same operation,
+attempt and response digest, changing local delivery from pending to delivered
+with exit 0 at 2026-10-29T07:38:24.664Z. The completed-turn count stayed at one,
+and `providerTaskStartedCount` was one. This proves saved-result reconciliation
+for that injected failure, not every interruption scenario. The local comparison
+ran the same ten tests in 269.583584 ms, but receiver launch to answer took about
+69 seconds; these measurements do not establish an overall speed improvement.
+The evidence is from the packaged CLI. The peer downloaded and verified the
+native app but had not installed it; desktop integration remains unverified.
+
 From the Project Room source checkout:
 
 ```sh
@@ -297,3 +349,44 @@ is reported as such; this does not certify physical sleep/wake or successful com
 ## Platform qualification
 
 See the [execution portability plan and qualification evidence](EXECUTION-PORTABILITY-PLAN-20261018.md) for the Linux generic host and native Mac Codex boundary.
+# Directed requests on a native host
+
+The shared-assistant watcher and directed-request receiver are distinct modes.
+Both connect outward to Room over HTTPS; neither needs Tailscale, an inbound port,
+or the remote-machine VM relay. A Room membership or a recorded message does not
+prove a running receiver. Verify a linked reply from the intended member.
+
+To receive formal requests from selected room members, use the existing private
+connection and dedicated Codex runtime:
+
+```sh
+ROOM_AGENT_CONFIG=/absolute/private/connection node scripts/run-codex-room.mjs \
+  --watch-requests /absolute/private/journal.sqlite /absolute/private/runtime.json \
+  REQUESTER_MEMBER_ID
+```
+
+Use 1–20 distinct requester member IDs separated by commas. The recipient remains
+the member pinned in the connection. Ordinary messages do not invoke the model.
+The allowlist authorizes use of the configured unattended runtime policy; it does
+not expand Room permissions or grant unsandboxed execution. Choose only trusted
+requesters and an appropriate read-only or workspace-write configuration.
+
+The native host manifest accepts optional `allowedRequesterIds: ["MEMBER_ID"]`.
+Import that manifest through the existing host configuration, then explicitly
+enable receiving. The selected identity, receiver mode and requester list are bound
+to the saved receiving preference. A changed list cannot inherit automatic-start
+consent. Omit the field to retain the shared-assistant mode. The native status
+identifies the selected mode; configuring directed requests does not change the
+room's selected shared assistant.
+
+Only one receiver owns a journal and only one runtime owns a dedicated Codex
+profile. Stop the old receiver before switching modes. Quit preserves receiving
+intent for relaunch; Disconnect disables it. Keep the journal and profile across
+restarts. A saved reply is delivered with its original basis; an unknown outcome
+blocks new pickup until reconciled. Never remove an unresolved lock or journal to
+force another execution. A changed request may require human attention rather than
+automatic rebasing.
+
+Qualification: send one bounded formal request from an enabled member, verify its
+linked response, then test Stop and restart with synthetic data. Protocol or login
+readiness alone is not evidence of a completed model turn or cross-device failover.

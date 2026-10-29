@@ -265,12 +265,28 @@ test("a delayed logout response cannot end a replacement session", async () => {
   assert.equal(ended, 0);
   assert.equal(client.session.member.id, "other");
 });
+function assertUiHooks(html, app) {
+  const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(new Set(ids).size, ids.length, "static HTML IDs must be unique");
+  // Some controls are created on demand. Only an explicit literal assignment
+  // counts; comparisons and computed IDs do not establish a matching hook.
+  const assigned = [...app.matchAll(/\b[A-Za-z_$][\w$]*\.id\s*=\s*(["'])([a-z-]+)\1\s*;/g)].map(m => m[2]);
+  const declared = new Set([...ids, ...assigned]);
+  for (const match of app.matchAll(/\$\("#([a-z-]+)"\)/g)) assert.ok(declared.has(match[1]), `Missing UI hook ${match[1]}`);
+}
+
+test("UI hook validation requires a static declaration or literal programmatic assignment", () => {
+  assert.doesNotThrow(() => assertUiHooks('<main id="main"></main>', 'button.id = "composer-direct-message"; $("#composer-direct-message"); $("#main");'));
+  for (const declaration of ['', 'button.id === "missing";', 'button.id = name;', 'button.id = "missing" + suffix;']) {
+    assert.throws(() => assertUiHooks('', `${declaration} $("#missing");`), /Missing UI hook missing/);
+  }
+  assert.throws(() => assertUiHooks('<p id="same"></p><p id="same"></p>', ''), /static HTML IDs must be unique/);
+});
+
 test("connected UI hooks exist and demo controls are not exposed", () => {
   const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
   const app = readFileSync(new URL("../src/app.js", import.meta.url), "utf8");
-  const ids = [...html.matchAll(/id="([^"]+)"/g)].map(m => m[1]);
-  assert.equal(new Set(ids).size, ids.length);
-  for (const match of app.matchAll(/\$\("#([a-z-]+)"\)/g)) assert.ok(ids.includes(match[1]), `Missing UI hook ${match[1]}`);
+  assertUiHooks(html, app);
   assert.doesNotMatch(app, /from "\.\/(seed|storage)\.js"/);
   assert.doesNotMatch(html, /actor-select|reset-button|4 here now|Simulate actor/);
   assert.match(html, /id="main"[^>]*hidden/);
@@ -435,11 +451,37 @@ test('unknown event hints and reconnects still fetch snapshots even when room se
     f.notify(value); await f.client.flight.promise;
     assert.equal(f.reads(), before + 1);
   }
+  // The first open right after a proving read skips its re-read; measure reconnects.
+  f.client.stream.readyState = 1; f.emit('open'); await f.client.flight?.promise;
+  f.client.stream.readyState = 0;
+  const retryingReads = f.reads();
+  f.emit('error'); await Promise.resolve();
+  assert.equal(f.reads(), retryingReads, 'native CONNECTING retry waits for open');
   for (const type of ['open', 'error']) {
+    f.client.stream.readyState = type === 'error' ? 2 : 1;
     const before = f.reads(); f.emit(type); await f.client.flight.promise;
     assert.equal(f.reads(), before + 1, type);
   }
   const before = f.reads();
   await f.client.refresh();
   assert.equal(f.reads(), before + 1, 'manual refresh');
+});
+
+test('a first stream open right after a proving read skips its re-read; a reconnect does not', async t => {
+  const f = liveRefreshFixture(t);
+  await f.client.refresh();
+  const afterRead = f.reads();
+  f.emit('open'); await f.client.flight?.promise;
+  assert.equal(f.reads(), afterRead, 'first open after a fresh read');
+  f.emit('open'); await f.client.flight?.promise;
+  assert.equal(f.reads(), afterRead + 1, 'reconnect open');
+});
+
+test('a first stream open re-reads when the proving read is stale', async t => {
+  const f = liveRefreshFixture(t);
+  await f.client.refresh();
+  f.client.lastReadAt -= 60_000;
+  const before = f.reads();
+  f.emit('open'); await f.client.flight?.promise;
+  assert.equal(f.reads(), before + 1);
 });

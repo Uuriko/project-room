@@ -136,3 +136,51 @@ for (const resource of ['entry.js', 'browser-session.js', 'signin-entry.js']) te
   assert.equal(await page.locator('#entry-retry').count(), 0);
   await page.screenshot({ path: `test-results/startup/recovered-${resource}.png` });
 });
+
+for (const failedModule of ['entry.js', 'browser-session.js']) test(`module startup recovery after ${failedModule} fails`, { timeout: 35000 }, async t => {
+  const fixture = createAcceptanceFixture();
+  const server = createRoomServer({ store: fixture.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true });
+  t.after(async () => { await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage();
+  const origin = `http://127.0.0.1:${server.address().port}`;
+  let documents = 0; page.on('request', request => { if (request.isNavigationRequest()) documents++; });
+  await page.route(`**/src/${failedModule}`, route => route.abort('failed'));
+  await page.goto(origin + '/');
+  const retry = page.getByRole('button', { name: 'Retry loading Project Room', exact: true });
+  await retry.waitFor({ state: 'visible', timeout: 18000 });
+  assert.match(await page.locator('#entry-load-status').textContent(), /couldn.t load/i);
+  assert.equal(documents, 1, 'failed startup never reloads itself');
+  assert.equal(await page.locator('#static-hero').isVisible(), true);
+  await page.unroute(`**/src/${failedModule}`);
+  await retry.click();
+  await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  assert.equal(documents, 2, 'one deliberate retry reloads the same page');
+  assert.equal(await page.locator('#static-hero').count(), 0);
+});
+
+test('slow module startup can finish after the bounded warning without reloading', { timeout: 30000 }, async t => {
+  const fixture = createAcceptanceFixture(), server = createRoomServer({ store: fixture.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const browser = await chromium.launch({ headless: true });
+  let release; const held = new Promise(resolve => { release = resolve; });
+  t.after(async () => { release(); await browser.close(); server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); fixture.store.close(); rmSync(fixture.directory, { recursive: true, force: true }); });
+  const page = await browser.newPage(); let documents = 0;
+  page.on('request', request => { if (request.isNavigationRequest()) documents++; });
+  await page.route('**/src/entry.js', async route => { await held; await route.continue(); });
+  await page.goto(`http://127.0.0.1:${server.address().port}/`, { waitUntil: 'commit' });
+  await page.locator('#entry-load-retry').waitFor({ state: 'visible', timeout: 18000 });
+  release();
+  await page.locator('#auth-panel').waitFor({ state: 'visible' });
+  assert.equal(await page.locator('#static-hero').count(), 0);
+  assert.equal(documents, 1, 'late healthy startup continues without navigation');
+  // Losing the independent script still leaves the original readable fallback.
+  await page.route('**/src/entry-watchdog.js', route => route.abort('failed'));
+  await page.unroute('**/src/entry.js');
+  await page.route('**/src/entry.js', route => route.abort('failed'));
+  await page.reload();
+  assert.equal(await page.locator('#static-hero').isVisible(), true);
+  assert.equal(await page.locator('#entry-load-recovery').isVisible(), false);
+  assert.match(await page.locator('#static-hero').textContent(), /shared room/);
+});

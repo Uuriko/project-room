@@ -78,7 +78,7 @@ test('viewer counts push visibility into SQL and agree with countMetadata', t =>
     && (!m.toMemberId || m.authorId === viewer || m.toMemberId === viewer);
   for (const viewer of ['alice', 'bob', 'eve']) {
     for (const fl of [null, floor]) {
-      assert.equal(q.countForViewer(viewer, fl), q.countMetadata(equivalent(viewer, fl)),
+      assert.equal(q.countViewerVisible(viewer, fl), q.countMetadata(equivalent(viewer, fl)),
         `${viewer} floor=${Boolean(fl)}`);
     }
   }
@@ -90,8 +90,8 @@ test('viewer counts push visibility into SQL and agree with countMetadata', t =>
   assert.equal(q.countArchivedForViewer('eve', null), 3);
   // No marker: the count is the live leg alone.
   const plain = messageQueries({ db }, 'plain', { messages: [retained, { id: 'dm', authorId: 'alice', toMemberId: 'bob', createdAt: T2 }] });
-  assert.equal(plain.countForViewer('alice', null), 2);
-  assert.equal(plain.countForViewer('eve', null), 1);
+  assert.equal(plain.countViewerVisible('alice', null), 2);
+  assert.equal(plain.countViewerVisible('eve', null), 1);
   assert.equal(plain.countArchivedForViewer('alice', null), 0);
 });
 

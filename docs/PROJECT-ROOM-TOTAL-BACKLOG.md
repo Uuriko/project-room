@@ -6,6 +6,41 @@ Captured 2026-10-18; local baseline d3ae60e0. **773 accountable entries**: 288 e
 
 This is the full captured inventory, not a priority shortlist. Existing source requirements remain binding. A task to reconcile or qualify a capability does not assert it has never been built. Schema 41 and earlier measured gains are local qualified checkpoints; the overall architecture overhaul remains incomplete.
 
+## Bounded older-work dispositions — 2026-10-29
+
+This twelve-item audit is bound to source `c7a214cbe1452cec7d293a99a10cd400948dc8f2`.
+It supplements the captured inventory; it is not exhaustive, a live PR-status
+feed or a new execution plan. “Missing” below means absent from that inspected
+source, not never implemented. Refresh each head/base and owner before acting;
+subsequent integrations can supersede a row without erasing its retained scope.
+No checkbox or PR is closed by this table.
+
+Composition update: main `6bda3388f6225eb4b468d4cd9ca522ebb926686f` includes
+[#5266](https://github.com/Uuriko/project-room/pull/5266),
+[#5268](https://github.com/Uuriko/project-room/pull/5268) and
+[#5270](https://github.com/Uuriko/project-room/pull/5270). These are source
+integrations; at the 2026-10-29 16:30 UTC observation, production was `c47c3fc`
+and their deployed behavior was unverified. They do not retroactively expand this audit's `c7a214cb` coverage.
+
+| Existing work / evidence | Disposition at inspected source | Concrete remaining action |
+| --- | --- | --- |
+| [#5180](https://github.com/Uuriko/project-room/pull/5180), `client/codex-stdio.mjs` (`alive()`) | Runtime profile-lock safety when a process-group observation returns EPERM is absent; Grok owns qualification. Output-byte budgeting is a separate concern. | Reuse the existing patch; validate permission-denied versus nonexistent group handling and lock retention before adoption. |
+| [#5174](https://github.com/Uuriko/project-room/pull/5174), `scripts/release-evidence.mjs` | Source-bound executed-qualification recorder not incorporated; integration assigned separately. | Preserve command/toolchain/log and before/after source binding, interruption uncertainty and existing receipt compatibility. Do not create another recorder. |
+| [#5193](https://github.com/Uuriko/project-room/pull/5193) | Removal of forced full-history fill after 24 reads remains unintegrated in this snapshot. | Reconcile the existing proposal with bounded paging, cursor/horizon and reconnect tests; distinguish UI page reads from cold projection hydration. |
+| [#5087](https://github.com/Uuriko/project-room/pull/5087), [#5083](https://github.com/Uuriko/project-room/pull/5083), [#5066](https://github.com/Uuriko/project-room/pull/5066), `server/project-map.mjs` | Graphify is present, but the #5087 candidate combining #5083/#5066 is not integrated; the inspected importer still drops definitions after 200 per file. Last retained hosted-map evidence is server-only, truncated `8ebdea`; current freshness is unverified. | Trace the intended cap-preservation change through current source, distinguish import retention from response bounds, and verify authorized map revision/digest before relying on it. Do not infer “not built” from stale notes. |
+| [#4988](https://github.com/Uuriko/project-room/pull/4988), [#5226](https://github.com/Uuriko/project-room/pull/5226), [#5227](https://github.com/Uuriko/project-room/pull/5227), [#5229](https://github.com/Uuriko/project-room/pull/5229) | Native selection/recovery is partially superseded; the older PR also claims startup-failure explanation and Retry UI whose remaining hunks need current comparison. | Compare retained hunks and installed behavior. Do not close the whole older PR based only on selection/recovery integration or packaged-CLI success. |
+| [#5059](https://github.com/Uuriko/project-room/pull/5059) | Reconciliation modules absent; existing proposal is stacked rather than independently integrated. | Inspect its dependency chain and actual completion/recovery semantics, then adopt or explicitly supersede only the unique remainder. |
+| [#5080](https://github.com/Uuriko/project-room/pull/5080) | Identity-bound tools modules absent from inspected main; stacked work exists. | Qualify identity, authorization/revocation and tool invocation boundaries against the composed base before exposing capability claims. |
+| [#5218](https://github.com/Uuriko/project-room/pull/5218) | Entity constructor arming remains default-off/unintegrated. | Reuse the existing candidate only after constructor, restart, write-cost and corruption qualification; a flag or prototype is not active production behavior. |
+| `cloudflare/room-shard.mjs`, `server/room-shard-route.mjs` | RoomShard is built, but ordinary Worker requests still use the shared pilot Durable Object; route helper explicitly documents that limitation. | Treat placement/copy/compare code as migration groundwork. Wire only with authority, copy/cutover/recovery evidence and a measured need; do not claim current room isolation. |
+| [#4958](https://github.com/Uuriko/project-room/pull/4958) | Durable journal/shadow prototype remains unintegrated, not an operational merge train. | Inspect execution ownership, restart/unknown-outcome reconciliation and existing landing-tool overlap before selecting any unique part. |
+| [#5187](https://github.com/Uuriko/project-room/pull/5187), [#5194](https://github.com/Uuriko/project-room/pull/5194) | Projection/summary boot stack remains a candidate; smaller wire payload does not establish lower total CPU. | Compare exact composed sources using body allocation, SQL work and end-to-end timings, retaining slower results and privacy/recovery controls. |
+| [#5195](https://github.com/Uuriko/project-room/pull/5195), [#5125](https://github.com/Uuriko/project-room/pull/5125), [#5137](https://github.com/Uuriko/project-room/pull/5137) | Follow-up remains dependent on the earlier attention/needs-me proposals in this audit. | Reconcile dependency heads and overlapping behavior first; do not revive a title-based duplicate or treat dependency presence as shipped adoption. |
+
+These dispositions retain acceptance questions, not blanket approval to revive
+all twelve. Select useful remaining work through the focused plan, keep current
+owners and source-bound evidence, and preserve rejected alternatives.
+
 ## How this stays complete
 
 1. Discover sources: active/archived chats, local plans and transcripts, agent bus/Room records, branches, patches, issue/PR history, code contracts and user feedback. Record inaccessible or unread sources explicitly.
@@ -14,7 +49,7 @@ This is the full captured inventory, not a priority shortlist. Existing source r
 4. Attach owner, dependencies, implementation status, exact revision and acceptance evidence as each item is triaged. The current JSON deliberately does not fabricate unknown owners or dependency graphs.
 5. Distinguish proposal, required work, locally qualified, integrated, deployed and verified. A closed issue, merged PR or green unrelated test is not sufficient completion evidence.
 6. Refresh moving inventories and compare changes. Require a disposition for every source obligation; report unread sources, orphaned tasks and unmet acceptance conditions.
-7. Execute B00–B09 from the build-to-completion plan. Newly discovered scope changes that plan through explicit dependency and acceptance updates; it does not erase prior work.
+7. Select execution through the [six-outcome delivery plan](FOCUSED-DELIVERY-PLAN.md). B00–B09 are historical package mappings, not a competing mandatory sequence. Reconcile newly discovered obligations into the retained outcomes with dependency, acceptance and supersession evidence; do not erase prior work.
 8. Complete a task only with evidence; retain superseded/cancelled IDs and the linked replacement or explicit decision.
 
 ## Coverage and limitations
@@ -477,7 +512,7 @@ Acceptance: Exact integrated artifacts pass supported suites and recovery drills
 - [ ] **OPS-09** — Rehearse disaster recovery, credential reissue and first-tick validation; measure RPO/RTO and user impact.
 - [ ] **OPS-10** — Provide operator status for deployment, jobs, backup freshness, integrity, queue health and actionable failures.
 - [ ] **OPS-11** — Define error budgets, alerts and incident ownership without creating noisy polling loops.
-- [ ] **OPS-12** — Publish only after current-session authorization; verify production journeys and running versions after any eventual release.
+- [ ] **OPS-12** — Use existing authorization and serialized deployment; verify production journeys and running versions after release. The historical per-session approval restriction is superseded by standing authorization.
 - [ ] **OPS-13** — Retire compatibility paths, obsolete tables, unused workers, duplicate docs and dead tests only after evidence permits removal.
 - [ ] **OPS-14** — Close backlog items with exact implementation and acceptance evidence; distinguish local, main and production completion.
 

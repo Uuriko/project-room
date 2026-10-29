@@ -70,6 +70,8 @@ test("unified guest entry, account-bound draft recovery, catch-up and agent hand
     evidenceUrl: "https://example.invalid/unified-test", producerId: "producer", nextAction: "Review this synthetic inline result." });
   await mutate(reviewer, T.VERIFICATION_RECORDED, { result: "pass", completionEventId: item().receipt.eventId,
     evidenceVersion: item().receipt.evidenceVersion, summary: "Synthetic reviewer checks this exact version; no independent operator claim." });
+  await owner.locator("#topbar-updates").click();
+  await owner.getByRole("button", { name: "Open Test: prepare an agenda", exact: true }).click();
   const card = owner.locator('[data-work-record-id="test-handoff"]');
   await card.locator('[data-next-step="decide"]').waitFor();
   assert.equal(await card.locator(".work-next-step").count(), 1);

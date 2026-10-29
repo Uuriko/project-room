@@ -776,7 +776,17 @@ test("record identities and fragments remain collision-safe and legacy work link
   });
   const page = await (await browser.newContext({ viewport: { width: 1100, height: 850 }, reducedMotion: "reduce" })).newPage();
   await login(page, origin, owner, "Room owner");
+  const openWork = async (id, query) => {
+    await openSearch(page);
+    await page.locator("#message-search").fill(query);
+    await page.locator(`#search-list [data-open-work="${id}"]`).click();
+    await page.locator(`[data-work-record-id="${id}"]`).waitFor();
+    assert.equal(await page.locator("#message-list [data-work-record-id]").count(), 1,
+      "human navigation mounts only the selected work record");
+  };
+  await openWork("work-legacy", "Collision work work-legacy");
   await page.locator('[data-work-record-id="work-legacy"]').waitFor();
+  await openWork("list", "Collision work list");
   // A caller-controlled message ID must not alias the work row's reuse key.
   const collisionBody = "A message remains distinct from the work card";
   const assertCollisionRecords = async () => {
@@ -802,7 +812,6 @@ test("record identities and fragments remain collision-safe and legacy work link
   assert.deepEqual(duplicates, [], "user IDs never duplicate structural DOM IDs");
   for (const [selector, pattern] of [
     ['[data-message-record-id="list"]', /^pr-message-record-/],
-    ['[data-work-record-id="title"]', /^pr-work-record-/],
     ['[data-work-record-id="list"]', /^pr-work-record-/],
     ['[data-member-record-id="stack"]', /^pr-member-record-/],
     ['[data-event-record-id="status"]', /^pr-event-record-/]
@@ -813,15 +822,16 @@ test("record identities and fragments remain collision-safe and legacy work link
     assert.ok(choices.includes("Alex (duplicate-a) · Person"));
     assert.ok(choices.includes("Alex (duplicate-b) · Person"));
   }
-  const duplicateWork = await page.locator('[data-work-record-id="duplicate-members"]').textContent();
-  assert.match(duplicateWork, /AccountableAlex \(duplicate-a\)/);
-  assert.match(duplicateWork, /VerifierAlex \(duplicate-b\)/);
   assert.match(await page.locator('[data-member-record-id="duplicate-a"]').textContent(), /Alex \(duplicate-a\)/);
   assert.match(await page.locator('[data-member-record-id="duplicate-b"]').textContent(), /Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-message-record-id="duplicate-a-message"] .message-meta').textContent(), /Alex \(duplicate-a\)/);
   assert.match(await page.locator('[data-message-record-id="duplicate-b-message"] .message-meta').textContent(), /Alex \(duplicate-b\)/);
   assert.match(await page.locator('[data-event-record-id="event-duplicate-a-message"]').textContent(), /Alex \(duplicate-a\)/);
   await closeSettings(page);
+  await openWork("duplicate-members", "Duplicate-name assignment");
+  const duplicateWork = await page.locator('[data-work-record-id="duplicate-members"]').textContent();
+  assert.match(duplicateWork, /AccountableAlex \(duplicate-a\)/);
+  assert.match(duplicateWork, /VerifierAlex \(duplicate-b\)/);
   await openSearch(page);
   await page.locator("#message-search").fill("First Alex identity message");
   assert.match(await page.locator("#search-list").textContent(), /Alex \(duplicate-a\)/);
@@ -840,6 +850,7 @@ test("record identities and fragments remain collision-safe and legacy work link
   assert.equal(await linkedWork.getAttribute("href"), "#pr-record/work/title");
   await linkedWork.click();
   await page.waitForFunction(() => document.activeElement?.dataset.workRecordId === "title");
+  assert.match(await page.locator('[data-work-record-id="title"]').getAttribute("id"), /^pr-work-record-/);
   assert.equal(await page.evaluate(() => location.hash), "#pr-record/work/title");
 
   await page.goto(`${origin}/#pr-record/message/msg%3Acolon`);

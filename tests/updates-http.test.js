@@ -13,6 +13,7 @@ import { createRoomServer } from "../server/http.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { claimAttentionFromEvents } from "../server/updates.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 import { buildOrient } from "../server/orient.mjs";
 
 function serve(t, roomId = "commons") {
@@ -51,6 +52,27 @@ function addAgent(store, roomId, ownerKey, memberId = "agent", displayName = "Re
   } });
   return store.issueAccessKey(roomId, memberId);
 }
+
+test("source-less human assignment remains discoverable through Updates as its next action changes", async t => {
+  const f = serve(t);
+  const command = (type, data) => f.store.command(f.ownerKey, "commons", { id: randomUUID(), type, data });
+  command(T.WORK_PROPOSED, { workItemId: "assigned", title: "Prepare the launch note", definitionOfDone: "A note",
+    accountableMemberId: "owner", independentVerificationRequired: false, ownerDecisionRequired: false, mode: "read" });
+  const read = async () => {
+    const response = await f.request("/api/rooms/commons/updates?state=actionable", { token: f.ownerKey });
+    assert.equal(response.status, 200);
+    return response.body.items.filter(item => item.sourceRef?.workItemId === "assigned");
+  };
+  const initial = await read();
+  assert.equal(initial.length, 1);
+  assert.equal(initial[0].kind, "work_assigned");
+  command(T.WORK_ACCEPTED, { workItemId: "assigned", expectedRevision: 0 });
+  const accepted = await read();
+  assert.equal(accepted.length, 1);
+  assert.notEqual(accepted[0].id, initial[0].id);
+  command(T.WORK_STARTED, { workItemId: "assigned", expectedRevision: 1 });
+  assert.deepEqual(await read(), [], "in-progress work does not demand another action");
+});
 
 function persistedUpdates(store) {
   return {
@@ -115,9 +137,7 @@ test("a reply request is answered with linkage and then leaves the list", async 
 test("done retires the item from updates and needs-me, and a clarification brings it back", async t => {
   const { store, ownerKey, request } = serve(t);
   const identity = store.identities.create("Needs Reader");
-  store.identities.link(ownerKey, "commons", {
-    identityId: identity.identityId, memberId: "reader", displayName: "Needs Reader", permissions: []
-  });
+  linkWithProof(store, ownerKey, "commons", identity, { memberId: "reader", displayName: "Needs Reader", permissions: [] });
   const { messageId } = ask(store, "commons", ownerKey, "reader", "please take this");
   const readerKey = store.issueAccessKey("commons", "reader");
   const open = await request("/api/needs-me", { token: identity.secret });
@@ -467,9 +487,7 @@ test("cross-room updates include only rooms the identity or account can access",
   const alphaOwner = store.issueAccessKey("alpha", "owner");
   const betaOwner = store.issueAccessKey("beta", "owner");
   const identity = store.identities.create("Alpha Reader");
-  store.identities.link(alphaOwner, "alpha", {
-    identityId: identity.identityId, memberId: "reader", displayName: "Alpha Reader", permissions: []
-  });
+  linkWithProof(store, alphaOwner, "alpha", identity, { memberId: "reader", displayName: "Alpha Reader", permissions: [] });
   const readerKey = store.issueAccessKey("alpha", "reader");
   store.command(alphaOwner, "alpha", { id: randomUUID(), type: T.MESSAGE_POSTED, data: {
     messageId: randomUUID(), body: "for the reader", toMemberId: "reader"

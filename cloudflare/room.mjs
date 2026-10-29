@@ -1,3 +1,4 @@
+import { createJobAlarmReconciler } from "./job-alarm-reconciler.mjs";
 // JDOT-PUBLIC-CSP-RUM begin: outer-response policy
 import { aboutPageCsp, publicPageCsp } from "../server/public-search.mjs";
 // JDOT-PUBLIC-CSP-RUM end
@@ -19,6 +20,7 @@ import { magicLinkMailerFromEnv } from '../server/resend-mailer.mjs';
 import { ChannelDrainer } from '../server/channel-drain.mjs';
 import { channelDrainTickShape, CHANNEL_DRAIN_INFLIGHT_KEY } from './channel-drain-tick.mjs';
 import { DurableDatabase, durableStorage } from './storage.mjs';
+import { SqlCostScopes, sqlCostOperation } from './sql-cost-scope.mjs';
 import { bootstrapRoom } from './bootstrap.mjs';
 import { maintenanceEnabled, maintenanceResponse } from '../server/maintenance.mjs';
 import { isEdgeDoorUrl, EDGE_DOOR_HOSTS, rewriteRoomApiPrefix, isHealthAliasPath } from '../server/agent-discovery.mjs';
@@ -38,7 +40,7 @@ import { countOpenPublicReports } from '../server/legal-store.mjs'; // open publ
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
-import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
@@ -112,18 +114,29 @@ function splitBackupTokens(env) {
 // Reads that carry the job list: refresh the heartbeat snapshot first.
 const JOB_LIST_READS = new Set(['/api/owner/overview']);
 
+// Re-arm the job alarm after a request only when it ran a write statement.
+// An unknown counter (a database without writeStatements) keeps the old
+// always-arm path.
+export function shouldArmAfterRequest(before, after) {
+  if (!Number.isFinite(before) || !Number.isFinite(after)) return true;
+  return after !== before;
+}
+
 export class ProjectRoom extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
+    const initializationStarted = performance.now();
     // DurableObject stores the context on this.ctx. Keep this.state and this.env
     // as aliases so existing reads of either name stay valid.
     this.state = ctx;
     this.env = env;
     this.requestSignals = new AsyncLocalStorage();
+    this.sqlCosts = env.ROOM_SQL_COST_LOG === '1'
+      ? new SqlCostScopes({ emit: row => console.info(JSON.stringify(row)) }) : null;
     const origin = roomOrigin(env);
     this.paused = maintenanceEnabled(env.ROOM_MAINTENANCE);
     if (this.paused) return;
-    this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage), storagePlatform: durableStorage,
+    this.store = new RoomStore(null, { database: new DurableDatabase(ctx.storage, { observeStatement: this.sqlCosts?.observeStatement }), storagePlatform: durableStorage,
       stitch: stitchConfigFromEnv(env), identityHashKey: env.ROOM_IDENTITY_HASH_KEY ?? null, integrity: "deferred",
       // Phase 1a: large message bodies at rest outside the projection row.
       bodiesAtRest: env.ROOM_BODIES_AT_REST === "1" });
@@ -134,7 +147,7 @@ export class ProjectRoom extends DurableObject {
     // the cron tick remains the restart-safe backstop.
     this.store.agentPlugin.setDispatchKick(() => {
       queueMicrotask(() => {
-        this.store.agentPlugin.drainWebhookDeliveries().catch(() => {}).finally(() => {
+        this.#sqlScope('background', 'webhooks', () => this.store.agentPlugin.drainWebhookDeliveries()).catch(() => {}).finally(() => {
           this.#armJobAlarm().catch(() => {});
         });
       });
@@ -204,8 +217,29 @@ export class ProjectRoom extends DurableObject {
       }
     });
     this.handler = httpServerHandler(this.server);
+    // Successful non-maintenance initialization, before the first RPC/fetch.
+    // Includes RoomStore, bootstrap, provider configuration and HTTP adapter.
+    this.initializationMs = Math.round(performance.now() - initializationStarted);
+    console.info(JSON.stringify({ event: 'room.do_initialized', ...runtimeTiming, initializationMs: this.initializationMs,
+      storeInitializationMs: this.store.initializationMs }));
   }
-  async fetch(request) {
+  #sqlScope(kind, operation, fn, options) {
+    if (!this.sqlCosts) return fn();
+    // Flush unattributed counters separately; no subtraction or request ownership
+    // inferred for constructor work, legacy RPCs or callbacks after scope close.
+    const finish = () => this.sqlCosts.flushUnattributed();
+    try {
+      const result = this.sqlCosts.run(kind, operation, fn, options);
+      if (result && typeof result.then === 'function') return Promise.resolve(result).finally(finish);
+      finish(); return result;
+    } catch (error) { finish(); throw error; }
+  }
+  fetch(request) {
+    // Response body/stream work may outlive headers; never claim a complete
+    // invocation. Subsequent inherited SQL is emitted in the late bucket.
+    return this.#sqlScope('request', sqlCostOperation(request.url), () => this.#fetch(request), { partial: true });
+  }
+  async #fetch(request) {
     const started = Date.now();
     const cold = this.store?.coldStart;
     const respond = response => {
@@ -213,15 +247,16 @@ export class ProjectRoom extends DurableObject {
       if (cold && !this.coldStartRequestLogged) {
         this.coldStartRequestLogged = true;
         const line = {
-          event: 'room.cold_start', phase: 'first_request',
+          event: 'room.cold_start', phase: 'first_request', ...runtimeTiming,
           constructMs: cold.durationMs, firstRequestMs: appMs,
+          storeInitializationMs: this.store.initializationMs, durableObjectInitializationMs: this.initializationMs,
           rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
         };
         if (cold.phases) line.phases = cold.phases;
         console.info(JSON.stringify(line));
       }
       console.info(JSON.stringify({
-        event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
+        event: 'room.do_request', ...runtimeTiming, method: request.method, path: requestPath(request.url), status: response.status, appMs
       }));
       return withServerTiming(response, 'app', appMs);
     };
@@ -254,17 +289,35 @@ export class ProjectRoom extends DurableObject {
     }
     try { return respond(await this.requestSignals.run(request.signal, () => this.handler.fetch(request))); }
     finally {
-      this.ctx.waitUntil(this.store.humanPush.flush());
+      this.ctx.waitUntil(this.#sqlScope('background', 'other', () => this.store.humanPush.flush()));
       // ACT-1a: post-request flush for a Room Guide step the command hook left queued.
-      this.ctx.waitUntil(Promise.resolve(flushRoomGuide(this.store)));
+      this.ctx.waitUntil(this.#sqlScope('background', 'other', () => Promise.resolve(flushRoomGuide(this.store))));
       // A commit in this request may have queued webhook, land, or claim work.
-      this.ctx.waitUntil(this.#armJobAlarm().catch(() => {}));
+      // A request that wrote nothing cannot have: job state only changes
+      // through writes, alarm() re-arms after every run, and the cron
+      // ensureJobAlarm is the backstop. Skipping saves earliestFutureAlarm's
+      // ~20 statements (incl. a full work_claims scan) on every read.
+      // Acknowledge only successfully reconciled writes. A failed boot or
+      // post-write reconciliation must remain owed on the next read. A newer
+      // request also prevents an older completion from advancing its watermark.
+      const writes = this.store.db?.writeStatements;
+      if (!this.alarmArmedSinceBoot || shouldArmAfterRequest(this.requestAlarmWrites, writes)) {
+        const generation = this.requestAlarmGeneration = (this.requestAlarmGeneration ?? 0) + 1;
+        this.ctx.waitUntil(this.#armJobAlarm().then(() => {
+          if (generation !== this.requestAlarmGeneration) return;
+          this.alarmArmedSinceBoot = true;
+          this.requestAlarmWrites = writes;
+        }).catch(() => {}));
+      }
     }
   }
 
   // Readiness is one statement. It does not open the room, replay events, or
   // scan a table. A paused object has no database, so it is not ready.
   probeStorage() {
+    return this.#sqlScope('readiness', 'storage-probe', () => this.#probeStorage());
+  }
+  #probeStorage() {
     if (this.paused || !this.store) return { ok: false };
     const row = this.store.db.prepare("SELECT 1 AS ok").get();
     return { ok: row?.ok === 1, emailVerification: magicLinkMailerFromEnv(this.env) ? 'enforced' : 'relaxed-no-mailer' };
@@ -524,7 +577,10 @@ export class ProjectRoom extends DurableObject {
   }
   // Due jobs only. Slow jobs (retention, integrity, backup) run from the
   // safety-net cron. Fast jobs run from the alarm when their nextDueAt arrives.
-  async #runDueJobs({ includeSlow, onlyJob = null }) {
+  #runDueJobs(options) {
+    return this.#sqlScope('scheduler', 'job-eligibility', () => this.#runDueJobsBody(options));
+  }
+  async #runDueJobsBody({ includeSlow, onlyJob = null }) {
     const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
     const lastRan = lastRanFrom(stored);
     const now = Date.now();
@@ -535,10 +591,10 @@ export class ProjectRoom extends DurableObject {
     });
     const outcomes = [];
     for (const job of selected) {
-      const result = await runCronJobs({ [job.name]: () => job.run(this.store, {
+      const result = await runCronJobs({ [job.name]: () => this.#sqlScope('job', job.name, () => job.run(this.store, {
         deadline: Date.now() + (job.budgetMs ?? CRON_JOB_BUDGET_MS),
         env: this.env, room: this, now: () => Date.now()
-      }) });
+      })) });
       // A later job may reset the object. Commit completed work before
       // starting it; a failed heartbeat write must not claim a healthy tick.
       await this.recordCronTick(result);
@@ -548,25 +604,21 @@ export class ProjectRoom extends DurableObject {
   }
   // Set the alarm only when the new time is earlier than the one already set.
   // Nothing queued deletes a leftover alarm so an idle room is not woken.
-  async #armJobAlarm({ retryDelayMs = 0 } = {}) {
+  #armJobAlarm(options) {
+    return this.#sqlScope('scheduler', 'job-eligibility', () => this.#armJobAlarmBody(options));
+  }
+  async #armJobAlarmBody({ retryDelayMs = 0 } = {}) {
     if (this.paused || !this.store) return { armed: false, alarmAt: null };
-    const now = Date.now();
-    const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
-    let when = earliestFutureAlarm(JOBS, {
-      env: this.env, store: this.store, now, lastRan: lastRanFrom(stored), runtime: "worker"
+    this.jobAlarmReconciler ??= createJobAlarmReconciler({
+      storage: this.ctx.storage,
+      calculate: async () => {
+        const stored = await this.ctx.storage.get(HEARTBEAT_STORAGE_KEY);
+        return earliestFutureAlarm(JOBS, {
+          env: this.env, store: this.store, now: Date.now(), lastRan: lastRanFrom(stored), runtime: "worker"
+        });
+      }
     });
-    if (retryDelayMs > 0) {
-      const retryAt = now + retryDelayMs;
-      when = when == null ? retryAt : Math.min(when, retryAt);
-    }
-    const current = await this.ctx.storage.getAlarm();
-    if (when == null) {
-      if (current != null) await this.ctx.storage.deleteAlarm();
-      return { armed: false, alarmAt: null };
-    }
-    if (current != null && current <= when) return { armed: false, alarmAt: current };
-    await this.ctx.storage.setAlarm(when);
-    return { armed: true, alarmAt: when };
+    return this.jobAlarmReconciler({ retryDelayMs });
   }
   // Fast safety-net RPC. Slow jobs each get their own invocation below.
   // Reading storage wakes the object, so the Worker cron cannot check "is
@@ -652,8 +704,17 @@ export default {
     // invite redeem hit the same handlers as origin (www /api/* is Webflow).
     if (isEdgeDoorUrl(request.url)) {
       const inbound = new URL(request.url);
-      const path = rewriteRoomApiPrefix(inbound.pathname) + inbound.search;
-      request = new Request(new URL(path, roomOrigin(env).origin), request);
+      const pathname = rewriteRoomApiPrefix(inbound.pathname);
+      const target = new URL(pathname + inbound.search, roomOrigin(env).origin);
+      // OAuth state is bound to a host-only account cookie. Start on the
+      // canonical callback host before creating either the slot or state;
+      // an internal rewrite would set the cookie on the public entry host.
+      if (request.method === 'GET' && pathname === '/api/auth/google/start') {
+        return finish(new Response(null, { status: 302, headers: {
+          Location: target.href, 'Cache-Control': 'no-store'
+        } }), 'worker');
+      }
+      request = new Request(target, request);
     } else if (EDGE_DOOR_HOSTS.includes(new URL(request.url).hostname)) {
       // The /room* route also catches /rooms, /roommates and similar lookalikes
       // (an exact pattern would drop /room?ref= query strings). Those are simply

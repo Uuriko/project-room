@@ -93,10 +93,30 @@ const get = async (url, accept = "application/json") => {
     try { json = JSON.parse(text); } catch {}
     return { status: res.status, json, ms: Date.now() - started };
   } catch (error) {
-    return { status: 0, json: null, ms: Date.now() - started, error: String(error?.message ?? error) };
+    return { status: 0, json: null, ms: Date.now() - started, error: String(error?.message ?? error), errorKind: error?.name === "TimeoutError" ? "fetch_timeout" : "fetch_error" };
   }
 };
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Only fixed classifications and bounded numbers belong in deployment artifacts.
+// Never retain arbitrary response fields, exception messages, or headers here.
+export function readinessDetail(result) {
+  const choose = (value, allowed, fallback) => allowed.includes(value) ? value : fallback;
+  const number = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  const probe = result.json?.do;
+  const detail = {
+    status: result.status,
+    body: choose(result.json?.status, ["ready", "degraded"], null),
+    emailVerification: choose(result.json?.emailVerification, ["enforced", "relaxed-no-mailer"], "unknown"),
+    emailVerificationScope: choose(result.json?.emailVerificationScope, ["durable-object", "worker"], "unknown"),
+    do: { status: choose(probe?.status, ["ok", "timeout", "error"], "unknown") },
+  };
+  if (number(result.ms)) detail.elapsedMs = result.ms;
+  for (const key of ["ms", "timeoutMs"]) if (number(probe?.[key])) detail.do[key] = probe[key];
+  if (Number.isInteger(probe?.statusCode) && probe.statusCode >= 100 && probe.statusCode <= 599) detail.do.statusCode = probe.statusCode;
+  if (result.status === 0) detail.transport = choose(result.errorKind, ["fetch_timeout", "fetch_error"], "fetch_error");
+  return detail;
+}
 
 // Deploy-time consistency check for one served agent card (#1524). Returns
 // the list of failures; an empty list means the card is signed, binds the
@@ -186,9 +206,10 @@ export async function checkAgentCardDoor({
   let streak = 0;
   let attempt = 0;
   let staleFetches = 0;
+  let onlyVerifiedStale = true;
   const pending = [];
   const done = (failures, converged) => {
-    if (stats) Object.assign(stats, { attempts: attempt, staleFetches, converged, elapsedMs: now() - started });
+    if (stats) Object.assign(stats, { attempts: attempt, staleFetches, converged, elapsedMs: now() - started, retryKind: !converged && staleFetches > 0 && onlyVerifiedStale ? "verified-stale-card" : null });
     return failures;
   };
   for (;;) {
@@ -216,6 +237,11 @@ export async function checkAgentCardDoor({
         return done([], true);
       }
     } else {
+      const oldRevision = r.json?.signedRevision;
+      const verifiedStale = r.status === 200 && /^[0-9a-f]{40}$/.test(oldRevision ?? "")
+        && oldRevision !== expectedRevision && !target
+        && checkAgentCard({ card: r.json, expectedRevision: oldRevision, publicKey, keyId, agentId }).length === 0;
+      onlyVerifiedStale &&= verifiedStale;
       const labelled = failures.map(f => `fetch #${attempt}: ${f}`);
       // The target build itself served a bad card: no amount of waiting fixes it.
       if (target) return done(labelled, false);
@@ -241,20 +267,21 @@ async function main() {
     const doors = [`${origin}/api/version`, `${origin}/api/version/worker`, `${entry}/api/version`, `${entry}/api/version/worker`];
     const deadline = Date.now() + waitMs;
     const last = {};
+    const statuses = {};
     for (;;) {
       const results = await Promise.all(doors.map(get));
-      results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; });
-      if (doors.every(d => last[d] === sha) || Date.now() > deadline) break;
+      results.forEach((r, i) => { last[doors[i]] = r.json?.sourceRevision ?? `http ${r.status}`; statuses[doors[i]] = r.status; });
+      if (doors.every(d => statuses[d] === 200 && last[d] === sha) || Date.now() > deadline) break;
       await sleep(10000);
     }
-    for (const d of doors) record(`version ${d}`, last[d] === sha, { got: last[d] });
+    for (const d of doors) record(`version ${d}`, statuses[d] === 200 && last[d] === sha, { got: last[d], status: statuses[d] });
   }
 
   for (const door of [origin, entry]) {
     const health = await get(`${door}/api/health`);
     record(`health ${door}/api/health`, health.status === 200 && health.json?.status === "ok", { status: health.status, body: health.json?.status ?? null });
     const ready = await get(`${door}/api/ready`);
-    record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", { status: ready.status, body: ready.json?.status ?? null, emailVerification: ready.json?.emailVerification ?? "unknown", emailVerificationScope: ready.json?.emailVerificationScope ?? "unknown" });
+    record(`ready ${door}/api/ready`, ready.status === 200 && ready.json?.status === "ready" && ready.json?.emailVerification === "enforced" && ready.json?.emailVerificationScope === "durable-object", readinessDetail(ready));
     for (const page of ["/terms", "/privacy", "/"]) {
       const r = await get(`${door}${page}`, "text/html");
       record(`page ${door}${page}`, r.status === 200, { status: r.status });
