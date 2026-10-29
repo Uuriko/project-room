@@ -1,5 +1,5 @@
 import { backup, DatabaseSync } from "node:sqlite";
-import { chmodSync, mkdtempSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, createReadStream, mkdtempSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { RoomStore } from "./store.mjs";
@@ -32,6 +32,18 @@ export function backupDigests(db) {
     attachments: { rows: fileRows, bytes: fileBytes, mismatched, sha256: files.digest("hex") } };
 }
 
+// Backups are immutable standalone SQLite files. A non-empty WAL means the
+// main file alone no longer describes the database that a reader will see.
+export async function backupSnapshotDigest(filename) {
+  try {
+    if (statSync(`${filename}-wal`).size > 0) throw new Error("Backup has a non-empty WAL; standalone snapshot integrity is not provable");
+  } catch (error) { if (error.code !== "ENOENT") throw error; }
+  const hash = createHash("sha256");
+  let bytes = 0;
+  for await (const chunk of createReadStream(filename)) { bytes += chunk.length; hash.update(chunk); }
+  return { bytes, sha256: hash.digest("hex") };
+}
+
 // Fresh private destination only; never overwrite or restore into the live DB.
 export async function backupRoom(source, destinationDirectory) {
   const input = realpathSync(source);
@@ -55,7 +67,9 @@ export async function backupRoom(source, destinationDirectory) {
     const events = restored.db.prepare("SELECT count(*) AS n FROM events").get().n;
     const digests = backupDigests(restored.db);
     if (digests.attachments.mismatched) throw new Error(`Backup holds ${digests.attachments.mismatched} attachment(s) whose bytes do not match their sha256`);
-    const watermark = { version: 1, backedUpAt: Date.now(), rooms, events, digests };
+    restored.close(); restored = null;
+    const snapshot = await backupSnapshotDigest(filename);
+    const watermark = { version: 1, backedUpAt: Date.now(), rooms, events, digests, snapshot };
     const sidecar = join(destination, "room-backup.json");
     writeFileSync(sidecar, JSON.stringify(watermark, null, 2));
     chmodSync(sidecar, 0o600);

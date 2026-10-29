@@ -15,7 +15,7 @@ import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RoomStore } from "../server/store.mjs";
-import { backupRoom, backupDigests, reconcileRestoredAuthority } from "../server/backup.mjs";
+import { backupRoom, backupDigests, backupSnapshotDigest, reconcileRestoredAuthority } from "../server/backup.mjs";
 
 process.umask(0o077);
 
@@ -106,7 +106,8 @@ export function scheduleIsDue(state, nowMs, schedule) {
 export async function verifyRestoredBackup({ backupFilename, watermarkPath, liveDbPath = null, nowMs = Date.now() }) {
   const checks = [];
   const check = (name, ok, detail = "") => checks.push({ name, ok: Boolean(ok), detail });
-  const done = (stale = [], watermark = null) => ({ ok: checks.every(c => c.ok), checks, stale, watermark });
+  const done = (stale = [], watermark = null) => ({ ok: checks.every(c => c.ok), checks, stale, watermark,
+    coverage: watermark?.snapshot ? "snapshot-bytes" : watermark?.digests ? "events-and-attachments" : "counts-only" });
   let watermark = null;
   try {
     watermark = JSON.parse(readFileSync(watermarkPath, "utf8"));
@@ -121,6 +122,21 @@ export async function verifyRestoredBackup({ backupFilename, watermarkPath, live
     `backedUpAt=${watermark.backedUpAt}`);
   check("watermark-events", Number.isSafeInteger(watermark.events) && watermark.events >= 0,
     `events=${watermark.events}`);
+  if (Object.hasOwn(watermark, "snapshot")) {
+    const expected = watermark.snapshot;
+    const valid = expected && Number.isSafeInteger(expected.bytes) && expected.bytes > 0
+      && typeof expected.sha256 === "string" && /^[a-f0-9]{64}$/.test(expected.sha256);
+    check("snapshot-digest-shape", valid);
+    if (valid) {
+      try {
+        const actual = await backupSnapshotDigest(backupFilename);
+        check("snapshot-bytes-match-watermark", actual.bytes === expected.bytes && actual.sha256 === expected.sha256,
+          `backup=${actual.bytes} bytes sha256:${actual.sha256.slice(0, 12)}`);
+      } catch (error) { check("snapshot-bytes-match-watermark", false, error?.message || String(error)); }
+    }
+  } else {
+    check("snapshot-digest-coverage", true, "legacy watermark: whole snapshot equality is not provable");
+  }
   let restored = null;
   try {
     restored = new RoomStore(backupFilename, { readOnly: true });
