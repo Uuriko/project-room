@@ -159,9 +159,18 @@ export function renderVerificationBlock(receipt, verification) {
     return `<li data-check="${escapeHtml(check.id)}" data-status="${escapeHtml(check.status)}"><strong>${escapeHtml(check.label)}</strong> — ${escapeHtml(CHECK_STATUS_WORDS[check.status] ?? check.status)}: ${detail}</li>`;
   }).join("");
   const notChecked = verification.scope.notChecked.map(item => `<li>${escapeHtml(item)}</li>`).join("");
+  // The headline carries the delivery outcome first (N1-F1): the re-check
+  // verdict alone ("Record re-checked") was identical for a verified, a
+  // submitted, and a rejected delivery, so a cropped stamp could not be
+  // told apart across outcomes. The outcome word is the record's own
+  // composed state — the same field the Outcome section below words —
+  // and only a public-work receipt carries one; any other receipt's
+  // headline stays the verdict label alone, with no outcome fabricated.
+  const outcome = receipt.source === "public-work" && receipt.state ? outcomeLabel(receipt.state) : null;
+  const headline = outcome ? `${outcome} — ${verification.verdictLabel}` : verification.verdictLabel;
   return `<section class="receipt-verification" aria-label="Verification">
 <h2>Verification</h2>
-<p class="verification-verdict" data-verdict="${escapeHtml(verification.verdict)}"><strong>${escapeHtml(verification.verdictLabel)}</strong></p>
+<p class="verification-verdict" data-verdict="${escapeHtml(verification.verdict)}"><strong>${escapeHtml(headline)}</strong></p>
 <p>${escapeHtml(verification.summary)}</p>
 <p class="verification-meta">Checked <time datetime="${escapeHtml(verification.checkedAt)}">${escapeHtml(verification.checkedAt)}</time> by ${escapeHtml(verification.scope.by)}.</p>
 <h3>What was checked</h3>
