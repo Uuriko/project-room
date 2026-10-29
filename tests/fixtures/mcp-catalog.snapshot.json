@@ -643,6 +643,15 @@
         "openWorldHint": false
       }
     },
+    "room_access_request_status": {
+      "inputSchema": "18f02251a4ef72f6",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
     "room_acquire_claim": {
       "inputSchema": "8095571b61c3be39",
       "annotations": {
@@ -1161,6 +1170,15 @@
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    "room_request_access": {
+      "inputSchema": "7b8fd369eddf258d",
+      "annotations": {
+        "readOnlyHint": false,
+        "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
       }

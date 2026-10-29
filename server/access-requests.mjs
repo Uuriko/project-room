@@ -687,6 +687,13 @@ export class AccessRequests {
       // the agent asked for is not enforced — the owner is sovereign — but
       // the request records what was asked).
       const grants = permissions === undefined ? requestContents(row).permissions : permissions;
+      // UT2 04-02 F4: the note is validated and recorded on approve exactly
+      // as on deny. The approve UPDATE below used to omit decision_note, so
+      // an owner's decision rationale was silently dropped (decisionNote
+      // read back null) while the deny branch kept it.
+      if (note !== undefined && note !== null && (typeof note !== "string" || note.length > 500)) {
+        fail(422, "invalid_request", "note must be text of at most 500 characters");
+      }
       // RC-2026-09-18-022: the approval grant is validated too, so a
       // hand-written approval can never mint a member with nonsense
       // permissions. (Requests validated at request() time already pass.)
@@ -736,8 +743,8 @@ export class AccessRequests {
       // #2912), so the flip must land first for that exemption to fire.
       // Flip and link stay inside this one transaction — the pair is
       // still atomic, and a failed link rolls the approval back too.
-      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=? WHERE request_id=?")
-        .run(now, auth.member.id, requestId);
+      this.db.prepare("UPDATE access_requests SET status='approved', decided_at=?, decided_by=?, decision_note=? WHERE request_id=?")
+        .run(now, auth.member.id, note?.trim() || null, requestId);
       const linked = identities.link(token, roomId, {
         identityId: row.identity_id,
         displayName: row.display_name,
@@ -751,6 +758,7 @@ export class AccessRequests {
         decidedRequestId: requestId,
         ...(referrerMemberId ? { referredBy: referrerMemberId } : {})
       }, expectedSessionBinding);
+
       // Journal the completed referral in the same transaction, after the
       // new member exists. Exactly-once per referee via the referrals
       // primary key, so a retried approval cannot double-count.
