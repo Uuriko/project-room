@@ -1,5 +1,8 @@
 # pnpm 12 ignores the "pnpm" field in package.json. Overrides live here so
-# `pnpm install --frozen-lockfile` matches pnpm-lock.yaml.
+# `pnpm install --frozen-lockfile` matches pnpm-lock.yaml. These values must
+# stay identical to package.json's "pnpm.overrides" and the lockfile (#3579);
+# CI currently pins pnpm 10, which reads package.json — drift here arms a
+# future pnpm bump to silently resolve different versions.
 overrides:
-  sharp: 0.35.4
+  sharp: 0.35.5
   undici: 7.29.1
