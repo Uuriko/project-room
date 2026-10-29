@@ -4462,6 +4462,10 @@ $("#channel-archive-button").addEventListener("click", async e => {
 function submitRequest(form) {
   if (!state || busy || requestReading) return;
   const mode = requestMode, key = composerKey(), identity = session, generation = client.generation;
+  const request = mode?.requestMessageId && state.replyRequests?.[mode.requestMessageId];
+  // Keyboard/programmatic submission must respect the terminal-request state
+  // used by the disabled button. An uncertain command still retries unchanged.
+  if (request && request.status !== "open" && !pendingMessage) return;
   if (!$("#message-input").value.trim()) return;
   const hadPending = Boolean(pendingMessage);
   try {
