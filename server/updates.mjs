@@ -1,4 +1,5 @@
 import { messageRepository } from "./message-repository.mjs";
+import { messageInHistory } from "./history-visibility.mjs";
 // One projection of "what needs me now?" over the journals that already exist.
 // There is no second queue and no handled flag on those records. Read, done,
 // and clear are private marks keyed to the source revision; a new revision
@@ -168,14 +169,16 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   const now = store.now();
   const items = [];
   const requests = state.replyRequests ?? {};
+  const floor = store.historyFloor(roomId, memberId, room.sequence);
   const byId = messageRepository(store, roomId, state);
 
   for (const request of Object.values(requests)) {
-    if (!request || request.recipientId !== memberId) continue;
+    if (!request || request.recipientId !== memberId || !messageInHistory(request, floor)) continue;
     const latest = byId.get(request.contextMessageId) ?? byId.get(request.id);
     // Same rule as reply-context (server/reply-requests.mjs): a private message is
     // visible only to its author and recipient, so never echo it as the title.
-    const context = latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
+    const context = !messageInHistory(latest, floor)
+      || latest?.toMemberId && latest.authorId !== memberId && latest.toMemberId !== memberId ? null : latest;
     const updatedAt = iso(context?.createdAt ?? request.closedAt ?? request.createdAt);
     const terminal = request.status === "answered" || request.status === "declined" ? "answered"
       : request.status === "cancelled" ? "cleared" : null;
@@ -193,7 +196,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   const requestIds = new Set(Object.keys(requests));
   try {
     const rows = store.db.prepare(
-      `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt,
+      `SELECT m.message_event_id AS messageEventId, m.state, m.created_at AS createdAt, e.sequence,
               json_extract(e.body,'$.actorId') AS actorId, json_extract(e.body,'$.data.messageId') AS messageId,
               json_extract(e.body,'$.data.body') AS body
        FROM mention_states m JOIN events e ON e.room_id=m.room_id AND e.id=m.message_event_id
@@ -201,6 +204,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
     ).all(roomId, memberId);
     for (const row of rows) {
       const messageId = row.messageId || row.messageEventId;
+      if (floor && row.sequence < floor.sequence) continue;
       if (requestIds.has(messageId)) continue;
       const terminal = row.state === "responded" ? "answered" : row.state === "acknowledged" ? "read" : null;
       const at = iso(row.createdAt);
@@ -218,7 +222,7 @@ function projectRoom(store, roomId, memberId, identityId, { needsMeOnly = false 
   }
 
   for (const message of byId.receivedBy(memberId)) {
-    if (!message || message.toMemberId !== memberId || message.authorId === memberId) continue;
+    if (!message || message.toMemberId !== memberId || message.authorId === memberId || !messageInHistory(message, floor)) continue;
     if (requestIds.has(message.id)) continue;
     const at = iso(message.createdAt);
     items.push(draft({

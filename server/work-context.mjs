@@ -13,10 +13,11 @@ const EVIDENCE_RECORDS = Object.freeze(["receipt", "verification", "decision", "
 // Current conversation pointers belong to their two participants, even when
 // linked to room-visible work. Neither a request body nor another member's
 // pending conversation is part of this selected task read.
-function openWorkReplies(state, workItemId, viewerId) {
+function openWorkReplies(state, workItemId, viewerId, floor) {
   const requests = Object.values(state.replyRequests ?? {}).filter(request =>
     request.workItemId === workItemId && request.status === "open"
-    && [request.requesterId, request.recipientId].includes(viewerId))
+    && [request.requesterId, request.recipientId].includes(viewerId)
+    && messageInHistory(request, floor))
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
   const shown = requests.slice(0, 25).map(request => ({
     ...pick(request, "id requesterId recipientId workItemId status revision createdAt"),
@@ -108,7 +109,7 @@ export function selectedWorkContext({ state, workItemId, viewerId, sequence, now
   const value = {
     contractVersion: 1, roomId: state.room.id, evaluatedThrough: sequence, evaluatedAt: new Date(now).toISOString(),
     viewer: pick(member, "id displayName kind active revision permissions"), work,
-    replyRequestContext: openWorkReplies(state, workItemId, viewerId),
+    replyRequestContext: openWorkReplies(state, workItemId, viewerId, floor),
     resume: workResume(work, now, state.room.ownerId),
     next: { ...next, addressedToViewer: next.memberId === viewerId },
     toolFocus: {
