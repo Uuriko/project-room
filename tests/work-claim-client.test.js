@@ -505,8 +505,14 @@ test('discovery release instructions work with a truncated board read and reject
   assert.ok(listed.historyOmitted > 0);
   const basis = { expectedClaimedAt: listed.claimedAt,
     expectedHistoryLength: listed.history.length + (listed.historyOmitted ?? 0) };
-  await assert.rejects(owner.releaseWorkItem(item.id, { ...basis, expectedHistoryLength: listed.history.length }),
-    error => error.status === 409 && error.code === 'work_claim_conflict');
+  await assert.rejects(owner.releaseWorkItem(item.id, { ...basis, expectedHistoryLength: listed.history.length }), error => {
+    assert.equal(error.status, 409);
+    assert.equal(error.code, 'work_claim_conflict');
+    assert.match(error.message, /release basis does not match/);
+    assert.match(error.message, /historyOmitted/);
+    assert.doesNotMatch(error.message, /changed since it was read/);
+    return true;
+  });
   assert.equal((await owner.workClaimGet(item.id)).owner, 'owner');
   assert.equal((await owner.releaseWorkItem(item.id, basis)).state, 'unclaimed');
   await owner.claimWorkItem(item.id);

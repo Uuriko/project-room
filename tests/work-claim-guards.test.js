@@ -252,8 +252,8 @@ test("release binds the claim round at the HTTP boundary", async () => {
   await assert.rejects(call(registry, "holder", "release", "lane", { ...stale, reason: "stale" }), error => {
     assert.equal(error.status, 409);
     assert.equal(error.code, "work_claim_conflict");
-    assert.match(error.message, /changed since it was read/);
-    assert.match(error.message, /re-read the claim/);
+    assert.match(error.message, /release basis does not match/);
+    assert.match(error.message, /same fresh read/);
     return true;
   });
   assert.equal(registry.get("room1", "lane").state, "claimed");
