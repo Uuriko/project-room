@@ -12,20 +12,47 @@ to do next without reconstructing chat history. A disconnected laptop resumes
 useful work without duplicating a deployment. Each production change has an
 inspectable chain from intent to tested source, artifact, deployment and outcome.
 
-At this checkpoint, production is f237176479f413756fbcc0898648da6c28f20571.
-Its first deployment smoke failed readiness; later verification passed, followed
-by another independent readiness failure. A successful sample does not close
-incident #5177. Main contains additional UI and infrastructure changes that are
-not deployed. PR #5199 implements verification without a second upload and has
-passed local tests and a real public verification against f237176. These are
-dated observations, not permanently current status.
+### Evidence checkpoint: 2026-10-29 UTC
 
-The other laptop identified an existing-tag publication path that can promote
-a release without checking its target and package. The peer confirmed ownership
-of that repair and the runner inventory in Room message
-`workflow-split-confirm-1029` (sequence 22321). This Mac owns the record composer.
-The first joint deliverable is an exact-target verification record plus a
-publisher that rejects mismatched existing tags and packages.
+Release [40824263799](https://github.com/Uuriko/project-room/actions/runs/40824263799)
+deployed `2d72bb7ffaf911ffa7801113de55e9130e208734`. Both entry points reported
+that source in Worker and application responses; authenticated identity access
+worked. The downloaded [runtime package](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-2d72bb7)
+matched all 630 exact-source files. Workflow smoke passed, but independent
+readiness verification failed afterwards: [incident #5177 evidence](https://github.com/Uuriko/project-room/issues/5177#issuecomment-6489081310).
+A publication receipt proves package identity, not current service health.
+
+The verification CLI (#5199), release-record importer (#5202), portable archive
+creator (#5203), existing-release integrity check (#5201), skipped-probe
+publication fix (#5205), and pinned publication tooling/correction tags (#5211)
+are merged. Records currently import public verification evidence; authenticated
+journeys, deployment and publication remain separately inspected evidence.
+Do not label their adapters implemented merely because the original receipts exist.
+
+Cold work-only reads (#5213) now extract work-view fields and hydrate work
+entities without loading unrelated conversation bodies. On its composed source,
+57 checks passed. Reopened-store HTTP fixtures with 10 and 100 messages made
+zero full-room hydration calls and returned 1,515/1,516 bytes; inline and
+body-at-rest modes passed. Fresh authorization, work corruption refusal and
+full-cache isolation remain checked. Selected-message mention resolution
+(#5212) also uses fresh membership without hydrating room history. SQLite still
+scans projection JSON; these changes do not complete A1, normalize all storage,
+or prove a readiness cure. Their deployment is tracked by exact source in
+[run 40827203823](https://github.com/Uuriko/project-room/actions/runs/40827203823),
+not inferred from merged status.
+
+Remaining read debt includes archived-page cursor ties and byte trimming
+(#5206), retained-message processing, default orientation/board call chains,
+verified archive hydration and full projection scan cost. Preserve private
+message, history-floor, index repair and corruption-recovery semantics while
+reducing those reads. The 4 MiB projection cap remains unchanged.
+
+The two-laptop execution trial remains unverified. Inventory existing native
+host journals, directed requests and saved results before extending scheduling.
+A protocol fixture or an independently run remote command is not evidence of
+cross-host dispatch, interrupted delivery or duplicate-result recovery. Retain
+source/toolchain, elapsed time, duplicate execution count and original failures
+for the real trial; report a specific investigated blocker if it cannot run.
 
 ## Reuse and ownership
 
