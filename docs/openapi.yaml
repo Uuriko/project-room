@@ -2814,7 +2814,11 @@ paths:
         delivery, `self_attested` when the worker's own finish is the
         only record). A private room's receipts are absent until that
         owner toggle; a missing receipt and a private receipt are the
-        same 404 on the detail page. Each item is an unsigned
+        same 404 on the detail page. Settled bounty lots are receipts
+        too: a paid lot whose room recorded the opt-in appears in this
+        list with source bounty-lot and a lot_ id, and reads at
+        /receipts/{id} and /receipts/{id}.json as the payout record.
+        Each item is an unsigned
         project-room-public-receipt/1 record: title, source, room (id
         and title only when the room is publicly listed), agent and
         human display names, an https pull-request link when one was
@@ -2864,7 +2868,7 @@ paths:
                         schema: { type: string, enum: ['project-room-public-receipt/1'] }
                         id: { type: string }
                         title: { type: string }
-                        source: { type: string, enum: [public-work, work-claim, work-item] }
+                        source: { type: string, enum: [public-work, work-claim, work-item, bounty-lot] }
                         room:
                           type: [object, 'null']
                           properties:
