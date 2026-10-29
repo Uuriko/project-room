@@ -4191,20 +4191,26 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
       // A since_join reader also loses messages and events from before their
       // join (server/history-visibility.mjs). null for everyone else.
       const historyFloor = store.historyFloor(roomId, viewerId);
-      const historyMessages = historyFloor ? messageRepository(store, roomId) : null;
+      let historyMessages;
       const dmMessageVisible = message => messageInHistory(message, historyFloor)
         && (!message.toMemberId || message.authorId === viewerId || message.toMemberId === viewerId);
       // SEC-19: edits, deletes, redactions, reactions and pins of a DM follow
       // the DM's own visibility (server/dm-event-visibility.mjs).
-      const dmPartyVisible = dmEventVisibility(viewerId, store.room(roomId).state.messages, [], store.archivedDmPartiesReader(roomId));
-      const dmEventVisible = event => eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
+      let dmPartyVisible;
+      const dmEventVisible = event => {
+        // Work-only reads have no message events to filter. Resolve history
+        // only when a route actually consumes it.
+        historyMessages ??= historyFloor ? messageRepository(store, roomId) : null;
+        dmPartyVisible ??= dmEventVisibility(viewerId, store.room(roomId).state.messages, [], store.archivedDmPartiesReader(roomId));
+        return eventInHistory(event, historyFloor, historyMessages) && dmPartyVisible(event);
+      };
       // --- end PRIV-2 ---
       // Bond receipts and peer DMs are ledger events, visible to the two
       // identities (bond metadata also to the room owner). Not room chat.
       const peerContext = {
         memberId: viewerId,
         identityId: store.bonds.identityForMember(roomId, viewerId),
-        isOwner: viewerId === store.room(roomId).state.room.ownerId
+        isOwner: viewerId === store.roomAuthority(roomId).ownerId
       };
       const roomEventVisible = event => dmEventVisible(event) && dmConsentEventVisible(event, viewerId, peerContext.isOwner)
         && peerEventVisible(event, peerContext);
