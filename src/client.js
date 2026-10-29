@@ -8,7 +8,7 @@ import { DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
 import { BOND_REFUSAL_CODES } from "./friend-bond.js";
 import { humanErrorMessage } from "./error-copy.js";
 import { requestFailureMessage } from "./share-links.js";
-import { isBootSummary, deriveBootSummary, mergeWorkDetail } from "./boot-summary.js";
+import { isBootSummary, deriveBootSummary, mergeWorkDetail, bootSummaryFromProjection, isProjectionRead, BOOT_PROJECTION_PATH } from "./boot-summary.js";
 
 // C2: the read-only "what this agent can access" preview must describe exactly the
 // selected work the browser asked about and repeat the server's own omission list;
@@ -140,7 +140,7 @@ export class RoomClient {
     // boot summary (see boot-summary.js) and detailOwed names the views
     // whose detail loadViewDetail() still has to fetch.
     this.summaryHeld = false;
-    this.summaryUnsupported = false;
+    this.projectionUnsupported = false;
     this.detailOwed = new Set();
     this.detailFlight = null;
     this.historyWanted = false;
@@ -382,7 +382,7 @@ export class RoomClient {
           const auditView = this.auditView;
           const attempt = this.readAttempts = (this.readAttempts ?? 0) + 1;
           // Summary-first boot: the first read of a summaryBoot client asks
-          // for the summary contract instead of the windowed snapshot;
+          // for the projection boot contract instead of the windowed snapshot;
           // bootSummaryRead() falls back to the windowed read (staged mode)
           // when the server does not serve the contract yet.
           const bootSummary = Boolean(this.summaryBoot && !full && !holding && this.sequence === 0);
@@ -722,22 +722,26 @@ export class RoomClient {
     this.onSnapshot(snapshot, session);
     return true;
   }
-  // Boot summary first read. Asks for the summary contract
-  // (GET ?view=summary, RR-D2's scoped projection); a server that does
-  // not serve it yet (422 invalid_snapshot_view, or 404) gets the staged
-  // fallback: the ordinary windowed read, slimmed locally by
-  // deriveBootSummary(). The negative answer is remembered for the
-  // session, so a later boot of this client does not re-probe. Auth
-  // failures and other errors propagate like any boot read.
+  // Boot summary first read, in RR-D2's scoped-projection grammar:
+  // the first read asks the projection endpoint for the boot classes
+  // (the fields selector in BOOT_PROJECTION_PATH, see boot-summary.js)
+  // and adapts the served envelope with bootSummaryFromProjection().
+  // A server that does not serve the endpoint yet (404, or 422
+  // invalid_snapshot_view) gets the staged fallback: the ordinary
+  // windowed read, slimmed locally by deriveBootSummary() into the
+  // same grammar. The negative answer is remembered for the session,
+  // so a later boot of this client does not re-probe. Auth failures
+  // and other errors propagate like any boot read.
   async bootSummaryRead(auditView) {
-    if (!this.summaryUnsupported) {
+    if (!this.projectionUnsupported) {
       try {
-        const read = await this.request(this.path("?view=summary"), { offerContext: true, auditView, fresh: true });
+        const read = await this.request(this.path(BOOT_PROJECTION_PATH), { offerContext: true, auditView, fresh: true });
+        if (isProjectionRead(read)) return bootSummaryFromProjection(read);
         if (isBootSummary(read)) return read;
-        this.summaryUnsupported = true;
+        this.projectionUnsupported = true;
       } catch (error) {
         if (![404, 422].includes(error?.status)) throw error;
-        this.summaryUnsupported = true;
+        this.projectionUnsupported = true;
       }
     }
     const read = await this.request(this.path("?messages=recent"), { offerContext: true, auditView, fresh: true });
