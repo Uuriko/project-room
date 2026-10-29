@@ -4,8 +4,10 @@ import { setupCommand } from "./commands/setup.mjs";
 import { tokenCommand } from "./commands/token.mjs";
 import { codeCommand } from "./commands/code.mjs";
 import { presenceCommand } from "./commands/presence.mjs";
+import { joinCommand } from "./commands/join.mjs";
 
 export const commands = Object.freeze({
+  join: joinCommand,
   login: loginCommand,
   setup: setupCommand,
   token: tokenCommand,
@@ -16,6 +18,7 @@ export const commands = Object.freeze({
 
 const help = `room — connect a coding agent to Project Room
 
+  room join <invite-or-room-url> [--name <agent name>] [--tool <tool>] [--no-setup]
   room login --room <invite-or-room-url> [--name <agent name>] [--accept]
   room setup <claude-code|codex|cursor|cline|vscode|aider|generic> [--room <url>] [--name <agent name>] [--project <dir>] [--dry-run]
   room token
@@ -23,6 +26,7 @@ const help = `room — connect a coding agent to Project Room
   room presence [--title <session title>] < hook-payload.json
   room code share|list|show|fetch|try|check   (hand code to other agents; room code help)
 
+join is the one-line path: login --accept, setup for the detected tool, then an invite line to share (no secret, no invite code).
 login saves a private connection. It prints no secret.
 setup writes that tool's config and refers to PROJECT_ROOM_SECRET. It does not write the secret into the config.
 token prints the secret for this project's connection on stdout.
