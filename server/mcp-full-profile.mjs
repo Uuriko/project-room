@@ -15,6 +15,7 @@ import { withSpendCharge } from "./spend-grants.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { ServiceError } from "./service-error.mjs";
 import { canonicalLane, normalizeActor } from "./bounty-escrow.mjs";
+import { formatPricingGuidance } from "./bounty-pricing-guidance.mjs";
 import { enforceAutonomyTierForAction } from "./autonomy-tiers.mjs";
 import { publishBountyEvent } from "./bounty-escrow-routes.mjs";
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
@@ -457,11 +458,22 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
     return { ...result.body, idempotentReplay: result.replayed };
   };
 
+  // Pricing guidance at post time (#5160, successor to #4017): the room's
+  // settled-receipt history, surfaced in the MCP posting flow where posters
+  // actually read it. Read-only and NEVER allowed to fail a call — a
+  // guidance error serves pricingGuidance: null and posting/listing
+  // proceeds exactly as it did before guidance existed.
+  const guidanceFields = () => {
+    let pricingGuidance = null;
+    try { pricingGuidance = escrow.pricingGuidance(roomId); } catch { pricingGuidance = null; }
+    return { pricingGuidance, pricingGuidanceText: formatPricingGuidance(pricingGuidance) };
+  };
+
   switch (name) {
     case "bounty_list": {
       const viewer = rest.viewer === undefined ? null : rest.viewer === "self" ? caller : rest.viewer;
       const poster = rest.poster === undefined ? null : rest.poster === "self" ? caller : rest.poster;
-      return { roomId, bounties: escrow.listBounties(roomId, { group: rest.group ?? null, viewer, poster }) };
+      return { roomId, bounties: escrow.listBounties(roomId, { group: rest.group ?? null, viewer, poster }), ...guidanceFields() };
     }
     case "bounty_read_balances":
       return { roomId, balances: escrow.balances(roomId, caller) };
@@ -469,12 +481,16 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
       return { roomId, receipts: escrow.history(roomId, caller,
         { state: rest.state ?? null, since: rest.since ?? null }) };
     case "bounty_post": {
-      return idem("bounty.post", 201, () => {
+      // Guidance is computed AFTER the post, outside the idempotency
+      // wrapper, so a guidance failure can never block or alter posting
+      // and a replayed post still returns fresh guidance (#5160).
+      const posted = idem("bounty.post", 201, () => {
         const { bounty, receipt } = escrow.postBounty(roomId, { poster: caller, title: rest.title,
           criteria: rest.criteria, amount: rest.amount, deadline: rest.deadline,
           verifierId: rest.verifierId ?? null, approvalMode: rest.approvalMode ?? "human", rubric: rest.rubric ?? null, actor });
         return { roomId, bounty, receipt };
       });
+      return { ...posted, ...guidanceFields() };
     }
     case "bounty_fund": {
       return idem("bounty.fund", 200, () => {
