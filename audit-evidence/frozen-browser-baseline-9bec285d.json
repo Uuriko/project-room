@@ -1,0 +1,711 @@
+{
+  "schema": "project-room-browser-baseline/1",
+  "localSource": "9bec285d48213fec11ac4a119ea32d4d0aa782e9",
+  "publishedEquivalent": "09c466352572c95e805eea2856f0ad7817859979",
+  "tree": "dcf1736a44b352e1cf0b14ba5caf734c446f969b",
+  "command": "npm run test:browser",
+  "launcher": "bash ../../outputs/project-room-local-checks.sh npm run test:browser",
+  "runId": "none — local terminal run",
+  "sessionId": 95689,
+  "exitCode": 1,
+  "scope": "configured full browser suite, respecting explicit suite exclusions; no other suites included",
+  "totals": {
+    "tests": 736,
+    "pass": 649,
+    "fail": 75,
+    "cancelled": 11,
+    "skip": 1
+  },
+  "note": "86 entries include failures and cancellations. Individual status is not inferred from the shared failure footer symbol.",
+  "logSha256": "e99736c018ef872565bb18514df14a164d626f71dbbc27f75ad0e528ff4bbe0a",
+  "entries": [
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 94,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:94:3",
+      "printedFailure": "✖ work action committed-empty: close and resume keep the exact result command (8571.168792ms)",
+      "name": "work action committed-empty: close and resume keep the exact result command"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 94,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:94:3",
+      "printedFailure": "✖ work action uncommitted-empty: close and resume keep the exact result command (8516.521792ms)",
+      "name": "work action uncommitted-empty: close and resume keep the exact result command"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 94,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:94:3",
+      "printedFailure": "✖ work action committed-lost: close and resume keep the exact result command (8535.21975ms)",
+      "name": "work action committed-lost: close and resume keep the exact result command"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 94,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:94:3",
+      "printedFailure": "✖ work action uncommitted-lost: close and resume keep the exact result command (8531.910333ms)",
+      "name": "work action uncommitted-lost: close and resume keep the exact result command"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 94,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:94:3",
+      "printedFailure": "✖ work action wrong-actor: close and resume keep the exact result command (8533.147416ms)",
+      "name": "work action wrong-actor: close and resume keep the exact result command"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 94,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:94:3",
+      "printedFailure": "✖ work action wrong-payload: close and resume keep the exact result command (8531.915875ms)",
+      "name": "work action wrong-payload: close and resume keep the exact result command"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 94,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:94:3",
+      "printedFailure": "✖ work action wrong-operation: close and resume keep the exact result command (8532.590708ms)",
+      "name": "work action wrong-operation: close and resume keep the exact result command"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 94,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:94:3",
+      "printedFailure": "✖ work action malformed-json: close and resume keep the exact result command (8517.422375ms)",
+      "name": "work action malformed-json: close and resume keep the exact result command"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 127,
+      "column": 1,
+      "location": "scripts/action-recovery-browser-check.mjs:127:1",
+      "printedFailure": "✖ unknown claim retries preserve ordered paths and stay locked through size and rate refusals (8531.8145ms)",
+      "name": "unknown claim retries preserve ordered paths and stay locked through size and rate refusals"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 144,
+      "column": 35,
+      "location": "scripts/action-recovery-browser-check.mjs:144:35",
+      "printedFailure": "✖ First invalid scope unlocks after a definitive refusal (8532.686292ms)",
+      "name": "First invalid scope unlocks after a definitive refusal"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 144,
+      "column": 35,
+      "location": "scripts/action-recovery-browser-check.mjs:144:35",
+      "printedFailure": "✖ Unknown invalid scope unlocks after a definitive refusal (8517.008583ms)",
+      "name": "Unknown invalid scope unlocks after a definitive refusal"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 159,
+      "column": 1,
+      "location": "scripts/action-recovery-browser-check.mjs:159:1",
+      "printedFailure": "✖ closed unknown save warns on leave and sign-out without deleting a declined retry (8517.381833ms)",
+      "name": "closed unknown save warns on leave and sign-out without deleting a declined retry"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 170,
+      "column": 1,
+      "location": "scripts/action-recovery-browser-check.mjs:170:1",
+      "printedFailure": "✖ unchanged pending-save warning stays quiet during unrelated room activity (8535.931167ms)",
+      "name": "unchanged pending-save warning stays quiet during unrelated room activity"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 187,
+      "column": 1,
+      "location": "scripts/action-recovery-browser-check.mjs:187:1",
+      "printedFailure": "✖ a competing reservation resolves an uncommitted retry without overwriting either scope (8528.511417ms)",
+      "name": "a competing reservation resolves an uncommitted retry without overwriting either scope"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 203,
+      "column": 1,
+      "location": "scripts/action-recovery-browser-check.mjs:203:1",
+      "printedFailure": "✖ a valid action receipt remains saved when its follow-up snapshot fails (8535.952125ms)",
+      "name": "a valid action receipt remains saved when its follow-up snapshot fails"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 213,
+      "column": 1,
+      "location": "scripts/action-recovery-browser-check.mjs:213:1",
+      "printedFailure": "✖ stale refusal with no live updates provides an owned refresh before rebasing (8531.328792ms)",
+      "name": "stale refusal with no live updates provides an owned refresh before rebasing"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 227,
+      "column": 1,
+      "location": "scripts/action-recovery-browser-check.mjs:227:1",
+      "printedFailure": "✖ a failed explicit refresh keeps old evidence and notes until a later successful read (8531.389208ms)",
+      "name": "a failed explicit refresh keeps old evidence and notes until a later successful read"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 242,
+      "column": 1,
+      "location": "scripts/action-recovery-browser-check.mjs:242:1",
+      "printedFailure": "✖ late explicit review refresh cannot expose a previous session's result link or notes (8527.396667ms)",
+      "name": "late explicit review refresh cannot expose a previous session's result link or notes"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 265,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:265:3",
+      "printedFailure": "✖ stale verify keeps notes but requires an explicit new verdict for the new result (8537.28275ms)",
+      "name": "stale verify keeps notes but requires an explicit new verdict for the new result"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 265,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:265:3",
+      "printedFailure": "✖ stale decide keeps notes but requires an explicit new verdict for the new result (8536.804625ms)",
+      "name": "stale decide keeps notes but requires an explicit new verdict for the new result"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 295,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:295:3",
+      "printedFailure": "✖ late action success cannot alter a replacement session's form or focus (8530.719208ms)",
+      "name": "late action success cannot alter a replacement session's form or focus"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 295,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:295:3",
+      "printedFailure": "✖ late action failure cannot alter a replacement session's form or focus (8532.917ms)",
+      "name": "late action failure cannot alter a replacement session's form or focus"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 316,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:316:3",
+      "printedFailure": "✖ pending action desktop keyboard stays operable (8534.41325ms)",
+      "name": "pending action desktop keyboard stays operable"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 316,
+      "column": 3,
+      "location": "scripts/action-recovery-browser-check.mjs:316:3",
+      "printedFailure": "✖ pending action mobile large text stays operable (8532.681916ms)",
+      "name": "pending action mobile large text stays operable"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 333,
+      "column": 150,
+      "location": "scripts/action-recovery-browser-check.mjs:333:150",
+      "printedFailure": "✖ human approval normal: typed rationale and exact two-leg retries (8365.761916ms)",
+      "name": "human approval normal: typed rationale and exact two-leg retries"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 333,
+      "column": 150,
+      "location": "scripts/action-recovery-browser-check.mjs:333:150",
+      "printedFailure": "✖ human approval rationale-lost: typed rationale and exact two-leg retries (8357.994333ms)",
+      "name": "human approval rationale-lost: typed rationale and exact two-leg retries"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 333,
+      "column": 150,
+      "location": "scripts/action-recovery-browser-check.mjs:333:150",
+      "printedFailure": "✖ human approval rationale-uncommitted: typed rationale and exact two-leg retries (8349.056ms)",
+      "name": "human approval rationale-uncommitted: typed rationale and exact two-leg retries"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 333,
+      "column": 150,
+      "location": "scripts/action-recovery-browser-check.mjs:333:150",
+      "printedFailure": "✖ human approval decision-lost: typed rationale and exact two-leg retries (8375.865125ms)",
+      "name": "human approval decision-lost: typed rationale and exact two-leg retries"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 333,
+      "column": 150,
+      "location": "scripts/action-recovery-browser-check.mjs:333:150",
+      "printedFailure": "✖ human approval decision-uncommitted: typed rationale and exact two-leg retries (8348.544042ms)",
+      "name": "human approval decision-uncommitted: typed rationale and exact two-leg retries"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 333,
+      "column": 150,
+      "location": "scripts/action-recovery-browser-check.mjs:333:150",
+      "printedFailure": "✖ human approval wrong-rationale: typed rationale and exact two-leg retries (8395.850583ms)",
+      "name": "human approval wrong-rationale: typed rationale and exact two-leg retries"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 333,
+      "column": 150,
+      "location": "scripts/action-recovery-browser-check.mjs:333:150",
+      "printedFailure": "✖ human approval empty-rationale: typed rationale and exact two-leg retries (8361.068291ms)",
+      "name": "human approval empty-rationale: typed rationale and exact two-leg retries"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 371,
+      "column": 60,
+      "location": "scripts/action-recovery-browser-check.mjs:371:60",
+      "printedFailure": "✖ human approval held rationale cannot cross the revision boundary (8361.1635ms)",
+      "name": "human approval held rationale cannot cross the revision boundary"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 371,
+      "column": 60,
+      "location": "scripts/action-recovery-browser-check.mjs:371:60",
+      "printedFailure": "✖ human approval held rationale cannot cross the session boundary (8344.697209ms)",
+      "name": "human approval held rationale cannot cross the session boundary"
+    },
+    {
+      "file": "scripts/action-recovery-browser-check.mjs",
+      "line": 371,
+      "column": 60,
+      "location": "scripts/action-recovery-browser-check.mjs:371:60",
+      "printedFailure": "✖ human approval held rationale cannot cross the account boundary (8332.698ms)",
+      "name": "human approval held rationale cannot cross the account boundary"
+    },
+    {
+      "file": "scripts/assisted-work-browser-check.mjs",
+      "line": 14,
+      "column": 3,
+      "location": "scripts/assisted-work-browser-check.mjs:14:3",
+      "printedFailure": "✖ assisted work desktop: scope conflict, explicit release, exact retry and quiet catch-up (15912.2975ms)",
+      "name": "assisted work desktop: scope conflict, explicit release, exact retry and quiet catch-up"
+    },
+    {
+      "file": "scripts/assisted-work-browser-check.mjs",
+      "line": 14,
+      "column": 3,
+      "location": "scripts/assisted-work-browser-check.mjs:14:3",
+      "printedFailure": "✖ assisted work mobile: scope conflict, explicit release, exact retry and quiet catch-up (15845.365125ms)",
+      "name": "assisted work mobile: scope conflict, explicit release, exact retry and quiet catch-up"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 91,
+      "column": 3,
+      "location": "scripts/draft-return-browser-check.mjs:91:3",
+      "printedFailure": "✖ draft return committed-empty: exact retry resolves without replacing the contribution (30037.563083ms)",
+      "name": "draft return committed-empty: exact retry resolves without replacing the contribution"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 91,
+      "column": 3,
+      "location": "scripts/draft-return-browser-check.mjs:91:3",
+      "printedFailure": "✖ draft return uncommitted-empty: exact retry resolves without replacing the contribution (30033.9735ms)",
+      "name": "draft return uncommitted-empty: exact retry resolves without replacing the contribution"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 91,
+      "column": 3,
+      "location": "scripts/draft-return-browser-check.mjs:91:3",
+      "printedFailure": "✖ draft return wrong-actor: exact retry resolves without replacing the contribution (30035.77425ms)",
+      "name": "draft return wrong-actor: exact retry resolves without replacing the contribution"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 91,
+      "column": 3,
+      "location": "scripts/draft-return-browser-check.mjs:91:3",
+      "printedFailure": "✖ draft return wrong-message: exact retry resolves without replacing the contribution (30032.698584ms)",
+      "name": "draft return wrong-message: exact retry resolves without replacing the contribution"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 91,
+      "column": 3,
+      "location": "scripts/draft-return-browser-check.mjs:91:3",
+      "printedFailure": "✖ draft return malformed-json: exact retry resolves without replacing the contribution (30033.525166ms)",
+      "name": "draft return malformed-json: exact retry resolves without replacing the contribution"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 91,
+      "column": 3,
+      "location": "scripts/draft-return-browser-check.mjs:91:3",
+      "printedFailure": "✖ draft return first-rate-limit: exact retry resolves without replacing the contribution (30035.1665ms)",
+      "name": "draft return first-rate-limit: exact retry resolves without replacing the contribution"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 122,
+      "column": 1,
+      "location": "scripts/draft-return-browser-check.mjs:122:1",
+      "printedFailure": "✖ uncommitted return retry unlocks only after stale rejection, preserving message identity through explicit correction (30033.179417ms)",
+      "name": "uncommitted return retry unlocks only after stale rejection, preserving message identity through explicit correction"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 142,
+      "column": 1,
+      "location": "scripts/draft-return-browser-check.mjs:142:1",
+      "printedFailure": "✖ confirmed draft applies locally with failed snapshot, remains saved, and stays findable on refresh (30611.488792ms)",
+      "name": "confirmed draft applies locally with failed snapshot, remains saved, and stays findable on refresh"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 173,
+      "column": 1,
+      "location": "scripts/draft-return-browser-check.mjs:173:1",
+      "printedFailure": "✖ posted draft returns to its exact conversation record and work link preserves unrelated thread drafts (30034.735458ms)",
+      "name": "posted draft returns to its exact conversation record and work link preserves unrelated thread drafts"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 220,
+      "column": 1,
+      "location": "scripts/draft-return-browser-check.mjs:220:1",
+      "printedFailure": "✖ mobile guest draft is discoverable by the returning accountable member without implying work completion (30022.943042ms)",
+      "name": "mobile guest draft is discoverable by the returning accountable member without implying work completion"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 239,
+      "column": 3,
+      "location": "scripts/draft-return-browser-check.mjs:239:3",
+      "printedFailure": "✖ late draft success cannot alter a replacement session (30023.4895ms)",
+      "name": "late draft success cannot alter a replacement session"
+    },
+    {
+      "file": "scripts/draft-return-browser-check.mjs",
+      "line": 239,
+      "column": 3,
+      "location": "scripts/draft-return-browser-check.mjs:239:3",
+      "printedFailure": "✖ late draft failure cannot alter a replacement session (30020.195125ms)",
+      "name": "late draft failure cannot alter a replacement session"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 111,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:111:1",
+      "printedFailure": "✖ exact result copy preserves text, reports failure and ignores a late completion after closing (8378.218625ms)",
+      "name": "exact result copy preserves text, reports failure and ignores a late completion after closing"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 156,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:156:1",
+      "printedFailure": "✖ native review shows exact text and leaves human approval pending (8372.546917ms)",
+      "name": "native review shows exact text and leaves human approval pending"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 169,
+      "column": 40,
+      "location": "scripts/native-result-browser-check.mjs:169:40",
+      "printedFailure": "✖ native result 320px dark: read, review and return to the same result (8403.454ms)",
+      "name": "native result 320px dark: read, review and return to the same result"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 169,
+      "column": 40,
+      "location": "scripts/native-result-browser-check.mjs:169:40",
+      "printedFailure": "✖ native result 320px light: read, review and return to the same result (8419.29475ms)",
+      "name": "native result 320px light: read, review and return to the same result"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 304,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:304:1",
+      "printedFailure": "✖ native review refuses self-consistent text from a different pinned evidence version (8405.803042ms)",
+      "name": "native review refuses self-consistent text from a different pinned evidence version"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 322,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:322:1",
+      "printedFailure": "✖ native result large text and keyboard remain usable; revocation clears visible text (8373.496666ms)",
+      "name": "native result large text and keyboard remain usable; revocation clears visible text"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 336,
+      "column": 37,
+      "location": "scripts/native-result-browser-check.mjs:336:37",
+      "printedFailure": "✖ native result desktop: failed read retries the pinned result in place (8406.957334ms)",
+      "name": "native result desktop: failed read retries the pinned result in place"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 336,
+      "column": 37,
+      "location": "scripts/native-result-browser-check.mjs:336:37",
+      "printedFailure": "✖ native result phone: failed read retries the pinned result in place (8419.720625ms)",
+      "name": "native result phone: failed read retries the pinned result in place"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 372,
+      "column": 45,
+      "location": "scripts/native-result-browser-check.mjs:372:45",
+      "printedFailure": "✖ native result: held retry cannot restore text after close (8381.972416ms)",
+      "name": "native result: held retry cannot restore text after close"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 372,
+      "column": 45,
+      "location": "scripts/native-result-browser-check.mjs:372:45",
+      "printedFailure": "✖ native result: held retry cannot restore text after revoke (8378.089334ms)",
+      "name": "native result: held retry cannot restore text after revoke"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 401,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:401:1",
+      "printedFailure": "✖ native result 320px: a live update keeps the focused View result control on screen (8378.109416ms)",
+      "name": "native result 320px: a live update keeps the focused View result control on screen"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 463,
+      "column": 68,
+      "location": "scripts/native-result-browser-check.mjs:463:68",
+      "printedFailure": "✖ native result: wrong-completion cannot masquerade as the selected result (8403.147584ms)",
+      "name": "native result: wrong-completion cannot masquerade as the selected result"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 463,
+      "column": 68,
+      "location": "scripts/native-result-browser-check.mjs:463:68",
+      "printedFailure": "✖ native result: missing-result cannot masquerade as the selected result (8392.669625ms)",
+      "name": "native result: missing-result cannot masquerade as the selected result"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 481,
+      "column": 37,
+      "location": "scripts/native-result-browser-check.mjs:481:37",
+      "printedFailure": "✖ selected result feedback desktop preserves drafts and exact reply (8784.289334ms)",
+      "name": "selected result feedback desktop preserves drafts and exact reply"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 481,
+      "column": 37,
+      "location": "scripts/native-result-browser-check.mjs:481:37",
+      "printedFailure": "✖ selected result feedback mobile preserves drafts and exact reply (8783.34175ms)",
+      "name": "selected result feedback mobile preserves drafts and exact reply"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 506,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:506:1",
+      "printedFailure": "✖ result reply refusal keeps the reader and private destination draft intact (8797.306667ms)",
+      "name": "result reply refusal keeps the reader and private destination draft intact"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 532,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:532:1",
+      "printedFailure": "✖ withdrawal clears an open review and prevents approval of missing text (8395.2155ms)",
+      "name": "withdrawal clears an open review and prevents approval of missing text"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 542,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:542:1",
+      "printedFailure": "✖ late review text cannot restore a withdrawn result (8386.569292ms)",
+      "name": "late review text cannot restore a withdrawn result"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 560,
+      "column": 1,
+      "location": "scripts/native-result-browser-check.mjs:560:1",
+      "printedFailure": "✖ native result 320px: a card re-render rescues a focused View result control that starts off screen (8387.537ms)",
+      "name": "native result 320px: a card re-render rescues a focused View result control that starts off screen"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 618,
+      "column": 37,
+      "location": "scripts/native-result-browser-check.mjs:618:37",
+      "printedFailure": "✖ result feedback preserves another reply (desktop) (8864.777458ms)",
+      "name": "result feedback preserves another reply (desktop)"
+    },
+    {
+      "file": "scripts/native-result-browser-check.mjs",
+      "line": 618,
+      "column": 37,
+      "location": "scripts/native-result-browser-check.mjs:618:37",
+      "printedFailure": "✖ result feedback preserves another reply (mobile) (8816.057334ms)",
+      "name": "result feedback preserves another reply (mobile)"
+    },
+    {
+      "file": "scripts/refine-draft-browser-check.mjs",
+      "line": 11,
+      "column": 37,
+      "location": "scripts/refine-draft-browser-check.mjs:11:37",
+      "printedFailure": "✖ refine draft desktop: separate edits, source link, exact retry and result (10409.7235ms)",
+      "name": "refine draft desktop: separate edits, source link, exact retry and result"
+    },
+    {
+      "file": "scripts/refine-draft-browser-check.mjs",
+      "line": 11,
+      "column": 37,
+      "location": "scripts/refine-draft-browser-check.mjs:11:37",
+      "printedFailure": "✖ refine draft mobile: separate edits, source link, exact retry and result (10382.988ms)",
+      "name": "refine draft mobile: separate edits, source link, exact retry and result"
+    },
+    {
+      "file": "scripts/visual-regression-browser-check.mjs",
+      "line": 118,
+      "column": 1,
+      "location": "scripts/visual-regression-browser-check.mjs:118:1",
+      "printedFailure": "✖ login/join entry pages match visual baselines (768.772042ms)",
+      "name": "login/join entry pages match visual baselines"
+    },
+    {
+      "file": "scripts/visual-regression-browser-check.mjs",
+      "line": 139,
+      "column": 1,
+      "location": "scripts/visual-regression-browser-check.mjs:139:1",
+      "printedFailure": "✖ signed-in room view and message list match visual baselines (494.797791ms)",
+      "name": "signed-in room view and message list match visual baselines"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 62,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:62:3",
+      "printedFailure": "✖ reuse desktop: definition-only preview, fresh proposal, stable drafts and keyboard focus (8397.854291ms)",
+      "name": "reuse desktop: definition-only preview, fresh proposal, stable drafts and keyboard focus"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 62,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:62:3",
+      "printedFailure": "✖ reuse mobile: definition-only preview, fresh proposal, stable drafts and keyboard focus (8337.480667ms)",
+      "name": "reuse mobile: definition-only preview, fresh proposal, stable drafts and keyboard focus"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 138,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:138:3",
+      "printedFailure": "✖ reuse creation: committed-lost keeps an exact explicit original retry (8355.761292ms)",
+      "name": "reuse creation: committed-lost keeps an exact explicit original retry"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 138,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:138:3",
+      "printedFailure": "✖ reuse creation: uncommitted-lost keeps an exact explicit original retry (8328.712666ms)",
+      "name": "reuse creation: uncommitted-lost keeps an exact explicit original retry"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 138,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:138:3",
+      "printedFailure": "✖ reuse creation: server-failure keeps an exact explicit original retry (8338.878916ms)",
+      "name": "reuse creation: server-failure keeps an exact explicit original retry"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 138,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:138:3",
+      "printedFailure": "✖ reuse creation: malformed-receipt keeps an exact explicit original retry (8348.202375ms)",
+      "name": "reuse creation: malformed-receipt keeps an exact explicit original retry"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 138,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:138:3",
+      "printedFailure": "✖ reuse creation: wrong-receipt keeps an exact explicit original retry (8348.784208ms)",
+      "name": "reuse creation: wrong-receipt keeps an exact explicit original retry"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 172,
+      "column": 1,
+      "location": "scripts/work-reuse-browser-check.mjs:172:1",
+      "printedFailure": "✖ known first refusal allows edits; closing an uncertain form is not cancellation (8333.412333ms)",
+      "name": "known first refusal allows edits; closing an uncertain form is not cancellation"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 194,
+      "column": 1,
+      "location": "scripts/work-reuse-browser-check.mjs:194:1",
+      "printedFailure": "✖ large Unicode proposal is a correctable refusal, not an uncertain retry (8316.174291ms)",
+      "name": "large Unicode proposal is a correctable refusal, not an uncertain retry"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 209,
+      "column": 1,
+      "location": "scripts/work-reuse-browser-check.mjs:209:1",
+      "printedFailure": "✖ uncommitted original retry rejection unlocks correction without creating another work identity (8459.265709ms)",
+      "name": "uncommitted original retry rejection unlocks correction without creating another work identity"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 230,
+      "column": 1,
+      "location": "scripts/work-reuse-browser-check.mjs:230:1",
+      "printedFailure": "✖ reuse keyboard cycle and CR line endings stay usable without changing the original (8350.756125ms)",
+      "name": "reuse keyboard cycle and CR line endings stay usable without changing the original"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 258,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:258:3",
+      "printedFailure": "✖ reuse late success cannot affect a replacement session's new draft (8351.401ms)",
+      "name": "reuse late success cannot affect a replacement session's new draft"
+    },
+    {
+      "file": "scripts/work-reuse-browser-check.mjs",
+      "line": 258,
+      "column": 3,
+      "location": "scripts/work-reuse-browser-check.mjs:258:3",
+      "printedFailure": "✖ reuse late failure cannot affect a replacement session's new draft (8332.971125ms)",
+      "name": "reuse late failure cannot affect a replacement session's new draft"
+    }
+  ]
+}
