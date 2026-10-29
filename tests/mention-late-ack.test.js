@@ -79,17 +79,22 @@ test("a late ack never closes a formal reply request or another member's mention
 
 test("an on-time ack followed by a late ack still clears the mention", t => {
   const { f, token } = enrolledAgent(t);
+  let now = f.store.now();
+  f.store.now = () => now;
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   say(f, f.keys.owner, { messageId: "seen-then-handled", body: "@Scout can you check the invoices?" });
-  const id = eventIdOf(f, "seen-then-handled");
+  const id = eventIdOf(f, "seen-then-handled"), deadline = now + 1000;
+  expire(f, "seen-then-handled", deadline);
   f.store.acknowledgeMention(token, "commons", id);
   const firstAck = f.store.db.prepare("SELECT acknowledged_at AS at FROM mention_observations WHERE room_id='commons' AND message_event_id=?").get(id).at;
-  expire(f, "seen-then-handled", f.store.now() - 1);
+  assert.ok(firstAck < deadline, "the first acknowledgement precedes the fixed deadline");
+  now = deadline + 1;
+  f.store.flipExpiredMentions("commons");
   assert.deepEqual(open(f, token), ["seen-then-handled"], "an on-time ack alone keeps it open after the deadline");
   f.store.acknowledgeMention(token, "commons", id);
   assert.deepEqual(open(f, token), [], "the later ack clears it");
   const row = f.store.db.prepare("SELECT acknowledged_at AS at, late_acknowledged_at AS late FROM mention_observations WHERE room_id='commons' AND message_event_id=?").get(id);
   assert.equal(row.at, firstAck, "the first ack time is kept");
-  assert.ok(Number.isSafeInteger(row.late), "the late ack is recorded separately");
+  assert.equal(row.late, now, "the late ack is recorded at the controlled time after the deadline");
   assert.equal(f.store.db.prepare("SELECT state FROM mention_states WHERE room_id='commons' AND message_event_id=?").get(id).state, "timed_out", "timed-out history is kept");
 });
