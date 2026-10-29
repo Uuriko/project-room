@@ -30,14 +30,14 @@ exists), **open** (promised, not yet pinned).
   (`claim-release-compare-and-swap`, not dates); every scenario must be
   fail-first verified (watch it go red against a deliberately broken build
   before it is accepted).
-- **Observability** — the invariant telemetry contract,
-  `docs/INVARIANTS-TELEMETRY.md` (lane A14,
-  [#2127](https://github.com/Uuriko/project-room/pull/2127), open):
-  `scripts/invariants-reporter.mjs` emits a JSONL run log
+- **Observability** — `scripts/invariants-ci.mjs` runs
+  `tests/invariants/**/*.test.mjs`, writes `results/invariants.jsonl`
   (`run_start` / `invariant_result` / `run_end`, per-invariant status,
-  duration, and the git SHA under test), `scripts/invariants-report.mjs`
-  renders it as a markdown table with `--fail-on-fail` for CI gates.
-  `results/` is gitignored; CI uploads the file as an artifact.
+  duration, and the git SHA under test), and renders the PR-comment table
+  itself. `docs/INVARIANTS-TELEMETRY.md`, `scripts/invariants-reporter.mjs`,
+  and `scripts/invariants-report.mjs` are not in the tree. The CI script
+  looks for that renderer and falls back to its built-in table. `results/`
+  is gitignored.
 - **Legacy scenario coverage** — many invariants were already pinned by
   subsystem test suites before the `tests/invariants/` frame existed. Those
   suites are named per invariant below and remain the enforcement until a
@@ -65,9 +65,9 @@ It never creates a second claim, a second dispatch, or a second charge.
   `tests/bounty-mcp-idempotency.test.js`,
   `tests/agent-rooms-idempotent-budget.test.js` — bounty and agent-room
   scopes.
-- `tests/room-post-retry-cross-surface.test.js` (test-only,
-  [#1994](https://github.com/Uuriko/project-room/pull/1994), open) —
-  proves room posts are idempotent across REST and MCP.
+- Cross-surface room-post retry was specified in
+  [#1994](https://github.com/Uuriko/project-room/pull/1994). That test file
+  is not in the tree, so the pin is not enforced here.
 
 **Routes / operations covered:**
 
@@ -243,7 +243,6 @@ asserting the event appears — and that a refused change emits nothing.
   PR states as of 2026-10-08. A contract doc with a wrong status is worse
   than no doc — when a linked PR merges or a new gap is found, update this
   file in the same PR.
-- Invariant ids in telemetry (`docs/INVARIANTS-TELEMETRY.md`) must match
-  scenario ids in `tests/invariants/` (stable kebab-case).
-- Telemetry for these invariants, once #2127 lands, lives in
-  `results/invariants.jsonl` (gitignored) and ships as a CI artifact.
+- Scenario ids in `tests/invariants/` stay stable kebab-case. There is no
+  separate telemetry contract doc in the tree.
+- `scripts/invariants-ci.mjs` writes `results/invariants.jsonl` (gitignored).

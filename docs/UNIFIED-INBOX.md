@@ -267,7 +267,7 @@ form says so. Email fixtures carry no credentials at all.
 
 | Piece | Today | Becomes live when |
 | --- | --- | --- |
-| Email inbound | Recorded Graph fixtures; cards read "Inbound: fixture mailbox · not yet routed" | Cloudflare Email Routing hands mail to the Worker (#144: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`, `docs/EMAIL-ROUTING.md`) and the Worker's `email()` handler is mounted |
+| Email inbound | Recorded Graph fixtures; cards read "Inbound: fixture mailbox · not yet routed" | Cloudflare Email Routing hands mail to the Worker (#144: `server/mime-message.mjs`, `server/email-routing-inbound.mjs`, `archive/docs/history/EMAIL-ROUTING.md`) and the Worker's `email()` handler is mounted |
 | Email outbound | None; sources say "Sending unavailable", `capabilities.send: false` | An outbound email slice (B23) |
 | Attachment bytes | Never retained; the reader lists descriptors (name, type, size) and downloads stay unavailable | A live provider fetch slice that downloads bytes with the account's credentials, reusing the phase-4 auth, ownership, and membership path |
 | Telegram inbound | Webhook route verifies and journals (`pending_channel_updates`); Reconnect imports | `TELEGRAM_BOT_TOKEN` and `TELEGRAM_WEBHOOK_SECRET` are set and `setWebhook` is registered |
@@ -512,13 +512,13 @@ once that file is next edited).
    to a Worker" pointing at the room Worker, and agree the address scheme
    (one connection per mailbox, plus-addressing for tags, an optional
    `*@domain` alias for catch-all). No secret, token or paid plan is involved.
-   See `docs/EMAIL-ROUTING.md` on that branch for caps and the handler
+   See `archive/docs/history/EMAIL-ROUTING.md` for caps and the handler
    proposal.
 3. Outbound email remains a separate slice (B23).
 
 ### Connection cards and the list
 
-`src/inbox-ui.js` renders one card per connection under the message list:
+`archive/deferred-email/src/inbox-ui.js` renders one card per connection under the message list:
 channel and bot or mailbox name, connection state, and for Telegram the live
 lines (`Live: not configured · set …` / `Live: configured`, `Webhook: …`,
 `Last update received`, `Last send`) plus **Reconnect**; email cards read
@@ -575,7 +575,7 @@ mailbox), `email_connection_limit` (20 per account), `email_connection_changed`
    registry throws at load time if a provider has no adapter).
 3. Accept the new `adapter` value where the Inbox projects sources
    (`summary`, `channelView` in `server/inbox.mjs`) and in the browser
-   validators (`src/inbox-client.js`).
+   validators (`archive/deferred-email/src/inbox-client.js`).
 4. Add the new server files to `scripts/runtime-package.mjs` and
    `scripts/candidate-runtime-fixture.mjs`; add tests and coverage-map claims.
 5. Keep the fixture-first stance: no tokens in code, fetch only through an
