@@ -1,4 +1,4 @@
-import { gunzipSync, brotliDecompressSync } from "node:zlib";
+import { gunzipSync, brotliDecompressSync, inflateSync } from "node:zlib";
 
 // Harness boundary for Miniflare dispatchFetch responses.
 //
@@ -30,12 +30,34 @@ export async function decodeDispatchResponse(response) {
   if (!bytes.length) {
     return new Response(null, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
-  let body = null;
-  try {
-    if (encoding.includes("gzip") && bytes[0] === 0x1f && bytes[1] === 0x8b) body = gunzipSync(bytes);
-    else if (encoding.includes("br")) body = brotliDecompressSync(bytes);
-  } catch { body = null; }
-  if (!body) {
+  // Peel every coding the header names, in reverse order of application,
+  // then keep peeling gzip layers while the gzip magic survives: at head
+  // 984a76c9 the hosted cloudflare job (run 40799927548, job 123209136557)
+  // still failed 12 checks with gzip magic bytes after a single peel, so
+  // the wire body can carry more than one gzip layer (a repeated coding,
+  // or a transport-added layer the moved header does not name). Bounded;
+  // each gzip peel is magic-verified, and a peel that throws keeps the
+  // last good bytes.
+  let body = bytes;
+  let peeled = false;
+  const codings = encoding.split(",").map(coding => coding.trim().toLowerCase()).reverse();
+  const peel = (coding, buf) => {
+    if ((coding === "gzip" || coding === "x-gzip") && buf[0] === 0x1f && buf[1] === 0x8b) return gunzipSync(buf);
+    if (coding === "br") return brotliDecompressSync(buf);
+    if (coding === "deflate") return inflateSync(buf);
+    return null;
+  };
+  for (const coding of codings) {
+    try {
+      const next = peel(coding, body);
+      if (!next) break;
+      body = next; peeled = true;
+    } catch { break; }
+  }
+  for (let extra = 0; extra < 3 && body[0] === 0x1f && body[1] === 0x8b; extra++) {
+    try { body = gunzipSync(body); peeled = true; } catch { break; }
+  }
+  if (!peeled) {
     return new Response(bytes, { status: response.status, statusText: response.statusText, headers: response.headers });
   }
   const headers = new Headers(response.headers);
