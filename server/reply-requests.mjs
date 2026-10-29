@@ -37,13 +37,49 @@ function decode(token, kind, binding) {
   return value;
 }
 
+// One bounded, process-local integrity index. Never contains authorization or
+// selected bodies. Tokens are sampled inside the established read snapshot.
+const HISTORY_CACHE_BYTES = 2 * 1024 * 1024;
+function fitsHistoryBudget(value) {
+  let bytes = 6; // Three array delimiters; per-entry comma allowance is conservative.
+  for (const entries of [value.byMessage.values(), value.owners.entries(), value.rows]) {
+    for (const entry of entries) {
+      bytes += Buffer.byteLength(JSON.stringify(entry)) + 1;
+      if (bytes > HISTORY_CACHE_BYTES) return false;
+    }
+  }
+  return true;
+}
+
+function historyToken(db) {
+  if (typeof db.readValidationToken === "function") return db.readValidationToken();
+  return { total: db.prepare("SELECT total_changes() AS n").get().n,
+    data: db.prepare("PRAGMA data_version").get().data_version,
+    schema: db.prepare("PRAGMA schema_version").get().schema_version };
+}
+const sameHistoryToken = (a, b) => a.total === b.total && a.data === b.data
+  && a.schema === b.schema && a.mutation === b.mutation;
+
 // Every read is authenticated and anchored in the same storage transaction. The
 // local notice acknowledgement, history checkpoint and human read cursor are separate.
 export class ReplyRequests {
+  #history = null;
+  #observed = null;
   constructor(store) { this.store = store; }
   read(token, roomId, expectedSessionBinding, fn, { requestsOnly = false } = {}) {
-    return this.store.readTransaction(() => {
+    const db = this.store.db;
+    const eligible = !requestsOnly && !db.isTransaction && !db.migrationSource;
+    let pending = null, observed = null;
+    const result = this.store.readTransaction(() => {
       const auth = this.store.authenticate(token, roomId, expectedSessionBinding);
+      const revision = eligible ? historyToken(db) : null;
+      // External Node commits do not pass this store's projection write watch.
+      // Do not rebuild integrity from its old same-head projection cache.
+      if (revision) {
+        if (this.#observed?.db !== db || revision.data !== this.#observed.revision.data
+          || revision.schema !== this.#observed.revision.schema) this.store._dropProjectionCache();
+        observed = { db, revision };
+      }
       let room;
       if (requestsOnly) {
         // Listing needs no conversation bodies, event history or work payloads.
@@ -52,10 +88,25 @@ export class ReplyRequests {
         if (!row) fail("room_not_found", "Room not found", 404);
         room = { sequence: row.sequence, state: { replyRequests: row.requests ? JSON.parse(row.requests) : {} } };
       } else room = this.store.room(roomId);
+      const integrity = revision ? {
+        get: horizon => {
+          const entry = this.#history;
+          return entry?.db === db && entry.roomId === roomId && entry.sequence === room.sequence
+            && entry.horizon === horizon && sameHistoryToken(entry.revision, revision) ? entry.value : null;
+        },
+        set: (horizon, value) => {
+          // Serialized budget bounds retained metadata; Map overhead is additional.
+          pending = fitsHistoryBudget(value) ? { db, roomId, sequence: room.sequence, horizon, revision, value } : null;
+        }
+      } : null;
       return { contractVersion: 1, roomId, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null,
         viewerAuthEpoch: auth.account?.authEpoch ?? null, viewerSessionBinding: auth.sessionBinding,
-        viewerSessionRevision: auth.sessionRevision ?? null, ...fn({ auth, room }), scope };
+        viewerSessionRevision: auth.sessionRevision ?? null, ...fn({ auth, room, integrity }), scope };
     });
+    // A failed outer commit or any nested/write transaction cannot publish.
+    if (pending) this.#history = pending;
+    if (observed) this.#observed = observed;
+    return result;
   }
   list(token, roomId, { direction = "incoming", status = "open", expectedSessionBinding = null } = {}) {
     if (!["incoming", "outgoing", "both"].includes(direction) || !["open", "answered", "declined", "cancelled", "all"].includes(status))
@@ -82,7 +133,7 @@ export class ReplyRequests {
     if (!integer(limit) || limit < 1 || limit > REPLY_MAX_PAGE_LIMIT || cursor !== null && checkpoint !== null
       || requestMessageId !== null && checkpoint !== null || requestMessageId === null && !["incoming", "outgoing", "both"].includes(direction))
       fail("invalid_reply_selection", "Choose a bounded page and one continuation or checkpoint");
-    return this.read(token, roomId, expectedSessionBinding, ({ auth, room }) => {
+    return this.read(token, roomId, expectedSessionBinding, ({ auth, room, integrity }) => {
       const state = room.state, requests = state.replyRequests ?? {};
       if (requestMessageId !== null && (!Object.hasOwn(requests, requestMessageId)
         || !directionMatches(requests[requestMessageId], auth.member.id, "both"))) fail("reply_request_not_found", "Request not found in this Room", 404);
@@ -118,14 +169,17 @@ export class ReplyRequests {
       // their metadata for validation and paging instead of fetching the
       // entire archive again in ID batches. Bodies are resolved only for output.
       // This is request-local, not an auth cache.
-      const byMessage = new Map();
+      const cached = integrity?.get(horizonSequence);
+      const byMessage = cached?.byMessage ?? new Map();
       function* indexedRecords() {
         for (const message of records.records({ omitBodies: true })) {
-          byMessage.set(message.id, message);
-          yield message;
+          const metadata = { id: message.id, authorId: message.authorId, createdAt: message.createdAt,
+            toMemberId: message.toMemberId, replyToId: message.replyToId, workItemId: message.workItemId };
+          byMessage.set(message.id, metadata);
+          yield metadata;
         }
       }
-      const owners = replyContextOwners({ ...state, messages: indexedRecords() });
+      const owners = cached?.owners ?? replyContextOwners({ ...state, messages: indexedRecords() });
       const fullMessages = new Map();
       const withBody = message => {
         if (!fullMessages.has(message.id)) {
@@ -138,9 +192,9 @@ export class ReplyRequests {
       // Validate global event integrity and posted-message provenance, including
       // unrelated messages. Retain only request-owned events for paging and
       // prior exchanges. This bounds each SQL result, not total scan work.
-      const rows = [], terminalIds = new Set(Object.values(requests).map(request => request.terminalEventId).filter(Boolean));
+      const rows = cached?.rows ?? [], terminalIds = new Set(Object.values(requests).map(request => request.terminalEventId).filter(Boolean));
       let through = 0, firstBatch = true;
-      for (;;) {
+      for (; !cached;) {
         const batch = firstBatch
           ? this.store.db.prepare(`SELECT ${eventColumns} FROM events WHERE room_id=? ORDER BY sequence LIMIT 128`).all(roomId)
           : this.store.db.prepare(`SELECT ${eventColumns} FROM events WHERE room_id=? AND sequence>? ORDER BY sequence LIMIT 128`).all(roomId, through);
@@ -155,7 +209,8 @@ export class ReplyRequests {
           if (message && owners.has(message.id) || terminalIds.has(row.id)) rows.push(row);
         }
       }
-      if (through !== room.sequence) changed();
+      if (!cached && through !== room.sequence) changed();
+      if (!cached) integrity?.set(horizonSequence, { byMessage, owners, rows });
       const byEvent = new Map(rows.map(row => [row.id, row]));
       const eventById = id => {
         if (!byEvent.has(id)) byEvent.set(id, this.store.db.prepare(`SELECT ${eventColumns} FROM events WHERE room_id=? AND id=?`).get(roomId, id));
