@@ -56,8 +56,10 @@ test("the plain page shows Record not rechecked with the action, and claims noth
   assert.match(html, /Record not rechecked/);
   assert.match(html, /href="\?verify=1"/);
   assert.doesNotMatch(html, /data-verdict=/, "no verdict is rendered before one runs");
-  assert.match(html, /Verification tier: bytes re-verified\. What was checked: the server verified the merge/,
-    "front-door batch B-4: the note names the tier the stored record carries (the server-verified merge), while the block above still says nothing was re-checked at read time");
+  assert.match(html, /Verification tier: merge recorded\. What was checked: the server recorded the merge/,
+    "front-door batch B-4 + #4071: the note names what the stored record carries (a server-recorded merge), and the block above agrees that nothing was re-checked at read time");
+  assert.doesNotMatch(html, /bytes re-verified/,
+    "#4071: a stored merge must not be worded as a completed verification");
   const json = await (await fetch(`${origin}/receipts/${receiptId}.json`)).json();
   assert.equal(json.verification, undefined, "JSON carries verification only when one ran");
 });
