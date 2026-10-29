@@ -7,6 +7,7 @@ import { createAcceptanceFixture } from "../scripts/acceptance-fixture.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { OutsideAgents } from "../server/outside-agents.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 function fixture(t) {
   const f = createAcceptanceFixture();
@@ -127,7 +128,7 @@ test("outside-agent HTTP and hosted MCP preserve scope, readonly and self-link b
   assert.equal((await api(f.keys.producer, { action: "introduce", externalRef: "bus:blocked", displayName: "Blocked", origin: "bus" })).status, 403);
   assert.deepEqual(Object.keys(f.members()), originalMembers);
   const identity = f.store.identities.create("MCP reader");
-  f.store.identities.link(f.keys.owner, "commons", { identityId: identity.identityId, displayName: "MCP reader", permissions: [] });
+  linkWithProof(f.store, f.keys.owner, "commons", identity, { displayName: "MCP reader", permissions: [] });
   const mcp = async (name, args = {}) => {
     const response = await fetch(origin + "/room/mcp", { method: "POST", headers: { Authorization: `Bearer ${identity.secret}`, "Content-Type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: { roomId: "commons", ...args } } }) });
     return response.json();
