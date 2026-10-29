@@ -126,3 +126,49 @@ test("filterEmptyCopy escapes the query it echoes", () => {
   assert.doesNotMatch(html, /<script>/);
   assert.match(html, /&lt;script&gt;/);
 });
+
+// --- #3909 board-UI kernel mirrors: Renew lease gate, claim cap, record order ---
+
+const isoAt = ms => new Date(ms).toISOString();
+const cardOf = (html, id) => {
+  const start = html.indexOf(`<article class="claim-card" data-claim-id="${id}">`);
+  assert.notEqual(start, -1, `card ${id} renders`);
+  const next = html.indexOf("<article", start + 1);
+  return html.slice(start, next === -1 ? html.length : next);
+};
+
+test("boardHtml offers Renew only on a claim with a live lease (#3909 F11)", () => {
+  const viewer = { id: "w1", manage: false, owner: false, write: true };
+  const live = claim("live", { state: "claimed", owner: "w1", leaseExpiresAt: isoAt(BOARD_NOW + 3600000) });
+  const leaseless = claim("leaseless", { state: "claimed", owner: "w1", leaseExpiresAt: null });
+  const lapsed = claim("lapsed", { state: "in_progress", owner: "w1", leaseExpiresAt: isoAt(BOARD_NOW - 60000) });
+  const html = boardHtml([live, leaseless, lapsed], null, viewer, members, BOARD_NOW, {});
+  assert.ok(cardOf(html, "live").includes('data-claim-action="renew"'), "a live lease can be renewed");
+  assert.ok(!cardOf(html, "leaseless").includes('data-claim-action="renew"'), "no lease, no Renew");
+  assert.ok(!cardOf(html, "lapsed").includes('data-claim-action="renew"'), "a lapsed lease is claimed again, not renewed");
+});
+
+test("boardHtml suppresses Claim at the per-member open-claim cap, with the refusal as a hint (#3909 F12)", () => {
+  const viewer = { id: "w1", manage: false, owner: false, write: true };
+  const held = claim("held", { state: "in_progress", owner: "w1", leaseExpiresAt: isoAt(BOARD_NOW + 7200000) });
+  const openOne = claim("open-one", { title: "Open one" });
+  const atCap = boardHtml([held, openOne], null, viewer, members, BOARD_NOW, { cap: 1 });
+  assert.ok(!cardOf(atCap, "open-one").includes('data-claim-action="claim"'), "at cap, no Claim button");
+  assert.ok(cardOf(atCap, "open-one").includes("You already hold the maximum number of open claims"), "the route's refusal copy is the hint");
+  const underCap = boardHtml([held, openOne], null, viewer, members, BOARD_NOW, { cap: 2 });
+  assert.ok(cardOf(underCap, "open-one").includes('data-claim-action="claim"'), "under cap, Claim renders");
+});
+
+test("boardHtml renders claim-record history newest-first (#3909 F14)", () => {
+  const item = claim("hist", { state: "done", owner: "w1", updatedAt: isoAt(BOARD_NOW - 60000),
+    history: [
+      { action: "created", agentId: "w1", at: isoAt(BOARD_NOW - 300000) },
+      { action: "claimed", agentId: "w1", at: isoAt(BOARD_NOW - 200000) },
+      { action: "state:done", agentId: "w1", at: isoAt(BOARD_NOW - 60000) },
+    ] });
+  const html = boardHtml([item], null, boardViewer, members, BOARD_NOW, {});
+  const card = cardOf(html, "hist");
+  const doneAt = card.indexOf("state:done"), claimedAt = card.indexOf("claimed"), createdAt = card.indexOf("created");
+  assert.ok(doneAt !== -1 && claimedAt !== -1 && createdAt !== -1, "all history rows render");
+  assert.ok(doneAt < claimedAt && claimedAt < createdAt, "the newest history entry renders first");
+});

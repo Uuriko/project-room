@@ -259,10 +259,22 @@ test("canWriteClaims refuses anonymous sessions and memberless rooms", () => {
   assert.equal(canWriteClaims({}, session("m1")), false);
 });
 
-test("canWriteClaims lets the owner write and skips enforcement without an ownerId", () => {
+test("canWriteClaims lets the owner write; without an ownerId the permission checks decide (#3909 F13)", () => {
   const state = boardState("owner1", { owner1: { kind: "human", permissions: [] } });
   assert.equal(canWriteClaims(state, session("owner1")), true);
-  assert.equal(canWriteClaims(boardState(null, { m1: { kind: "human", permissions: [] } }), session("m1")), true);
+  // No ownerless short-circuit: mayWriteWorkClaims falls through to the
+  // same permission checks when a room has no ownerId.
+  assert.equal(canWriteClaims(boardState(null, { m1: { kind: "human", permissions: [] } }), session("m1")), false);
+  assert.equal(canWriteClaims(boardState(null, { m1: { kind: "human", permissions: ["accept_work"] } }), session("m1")), true);
+});
+
+test("canWriteClaims checks membership and active status before the owner shortcut (#3909 F13)", () => {
+  // An inactive owner is refused, exactly as the route refuses an
+  // inactive member before its owner shortcut; so is an "owner" who is
+  // not a listed member at all.
+  const inactive = boardState("owner1", { owner1: { kind: "human", permissions: [], active: false } });
+  assert.equal(canWriteClaims(inactive, session("owner1")), false);
+  assert.equal(canWriteClaims(boardState("owner1", {}), session("owner1")), false);
 });
 
 test("canWriteClaims gates humans on accept/complete work and rejects the inactive", () => {

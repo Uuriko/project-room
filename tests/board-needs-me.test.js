@@ -88,3 +88,15 @@ test("a new head restores the review ask instead of trusting stale approval", ()
   const item = claim("changed", { owner: other, tags: [`rev-${me}`], ci: { headSha: "b".repeat(40) }, reviews: [{ memberId: me, basis: { version: 1, owner: other, claimedAt: null, revision: null, headSha: "a".repeat(40) } }] });
   assert.deepEqual(myBoardWork([item], me, members, now).reviews.map(row => row.item.id), ["changed"]);
 });
+
+test("a done or closed claim with an open PR invents no review row (#3909 F10)", () => {
+  const pr = { url: "https://github.com/Uuriko/project-room/pull/1" };
+  const items = [
+    claim("done-pr", { owner: other, state: "done", tags: [`rev-${me}`], pullRequest: pr }),
+    claim("closed-pr", { owner: other, state: "closed", tags: [`rev-${me}`], pullRequest: pr }),
+    claim("delivered-pr", { owner: other, state: "delivered", tags: [`rev-${me}`], pullRequest: pr }),
+  ];
+  // The kernel reviews active + delivered claims only; the open PR on a
+  // terminal claim must not resurrect a review the kernel would refuse.
+  assert.deepEqual(myBoardWork(items, me, members, now).reviews.map(x => x.item.id), ["delivered-pr"]);
+});
