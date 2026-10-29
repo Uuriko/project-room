@@ -692,3 +692,72 @@ for (const count of [10, 100]) test(`request listing avoids full room hydration 
   f.store.revoke(f.keys.agent);
   await assert.rejects(new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token: f.keys.agent }).replyRequests());
 });
+
+test("request reads respect since-join history after member reactivation", async t => {
+  const f = fixture(t);
+  const frozen = Date.now() + 10000; f.store.now = () => frozen;
+  f.send('owner', { id: 'floor-policy', type: 'room.history_visibility_set', data: { historyVisibility: 'since_join' } });
+  const old = f.open('guest', { body: 'Private before reactivation' }, 'before-reactivation');
+  f.post('guest', { messageId: 'older-context', body: 'Older context', replyToId: old.command.data.messageId });
+  const oldRead = f.store.replyRequests.history(f.keys.agent, 'commons', { limit: 1 });
+  f.send('owner', { id: 'remove-agent', type: 'member.access_changed', data: { memberId: 'agent', active: false, permissions: f.state().members.agent.permissions, expectedMemberRevision: f.state().members.agent.revision ?? 0 } });
+  f.send('owner', { id: 'restore-agent', type: 'member.access_changed', data: { memberId: 'agent', active: true, permissions: f.state().members.agent.permissions, expectedMemberRevision: f.state().members.agent.revision ?? 0 } });
+  f.keys.agent = f.store.issueAccessKey('commons', 'agent');
+  const fresh = f.open('guest', { body: 'Visible after reactivation' }, 'after-reactivation');
+  assert.deepEqual(f.store.replyRequests.list(f.keys.agent, 'commons').requests.map(r => r.id), [fresh.command.data.messageId]);
+  assert.throws(() => f.store.replyRequests.selected(f.keys.agent, 'commons', old.command.data.messageId), { code: 'reply_request_not_found' });
+  const history = f.store.replyRequests.history(f.keys.agent, 'commons');
+  assert.deepEqual(history.page.items.map(i => i.message?.id), [fresh.command.data.messageId]);
+  assert.equal(JSON.stringify(history).includes('Private before reactivation'), false);
+  assert.equal(f.store.replyRequests.selected(f.keys.agent, 'commons', fresh.command.data.messageId).current.answerBasis.contextEventId, fresh.receipt.event.id);
+  assert.ok(oldRead.page.nextCursor);
+  assert.throws(() => f.store.replyRequests.history(f.keys.agent, 'commons', { cursor: oldRead.page.nextCursor }), { code: 'invalid_reply_cursor' });
+  assert.equal(f.store.replyRequests.list(f.keys.guest, 'commons', { direction: 'outgoing' }).requests.length, 2);
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => { server.closeStreams(); server.closeAllConnections(); server.close(resolve); }));
+  const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', memberId: 'agent', token: f.keys.agent });
+  assert.deepEqual((await client.replyRequests()).requests.map(r => r.id), [fresh.command.data.messageId]);
+  await assert.rejects(client.replyContext(old.command.data.messageId), /not found/i);
+  assert.equal(JSON.stringify(await client.replyHistory()).includes('Private before reactivation'), false);
+  const hosted = await callHostedStdioTool(f.store, f.keys.agent, 'room_list_requests', { roomId: 'commons' });
+  assert.deepEqual(hosted.value.requests.map(r => r.id), [fresh.command.data.messageId]);
+  await assert.rejects(callHostedStdioTool(f.store, f.keys.agent, 'room_read_request', { roomId: 'commons', requestMessageId: old.command.data.messageId }), /not found/i);
+
+});
+
+test('follow-up preparation refuses prior exchanges hidden by a new history policy', t => {
+  const f = fixture(t), frozen = Date.now() + 10000; f.store.now = () => frozen;
+  const old = f.open();
+  f.send('agent', f.answer(old, old.receipt, { messageId: 'old-answer' }));
+  for (const active of [false, true]) f.send('owner', { id: crypto.randomUUID(), type: 'member.access_changed', data: {
+    memberId: 'agent', active, permissions: f.state().members.agent.permissions, expectedMemberRevision: f.state().members.agent.revision ?? 0
+  } });
+  f.keys.agent = f.store.issueAccessKey('commons', 'agent');
+  const follow = f.open('guest', { replyToId: 'old-answer' });
+  assert.equal(f.store.replyRequests.selected(f.keys.agent, 'commons', follow.command.data.messageId).preparation.previousExchanges.length, 1);
+  f.send('owner', { id: 'restrict-history', type: 'room.history_visibility_set', data: { historyVisibility: 'since_join' } });
+  assert.throws(() => f.store.replyRequests.selected(f.keys.agent, 'commons', follow.command.data.messageId), { code: 'reply_follow_up_unavailable' });
+  assert.equal(f.store.replyRequests.selected(f.keys.guest, 'commons', follow.command.data.messageId).preparation.previousExchanges.length, 1);
+  f.send('owner', { id: 'restore-history', type: 'room.history_visibility_set', data: { historyVisibility: 'all' } });
+  assert.equal(f.store.replyRequests.selected(f.keys.agent, 'commons', follow.command.data.messageId).preparation.previousExchanges.length, 1);
+});
+
+for (const outcome of ['answered', 'cancelled']) test(`history checkpoints do not disclose hidden ${outcome} exchanges after reactivation`, t => {
+  const f = fixture(t), frozen = Date.now() + 10000; f.store.now = () => frozen;
+  f.send('owner', { id: 'set-history', type: 'room.history_visibility_set', data: { historyVisibility: 'since_join' } });
+  const checkpoint = f.store.replyRequests.history(f.keys.agent, 'commons').page.completedCheckpoint;
+  const old = f.open('guest', { body: 'Hidden terminal question' });
+  if (outcome === 'answered') f.send('agent', f.answer(old, old.receipt, { body: 'Hidden terminal answer' }));
+  else f.send('guest', f.cancel(old, { reason: 'Hidden cancellation reason' }));
+  for (const active of [false, true]) f.send('owner', { id: crypto.randomUUID(), type: 'member.access_changed', data: {
+    memberId: 'agent', active, permissions: f.state().members.agent.permissions, expectedMemberRevision: f.state().members.agent.revision ?? 0
+  } });
+  f.keys.agent = f.store.issueAccessKey('commons', 'agent');
+  const fresh = f.open('guest', { body: 'Current question' });
+  const history = f.store.replyRequests.history(f.keys.agent, 'commons', { checkpoint });
+  assert.deepEqual(history.page.items.map(item => item.requestMessageId), [fresh.command.data.messageId]);
+  assert.equal(JSON.stringify(history).includes('Hidden'), false);
+  assert.deepEqual(f.store.replyRequests.list(f.keys.agent, 'commons', { status: 'all' }).requests.map(r => r.id), [fresh.command.data.messageId]);
+  assert.throws(() => f.store.replyRequests.selected(f.keys.agent, 'commons', old.command.data.messageId), { code: 'reply_request_not_found' });
+});
