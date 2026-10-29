@@ -1,5 +1,21 @@
 # Claude (cloud seat) handover to Codex, 2026-10-28
 
+## Update, 02:25Z on 2026-10-29: final and complete
+
+Everything Claude did after the first handover is listed here, and Codex owns all of it. Claude holds no claims, leases, branches or open tasks, and will not push to any branch below unless Codex asks.
+
+| Item | Current head / file | State | Codex's next decision |
+|---|---|---|---|
+| Planner `claude/train-planner` | `f39f14a189094904717b2386bf2261539fd0801f` | Batch size and CLI validated; boundary tests 7/7; JSON `handoff` gives exact base, ordered heads, regenerate list, simulated tree. Member 2 reviewed f39f14a (21803): zero-batch finding closed. Limits: the five-check filter is advisory; later batch bases are symbolic until batch N is really composed. | Whether Grok's gate consumes `handoff[0]` (recommendation in `planner-zero-batch-and-lander-recommendation.txt`). Jill still holds `merge-queue-worker.mjs` undecided. |
+| #5159 `claude/drawer-scrim` | `beda400664e91adf57bf98a85d95688e8f191a4c` (Codex's fix on top of Claude's) | Claude reviewed beda4006 (21774): no blocker. | Land when green. |
+| #5167 | `d7d12acb` | Failing shard 6/6: `chat-suggestions-browser-check` "the tap posted an ordinary message". Passes 2/2 locally at main and at head: likely flake. | Rerun the browser job. |
+| First batch proposal | `release-readiness-reconciliation.txt` | #5157, #5158, #5161, #5064, #5149: all green at head, no prerequisites, compose on aaa74906 with zero conflicts (git merge-tree). #5161 adds one column via a registered ensure helper. | Give to Grok, or reject. |
+| Readiness suspect | `readiness-suspect.txt`, `readiness-source-findings.txt` | A full room read is now 12+ MB. Browser tabs do a full read after 24 windowed refreshes. `room.request` logs exist (path only, so tell views apart by appMs). Not proven; no load experiment was run, per Codex. | Instinct-3 owns the incident; correlate `room.request` with /api/ready failures. |
+| Journey gap | `journey-gap-review.txt` (sent to Member 2, 21782) | By default, work a human asks for has no reviewer: the card says "Completed" and Updates says "Nothing needs you". Proposed: default the asking human as decision maker. | Owner for the workflow/Updates change. |
+| Review of #5169 | `review-5169.txt` | No blocker; badge width note. | None. |
+| Offer to Grok (21827) | | Claude offered post-landing main verification. Withdrawn: it moves to Codex with everything else. | Whether you want it. |
+| Fleet sync from Jill (21821) | | Claude answered that all work is Codex's. | None. |
+
 John asked Claude to hand over all its Project Room work to Codex. This file is the full list. Main is `aaa749065a` (no merges since 08:00Z). Production is `ca37fee4`. Nothing below is merged or deployed.
 
 Room seat: `ai_QjkNRXDiuvQ9Q86G`. All work items below have no open claims held by Claude; the claims are closed or never opened.

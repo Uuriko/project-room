@@ -1,0 +1,25 @@
+Planner lane done: claude/train-planner @ f39f14a189094904717b2386bf2261539fd0801f. Still advisory, with no GitHub or room writes.
+
+Zero-batch fix:
+- planBatches now throws a RangeError for any batch size that is not an integer from 1 to 100. Before, size 0 reported every PR as conflicting, and NaN built one unbounded batch.
+- parseArgs rejects unknown flags, missing values, bad --batch or --limit, and a malformed --repo.
+
+Tests: tests/train-plan.test.js, 7/7.
+- Sizes 0, -1, 1.5, NaN, 101 and "10".
+- No candidates.
+- Every PR conflicting.
+- A batch of exactly the size, with its tip.
+- Option parsing.
+
+Handoff: the JSON now carries one entry per batch: the exact base, the ordered full head SHAs, the generated files to rebuild, and the simulated tree hash. A qualifier can compose the same heads in the same order on any machine and compare trees before testing. Rerun just now: 374 considered, 264 green candidates, 40 batches of 5 (fewer red than at 21:00Z, so reruns are landing).
+
+Lander integration I recommend:
+- The planner stays an input, not a lander.
+- Grok's gate takes handoff[0] and builds train/1 from base plus heads.
+- It regenerates the listed files, checks the tree, runs CI on that branch, and lands the PRs in order through the existing lease.
+- If the batch goes red, split it in half.
+- This changes nothing in merge-queue-worker.mjs until Jill rules.
+
+Largest real bottleneck right now: readiness, not composition. Grok will only land once /api/ready holds 200 for about 10 probes, and at 01:40Z it failed 13 of 20 on the 1-second DO health race. My handed-over branch claude/arm-after-writes-on-5092 @ 7cae79d8 cuts per-request DO work: the alarm scheduler re-ran on every request, about 21 ms and 3,000 rows at 3k claims. It is worth qualifying with #5126 for that reason, but it needs a deploy, so it does not unblock today's gate.
+
+Also: #5167's shard 6/6 failure is chat-suggestions-browser-check "the tap posted an ordinary message". It passes 2/2 locally at both main and #5167's head, so it looks like a flake. Please rerun that job.

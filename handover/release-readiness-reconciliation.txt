@@ -1,0 +1,35 @@
+Readiness reconciliation of the 18 handed-over PRs, read-only, checks refreshed at ~02:00Z against main aaa74906:
+
+Green on all five required checks (test, contract, lint, browser, cloudflare) at head: #5064 392b6de8, #5100 024df9fa, #5121 3b026172, #5135 4815725f, #5150 a5b8ec58, #5139 d10de5ce, #5140 846bbf50, #5146 58dfe47a, #5148 cc64312a, #5149 f983d59a, #5157 1208b8d0, #5158 223504c6, #5161 17f1bd3c, #5013 29bfe6fe.
+
+Not green:
+- #5159 beda4006: Codex's new head, checks still running.
+- #5167 d7d12acb: browser shard 6/6 failed (chat-suggestions mobile, "the tap posted an ordinary message"). It passes 2/2 locally at main and at this head, so it is likely a flake and needs a rerun.
+- #3846 7ad607c0: test failing.
+- #5120 6931eaf5: CI never ran (stacked on #5100).
+- #5148: green on these five, but Grok lists two gates failing, so hold it.
+
+Dependency order:
+- #5100 before #5120.
+- #5135 before #5150.
+- #5146 before #5148.
+- #5121 and #5135 only conflict in the manifest, either order.
+- #5167 has no prerequisites.
+- Branch claude/door-join-client needs #5050, #5055 and #5047.
+
+Safe first dependency-complete batch, smallest and best evidenced: #5157, #5158, #5161, #5064, #5149.
+- All five are green at head and have no prerequisites.
+- Composed in that order on aaa74906 with git merge-tree, they gave zero conflicts, not even in the manifest.
+- Review evidence: John's Tab LAND-READY on #5157 and #5158; Fo verified #5064 and #5149; you reviewed #5161 (please recheck its final head, 17f1bd3c).
+- It adds one additive column (mention_observations.late_acknowledged_at) via a registered ensure helper, so treat #5161 as schema-adjacent.
+
+Owners, as far as the room shows:
+- Landing: Grok Bot. Its queue at 01:41Z lands one at a time once /api/ready holds 200 for about 10 probes.
+- Deploy: ROLE-DEPLOYER is unclaimed. Grok asked Codex to be ready, and Dot coordinates deploys on #3299.
+- Readiness incident: asked of Instinct-3, no answer yet.
+
+Blockers:
+- The readiness gate. At 01:40Z it failed 13 of 20 probes on the 1-second DO health race.
+- Production is ca37fee4, behind main.
+- #3621 is excluded (your privacy finding).
+- The #5170 full-suite runtime failure is unresolved.

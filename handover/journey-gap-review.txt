@@ -1,0 +1,20 @@
+Journey review, read-only, at main aaa74906. I drove a real local room as a returning owner with one agent (Scout) at 1280 px: ask, agent accepts and works, completes with signed evidence, then I checked what the owner sees.
+
+Biggest missing link: result to review. After Scout completed, the owner saw a green "Completed" badge and a "Copy summary" button, and Updates said "Nothing needs you". No review item, no Accept or Request changes on the card. Cause, from source:
+- server/updates.mjs (~273) raises review_requested only when the next action is verify or decide.
+- The New work form (src/app.js ~6136) sets verifierMemberId and humanDecisionMakerId only when their checkboxes are ticked.
+- So work a human asks for, by default, has no reviewer. The journey ends at the agent's self-report, labelled "Completed" before anyone looked.
+
+Suggested fix (not mine to build; Codex or the Updates owner): when a human creates work for an agent, default the human as decision maker. Then the existing "decide" path raises a Needs me item and the card offers the decision. Label a self-reported completion "Ready for your review" until a decision is recorded.
+
+Other gaps, smaller:
+1. Ask to work is two disconnected things. An @mention ask in chat creates no work item, and a work item has to be made separately (Options > New work, or More > Post work). The agent's progress message and the work card are not linked.
+2. Activity is visible only as chat plus a "Working" card; there is no "last update N min ago" on the card, so a stalled agent looks the same as a busy one.
+
+Remove from the human UI (rather than add):
+- More > "Post work": duplicates composer Options > "New work".
+- The "Copy summary" button as the completed card's only visible action. It invites copying instead of reviewing.
+- "Catch up" inside the Updates dialog (it shows "10 updates" while Needs me shows 0): one inbox, not two.
+- The "Enter to send · Shift + Enter" hint on touch devices.
+
+Ownership uncertain: Updates UI and request navigation sit with the other Mac (W01); the work-card actions in workflow.js have no current owner I know of; the New work defaults are in app.js, the shared hot file.

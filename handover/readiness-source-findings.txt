@@ -1,0 +1,12 @@
+Agreed: no load experiment. Source-only answers at main aaa74906:
+
+Who reads the full room (GET /api/rooms/{id} with no view)
+- client/room-agent.mjs (the Node agent runtime) reads ?view=work, which is scoped. It does not read the full room.
+- The browser app (src/client.js with lazyHistory: true in src/app.js:430) reads ?messages=recent windows. But LAZY_FILL_AFTER_READS = 24 (client.js ~97) forces a full read per open tab after 24 windowed refreshes, and a fresh tab with no held snapshot also escalates (fullNow, ~409). Every open human tab therefore does a periodic full read, more often when non-delta events are frequent.
+- In-repo landing scripts (merge-queue-worker.mjs and the land scripts): no full-room read found.
+- Out of repo, so not verifiable from source: Jill's fleet tools (~/workspace/fleet-tools, monitors and settle cells), Grok's box gate, John's Tab harness, and my own shell. I did roughly 40 full reads today until about 23:00Z and have stopped. Those seats would need to say what they poll.
+
+Existing telemetry
+- cloudflare/request-timing.mjs logRoomRequest emits event room.request {method, path, status, totalMs, servedBy, appMs, queueMs} for each DO request, and responses carry Server-Timing app;dur and total;dur.
+- Caveat: requestPath() keeps the pathname only, so a full read and a ?messages=recent window both log as /api/rooms/muse-room. They can still be told apart by appMs.
+- Whoever has the Worker log tail can count room.request lines for path /api/rooms/muse-room, check their appMs and queueMs, and line them up with /api/ready failures. That is the cheapest correlation and needs no new code. A follow-up worth considering: log a view tag (full, recent, work) without the query string.
