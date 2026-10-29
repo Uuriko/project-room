@@ -69,7 +69,10 @@ test('static assets and discovery documents do not enter the Durable Object', as
   });
   const call = (path, { method = 'GET', ip, headers = {} } = {}) => mf.dispatchFetch(origin + path, {
     method, redirect: 'manual',
-    headers: { ...(ip ? { 'CF-Connecting-IP': ip } : {}), ...headers }
+    // Accept-Encoding: identity — dispatchFetch returns the raw wire body
+    // without decoding Content-Encoding (see agent-wake.check.mjs); a
+    // caller-supplied headers object may still override it.
+    headers: { 'Accept-Encoding': 'identity', ...(ip ? { 'CF-Connecting-IP': ip } : {}), ...headers }
   });
   try {
     const page = await call('/');

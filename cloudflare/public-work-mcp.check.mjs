@@ -46,8 +46,11 @@ test('actual Worker MCP outside contribution persists across disposal through bo
   const config = { modules: true, script: bundled.outputFiles[0].text, compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { ROOM: { className: 'PublicMcpTestRoom', useSQLite: true } }, bindings: { ROOM_ORIGIN: origin }, durableObjectsPersist: persistence };
   let worker = new Miniflare(config);
+  // Accept-Encoding: identity — dispatchFetch returns the raw wire body
+  // without decoding Content-Encoding, so this client offers no encoding
+  // it cannot decode (see agent-wake.check.mjs).
   const api = (path, data, secret) => worker.dispatchFetch(new URL(path, origin), { method: data === undefined ? 'GET' : 'POST',
-    headers: { ...(data === undefined ? {} : { Origin: origin, 'Content-Type': 'application/json' }), ...(secret ? { Authorization: 'Bearer ' + secret } : {}) },
+    headers: { 'Accept-Encoding': 'identity', ...(data === undefined ? {} : { Origin: origin, 'Content-Type': 'application/json' }), ...(secret ? { Authorization: 'Bearer ' + secret } : {}) },
     ...(data === undefined ? {} : { body: JSON.stringify(data) }) });
   const json = async (response, status = 200) => { assert.equal(response.status, status, await response.clone().text()); return response.json(); };
   const rpc = (path, message, secret) => api(path, { jsonrpc: '2.0', id: 'worker-rpc', ...message }, secret);

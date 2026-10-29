@@ -71,7 +71,7 @@ test('actual Worker public claims survive disposal, exact finish retry and guard
     durableObjects:{ROOM:{className:'PublicClaimTestRoom',useSQLite:true}},bindings:{ROOM_ORIGIN:origin},durableObjectsPersist:persistence };
   let worker=new Miniflare(config);
   const api=(path,body,secret,method)=>worker.dispatchFetch(origin+path,{method:method??(body?'POST':'GET'),
-    headers:{Host:'room.example.test',...(body?{Origin:origin,'Content-Type':'application/json'}:{}),...(secret?{Authorization:'Bearer '+secret}:{})},...(body?{body:JSON.stringify(body)}:{})});
+    headers:{Host:'room.example.test','Accept-Encoding':'identity',...(body?{Origin:origin,'Content-Type':'application/json'}:{}),...(secret?{Authorization:'Bearer '+secret}:{})},...(body?{body:JSON.stringify(body)}:{})});
   const call=(path,body)=>path==='action' ? api('/api/public-work/tasks/worker-public-task/'+body.action,body.body,body.secret)
     : api('/__fixture/'+path,body);
   const json=async(response,status=200)=>{assert.equal(response.status,status,await response.clone().text());return response.json();};

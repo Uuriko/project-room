@@ -5,6 +5,15 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomBytes, randomUUID, createHash } from 'node:crypto';
+import { gunzipSync } from 'node:zlib';
+
+// Every `call` helper in this file offers `Accept-Encoding: identity`:
+// Miniflare's dispatchFetch returns the raw wire body and does not decode
+// Content-Encoding (it moves the encoding to MF-Content-Encoding), so a
+// helper that feeds responses to .json() must not let the transport offer
+// an encoding it will not decode. Clients that do offer gzip and decode
+// it are covered by the gzip probe test at the end of this file and by
+// tests/response-compression.test.js.
 import { build } from 'esbuild';
 import { Miniflare, Response } from 'miniflare';
 
@@ -23,7 +32,7 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     } }
   });
   const call = (path, { data, headers = {}, method = data ? 'POST' : 'GET', ip = '192.0.2.1', redirect = 'follow' } = {}) => mf.dispatchFetch(origin + path, {
-    method, redirect, headers: { Host: new URL(origin).host, 'CF-Connecting-IP': ip, ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
+    method, redirect, headers: { Host: new URL(origin).host, 'CF-Connecting-IP': ip, 'Accept-Encoding': 'identity', ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
     ...(data ? { body: JSON.stringify(data) } : {})
   });
   const json = async (response, status = 200) => {
@@ -514,7 +523,7 @@ test('getdasha entry and canonical browser app share identities, rooms and invit
     const canonical = await mf.getWorker(release.env.production.name);
     const call = async (edge, path, data, token) => {
       const url = edge ? 'https://www.getdasha.com/room' + path : release.vars.ROOM_ORIGIN + path;
-      const init = { method: data ? 'POST' : 'GET', headers: { 'CF-Connecting-IP': '192.0.2.8',
+      const init = { method: data ? 'POST' : 'GET', headers: { 'CF-Connecting-IP': '192.0.2.8', 'Accept-Encoding': 'identity',
         ...(data ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         ...(data ? { body: JSON.stringify(data) } : {}) };
       const response = edge ? await mf.dispatchFetch(url, init) : await canonical.fetch(url, init);
@@ -545,7 +554,7 @@ test('Worker bounty HTTP receipts create distinct durable webhook deliveries wit
   let mf = new Miniflare(config);
   const call = async (path, key, data) => {
     const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
-      headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1',
+      headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1', 'Accept-Encoding': 'identity',
         ...(key ? { Authorization: `Bearer ${key}` } : {}),
         ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}) },
       ...(data ? { body: JSON.stringify(data) } : {}) });
@@ -585,7 +594,7 @@ test('Worker board v2 routes stay retired', async () => {
   const mf = new Miniflare(config);
   const call = async (path, key, data, status = 410) => {
     const response = await mf.dispatchFetch(origin + path, { method: data ? 'POST' : 'GET',
-      headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1',
+      headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.1', 'Accept-Encoding': 'identity',
         ...(key ? { Authorization: `Bearer ${key}` } : {}),
         ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}) },
       ...(data ? { body: JSON.stringify(data) } : {}) });
@@ -613,7 +622,7 @@ test('Workers password reset commits failed attempts, consumes once and requires
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, bindings: { ROOM_ORIGIN: origin } });
   const call = (path, data, headers = {}) => mf.dispatchFetch(origin + path, {
-    method: data ? 'POST' : 'GET', headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.73',
+    method: data ? 'POST' : 'GET', headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.73', 'Accept-Encoding': 'identity',
       ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
     ...(data ? { body: JSON.stringify(data) } : {}) });
   const json = async (response, status = 200) => {
@@ -665,7 +674,7 @@ test('Workers held wake poll receives a fresh online mention and fences revoked 
     compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat', 'enable_request_signal', 'request_signal_passthrough', 'enable_nodejs_http_server_modules'],
     durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } }, bindings: { ROOM_ORIGIN: origin } });
   const call = (path, data, headers = {}) => mf.dispatchFetch(origin + path, {
-    method: data ? 'POST' : 'GET', headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.87',
+    method: data ? 'POST' : 'GET', headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.87', 'Accept-Encoding': 'identity',
       ...(data ? { Origin: origin, 'Content-Type': 'application/json' } : {}), ...headers },
     ...(data ? { body: JSON.stringify(data) } : {}) });
   const json = async (response, status = 200) => {
@@ -708,5 +717,34 @@ test('Workers held wake poll receives a fresh online mention and fences revoked 
       data: { messageId: 'worker-after-revoke', body: 'Again @worker-wake-peer' } }, ownerHeaders), 201);
     const denied = await json(await revokedPoll, 401);
     assert.equal(denied.error.code, 'unauthenticated'); assert.equal(denied.pendingWakes, undefined);
+  } finally { await mf.dispose(); }
+});
+
+test('Worker gzip probe: a client that offers gzip receives a gzipped tools/list that decodes to the plain body', async () => {
+  const bundled = await build({ entryPoints: [fileURLToPath(new URL('./http-worker.test-fixture.mjs', import.meta.url))],
+    bundle: true, write: false, format: 'esm', platform: 'neutral', external: ['node:*', 'cloudflare:*'] });
+  const origin = 'https://room.example.test';
+  const mf = new Miniflare({ modules: true, script: bundled.outputFiles[0].text,
+    compatibilityDate: '2026-07-30', compatibilityFlags: ['nodejs_compat'],
+    durableObjects: { ROOM: { className: 'HttpTestRoom', useSQLite: true } },
+    bindings: { ROOM_ORIGIN: origin } });
+  try {
+    const post = headers => mf.dispatchFetch(origin + '/mcp', { method: 'POST',
+      headers: { Host: new URL(origin).host, 'CF-Connecting-IP': '192.0.2.99', Origin: origin, 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) });
+    const plain = await post({ 'Accept-Encoding': 'identity' });
+    assert.equal(plain.status, 200, await plain.clone().text());
+    const plainJson = await plain.json();
+    assert.ok(Array.isArray(plainJson.result?.tools) && plainJson.result.tools.length > 0);
+    const plainBytes = JSON.stringify(plainJson).length;
+    assert.ok(plainBytes >= 2048, `anonymous tools/list must exceed the compression threshold, got ${plainBytes}`);
+    const gz = await post({ 'Accept-Encoding': 'gzip' });
+    assert.equal(gz.status, 200);
+    // dispatchFetch moves Content-Encoding to MF-Content-Encoding; either
+    // header naming the wire encoding is acceptable evidence of gzip.
+    assert.equal(gz.headers.get('content-encoding') ?? gz.headers.get('mf-content-encoding'), 'gzip');
+    const wire = new Uint8Array(await gz.arrayBuffer());
+    assert.ok(wire.byteLength < plainBytes, `gzipped wire body (${wire.byteLength}) must be smaller than the plain body (${plainBytes})`);
+    assert.deepEqual(JSON.parse(gunzipSync(wire).toString('utf8')), plainJson);
   } finally { await mf.dispose(); }
 });
