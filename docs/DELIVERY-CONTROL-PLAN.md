@@ -12,6 +12,8 @@ to do next without reconstructing chat history. A disconnected laptop resumes
 useful work without duplicating a deployment. Each production change has an
 inspectable chain from intent to tested source, artifact, deployment and outcome.
 
+### Evidence checkpoint: 2026-10-29 UTC
+
 ### Verified release checkpoint — 2026-10-29, 18:26 UTC
 
 [PR #5292](https://github.com/Uuriko/project-room/pull/5292) landed
@@ -82,8 +84,6 @@ its server-only truncated map is not repository-wide coverage.
 Earlier checkpoints below are historical, including their pending-results and
 preparation-only statements. Preserve original receipts rather than rewriting
 failed attempts as passes.
-
-### Evidence checkpoint: 2026-10-29 UTC
 
 ### Preparation candidate frozen — 2026-10-29, after 17:13 UTC
 
