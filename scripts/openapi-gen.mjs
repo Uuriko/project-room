@@ -1,20 +1,22 @@
 // OpenAPI gate (batch RT).
 //
-// Until the legacy chain is empty, this check parses docs/openapi.yaml,
-// keeps the template gate, and requires every documented operation to be a
-// row in server/routes/table.mjs or a row still listed in the legacy
-// allowlist. A documented HEAD is covered when GET is served for the same
-// template: several handlers answer HEAD as 404 today, and this batch does
-// not change that.
+// The document is rendered from server/openapi/fragments. This check parses
+// that rendering, keeps the template gate, and requires every documented
+// operation to be a row in server/routes/table.mjs or a row still listed in
+// the legacy allowlist. A documented HEAD is covered when GET is served for
+// the same template: several handlers answer HEAD as 404 today, and this
+// batch does not change that.
 //
-// Byte-for-byte generation of docs/openapi.yaml from the table starts when
-// the allowlist is empty (RT-final). Until then a rewrite would fight other
-// open pull requests that still edit the document by hand.
+// --check and --write both refresh docs/openapi.yaml from the fragments when
+// the bytes differ, then validate the rendering. Neither command diffs the
+// committed snapshot. Generation from the route-table schemas (RT-final)
+// still waits until the legacy allowlist is empty.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { parseDocument } from "yaml";
+import { renderOpenApi, writeOpenApi } from "./openapi-document.mjs";
 import { openapiOperations } from "./open-routes.mjs";
 import { routeDocsDrift, routeSources } from "./route-docs-check.mjs";
 import { allowlistProblems, extractLegacyRoutes, loadRouteSources, templateKey } from "./routes-inventory.mjs";
@@ -43,8 +45,8 @@ export function methodCoverageProblems(operations, legacyRoutes, tableRoutes = [
 
 export function openApiGateProblems(root) {
   const problems = [];
-  const openapi = readFileSync(join(root, "docs/openapi.yaml"), "utf8");
-  for (const message of openApiParseErrors(openapi)) problems.push(`docs/openapi.yaml: ${message}`);
+  const openapi = renderOpenApi(root);
+  for (const message of openApiParseErrors(openapi)) problems.push(`OpenAPI document: ${message}`);
   for (const failure of routeDocsDrift(routeSources(root)).failures) problems.push(failure);
   const legacy = extractLegacyRoutes(loadRouteSources(root));
   let document = null;
@@ -66,11 +68,15 @@ function repoRoot() {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
-  if (!process.argv.includes("--check")) {
-    console.error("Usage: node scripts/openapi-gen.mjs --check");
+  const flags = process.argv.slice(2);
+  if (!flags.length || flags.some(flag => flag !== "--check" && flag !== "--write")) {
+    console.error("Usage: node scripts/openapi-gen.mjs --check | --write");
     process.exit(1);
   }
-  const problems = openApiGateProblems(repoRoot());
+  const root = repoRoot();
+  const written = writeOpenApi(root);
+  if (written.changed) console.log("OpenAPI snapshot refreshed from server/openapi/fragments.");
+  const problems = openApiGateProblems(root);
   if (problems.length) {
     console.error("OpenAPI route gate:\n" + problems.map(line => `  ${line}`).join("\n"));
     process.exit(1);
