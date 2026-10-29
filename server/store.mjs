@@ -5727,10 +5727,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || [completionEventId, draftMessageId].some(id => id !== null && !validId(id))
         || completionEventId !== null && draftMessageId !== null) fail(422, "invalid_result_selection", "Choose current result, one completion, or one draft");
-      const room = this.room(roomId);
-      if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
+      const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room') AS metadata,json_type(projection,'$.messagesArchive') AS archive_type FROM rooms WHERE id=?").get(roomId);
+      if (!row) fail(404, "room_not_found", "Room not found");
+      const work = readWorkItem(this.db, roomId, workItemId);
+      if (!work) fail(404, "work_not_found", "Work item not found in this Room");
+      // The full selected receipt history is needed for withdrawn historical
+      // text. Unrelated work and conversation bodies are not result dependencies.
+      const state = { room: JSON.parse(row.metadata), workItems: { [workItemId]: work } };
+      const messages = new Map();
+      const messageRecords = { get: id => {
+        if (!messages.has(id)) messages.set(id, selectedMessageRecord(this, roomId, id, row.archive_type === "object"));
+        return messages.get(id);
+      } };
       let value;
-      try { value = selectedWorkResult({ db: this.db, state: room.state, workItemId, sequence: room.sequence, now: this.now(), completionEventId, draftMessageId, viewerId: auth.member.id, floor: this.historyFloor(roomId, auth.member.id, room.sequence) }); }
+      try { value = selectedWorkResult({ db: this.db, state, workItemId, sequence: row.sequence, now: this.now(), completionEventId, draftMessageId,
+        viewerId: auth.member.id, floor: this.historyFloor(roomId, auth.member.id, row.sequence), messageRecords }); }
       catch { fail(422, "result_unavailable", "Exact text evidence is unavailable; no other result was substituted"); }
       if (!value) fail(404, "result_not_found", "Completion not found on this work; no other result was substituted");
       return stampWorkResult({ ...value, viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
