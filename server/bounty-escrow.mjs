@@ -1302,7 +1302,13 @@ export class BountyEscrow {
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
       poster: row.poster, verifier: row.verifier, claimant: row.claimant,
-      disputeDecider: row.dispute_decider ?? null,
+      // F-X4-2 (disclose-only): the view reports the EFFECTIVE decider — the
+      // same composition disputeBounty seats by (designated dispute decider,
+      // else the designated verifier). The stored column is NOT rewritten:
+      // _mutable/_saveBounty keep the raw dispute_decider value, so a
+      // verifier-only bounty still stores NULL and only the read discloses
+      // who will actually seat and rule.
+      disputeDecider: row.dispute_decider ?? row.verifier ?? null,
       approvalMode: row.approval_mode ?? "legacy",
       state: row.state, group: stateGroup(row.state),
       deadline: new Date(row.deadline_ms).toISOString(), deadlineMs: row.deadline_ms,
@@ -2485,7 +2491,8 @@ export class BountyEscrow {
       const bounty = this._mutable(row);
       check(bounty.state === "disputed" && bounty.disputeId, "invalid_state", `bounty is ${bounty.state}, no open dispute`);
       const dispute = this._disputes.get(bounty.disputeId);
-      check(dispute.decider === lane, "not_authorized", "only the seated decider may rule");
+      check(dispute.decider === lane, "not_authorized",
+        `only the seated decider may rule (seated decider: ${dispute.decider})`);
       // Defense in depth: seating now refuses a challenger-designee, but a
       // dispute seated before that exclusion existed (or recorded by any
       // other path) still cannot be ruled on by the party who raised it.

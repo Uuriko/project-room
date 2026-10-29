@@ -18271,6 +18271,7 @@ components:
         poster: { type: string }
         claimant: { type: string, nullable: true }
         verifier: { type: string, nullable: true }
+        disputeDecider: { type: string, nullable: true, description: "The effective dispute decider: the dispute decider designated at posting, else the designated verifier (who seats as decider when a dispute opens). Null only when neither was designated." }
         watchers: { type: array, items: { type: string } }
         deadline: { type: string, format: date-time }
         stateChangedAt: { type: string, format: date-time }
