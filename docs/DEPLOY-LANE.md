@@ -103,3 +103,30 @@ The Board in muse-room (`GET /api/rooms/muse-room/work-claims`) holds a 24-hour 
 | `ROOM_AGENT_CARD_SIGNING_KEY` | deploy-prod, staging | The build signs the agent card and fails closed without it. Custody: [AGENT-CARD-CUSTODY.md](AGENT-CARD-CUSTODY.md). |
 | `CLOUDFLARE_ACCOUNT_ID` | optional | Only needed if the token can see more than one account. |
 | `ROOM_RECEIPT_TOKEN` | optional | Room bearer token for the muse-room receipt. Without it the run skips the receipt. |
+
+### Reverify an already deployed revision without uploading Workers
+
+From a clean checkout of the exact deployed commit, run the checkpoint CLI from
+this or another clean tooling checkout:
+
+```sh
+node /path/to/tooling/scripts/release-checkpoint.mjs --mode verify \
+  --expected-revision FULL_40_CHARACTER_SHA --output /outside/checkout/receipts \
+  --prior-report /path/to/original-failed-prod-smoke.json
+```
+
+The target need not be on main (for example, an intentional rollback). Both the
+target and tooling revision/tree are recorded. All four version endpoints must
+return HTTP200 and the target SHA before and after strict production smoke and
+public live-smoke. Each run creates a new attempt directory; the original failed
+report is copied byte-for-byte with its digest and is never overwritten. Omit
+`--prior-report` when there is no earlier failed smoke. Keep output outside both
+checkouts so receipts do not dirty source verification.
+
+Only explicit-target main lag/divergence findings become advisory; the original
+live-smoke report and exit code remain unchanged, alongside the policy result.
+Other failures prevent a verified receipt. Known warnings remain visible. This
+is public verification, not an authenticated or browser journey. Before/after
+observations bound races but are not a deployment lock. The command never
+uploads, rolls back, or publishes a runtime; publication remains separate and
+must recheck the deployed source rather than treating an old receipt as current.
