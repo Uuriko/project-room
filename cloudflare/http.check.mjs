@@ -130,7 +130,16 @@ test('shared HTTP service on Workers: secure cookie, invitation, guest message, 
     assert.match(await packet.text(), /# (Uuriko )?Project Room/);
     const plainDoor = await call('/room', { headers: { Accept: 'text/plain' } });
     assert.match(plainDoor.headers.get('content-type'), /text\/plain/);
-    assert.equal(await plainDoor.text(), await (await call('/llms.txt')).text());
+    // #3655: every serving path in this deployment — the edge isolate
+    // (/llms.txt) and the Durable Object (the plain /room door) — serves
+    // the same packet, and that packet describes THIS deployment's origin
+    // (the ROOM_ORIGIN binding above), never the production origin. A
+    // path that falls back to the canonical packet fails both pins.
+    const servedPacket = await (await call('/llms.txt')).text();
+    assert.equal(await plainDoor.text(), servedPacket);
+    assert.ok(servedPacket.includes(`[Full agent packet](${origin}/llms-full.txt)`), 'served packet full-packet link uses the serving origin');
+    assert.ok(servedPacket.includes(`[Hosted MCP](${origin}/mcp)`), 'served packet MCP link uses the serving origin');
+    assert.equal(servedPacket.includes('https://room.trydemigod.com'), false, 'served packet must not name the production origin');
     const leftoverPacket = await call('/room/skill');
     assert.equal(leftoverPacket.status, 200);
     assert.equal(await leftoverPacket.text(), await (await call('/llms.txt')).text());

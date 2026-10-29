@@ -222,8 +222,18 @@ function openApiResponse(request, url) {
   return new Response(request.method === 'HEAD' ? null : bytes, { status: 200, headers });
 }
 
-function discoveryResponse(request, url) {
-  const doc = discoveryDoc(url.pathname);
+function discoveryResponse(request, url, env) {
+  // #3655: the llms packets describe the deployment that serves them. The
+  // Durable Object's Node handler already threads its configured origin
+  // (server/http.mjs: discoveryDoc(pathname, expectedOrigin())); the edge
+  // isolate serves most packet paths before the object, so it must thread
+  // the same serving origin — the Worker's configured ROOM_ORIGIN, falling
+  // back to the request origin — or one deployment would serve two packets
+  // that claim to be the same bytes: the plain /room door (object) rebased
+  // onto the serving origin, /llms.txt (edge) still naming production.
+  // On the canonical deployment ROOM_ORIGIN is the canonical origin and
+  // discoveryDoc returns the frozen packet unchanged, byte-identical.
+  const doc = discoveryDoc(url.pathname, env?.ROOM_ORIGIN ?? url.origin);
   const headers = baseHeaders(url);
   headers.set('X-Robots-Tag', 'all');
   headers.set('Link', discoveryLinks(url));
@@ -318,7 +328,7 @@ export async function edgePublicResponse(request, env, url) {
   if (!kind) return null;
   if (kind === 'security-txt') return securityTxtResponse(request, url, securityContactFrom(env?.ROOM_SECURITY_CONTACT));
   if (kind === 'openapi') return openApiResponse(request, url);
-  if (kind === 'discovery') return discoveryResponse(request, url);
+  if (kind === 'discovery') return discoveryResponse(request, url, env);
   // #3274: POST / is 404 on Node (the app root is the SPA shell route, not a
   // method-guarded document) but the edge classified '/' as an asset and
   // answered 405. Decide it once, Node's way: 404 with the standard envelope,
