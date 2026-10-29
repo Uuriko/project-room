@@ -144,8 +144,27 @@ for (const width of [1440, 320]) test(`direct conversations ${width}: keyboard n
   assert.equal(await input.inputValue(), 'Bob draft');
   await page.locator('#message-list [data-empty-write]').waitFor({ state: 'visible' });
   assert.equal(await page.locator('#channel-list [aria-current="page"]').count(), 0, 'public channel is not selected inside a private conversation');
+  if (width === 320) {
+    const composer = await page.locator('#message-form').boundingBox();
+    assert.ok(composer && composer.y + composer.height > 800, 'tall narrow windows should use the available height');
+  }
   mkdirSync('test-results', { recursive: true });
   await page.screenshot({ path: `test-results/direct-conversation-${width}.png` });
+  if (width === 320) {
+    for (const theme of ['light', 'dark']) {
+      await page.evaluate(theme => { document.documentElement.dataset.theme = theme; }, theme);
+      await page.setViewportSize({ width, height: 420 });
+      await page.evaluate(() => { document.documentElement.style.fontSize = '200%'; });
+      const sendButton = page.locator('#message-form button[type="submit"]');
+      await sendButton.scrollIntoViewIfNeeded();
+      const target = await sendButton.boundingBox();
+      assert.ok(target && target.y >= 0 && target.y + target.height <= 421, 'short windows with enlarged text keep Send reachable');
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'enlarged text must not create horizontal scrolling');
+      await page.screenshot({ path: `test-results/direct-conversation-short-large-${theme}.png` });
+      await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
+      await page.setViewportSize({ width, height: 900 });
+    }
+  }
   for (const [key, canRead] of [[alice, true], [bob, false]]) {
     const context = await browser.newContext();
     const peerPage = await context.newPage();

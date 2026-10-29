@@ -929,7 +929,7 @@ summary { overflow-wrap: anywhere; }
 /* Large text and very narrow windows need document scrolling rather than a
    squeezed-to-zero timeline. Normal desktop/phone layouts stay viewport-fit. */
 @container room-shell (max-width: 20em) {
-  .app-shell > #main { flex: 0 0 auto; }
+  .app-shell > #main { flex: 1 0 auto; }
   .room-main { overflow: visible; min-height: 32rem; }
   .timeline { flex: 1 0 auto; min-height: 12rem; overflow: visible; }
 }
