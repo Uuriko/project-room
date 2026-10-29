@@ -173,6 +173,13 @@ export const unfencedAdditiveTables = Object.freeze([
   // activity, read by the wakeable / not-wakeable lists; older writers have
   // no code path to it and AgentHeartbeats.verifySchema() is read-only-safe.
   "agent_wake_polls",
+  // Issue #3592: agent_declared_cadences (the raw cadence declaration the
+  // wakeability window reads, kept apart from the server-assigned cadence
+  // in agent_push_configs). Same rationale as agent_wake_polls — purely
+  // additive, per-identity rows, created at store open, and partitioned
+  // in AgentHeartbeats.verifyDeclaredCadenceSchema() so a read-only open
+  // of a pre-#3592 backup tolerates its absence.
+  "agent_declared_cadences",
   "collab_assignments",
   "collab_notes",
   "collab_draft_locks",

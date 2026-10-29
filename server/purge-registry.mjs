@@ -251,6 +251,17 @@ const ROWS = [
     }
   },
   {
+    "table": "agent_declared_cadences",
+    "key": "agent_id",
+    "action": "delete",
+    "optional": true,
+    "match": {
+      "identity": [
+        "agent_id"
+      ]
+    }
+  },
+  {
     "table": "agent_directory_cards",
     "key": "agent_id",
     "action": "delete",

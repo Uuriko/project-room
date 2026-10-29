@@ -9,6 +9,7 @@ import { flagMessage } from "../server/inbox-spam.mjs";
 import { createNotifyPrefs } from "../server/notify-prefs.mjs";
 import { issueGrant } from "../server/grants.mjs";
 import { appendOperatorAction } from "../server/operator-actions.mjs";
+import { declaredCadenceSchema } from "../server/agent-heartbeats.mjs";
 import { RoomAssistant } from "../server/room-assistant.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 
@@ -172,6 +173,15 @@ export async function seedRecoveryCoverage(f) {
   // needs a public-resolving push url the fixture has no reason to own.
   f.store.db.prepare(`INSERT INTO agent_push_configs(agent_id,host_id,cadence_seconds,push_url,push_token,push_auth_json,push_failures,push_suspended,updated_at) VALUES(?,?,?,?,?,?,?,?,?)`)
     .run(identityId, "recovery-host", 30, "https://recovery.example.test/push", "recovery-push-token", null, 0, 0, f.now());
+  // Seed a raw cadence declaration so the capture covers
+  // agent_declared_cadences (#3592: the declaration the wakeability window
+  // reads, kept apart from the server-assigned cadence above). The table
+  // is lazily created on the first explicit declaration, so the fixture
+  // creates it from its schema before inserting, like a real heartbeat
+  // with a cadenceSeconds body would.
+  f.store.db.exec(declaredCadenceSchema);
+  f.store.db.prepare(`INSERT INTO agent_declared_cadences(agent_id,host_id,cadence_seconds,updated_at) VALUES(?,?,?,?)`)
+    .run(identityId, "recovery-host", 172800, f.now());
   // Seed one GX guest invite + its redeemed seat so the capture covers
   // guest_invites and guest_members (RC-2026-09-23-100). Written directly:
   // the mint path needs a live owner account session the fixture has no
