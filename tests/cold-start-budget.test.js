@@ -244,3 +244,27 @@ test("successful writable startup total includes work after the legacy cold-star
   assert.equal(complete.cpuMeasured, false);
   assert.equal(complete.clockSemantics, "runtime-dependent");
 });
+
+
+test("hosted successful startup is info while failed startup remains error", t => {
+  const seed = new RoomStore(":memory:");
+  const platform = { ...seed.storagePlatform, clockSemantics: "io-bound" };
+  seed.close();
+  const records = [];
+  for (const level of ["info", "error"]) t.mock.method(console, level, line => {
+    try { records.push({ level, ...JSON.parse(line) }); } catch { /* unrelated */ }
+  });
+  const store = new RoomStore(":memory:", { storagePlatform: platform });
+  store.close();
+  for (const event of ["room.cold_start", "room.store_initialized"]) {
+    assert.equal(records.find(row => row.event === event)?.level, "info");
+  }
+  records.length = 0;
+  assert.throws(() => new RoomStore(":memory:", { storagePlatform: {
+    ...platform, installWriterFence() { throw new Error("fixture fence failure"); }
+  } }), /fixture fence failure/);
+  const failed = records.find(row => row.event === "room.cold_start");
+  assert.equal(failed.level, "error");
+  assert.equal(failed.failed, true);
+  assert.equal(records.some(row => row.event === "room.store_initialized"), false);
+});

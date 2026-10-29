@@ -316,7 +316,10 @@ function logColdStart(started, db, failed, extra = {}) {
       }
     }
   } catch { /* schema not installed, or the handle is already closing */ }
-  console.error(JSON.stringify(record));
+  // Node reserves stdout for its listening protocol; Cloudflare maps the
+  // console method to severity, so successful opens must use info there.
+  const log = !failed && record.clockSemantics === "io-bound" ? console.info : console.error;
+  log(JSON.stringify(record));
   return record;
 }
 
@@ -2171,7 +2174,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // comparable; this separate successful writable-store total includes all
     // initialization through work repository setup and migration.
     this.initializationMs = Math.round(performance.now() - initializationStarted);
-    console.error(JSON.stringify({ event: "room.store_initialized", initializationMs: this.initializationMs,
+    const logInitialized = this.storagePlatform.clockSemantics === "io-bound" ? console.info : console.error;
+    logInitialized(JSON.stringify({ event: "room.store_initialized", initializationMs: this.initializationMs,
       legacyColdStartMs: this.coldStart.durationMs, clockSemantics: this.storagePlatform.clockSemantics ?? "runtime-dependent", cpuMeasured: false }));
   }
 
