@@ -666,6 +666,26 @@ test("anonymous MCP catalog is seven tools (four join + two public-work + identi
   assert.ok(!/tools\/list is the four( public join)? tools/i.test(text), "llms.txt must not say no-credential tools/list is only four tools");
 });
 
+test("front-door packets scope the query-parameter rule and name the MCP catalogs distinctly (#3634)", () => {
+  // Cure adaptation (merge vs main aaa74906): main restructured llms.txt into
+  // a short index — operational detail (Routes, catalogs) lives only in
+  // llms-full.txt, and llms.txt must stay under 5 KB. So the positive
+  // query-param / 11-tool assertions pin llms-full.txt, while llms.txt is
+  // pinned on the negatives (no wrong text survives) plus its Start-here
+  // naming of the no-credential catalog.
+  for (const [label, packet] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.ok(!packet.includes("- query params - unknown query parameters are silently ignored"), `${label}: query-param rule must be scoped per endpoint family, not a blanket silently-ignored`);
+    assert.ok(!packet.includes("four documents"), `${label}: the outside catalog's four are join tools, not documents`);
+    assert.ok(!packet.includes("about 22"), `${label}: the member core total is exact (22), never about`);
+    assert.ok(packet.includes("no-credential catalog"), `${label}: the anonymous catalog must be named distinctly from the outside seven`);
+  }
+  const full = llmsFullTxt();
+  assert.ok(full.includes("- query params - there is no single global rule"), "llms-full.txt: query-param bullet must state the per-family rule");
+  assert.ok(full.includes("GET /api/public-work/tasks accepts exactly limit, after, and claimable"), "llms-full.txt: the strict public-work list rule must be stated");
+  assert.ok(full.includes("On endpoints without strict query validation, unknown query parameters are silently ignored"), "llms-full.txt: the lenient family must be stated as the scoped case");
+  assert.ok(full.includes("public-work catalog by default: 11 tools - the seven public-work tools plus the four join tools"), "llms-full.txt: the outside catalog must be named with its exact 11-tool total");
+});
+
 test("llms.txt follows the llmstxt.org header: H1, summary blockquote, Start here links", () => {
   const text = llmsTxt();
   // llmstxt.org: H1, then a blockquote summary, before anything else.
