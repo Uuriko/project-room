@@ -40,7 +40,7 @@ import { countOpenPublicReports } from '../server/legal-store.mjs'; // open publ
 import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
-import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
+import { runtimeTiming, appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
 import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
@@ -220,7 +220,7 @@ export class ProjectRoom extends DurableObject {
     // Successful non-maintenance initialization, before the first RPC/fetch.
     // Includes RoomStore, bootstrap, provider configuration and HTTP adapter.
     this.initializationMs = Math.round(performance.now() - initializationStarted);
-    console.info(JSON.stringify({ event: 'room.do_initialized', initializationMs: this.initializationMs,
+    console.info(JSON.stringify({ event: 'room.do_initialized', ...runtimeTiming, initializationMs: this.initializationMs,
       storeInitializationMs: this.store.initializationMs }));
   }
   #sqlScope(kind, operation, fn, options) {
@@ -247,7 +247,7 @@ export class ProjectRoom extends DurableObject {
       if (cold && !this.coldStartRequestLogged) {
         this.coldStartRequestLogged = true;
         const line = {
-          event: 'room.cold_start', phase: 'first_request',
+          event: 'room.cold_start', phase: 'first_request', ...runtimeTiming,
           constructMs: cold.durationMs, firstRequestMs: appMs,
           storeInitializationMs: this.store.initializationMs, durableObjectInitializationMs: this.initializationMs,
           rooms: cold.rooms ?? 0, sequences: cold.sequences ?? 0, projectionBytes: cold.projectionBytes ?? 0
@@ -256,7 +256,7 @@ export class ProjectRoom extends DurableObject {
         console.info(JSON.stringify(line));
       }
       console.info(JSON.stringify({
-        event: 'room.do_request', method: request.method, path: requestPath(request.url), status: response.status, appMs
+        event: 'room.do_request', ...runtimeTiming, method: request.method, path: requestPath(request.url), status: response.status, appMs
       }));
       return withServerTiming(response, 'app', appMs);
     };
