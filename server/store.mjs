@@ -190,7 +190,7 @@ import {
   isSessionStatus, isTerminalSession, sessionRecord, listWorkItemSessions, sessionCommandType, sessionWorker,
   sessionClaimConflict,
   validateSessionBudget, budgetLimitExceeded, roundLimitExceeded, SESSION_HEARTBEAT_STALE_MS,
-  validateAttemptEnvironment, validateAttemptModel, validateAttemptOutputs, ensureWorkControlDefaults
+  validateAttemptEnvironment, validateAttemptModel, validateAttemptDeclaration, validateAttemptOutputs, ensureWorkControlDefaults
 } from "../src/work-item-session.js";
 import { Inbox, inboxSchema, inboxReadSchema } from "./inbox.mjs";
 import { EmailImport, emailImportSchema } from "./email-import.mjs";
@@ -652,7 +652,9 @@ const sessionEventMatchesRequest = (event, request) => event?.data?.workItemId =
     : event.type === T.SESSION_STARTED ? request.status === "processing"
       : (event.type === T.SESSION_STATUS_CHANGED || event.type === T.SESSION_STOPPED) && event.data.status === request.status)
   && (event?.data?.environment ?? null) === (request.environment ?? null)
-  && (event?.data?.model ?? null) === (request.model ?? null)
+  && (event?.data?.model ?? null) === (typeof request.model === "string" ? request.model.trim() : request.model ?? null)
+  && (event?.data?.provider ?? null) === (typeof request.provider === "string" ? request.provider.trim() : request.provider ?? null)
+  && (event?.data?.client ?? null) === (typeof request.client === "string" ? request.client.trim() : request.client ?? null)
   && JSON.stringify(event?.data?.outputs ?? null) === JSON.stringify(request.outputs ?? null);
 // Platform differences stay at the database boundary; identity, invitation and
 // command rules below are shared by every runtime. The default remains Node.
@@ -756,7 +758,7 @@ const shapes = {
   [T.WORK_STARTED]: `${work} resolvedBlocker`,
   [T.WORK_BLOCKED]: `${work} reason nextAction`,
   [T.WORK_BLOCKER_RESOLVED]: `${work} resolution`,
-  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId segments signedEvidence`,
+  [T.WORK_COMPLETED]: `${work} summary evidenceUrl evidenceVersion nextAction checksClaimed producerId externalProducer attempt evidenceKind evidenceMessageId evidenceMessageEventId previousCompletionEventId segments signedEvidence`,
   [T.WORK_SUPERSEDED]: `${work} supersededByWorkItemId reason`,
   [T.WORK_HANDOFF_RECORDED]: `${work} doneSummary evidenceUrl evidenceVersion nextAction limitReason haltAll`,
   [T.WORK_HALT_CLEARED]: "memberId haltEventId note",
@@ -766,7 +768,7 @@ const shapes = {
   [T.VERIFICATION_RECORDED]: `${work} result completionEventId evidenceVersion summary nextAction`,
   [T.OWNER_DECISION_RECORDED]: `${work} decision completionEventId evidenceVersion reason sourceMessageId`,
   [T.DECISION_RECORDED]: "sourceMessageId statement note",
-  [T.SESSION_STARTED]: `${work} budget environment model`,
+  [T.SESSION_STARTED]: `${work} budget environment model provider client`,
   [T.SESSION_STATUS_CHANGED]: `${work} status spendCents rounds toolCalls suspendReason resumeApproved`,
   [T.SESSION_STOP_REQUESTED]: work,
   [T.SESSION_STOPPED]: `${work} status spendCents rounds toolCalls budgetEnforced reason limit outputs`,
@@ -825,7 +827,7 @@ export function validateCommand(command) {
   for (const [name, value] of Object.entries(command.data)) {
     if (!allowed.includes(name)) fail(422, "invalid_command", `Unexpected field: ${name}`);
     if (value === null) continue;
-    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
+    const type = ["expectedRevision", "expectedMemberRevision", "expectedMessageRevision", "basisRevision", "expectedRequestRevision", "contextSequence", "expectedHelpRevision", "expectedOfferRevision", "spendCents", "allowanceCents", "periodDays", "rounds", "toolCalls", "option", "attempt"].includes(name) ? "number" : ["active", "independentVerificationRequired", "ownerDecisionRequired", "allowOlderBasis", "externalActivityUnverified", "haltAll", "budgetEnforced", "muted", "resumeApproved", "alsoSendToChannel", "enabled", ...ROOM_POLICY_FIELDS].includes(name) ? "boolean" : ["permissions", "paths", "checksClaimed", "capabilities", "segments", "labels", "scopes", "pullRequests", "blocks"].includes(name) ? "array" : name === "outputs" ? "outputs" : ["preferences", "budget", "signedEvidence", "poll"].includes(name) ? "object" : "string";
     if (type === "array" ? !Array.isArray(value) : type === "object" ? !(value && typeof value === "object" && !Array.isArray(value)) : type === "outputs" ? !(typeof value === "string" || (Array.isArray(value) && value.every(v => typeof v === "string"))) : typeof value !== type) fail(422, "invalid_command", `Invalid field: ${name}`);
   }
   if (command.type === T.MESSAGE_POSTED && (typeof command.data.body !== "string" || !command.data.body.trim())) fail(422, "invalid_command", messageBody);
@@ -4989,7 +4991,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // a caller that smuggles them in is rejected, not silently honoured.
     const required = ["requestId", "workItemId", "action",
       ...(request.action === "set_status" ? ["status"] : [])];
-    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "outputs"] : [])];
+    const optional = ["expectedRevision", ...(request.action === "set_status" ? ["budget", "spendCents", "rounds", "toolCalls", "environment", "model", "provider", "client", "outputs"] : [])];
     if (required.some(key => !keys.includes(key)) || keys.some(key => ![...required, ...optional].includes(key))) {
       fail(422, "invalid_session_action", "Supply requestId, workItemId, and set_status or request_stop. expectedRevision is optional");
     }
@@ -5130,6 +5132,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         fail(422, "invalid_session_model", "A model is declared when the session starts");
       if (request.outputs !== undefined && type !== T.SESSION_STOPPED)
         fail(422, "invalid_session_outputs", "Output references are recorded when the session stops");
+      const declarations = {};
+      for (const key of ["provider", "client"]) {
+        if (request[key] !== undefined && type !== T.SESSION_STARTED)
+          fail(422, "invalid_session_declaration", "Provider and client are declared when the session starts");
+        try { const value = validateAttemptDeclaration(request[key]); if (value) declarations[key] = value; }
+        catch (error) { fail(422, "invalid_session_declaration", error.message); }
+      }
       let environment = null, outputs = null, model = null;
       try { environment = validateAttemptEnvironment(request.environment); }
       catch (error) { fail(422, "invalid_session_environment", error.message); }
@@ -5143,6 +5152,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (type === T.SESSION_STARTED && budget) data.budget = budget;
       if (type === T.SESSION_STARTED && environment) data.environment = environment;
       if (type === T.SESSION_STARTED && model) data.model = model;
+      if (type === T.SESSION_STARTED) Object.assign(data, declarations);
       if (type === T.SESSION_STOPPED && outputs) data.outputs = outputs;
       if (request.spendCents !== undefined && type !== T.SESSION_STOP_REQUESTED) data.spendCents = request.spendCents;
       if (request.rounds !== undefined && type !== T.SESSION_STOP_REQUESTED) data.rounds = request.rounds;

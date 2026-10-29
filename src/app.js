@@ -32,7 +32,7 @@ function clipGraphemes(text, maxUnits) {
 }
 import { nextWorkStep, workStatus, workActions, renderWorkActions, activeClaim, terminalWork, doneChip, reusableWorkDefinition, confirmsWorkProposal, confirmsWorkAction, matchesReceipt, producerKnown as hasReportedProducer, changeDescription, workRecipeOptions } from "./workflow.js";
 import { coordinationLoops } from "./work-loops.js";
-import { attemptReceipts, attemptLedger, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
+import { attemptReceipts, attemptLedger, attemptDeclarationLabel, cancellationState, workContinuity, spendLedger } from "./work-item-session.js";
 import { consumeJoinFragment, installShareLinks, canRetryInvitation, requestFailureMessage, failureTextWithHint } from "./share-links.js";
 import { FIRST_ROOM_SETUP_FAILURE } from "./first-room-copy.js";
 import { dmConsentPeerSummary, incomingDmRequests, dmConsentPairDescription, dmConsentActionsForPeer, fetchDmConsents, requestDmConsent, decideDmConsent, revokeDmConsent, blockDmMember, unblockDmMember, dmConsentFailureMessage, DM_CONSENT_REFUSAL_CODES } from "./dm-consents.js";
@@ -3816,6 +3816,7 @@ function claimStateLabel(i, now = Date.now()) {
 function receiptCard(i) {
   if (!i.receipt) return "";
   const receipt = i.receipt;
+  const declaration = attemptDeclarationLabel(receipt.attemptSnapshot);
   const earlier = [...drafts.entries].filter(([, draft]) => draft.mode?.resultEventId && draft.mode.workItemId === i.id
     && draft.mode.resultEventId !== receipt.eventId && (draft.body.trim() || draft.pending) && validReplyDraft(draft.mode, state));
   const resume = earlier.map(([key], index) => `<button type="button" class="button ghost" data-resume-credit="${esc(key)}"
@@ -3835,7 +3836,7 @@ function receiptCard(i) {
       : "";
     verification = `<p><strong>${esc(resultLabel)}</strong> reported by ${esc(memberLabel(i.verification.verifierId))}${independence}: ${esc(i.verification.summary)}</p>`;
   }
-  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl><p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer noopener" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}${receipt.producerAttribution !== "reported" ? `<button type="button" class="button ghost" data-ask-credit="${esc(i.id)}" data-result-event="${esc(receipt.eventId)}" data-focus-key="ask-credit:${esc(i.id)}"${busy ? " disabled" : ""}>Ask about credit</button>` : ""}${resume}</div>`;
+  return `<div class="receipt"><p class="receipt-label">REPORTED COMPLETION · NOT AUTOMATIC VERIFICATION</p><dl class="receipt-attribution"><div><dt>Completion reporter</dt><dd>${esc(reporter)}</dd></div><div><dt>Producer</dt><dd>${esc(producer)}</dd></div></dl>${declaration ? `<p class="form-hint">Attempt #${receipt.attemptSnapshot.attempt} · ${esc(declaration)}</p>` : ""}<p>${esc(receipt.summary)}</p>${receipt.nativeText ? "" : `<a href="${safeUrl(receipt.evidenceUrl)}" target="_blank" rel="noreferrer noopener" data-focus-key="work-evidence:${esc(i.id)}">Open submitted evidence ↗</a>`}<code>${esc(receipt.evidenceVersion)}</code><p>${esc(receipt.nextAction)}</p>${verification}${receipt.producerAttribution !== "reported" ? `<button type="button" class="button ghost" data-ask-credit="${esc(i.id)}" data-result-event="${esc(receipt.eventId)}" data-focus-key="ask-credit:${esc(i.id)}"${busy ? " disabled" : ""}>Ask about credit</button>` : ""}${resume}</div>`;
 }
 function shareDraftButton(item, key = "task") {
   return `<button type="button" class="button secondary" data-portable-work="${esc(item.id)}" data-portable-mode="draft" data-focus-key="share-draft:${esc(item.id)}:${esc(key)}">Share draft</button>`;
@@ -3922,7 +3923,7 @@ function workCard(i, now, drafts, messages = []) {
   // G7: silence is never termination - a stale-heartbeat run is labeled
   // unresponsive with process state unknown, never "stopped".
   const unresponsiveRun = cancellationState(i, { nowMs: Date.now() }).unresponsive;
-  const attemptsLine = attempts.length ? `<p class="form-hint" data-attempt-ledger="${esc(i.id)}">Attempts: ${attempts.map((a, ix) => `#${a.attempt} ${esc(memberLabel(a.performer))} · ${a.outcome ?? (unresponsiveRun ? "unresponsive - process state unknown" : "running")}${a.environment ? ` · ${esc(a.environment)}` : ""}${receipts[ix]?.successClaim === "unverified" ? " · unverified (missing outputs or measured usage)" : ""}`).join(" · ")}</p>` : "";
+  const attemptsLine = attempts.length ? `<p class="form-hint" data-attempt-ledger="${esc(i.id)}">Attempts: ${attempts.map((a, ix) => `#${a.attempt} ${esc(memberLabel(a.performer))} · ${a.outcome ?? (unresponsiveRun ? "unresponsive - process state unknown" : "running")}${a.environment ? ` · ${esc(a.environment)}` : ""}${attemptDeclarationLabel(a) ? ` · ${esc(attemptDeclarationLabel(a))}` : ""}${receipts[ix]?.successClaim === "unverified" ? " · unverified (missing outputs or measured usage)" : ""}`).join(" · ")}</p>` : "";
   const reuse = can("steer") ? `<button type="button" class="button ghost" data-reuse-work="${esc(i.id)}" data-focus-key="work-reuse:${esc(i.id)}">Use again</button>` : "";
   const latestDraft = drafts[0];
   const alternatives = drafts.length > 1 ? `<details class="work-drafts"><summary data-focus-key="work-drafts:${esc(i.id)}">Drafts (${drafts.length})</summary>${drafts.map(draft =>

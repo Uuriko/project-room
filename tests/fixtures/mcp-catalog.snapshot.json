@@ -1085,7 +1085,7 @@
       }
     },
     "room_record_completion": {
-      "inputSchema": "c0f2faaebb255d63",
+      "inputSchema": "2d3991a09f5107b5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1220,7 +1220,7 @@
       }
     },
     "room_submit_text_result": {
-      "inputSchema": "06247538b2b8ee95",
+      "inputSchema": "fef79c828fbdb3ed",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1636,7 +1636,7 @@
       }
     },
     "room_record_completion": {
-      "inputSchema": "c0f2faaebb255d63",
+      "inputSchema": "2d3991a09f5107b5",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,
@@ -1717,7 +1717,7 @@
       }
     },
     "room_submit_text_result": {
-      "inputSchema": "06247538b2b8ee95",
+      "inputSchema": "fef79c828fbdb3ed",
       "annotations": {
         "readOnlyHint": false,
         "destructiveHint": true,

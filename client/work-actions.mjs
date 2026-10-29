@@ -13,6 +13,7 @@ const object = (properties, required = Object.keys(properties)) => ({ type: "obj
 const common = { requestId: { ...id, description: "Optional stable business operation ID. Omit on the first call and the service derives one from the tool, room, actor and input; keep the returned ID and ALL input unchanged after an uncertain result, cancellation or reconnect." },
   workItemId: id, expectedRevision: { ...revision, description: "Optional exact work revision you inspected. Omit to use the current revision; a conflict means the work changed before this attempt was recorded." } };
 const retry = " Preserve the exact input across retries. A saved receipt confirms this operation, not current ownership or approval; read the task again for its current next step.";
+const attempt = { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: "Optional exact finished successful session attempt of this work. Must belong to you and match producerId. Its declared metadata is snapshotted, not independently verified; omission means unknown." };
 const externalProducer = { ...text, maxLength: 160, description: "Optional reported outside person, team or AI credit. Use only with producerId=null (or omitted for external evidence). Does not create membership, verify identity or establish reviewer independence." };
 // RC-2026-09-19-063: fact / inference / proposal marks on a result. A
 // passage of the result is labeled as observed fact, derived inference, or
@@ -25,7 +26,7 @@ const definitions = [
     summary: text, nextAction: text, evidenceMessageId: id, evidenceMessageEventId: id,
     evidenceVersion: { type: "string", pattern: "^sha256:[0-9a-f]{64}$" },
     previousCompletionEventId: { ...id, type: ["string", "null"] }, producerId: { ...id, type: ["string", "null"] },
-    externalProducer, segments: resultSegments,
+    externalProducer, attempt, segments: resultSegments,
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "nextAction", "evidenceMessageId", "evidenceMessageEventId", "evidenceVersion", "previousCompletionEventId", "producerId"]],
   ["propose_work", "Propose work", T.WORK_PROPOSED, "Propose a new assigned task. Requires steer permission; ordinary enrolled agents do not receive it. This neither accepts nor starts work.", {
@@ -39,7 +40,7 @@ const definitions = [
   ["record_completion", "Submit result", T.WORK_COMPLETED, "Record your assigned task's result and evidence reference. Requires complete_work; write mode also requires current write authority and your active claim. Producer attribution is an explicit assertion, never inferred. Evidence is not fetched. This is not verification or human approval.", {
     summary: text, evidenceUrl: { ...text, description: "HTTPS reference without embedded credentials; not fetched or independently verified by Room." }, evidenceVersion: text, nextAction: text,
     producerId: { ...id, type: ["string", "null"], description: "Explicit reported producer. Omit or use null when unknown; do not guess." },
-    externalProducer, segments: resultSegments, signedEvidence: { type: "object", description: "Signed external evidence (room-signed-evidence/1) bound to the signer's room identity key. Required for external completions." },
+    externalProducer, attempt, segments: resultSegments, signedEvidence: { type: "object", description: "Signed external evidence (room-signed-evidence/1) bound to the signer's room identity key. Required for external completions." },
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "evidenceUrl", "evidenceVersion", "nextAction"]],
   ["record_verification", "Record evidence review", T.VERIFICATION_RECORDED, "Record your own check of the exact completion event and evidence version inspected. Requires designated verify authority; independent review cannot be by its producer. Historical findings do not approve newer evidence. Never substitute the latest receipt automatically.", {
