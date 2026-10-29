@@ -12,7 +12,8 @@
 // stored projection and the current reducer, and prints the audit result.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseArgs } from "node:util";
 import { replayNdjson } from "../server/room-export.mjs";
@@ -70,6 +71,8 @@ export function messageDigestLine(sequence, event) {
   return `${sequence}\t${event.id}\t${event.data?.messageId ?? ""}\t${event.data?.body ?? ""}\n`;
 }
 
+const restoreOutcome = { promoted: false, cleanupFailed: false };
+
 async function main() {
   const { values } = parseArgs({ options: {
     from: { type: "string" }, kv: { type: "string" }, "namespace-id": { type: "string" },
@@ -88,14 +91,32 @@ async function main() {
   }
   if (values.save) writeFileSync(values.save, ndjson, { mode: 0o600, flag: "wx" });
   const watermark = JSON.parse(ndjson.slice(0, ndjson.indexOf("\n")));
-  let result;
-  try { result = replayNdjson(ndjson, values.to, { audit: values.audit ?? "strict" }); }
-  catch (error) {
-    // The destination did not exist before this run; do not leave a half-built store behind.
-    for (const suffix of ["", "-wal", "-shm"]) rmSync(`${values.to}${suffix}`, { force: true });
+  // A destination can appear while input is downloaded. Never replay or clean
+  // up at a path another process could have claimed after the initial check.
+  // Stage on the same filesystem, then publish with an atomic no-replace link.
+  const parent = dirname(values.to);
+  mkdirSync(parent, { recursive: true, mode: 0o700 });
+  const staging = mkdtempSync(join(parent, ".room-restore-"));
+  const stagedFile = join(staging, "room.sqlite");
+  let result, rooms, replayError;
+  try {
+    result = replayNdjson(ndjson, stagedFile, { audit: values.audit ?? "strict" });
+    rooms = (values.room ?? []).map(roomId => summarizeRoom(stagedFile, roomId));
+    if (["-wal", "-shm"].some(suffix => existsSync(`${values.to}${suffix}`)))
+      throw new Error("Refusing to restore beside existing SQLite sidecars");
+    linkSync(stagedFile, values.to);
+    restoreOutcome.promoted = true;
+  } catch (error) {
+    replayError = error;
     throw error;
+  } finally {
+    // Only this run's private directory is ours to remove, even on failure.
+    try { rmSync(staging, { recursive: true, force: true }); }
+    catch (error) {
+      restoreOutcome.cleanupFailed = true;
+      if (!replayError) throw error;
+    }
   }
-  const rooms = (values.room ?? []).map(roomId => summarizeRoom(values.to, roomId));
   process.stdout.write(`${JSON.stringify({
     verified: result.verified, events: result.events, trailer: result.trailer, contentVerification: result.contentVerification, audit: result.audit, skippedTables: result.skippedTables, sanitizedCells: result.sanitizedCells, roomsInBackup: watermark.rooms?.length ?? null,
     backedUpAt: watermark.backedUpAt ? new Date(watermark.backedUpAt).toISOString() : null,
@@ -106,7 +127,9 @@ async function main() {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(error => {
-    process.stderr.write(`Restore failed: ${String(error?.message ?? error).split("\n")[0]}. The destination was not promoted.\n`);
+    const destination = restoreOutcome.promoted ? "The destination was promoted; preserve it and inspect before retrying." : "The destination was not promoted.";
+    const cleanup = restoreOutcome.cleanupFailed ? " Private staging cleanup failed; a private copy may remain beside the destination." : "";
+    process.stderr.write(`Restore failed: ${String(error?.message ?? error).split("\n")[0]}. ${destination}${cleanup}\n`);
     process.exitCode = 1;
   });
 }
