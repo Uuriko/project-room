@@ -15,7 +15,16 @@ import { projectPublicWorkReceipt } from './public-read-model.mjs';
 // receipt's verified successor state (#3546: state / verification /
 // verified / executedChecks) — the submission bytes themselves are never
 // altered, and the stamp is derived entirely from the review fact
-// recorded here. A verify PASS additionally executes the platform's own
+// recorded here. A third, narrower exception (request-changes charter,
+// Option A): a revision_requested decision on an UNPAID task stamps
+// rework.reopensFinish onto the review fact, and the claims module —
+// reading that fact — lets the SAME claimant re-finish the SAME
+// claim/generation, superseding this receipt with a new one (this
+// receipt stays immutable and readable). On a PAID task
+// revision_requested is refused outright: paid work returns through the
+// bounty request-changes path on its settlement bounty, or through the
+// successor-task path, never through a same-claim re-delivery that would
+// double-settle the escrow rail. A verify PASS additionally executes the platform's own
 // artifact-integrity check first: the stored bytes are re-hashed and
 // must match the hash the receipt was issued under. The outcome recorded
 // here is not private, though: receipt reads compose this record's
@@ -133,7 +142,8 @@ export class PublicWorkReviews {
       task: scope.task,
       review: { schema: 'public-work-review/1', receiptId: scope.receipt.receiptId, taskId: scope.receipt.taskId,
         termsVersion: scope.receipt.termsVersion, generation: scope.receipt.generation, artifactSha256: scope.receipt.artifact.sha256,
-        revision: review.revision, state: review.state, verification: review.verification ? { ...evidence, current: this.passCurrent(scope, review) } : null, decision: review.decision },
+        revision: review.revision, state: review.state, verification: review.verification ? { ...evidence, current: this.passCurrent(scope, review) } : null, decision: review.decision,
+        ...(review.rework ? { rework: review.rework } : {}) },
       authority: { canDecide: permissions.decide && !terminal, canVerify: permissions.verify && !terminal,
         acceptReady: permissions.decide && ready && !terminal,
         reason: terminal ? 'Review decision is final.' : !permissions.decide ? 'A designated reviewer must decide.' : !ready ? 'A current independent PASS is required.' : 'Ready for an explicit decision.' } };
@@ -270,6 +280,18 @@ export class PublicWorkReviews {
           ...(executedChecks ? { executedChecks } : {}) };
       } else {
         if (input.decision === 'accepted' && this.needsPass(scope) && !this.passCurrent(scope, current)) fail(409, 'review_pass_required', 'Acceptance requires a current authorized independent PASS');
+        if (input.decision === 'revision_requested') {
+          // Request-changes (Option A): a paid task settles through its
+          // escrow bounty, so a same-claim re-delivery here would strand
+          // the rail (its attach guard refuses a second submission).
+          // Refuse before any verdict is recorded, naming the two paths
+          // that do exist for paid work. Unpaid tasks stamp the rework
+          // fact the claims module reads to re-open finish.
+          const link = this.settlementService().link(scope.receipt.taskId);
+          if (link) fail(422, 'revision_requested_paid_task',
+            `Paid public work cannot be returned for same-claim re-delivery: it settles through the bounty request-changes path (POST /api/rooms/${roomId}/bounties/${link.bounty_id}/request-changes on the task's settlement bounty), or the successor path (the room owner publishes a follow-up task). Use the bounty path to return the delivery to the worker for changes, or the successor path for a fresh task.`);
+          current.rework = { reopensFinish: true, by: actorId, at };
+        }
         current.state = input.decision; current.decision = { decision: input.decision, actorId, reason: input.reason, at };
       }
       current.revision += 1;

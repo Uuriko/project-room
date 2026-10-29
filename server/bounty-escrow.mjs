@@ -169,10 +169,25 @@ export const SETTLEMENT_KINDS = new Set(["verified-complete", "failed", "unverif
 // "refunded"). Every acceptance transition is evidence-cited.
 const ACCEPTANCE_TRACK = new Map([
   ["claimed", new Set(["submitted"])],              // work enters review
-  ["submitted", new Set(["accepted", "refunded"])], // verdict | reject (no dispute edge: #3726)
+  ["submitted", new Set(["accepted", "refunded", "claimed"])], // verdict | reject | request-changes return (no dispute edge: #3726)
   ["accepted", new Set(["disputed"])],              // challenge within the window
   ["disputed", new Set(["approved", "refunded"])], // release: verdict affirmed; cancel: verdict rejected
 ]);
+
+// Request-changes (UT2 conversion, charter request-changes.md Option A):
+// the non-terminal return edge submitted -> claimed. It is NOT a verdict:
+// it records no attestation, attributes nothing, forfeits no bond and
+// strikes no flake — escrow and bond stay locked exactly as they were, so
+// the acceptance track's evidence-cited invariant and the finality track's
+// conservation argument are untouched (the return cites the reviewer's
+// mandatory summary as its evidence, like every acceptance-track move).
+// Bounded: at most MAX_REWORK_ROUNDS returns per bounty; the original
+// deadline still binds the re-delivery (submitWork checks it unchanged).
+export const MAX_REWORK_ROUNDS = 2;
+// The one request-changes phrase, shared verbatim with the accept guard's
+// 422 (candidate 3, PR #5072): both surfaces name the same path with the
+// same words, pinned by tests on both sides.
+export const REQUEST_CHANGES_PATH_PHRASE = "for work that needs changes, use the request-changes path (return the delivery to the worker for changes) instead of accepting it, or reject the delivery";
 
 // Bounty-record state transitions -> the track that governs them. null =
 // intake/triage/commitment: pre-lifecycle, governed by neither track.
@@ -180,8 +195,8 @@ const STATE_TRANSITION_TRACK = new Map([
   ["proposed", new Map([["funded", null], ["cancelled", null]])],
   ["funded", new Map([["claimed", null], ["refunded", TRACK_FINALITY]])],
   ["claimed", new Map([["submitted", TRACK_ACCEPTANCE], ["refunded", TRACK_FINALITY]])],
-  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE],
-    ["refunded", TRACK_ACCEPTANCE]])], // reject: the verdict failed the work (free-miss settlement)
+  ["submitted", new Map([["accepted", TRACK_ACCEPTANCE], ["claimed", TRACK_ACCEPTANCE],
+    ["refunded", TRACK_ACCEPTANCE]])], // reject: the verdict failed the work (free-miss settlement); claimed: request-changes return
   ["accepted", new Map([["approved", TRACK_FINALITY], ["disputed", TRACK_ACCEPTANCE]])],
   ["disputed", new Map([["approved", TRACK_ACCEPTANCE], ["refunded", TRACK_ACCEPTANCE]])],
   ["approved", new Map([["paid", TRACK_FINALITY]])],
@@ -265,6 +280,7 @@ export const bountyEscrowSchema = `
     rubric_hash TEXT,
     rubric_version INTEGER,
     submission_hash TEXT,
+    rework_json TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -977,7 +993,7 @@ export class BountyEscrow {
       bounty_journal: ["actor_kind", "actor_id", "receipt_id", "track"],
       bounty_events: ["actor_kind", "before_state", "after_state", "track"],
       bounty_records: ["state_changed_ms", "snoozed_until_ms", "decline_reason", "duplicate_of", "label",
-        "rubric_json", "rubric_hash", "rubric_version", "approval_mode", "dispute_decider"],
+        "rubric_json", "rubric_hash", "rubric_version", "approval_mode", "dispute_decider", "rework_json"],
     };
     for (const [table, cols] of Object.entries(required)) {
       const have = colsOf(table);
@@ -1026,6 +1042,10 @@ export class BountyEscrow {
     addCol("bounty_records", "rubric_hash TEXT");
     addCol("bounty_records", "rubric_version INTEGER");
     addCol("bounty_records", "submission_hash TEXT");
+    // Request-changes: the rework record (rounds used, the outstanding
+    // changes-requested ask, and every delivery generation) rides one
+    // additive JSON column, following the rubric_json pattern.
+    addCol("bounty_records", "rework_json TEXT");
     // Approval modes (#1240): who renders the acceptance verdict. NOT NULL
     // DEFAULT 'legacy' preserves pre-mode poster-or-verifier authority; the CHECK mirrors the base
     // schema. Without this, posting a bounty on a pre-#1240 database 500s
@@ -1296,8 +1316,23 @@ export class BountyEscrow {
     return Object.freeze({ version: 1, hash: rubricHashOf(criteria), criteria });
   }
 
+  // The rework record for a bounty row: { rounds, changesRequested,
+  // deliveries }. Rows predating request-changes carry NULL; the default
+  // is an unused record (no rounds spent, nothing outstanding, and the
+  // current evidence — if any — is delivery generation 1, snapshotted by
+  // the first request-changes or re-delivery that touches the bounty).
+  _reworkOfRow(row) {
+    if (row.rework_json) {
+      const parsed = JSON.parse(row.rework_json);
+      return { rounds: parsed.rounds ?? 0, changesRequested: parsed.changesRequested ?? null,
+        deliveries: Array.isArray(parsed.deliveries) ? parsed.deliveries : [] };
+    }
+    return { rounds: 0, changesRequested: null, deliveries: [] };
+  }
+
   _viewBounty(row, roomId) {
     const now = this.nowMs();
+    const rework = this._reworkOfRow(row);
     return Object.freeze({
       bountyId: row.bounty_id, roomId: row.room_id, title: row.title, criteria: row.criteria,
       amount: toCredits(row.amount_millis), amountMillis: row.amount_millis,
@@ -1321,6 +1356,13 @@ export class BountyEscrow {
       resolution: row.resolution_json ? JSON.parse(row.resolution_json) : null,
       rubric: this._rubricOfRow(row),
       submissionHash: row.submission_hash ?? null,
+      // Request-changes projection (R3/R4): the outstanding ask is visible
+      // only while the bounty sits back with the worker (claimed after a
+      // return); delivery generations stay readable in every later state.
+      reworkRounds: rework.rounds,
+      maxReworkRounds: MAX_REWORK_ROUNDS,
+      changesRequested: row.state === "claimed" ? rework.changesRequested : null,
+      deliveries: Object.freeze(rework.deliveries.map(d => Object.freeze({ ...d }))),
       watchers: this._watchersOf(roomId ?? row.room_id, row.bounty_id),
       createdAt: row.created_at, updatedAt: row.updated_at,
       stateChangedAt: new Date(row.state_changed_ms).toISOString(),
@@ -1335,7 +1377,7 @@ export class BountyEscrow {
       claimant=?, state=?, state_changed_ms=?, deadline_ms=?, challenge_ends_ms=?, dispute_id=?, dispute_opened_ms=?,
       snoozed_until_ms=?, decline_reason=?, duplicate_of=?, label=?,
       evidence_json=?, attestation_json=?, resolution_json=?,
-      rubric_json=?, rubric_hash=?, rubric_version=?, submission_hash=?, updated_at=? WHERE bounty_id=?`)
+      rubric_json=?, rubric_hash=?, rubric_version=?, submission_hash=?, rework_json=?, updated_at=? WHERE bounty_id=?`)
       .run(bounty.title, bounty.criteria, bounty.amountMillis, bounty.poster, bounty.verifier, bounty.disputeDecider ?? null,
         bounty.claimant ?? null, bounty.state, bounty.stateChangedMs, bounty.deadlineMs,
         bounty.challengeEndsMs ?? null, bounty.disputeId ?? null, bounty.disputeOpenedMs ?? null,
@@ -1346,7 +1388,8 @@ export class BountyEscrow {
         bounty.rubric ? JSON.stringify(bounty.rubric.criteria) : null,
         bounty.rubric ? bounty.rubric.hash : null,
         bounty.rubric ? bounty.rubric.version : null,
-        bounty.submissionHash ?? null, at, bounty.bountyId);
+        bounty.submissionHash ?? null,
+        bounty.rework ? JSON.stringify(bounty.rework) : null, at, bounty.bountyId);
   }
 
   _mutable(row) {
@@ -1364,6 +1407,7 @@ export class BountyEscrow {
       resolution: row.resolution_json ? JSON.parse(row.resolution_json) : null,
       rubric: this._rubricOfRow(row),
       submissionHash: row.submission_hash ?? null,
+      rework: this._reworkOfRow(row),
     };
   }
 
@@ -1793,6 +1837,17 @@ export class BountyEscrow {
       // Acceptance track: the work enters review, evidence-cited.
       this._acceptanceTransition(bounty, "submitted", { evidence: receipt });
       bounty.evidence = receipt;
+      // Request-changes R4: every delivery generation is retained. The
+      // re-delivery supersedes the current evidence pointer but never
+      // overwrites the generation record; a pre-request-changes delivery
+      // (no generations recorded yet) is snapshotted as generation 1
+      // first. A fresh submission answers any outstanding ask, so the
+      // changesRequested projection clears.
+      const rework = bounty.rework ?? { rounds: 0, changesRequested: null, deliveries: [] };
+      rework.deliveries = [...rework.deliveries,
+        { generation: rework.deliveries.length + 1, evidence: receipt, submittedAt: isoNow(this.nowMs()) }];
+      rework.changesRequested = null;
+      bounty.rework = rework;
       // Slice 10: the normalized submission fingerprint, pinned before the
       // save so correlation reads the stored value.
       bounty.submissionHash = submissionHashOf(receipt);
@@ -2177,6 +2232,69 @@ export class BountyEscrow {
         attribution: { attributionId: lotId, bountyId, claimant: bounty.claimant, amount: toCredits(bounty.amountMillis), at },
         receipt: { kind: "attribute", bountyId, lotId, entries: [movement.debitEntryId, movement.creditEntryId], at, actor: act, event,
           ...this._signed(movement) } };
+    });
+  }
+
+  // Request-changes (UT2 conversion, charter request-changes.md Option A):
+  // the reviewer returns a submitted delivery to the SAME claimant on the
+  // SAME claim for re-delivery. Authority mirrors reject (the designated
+  // approver for the pinned mode, never the claimant). This is not a
+  // verdict on the worker: no journal movement at all — escrow and claim
+  // bond stay locked byte-identical, no bond forfeit, no flake strike, no
+  // reputation event (the reject/flake legs stay unreachable from here).
+  // The reviewer's summary is mandatory (R5) and rides the bounty view's
+  // changesRequested projection plus the needs-me actionsNeeded entry
+  // (R3). Bounded at MAX_REWORK_ROUNDS returns (R2); the original
+  // deadline still binds the re-delivery — request-changes extends
+  // nothing, and submitWork keeps enforcing the deadline unchanged.
+  requestChangesWork(roomId, bountyId, { requester, summary, actor } = {}) {
+    return this.store.transaction(() => {
+      this._ensure();
+      const lane = this._requireLane(roomId, requester, "requester");
+      const act = this._actorFor(roomId, actor, lane);
+      const row = this.db.prepare("SELECT * FROM bounty_records WHERE room_id=? AND bounty_id=?").get(roomId, bountyId);
+      if (!row) fail("unknown_bounty", `unknown bounty "${bountyId}"`);
+      const bounty = this._mutable(row);
+      check(this._mayApprove(bounty, lane), "not_authorized",
+        bounty.approvalMode === "agent"
+          ? "only the designated agent verifier may request changes on an agent-approved bounty"
+          : bounty.approvalMode === "legacy"
+            ? "only the poster or designated verifier may request changes on a legacy bounty"
+            : "only the poster may request changes on a human-approved bounty");
+      check(lane !== bounty.claimant, "not_authorized",
+        "request-changes must come from an identity distinct from the claimant");
+      check(bounty.state === "submitted", "invalid_state",
+        `bounty is ${bounty.state}, not awaiting review — request-changes returns a submitted delivery to its worker`);
+      check(typeof summary === "string" && summary.trim().length >= 1 && summary.length <= 2000, "invalid_input",
+        "summary is required: a changes_requested review must carry a summary naming what to change (1..2000 characters)");
+      const rework = bounty.rework ?? { rounds: 0, changesRequested: null, deliveries: [] };
+      if (rework.rounds >= MAX_REWORK_ROUNDS)
+        fail("rework_limit_reached",
+          `rework limit reached (${MAX_REWORK_ROUNDS} rounds): this delivery cannot be returned again — the remaining outcomes are accept, reject, or dispute. ${REQUEST_CHANGES_PATH_PHRASE}`);
+      // R4: a delivery made before request-changes existed (evidence set,
+      // no generation recorded) is snapshotted as generation 1 before the
+      // return, so its record survives the coming re-delivery.
+      if (rework.deliveries.length === 0 && bounty.evidence)
+        rework.deliveries = [{ generation: 1, evidence: bounty.evidence,
+          submittedAt: new Date(bounty.stateChangedMs).toISOString() }];
+      const at = isoNow(this.nowMs());
+      const trimmed = summary.trim();
+      // Acceptance track: the return is evidence-cited (the summary), like
+      // every move on the track — but it is not a terminal verdict: no
+      // attestation is recorded and no finality move is gated or made.
+      this._acceptanceTransition(bounty, "claimed",
+        { evidence: { decision: "changes_requested", summary: trimmed, requestedBy: lane } });
+      rework.rounds += 1;
+      rework.changesRequested = Object.freeze({ summary: trimmed, by: lane, at, round: rework.rounds });
+      bounty.rework = rework;
+      this._transition(bounty, "claimed");
+      this._saveBounty(bounty);
+      const event = this._event(roomId, "bounty.changes-requested",
+        { bountyId, actor: act, before: "submitted", after: "claimed",
+          data: { summary: trimmed, requestedBy: lane, claimant: bounty.claimant,
+            round: rework.rounds, reworkRounds: rework.rounds, maxReworkRounds: MAX_REWORK_ROUNDS } });
+      return { bounty: this._getBounty(roomId, bountyId),
+        receipt: { kind: "request-changes", bountyId, at, actor: act, event } };
     });
   }
 

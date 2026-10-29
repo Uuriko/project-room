@@ -503,6 +503,13 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
         return { roomId, bounty, approval, attribution, receipt };
       });
     }
+    case "bounty_request_changes": {
+      return idem("bounty.request-changes", 200, () => {
+        const { bounty, receipt } = escrow.requestChangesWork(roomId, bountyId,
+          { requester: caller, summary: rest.summary, actor });
+        return { roomId, bounty, receipt };
+      });
+    }
     case "bounty_dispute": {
       return idem("bounty.dispute", 201, () => {
         const { bounty, dispute, receipt } = escrow.disputeBounty(roomId, bountyId,

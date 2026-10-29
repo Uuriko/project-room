@@ -16,7 +16,10 @@ import { stampNeedsMe } from "./content-trust.mjs";
 // the last gap where a polling agent had to re-read a whole room or board
 // to answer "what is mine and what is broken": the CI rollup and reviews
 // already live on the claim record (recordCi / recordReview), so these
-// sections compose that state instead of recomputing it.
+// sections compose that state instead of recomputing it. actionsNeeded
+// also carries bounty changes-requested asks (a submitted bounty the
+// reviewer returned to this member for re-delivery, summary verbatim) —
+// the one bounty entry, per the request-changes charter's R3 minimum.
 //
 // since is a sequence number (applied per room) or the previous cursor
 // { rooms: { roomId: seq }, land: { roomId: updatedAt } }. Land-queue
@@ -34,6 +37,7 @@ import { availableBoardRows } from "./available-work.mjs";
 import { claimUpdatedAt, isHardWork, releaseExpired, resolveNamedReviewers, hasCurrentReview, CLAIM_LIFECYCLE, ACTIVE_CLAIM_STATES } from "./work-claims.mjs";
 import { claimIdle } from "./agent-fleet.mjs";
 import { identityRoomSeats } from "./membership-resolution.mjs";
+import { canonicalLane } from "./bounty-escrow.mjs";
 import { SQL_BIND_CHUNK } from "./sql-binds.mjs";
 
 const MAX_ROOMS = 40;
@@ -630,6 +634,40 @@ export function actionsNeededOf(store, roomId, memberId, claims = null) {
   };
 }
 
+// Bounty changes-requested asks (request-changes charter, R3 minimum):
+// a bounty the reviewer returned to this member for re-delivery, with the
+// reviewer's summary verbatim. The bounty surface otherwise generates no
+// needs-me items at all; the general bounty needs-me family belongs to
+// the attention-plumbing charter. Standing state like the work-claim
+// sections: never moves the cursor. Reads go through the escrow's own
+// read transaction; a room whose escrow is unavailable contributes
+// nothing rather than failing the whole inbox.
+export function bountyActionsNeededOf(store, roomId, memberId) {
+  if (!store.bountyEscrow) return null;
+  let bounties;
+  try { bounties = store.bountyEscrow.listBounties(roomId); } catch { return null; }
+  const lane = canonicalLane(memberId);
+  const rows = [];
+  for (const bounty of bounties) {
+    if (!bounty || bounty.claimant !== lane || !bounty.changesRequested) continue;
+    rows.push({
+      id: bounty.bountyId, bountyId: bounty.bountyId, kind: "bounty",
+      title: String(bounty.title ?? "").slice(0, OPEN_WORK_TITLE),
+      why: "changes_requested",
+      by: bounty.changesRequested.by ?? null,
+      summary: bounty.changesRequested.summary,
+      round: bounty.changesRequested.round ?? null
+    });
+  }
+  if (!rows.length) return null;
+  return {
+    roomId,
+    count: rows.length,
+    top: rows.slice(0, ACTIONS_NEEDED_SHOWN),
+    next: `GET /api/rooms/${encodeURIComponent(roomId)}/bounties`
+  };
+}
+
 export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null } = {}) {
   let identity = null;
   let allowedRooms = null;
@@ -697,7 +735,12 @@ export function collectNeedsMe(store, secret, { since, roomId: scopedRoom = null
     const owned = myClaimsOf(store, link.roomId, link.memberId, claims);
     if (owned) myClaims.push(owned);
     const needed = actionsNeededOf(store, link.roomId, link.memberId, claims);
-    if (needed) actionsNeeded.push(needed);
+    const bountyNeeded = bountyActionsNeededOf(store, link.roomId, link.memberId);
+    if (needed && bountyNeeded) {
+      actionsNeeded.push({ roomId: link.roomId, count: needed.count + bountyNeeded.count,
+        top: [...needed.top, ...bountyNeeded.top].slice(0, ACTIONS_NEEDED_SHOWN), next: needed.next });
+    } else if (needed) actionsNeeded.push(needed);
+    else if (bountyNeeded) actionsNeeded.push(bountyNeeded);
     // A watermark above the room head (a numeric since taken from another
     // room's seq, or a cursor saved before a restore) can never be passed
     // legitimately; keeping it would hide this room's next events.

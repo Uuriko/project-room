@@ -388,6 +388,21 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
       return { roomId, bounty, approval, attribution, receipt };
     });
   }
+  // Request-changes: the poster (or the designated verifier) returns a
+  // submitted delivery to the same worker for re-delivery with a mandatory
+  // summary. No money moves: escrow and claim bond stay locked, no bond
+  // forfeit, no flake strike. Bounded at the escrow's rework limit; the
+  // refusal then names the remaining outcomes (accept / reject / dispute).
+  if (escrowRoute === "request-changes" && req.method === "POST") {
+    const payload = await readPayload(reject, body, req);
+    if (!shape(payload, { required: ["summary"], optional: ["idempotencyKey"] }))
+      invalidInput(reject, "{summary, idempotencyKey?}");
+    return idem(payload, "bounty.request-changes", 200, () => {
+      const { bounty, receipt } = escrow.requestChangesWork(roomId, bountyId,
+        { requester: caller, summary: payload.summary, actor });
+      return { roomId, bounty, receipt };
+    });
+  }
   // Free-miss settlement: the poster (or the designated verifier) rejects
   // submitted work with a written reason. The award — still locked with the
   // poster, never attributed — refunds to the poster in full with no fee;

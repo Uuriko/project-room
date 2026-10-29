@@ -1,0 +1,46 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/request-changes:
+    post:
+      x-room-permission: member
+      summary: Request changes on submitted work (return to worker for re-delivery)
+      description: |
+        The poster (or the designated verifier, never the claimant) returns
+        a submitted bounty delivery to the same worker on the same claim
+        for re-delivery, with a mandatory written summary of what must
+        change. This is not a verdict on the worker: no credits move — the
+        award escrow and the claim bond stay locked exactly as they were,
+        the bond is not forfeited and no anti-flake strike is recorded.
+        The bounty reads back as claimed (back with the worker) with a
+        `changesRequested` projection carrying the summary, and the
+        worker's needs-me carries the ask. Rework is bounded at 2 rounds;
+        past the bound the refusal names the remaining outcomes (accept,
+        reject, dispute). The original deadline still binds the
+        re-delivery. Every delivery generation stays readable on the
+        bounty (`deliveries`). API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [summary]
+              properties:
+                summary: { type: string, minLength: 1 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The bounty returned to the worker, with its changes-requested receipt
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }

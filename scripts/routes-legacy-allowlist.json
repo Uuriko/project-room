@@ -1499,6 +1499,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/request-changes"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/request-changes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/request-changes"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/bounties/{id}/rubric"
     },
     {
@@ -5038,6 +5050,18 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/bounties/{id}/reject"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/request-changes"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/request-changes"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/request-changes"
     },
     {
       "method": "GET",
