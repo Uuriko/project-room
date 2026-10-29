@@ -116,6 +116,10 @@ export async function verifyRestoredBackup({ backupFilename, watermarkPath, live
     check("watermark-readable", false, err?.message || String(err));
     return done();
   }
+  if (!watermark || typeof watermark !== "object" || Array.isArray(watermark)) {
+    check("watermark-shape", false, "watermark must be an object");
+    return done();
+  }
   check("watermark-version", watermark.version === 1, `version=${watermark.version}`);
   check("watermark-timestamp",
     typeof watermark.backedUpAt === "number" && watermark.backedUpAt > 0 && watermark.backedUpAt <= nowMs + 60_000,
@@ -171,6 +175,15 @@ export async function verifyRestoredBackup({ backupFilename, watermarkPath, live
         check("reconcile-clean", stale.length === 0,
           stale.length ? `${stale.length} stale entries resurrected` : "no resurrected authority");
       } finally { live.close(); }
+    }
+    // Verification is for an immutable private snapshot. Recheck after the
+    // semantic reads so a file/WAL change during those reads cannot inherit
+    // the digest observed before them. This is not a lock against a hostile writer.
+    if (Object.hasOwn(watermark, "snapshot") && checks.find(c => c.name === "snapshot-digest-shape")?.ok) {
+      try {
+        const actual = await backupSnapshotDigest(backupFilename);
+        check("snapshot-still-matches-watermark", actual.bytes === watermark.snapshot.bytes && actual.sha256 === watermark.snapshot.sha256);
+      } catch (error) { check("snapshot-still-matches-watermark", false, error?.message || String(error)); }
     }
     return done(stale, watermark);
   } catch (err) {

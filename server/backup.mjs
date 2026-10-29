@@ -35,12 +35,23 @@ export function backupDigests(db) {
 // Backups are immutable standalone SQLite files. A non-empty WAL means the
 // main file alone no longer describes the database that a reader will see.
 export async function backupSnapshotDigest(filename) {
-  try {
-    if (statSync(`${filename}-wal`).size > 0) throw new Error("Backup has a non-empty WAL; standalone snapshot integrity is not provable");
-  } catch (error) { if (error.code !== "ENOENT") throw error; }
+  const assertStandalone = () => {
+    try {
+      if (statSync(`${filename}-wal`).size > 0) throw new Error("Backup has a non-empty WAL; standalone snapshot integrity is not provable");
+    } catch (error) { if (error.code !== "ENOENT") throw error; }
+  };
+  const stamp = () => {
+    const value = statSync(filename, { bigint: true });
+    if (!value.isFile()) throw new Error("Backup snapshot must be a regular file");
+    return [value.dev, value.ino, value.size, value.mtimeNs, value.ctimeNs].join(":");
+  };
+  assertStandalone();
+  const before = stamp();
   const hash = createHash("sha256");
   let bytes = 0;
   for await (const chunk of createReadStream(filename)) { bytes += chunk.length; hash.update(chunk); }
+  assertStandalone();
+  if (stamp() !== before) throw new Error("Backup changed while its snapshot digest was being read");
   return { bytes, sha256: hash.digest("hex") };
 }
 

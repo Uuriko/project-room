@@ -14,7 +14,7 @@ import { registerWriter } from "../server/writer-fence.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { backupRoom, backupDigests } from "../server/backup.mjs";
+import { backupRoom, backupDigests, backupSnapshotDigest } from "../server/backup.mjs";
 import { exportNdjsonText, replayNdjson } from "../server/room-export.mjs";
 import { verifyRestoredBackup } from "../scripts/backup-verify.mjs";
 
@@ -178,5 +178,32 @@ test("legacy backup verification names its limited coverage and malformed new di
     writeFileSync(result.watermark, JSON.stringify({ ...original, snapshot }));
     const invalid = await verify(); assert.equal(invalid.ok, false);
     assert.ok(invalid.checks.some(c => c.name === "snapshot-digest-shape" && !c.ok));
+  }
+});
+
+
+test("snapshot hashing rejects a file change or WAL appearing after hashing starts", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "backup-hash-race-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = join(directory, "snapshot.sqlite");
+  writeFileSync(filename, Buffer.alloc(4096, 1));
+  const changed = backupSnapshotDigest(filename);
+  // The stream has yielded; change the file before its final metadata check.
+  writeFileSync(filename, Buffer.alloc(8192, 2));
+  await assert.rejects(changed, /Backup changed/);
+  const wal = backupSnapshotDigest(filename);
+  writeFileSync(`${filename}-wal`, Buffer.from("pending write"));
+  await assert.rejects(wal, /non-empty WAL/);
+});
+
+test("verification returns a failed check for non-object watermark JSON", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "backup-watermark-shape-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const watermarkPath = join(directory, "watermark.json");
+  for (const value of [null, [], 7, "not a watermark"]) {
+    writeFileSync(watermarkPath, JSON.stringify(value));
+    const report = await verifyRestoredBackup({ backupFilename: join(directory, "unused.sqlite"), watermarkPath });
+    assert.equal(report.ok, false);
+    assert.ok(report.checks.some(c => c.name === "watermark-shape" && !c.ok));
   }
 });
