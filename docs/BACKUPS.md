@@ -76,6 +76,12 @@ The script checks each part's sha256 and the whole file's sha256 against the man
 
 Putting a restore back into the production Durable Object is a separate, deliberate operation and is not scripted here.
 
+A failed KV replay preserves its original error and reports `cleanupFailed: true`
+when removing partial rows, closing the claim-writer permit, or restoring foreign-key
+enforcement fails. Do not treat that destination as empty and retryable: inspect
+and reconcile it before another restore. Repeated abort handling preserves the
+first cleanup outcome; it does not silently turn a failed cleanup into success.
+
 ### Drill without waiting for the nightly copy
 
 The nightly job is due 24 hours after its last run, so there is no way to force a KV copy early. For an on-demand drill, pull the same NDJSON from `GET /api/operator/export`: set a random `ROOM_EXPORT_TOKEN` (16+ characters) on `project-room` with `wrangler secret put ROOM_EXPORT_TOKEN --env production`, keep it in a 0600 file, send it as `authorization: Bearer ...` (curl `-H @file`, so it never lands in shell history or output), then `wrangler secret delete ROOM_EXPORT_TOKEN --env production` and confirm the route answers 404 again. Both secret commands publish a new Worker version with the same code; smoke `/api/version` afterwards. Restore with `--from`, then check:
