@@ -185,11 +185,27 @@ function hostedStdioWriteTool(name) {
   if (isTrustTool(name)) return false;
   return false;
 }
+// B5-4-F8: inbox-class hosted reads reach the identity's WHOLE inbox
+// (store.agentInbox: DMs, assignments, mentions, bond proposals across
+// rooms), not one room's data, so room scopes never cover them — the
+// design rule the core profile states for its INBOX_TOOLS branch
+// (mcp-room-profile.mjs). room_read_inbox is a hosted-stdio tool, so
+// without this class it fell under the plain rooms:read read gate and a
+// rooms:read-only key read the full inbox. Inbox-class tools require
+// the mcp:inbox scope instead of (not in addition to) rooms:read,
+// exactly as the INBOX_TOOLS branch requires only mcp:inbox.
+const HOSTED_STDIO_INBOX_TOOLS = new Set([
+  "room_read_inbox",
+]);
+export function isHostedStdioInboxTool(name) {
+  return HOSTED_STDIO_INBOX_TOOLS.has(name);
+}
 function enforceHostedStdioApiKeyScope(store, secret, name) {
   if (typeof secret !== "string" || !secret.startsWith(API_KEY_PREFIX)) return;
   const record = store.agentPlugin.verifyPresentedApiKey(secret);
   if (!record) throw new ServiceError(401, "unauthenticated", "Unknown, revoked, or expired API key");
-  const required = hostedStdioWriteTool(name) ? "rooms:write" : "rooms:read";
+  const required = isHostedStdioInboxTool(name) ? "mcp:inbox"
+    : hostedStdioWriteTool(name) ? "rooms:write" : "rooms:read";
   const granted = (record.scopes ?? []).some(scope =>
     scope === required || (scope.endsWith(":*") && required.startsWith(scope.slice(0, -1))));
   if (!granted) throw new ServiceError(403, "insufficient_scope", `API key lacks the ${required} scope`);
@@ -211,7 +227,9 @@ export async function callHostedStdioTool(store, secret, name, args) {
   // tools never applied that gate — a scoped key with no room scopes
   // could read boards, messages, claims and bounties over MCP while HTTP
   // 403'd it. Classify explicitly: writes need rooms:write, everything
-  // else needs rooms:read.
+  // else needs rooms:read — except inbox-class reads (room_read_inbox),
+  // which need mcp:inbox: they reach the identity-wide inbox, which room
+  // scopes never cover (see HOSTED_STDIO_INBOX_TOOLS above).
   {
     const { roomId } = args;
     const auth = store.authenticate(secret, roomId);

@@ -1,7 +1,8 @@
 // Structured MCP tools/call errors. Callers get unknown_tool, auth_required,
 // or invalid_arguments instead of one fixed "Unknown tool or invalid arguments"
-// string. The JSON-RPC code stays -32602 for schema problems and -32001 when
-// a room tool is called with no identity bearer.
+// string. The JSON-RPC code stays -32602 for schema problems and -32001 for
+// access problems: no identity bearer, or a scoped API key missing the
+// scope its tool's named gate requires (insufficient_scope).
 
 import { randomBytes } from "node:crypto";
 
@@ -182,6 +183,29 @@ export function mcpCallError(id, { reason, tool, suggestion = null, missing = []
           }),
         },
       }
+    };
+  }
+  if (reason === "insufficient_scope") {
+    // B5-4-F8: a named scope gate's refusal must carry its own shape.
+    // Before this branch existed, scope denials fell through to the
+    // generic invalid_arguments envelope below (-32602), so a scope
+    // problem was reported to the caller as bad arguments.
+    return {
+      jsonrpc: "2.0",
+      id,
+      error: {
+        code: -32001,
+        message: "insufficient_scope",
+        data: {
+          tool: tool ?? null,
+          ...canonicalData({
+            reason: "insufficient_scope",
+            category: "access",
+            hint: hint ?? "This API key lacks the scope this tool requires. Reconnect with a key that carries it, or use the identity secret.",
+            next: [Object.freeze({ command: "tools/list" })],
+          }),
+        },
+      },
     };
   }
   if (reason === "unknown_tool") {
