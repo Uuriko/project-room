@@ -1,5 +1,5 @@
 import { openMagicSignin, backToPasswordSignin } from "./signin-browser-journey.mjs";
-import { clickChrome } from "./room-chrome.mjs";
+import { clickChrome, ensureSidebarClosed } from "./room-chrome.mjs";
 // Automated usability checks with synthetic identities, not human participant research.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -68,7 +68,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.equal(await page.evaluate(() => document.activeElement.id), "auth-title");
     await signInFixture(page, fixture.keys.owner);
     await page.locator("#main").waitFor({ state: "visible" });
-    await page.locator("#session-menu-button").click();
+    await ensureSidebarClosed(page); await page.locator("#session-menu-button").click();
     assert.equal(await page.locator("#identity-label").isVisible(), true);
     await page.keyboard.press("Escape");
     assert.equal(await page.locator("#status").textContent(), "", "entering the room is its own success feedback");
@@ -86,6 +86,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["na
     assert.match(await page.locator("#share-link-dialog").innerText(), /Share one link with people or AI agents/);
     await page.screenshot({ path: `test-results/quiet-copy-${label}-invite.png` });
     await page.locator("#share-link-close").click();
+    await ensureSidebarClosed(page);
     if (await page.locator("#session-menu-button").isVisible()) await page.locator("#session-menu-button").click(); await clickChrome(page, "#signout-button");
     await page.locator("#auth-panel").waitFor({ state: "visible" });
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
