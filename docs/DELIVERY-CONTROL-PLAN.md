@@ -55,6 +55,16 @@ The frozen browser baseline is **red**: peer source `09c466352572c95e805eea2856f
 11 cancelled, one skipped. Jill has the exact 86 failure/cancellation locations
 for a selection-gap audit. Focused passes do not supersede this baseline.
 
+The first preparation composition (`codex/release-prepared-candidate-1029`) is
+`fb37bae66e458d379156c4a5702819fd6a862ce0`, tree
+`45b0ea1a443cee21a69231b18e97ce23f98d72ec`: main plus #5271, #5272,
+#5277 and #5278 merge locally without conflicts. Its 55 focused work/result/map/
+publication tests passed with clean unchanged source before and after execution.
+Runtime packaging verified 632 source files, 134 assets and schema 42, manifest
+`86f64163e887b3a999dcdb713e33215b877bf6e4071da17cb8f797e8e6bca3b3`.
+This is a preparation branch, not a main merge, final UI candidate, published
+runtime or full-suite result. Rebuild after the outstanding UI composition.
+
 **Work split and execution order:**
 
 1. The peer laptop owns creation/UI repairs and their browser failure triage.
