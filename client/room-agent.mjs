@@ -308,8 +308,13 @@ export async function redeemAgentInvite(origin, code, displayName, options = {})
     token: options.identitySecret }, options);
   if (options.identitySecret && value?.identityId) value.secret = options.identitySecret;
   const roomToken = value?.mcpToken?.credential;
+  // A lost-response replay returns the same membership with mcpToken null and
+  // next.action rotate. The room credential is replaced at token/rotate, not
+  // minted again here. A first redemption still has to carry a rak_ credential.
+  const replay = value?.duplicate === true && value?.mcpToken == null
+    && Array.isArray(value?.next) && value.next.some(step => step?.action === "rotate");
   if (typeof value?.identityId !== "string" || typeof value?.memberId !== "string"
-    || typeof roomToken !== "string" || !roomToken.startsWith("rak_"))
+    || !(replay || (typeof roomToken === "string" && roomToken.startsWith("rak_"))))
     throw new RoomClientError(200, "invalid_response", "Room returned an invalid invite redemption");
   return value;
 }
@@ -488,15 +493,21 @@ export class RoomAgentClient {
       checkedAt: new Date(now).toISOString(), expiresAt: value.expiresAt, scope: "room", externalExecution: false };
   }
   async #checkIdentityConnection({ signal } = {}) {
-    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}`, undefined, signal);
+    // Identity checks need current membership and ownership, not message history.
+    // Require the existing versioned work view; never fall back to a full room.
+    const snapshot = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}?view=work`, undefined, signal);
     const member = snapshot?.state?.members?.[this.#memberId];
     // Agent owners hold manage_members/decide on rooms they created or were
     // appointed to (#593). That is ownership, not a delegated human-admin
     // grant — allow the CLI connect/check ladder when this identity is the
     // room owner. Non-owner agents require the server's explicit owner-grant marker.
     const ownerAgent = member?.kind === "agent" && snapshot?.state?.room?.ownerId === this.#memberId;
-    if (!snapshot || Array.isArray(snapshot) || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
-      || !member || member.kind !== "agent" || member.active !== true || !Number.isSafeInteger(member.revision)
+    if (!snapshot || Array.isArray(snapshot) || snapshot.snapshotView !== "work" || snapshot.snapshotVersion !== 1
+      || snapshot.roomId !== this.#roomId || snapshot.viewerId !== this.#memberId
+      || snapshot.viewerAccountId !== null || snapshot.viewerAuthEpoch !== null
+      || snapshot.viewerSessionBinding !== null || snapshot.viewerSessionRevision !== null
+      || !member || member.id !== this.#memberId || member.kind !== "agent" || member.active !== true
+      || !Number.isSafeInteger(member.revision) || member.revision < 0
       || !Array.isArray(member.permissions) || member.permissions.some(permission => !PERMISSIONS.includes(permission))
       || (!ownerAgent && member.delegatedAdmin !== true && member.permissions.some(permission => ["manage_members", "decide"].includes(permission)))) {
       throw new RoomClientError(200, "identity_mismatch", "Identity is not linked to this room as the configured agent");
@@ -1120,9 +1131,13 @@ export class RoomAgentClient {
     if (!wellFormed) throw new RoomClientError(200, "invalid_response", "Room returned an invalid identity response");
     return value;
   }
-  linkIdentity({ identityId, memberId, displayName, permissions }, { signal } = {}) {
+  linkIdentity({ identityId, memberId, displayName, permissions, identityLinkCode }, { signal } = {}) {
     return this.#identityAdmin("/identity-links", { identityId, ...(memberId === undefined ? {} : { memberId }),
-      ...(displayName === undefined ? {} : { displayName }), permissions }, { signal });
+      ...(displayName === undefined ? {} : { displayName }),
+      // SECURITY-FIX C3 (#942): the holder-minted link code, when the
+      // caller has one. Without it the server refuses a direct link
+      // unless an approved access request is on record.
+      ...(identityLinkCode === undefined ? {} : { identityLinkCode }), permissions }, { signal });
   }
   identityLinks({ signal } = {}) {
     return this.#identityAdmin("/identity-links", undefined, { signal });
