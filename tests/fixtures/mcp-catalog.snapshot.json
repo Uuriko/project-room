@@ -1210,6 +1210,15 @@
         "openWorldHint": false
       }
     },
+    "room_since": {
+      "inputSchema": "47c7454494ce714b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
     "room_start_work": {
       "inputSchema": "f07fc885990b22bd",
       "annotations": {
@@ -2651,6 +2660,15 @@
         "destructiveHint": true,
         "idempotentHint": true,
         "openWorldHint": false
+      }
+    },
+    "room_since": {
+      "inputSchema": "47c7454494ce714b",
+      "annotations": {
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
       }
     },
     "wake_pause": {

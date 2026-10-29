@@ -795,6 +795,14 @@
     },
     {
       "method": "GET",
+      "path": "/api/room-since"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/room-since"
+    },
+    {
+      "method": "GET",
       "path": "/api/oauth/sessions"
     },
     {
@@ -4334,6 +4342,14 @@
     {
       "method": "HEAD",
       "path": "/api/needs-me"
+    },
+    {
+      "method": "GET",
+      "path": "/api/room-since"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/room-since"
     },
     {
       "method": "GET",

@@ -39,6 +39,7 @@ import { AgentRooms } from "./agent-rooms.mjs";
 import { AccessRequests } from "./access-requests.mjs";
 import { buildRoomBootstrap } from "./room-bootstrap.mjs";
 import { collectNeedsMe } from "./needs-me.mjs";
+import { collectRoomSince } from "./room-since.mjs";
 import { MCP_SUPPORTED_VERSIONS, MCP_VERSION } from "../client/mcp-stdio.mjs";
 import { isHostedStdioTool, validHostedStdioArgs, callHostedStdioTool } from "./mcp-full-profile.mjs";
 import { friendBondCommand } from "../src/friend-bond.js";
@@ -179,6 +180,11 @@ function validRoomArgs(name, args) {
     return typeof args.squadId === "string" && args.squadId.length >= 1 && args.squadId.length <= 128;
   }
   if (name === "room_needs_me") {
+    if (args.since === undefined) return true;
+    if (Number.isSafeInteger(args.since) && args.since >= 0) return true;
+    return object(args.since);
+  }
+  if (name === "room_since") {
     if (args.since === undefined) return true;
     if (Number.isSafeInteger(args.since) && args.since >= 0) return true;
     return object(args.since);
@@ -519,6 +525,7 @@ function callRoomTool(store, secret, identity, name, args, agentRooms, spendCred
 
 function dispatchRoomToolCall(store, secret, identity, name, args, agentRooms) {
   if (name === "room_needs_me") return collectNeedsMe(store, secret, { since: args.since, roomId: args.roomId });
+  if (name === "room_since") return collectRoomSince(store, secret, { since: args.since, roomId: args.roomId });
   if (name === "room_create") {
     const request = {};
     for (const key of ["title", "purpose", "roomId", "kind", "displayName", "requestId"]) {
