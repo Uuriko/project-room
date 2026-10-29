@@ -414,30 +414,27 @@ export function assistantRunId(sourceMessageId) {
 // ask in a freshly configured room rides the plain message path and no run
 // starts. The server owns the configuration, so after a plain shared post it
 // derives the same invoke the client would have sent with a fresh read.
-// Reply-based continuations stay client-routed. Derivation never throws and
-// never refuses the post: "posting a message stays open" holds here too.
+// Reply-based continuations stay client-routed. Eligible posts and their run
+// commit in the same command transaction. Storage failures must propagate so
+// an acknowledged ask cannot lose its dispatch; the same command can retry.
 export function invokeFromPlainPost(store, roomId, state, actor, data, messageId) {
-  try {
-    if (!store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get()) return;
-    const configRow = store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId);
-    if (!configRow) return;
-    const config = JSON.parse(configRow.value);
-    if (!config.coordinatorMemberId) return;
-    const coordinator = state.members[config.coordinatorMemberId];
-    if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) return;
-    if (actor.kind !== 'human' || isGuestAgentMemberId(actor.id)) return;
-    const isAdmin = canAdministerRoom(state, actor.id) && actor.permissions.includes('manage_members');
-    if (!isAdmin && !actor.permissions?.includes('steer')) return;
-    if (data?.toMemberId || data?.replyToId || typeof data?.body !== 'string' || typeof data?.messageId !== 'string' || !validId(data.messageId)) return;
-    if (!addressesAssistant(data.body, config.name || 'Room')) return;
-    if (store.db.prepare("SELECT 1 FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, messageId)) return;
-    const run = { id: assistantRunId(messageId), sourceMessageId: messageId, initiatorId: actor.id,
-      coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
-      createdAt: store.now(), updatedAt: store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: messageId, status: 'pending' }], activity: [] };
-    // Explicit invokes may already own this derived ID for another source.
-    // Keep their execution and history intact; a plain post still succeeds.
-    store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO NOTHING').run(roomId, run.id, JSON.stringify(run));
-  } catch (error) {
-    console.error(`assistant intent derivation failed for room ${roomId} message ${messageId}:`, error?.message ?? error);
-  }
+  if (!store.db.prepare("SELECT 1 FROM sqlite_master WHERE name='room_assistant_config'").get()) return;
+  const configRow = store.db.prepare('SELECT value FROM room_assistant_config WHERE room_id=?').get(roomId);
+  if (!configRow) return;
+  const config = JSON.parse(configRow.value);
+  if (!config.coordinatorMemberId) return;
+  const coordinator = state.members[config.coordinatorMemberId];
+  if (!coordinator?.active || coordinator.kind !== 'agent' || !coordinator.permissions.includes('accept_work')) return;
+  if (actor.kind !== 'human' || isGuestAgentMemberId(actor.id)) return;
+  const isAdmin = canAdministerRoom(state, actor.id) && actor.permissions.includes('manage_members');
+  if (!isAdmin && !actor.permissions?.includes('steer')) return;
+  if (data?.toMemberId || data?.replyToId || typeof data?.body !== 'string' || typeof data?.messageId !== 'string' || !validId(data.messageId)) return;
+  if (!addressesAssistant(data.body, config.name || 'Room')) return;
+  if (store.db.prepare("SELECT 1 FROM room_assistant_runs WHERE room_id=? AND json_extract(value,'$.sourceMessageId')=?").get(roomId, messageId)) return;
+  const run = { id: assistantRunId(messageId), sourceMessageId: messageId, initiatorId: actor.id,
+    coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
+    createdAt: store.now(), updatedAt: store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: messageId, status: 'pending' }], activity: [] };
+  // Explicit invokes may already own this derived ID for another source.
+  // Keep their execution and history intact; a plain post still succeeds.
+  store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO NOTHING').run(roomId, run.id, JSON.stringify(run));
 }
