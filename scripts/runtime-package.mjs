@@ -357,6 +357,7 @@ optional.push("server/routes/spend-grants.mjs"); // spend-primitive MVP: per-age
 optional.push("server/routes/agent-work.mjs"); // bounded agent pickup route
 optional.push("server/routes/agent-room-token.mjs"); // onboarding token rotate RT route (imported by server/routes/table.mjs)
 optional.push("server/routes/typing.mjs", "server/routes/room-digest.mjs", "server/room-digest.mjs", "server/message-read-index.mjs"); // human UX: ephemeral typing heartbeat RT route (imported by server/routes/table.mjs)
+optional.push("server/room-projection.mjs", "server/routes/room-projection.mjs"); // RR-D2: scoped projection read (imported by server/routes/table.mjs)
 optional.push("server/code-drops.mjs", "server/routes/code-drops.mjs"); // code drops: room-native patch exchange (imported by server/store.mjs and server/routes/table.mjs)
 optional.push("server/projection-at-rest.mjs"); // Phase1a stored body serializer
 optional.push("server/legacy-message-shape.mjs"); // projection shape upgrade v1: legacy message records (imported by server/store.mjs)
