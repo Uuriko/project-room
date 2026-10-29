@@ -1,0 +1,15 @@
+  /api/rooms/{roomId}/membership-delegation:
+    get:
+      summary: List membership-administration grants (owner)
+      description: >-
+        Owner-only. Lists the agent identities currently holding an
+        owner-granted membership-administration grant in this room. A grant
+        lets the holder's identity list and decide access requests; it does
+        not put manage_members in the agent's member permissions and it
+        cannot be re-granted by the holder.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: The room's active membership-administration grants }
+        '403': { description: access_denied (owner only) }

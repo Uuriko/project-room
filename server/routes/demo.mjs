@@ -13,5 +13,6 @@ export function demoRoute(ctx) {
 }
 export const DEMO_ROUTES = Object.freeze(["GET","HEAD"].map(method=>Object.freeze({
  id:`demo-${method.toLowerCase()}`,method,path:"/demo",auth:"none",capability:null,scope:"public",handler:demoRoute,
+ publication:"open:synthetic demo room with illustrative content; no member or room data is served",
  schema:{response:{type:"string"}},events:[]
 })));
