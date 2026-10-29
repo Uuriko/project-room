@@ -166,6 +166,7 @@ optional.push("server/mcp-room-profile.mjs"); // authenticated hosted MCP room t
 optional.push("server/mcp-request-defaults.mjs"); // pinned API-key roomId defaults for hosted MCP calls (imported by server/mcp-room-profile.mjs and server/mcp-full-profile.mjs)
 optional.push("client/request-id.mjs"); // deterministic transport request IDs (imported by client/mcp-stdio.mjs, work-actions, help-actions, and reply-actions)
 optional.push("server/spend-grants.mjs"); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/mcp-room-profile.mjs, server/mcp-full-profile.mjs, server/http.mjs)
+optional.push("server/store-transaction.mjs"); // S-02: store-core bare-db transaction adapter (imported by server/store.mjs and server/spend-grants.mjs; pure, no imports)
 optional.push("server/a2a-jsonrpc.mjs"); // public A2A JSON-RPC join reply at /a2a (imported by server/http.mjs)
 optional.push("server/read-cursor.mjs"); // safe scalar foundation imported by needs-me
 optional.push("server/storage-limits.mjs"); // r56: storage value limit reported on /api/version (imported by server/http.mjs)

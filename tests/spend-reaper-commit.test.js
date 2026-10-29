@@ -17,7 +17,6 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { registerBareTransactions } from "./helpers/bare-db-transactions.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { AgentRooms, agentRoomSchema } from "../server/agent-rooms.mjs";
@@ -36,7 +35,10 @@ const T0 = 1_786_000_000_000;
 const T1 = T0 + RESERVE_LEASE_MS + 60_000; // DEAD's lease is long past
 
 function bareDb() {
-  const db = registerBareTransactions(new DatabaseSync(":memory:"));
+  // Bind the store's transaction runner by constructing a RoomStore over
+  // the bare db (S-02: no test-local transaction re-implementation).
+  const db = new DatabaseSync(":memory:");
+  new RoomStore(null, { database: db });
   ensureGrantsSchema(db);
   ensureAutonomyTiersSchema(db);
   ensureSpendGrantsSchema(db);

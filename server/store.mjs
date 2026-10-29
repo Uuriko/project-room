@@ -44,7 +44,8 @@ import { enforceSpendAllowance } from "./spend-allowance.mjs";
 import { ensureAutonomyTiersSchema, enforceAutonomyTiers, AUTONOMY_TIERS_SCHEMA } from "./autonomy-tiers.mjs";
 import { ensureOperatorActionsSchema, OPERATOR_ACTIONS_SCHEMA } from "./operator-actions.mjs"; // CP-ADMIN-0: append-only operator audit.
 import { ensureGrantsSchema, GRANTS_SCHEMA } from "./grants.mjs";
-import { ensureSpendGrantsSchema, registerTransactionRunner, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
+import { ensureSpendGrantsSchema, SPEND_GRANTS_SCHEMA } from "./spend-grants.mjs";
+import { registerStoreTransactionRunner } from "./store-transaction.mjs"; // Store-core bare-db transaction adapter (spend-grants' transactionForDb seam).
 import { canonicalInvitationData, invitationJournalEntry, invitationJournalSchema, replayInvitationJournal, ChannelUpdateJournal, channelJournalSchema, SpamQuarantineJournal, spamQuarantineSchema, migrateSpamQuarantineColumns, JevShadowJournal, jevShadowSchema, SlaBreachAlertJournal, slaBreachAlertSchema, membershipDelegationJournalSchema, MembershipDelegationJournal } from "./journal.mjs";
 import { invitationJoinedEvent, assertInvitationMembershipEvidence } from "./invitation-evidence.mjs";
 import { STORE_SCHEMA_VERSION, fenceDefinitions, registerWriter, installWriterFence, verifyWriterFence } from "./writer-fence.mjs";
@@ -1433,7 +1434,7 @@ export class RoomStore {
     this.db = database ?? new DatabaseSync(filename, { readOnly, ...nodeSqlLimits() });
     this.workEntities = workEntities === true;
     this.storagePlatform = storagePlatform;
-    registerTransactionRunner(this.db, fn => this.transaction(fn));
+    registerStoreTransactionRunner(this.db, fn => this.transaction(fn));
     this.shareLinks = new ShareLinks(this);
     this.identities = new AgentIdentities(this, { hashKey: identityHashKey });
     this.delegation = new MembershipDelegation(this);

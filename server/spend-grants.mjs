@@ -69,6 +69,7 @@ import { issueGrant, revokeGrant, resolveGrants, requireGrantManagement } from "
 import { isGuestAgentMemberId } from "./guest-agent-links.mjs";
 import { getTier, DEFAULT_AUTONOMY_TIER } from "./autonomy-tiers.mjs";
 import { spendAllowanceReport } from "./spend-allowance.mjs";
+import { transactionForDb } from "./store-transaction.mjs";
 import { ownMember, spendPricingEnabled } from "../src/events.js";
 
 export const SPEND_CAPABILITY = "spend";
@@ -215,19 +216,13 @@ const validMemberId = id => typeof id === "string" && MEMBER_ID_PATTERN.test(id)
 // getTier returns a row object (or null when the member was never tiered —
 // enrollment default is t2_standard).
 const tierOf = (db, roomId, agentId) => getTier(db, roomId, agentId)?.autonomyTier ?? DEFAULT_AUTONOMY_TIER;
-// Transactions go through the store's platform transaction (store.transaction),
-// never raw BEGIN/COMMIT: the Durable Object wrapper cannot execute raw
-// transaction SQL, so a raw BEGIN here turned a 402 into a 500 on that runtime.
-// RoomStore registers its runner for its database at construction; callers
-// already inside a transaction (db.isTransaction) just run fn.
-const transactionRunners = new WeakMap();
-export function registerTransactionRunner(db, run) { transactionRunners.set(db, run); }
-function transact(db, fn) {
-  if (db.isTransaction) return fn();
-  const run = transactionRunners.get(db);
-  if (typeof run !== "function") throw new Error("spend-grants: no store transaction is registered for this database");
-  return run(fn);
-}
+// Transactions go through the store's platform transaction, never raw
+// BEGIN/COMMIT: the Durable Object wrapper cannot execute raw transaction
+// SQL, so a raw BEGIN here turned a 402 into a 500 on that runtime. The seam
+// is the store-core bare-db adapter (server/store-transaction.mjs):
+// transactionForDb runs fn through the runner RoomStore registered for its
+// database at construction; callers already inside a transaction
+// (db.isTransaction) just run fn.
 // Integer cents as text: no floats, no negatives, no leading zeros, bounded.
 const CENTS_PATTERN = /^(0|[1-9][0-9]{0,8})$/;
 const validCentsText = value => typeof value === "string" && CENTS_PATTERN.test(value);
@@ -453,7 +448,7 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
   // recovery commits before any refusal is raised.
   reapExpiredSpendAuthorizations(db, { roomId, nowMs });
 
-  const outcome = transact(db, () => {
+  const outcome = transactionForDb(db, () => {
     // Replay first: a re-presented nonce never authorizes twice, no matter
     // the cap state. 'settled' returns its receipt (exactly-once charging
     // for completed-request replay, no fresh headroom needed); 'reserved'
@@ -599,7 +594,7 @@ export function authorizeSpend(db, { roomId, agentId, toolName, priceCents, nonc
       return settleAuthorization(db, { roomId, agentId, nonce, at });
     },
     void() {
-      return transact(db, () => {
+      return transactionForDb(db, () => {
         const moved = voidTransition();
         releaseRoomReservation();
         return moved;
@@ -631,7 +626,7 @@ function releaseRoomReservationRow(db, roomId, agentId, nonce) {
 // and must retry with a fresh nonce. Idempotent; returns the count voided.
 export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() } = {}) {
   if (!db || typeof roomId !== "string" || !Number.isSafeInteger(nowMs)) return 0;
-  return transact(db, () => {
+  return transactionForDb(db, () => {
     const expired = db.prepare(
       `SELECT room_id, agent_id, nonce FROM spend_authorizations
        WHERE room_id = ? AND status = 'reserved'
@@ -669,7 +664,7 @@ export function reapExpiredSpendAuthorizations(db, { roomId, nowMs = Date.now() 
 //   on a real transition: a settle that did not move the row changes
 //   nothing else.
 function settleAuthorization(db, { roomId, agentId, nonce, at }) {
-  return transact(db, () => {
+  return transactionForDb(db, () => {
     const info = db.prepare(`UPDATE spend_authorizations SET status = 'settled', settled_at = ?
       WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'
         AND COALESCE(expires_at, created_at + ?) > ?`)
@@ -691,7 +686,7 @@ export function settleSpend(db, { roomId, agentId, nonce, nowMs = Date.now() } =
 }
 
 export function voidSpend(db, { roomId, agentId, nonce } = {}) {
-  return transact(db, () => {
+  return transactionForDb(db, () => {
     const info = db.prepare(`UPDATE spend_authorizations SET status = 'voided'
       WHERE room_id = ? AND agent_id = ? AND nonce = ? AND status = 'reserved'`)
       .run(roomId, agentId, nonce);
@@ -728,7 +723,7 @@ export function chargeSpendBeforeCall(store, secret, name, args) {
   reapExpiredSpendAuthorizations(store.db, { roomId, nowMs });
   const report = spendAllowanceReport(room.state, nowMs);
   // The check+reserve MUST run inside the store's platform transaction.
-  // authorizeSpend's transact() now delegates to the store's platform
+  // authorizeSpend's transactionForDb() delegates to the store's platform
   // transaction itself (it used to issue raw BEGIN IMMEDIATE, which the
   // Durable Object wrapper cannot execute: qa4-fix-spend-do-txn-jill,
   // live-verified 2026-10-05). Wrapping here keeps the projection read in
