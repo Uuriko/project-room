@@ -1404,6 +1404,9 @@ function setConnectionStatus(text) {
   status.dataset.state = connected ? "connected"
     : /^Not connected · (account )?sign.in required$/.test(normalized) ? "signed-out" : "other";
   if (status.textContent !== visible) status.textContent = visible;
+  // A healthy connection needs no standing label: the bar stays for screen
+  // readers and shows again when the link drops or reconnects.
+  $(".connection-bar")?.classList.toggle("sr-only", connected);
   $("#connection-explanation").textContent = normalized;
   if (state && wasInterrupted !== (status.dataset.interrupted === "true")) queueMicrotask(() => { if (state) render(); });
 }
@@ -1574,7 +1577,7 @@ function syncSessionMenu() {
     const accountExpiry = !state && accountClient.session?.authenticated ? accountClient.session.expiresAt : null;
     const formatted = signedIn ? formatSessionExpiry(roomExpiry ?? accountExpiry) : null;
     if (formatted) {
-      expiryEl.textContent = `${roomExpiry != null ? "Session" : "Account session"} expires ${formatted}`;
+      expiryEl.textContent = `Signed in until ${formatted}`;
       expiryEl.hidden = false;
     } else {
       expiryEl.textContent = "";
@@ -5078,7 +5081,8 @@ function renderRoomActions() {
   })));
   $("#room-actions-list").replaceChildren(...groups);
   const counts = [!tasksOnly ? `${shown.length} of ${channels.length} channels` : "", !channelsOnly ? `${shownTasks.length} of ${tasks.length} tasks` : ""].filter(Boolean);
-  $("#room-actions-count").textContent = `Showing ${counts.join("; ")}. Loaded in this room.${channels.length > shown.length || tasks.length > shownTasks.length ? " Type more to refine the list." : ""}`;
+  const partial = channels.length > shown.length || tasks.length > shownTasks.length;
+  $("#room-actions-count").textContent = partial ? `Showing ${counts.join("; ")}. Loaded in this room. Type more to refine the list.` : "";
   $("#room-actions-empty").hidden = shown.length + shownTasks.length + entries.length > 0;
   $("#room-actions-status").textContent = "";
 }
