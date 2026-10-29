@@ -382,9 +382,10 @@ const PAYLOAD_SCHEMAS = {
       // "verification-rejected" (rejectWork) and "unverified"
       // (_settleUnverified) previously failed shape validation, so enabling
       // receipt signing rolled the whole reject/refund transaction back and
-      // funds stayed locked.
-      if (!["timeout", "dispute-cancel", "split", "verification-rejected", "unverified"].includes(p.reason))
-        fail("invalid_receipt", 'payload.reason must be "timeout", "dispute-cancel", "split", "verification-rejected" or "unverified"');
+      // funds stayed locked. "poster-withdrawn" (unfundBounty, sponsor
+      // exits) joins the same list for the same reason.
+      if (!["timeout", "dispute-cancel", "split", "verification-rejected", "unverified", "poster-withdrawn"].includes(p.reason))
+        fail("invalid_receipt", 'payload.reason must be "timeout", "dispute-cancel", "split", "verification-rejected", "unverified" or "poster-withdrawn"');
       nonEmpty(p.refundTo, 256, "payload.refundTo");
     },
   },

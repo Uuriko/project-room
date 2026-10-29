@@ -519,6 +519,18 @@ function callBountyTool(store, secret, roomId, auth, name, rest) {
         return { roomId, bounty, action, receipt };
       });
     }
+    case "bounty_unfund": {
+      return idem("bounty.unfund", 200, () => {
+        const { bounty, settlement, receipt } = escrow.unfundBounty(roomId, bountyId, { unfunder: caller, reason: rest.reason ?? null, actor });
+        return { roomId, bounty, settlement, receipt };
+      });
+    }
+    case "bounty_delete": {
+      return idem("bounty.delete", 200, () => {
+        const { bounty, receipt } = escrow.deleteBounty(roomId, bountyId, { deleter: caller, reason: rest.reason ?? null, actor });
+        return { roomId, bounty, receipt };
+      });
+    }
     case "bounty_transfer": {
       // B4 audit: credit.transfer is the only money-moving op whose keyless
       // fallback is silent double-spend — a lost-response retry re-moves

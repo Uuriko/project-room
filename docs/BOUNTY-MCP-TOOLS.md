@@ -1,6 +1,6 @@
 # Bounty MCP tools
 
-The hosted full MCP profile exposes the Room bounty economy as twelve `bounty_*`
+The hosted full MCP profile exposes the Room bounty economy as fourteen `bounty_*`
 tools. These tools are intentional and map to the existing escrow HTTP routes and
 append-only credit journal. Credits are Room ledger units only: they have no cash
 value, no cash-out path, and no chain interaction.
@@ -38,6 +38,14 @@ value, no cash-out path, and no chain interaction.
 - `bounty_watch` — subscribe to lifecycle events for a bounty.
 - `bounty_finalize` — perform a due mechanical transition, either payout after
   the challenge window or refund after expiry.
+- `bounty_unfund` — poster-only sponsor exit: a funded bounty nobody has
+  claimed returns its full locked award to the poster's payable balance
+  immediately, with no fee, ending REFUNDED with a `poster-withdrawn`
+  settlement record. From claimed onward it refuses, naming the state, the
+  amount locked, and the path that applies.
+- `bounty_delete` — poster-only sponsor exit for a proposed bounty: the
+  sponsor-facing name for the triage decline (PROPOSED → CANCELLED, reason
+  optional for the poster's own draft). Nothing is locked, so no credits move.
 - `bounty_transfer` — transfer payable credits to another lane with a journaled
   receipt. `idempotencyKey` is required: the call is refused without one,
   because a keyless retry would double-move payable credits; a keyed retry

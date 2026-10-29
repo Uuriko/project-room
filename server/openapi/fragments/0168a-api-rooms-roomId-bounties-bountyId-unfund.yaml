@@ -1,0 +1,41 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/unfund:
+    post:
+      x-room-permission: member
+      summary: Unfund a funded, unclaimed bounty (poster)
+      description: |
+        Poster-only sponsor exit: FUNDED → REFUNDED before the deadline,
+        returning the full locked award to the poster's payable balance
+        with no fee, through the finality track's existing `refund`
+        journal kind. Writes a `poster-withdrawn` settlement record and
+        emits `bounty.refunded`. Only the funded-unclaimed state is
+        legal: from claimed onward the refusal names the state, the
+        amount locked, and the path that applies (deadline finalize or
+        dispute); from PROPOSED it points at the delete route. MCP twin:
+        bounty_unfund. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The refunded bounty and its settlement record
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }

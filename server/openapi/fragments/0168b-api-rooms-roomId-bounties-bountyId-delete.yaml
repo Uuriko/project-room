@@ -1,0 +1,40 @@
+  /api/rooms/{roomId}/bounties/{bountyId}/delete:
+    post:
+      x-room-permission: member
+      summary: Delete a proposed bounty (poster)
+      description: |
+        Poster-only sponsor exit for the PROPOSED state: the same kernel
+        path as decline, under the sponsor-facing name — PROPOSED →
+        CANCELLED, leaving the active list and staying in history with
+        the actor and reason. The reason is optional for the poster's
+        own draft (a default is recorded). Proposed bounties lock
+        nothing, so no credits move. A funded bounty cannot be deleted;
+        unfund it instead. Emits `bounty.declined`. MCP twin:
+        bounty_delete. API keys need `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - $ref: '#/components/parameters/BountyId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, minLength: 1, maxLength: 2000 }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: The cancelled bounty
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  bounty: { $ref: '#/components/schemas/Bounty' }
+                  receipt: { $ref: '#/components/schemas/BountyReceipt' }
+        '401': { description: unauthenticated }
+        '403': { description: not_authorized }
+        '404': { description: unknown_bounty }
+        '422': { description: invalid_bounty_input }

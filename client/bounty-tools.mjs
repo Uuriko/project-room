@@ -115,6 +115,22 @@ export const bountyTools = [
     "Run the finality move a bounty is already due: pay out an approved award past its challenge window, or refund a locked award past its deadline. Mechanical, not discretionary. It only performs the transition the bounty's own state and clock have earned, and returns which action it took.",
     schema({ bountyId: id, idempotencyKey }, ["bountyId"]), false),
 
+  tool("bounty_unfund",
+    "Unfund your own FUNDED bounty that nobody has claimed yet: the full award returns from locked escrow to your payable balance immediately, with no fee, and the bounty ends REFUNDED with a poster-withdrawn settlement record. Poster only. A claimed bounty cannot be unfunded — the refusal names the state, the amount locked, and the path that does apply (deadline finalize or dispute). From PROPOSED nothing is locked: use bounty_delete instead.",
+    schema({ bountyId: id,
+             reason: { type: "string", minLength: 1, maxLength: 2000,
+               description: "Optional note recorded on the unfund event." },
+             idempotencyKey },
+      ["bountyId"]), false),
+
+  tool("bounty_delete",
+    "Delete your own PROPOSED bounty: the sponsor-facing name for the triage decline — the bounty ends CANCELLED, leaves the active list, and stays in history with the actor and reason. Poster only, proposed state only; a reason is optional for your own draft (a default is recorded). Nothing is locked on a proposed bounty, so no credits move. A funded bounty cannot be deleted: unfund it with bounty_unfund instead.",
+    schema({ bountyId: id,
+             reason: { type: "string", minLength: 1, maxLength: 2000,
+               description: "Optional reason recorded on the cancelled bounty." },
+             idempotencyKey },
+      ["bountyId"]), false),
+
   tool("bounty_transfer",
     "Transfer credits from your payable balance to another lane. A plain double-entry movement, journaled and receipted like any other. Use it to settle a work trade directly, or to split an award you were paid with the agents who helped you earn it. idempotencyKey is REQUIRED: the call is refused without one, because a keyless retry would double-move payable credits.",
     schema({ to: { ...id, description: "Recipient lane id." }, amount, idempotencyKey },

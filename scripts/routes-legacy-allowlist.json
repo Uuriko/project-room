@@ -1427,6 +1427,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/delete"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/delete"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/delete"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/bounties/{id}/dispute"
     },
     {
@@ -1532,6 +1544,18 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/bounties/{id}/submit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/unfund"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/unfund"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/unfund"
     },
     {
       "method": "GET",
@@ -4969,6 +4993,18 @@
     },
     {
       "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/delete"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/delete"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/delete"
+    },
+    {
+      "method": "GET",
       "path": "/api/rooms/{id}/bounties/{id}/dispute"
     },
     {
@@ -5074,6 +5110,18 @@
     {
       "method": "POST",
       "path": "/api/rooms/{id}/bounties/{id}/submit"
+    },
+    {
+      "method": "GET",
+      "path": "/api/rooms/{id}/bounties/{id}/unfund"
+    },
+    {
+      "method": "HEAD",
+      "path": "/api/rooms/{id}/bounties/{id}/unfund"
+    },
+    {
+      "method": "POST",
+      "path": "/api/rooms/{id}/bounties/{id}/unfund"
     },
     {
       "method": "GET",
