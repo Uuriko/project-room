@@ -297,7 +297,9 @@ export function installHumanExperience({ getState, getSession, getConversation, 
       if (intent.action !== 'invoke' && (!run || ['done','failed','cancelled'].includes(run.status))) { error = uiText("human.copy.015"); paint(); return; }
       const reviewed = { ...intent, ...(intent.action !== 'invoke' ? { expectedRevision: run.revision } : {}), ...('expectedAttemptId' in intent ? { expectedAttemptId: run.attemptId || null } : {}) };
       operation = { ...(original.action === 'submit' ? { ...original, intent: reviewed } : reviewed), requestId: crypto.randomUUID() }; rejectedOperation = null; projection = latest; persistOperation();
+      const reviewHadFocus = document.activeElement === $('#assistant-review');
       error = uiText("human.copy.016"); paint();
+      if (reviewHadFocus) $('#assistant-retry').focus({ preventScroll: true });
     } catch (failure) { if (stamp === key()) { error = failure.message; paint(); } }
   };
   $('#assistant-runs').onclick = async event => {
