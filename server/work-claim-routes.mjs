@@ -1106,7 +1106,16 @@ function handleWorkClaimsCore({ req, res, url, store, roomId, auth, workClaimRou
     // re-claim and was unactionable for a foreign holder (non-owners cannot
     // release it) — it also never named the holder.
     if (item.state !== "unclaimed") {
-      if (item.state !== "claimed") reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
+      if (item.state !== "claimed") {
+        // DC1-A1, A2 sub-case: an active item (in_progress/blocked) held by
+        // a current member gets the same owner-release copy when the
+        // caller is the room owner — the bare "already <state>" message
+        // would leave the agent-error fallback prescribing an ask to the
+        // (silent) holder, with no caller remedy named.
+        const ownerCopy = ACTIVE_CLAIM_STATES.includes(item.state) ? ownerHeldCopy(item) : null;
+        if (ownerCopy) reject(409, "work_claim_conflict", ownerCopy);
+        reject(409, "work_claim_conflict", `Work "${item.id}" is already ${item.state}`);
+      }
       if (item.owner === caller) {
         reject(409, "work_claim_conflict",
           `You already hold work "${item.id}" — no new claim was saved; read the item to confirm`);

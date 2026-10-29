@@ -575,19 +575,20 @@ function publicHint(value, fallback) {
 // configuration). The work-claim routes and the board sync serve this exact
 // text as the refusal message in that configuration — they hold the caller,
 // the holder, the lease and the ids; this layer does not — and agentErrorAx
-// recognises the shape below and mirrors it into hint/next. There is no
-// reassign action on the agent surface: the owner's own release is the
-// first prescription, and the single-item read is named because the board
+// recognises the shape below and mirrors it into hint/next. The owner's
+// own release is the first prescription — the defect was HT-2/HT-3: the
+// old copy prescribed asking the silent holder and never named the
+// caller's own remedy — and the single-item read is named because the board
 // list shows only part of a claim's history, so a list-shaped release
 // round fails with a false stale-round 409.
 export function ownerHeldClaimCopy({ holder, leaseExpiresAt, roomId, claimId } = {}) {
   const claimPath = `/api/rooms/${roomId}/work-claims/${claimId}`;
   return leaseExpiresAt
-    ? `This work is held by ${holder} until ${leaseExpiresAt}. There is no reassign action. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it, or wait until ${leaseExpiresAt} and claim it then.`
-    : `This work is held by ${holder}. There is no reassign action. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it.`;
+    ? `This work is held by ${holder} until ${leaseExpiresAt}. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it, or wait until ${leaseExpiresAt} and claim it then.`
+    : `This work is held by ${holder}. You can release it yourself now: first read the single item — GET ${claimPath} (use this read, not the board list; the list shows only part of the claim's history) — then send POST ${claimPath}/release with expectedClaimedAt and expectedHistoryLength copied from that read. The claim becomes unclaimed and anyone can claim it. Or message the holder and ask them to release it.`;
 }
 export function parseOwnerHeldClaimCopy(message) {
-  const match = /^This work is held by (.+?)(?: until (.+?))?\. There is no reassign action\. You can release it yourself now:/.exec(String(message || ""));
+  const match = /^This work is held by (.+?)(?: until (.+?))?\. You can release it yourself now:/.exec(String(message || ""));
   return match ? { holder: match[1], leaseExpiresAt: match[2] ?? null } : null;
 }
 
@@ -785,7 +786,7 @@ export function agentErrorAx({ httpStatus = 0, code = "request_failed", message 
         ? `Read the current item (GET ${claimPath}) to confirm what you hold.`
         : named
           ? `Ask ${named} to reassign or release the claim, then claim it.`
-          : "Read the current item, identify the holder, then ask them to reassign or release the claim.")]
+          : "Read the current item, identify the holder, then ask them to release the claim.")]
     };
   }
   // #3880: the claim was refused because the work's dependsOn are not all
