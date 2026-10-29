@@ -76,6 +76,12 @@ The script checks each part's sha256 and the whole file's sha256 against the man
 
 Putting a restore back into the production Durable Object is a separate, deliberate operation and is not scripted here.
 
+A failed KV replay preserves its original error and reports `cleanupFailed: true`
+when removing partial rows, closing the claim-writer permit, or restoring foreign-key
+enforcement fails. Do not treat that destination as empty and retryable: inspect
+and reconcile it before another restore. Repeated abort handling preserves the
+first cleanup outcome; it does not silently turn a failed cleanup into success.
+
 ### Drill without waiting for the nightly copy
 
 The nightly job is due 24 hours after its last run, so there is no way to force a KV copy early. For an on-demand drill, pull the same NDJSON from `GET /api/operator/export`: set a random `ROOM_EXPORT_TOKEN` (16+ characters) on `project-room` with `wrangler secret put ROOM_EXPORT_TOKEN --env production`, keep it in a 0600 file, send it as `authorization: Bearer ...` (curl `-H @file`, so it never lands in shell history or output), then `wrangler secret delete ROOM_EXPORT_TOKEN --env production` and confirm the route answers 404 again. Both secret commands publish a new Worker version with the same code; smoke `/api/version` afterwards. Restore with `--from`, then check:
@@ -90,6 +96,26 @@ Delete the export, the restored store and any saved NDJSON when done: they hold 
 Results of each drill are recorded in `ops/STATE.md`.
 
 ## Byte equality (REL-14)
+
+For local SQLite backups, `backupRoom` also records `snapshot.bytes` and
+`snapshot.sha256` for the complete standalone file, after closing its verification
+connection. `backup-verify` checks those bytes before and after its semantic reads,
+rejects a non-empty WAL, and detects file identity/size/timestamp changes during
+hashing. This catches changes outside the event and attachment tables, including
+account rows. It does not change the hosted NDJSON backup format.
+
+Verify a private, quiescent backup, never the live database. Do not open the backup
+for writes, checkpoint it, or replace it during verification. The repeated checks
+detect observed changes; they are not an atomic lock against a concurrent writer.
+Keep the watermark with the snapshot and protect both: a checksum is evidence of
+byte equality to that watermark, not authentication of whoever supplied it. An
+actor who can replace both can create a matching checksum. Authority reconciliation
+against a current reference is still a separate check.
+
+The report names its coverage: `snapshot-bytes`, `events-and-attachments` for an
+older digest watermark, or `counts-only` for the oldest format. Legacy backups
+remain readable; a legacy `ok: true` does not prove equality of every table.
+Malformed snapshot metadata fails rather than silently downgrading coverage.
 
 - `backupRoom` writes content digests into the watermark (`digests.events`, `digests.attachments`): a sha256 over every event row and every `room_attachments` row, including a hash of each file's bytes. `scripts/backup-verify.mjs` recomputes them on the restored copy, so a same-count edit or a flipped file byte fails verification. Watermarks written before this carry counts only and still verify (the check says so).
 - The NDJSON export (the nightly backup's format) writes BLOB cells as `{"$base64": "..."}` and replay decodes them. Before this, any room holding a room file produced an export that replay refused.
