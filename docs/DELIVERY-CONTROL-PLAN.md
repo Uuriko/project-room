@@ -14,7 +14,55 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
-Current integrated release
+The coordinated integration
+([#5249](https://github.com/Uuriko/project-room/pull/5249)) merged #5235, #5237
+and #5238–#5248 at `c47c3fc79cc3af65db095f0b653d6dedb9e24454`, tree
+`e01b537a7ff911e2b3f1cd1902d91157ee828305`. Deployment workflow
+[40857688312](https://github.com/Uuriko/project-room/actions/runs/40857688312)
+was deliberately **cancelled before runtime publication**, after the peer observed
+an orientation HTTP 422 even though the default pilot's version endpoints had
+converged. A later SDK orientation read passed with HTTP 200 and 123 work items;
+source inspection confirmed the route exists. Staggered per-room propagation is
+a hypothesis, not a proven routing defect. No speculative patch was applied.
+
+Independent strict/live verification subsequently passed on stable `c47c3fc`
+source before and after, with readiness 527/198 ms and live-smoke p95 200 ms.
+Authenticated identity, Board and orientation reads passed. Manual publication
+followed that verification: the downloaded
+[runtime package](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-c47c3fc)
+verified 632 archive files against 631 source files, with archive SHA-256
+`3bf1f3f7fc0e9112800a75d0e7847429bcefd25695522bd620b7b34d12f5914e`;
+the API confirmed it latest. The deployment claim was released and read back as
+unclaimed. This is an independently verified release and publication checkpoint,
+**not a successful deployment-workflow run**. At this checkpoint,
+[CI run 40857577869](https://github.com/Uuriko/project-room/actions/runs/40857577869)
+was still running with browser shards 2 and 6 failed; diagnosis was in progress.
+The release is not described as having all CI checks green.
+
+Private receipts under `release-prep-20261029/` preserve these distinct outcomes:
+`cohesive-verification/verify-8Osog2/receipt.json`, `cohesive-client-live.json`,
+`cohesive-orientation-live.json`, `cohesive-runtime-publication.json` and
+`cohesive-release-claim.json`. The prior verified `0faa43b` release and earlier
+readiness failures remain below; incident #5177 is not closed by this checkpoint.
+
+On the initial `fc0725` composition, the peer reported 171 unit checks,
+78 browser/workflow checks and two Worker checks; this Mac passed 149 unit and
+65 browser checks. Integration review found a missing agent-orientation runtime
+registration, an assistant run-ID overwrite, and a swallowed dispatch INSERT
+failure. The repairs register the packaged dependency, preserve existing runs,
+and commit a qualifying post and its derived run atomically before side effects.
+A collision explicitly returns 409 and rolls the transaction back. Original
+negative controls are retained; final package/assistant/first-result/unified
+qualification passed 64 checks, with 54 focused assistant checks. Earlier
+composition results are not presented as full qualification of the later repairs.
+The exact merged runtime package verified 631 files, 134 assets and schema 42.
+Private source-bound evidence is retained in
+`release-prep-20261029/cohesive-integration-checkpoint.json`,
+`cohesive-collision-before.log`, `cohesive-collision-atomic-before.log`,
+`cohesive-release-final-tests.log` and `cohesive-runtime-final-create.json`.
+These source and package checks alone do not establish deployed usability.
+
+Previous integrated release
 [40837088951](https://github.com/Uuriko/project-room/actions/runs/40837088951)
 succeeded on `0faa43b83225ab59f4a7cbaba9fe294b22b40def`, tree
 `cbecffa8755d4502375c65108bb545e20da656fc`. All four version endpoints,
@@ -98,8 +146,8 @@ Runtime dependency completeness and service/HTTP/MCP parity were repaired in
 viewer and revision. The SDK selected work-packet improvement
 ([#5232](https://github.com/Uuriko/project-room/pull/5232)) is now deployed in
 `0faa43b`. The server selected work-context follow-up
-([#5235](https://github.com/Uuriko/project-room/pull/5235)) is a draft next
-candidate, **not deployed**; its 85 passing tests are peer-reported qualification.
+([#5235](https://github.com/Uuriko/project-room/pull/5235)) is merged in #5249 and deployed in the independently verified `c47c3fc` release;
+its earlier 85 passing tests were peer-reported qualification.
 Default orientation still needs separate work.
 
 Remaining read debt includes global reply-context metadata/event scans,
