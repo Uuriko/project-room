@@ -10,6 +10,7 @@ import { AgentRooms } from '../server/agent-rooms.mjs';
 import { collectNeedsMe } from '../server/needs-me.mjs';
 import { wakeNamedReviewers } from '../server/work-claim-events.mjs';
 import { createWork, claimWork, updateWork, recordReview, recordCi, flagPremiseInvalid, clearPremiseFlag } from '../server/work-claims.mjs';
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 const WRITER = ['steer', 'accept_work', 'complete_work', 'verify'];
 
@@ -26,8 +27,8 @@ function setup(t) {
   const ada = store.identities.create('Ada');
   const rex = store.identities.create('Rex');
   rooms.create(owner.secret, { roomId: 'board', title: 'board', purpose: 'Open work', kind: 'personal' });
-  store.identities.link(owner.secret, 'board', { identityId: ada.identityId, displayName: 'Ada', permissions: WRITER });
-  store.identities.link(owner.secret, 'board', { identityId: rex.identityId, displayName: 'Rex', permissions: [] });
+  linkWithProof(store, owner.secret, 'board', ada, { displayName: 'Ada', permissions: WRITER });
+  linkWithProof(store, owner.secret, 'board', rex, { displayName: 'Rex', permissions: [] });
   const t0 = Date.parse('2026-10-01T00:00:00Z');
   const put = (id, minutes, extra = {}) => {
     const item = { ...createWork({ id, title: `Task ${id}`, tags: ['wk41'], ...extra }, { now: t0 + minutes * 60000, agentId: owner.identityId }) };
@@ -137,7 +138,7 @@ test('every room with open work is summarised, none dropped', t => {
     const roomId = `room-${String(r).padStart(2, '0')}`;
     const owner = store.identities.create(`Owen ${r}`);
     rooms.create(owner.secret, { roomId, title: roomId, purpose: 'Open work', kind: 'personal' });
-    store.identities.link(owner.secret, roomId, { identityId: ada.identityId, displayName: 'Ada', permissions: WRITER });
+    linkWithProof(store, owner.secret, roomId, ada, { displayName: 'Ada', permissions: WRITER });
     store.workClaims.set(roomId, createWork({ id: `task-${r}`, title: 'T' }, { now: Date.now(), agentId: owner.identityId }));
   }
   const page = collectNeedsMe(store, ada.secret, {});
@@ -157,7 +158,10 @@ test('openWork stays small on a crowded board', t => {
   assert.equal(open.count, 40);
   assert.equal(open.top.length, 3);
   assert.ok(open.top.every(row => row.title.length <= 80));
-  assert.ok(JSON.stringify(open).length < 600, `openWork was ${JSON.stringify(open).length} bytes`);
+  assert.ok(open.top.every(row => row.untrusted === true), 'open rows are marked as member-authored data');
+  // The old 600-byte budget plus exactly the 18-byte `,"untrusted":true`
+  // mark stampNeedsMe adds to each of the 3 top rows (measured 564 -> 618).
+  assert.ok(JSON.stringify(open).length < 654, `openWork was ${JSON.stringify(open).length} bytes`);
 });
 
 test('hard work (tag hard / hard-problem) ranks first and says how to close it', t => {
