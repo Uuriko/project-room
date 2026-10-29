@@ -192,6 +192,8 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   if (escrowRoute === "reviews" && req.method === "GET") {
     const bountyId = url.searchParams.get("bountyId");
     const packets = runPure(reject, () => escrow.getReviewPackets(roomId, { bountyId }));
+    // #3616 (R-11): an arbiter evidence read leaves an access record.
+    store.decisionRows?.logAccessQuietly({ roomId, readerId: caller, kind: "evidence_read", surface: "bounty-review-packets", recordId: bountyId });
     return json(res, 200, { roomId, packets });
   }
   // Slice 10: the sybil-flag arbiter review queue. Read-only (rooms:read);
@@ -201,6 +203,8 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
     if (status !== null && !["open", "dismissed", "confirmed"].includes(status))
       invalidInput(reject, "status one of open, dismissed, confirmed");
     const flags = runPure(reject, () => escrow.getSybilFlags(roomId, { status }));
+    // #3616 (R-11): an arbiter evidence read leaves an access record.
+    store.decisionRows?.logAccessQuietly({ roomId, readerId: caller, kind: "evidence_read", surface: "bounty-sybil-flags", recordId: null });
     return json(res, 200, { roomId, flags });
   }
   // Slice 10: resolution of a sybil flag — dismissed (honest coincidence)
@@ -226,6 +230,8 @@ export async function handleBountyEscrow({ req, res, url, store, roomId, auth, e
   // packets. Read-only (rooms:read); packets are immutable once created.
   if (escrowRoute === "reputation-reviews" && req.method === "GET") {
     const packets = runPure(reject, () => escrow.getReputationPackets(roomId));
+    // #3616 (R-11): an arbiter evidence read leaves an access record.
+    store.decisionRows?.logAccessQuietly({ roomId, readerId: caller, kind: "evidence_read", surface: "bounty-reputation-packets", recordId: null });
     return json(res, 200, { roomId, packets });
   }
   if (escrowRoute === "create" && req.method === "POST") {
