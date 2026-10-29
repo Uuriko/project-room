@@ -14,6 +14,55 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
+### Preparation candidate frozen — 2026-10-29, after 17:13 UTC
+
+The fetchable preparation branch `codex/release-prepared-candidate-1029` is now
+`2457a65e01f0849917cb174f4f41b7d11fbff145`, tree
+`89ce10fa446c0dec4621b9236035836dd64139c1`. Main and production are unchanged.
+It composes #5271, #5272, #5277, #5278, #5280, #5281, #5282, #5283,
+#5284 and #5285 while preserving their ancestry. Earlier candidate packages below
+are historical evidence and must not be called the final package.
+
+- #5280 repairs agent discovery of work claim/update lifecycle operations; 39
+  discovery and QA2 checks passed on composition.
+- #5281 and #5283 contain the peer's creation recovery and contextual navigation
+  fixture repairs. Peer reports 12 creation plus 62 related browser passes and
+  32 draft-return/reuse/refine passes. These are focused results, not full coverage.
+- #5282 closes outsider injection into private formal-request threads, including
+  owner outsiders and public descendants. Participant replies and ordinary public
+  conversation remain supported; 63 combined boundary/reply/work/result tests passed.
+- #5284 repairs served-client affected-test dependencies and writes selected and
+  omitted coverage into existing browser artifacts. 26 checks passed. An app-only
+  affected probe accounts for all seven families: two selected and five explicitly
+  omitted by budget; omitted checks are not passes.
+- #5285 preserves #5231 dependency changes and aligns the Sharp workspace override.
+  Frozen installs with pnpm 10 and 11, relay npm ci, registry integrity, 38 checks
+  and both Worker dry runs passed. Three additional relay advisories (body-parser,
+  zod and ip-address) require exposure assessment; this is not an all-clean audit.
+
+Full browser qualification is dispatched using the existing six shards and all
+142 scripts. This Mac runs shards 1/3/5; the peer is requested to run 2/4/6,
+sequentially per host. Source is the full SHA above, run ID
+`prep-2457a65e-20261029`, attempt 1, and `CI_BROWSER_SCOPE` is unset.
+Expected plan hash:
+`50f1dcd0d7380a78c1fdfc18d0eb260c47e7750282fcb2a852e02787f0100b82`.
+Results remain pending. Keep each host's toolchain, selection, receipts, logs and
+JUnit; do not overwrite visual baselines to conceal platform differences.
+
+Local backup and restore rehearsals passed on the earlier addb03aa composition:
+byte equality for nine events, two members, one work item and one file; stale
+restore authority is identified while canonical work and retry receipts survive.
+These scripted assertions are not a production restore rehearsal. Candidate and
+serving source both declare schema 42 and matching writer definitions; current
+provider allocation and full stored-data rollback compatibility remain unproven.
+
+The 17:00 claim-prs tick recovered (zero checked/updated, three invalid skipped,
+current failure count zero). Integrity still reports messages parity failures and
+patrol separately reports a claim-legality transition. Public summaries do not
+identify enough detail to justify a repair; obtain bounded operator diagnostics
+before changing data or weakening checks. The old statement below about current
+claim failure is superseded by this checkpoint; integrity is still unresolved.
+
 ### Next release preparation — 16:55 UTC
 
 Preparation only: no next release merge or deployment has started. The peer
