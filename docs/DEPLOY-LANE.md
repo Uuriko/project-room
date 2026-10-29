@@ -12,9 +12,7 @@ Every deployment requires a commit on `main` and a successful `schema-gate` push
 
 Merging and deploying are separate decisions. Production need not be healthy
 before an unrelated, qualified change can merge. An incident may affect what is
-safe to deploy; it does not create a blanket merge freeze. Current GitHub lease
-requirements and workflow schema checks still apply as implemented; this guidance
-does not remove them.
+safe to deploy; it does not create a blanket merge freeze. Actual repository protection and workflow schema checks still apply.
 
 ## Deploy
 
