@@ -763,6 +763,14 @@ export class RoomAgentClient {
         || (source.status === "included" ? source.message?.id !== result.work.sourceMessageId || typeof source.message?.body !== "string" : source.message !== null)))) {
       throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
     }
+    if (Object.hasOwn(result.next, "replacement")) {
+      const link = result.next.replacement;
+      const expectedRead = { tool: "room_read_work", arguments: { workItemId: result.work.supersededBy } };
+      if (!link || result.next.action !== "superseded" || !validId(link.workItemId) || link.workItemId === workItemId
+        || link.workItemId !== result.work.supersededBy || !["available", "unavailable"].includes(link.status)
+        || (link.status === "available" ? !isDeepStrictEqual(link.nextRead, expectedRead) : link.nextRead !== null))
+        throw new RoomClientError(200, "invalid_response", "Invalid work replacement navigation");
+    }
     if (Object.hasOwn(result, "dependencies") && (!Array.isArray(result.dependencies) || result.dependencies.length > 16
       || result.dependencies.some(dep => !dep || typeof dep.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(dep.id)
         || typeof dep.state !== "string" || dep.state.length > 32 || typeof dep.satisfied !== "boolean"
@@ -1529,6 +1537,9 @@ export function workContextMarkdown(result) {
     `Room: ${result.roomId} · Work: ${result.work.id} · Revision: ${result.work.revision} · Evaluated: ${result.evaluatedAt}`,
     "Current work step or status: " + (result.resume.next.action === "complete" ? "none — recorded work complete" : result.resume.next.label),
     ...(result.toolFocus ? ["Suggested tool focus: " + result.toolFocus.focus + " (optional; does not change permissions). " + result.toolFocus.reason] : []),
+    ...(result.next.replacement ? [result.next.replacement.status === "available"
+      ? "Replacement next read (does not transfer approval or assignment): " + JSON.stringify(result.next.replacement.nextRead)
+      : "Replacement is unavailable in this room. Historical work remains readable."] : []),
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
     "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),

@@ -74,6 +74,26 @@ test("real stdio process uses owner enrollment, selected work and stable draft r
   const after = f.store.snapshot(token, "commons"); assert.equal(after.sequence, before.sequence + 1);
   assert.equal(after.state.messages.find(m => m.id === posted.messageId).replyToId, "test-request");
   assert.deepEqual(after.state.workItems, before.state.workItems); assert.equal(after.cursor, before.cursor);
+  f.store.command(f.keys.owner, "commons", { id: "replace-batch-two", type: "work.superseded", data: {
+    workItemId: "batch-two", supersededByWorkItemId: "batch-three", reason: "New direction" } });
+  const replacementBefore = f.store.snapshot(token, "commons");
+  const replaced = (await mcp.call("room_read_work", { workItemId: "batch-two" })).result.structuredContent;
+  const pointer = replaced.next.replacement.nextRead;
+  assert.deepEqual(pointer, { tool: "room_read_work", arguments: { workItemId: "batch-three" } });
+  const followed = (await mcp.call(pointer.tool, pointer.arguments)).result.structuredContent;
+  assert.equal(followed.work.id, "batch-three", "literal returned pointer passes actual stdio schema and dispatch");
+  const compactReplaced = (await mcp.call("room_read_work", { workItemId: "batch-two", brief: true })).result.structuredContent;
+  assert.ok(compactReplaced.brief.includes(JSON.stringify(pointer)), "brief preserves literal executable read pointer");
+  const replacementBatch = (await mcp.call("room_read_work", { workItemIds: ["batch-two"] })).result.structuredContent;
+  assert.ok(replacementBatch.items[0].brief.includes(JSON.stringify(pointer)), "default batch brief preserves replacement");
+  const hostedReplacement = await callHostedStdioTool(f.store, token, "room_read_work", { roomId: "commons", workItemId: "batch-two" });
+  const hostedPointer = hostedReplacement.value.next.replacement.nextRead;
+  assert.equal(validHostedStdioArgs(hostedPointer.tool, hostedPointer.arguments), true);
+  const hostedFollowed = await callHostedStdioTool(f.store, token, hostedPointer.tool, hostedPointer.arguments);
+  assert.equal(hostedFollowed.value.work.id, "batch-three");
+  const hostedReplacementBatch = await callHostedStdioTool(f.store, token, "room_read_work", { roomId: "commons", workItemIds: ["batch-two"] });
+  assert.ok(hostedReplacementBatch.value.items[0].brief.includes(JSON.stringify(hostedPointer)));
+  assert.deepEqual(f.store.snapshot(token, "commons"), replacementBefore, "all replacement reads are mutation-free");
   f.store.agentConnections.apply(session.token, "commons", { action: "disconnect", requestId: "end-mcp", memberId: "mcp-agent", expectedOwnerRevision: 0, expectedMemberRevision: 0, expectedGeneration: 1 }, session.session.sessionBinding);
   const ended = (await mcp.call("room_check_access")).result;
   assert.equal(ended.isError, true); assert.equal(ended.structuredContent.code, "access_ended");
