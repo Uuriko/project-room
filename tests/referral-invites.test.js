@@ -23,6 +23,7 @@ import { EVENT_TYPES as T } from "../src/events.js";
 import { demoteToReadonly } from "../server/autonomy-tiers.mjs";
 import { solveIdentityMintProof } from "../server/agent-identities.mjs";
 import { generateKeyPair, signCard } from "../server/agent-card-signing.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
 async function serve(t, ownerId = "owner") {
   const directory = mkdtempSync(join(tmpdir(), "project-room-referral-"));
@@ -77,10 +78,7 @@ function mintRefusalViaStore(store, body, secret) {
 async function enrollInviter(store, origin, ownerKey, displayName = "Inviter") {
   const created = await post(origin, "/api/agent-identities", { displayName });
   assert.equal(created.status, 201);
-  store.identities.link(ownerKey, "commons", {
-    identityId: created.json.identityId, displayName,
-    permissions: ["steer", "accept_work", "complete_work", "verify", "invite_member"],
-  });
+  linkWithProof(store, ownerKey, "commons", created.json, { displayName, permissions: ["steer", "accept_work", "complete_work", "verify", "invite_member"] });
   return { identityId: created.json.identityId, secret: created.json.secret };
 }
 
@@ -328,12 +326,12 @@ test("mint requires room membership; removed inviter's tokens die", async t => {
   const { store, origin, ownerKey } = await serve(t);
   const outsiderCreated = await post(origin, "/api/agent-identities", { displayName: "Outsider" });
   // At the store level an identity with no room membership cannot
-  // authenticate into the room at all — the mint is refused before
-  // membership is even evaluated. (At the parked HTTP door the same
+  // authenticate into the room: the mint is refused as no_access
+  // before membership is evaluated. (At the parked HTTP door the same
   // caller gets the uniform 410: the freeze answers members and
   // non-members identically, so the door is not a membership oracle.)
   assert.throws(() => store.referralInvites.mint(outsiderCreated.json.secret, "commons"),
-    error => error.status === 401);
+    error => error.status === 403 && error.code === "no_access");
   const denied = await post(origin, "/api/referral-invites/mint", { roomId: "commons" }, outsiderCreated.json.secret);
   assert.equal(denied.status, 410);
   assert.equal(denied.json.error.code, "referral_invites_parked");

@@ -1,0 +1,23 @@
+  /api/rooms/{roomId}/collab/draft-locks/release:
+    post:
+      summary: Release a draft lock
+      description: >-
+        Room-token write (CSRF + rate limit). Only the lock holder may
+        release it (403 collision_forbidden otherwise); unknown locks are
+        404.
+      security:
+        - roomToken: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [lockId]
+              properties:
+                lockId: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: "{ released: true, lockId }" }
+        '403': { description: collision_forbidden }
+        '404': { description: collision_lock_not_found }

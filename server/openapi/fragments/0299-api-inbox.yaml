@@ -1,0 +1,27 @@
+  /api/inbox:
+    get:
+      summary: The account's private inbox
+      description: >-
+        Account-session read (docs/ACTIVITY-INBOX.md, docs/UNIFIED-INBOX.md).
+        Every `/api/inbox*` route refuses bearer authorization with 401
+        account_session_required and needs the `account_session` cookie plus
+        `X-Session-Binding`. `?view=email-text-v1` or `email-excerpt-v1`
+        includes channel sources; any other view is 422 unsupported_inbox_view.
+      security:
+        - accountSession: []
+      parameters:
+        - name: view
+          in: query
+          schema: { type: string, enum: [email-text-v1, email-excerpt-v1] }
+        - name: cursor
+          in: query
+          description: Opaque page cursor from a previous response's nextCursor.
+          schema: { type: string }
+        - name: limit
+          in: query
+          description: Page size, 1..100. Default 25.
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200': { description: "{ contractVersion: 1, viewer, sources, nextCursor }" }
+        '401': { description: account_session_required }
+        '422': { description: unsupported_inbox_view or session_binding_required or invalid_cursor or invalid_limit }
