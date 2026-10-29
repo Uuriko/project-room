@@ -21,10 +21,10 @@ export class SqlCostTestRoom extends DurableObject {
     return Response.json(rows);
   }
 }
-const diagnosticRows = [];
+const diagnosticRows = [], startupRows = [];
 const originalInfo = console.info.bind(console);
 console.info = (...args) => {
-  try { const row = JSON.parse(args[0]); if (row.event === 'room.sql_cost') { diagnosticRows.push(row); return; } } catch { /* other log */ }
+  try { const row = JSON.parse(args[0]); if (row.event === 'room.do_initialized' || (row.event === 'room.cold_start' && row.phase === 'first_request')) startupRows.push(row); if (row.event === 'room.sql_cost') { diagnosticRows.push(row); return; } } catch { /* other log */ }
   originalInfo(...args);
 };
 export class WiredSqlCostRoom extends ProjectRoom {
@@ -34,7 +34,7 @@ export class WiredSqlCostRoom extends ProjectRoom {
     const response = await this.fetch(new Request('https://room.example.test/api/version', {headers: {Host:'room.example.test', 'x-room-visitor-ip':'127.0.0.1'}}));
     const denied = await this.fetch(new Request('https://room.example.test/api/rooms/missing?view=work', {headers:{Host:'room.example.test', 'x-room-visitor-ip':'127.0.0.1', Authorization:'Bearer pri_'+'a'.repeat(43)}}));
     await this.runSlowJob('integrity');
-    return { ready, status: response.status, deniedStatus: denied.status, rows: diagnosticRows };
+    return { ready, status: response.status, deniedStatus: denied.status, rows: diagnosticRows, startupRows };
   }
 }
 export default {fetch(request,env){
