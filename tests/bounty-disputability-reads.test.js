@@ -7,9 +7,15 @@
 // _viewBounty shape behind the HTTP create/fund/list responses and the MCP
 // face) carries `disputability: { status, reason, decider }` computed from
 // current state, and that the field AGREES with the dispute path itself:
-// configurations the field calls undisputable are exactly the ones
-// disputeBounty refuses dispute_unavailable, and a configuration the field
-// calls disputable really opens a dispute with that decider seated.
+// for the configurations exercised here, the ones the field calls
+// undisputable are the ones disputeBounty refuses dispute_unavailable,
+// and a configuration the field calls disputable really opens a dispute
+// with that decider seated. One deliberate, documented divergence: on a
+// legacy row whose designee IS the poster (uncreatable today — postBounty
+// refuses it at create time), the field is STRICTER than the dispute
+// path: it reports undisputable / verifier_is_poster, applying the
+// create-time third-party rule at read time, while disputeBounty itself,
+// which has no poster check, would open the dispute and seat the poster.
 //
 // Harness pattern copied from tests/bounty-dispute-decider-visibility.test.js.
 import test from "node:test";

@@ -71,6 +71,28 @@ test("designated decider is the executor: verifier_is_executor, whoever designat
     { status: "undisputable", reason: "verifier_is_executor", decider: null });
 });
 
+test("empty-string designations are no designation: undisputable, no_decider_named, no decider", () => {
+  // Regression (critic D1): disputeBounty composes the designee with ??
+  // and seats it only under a truthiness gate (if (designatedDecider)),
+  // so an empty string is NOT a designation there — it refuses
+  // dispute_unavailable. The field must agree, not report decider "".
+  assert.deepEqual(
+    disputabilityFor({ poster: POSTER, verifier: null, disputeDecider: "", claimant: WORKER }),
+    { status: "undisputable", reason: "no_decider_named", decider: null });
+  assert.deepEqual(
+    disputabilityFor({ poster: POSTER, verifier: "", disputeDecider: null, claimant: WORKER }),
+    { status: "undisputable", reason: "no_decider_named", decider: null });
+});
+
+test("an empty-string dispute decider does NOT fall back to the verifier", () => {
+  // ?? falls through only on null/undefined: in disputeBounty,
+  // "" ?? verifier stays "", the truthiness gate then seats nobody, and
+  // the dispute is refused. The empty decider shadows the real verifier.
+  assert.deepEqual(
+    disputabilityFor({ poster: POSTER, verifier: THIRD, disputeDecider: "", claimant: WORKER }),
+    { status: "undisputable", reason: "no_decider_named", decider: null });
+});
+
 test("no fallback is ever reported as a decider: the poster is not substituted in", () => {
   // disputeBounty seats only a designated decider; with none designated the
   // field must say so, never name the poster (or any other party) instead.

@@ -42,7 +42,7 @@
 // dispute attempt by a specific challenger.
 export function disputabilityFor({ poster, verifier, disputeDecider, claimant } = {}) {
   const designated = disputeDecider ?? verifier ?? null;
-  if (designated === null)
+  if (!designated)
     return Object.freeze({ status: "undisputable", reason: "no_decider_named", decider: null });
   if (designated === poster)
     return Object.freeze({ status: "undisputable", reason: "verifier_is_poster", decider: null });
