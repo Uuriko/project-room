@@ -389,7 +389,13 @@ jobs:
   # GH_TOKEN is the job token. Never echo it, CLOUDFLARE_API_TOKEN, or ROOM_RECEIPT_TOKEN.
   release-runtime:
     needs: [gate, deploy]
-    if: needs.deploy.result == 'success' && needs.gate.outputs.go == 'true'
+    # The optional probe is a transitive ancestor through deploy. Override
+    # implicit success() so its intentional skip does not suppress publication.
+    if: >-
+      !cancelled() &&
+      needs.gate.result == 'success' &&
+      needs.deploy.result == 'success' &&
+      needs.gate.outputs.go == 'true'
     permissions:
       contents: write
     runs-on: ubuntu-latest
