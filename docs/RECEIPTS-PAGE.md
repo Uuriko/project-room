@@ -118,6 +118,17 @@ reviewer's identity, reason, and review fingerprint never appear. A
 rejected delivery reads as rejected on the page, in the JSON, and in
 the list — it is not removed, and it is not dressed as accepted work.
 
+A public-work receipt also carries a `sourcePointer`: the resolvable
+source its verification claims are about. The pointer names the
+submitted artifact (`kind: "artifact"`, the receipt id, the artifact's
+sha256, and the artifact's own read path as `href`) — fetch the href,
+sha256 the bytes, and compare against the recorded digest to re-derive
+what the platform's artifact check verified. It is recorded on the
+receipt record at finish, so every receipt the writer issues carries
+it from birth and a settlement inherits it unchanged; receipts written
+before the pointer shipped do not carry one, and none is reconstructed
+for them.
+
 ## Verification
 
 Every detail page carries a verification block. Unverified, it says so —
