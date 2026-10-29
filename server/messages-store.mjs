@@ -1115,7 +1115,13 @@ function fillRoom(store, room, budget, expired, yieldBetween) {
       }
       // The last chunk already stored its event id. Saving here would replace
       // that id with a blank one and the next pass would replay the room.
-      store.transaction(() => { publishRoom(store, room.id, seq, state); });
+      store.transaction(() => {
+        // A final chunk normally publishes before yielding. Recheck its
+        // certificate rather than repeating the full overlay/prune pass and
+        // clearing a parity check completed during that yield. An absent or
+        // invalidated certificate still needs publication.
+        if (!messagesBackfillCaughtUp(db, room.id)) publishRoom(store, room.id, seq, state);
+      });
       return { events, stopped: false, budgetExceeded: false, replaySeq: seq, freshBlock };
     }
     const outcome = store.transaction(() => {

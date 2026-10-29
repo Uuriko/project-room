@@ -4462,15 +4462,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
-        if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
+        if (params.has("view") && (params.getAll("view").length !== 1 || !["work", "orientation"].includes(params.get("view"))
           || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
         const helpContext = req.headers["x-project-room-help-context"];
-        if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
+        if (helpContext !== undefined && (helpContext !== "1" || params.get("view") !== "work")) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
-        const snapshotView = params.has("view") ? "work" : "full";
+        const snapshotView = params.get("view") ?? "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         if (fullRead) {
