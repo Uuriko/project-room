@@ -293,7 +293,7 @@ export const STORE_GROWTH_LIMITS = Object.freeze({
 
 export function measureStoreGrowth(store) {
   const row = store.db.prepare(`SELECT COUNT(*) AS rooms, COALESCE(SUM(sequence), 0) AS events,
-    COALESCE(MAX(LENGTH(projection)), 0) AS maxProjectionBytes FROM rooms`).get();
+    COALESCE(MAX(LENGTH(CAST(projection AS BLOB))), 0) AS maxProjectionBytes FROM rooms`).get();
   let dbBytes = 0;
   try {
     const pages = store.db.prepare("PRAGMA page_count").get();
