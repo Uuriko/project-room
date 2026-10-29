@@ -15,6 +15,10 @@ const sha = value => typeof value === "string" && /^[a-f0-9]{40}$/.test(value);
 
 export function classifyReproduction(stdout, exitCode, testName) {
   const lines = String(stdout).split(/\r?\n/);
+  // Node can finish the runner after cancelling the selected test. A matching
+  // not-ok line is not a completed assertion failure in that case.
+  if (lines.some(value => /^# cancelled [1-9]\d*$/.test(value)
+    || /^\s*failureType: [\"\']?(?:testTimeoutFailure|cancelledByParent)[\"\']?$/.test(value))) return "unknown";
   const pattern = new RegExp(`^(not )?ok \\d+ - ${escapePattern(testName)}(?: #.*)?$`);
   const rows = lines.filter(value => pattern.test(value));
   if (rows.length !== 1 || / #\s*(?:SKIP|TODO)\b/i.test(rows[0]) || !Number.isInteger(exitCode)) return "unknown";

@@ -82,3 +82,10 @@ test("dynamic names are selected by observed TAP; nonexistent name remains unkno
   assert.equal((await runBrowserReproduction(f.options)).receipt.outcome, "passed");
   assert.equal((await runBrowserReproduction({ ...f.options, testName: "missing", out: join(f.root, "missing") })).receipt.outcome, "unknown");
 });
+
+test("Node runner cancellation and test timeout remain unknown; assertion timeouts stay failed", () => {
+  assert.equal(classifyReproduction(Buffer.concat([tap("not ok"), Buffer.from("# cancelled 1\n")]), 1, name), "unknown");
+  for (const reason of ["testTimeoutFailure", "cancelledByParent"])
+    assert.equal(classifyReproduction(Buffer.concat([tap("not ok"), Buffer.from(`  failureType: '${reason}'\n`)]), 1, name), "unknown");
+  assert.equal(classifyReproduction(Buffer.concat([tap("not ok"), Buffer.from("  failureType: 'testCodeFailure'\n  error: 'locator.click timeout'\n# cancelled 0\n")]), 1, name), "failed");
+});
