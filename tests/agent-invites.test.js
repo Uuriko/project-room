@@ -735,6 +735,39 @@ test("served discovery copy states the invite TTL range without mangled characte
   }
 });
 
+test("#3379: redeem 201 signals whether it minted a new identity or linked an existing one", async t => {
+  const { origin, ownerKey } = await serve(t);
+  // Mint branch: no bearer, so a fresh identity is created — and the 201 says so.
+  const mintInvite = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  assert.equal(mintInvite.status, 201, JSON.stringify(mintInvite.json));
+  const mintedRedeem = await redeem(origin, mintInvite.json.code, "Fork Mint Bot");
+  assert.equal(mintedRedeem.status, 201, JSON.stringify(mintedRedeem.json));
+  assert.equal(mintedRedeem.json.identityMinted, true, "mint branch answers identityMinted: true");
+  assert.equal(typeof mintedRedeem.json.identitySecret, "string", "mint branch shows the new secret once");
+  assert.equal(mintedRedeem.json.duplicate, undefined, "mint branch is not a link/duplicate answer");
+  // Link branch: the bearer is an existing identity's secret, so the redeem
+  // joins as that identity and mints nothing.
+  const existing = await post(origin, "/api/agent-identities", { displayName: "Fork Link Bot" });
+  assert.equal(existing.status, 201, JSON.stringify(existing.json));
+  const linkInvite = await mint(origin, ownerKey, { permissions: ["accept_work"], expiresInMinutes: 60 });
+  assert.equal(linkInvite.status, 201, JSON.stringify(linkInvite.json));
+  const linkedRedeem = await post(origin, "/api/agent-invites/redeem",
+    { code: linkInvite.json.code, displayName: "Fork Link Bot" }, existing.json.secret);
+  assert.equal(linkedRedeem.status, 201, JSON.stringify(linkedRedeem.json));
+  assert.equal(linkedRedeem.json.identityId, existing.json.identityId, "link branch joins the presented identity");
+  assert.equal(linkedRedeem.json.duplicate, false, "link branch answers duplicate: false");
+  assert.equal(linkedRedeem.json.identityMinted, undefined, "link branch mints nothing");
+  assert.equal(linkedRedeem.json.identitySecret, undefined, "link branch reveals no secret");
+});
+
+test("#3379: llms packets name the mint-vs-link fork on the invite-redeem entry", async () => {
+  const { llmsTxt, llmsFullTxt } = await import("../server/agent-discovery.mjs");
+  for (const [name, body] of [["llms.txt", llmsTxt()], ["llms-full.txt", llmsFullTxt()]]) {
+    assert.match(body, /existing identity's secret as Authorization: Bearer/, `${name}: invite-redeem entry names the link option`);
+    assert.match(body, /identityMinted: true/, `${name}: invite-redeem entry names the mint-branch signal`);
+  }
+});
+
 test("ANCHOR-D7a: redeem times out, retry with the same requestId recovers the membership deterministically", async t => {
   // G1 (QA-200 failseq): redeem commits the membership burn but the 201 body
   // is lost on timeout; the retry then gets 409 invite_already_used with no
