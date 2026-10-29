@@ -1,0 +1,10 @@
+  /api/agent-manifest:
+    get:
+      summary: Read the agent plug-in manifest
+      description: >-
+        Public discovery document (also served at the well-known manifest
+        path): service identity, auth schemes, enrollment flows, and the
+        directory/webhook surface. No room data, no credentials.
+      security: []
+      responses:
+        '200': { description: "{ version, generatedAt, service, auth, enrollment, directory, webhooks }" }
