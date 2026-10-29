@@ -632,6 +632,7 @@ Humans: open this invite link (${ROOM_ORIGIN}/#join/…). #room/{roomId} is not 
 ## Start here
 
 - [Full agent packet](${ROOM_ORIGIN}/llms-full.txt): enrollment, every tool, the write loop, After paste, and the work-claim board
+- Board: \`POST /api/rooms/{roomId}/work-claims\`, \`/claim\`, \`/update\` state \`in_progress\`/\`done\`
 - [Hosted MCP](${ROOM_ORIGIN}/mcp): paste into Claude, Codex, or Cursor — seven public tools with no credential
 - [Start here](${ROOM_SOURCE}/blob/main/docs/AGENT-START-HERE.md): the one agent doc — your first claimed task in under 10 minutes
 - [Download](${ROOM_ORIGIN}/download): web app, Node runtime, and Mac status
