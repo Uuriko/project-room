@@ -177,7 +177,7 @@ function checkedOffers(result) {
   } catch { throw new RoomClientError(200, "invalid_response", "Help offers do not match selected work and participants"); }
 }
 
-function checkedWorkSnapshot(value, roomId) {
+function checkedWorkSnapshot(value, roomId, expectedView = "work") {
   const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
   const integer = value => Number.isSafeInteger(value) && value >= 0;
   const text = value => typeof value === "string" && value.trim().length > 0 && value.length <= 4096;
@@ -189,11 +189,11 @@ function checkedWorkSnapshot(value, roomId) {
       || !Object.hasOwn(state.members, value.viewerId) || Object.keys(state.members).length > 100 || Object.keys(state.workItems).length > 500) throw new Error();
     if (projected) {
       const help = Object.hasOwn(value, "helpContextVersion") || Object.hasOwn(value, "evaluatedAt");
-      if (value.snapshotView !== "work" || value.snapshotVersion !== 1
+      if (value.snapshotView !== expectedView || value.snapshotVersion !== 1
         || !exact(value, "snapshotView snapshotVersion roomId sequence state charter viewerId viewerAccountId viewerAuthEpoch viewerSessionBinding viewerSessionRevision" + (help ? " helpContextVersion evaluatedAt" : ""))
         || help && (value.helpContextVersion !== 1 || typeof value.evaluatedAt !== "string" || !Number.isFinite(Date.parse(value.evaluatedAt)) || new Date(value.evaluatedAt).toISOString() !== value.evaluatedAt)
         || !exact(state, "room members workItems")) throw new Error();
-    } else if (value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
+    } else if (expectedView !== "work" || value.replyRequestContractVersion !== undefined && value.replyRequestContractVersion !== 1
       || !integer(value.cursor) || value.cursor > value.sequence
       || !Array.isArray(state.messages) || !Array.isArray(state.eventLog)) throw new Error();
     // Legacy compatibility validates the consumed envelope/current records, not
@@ -449,7 +449,7 @@ export class RoomAgentClient {
     // is never a cached grant. The service still authorizes the operation itself.
     if (this.#memberId) await this.checkConnection({ signal });
     const value = await this.#fetchPath(`/api/rooms/${encodeURIComponent(this.#roomId)}${suffix}`, body, signal, helpContext, offerContext);
-    const snapshotRead = suffix === "" || suffix === "?view=work";
+    const snapshotRead = suffix === "" || suffix === "?view=work" || suffix === "?view=orientation";
     const boardRead = suffix === "/board" || suffix.startsWith("/board?");
     if (this.#memberId && (snapshotRead || boardRead || suffix === "/charter" || suffix.startsWith("/charter?") || suffix === "/context" || suffix.startsWith("/context?") || suffix.startsWith("/work-context?") || suffix.startsWith("/work-discussion?") || suffix.startsWith("/work-result?") || suffix.startsWith("/return-brief?") || /^\/reply-(requests|context|history)\?/.test(suffix))) {
       if (value?.roomId !== this.#roomId || value.viewerId !== this.#memberId || value.viewerAccountId !== null
@@ -1436,7 +1436,7 @@ export class RoomAgentClient {
     if (sort !== undefined && sort !== "curiosity") throw new RoomClientError(0, "invalid_sort", "Sort is omitted or curiosity");
     const snapshot = focus !== "all" || query !== undefined
       ? checkedWorkSnapshot(await this.#request("?view=work", undefined, signal, focus === "help_wanted"), this.#roomId)
-      : await this.snapshot({ signal });
+      : checkedWorkSnapshot(await this.#request("?view=orientation", undefined, signal), this.#roomId, "orientation");
     const member = snapshot.state.members[snapshot.viewerId];
     const charter = snapshot.charter === undefined ? null : checkedCharter(snapshot.charter, snapshot.sequence);
     try {
