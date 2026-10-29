@@ -41,14 +41,16 @@ import { runPatrolTick } from '../server/patrol.mjs';
 import { SOURCE_REVISION, BUILD_ID } from '../server/version.mjs';
 import { edgePublicResponse, workerErrorBody, workerErrorResponse } from './edge-public.mjs';
 import { appDurationMs, logRoomRequest, requestPath, withServerTiming } from './request-timing.mjs';
-import { HEALTH_PROBE_TIMEOUT_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
+import { HEALTH_PROBE_TIMEOUT_MS, READY_PROBE_CACHE_TTL_MS, createHealthProbe, healthLivenessResponse, readyProbeResponse, workerLivenessResponse } from './health-probe.mjs';
 import { exportNdjsonStream, operatorExportResponse } from '../server/room-export.mjs';
 import { operatorRestoreResponse, operatorRestoreFromBackupResponse } from '../server/restore-ndjson.mjs';
 import { flushRoomGuide, installGuideCommandHook } from '../server/room-guide.mjs';
 
 // One probe per isolate. Concurrent health checks during a cold start share
-// it; a finished probe does not cache, so the next check sees a fresh answer.
-const durableObjectHealth = createHealthProbe();
+// it, and a settled ready verdict is cached for READY_PROBE_CACHE_TTL_MS so
+// monitor polls inside the window do not queue on the Durable Object; the
+// first check after the window sees a fresh answer.
+const durableObjectHealth = createHealthProbe({ cacheTtlMs: READY_PROBE_CACHE_TTL_MS });
 
 // Let a request that arrived while this cron RPC was queued run before the
 // job's synchronous work closes the input gate again.
@@ -774,7 +776,7 @@ export default {
           return new Response(JSON.stringify({ status: 'ok', emailVerification: result.emailVerification }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
         },
         waitUntil: ctx?.waitUntil?.bind(ctx),
-        onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs }), servedBy: 'durable-object' }),
+        onSnapshot: (snapshot, timing) => ({ response: readyProbeResponse(snapshot, request, { mode, deployment, elapsedMs: timing.elapsedMs, cached: timing.cached }), servedBy: timing.cached ? 'worker' : 'durable-object' }),
         onUnready: (readiness, timing) => ({ response: healthLivenessResponse(request, { mode, deployment, readiness, ...timing }), servedBy: 'worker' })
       });
       return finish(probed.response, probed.servedBy);

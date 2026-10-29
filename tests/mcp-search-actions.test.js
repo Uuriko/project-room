@@ -9,7 +9,6 @@ import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
 import { listedMcpTools } from "../server/mcp-discovery.mjs";
 import { LEAN_MCP_TOOLS, searchActions, isRunnableAction } from "../server/mcp-action-search.mjs";
-import { hostedMcpToolDefs } from "../server/mcp-hosted-tools.mjs";
 
 async function serve(t) {
   const directory = mkdtempSync(join(tmpdir(), "room-mcp-search-"));
@@ -60,17 +59,32 @@ test("every lean name is a real definition or join tool", () => {
   for (const tool of listedMcpTools("lean")) assert.ok(tool.inputSchema && tool.description, tool.name);
 });
 
-test("search finds long-tail tools with their exact schema and REST route", () => {
+test("search finds long-tail tools by name and REST route, without embedding schemas", () => {
   const close = searchActions("close board claim");
   assert.equal(close.matches[0].name, "room_close_work_claim");
-  const def = hostedMcpToolDefs.find(tool => tool.name === "room_close_work_claim");
-  assert.deepEqual(close.matches[0].inputSchema, def.inputSchema);
+  // Slim shape (PERF-50 E1-a): name, summary, readOnly and rest only. Exact
+  // schemas are fetched once via tools/list profile=full, never re-shipped
+  // per search match.
+  for (const match of close.matches) {
+    assert.deepEqual(Object.keys(match), ["name", "summary", "readOnly", "rest"], match.name);
+  }
   const land = searchActions("land queue remove", { limit: 3 });
   assert.ok(land.matches.some(match => match.name === "remove_land_item"));
   assert.ok(land.matches.length <= 3);
   const withRest = searchActions("squads list").matches.find(match => match.name === "squads_list");
   assert.match(withRest.rest, /^GET \/api\/rooms\/:roomId\/squads/);
   assert.deepEqual(searchActions("zzzz qqqq").matches, []);
+});
+
+test("search responses stay in the slim byte class with the same action sets and order", () => {
+  const res = searchActions("work claim", { limit: 10 });
+  assert.deepEqual(res.matches.map(match => match.name), [
+    "room_claim", "room_work_claim_provenance", "room_link_work_claim_pr",
+    "room_close_work_claim", "room_read_work", "room_set_member_claim_cap",
+    "room_begin_work", "room_start_work", "room_acquire_claim", "room_release_claim"
+  ]);
+  const bytes = Buffer.byteLength(JSON.stringify(res));
+  assert.ok(bytes < 2500, `slim search response is ${bytes} B, in the ~1.5 KB class (was 12,433 B with embedded schemas at the same query)`);
 });
 
 test("plain claim and handoff words rank the canonical tools above long-tail lookalikes", () => {
