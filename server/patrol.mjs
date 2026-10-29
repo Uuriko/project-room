@@ -130,6 +130,14 @@ const isSettleMove = (action, fromState, nextState) =>
 // work_not_delivered, so the route, not this table, enforces the policy.
 const isCollapseMove = (action, fromState, nextState) =>
   action === "state_changed" && fromState === "in_progress" && nextState === "done";
+// closeWhenLive (server/work-claims.mjs): a land or deploy claim whose
+// revision is live closes to done from any non-terminal state, under the
+// state_changed action (claim-pr-sync and the work-claim route). Kind is
+// fixed at creation, so the registry row's kind is the claim's kind.
+const LIVE_CLOSE_KINDS = new Set(["land", "deploy"]);
+const isLiveCloseMove = (action, fromState, nextState, kind) =>
+  action === "state_changed" && nextState === "done" && LIVE_CLOSE_KINDS.has(kind)
+  && fromState !== "done" && fromState !== "closed";
 
 export const PATROL_SCHEMA = `
 CREATE TABLE IF NOT EXISTS patrol_cursor (
@@ -517,7 +525,7 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
       }
     }
     if (event?.type === "work_claim.updated") {
-      patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedClaims, event, sequence: row.sequence, eventId: row.id });
+      patrolClaimEvent({ file, claimPrior, claimKind: id => store.workClaims?.get(roomId, id)?.kind ?? null, claimWork, touchedClaims, deletedClaims, event, sequence: row.sequence, eventId: row.id });
     } else if (typeof event?.type === "string" && event.type.startsWith("message.")) {
       for (const id of patrolMessageEvent({ messagePrior, messageWork, event, sequence: row.sequence })) {
         touchedMessages.add(id);
@@ -603,7 +611,7 @@ function patrolRoom(store, roomRow, { deadline, limit, forced }) {
 // thin receipt (work-claim-events.mjs): { workClaim, action, claimState,
 // ownerId }. The registry row is the truth; the shadow is what the log
 // claims happened, in order.
-function patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedClaims, event, sequence, eventId }) {
+function patrolClaimEvent({ file, claimPrior, claimKind, claimWork, touchedClaims, deletedClaims, event, sequence, eventId }) {
   const data = event.data ?? {};
   const claimId = typeof data.workClaim === "string" && data.workClaim ? data.workClaim : null;
   if (!claimId || typeof data.claimState !== "string") return;
@@ -624,6 +632,7 @@ function patrolClaimEvent({ file, claimPrior, claimWork, touchedClaims, deletedC
   } else if (prior) {
     if (nextState !== prior.state && !isSettleMove(action, prior.state, nextState)
       && !isCollapseMove(action, prior.state, nextState)
+      && !isLiveCloseMove(action, prior.state, nextState, claimKind?.(claimId))
       && !(LEGAL_NEXT.get(prior.state)?.has(nextState) ?? false)) {
       file(sequence, eventId, "claim_legality", "illegal_transition", claimId,
         { from: prior.state, to: nextState, action });
