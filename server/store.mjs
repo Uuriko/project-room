@@ -1,8 +1,8 @@
 import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
-import { messageRepository } from "./message-repository.mjs";
-import { invalidateEditedAssistantInput } from './room-assistant.mjs';
+import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
+import { invalidateEditedAssistantInput, invokeFromPlainPost } from './room-assistant.mjs';
 import { dmEventVisibility, dmConsentEventVisible } from "./dm-event-visibility.mjs";
 import { publicWorkClaimFenceSchema, verifyPublicWorkClaimFence } from "./public-work-claim-fence.mjs";
 import { PublicWorkClaims, publicWorkClaimsSchema } from "./public-work-claims.mjs";
@@ -5627,9 +5627,17 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
-      const room = this.room(roomId), now = this.now();
+      // Select the supporting aggregates without materializing conversation bodies.
+      // Offers validate cross-work references, so retain the full work aggregate
+      // until that repository migrates; this is not a bounded-work-storage claim.
+      const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.helpOffers','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
+      if (!row) fail(404, "room_not_found", "Room not found");
+      const [metadata, members, workItems, replyRequests, helpOffers, messagesArchive] = JSON.parse(row.fields);
+      const state = hydrateWorkItems(this.db, roomId, { room: metadata, members, workItems,
+        ...(replyRequests ? { replyRequests } : {}), ...(helpOffers ? { helpOffers } : {}) });
+      const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
-      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: messageRepository(this, roomId, room.state),
+      return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
         floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
         viewerId: auth.member.id, viewerAccountId: auth.account?.id ?? null, viewerAuthEpoch: auth.account?.authEpoch ?? null,
         viewerSessionBinding: auth.sessionBinding, viewerSessionRevision: auth.sessionRevision ?? null };
@@ -6365,6 +6373,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Persist the message domain in the same transaction as event/receipt.
         // A failure rolls back both the entity and its projection reference.
         messageWrite.persistEntities();
+        // fo-qa-c10-202610280645: a plain shared post that addresses the room
+        // assistant starts its run server-side, so the ask never depends on the
+        // client's projection being fresh. Reply-based continuations stay
+        // client-routed. Eligible posts and their derived run commit atomically;
+        // storage failure rolls both back for an exact-command retry.
+        if (command.type === T.MESSAGE_POSTED && !command.data.toMemberId && !command.data.replyToId)
+          invokeFromPlainPost(this, roomId, state, auth.member, command.data, command.data.messageId);
         if (incoming.type === T.MESSAGE_EDITED) {
           invalidateEditedAssistantInput(this.db, roomId, incoming.data.messageId, this.now());
         }

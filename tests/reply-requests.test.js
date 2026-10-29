@@ -660,3 +660,35 @@ test("metadata context traversal preserves canonical corruption rejection outsid
   assert.deepEqual(read().page.items.map(item => item.message.id), [q.command.data.messageId],
     "denormalized ownership columns cannot override the canonical record");
 });
+
+for (const count of [10, 100]) test(`request listing avoids full room hydration with ${count} unrelated messages`, async t => {
+  const f = fixture(t);
+  const answered = f.open('guest', {}, 'cold-answered');
+  f.send('agent', f.answer(answered));
+  f.open('guest', {}, 'cold-open');
+  f.store.roomFlood = { consume() {} };
+  for (let i = 0; i < count; i++) f.post('owner', { body: `UNRELATED-LIST-${i} ` + 'x'.repeat(2000) });
+  const server = createRoomServer({ store: f.store });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); });
+  // Capture the prior full-projection behavior as the semantic oracle.
+  const read = f.store.replyRequests.read.bind(f.store.replyRequests);
+  f.store.replyRequests.read = (token, roomId, binding, fn) => read(token, roomId, binding, fn);
+  const selections = [];
+  for (const actor of ['agent', 'guest', 'reviewer']) for (const direction of ['incoming', 'outgoing', 'both']) for (const status of ['open', 'answered', 'all']) {
+    const options = { direction, status };
+    selections.push({ actor, options, expected: await new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token: f.keys[actor] }).replyRequests(options) });
+  }
+  f.store.replyRequests.read = read;
+  f.store._dropProjectionCache();
+  const guard = t.mock.method(f.store, 'room', () => { throw new Error('request list hydrated full room'); });
+  for (const { actor, options, expected } of selections) {
+    const client = new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token: f.keys[actor] });
+    const actual = await client.replyRequests(options);
+    assert.deepEqual(actual, expected);
+    assert.equal(JSON.stringify(actual).includes('UNRELATED-LIST-'), false);
+  }
+  assert.equal(guard.mock.callCount(), 0);
+  f.store.revoke(f.keys.agent);
+  await assert.rejects(new RoomAgentClient({ origin: `http://127.0.0.1:${server.address().port}`, roomId: 'commons', token: f.keys.agent }).replyRequests());
+});
