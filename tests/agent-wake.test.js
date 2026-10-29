@@ -204,3 +204,27 @@ test('plain-text credential rejection remains fatal and does not expose response
   await assert.rejects(client.setup({ hostId: 'denied', cadenceSeconds: 60 }), error =>
     error.status === 401 && !isTransientWakeError(error) && !error.message.includes('PRIVATE'));
 });
+
+
+test('wake HTTP-date retry hints survive transport while auth status overrides timeout labels', async t => {
+  const { connection } = await fixture(t);
+  const { isTransientWakeError, wakeRetryDelayMs } = await import('../client/wake-retry.mjs');
+  const deadline = Math.floor(Date.now() / 1000) * 1000 + 120000;
+  let status = 429;
+  const client = new AgentWakeClient({ connection, fetchImpl: (url, options) =>
+    new URL(url).pathname === '/api/agent-heartbeats' && options.method === 'POST'
+      ? Promise.resolve(new Response(JSON.stringify({ error: { code: 'request_timeout' } }),
+        { status, headers: { 'Retry-After': new Date(deadline).toUTCString() } })) : fetch(url, options) });
+  const before = Date.now();
+  let failure;
+  await assert.rejects(client.setup({ hostId: 'date-hint', cadenceSeconds: 60 }), error => { failure = error; return true; });
+  const after = Date.now();
+  assert.equal(failure.status, 429);
+  assert.ok(failure.retryAfterMs >= deadline - after && failure.retryAfterMs <= deadline - before);
+  assert.ok(failure.retryAfterMs > 1000);
+  assert.equal(wakeRetryDelayMs(0, failure), failure.retryAfterMs);
+  for (status of [401, 403]) {
+    await assert.rejects(client.setup({ hostId: 'date-hint', cadenceSeconds: 60 }), error =>
+      error.status === status && error.code === 'request_timeout' && !isTransientWakeError(error));
+  }
+});
