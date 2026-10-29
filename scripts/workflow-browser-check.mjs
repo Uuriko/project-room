@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 import { openComposerOptions } from "./room-chrome.mjs";
 import { clickWorkAction } from "./room-chrome.mjs";
 // Disposable local participants only; no external runtime or evidence is fetched.
@@ -106,6 +107,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
       };
       await mutate("producer", T.WORK_ACCEPTED);
       await mutate("producer", T.WORK_COMPLETED, { summary: "The source supports this small finding.", evidenceUrl: "https://example.invalid/finding", evidenceVersion: "v1", producerId: "producer", nextAction: "Use the finding or review it as requested." });
+      await openSearch(page); await page.locator("#message-search").fill(title);
+      await page.locator(`#search-list [data-open-work="${id}"]`).click();
       const card = page.locator(`[data-work-record-id="${id}"]`);
       const status = async (step, text, tone) => {
         await card.locator(`[data-next-step="${step}"]`).waitFor({ state: "attached" });
@@ -165,6 +168,8 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const reviewer = await reviewerContext.newPage();
     reviewer.on("pageerror", error => errors.push(error.message));
     await login(reviewer, reviewerKey);
+    await openSearch(reviewer); await reviewer.locator("#message-search").fill(items()[reviewedId].title);
+    await reviewer.locator(`#search-list [data-open-work="${reviewedId}"]`).click();
     await clickWorkAction(reviewer.locator(`[data-work-record-id="${reviewedId}"]`), "verify");
     await reviewer.locator('#action-fields select[name="result"]').selectOption("fail");
     await reviewer.locator('#action-fields textarea[name="summary"]').fill("The source has a correction. Revise the finding.");
