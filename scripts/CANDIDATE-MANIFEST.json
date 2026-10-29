@@ -99,7 +99,7 @@
     "src/human-push.js": "sha256:d1c35ff1ea9b2cdfd352282db6a7fb1cbcd814e503b53e03a45884adfa041ae3",
     "src/invite-context.js": "sha256:17328cc6619c64592b75995baa441d45e136da37c80f2079bbdb6c7fc3c44bea",
     "src/join-watchdog.js": "sha256:1f7d0ebc08090f8fff722d16443e4e0764939588122777728db56323dc8baba0",
-    "src/join.js": "sha256:757329ce33a00d437c0c51d9b86a167b3cd2d6cc8023ae990829dadffff511cb",
+    "src/join.js": "sha256:9afbcf2a6c3c5f7f6f301f5724bc0dbb0209466d84060a15edce7a23af812960",
     "src/login-polish.css": "sha256:0d4ece96f4d26140e7f99bf34f5e63d73e0143c63e50f7ca61d7dacebd685b3c",
     "src/member-display-names.js": "sha256:7679f106d20b4a8947555173895784952ce9aef858dfc2c2bab041ed4eaa794b",
     "src/message-reducers.js": "sha256:4df23621c020fa8f84d7e9986d07bc579b6d18298d6cce39c7df7439cb7cc475",
