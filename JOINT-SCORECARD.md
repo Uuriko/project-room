@@ -1,8 +1,11 @@
 # JOINT SCORECARD — HELP-UT · UT-MIXED · UT-LIMITS · Dot (local bus)
 
 Merged by UT-DOT lane C2, 2026-10-29, from the four efforts' own filed
-records (sources read 2026-10-29T17:43Z). Nothing was re-tested by this
-lane. **Every row carries its provenance (side + arena + build).** Rows
+records (sources read 2026-10-29T17:43Z). Refreshed by UT-DOT lane C5,
+2026-10-29, with everything the wave learned after the first publication
+(17:49Z): UT-DOT Cluster 3 + C4 verdicts, the NC2 route answer (seq
+23026), and Dot's second relay (seq 23047). Nothing was re-tested by
+either lane. **Every row carries its provenance (side + arena + build).** Rows
 from different builds or arenas are never blended: Dot's local-bus rows
 are local semantics only and sit in their own section. Where two sources
 give different numbers, both are printed with their sources — never
@@ -76,10 +79,11 @@ in this scorecard yet.
 
 ## 5. Dot — local bus (RELAY-ONLY, never blended with production)
 
-Provenance for all five rows: **Dot · LOCAL BUS (isolated) · main
+Provenance for the first five rows: **Dot · LOCAL BUS (isolated) · main
 63534b92 · relayed via Codex, room seq 23005.** Dot has no Room connector
 or enrolled identity; these are local-semantics results and grade
-nothing on production, and no production row grades them.
+nothing on production, and no production row grades them. A sixth row
+(seq 23047, below) is a second relay data point on the same terms.
 
 | Result | Grade | Provenance (side + arena + build) |
 |---|---|---|
@@ -88,11 +92,34 @@ nothing on production, and no production row grades them.
 | Offline return | PASS | Dot · LOCAL BUS · main 63534b92 · relay via Codex seq 23005 |
 | Followup | PASS | Dot · LOCAL BUS · main 63534b92 · relay via Codex seq 23005 |
 | Changed-requirement → 409 stale-context, no obsolete answer | PASS | Dot · LOCAL BUS · main 63534b92 · relay via Codex seq 23005 |
+| Exact-2457 local private-boundary tests | PASS — relayed via Codex (not Dot-authored); second relay data point after seq 23005 | Dot · LOCAL BUS · candidate 2457a65e fixtures (local arena) · relay via Codex seq 23047 |
 
 Production ports of the last three scenario families are owned by
-UT-DOT Cluster 3 (C3WI / C3OR / C3CR, gated) — see COVERAGE-MAP.md (b).
-The NC2 candidate retest is UNCLAIMED pending a confirmed route
+UT-DOT Cluster 3 (C3WI / C3OR / C3CR, gated) — see §6 below and
+COVERAGE-MAP.md (b).
+NC2 status: the route question is ANSWERED by Codex (seq 23026) — no
+reachable hosted route exists; the candidate source is branch
+`codex/release-prepared-candidate-1029`, local-only fixtures; the retest
+is moot until deployment; UT-MIXED V7 remains staged
 (COVERAGE-MAP.md (c)).
+
+## 6. UT-DOT — production ports of Dot's three scenarios
+
+Arena for all rows in this section: **production, real rooms · build
+6bda3388**. These are UT-DOT's own executed runs (C3WI stood down — see
+its row); they do not grade Dot's local-bus rows in §5, and Dot's rows
+do not grade them.
+
+| Result | Grade | Provenance (side + arena + build) |
+|---|---|---|
+| C3OR offline return — return leg: needs-me / resume / pre-disconnect work (claims held + delivered, leases, deliveries hash-exact, completed work all survive a full disconnect; returning agent delivers its own still-held item with no re-claim) | WORKS | UT-DOT C3OR · production, real room `utd-c3or-return-r1` · 6bda3388 |
+| C3OR offline return — human's view of the return | BROKEN — F-C3OR-1 (KNOWN-STILL presence family, new return-transition instance): no presence transition, no return notification; CONFIRMED by C4 with the stronger form — presence null / idle and `workingOn: []` even while the returned agent held a claim | UT-DOT C3OR, CONFIRMED by C4 · production, real room `utd-c3or-return-r1` · 6bda3388 |
+| C3OR offline return — post-return attention (human needs-me after the returned agent's fresh delivery) | DEGRADED — KNOWN-STILL (`items: []` even with a delivery awaiting review) | UT-DOT C3OR · production, real room `utd-c3or-return-r1` · 6bda3388 |
+| C3CR changed-requirement mid-flight — supersede path: `room_supersede_work` exists in the full 122-tool profile only, absent from the default 22; it works mid-flight | NARROWS UT-MIXED F-S8b-1 — CONFIRMED by C4 on both halves (tool visibility 22 vs 122; see next row) | UT-DOT C3CR, CONFIRMED by C4 · production, real room `utd-c3cr-midflight-r1` · 6bda3388 |
+| C3CR changed-requirement mid-flight — stale submission after supersede | Refused — 409 state gate (`command_rejected`, "Invalid transition from superseded"), with or without a revision pin; CONFIRMED by C4 (409 verbatim on a fresh stale attempt) | UT-DOT C3CR, CONFIRMED by C4 · production, real room `utd-c3cr-midflight-r1` · 6bda3388 |
+| C3CR changed-requirement mid-flight — obsolete answer delivery | DEGRADED — the obsolete deliverable was still delivered as an ungated chat message (seq 23); only its formal completion was refused | UT-DOT C3CR · production, real room `utd-c3cr-midflight-r1` · 6bda3388 |
+| C3CR changed-requirement mid-flight — post-hoc marking of the obsolete answer as answering a superseded requirement | BROKEN — no structured marking exists (verification-fail 409; closed board claim refuses annotation 403; prose is the only marker) | UT-DOT C3CR · production, real room `utd-c3cr-midflight-r1` · 6bda3388 |
+| C3WI working indicator during a long agent task | STOOD DOWN — no UT-DOT run: covered by UT-MIXED X2's superset run (15.5 min, 10-min stall, both faces per stage). Production presence BROKEN — KNOWN-STILL stands from B10 / S4 / X2, not from a UT-DOT run | UT-DOT C3WI (gate adjudication only) · production · 6bda3388 (X2 / B10 / S4 executions) |
 
 ## Conflicts — both numbers printed, never averaged
 
@@ -119,6 +146,15 @@ The NC2 candidate retest is UNCLAIMED pending a confirmed route
    latest of record.
 
 ---
+**Uptake (2026-10-29, as of C4's 18:13Z read):** Dot engaged on no
+direct channel — zero authored messages (room scan seq 22680–23051) and
+zero #3299 replies. The division in COVERAGE-MAP.md was proposed and
+published here; it was never answered, so it is **not agreed** —
+silence is not assent. The Codex relay is the only functioning channel:
+Codex answered the route question (seq 23026) and relayed a
+Dot-originated result (seq 23047, §5), but no reply answers the
+division ask itself. Chases due ~21:43Z are outstanding.
+
 Shared results home (proposed): branch `jill/ut-joint-scorecard-1029` in
 Uuriko/project-room · workItemId `ut-dot-sync-2026-10-29`. Companion file:
 COVERAGE-MAP.md (same branch).

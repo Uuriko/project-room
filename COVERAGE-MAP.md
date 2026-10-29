@@ -44,10 +44,10 @@ provenance — she has no Room connector / enrolled identity).
 | Offline return | LOCAL BUS (isolated) | Dot | DONE — PASS (local semantics only); production port = UT-DOT C3OR, see (b) |
 | Followup | LOCAL BUS (isolated) | Dot | DONE — PASS (local semantics only); no separate port — production followup/attention is owned by UT-MIXED X3 + HELP-UT B10 (linkage wakes) |
 | Changed-requirement → 409 stale-context, no obsolete answer | LOCAL BUS (isolated) | Dot | DONE — PASS (local semantics only); production port = UT-DOT C3CR, see (b) |
-| Working-indicator truthfulness during a long agent task (production) | Production, real room | UT-DOT C3WI | GATED — runs only the slice UT-MIXED X2 leaves unclaimed (≤1 mint) |
-| Offline return: agent disconnects mid-task and returns (production) | Production, real room | UT-DOT C3OR | GATED — runs only the unclaimed return-leg slices vs B10 / S4a / S4b / X2 (≤2 mints) |
-| Changed-requirement mid-flight: human edits the ask while the agent works it (production) | Production, real room | UT-DOT C3CR | GATED — version/invalidation semantics vs Dot's local 409 (≤2 mints) |
-| F-B10-1 NC2 retest on the fix candidate (frozen candidate 2457a65e, PR #5282 head deef7f49) | Candidate surface — NO confirmed route | UNCLAIMED | See (c) |
+| Working-indicator truthfulness during a long agent task (production) | Production, real room | UT-DOT C3WI | FILED 17:51Z — STOOD DOWN at gate: UT-MIXED X2's execution is a strict superset; production presence BROKEN — KNOWN-STILL stands from B10 / S4 / X2 (0 mints used) |
+| Offline return: agent disconnects mid-task and returns (production) | Production, real room | UT-DOT C3OR | FILED 17:57Z — return leg WORKS (needs-me / resume / pre-disconnect work); human's view of the return BROKEN (F-C3OR-1, CONFIRMED by C4); post-return attention DEGRADED known-still (1 mint used) |
+| Changed-requirement mid-flight: human edits the ask while the agent works it (production) | Production, real room | UT-DOT C3CR | FILED 18:08Z — `room_supersede_work` exists in the full 122-tool profile only, absent from the default 22 (narrows F-S8b-1, CONFIRMED by C4); stale submission refused 409; obsolete answer delivered as ungated chat; post-hoc marking BROKEN (1 mint used) |
+| F-B10-1 NC2 retest on the fix candidate (frozen candidate 2457a65e, PR #5282 head deef7f49) | Candidate surface — NO reachable hosted route | ANSWERED — no route (Codex seq 23026) | See (c) |
 | Dot sync itself (exchange plans, divide coverage, joint scorecard) | Room + GitHub #3299 + Codex relay | UT-DOT C1A/C1B/C1C/C2 | IN FLIGHT — workItemId ut-dot-sync-2026-10-29; this map + scorecard are the C2 leg |
 
 ## (a) Overlaps found and how they were resolved
@@ -95,20 +95,20 @@ runs twice:
 
 | Dot scenario (local bus, PASS) | Production port | Gate |
 |---|---|---|
-| Working indicator | UT-DOT C3WI — truthfulness during a long agent task | Gated on UT-MIXED X2's presence/indicator coverage; unclaimed slice only |
-| Offline return | UT-DOT C3OR — disconnect mid-task and return | Gated on HELP-UT B10 + UT-MIXED S4a/S4b/X2 coverage; unclaimed return legs only |
-| Changed-requirement → 409 | UT-DOT C3CR — human edits the ask mid-flight | Version/invalidation semantics on production; compared with, never substituted for, Dot's local 409 |
+| Working indicator | UT-DOT C3WI — truthfulness during a long agent task | FILED — STOOD DOWN at gate (X2 superset); no UT-DOT run |
+| Offline return | UT-DOT C3OR — disconnect mid-task and return | FILED — return leg WORKS; human's view of the return BROKEN (F-C3OR-1, C4-confirmed) |
+| Changed-requirement → 409 | UT-DOT C3CR — human edits the ask mid-flight | FILED — supersede tool full-profile only (narrows F-S8b-1, C4-confirmed); stale submission 409; compared with, never substituted for, Dot's local 409 |
 
-## (c) NC2 candidate retest — UNCLAIMED
+## (c) NC2 candidate retest — ANSWERED, no route
 
 The retest of F-B10-1 against the fix (frozen candidate `2457a65e`, PR #5282,
-head `deef7f49`) is **UNCLAIMED pending a confirmed route**. UT-MIXED has the
-brief STAGED (lanes/V7/STAGED-BRIEF.md, staged 17:45Z per its STATE) with the
-route NOT confirmed — no candidate route exists in any fleet-readable source
-and production at 6bda3388 does not carry the fix. UT-DOT is searching
-(lane C3NC2, read-only; lane C1C asks Codex for the candidate route).
-Claim rule, agreed both waves: whichever wave first writes a CONFIRMED
-reachable route into its STATE owns the retest; the other defers.
+head `deef7f49`): the route question is **ANSWERED by Codex (seq 23026,
+17:46:10Z) — no reachable hosted route exists**. The candidate source is
+branch `codex/release-prepared-candidate-1029`, with local-only fixtures;
+production at 6bda3388 does not carry the fix. The retest is therefore moot
+until deployment. UT-MIXED has the brief STAGED (lanes/V7/STAGED-BRIEF.md,
+staged 17:45Z per its STATE) and it remains staged. UT-DOT's own search
+(lane C3NC2) also found no reachable route in fleet-readable sources.
 
 ---
 Provenance: every status above is transcribed from the named wave's own
