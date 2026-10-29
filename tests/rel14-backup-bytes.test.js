@@ -2,7 +2,7 @@
 // events and on room files, and verification must notice when they don't.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -14,7 +14,7 @@ import { registerWriter } from "../server/writer-fence.mjs";
 import { RoomStore } from "../server/store.mjs";
 import { initialRoom } from "../server/bootstrap.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
-import { backupRoom, backupDigests } from "../server/backup.mjs";
+import { backupRoom, backupDigests, backupSnapshotDigest } from "../server/backup.mjs";
 import { exportNdjsonText, replayNdjson } from "../server/room-export.mjs";
 import { verifyRestoredBackup } from "../scripts/backup-verify.mjs";
 
@@ -131,4 +131,79 @@ test("the drill covers room files and proves byte equality", async () => {
   assert.equal(report.ok, true);
   assert.equal(report.before.files, 1);
   assert.deepEqual(report.after, report.before);
+});
+
+// Full-file proof covers tables outside the event/attachment summaries.
+test("verification detects changed account data outside event and attachment digests", async t => {
+  const { filename } = roomWithFile(t);
+  const result = await backupOf(t, filename);
+  const db = new DatabaseSync(result.filename); registerWriter(db);
+  assert.ok(db.prepare("UPDATE accounts SET display_name='Changed after backup'").run().changes > 0);
+  db.close();
+  const report = await verifyRestoredBackup({ backupFilename: result.filename, watermarkPath: result.watermark });
+  assert.equal(report.ok, false);
+  assert.equal(report.coverage, "snapshot-bytes");
+  assert.ok(report.checks.some(c => c.name === "snapshot-bytes-match-watermark" && !c.ok));
+});
+
+test("verification refuses a nonempty WAL even if the main snapshot bytes are unchanged", async t => {
+  const { filename } = roomWithFile(t);
+  const result = await backupOf(t, filename);
+  const before = readFileSync(result.filename);
+  const db = new DatabaseSync(result.filename); registerWriter(db);
+  try {
+    db.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0");
+    db.prepare("UPDATE accounts SET display_name='Only in the WAL'").run();
+    assert.deepEqual(readFileSync(result.filename), before);
+    const report = await verifyRestoredBackup({ backupFilename: result.filename, watermarkPath: result.watermark });
+    assert.equal(report.ok, false);
+    assert.ok(report.checks.some(c => c.name === "snapshot-bytes-match-watermark" && !c.ok && /WAL/.test(c.detail)));
+  } finally { db.close(); }
+});
+
+test("legacy backup verification names its limited coverage and malformed new digests fail", async t => {
+  const { filename } = roomWithFile(t);
+  const result = await backupOf(t, filename);
+  const original = JSON.parse(readFileSync(result.watermark, "utf8"));
+  assert.ok(original.snapshot.bytes > 0);
+  assert.match(original.snapshot.sha256, /^[a-f0-9]{64}$/);
+  const verify = () => verifyRestoredBackup({ backupFilename: result.filename, watermarkPath: result.watermark });
+  const full = await verify(); assert.equal(full.ok, true); assert.equal(full.coverage, "snapshot-bytes");
+  const legacy = { ...original }; delete legacy.snapshot;
+  writeFileSync(result.watermark, JSON.stringify(legacy));
+  const partial = await verify(); assert.equal(partial.ok, true); assert.equal(partial.coverage, "events-and-attachments");
+  delete legacy.digests; writeFileSync(result.watermark, JSON.stringify(legacy));
+  const counts = await verify(); assert.equal(counts.ok, true); assert.equal(counts.coverage, "counts-only");
+  for (const snapshot of [null, {}, { bytes: -1, sha256: original.snapshot.sha256 }, { bytes: original.snapshot.bytes, sha256: "invalid" }]) {
+    writeFileSync(result.watermark, JSON.stringify({ ...original, snapshot }));
+    const invalid = await verify(); assert.equal(invalid.ok, false);
+    assert.ok(invalid.checks.some(c => c.name === "snapshot-digest-shape" && !c.ok));
+  }
+});
+
+
+test("snapshot hashing rejects a file change or WAL appearing after hashing starts", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "backup-hash-race-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const filename = join(directory, "snapshot.sqlite");
+  writeFileSync(filename, Buffer.alloc(4096, 1));
+  const changed = backupSnapshotDigest(filename);
+  // The stream has yielded; change the file before its final metadata check.
+  writeFileSync(filename, Buffer.alloc(8192, 2));
+  await assert.rejects(changed, /Backup changed/);
+  const wal = backupSnapshotDigest(filename);
+  writeFileSync(`${filename}-wal`, Buffer.from("pending write"));
+  await assert.rejects(wal, /non-empty WAL/);
+});
+
+test("verification returns a failed check for non-object watermark JSON", async t => {
+  const directory = mkdtempSync(join(tmpdir(), "backup-watermark-shape-"));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const watermarkPath = join(directory, "watermark.json");
+  for (const value of [null, [], 7, "not a watermark"]) {
+    writeFileSync(watermarkPath, JSON.stringify(value));
+    const report = await verifyRestoredBackup({ backupFilename: join(directory, "unused.sqlite"), watermarkPath });
+    assert.equal(report.ok, false);
+    assert.ok(report.checks.some(c => c.name === "watermark-shape" && !c.ok));
+  }
 });
