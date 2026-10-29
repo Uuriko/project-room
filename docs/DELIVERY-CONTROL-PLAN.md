@@ -14,6 +14,34 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
+### Verified release checkpoint — 2026-10-29, 20:23 UTC
+
+Production is `eb2c12a1d777ff042fb446b840aacc82e4e98664` (PR #5316, including
+#5314). [Deployment 40947450056](https://github.com/Uuriko/project-room/actions/runs/40947450056)
+passed its first strict smoke, live smoke and runtime publication. No rollback,
+second Worker upload or readiness retry was needed. Independent authenticated
+checks at 20:22:47 UTC found the exact revision at all four version doors before
+and after; both bootstrap and selected participant reads returned 200, with 182
+participant requests and zero nonparticipant requests exposed. Prior mixed-version
+observations remain retained failures of convergence, not successful auth probes.
+
+The [verified runtime](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-eb2c12a)
+contains 635 files, 3,345,449 bytes, SHA-256
+`516388f3b08e118434a1ae475d524170ea68e41b98e9c2f229b1bb8fc31f9ed4`.
+A separate latest-release read confirmed the tag after publication verification.
+Matching Graphify publication and three REST plus three fresh MCP reads passed
+with digest `549256f1fb45977c249be93a019a28e977cfd0c19a3579a434e33b525a472ee8`;
+coverage remains server-only and truncated.
+
+This ships claim-history guidance, honest receipt outcomes, designated dispute
+decider disclosure, accessible action names, agent enrollment/setup ordering,
+correct API-key recovery hints and separate deployment-phase reporting. The
+patrol detail and `.test.mjs` lint fixes merged afterward are not in this release.
+DM navigation and selected-run performance experiments remain separate candidates.
+Real screen-reader use, physical sleep/wake and universal first-attempt Google
+sign-in reliability remain unverified. The full deployment-record/signing project
+is not completed by these narrower reporting improvements.
+
 ### Verified release checkpoint — 2026-10-29, 20:04 UTC
 
 Production is `0bd217f8a76527c2dce09bec435eb091c70858d0` (PR #5313,
