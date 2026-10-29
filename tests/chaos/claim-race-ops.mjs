@@ -406,6 +406,7 @@ export async function loadWeakenedClaimModule(kind) {
     `from "./claim-coordination.mjs"`,
     `from "../../../server/claim-coordination.mjs"`,
   );
+  source = source.replace(`from "../src/work-dependencies.js"`, `from "../../../src/work-dependencies.js"`);
   const weakDir = join(HERE, ".weak");
   await mkdir(weakDir, { recursive: true });
   const weakPath = join(weakDir, `work-claims-${kind}.${process.pid}.weak.mjs`);

@@ -763,6 +763,12 @@ export class RoomAgentClient {
         || (source.status === "included" ? source.message?.id !== result.work.sourceMessageId || typeof source.message?.body !== "string" : source.message !== null)))) {
       throw new RoomClientError(200, "invalid_response", "Selected work context does not match the request");
     }
+    if (Object.hasOwn(result, "dependencies") && (!Array.isArray(result.dependencies) || result.dependencies.length > 16
+      || result.dependencies.some(dep => !dep || typeof dep.id !== "string" || !/^[A-Za-z0-9_-]{1,128}$/.test(dep.id)
+        || typeof dep.state !== "string" || dep.state.length > 32 || typeof dep.satisfied !== "boolean"
+        || dep.satisfied && dep.state !== "done")
+      || new Set(result.dependencies.map(dep => dep.id)).size !== result.dependencies.length))
+      throw new RoomClientError(200, "invalid_response", "Invalid work dependency observation");
     if (Object.hasOwn(result, "resume") && !isDeepStrictEqual(result.resume,
       workResume(result.work, Date.parse(result.evaluatedAt), result.context.roomOwnerId)))
       throw new RoomClientError(200, "invalid_response", "Resume brief does not match selected work");
@@ -1525,6 +1531,10 @@ export function workContextMarkdown(result) {
     "Responsible member for this step: " + (result.resume.next.memberId ?? "none"),
     "Session display status: " + (result.work.displayStatus ?? result.work.status) + " (presentation only; recorded controls below)",
     resumeMarkdown(result.resume),
+    ...(result.dependencies?.length ? [
+      "Prerequisites (Board claim IDs; checked again before claim/start): " + result.dependencies.map(dep => `${dep.id}: ${dep.state}${dep.satisfied ? " (satisfied)" : " (not satisfied)"}`).join(", "),
+      ...(result.dependencies.some(dep => !dep.satisfied) ? ["Prerequisites are not satisfied. Do not claim or start this work yet."] : [])
+    ] : []),
     ...(result.replyRequestContext ? [
       `Pending linked reply requests: ${result.replyRequestContext.total} (${result.replyRequestContext.shown} shown). Conversations, separate from work completion.`,
       ...result.replyRequestContext.requests.map(request => `${request.direction}: ${request.id} · ${request.requesterId} → ${request.recipientId}. Next read: ${JSON.stringify(request.nextRead)}`),

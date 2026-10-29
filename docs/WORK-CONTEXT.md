@@ -257,3 +257,20 @@ A continuation is valid only for its unchanged frozen selection. On
 token. Store text and token together only after every page and current viewer
 scope have been checked. The preflight consumer implements that storage flow;
 MCP's numeric discussion checkpoint remains unchanged.
+
+### Task prerequisites
+
+`room_propose_work` accepts optional `dependsOn`: up to 16 existing Board claim
+IDs in the same room. These are the IDs returned by the Board, which can differ
+from canonical work IDs containing punctuation. Accept a prerequisite first so
+its Board card exists. Self references, missing claims and cyclic dependencies
+are refused. Acceptance rechecks existence if a prerequisite was deleted after
+proposal.
+
+`room_read_work` returns `dependencies`, a bounded list of `{id, state, satisfied}`
+observations. Only a done, non-superseded, non-invalidated prerequisite satisfies
+the existing Board rule. Claiming or starting canonical work checks that same
+rule inside the command transaction. Finishing a prerequisite makes dependent
+work eligible through existing available-work reads; it does not start work or
+resolve a separately reported blocker. Board deletion retains its existing
+explicit dependency-waiver behavior. Reads grant no execution authority.
