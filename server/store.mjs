@@ -1345,6 +1345,10 @@ function freezeJsonState(value) {
 class ProjectionCache {
   constructor() { this.entries = new Map(); this.bytes = 0; }
   clear() { this.entries.clear(); this.bytes = 0; }
+  delete(roomId) {
+    const entry = this.entries.get(roomId);
+    if (entry) { this.entries.delete(roomId); this.bytes -= entry.weight; }
+  }
   lookup(roomId, sequence) {
     const entry = this.entries.get(roomId);
     if (!entry || entry.sequence !== sequence) return null;
@@ -3399,9 +3403,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     this.db.close();
   }
   // Invalidate both parsed reads and unpublished command candidates.
-  _dropProjectionCache() {
-    this._projectionCache?.clear();
-    for (const pending of this._pendingProjectionFrames ?? []) pending.clear();
+  _dropProjectionCache(roomId = null) {
+    if (roomId === null) this._projectionCache?.clear();
+    else this._projectionCache?.delete(roomId);
+    for (const pending of this._pendingProjectionFrames ?? []) {
+      if (roomId === null) pending.clear();
+      else pending.delete(roomId);
+    }
   }
   _queueProjectionCache(roomId, sequence, state, projection) {
     const pending = this._pendingProjectionFrames?.at(-1);
@@ -3414,6 +3422,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     if (this._projectionWatch || typeof this.db?.prepare !== "function") return;
     this._projectionWatch = true;
     const invalidate = () => this._dropProjectionCache();
+    // Only these literal statements prove one affected room. Unknown SQL,
+    // work entity writes, bulk statements and exec retain global invalidation.
+    const scopedUpdates = new Map([
+      ["UPDATE rooms SET projection=? WHERE id=?", 1],
+      ["UPDATE rooms SET sequence=?,projection=? WHERE id=?", 2],
+      ["UPDATE rooms SET sequence=?,projection=?,archived_at=? WHERE id=?", 3]
+    ]);
     const prepare = this.db.prepare.bind(this.db);
     this.db.prepare = sql => {
       const stmt = prepare(sql);
@@ -3423,7 +3438,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const run = stmt.run.bind(stmt);
       stmt.run = (...args) => {
         const result = run(...args);
-        if (roomsWrite) invalidate();
+        if (roomsWrite) {
+          const roomIndex = scopedUpdates.get(sql);
+          const roomId = roomIndex === undefined ? null : args[roomIndex];
+          this._dropProjectionCache(typeof roomId === "string" && args.length === roomIndex + 1 ? roomId : null);
+        }
         // Every events insert in the codebase binds (roomId, sequence, ...)
         // positionally; anything else is ignored rather than guessed at.
         if (eventAppend && typeof args[0] === "string" && Number.isSafeInteger(args[1])) this._noteEventAppend(args[0]);
@@ -3485,7 +3504,8 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     // idempotent replay commits nothing. Measured only while degraded.
     const before = outermost && this.storageFailures > 0 ? this.storagePlatform.changes?.(this.db) : null;
     // Savepoints collect candidates separately, but never publish before
-    // the outer commit. Every rooms write invalidates all earlier candidates.
+    // the outer commit. A scoped rooms write invalidates that room's earlier candidates;
+    // unknown writes and rollbacks invalidate every candidate.
     const boundary = outermost || isolated;
     const frames = this._pendingProjectionFrames ??= [];
     if (boundary) frames.push(new Map());
