@@ -1,7 +1,7 @@
 import { validateCharterContext } from "../src/room-charter.js";
 import { createHash } from "node:crypto";
 import { validId, MAX_MESSAGE_BODY_CHARS, MAX_MESSAGE_COMMAND_BYTES } from "../src/events.js";
-import { replyPostMode } from "../src/reply-requests.js";
+import { replyPostMode, ANSWER_CREDENTIALS } from "../src/reply-requests.js";
 import { conforms, confirmsAgentCommand } from "./work-actions.mjs";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { CONTENT_TRUST } from "../server/content-trust.mjs";
@@ -269,7 +269,11 @@ export function validateReplyRead(result, { name, args, roomId }) {
     }
   }
   if (selected) {
-    assert(keys(request, [...requestFields, "contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason"])
+    // answerCredential: the server's stamp on an answered or declined request.
+    const stamped = Object.hasOwn(request ?? {}, "answerCredential");
+    assert(!stamped || ["answered", "declined"].includes(request.status) && ANSWER_CREDENTIALS.includes(request.answerCredential));
+    assert(keys(request, [...requestFields, "contextMessageId", "terminalActorId", "responseMessageId", "responseContextSequence", "reason",
+      ...(stamped ? ["answerCredential"] : [])])
       && validRequest(request) && request.id === requestMessageId && validId(request.contextMessageId)
       && current?.evaluatedThrough === result.evaluatedThrough && current.contextEventId === request.contextEventId
       && integer(current.contextSequence) && current.contextSequence > 0 && current.contextSequence <= result.evaluatedThrough

@@ -6205,7 +6205,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
             authorityPolicyVersion: MEMBERSHIP_AUTHORITY_POLICY_VERSION,
             ...(command.type === T.MEMBER_ADDED ? { displayNamePolicyVersion: DISPLAY_NAME_POLICY_VERSION } : {}),
           }
-          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION }
+          : requestMode ? { ...command.data, requestPolicyVersion: REPLY_POLICY_VERSION,
+            // Server-derived (callers cannot send it): the credential route this
+            // response arrived on. See ANSWER_CREDENTIALS in src/reply-requests.js.
+            ...(requestMode === "respond" ? { answerCredential: auth.kind === "session" && auth.credentialScope === "account-session"
+              && auth.account && auth.member.kind === "human" ? "account_session" : "room_credential" } : {}) }
           : pinEvent ? { ...command.data, pinDmPartyPolicyVersion: PIN_DM_PARTY_POLICY_VERSION }
           : command.data
       });
