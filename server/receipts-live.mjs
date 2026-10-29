@@ -4,8 +4,9 @@
 //
 // Visibility has one definition (server/public-visibility.mjs) and the
 // read model applies the whole of it in SQL, before pagination: operator
-// unpublish and the owner's public-receipts toggle
-// (room_directory_settings.public_receipts = 0, default 1) both hide a
+// unpublish, the owner's public-receipts toggle
+// (room_directory_settings.public_receipts = 0, default 1), and the
+// recorded opt-in for room-source rows (Ruling 40) each hide a
 // receipt from listings, detail reads, the sitemap, and lot pages. This
 // module used to wrap the read model with a second, JS implementation of
 // the toggle half and post-filter pages the read model had already

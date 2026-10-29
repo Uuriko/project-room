@@ -28,6 +28,13 @@ function insertReceipt(store, row) {
     JSON.stringify(row.agents ?? ["ada"]), JSON.stringify(row.humans ?? []),
     row.pullRequest ?? null, row.mergedAt ?? null, JSON.stringify(row.hashes ?? []), row.at,
     "https://room.trydemigod.com/?start=room");
+  // A projected room-source row implies its origin room recorded an
+  // opt-in (Ruling 40): the mirror the visibility predicate consults.
+  // (Room scoping and the page's receipts_enabled gate still decide
+  // which room's page a row may appear on.)
+  if (row.source === "work-claim" || row.source === "work-item") {
+    store.db.prepare("INSERT OR IGNORE INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 1)").run(row.origin ?? "commons");
+  }
 }
 
 function publishRoom(store, slug, receiptsEnabled) {

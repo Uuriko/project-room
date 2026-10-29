@@ -36,6 +36,10 @@ function seed(t) {
   }
   insert.run(visibleId, "Visible payroll fix", "work-claim", "commons", "commons", "Commons",
     "[]", "[]", null, null, "[]", "2026-10-10T00:00:00.000Z", "https://room.trydemigod.com/?start=room");
+  // Projected room-source rows imply recorded opt-ins (Ruling 40); the
+  // secret room's rows stay hidden by its owner toggle, as this file pins.
+  store.db.prepare("INSERT OR IGNORE INTO room_public_receipts_setting (room_id, enabled) VALUES ('commons', 1)").run();
+  store.db.prepare("INSERT OR IGNORE INTO room_public_receipts_setting (room_id, enabled) VALUES ('secret', 1)").run();
   return store;
 }
 

@@ -83,6 +83,10 @@ test("a done merged claim is a receipt in both the live list and the growth pred
     open: { id: "open", state: "working", title: "LeakTitleZZ", receipt: null }
   };
   store.db.prepare("UPDATE rooms SET projection=? WHERE id='alpha'").run(JSON.stringify(projection));
+  // The opt-in above is written behind the store's back, so the recorded
+  // setting the real command path would have mirrored is recorded here
+  // too (Ruling 40: the anonymous read consults the recorded setting).
+  store.db.prepare("INSERT INTO room_public_receipts_setting (room_id, enabled) VALUES ('alpha', 1)").run();
   store.workClaims.set("alpha", {
     id: "claim1", title: "LeakTitleZZ", state: "done", owner: "agent1",
     pullRequest: { url: "https://github.com/acme/demo/pull/7", outcome: "merged", syncedAt: "2026-09-30T15:00:00.000Z" },

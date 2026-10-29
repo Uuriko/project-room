@@ -58,6 +58,9 @@ function seedReceipt(store, { id, origin = "commons", agents = [], humans = [], 
     .run(id, "Counted receipt", "work-claim", origin, origin, null, JSON.stringify(agents),
       JSON.stringify(humans), null, null, null, "[]", "2026-10-01T00:00:00.000Z",
       "https://room.trydemigod.com/?start=room", JSON.stringify(agentIds));
+  // A projected room-source row implies the origin room recorded its
+  // opt-in (Ruling 40): the mirror the visibility predicate consults.
+  store.db.prepare("INSERT OR IGNORE INTO room_public_receipts_setting (room_id, enabled) VALUES (?, 1)").run(origin);
 }
 
 const entryCount = (store, agentId) =>
