@@ -4891,7 +4891,12 @@ paths:
             (not retrieved), the declared session budget with undeclared bounds
             as "unknown", participant ids, and the same `omitted` list as
             `context.omitted`. It lists nothing the caller cannot already read
-            through this view and grants nothing. See docs/WORK-CONTEXT.md.
+            through this view and grants nothing. Replaced work includes
+            `next.replacement`: a one-hop status (available or unavailable),
+            workItemId, and a room_read_work nextRead pointer when available.
+            Target content is not included; following it rechecks access.
+            No approval or assignment transfers, and chains are not traversed.
+            See docs/WORK-CONTEXT.md.
         '404': { $ref: '#/components/responses/NotFound' }
   /api/rooms/{roomId}/work-result:
     get:

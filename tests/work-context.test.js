@@ -489,3 +489,35 @@ test("selected source lookup respects a late member history floor without full h
   assert.deepEqual(view.accessSummary.conversation.sourceMessageIds, []);
   assert.equal(view.accessSummary.conversation.sourceAvailability, "unavailable");
 });
+
+test("replacement reads are one-hop navigation, preserve history, and omit target source", async t => {
+  const f = await fixture(t);
+  f.send("owner", T.MESSAGE_POSTED, { messageId: "replacement-private", toMemberId: "reviewer", body: "REPLACEMENT-PRIVATE-SENTINEL" });
+  f.send("owner", T.WORK_PROPOSED, { workItemId: "replacement-one", title: "REPLACEMENT-TITLE-SENTINEL", definitionOfDone: "Next", accountableMemberId: "owner", mode: "read", sourceMessageId: "replacement-private" });
+  f.send("owner", T.WORK_SUPERSEDED, { workItemId: "test-handoff", supersededByWorkItemId: "replacement-one", reason: "Changed direction" });
+  const before = f.store.snapshot(f.keys.owner, "commons");
+  const old = await f.client("producer").workContext("test-handoff");
+  assert.deepEqual(old.next.replacement, { status: "available", workItemId: "replacement-one", nextRead: { tool: "room_read_work", arguments: { roomId: "commons", workItemId: "replacement-one" } } });
+  assert.equal(old.work.id, "test-handoff");
+  assert.equal(old.work.state, "superseded");
+  assert.ok(!JSON.stringify(old).includes("REPLACEMENT-"), "old read does not hydrate target content");
+  assert.match(workContextMarkdown(old), /replacement-one/);
+  const target = await f.client("producer").workContext("replacement-one", { includeSource: true });
+  assert.equal(target.work.id, "replacement-one");
+  assert.equal(target.context.source.status, "unavailable", "target private source retains audience boundary");
+  assert.ok(!JSON.stringify(target).includes("REPLACEMENT-PRIVATE-SENTINEL"));
+  assert.deepEqual(f.store.snapshot(f.keys.owner, "commons"), before, "navigation does not accept or mutate work");
+  const state = structuredClone(before.state);
+  const project = () => selectedWorkContext({ state, workItemId: "test-handoff", viewerId: "producer", sequence: before.sequence, now: 2000 });
+  delete state.workItems["replacement-one"];
+  assert.deepEqual(project().next.replacement, { status: "unavailable", workItemId: "replacement-one", nextRead: null });
+  state.workItems["replacement-one"] = { id: "replacement-one", state: "superseded", supersededBy: "test-handoff" };
+  assert.equal(project().next.replacement.workItemId, "replacement-one", "corrupt cycle is not traversed");
+  assert.equal(project().next.replacement.nextRead.arguments.workItemId, "replacement-one");
+  const corrupt = new RoomAgentClient({ origin: f.origin, roomId: "commons", token: f.keys.producer,
+    fetchImpl: async () => new Response(JSON.stringify({ ...old, next: { ...old.next, replacement: { ...old.next.replacement,
+      nextRead: { tool: "room_read_work", arguments: { roomId: "foreign-room", workItemId: "replacement-one" } } } } }), { status: 200 }) });
+  await assert.rejects(corrupt.workContext("test-handoff"), error => error.code === "invalid_response");
+  f.store.revoke(f.keys.producer);
+  await assert.rejects(f.client("producer").workContext("replacement-one"), error => error.status === 401);
+});

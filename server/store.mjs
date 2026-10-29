@@ -5706,7 +5706,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
-        floor: this.historyFloor(roomId, auth.member.id, room.sequence) }),
+        floor: this.historyFloor(roomId, auth.member.id, room.sequence),
+        replacementAvailable: (() => {
+          const target = room.state.workItems[workItemId].supersededBy;
+          return validId(target) && target !== workItemId && Boolean(readWorkItem(this.db, roomId, target));
+        })() }),
         dependencies: (() => {
           const claim = this.workClaims.get(roomId, boardClaimId(workItemId));
           const ids = claim?.dependsOn ?? room.state.workItems[workItemId].dependsOn ?? [];
