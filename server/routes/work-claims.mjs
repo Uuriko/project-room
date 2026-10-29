@@ -14,6 +14,7 @@ import { retentionReport } from "../retention-response.mjs";
 import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
 import { withProjectMapOverlap } from "../project-map-store.mjs";
+import { readBoard } from "../board-read.mjs";
 
 function requireRoomScope(ctx, auth, writing = false) {
   const required = writing ? "rooms:write" : "rooms:read";
@@ -45,7 +46,12 @@ function authenticateRead(ctx, writing = false) {
   if (!member || member.active === false) {
     ctx.reject(403, "not_member", `Member "${auth.member.id}" is not a member of room "${roomId}"`);
   }
-  return { roomId, auth };
+  return { roomId, auth, selected, fence };
+}
+
+export async function getBoardRead(ctx) {
+  const { roomId, selected, fence } = authenticateRead(ctx);
+  return ctx.json(ctx.res, 200, readBoard(ctx.store, selected.token, roomId, fence, ctx.url.searchParams));
 }
 
 export async function getRetentionDashboard(ctx) {
@@ -88,6 +94,9 @@ const parameters = Object.freeze({ type: "object", required: ["roomId"],
 
 // Deliberately non-punitive: queues for reviewers, never strikes or sanctions.
 export const WORK_CLAIM_ROUTES = Object.freeze([
+  Object.freeze({ id: "board-read", method: "GET", path: "/api/rooms/{roomId}/board",
+    auth: "room", capability: null, scope: "room", handler: getBoardRead,
+    schema: { params: parameters, response: { type: "object" } }, events: [] }),
   ...["GET", "HEAD", "POST"].map(method => Object.freeze({ id: `claim-provenance-${method}`, method,
     path: `/api/rooms/{roomId}/work-claims/{claimId}/${method === "POST" ? "premise-invalid" : "provenance"}`,
     auth: "room", capability: null, scope: "room", handler: provenanceRoute,

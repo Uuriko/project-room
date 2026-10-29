@@ -44,6 +44,10 @@ on:
         description: "Optional note for the receipt"
         required: false
         type: string
+      runtime_revision:
+        description: "Optional immutable runtime correction suffix, such as r2; existing assets are never replaced"
+        required: false
+        type: string
       probe_override:
         description: "Only when ROOM_ONBOARDING_GATE is 1: deploy even if the staging onboarding probe fails, recording this reason"
         required: false
@@ -91,6 +95,13 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
+      - name: Validate runtime correction suffix
+        env:
+          REVISION: ${{ inputs.runtime_revision }}
+        run: |
+          if [[ -n "$REVISION" && ! "$REVISION" =~ ^r([2-9]|[1-9][0-9]+)$ ]]; then
+            echo "::error::runtime_revision must be empty or r2, r3, ..."; exit 1
+          fi
       - name: Resolve the commit and check deployment policy
         id: gate
         env:
@@ -269,19 +280,25 @@ jobs:
           [ -n "$VERSION" ] || { echo "::error::could not read the new entry version id"; exit 1; }
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Smoke version, health, ready, legal pages
+        id: smoke
         shell: bash
-        # One retry before recovery: after a Worker upload the Durable Object
-        # can keep answering /api/version with the previous build for more
-        # than the 5-minute window (run 37880461862 rolled back a healthy
-        # deploy that way; the identical redeploy passed). The retry waits
-        # SMOKE_RETRY_DELAY_SECONDS (default 150) and re-checks for 60s more;
-        # a broken build still fails and recovers, about 3.5 minutes later.
+        # Retry only verified propagation failures. Preserve the original report
+        # and observe convergence during the former 150s idle-delay budget.
         run: |
+          record_smoke_digest() {
+            if [ -n "${GITHUB_OUTPUT:-}" ] && [ -f "$RUNNER_TEMP/prod-smoke.json" ]; then
+              node --input-type=module -e 'import { readFileSync, appendFileSync } from "node:fs"; import { createHash } from "node:crypto"; const raw = readFileSync(process.env.RUNNER_TEMP + "/prod-smoke.json"); appendFileSync(process.env.GITHUB_OUTPUT, "report_sha256=" + createHash("sha256").update(raw).digest("hex") + "\n");'
+            fi
+          }
+          trap record_smoke_digest EXIT
           if node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 300000 > "$RUNNER_TEMP/prod-smoke-attempt1.log"; then
             cat "$RUNNER_TEMP/prod-smoke-attempt1.log" | tee "$RUNNER_TEMP/prod-smoke.json"
           else
-            echo "::warning::prod smoke attempt 1 failed; retrying once in ${SMOKE_RETRY_DELAY_SECONDS:-150}s (Durable Object version lag) before recovery" >&2
-            sleep "${SMOKE_RETRY_DELAY_SECONDS:-150}"
+            cp "$RUNNER_TEMP/prod-smoke-attempt1.log" "$RUNNER_TEMP/prod-smoke.json"
+            if ! node scripts/prod-smoke-retry.mjs "$RUNNER_TEMP/prod-smoke-attempt1.log" --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN"; then
+              cat "$RUNNER_TEMP/prod-smoke-attempt1.log"
+              exit 1
+            fi
             node scripts/prod-deploy-smoke.mjs --sha "$SHA" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --wait-ms 60000 | tee "$RUNNER_TEMP/prod-smoke-attempt2.log" "$RUNNER_TEMP/prod-smoke.json"
           fi
       - name: Live smoke
@@ -296,6 +313,9 @@ jobs:
         env:
           PROD_OUTCOME: ${{ steps.prod.outcome }}
           ENTRY_OUTCOME: ${{ steps.entry.outcome }}
+          SMOKE_OUTCOME: ${{ steps.smoke.outcome }}
+          SMOKE_REPORT_SHA256: ${{ steps.smoke.outputs.report_sha256 }}
+          SMOKE_REPORT_PATH: ${{ runner.temp }}/prod-smoke.json
         run: node scripts/deploy-recovery.mjs recover "$RUNNER_TEMP/pre-deploy.json" "$RUNNER_TEMP/deploy-recovery.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always() && steps.pre.outcome == 'success'
@@ -380,7 +400,13 @@ jobs:
   # GH_TOKEN is the job token. Never echo it, CLOUDFLARE_API_TOKEN, or ROOM_RECEIPT_TOKEN.
   release-runtime:
     needs: [gate, deploy]
-    if: needs.deploy.result == 'success' && needs.gate.outputs.go == 'true'
+    # The optional probe is a transitive ancestor through deploy. Override
+    # implicit success() so its intentional skip does not suppress publication.
+    if: >-
+      !cancelled() &&
+      needs.gate.result == 'success' &&
+      needs.deploy.result == 'success' &&
+      needs.gate.outputs.go == 'true'
     permissions:
       contents: write
     runs-on: ubuntu-latest
@@ -388,7 +414,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          ref: ${{ needs.gate.outputs.sha }}
+          # Tools come from the immutable workflow revision, not an older target.
+          ref: ${{ github.workflow_sha }}
           fetch-depth: 0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -405,19 +432,26 @@ jobs:
           OUT="$RUNNER_TEMP/project-room-runtime"
           node scripts/runtime-package.mjs create "$GITHUB_WORKSPACE" "$SHA" "$OUT"
           node scripts/runtime-package.mjs verify "$OUT" "$SHA"
-          tar -C "$OUT" -czf "$RUNNER_TEMP/project-room-runtime.tar.gz" .
+          python3 scripts/runtime-archive.py "$OUT" "$RUNNER_TEMP/project-room-runtime.tar.gz" --expected-commit "$SHA"
       - name: Publish the runtime release
         env:
           GH_TOKEN: ${{ github.token }}
+          REVISION: ${{ inputs.runtime_revision }}
           SHA: ${{ needs.gate.outputs.sha }}
         run: |
           set -euo pipefail
           SHORT="${SHA:0:7}"
           DATE="$(date -u +%Y-%m-%d)"
-          TAG="runtime-${DATE}-${SHORT}"
+          TAG="runtime-${DATE}-${SHORT}${REVISION:+-${REVISION}}"
+          verify_release() {
+            python3 scripts/verify-runtime-release.py --repository "$GITHUB_REPOSITORY" \
+              --tag "$TAG" --sha "$SHA" --expected "$RUNNER_TEMP/project-room-runtime" \
+              --receipt "$RUNNER_TEMP/runtime-publication-verification.json"
+          }
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            verify_release
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest
-            echo "Release ${TAG} already exists; marked latest."
+            echo "Release ${TAG} already exists; target and asset verified before marking latest."
             exit 0
           fi
           gh release create "$TAG" \
@@ -425,5 +459,14 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --target "$SHA" \
             --title "$TAG" \
-            --latest \
+            --latest=false \
             --notes "Node agent runtime from deployed commit ${SHORT}. Node 24.19+."
+          verify_release
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --latest
+      - name: Retain runtime publication verification
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: runtime-publication-verification-${{ needs.gate.outputs.sha }}
+          path: ${{ runner.temp }}/runtime-publication-verification.json
+          if-no-files-found: ignore

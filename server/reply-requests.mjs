@@ -100,8 +100,27 @@ export class ReplyRequests {
         verifyAnchor(saved.throughSequence, saved.throughEventId); afterSequence = saved.throughSequence;
       }
       const records = messageRepository(this.store, roomId, state);
-      const byMessage = records.getMany ? records.getMany(rows.filter(row => row.type === 'message.posted').map(row => row.message_id || row.id)) : records;
-      const owners = replyContextOwners({ ...state, messages: records.records() });
+      // Ownership already visits every canonical message in posting order. Keep
+      // their metadata for validation and paging instead of fetching the
+      // entire archive again in ID batches. Bodies are resolved only for output.
+      // This is request-local, not an auth cache.
+      const byMessage = new Map();
+      function* indexedRecords() {
+        for (const message of records.records({ omitBodies: true })) {
+          byMessage.set(message.id, message);
+          yield message;
+        }
+      }
+      const owners = replyContextOwners({ ...state, messages: indexedRecords() });
+      const fullMessages = new Map();
+      const withBody = message => {
+        if (!fullMessages.has(message.id)) {
+          const full = records.get(message.id);
+          if (!full) changed();
+          fullMessages.set(message.id, full);
+        }
+        return fullMessages.get(message.id);
+      };
       const byEvent = new Map(rows.map(row => [row.id, row])), terminals = new Map(), openings = new Map();
       for (const request of Object.values(requests)) {
         if (requestMessageId !== null ? request.id !== requestMessageId : !directionMatches(request, auth.member.id, direction)) continue;
@@ -129,12 +148,13 @@ export class ReplyRequests {
       const items = []; let rowBytes = 0, hasMore = false;
       for (const entry of relevant) {
         if (entry.row.sequence <= afterSequence) continue;
+        if (items.length === limit) { hasMore = true; break; }
         const { row, request, kind, message } = entry;
         const item = { sequence: row.sequence, eventId: row.id, requestMessageId: request.id, kind,
           requesterId: request.requesterId, recipientId: request.recipientId, workItemId: request.workItemId,
-          actorId: row.actor_id, at: row.at, ...(message ? { message: readMessage(message) } : { reason: request.reason }) };
+          actorId: row.actor_id, at: row.at, ...(message ? { message: readMessage(withBody(message)) } : { reason: request.reason }) };
         const bytes = Buffer.byteLength(JSON.stringify(item));
-        if (items.length === limit || rowBytes + bytes > REPLY_PAGE_BYTES) {
+        if (rowBytes + bytes > REPLY_PAGE_BYTES) {
           if (!items.length) fail("reply_entry_too_large", "One request entry exceeds the page budget", 413);
           hasMore = true; break;
         }
@@ -182,7 +202,7 @@ export class ReplyRequests {
           room: { id: state.room.id, title: state.room.title,
             purpose: instructions.charter?.purpose ?? state.room.purpose ?? "" },
           instructions,
-          previousExchanges: previousExchanges(request, state, rows, byMessage, owners),
+          previousExchanges: previousExchanges(request, state, rows, byMessage, owners, withBody),
           work: request.workItemId && Object.hasOwn(state.workItems, request.workItemId)
             ? currentWorkRecord(state.workItems[request.workItemId]) : null,
           omitted: ["other_work", "other_messages", "private_inbox", "external_resources"],
@@ -202,7 +222,7 @@ export class ReplyRequests {
 
 // Only an explicit request replying to the last answer of the same pair carries
 // prior context. Bound the chain; never silently drop earlier constraints.
-function previousExchanges(request, state, rows, byMessage, owners) {
+function previousExchanges(request, state, rows, byMessage, owners, withBody) {
   const answered = new Map(Object.values(state.replyRequests ?? {})
     .filter(entry => entry.status === "answered").map(entry => [entry.responseMessageId, entry]));
   const exchanges = [], seen = new Set([request.id]);
@@ -219,7 +239,7 @@ function previousExchanges(request, state, rows, byMessage, owners) {
     const messages = rows.filter(row => row.type === "message.posted" && row.sequence <= terminal.sequence)
       .map(row => byMessage.get(row.message_id || row.id)).filter(message => message && owners.get(message.id) === prior.id
         && (!message.toMemberId || [request.requesterId, request.recipientId].every(memberId =>
-          memberId === message.authorId || memberId === message.toMemberId))).map(readMessage);
+          memberId === message.authorId || memberId === message.toMemberId))).map(message => readMessage(withBody(message)));
     if (!messages.some(message => message.id === prior.id) || !messages.some(message => message.id === prior.responseMessageId)
       || messages.some(message => message.body === null))
       fail("reply_follow_up_unavailable", "Earlier exchange contains withdrawn context; start a new request with the relevant context", 409);

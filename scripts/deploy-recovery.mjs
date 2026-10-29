@@ -1,5 +1,6 @@
 // Schema-aware recovery for deploy-prod. Reading /api/version/worker does not
 // open a Durable Object; schemas are parsed from exact Git blobs, never evaluated.
+import { timeoutOnlyEvidence } from './readiness-recovery-hold.mjs';
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
@@ -180,6 +181,21 @@ export async function deploymentStatus(name, run = command, retry = {}, rest = r
     return rest(name);
   }
 }
+export function heldRecovery(snapshot, raw, context) {
+  if (context.sha !== snapshot.targetSha || context.prodOutcome !== 'success' || context.entryOutcome !== 'success' || context.smokeOutcome !== 'failure'
+      || !timeoutOnlyEvidence(raw, { ...context, sha: snapshot.targetSha })) return null;
+  return { status: 'RECOVERY HELD — MANUAL DIAGNOSIS REQUIRED', targetSha: snapshot.targetSha,
+    releaseFailed: true, smokeSha256: context.digest, recordedAt: new Date().toISOString(),
+    compatibilityLimit: 'Only DO readiness timed out. This is inconclusive health evidence, not a healthy release or proof that prior code will improve it. No automatic rollback was attempted.',
+    workers: Object.fromEntries(['prod', 'entry'].map(name => [name, {
+      disposition: 'recovery_held', rollbackAttempted: false,
+      previousVersionId: snapshot[name]?.versionId ?? null,
+      previousCodeSchemaVersion: snapshot[name]?.codeSchemaVersion ?? null,
+      candidateCodeSchemaVersion: snapshot.candidateCodeSchemaVersion,
+      reason: 'Complete matching smoke passed versions, signed cards, health and pages; DO readiness timeout only. Diagnose before another code transition.',
+    }])) };
+}
+
 async function main() {
   const [mode, path, output] = process.argv.slice(2);
   if (mode === 'snapshot') {
@@ -203,11 +219,16 @@ async function main() {
   } else if (mode === 'recover') {
     const snapshot = JSON.parse(readFileSync(path, 'utf8'));
     const attempted = { prod: !['', undefined, 'skipped'].includes(process.env.PROD_OUTCOME), entry: !['', undefined, 'skipped'].includes(process.env.ENTRY_OUTCOME) };
-    const report = await recoverWorkers(snapshot, attempted, { status: deploymentStatus, readVersion: name => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN), rollback: async (name, id) => command(['pnpm', 'exec', 'wrangler', 'rollback', id, ...(name === 'prod' ? ['--env', 'production'] : []), '--message', `deploy-prod run ${process.env.GITHUB_RUN_ID} failed for ${snapshot.targetSha}`, '--yes'], 'cloudflare') });
+    let rawSmoke = null;
+    try { if (process.env.SMOKE_REPORT_PATH) rawSmoke = readFileSync(process.env.SMOKE_REPORT_PATH, 'utf8'); } catch { /* no usable evidence: existing recovery policy */ }
+    const held = heldRecovery(snapshot, rawSmoke, { sha: process.env.SHA, digest: process.env.SMOKE_REPORT_SHA256,
+      origin: process.env.PROD_ORIGIN, entry: process.env.ENTRY_ORIGIN,
+      prodOutcome: process.env.PROD_OUTCOME, entryOutcome: process.env.ENTRY_OUTCOME, smokeOutcome: process.env.SMOKE_OUTCOME });
+    const report = held ?? await recoverWorkers(snapshot, attempted, { status: deploymentStatus, readVersion: name => readVersion(name === 'prod' ? process.env.PROD_ORIGIN : process.env.ENTRY_ORIGIN), rollback: async (name, id) => command(['pnpm', 'exec', 'wrangler', 'rollback', id, ...(name === 'prod' ? ['--env', 'production'] : []), '--message', `deploy-prod run ${process.env.GITHUB_RUN_ID} failed for ${snapshot.targetSha}`, '--yes'], 'cloudflare') });
     writeFileSync(output, JSON.stringify(report, null, 2) + '\n');
     console.log(recoveryDescription(report));
     if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n${recoveryDescription(report)}\n\n${report.compatibilityLimit}\n`);
-    process.exitCode = ['ROLL FORWARD REQUIRED', 'ROLLBACK NOT VERIFIED'].includes(report.status) ? 1 : 0;
+    process.exitCode = (report.releaseFailed === true || ['ROLL FORWARD REQUIRED', 'ROLLBACK NOT VERIFIED'].includes(report.status)) ? 1 : 0;
   } else throw new Error('Usage: deploy-recovery.mjs snapshot <output> | recover <pre-deploy> <output>');
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) await main();

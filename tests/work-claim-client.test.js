@@ -342,7 +342,7 @@ test('SDK board reads exactly one canonical claim page and forwards explicit con
   assert.equal(first.claimsPage.hasMore, true);
   assert.equal(Object.hasOwn(first.claimsPage, 'claims'), false);
   assert.equal(Object.hasOwn(first.claimsPage, 'swept'), false);
-  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/work-claims-read')).length, 1);
+  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/board')).length, 1);
   const last = await owner.board({ cursor: first.claimsPage.nextCursor });
   assert.deepEqual(last.claims.map(item => item.id), ids.slice(50));
   assert.equal(last.claimsPage.hasMore, false);
@@ -371,12 +371,12 @@ test('SDK board propagates canonical query refusals without returning a legacy-o
     { cursor: '' }, { cursor: 'invalid' }, { queue: 'ready', state: 'done' }]) {
     await assert.rejects(owner.board(options), invalid);
   }
-  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/work-claims-read')).length, 8);
+  assert.equal(requests.filter(path => path.startsWith('/api/rooms/commons/board')).length, 8);
   assert.equal(requests.some(path => /^\/api\/rooms\/commons\/work-claims(?:\?|$)/.test(path)), false);
 });
 
 // Delay an actual canonical HTTP response after the real route has evaluated
-// it. This detects a lost signal on board()'s second request without a fetch double.
+// it. This detects a lost signal on the Board read without a fetch double.
 test('SDK board cancellation aborts an in-flight canonical claim response', async t => {
   const { origin, token } = await fixture(t);
   let entered, closed, release;
@@ -386,12 +386,12 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   const requests = [];
   const proxy = createServer(async (req, res) => {
     requests.push(req.url);
-    if (req.method !== 'GET' || !['/api/rooms/commons', '/api/rooms/commons/work-claims-read'].includes(req.url)) {
+    if (req.method !== 'GET' || req.url !== '/api/rooms/commons/board') {
       res.writeHead(500).end(); return;
     }
     const response = await fetch(origin + req.url, { headers: { authorization: req.headers.authorization } });
     const body = await response.text();
-    if (req.url.endsWith('/work-claims-read')) {
+    if (req.url.endsWith('/board')) {
       res.on('close', closed);
       entered();
       await gate;
@@ -409,7 +409,7 @@ test('SDK board cancellation aborts an in-flight canonical claim response', asyn
   await refused;
   await disconnected;
   release();
-  assert.deepEqual(requests, ['/api/rooms/commons', '/api/rooms/commons/work-claims-read']);
+  assert.deepEqual(requests, ['/api/rooms/commons/board']);
 });
 
 

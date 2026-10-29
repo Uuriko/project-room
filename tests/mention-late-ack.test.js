@@ -30,7 +30,9 @@ test("a late ack clears a timed-out mention; an on-time ack keeps it open", t =>
   const { f, token, clock } = enrolledAgent(t);
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   say(f, f.keys.owner, { messageId: "answered-elsewhere", body: "@Scout did the deploy go out?" });
+  clock.advance(1);
   say(f, f.keys.owner, { messageId: "acked-in-time", body: "@Scout please look at the logs" });
+  clock.advance(1);
   say(f, f.keys.owner, { messageId: "ignored", body: "@Scout ping" });
   assert.deepEqual(open(f, token), ["ignored", "acked-in-time", "answered-elsewhere"]);
 

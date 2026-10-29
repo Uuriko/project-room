@@ -13,6 +13,13 @@ export class MessageCursorRoom extends DurableObject {
    after:measure('after',()=>[...q.records({afterId:'m000255'})]),before:measure('before',()=>[...q.records({afterId:'m000256',descending:true})]),
    visible:measure('visible',()=>[...q.records({visibility:{viewerId:'viewer'}})]),recent:measure('recent',()=>q.recent(100,f.visible)),
    count:measure('count',()=>q.countMetadata(f.visible)),first:measure('first',()=>[...q.firstPostedAtByAuthor()])};
+  result.sequencePage=measure('sequencePage',()=>{
+   const page=[];
+   for(const message of q.records({descending:true,beforeSequence:9000,beforeId:'m018001',visibility:{viewerId:'viewer'}})){
+    page.push(message);if(page.length===6)break;
+   }
+   return page;
+  });
   const counts=[];
   for(const viewer of ['viewer','other','private','outsider']) for(const floor of [null,{at:'2026-10-27T00:00:30.000Z',sameInstant:new Set(['m000030','m000150'])},{at:'9999-12-31T23:59:59.999Z',sameInstant:new Set()}]) {
    const key=`${viewer}:${floor?.at??'all'}`;

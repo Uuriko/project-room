@@ -173,3 +173,73 @@ for (const priorState of ["inProgress", "interrupted"]) test(`shared runtime ${p
   await run.promise;
   assert.equal(f.rpc.starts, priorState === "inProgress" ? 0 : 1);
 });
+
+test("selected request executes without claiming other requests from the same enabled requester", async t => {
+  const f = await fixture(t), old = f.post(), selected = f.post(), later = f.post();
+  const controller = new AbortController();
+  await f.run({ allowedRequestIds: [selected], controller,
+    emit: event => { if (event.status === "delivered") controller.abort(); } }).promise;
+  assert.equal(f.rpc.starts, 1);
+  assert.equal((await f.client.replyContext(selected)).request.status, "answered");
+  for (const id of [old, later]) assert.equal((await f.client.replyContext(id)).request.status, "open");
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM request_runs").get().n, 1);
+});
+
+test("selection withdrawal during runtime preparation creates no intent or execution", async t => {
+  const f = await fixture(t), id = f.post(); let selected = true;
+  const execute = Object.assign(async () => assert.fail("Unselected request executed"), {
+    prepare: async () => { selected = false; }
+  });
+  await assert.rejects(runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+    execute, selectRequest: () => selected }), { code: "request_not_selected" });
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM request_runs").get().n, 0);
+});
+
+test("request selection cannot bypass requester authorization and invalid selections fail before connecting", async t => {
+  const f = await fixture(t), id = f.post();
+  await assert.rejects(runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+    execute: () => assert.fail("Unauthorized execution"), allowRequest: () => false, selectRequest: () => true }),
+  { code: "requester_not_allowed" });
+  for (const allowedRequestIds of [[], [id, id], [""], "all"]) {
+    await assert.rejects(f.run({ allowedRequestIds }).promise, /distinct valid request IDs/);
+  }
+  assert.equal(f.connects, 0);
+});
+
+test("saved response survives deselection but still obeys requester revocation", async t => {
+  const f = await fixture(t), id = f.post(); let starts = 0;
+  const execute = async () => { starts++; return { body: "Saved exact result" }; };
+  await runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id, execute, selectRequest: () => true });
+  const original = f.db.prepare("SELECT * FROM request_runs").get();
+  const replay = await runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+    execute: () => assert.fail("Saved result reexecuted"), selectRequest: () => false });
+  assert.equal(replay.hostExecuted, false);
+  assert.equal(starts, 1);
+  assert.deepEqual(f.db.prepare("SELECT * FROM request_runs").get(), original);
+  await assert.rejects(runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+    execute, selectRequest: () => false, allowRequest: () => false }), { code: "requester_not_allowed" });
+});
+
+test("supervisor recovers deselected pending delivery without execution and honors requester revocation", async t => {
+  const f = await fixture(t), id = f.post(); let starts = 0;
+  const original = RoomAgentClient.prototype.replyAction;
+  RoomAgentClient.prototype.replyAction = async () => { throw Object.assign(new Error("Synthetic delivery outage"), { status: 503 }); };
+  try {
+    await assert.rejects(runRequestOnce({ connection: f.connection, db: f.db, requestMessageId: id,
+      execute: async () => { starts++; return { body: "Retained answer" }; } }), /Synthetic delivery outage/);
+  } finally { RoomAgentClient.prototype.replyAction = original; }
+  const saved = f.db.prepare("SELECT * FROM request_runs").get();
+  assert.ok(saved.response); assert.equal(saved.delivered, 0);
+  const denied = f.run({ allowedRequesterIds: ["reviewer"], allowedRequestIds: ["future-request"] });
+  await delay(150); denied.controller.abort(); await denied.promise;
+  assert.equal(f.db.prepare("SELECT delivered FROM request_runs").get().delivered, 0);
+  assert.equal((await f.client.replyContext(id)).request.status, "open");
+  const controller = new AbortController();
+  await f.run({ allowedRequestIds: ["future-request"], controller,
+    emit: event => { if (event.status === "delivered") controller.abort(); } }).promise;
+  assert.equal(starts, 1); assert.equal(f.connects, 0);
+  const recovered = f.db.prepare("SELECT * FROM request_runs").get();
+  assert.equal(recovered.delivered, 1); assert.equal(recovered.response, saved.response);
+  assert.equal(recovered.id, saved.id); assert.equal(recovered.attempt_id, saved.attempt_id);
+  assert.equal((await f.client.replyContext(id)).request.status, "answered");
+});

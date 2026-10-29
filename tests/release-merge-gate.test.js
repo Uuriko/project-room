@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { CONTEXT, REQUIRED, protectionPlan, landingProtection, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, collisionClaims, guardedMerge, openAuthorizations } from '../scripts/release-merge-gate.mjs';
+import { CONTEXT, REQUIRED, roomRead, protectionPlan, landingProtection, candidateReady, grantOf, problemKeyCheck, pauseCheck, claimsFromPages, collisionClaims, guardedMerge, openAuthorizations } from '../scripts/release-merge-gate.mjs';
 const candidate = { repo: 'Uuriko/project-room', pr: 4102, head: 'a'.repeat(40), base: 'b'.repeat(40) };
 const grant = { kind: 'room.release-merge.v1', ...candidate, purpose: 'deploy-fix', directiveMessageId: 'owner-directive', problemKeys: ['release:landing'], workClaimId: 'source-work' };
 const protection = { enforceAdmins: true, strict: false, checks: [...REQUIRED.map(context => ({ context, app_id: 15368 })), { context: CONTEXT, app_id: -1 }] };
@@ -266,4 +266,34 @@ test('collision scans validate keys and retain conflicts and incomplete-page ref
   assert.equal(reads, 3);
   assert.throws(() => problemKeyCheck(grant, claims), /held by peer/);
   await assert.rejects(collisionClaims(grant, async () => ({ claims: [], hasMore: true })), /Incomplete/);
+});
+
+
+test('Room read failure retains safe phase/status/code without logging private remote diagnostics', async () => {
+  const error = Object.assign(new Error('Bearer SECRET response body'), {
+    status: 503, code: 'request_failed', retryAfterMs: 1000,
+    hint: 'SECRET hint', response: { token: 'SECRET' }, url: 'https://SECRET.invalid' });
+  const writes = [];
+  await assert.rejects(guardedMerge(candidate, {
+    inspect: () => roomRead('merge-slot', async () => { throw error; }),
+    validated: () => writes.push('journal'), status: () => writes.push('status'), merge: () => writes.push('merge'),
+  }), failure => {
+    assert.equal(failure.message, 'Room read failed {"phase":"merge-slot","status":503,"code":"request_failed","retryAfterMs":1000}');
+    assert.equal(failure.cause, error);
+    assert.equal(failure.message.includes('SECRET'), false);
+    return true;
+  });
+  assert.deepEqual(writes, []);
+});
+test('Room read diagnostics distinguish timeout and sanitize malformed metadata without changing successful reads', async () => {
+  const result = { state: 'unclaimed' };
+  assert.equal(await roomRead('release-pause', async () => result), result);
+  for (const [error, detail] of [
+    [new DOMException('private URL', 'TimeoutError'), { code: 'timeout' }],
+    [new TypeError('private URL'), { code: 'transport_failed' }],
+    [Object.assign(new Error('SECRET'), { status: '503 SECRET', code: 'SECRET token\n', retryAfterMs: -1 }), {}],
+  ]) await assert.rejects(roomRead('connection', async () => { throw error; }), failure => {
+    assert.equal(failure.message, `Room read failed ${JSON.stringify({ phase: 'connection', ...detail })}`);
+    return true;
+  });
 });
