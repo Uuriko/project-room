@@ -14,6 +14,70 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
+### Reliability cycle follow-up
+
+Production remains the independently verified `c47c3fc` release described below;
+no new Worker deployment was performed for the following changes. The browser
+navigation repair (#5252) passed 30 cases across eight scripts and remains a
+test-only correction, with the mobile Search viewport issue still unresolved.
+The machine command output-budget integration
+([#5255](https://github.com/Uuriko/project-room/pull/5255)) merged at `5479e8d2`:
+100 direct machine checks and 108 affected checks passed. One retained-byte budget
+now covers stdout and stderr, including queued output after termination. This
+machine source is outside the published runtime archive; neither an installed
+agent upgrade nor remote descendant termination is established by that merge.
+
+The proposed cold reply-context hydration change
+([#5256](https://github.com/Uuriko/project-room/pull/5256)) passed 93 focused checks
+and actual Workers corruption checks after independent review caught and repaired
+a strict-JSON regression. That correctness evidence did not justify its performance
+cost. The peer's explicit performance HOLD is supported by 144 raw samples, 12 per
+case, whose medians were independently recomputed: at 5k messages, warm
+baseline/candidate were 11.5156875/29.4373545 ms (about 2.56×), and cold were
+22.4107085/29.8986045 ms. These are peer-host timings; “cold” only cleared the
+projection cache. The benchmark source was inspected but not independently rerun.
+Source commit `f082949795deba3242e6edef8b51890319c9cfbc` and raw SHA-256
+`64b63af431c1f77b8ebe2f68a493e17c7eefa3254f798f67682fab3c6e10e6d0`
+bind the retained `peer-reply-benchmark-source.mjs` and
+`peer-reply-benchmark-raw.json` under `release-prep-20261029/`.
+The peer's final acknowledgement (Room sequence 22803) confirms the revert and
+that no production deployment occurred. The candidate was merged but never deployed; the allocation
+benefit did not justify the reported slowdown. Revert
+[#5257](https://github.com/Uuriko/project-room/pull/5257) restored the exact
+qualified `5479e8d2` tree, `9506df174b998fc25a57f8c6d3c8f44e0c835ade`, at
+`20e5fc33751e4e4dd92ca35423440e4f33971818`. Candidate source, negative controls
+and qualification evidence remain preserved for investigation.
+
+The performance HOLD at Room sequence 22791 was missed because a sent-message
+sequence was used to advance the read cursor. A sent sequence does not prove that
+intervening messages were consumed. Continuation must use the cursor returned by
+the actual read; this is a coordination correctness fix, not a new permission or
+approval requirement. No further optimization is implied by the revert.
+
+Landing diagnostics
+([#5258](https://github.com/Uuriko/project-room/pull/5258)) merged at
+`a1de72cc6fea26dc2898c714a69386053a426c4a`. The local landing wrapper now uses
+the qualified script. A live read-only control against draft PR #5231 returned
+`candidate/pr_is_draft` with an actionable hint after two remote reads and zero
+writes (`release-prep-20261029/merge-diagnostic-live-readonly.json`). This fixes
+the ambiguous refusal that obscured #5250's draft state; it does not bypass
+candidate identity or draft checks.
+
+Final independent verification at 2026-10-29T11:01:52Z again verified stable
+`c47c3fc` serving source. Authenticated orientation returned 123 work items, and
+the deployment, merge and integration claims were read back as unclaimed.
+Receipts are `release-prep-20261029/sustained-final-verification/verify-F5xtB3/receipt.json`
+and `release-prep-20261029/sustained-final-auth.json`. This closes the cycle's
+release/claim reconciliation, not the remaining performance and usability work.
+
+A subsequent bounded cross-laptop observation recorded 18 successful readiness
+responses on `c47c3fc`, alongside six matched canonical request traces. These
+observations do not close incident #5177: the stored window still attributed
+17,380 ms CPU to 50 reply-context calls. Shared history/projection work remains
+an investigation target, and correlation alone does not establish the timeout's
+cause. Deployment, active connector adoption and installed desktop execution
+remain distinct from source/test qualification.
+
 The coordinated integration
 ([#5249](https://github.com/Uuriko/project-room/pull/5249)) merged #5235, #5237
 and #5238–#5248 at `c47c3fc79cc3af65db095f0b653d6dedb9e24454`, tree
