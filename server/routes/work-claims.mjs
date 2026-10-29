@@ -13,6 +13,7 @@
 import { retentionReport } from "../retention-response.mjs";
 import { isGuestAgentMemberId } from "../guest-agent-links.mjs";
 import { buildWorkClaimPage, handleWorkClaims } from "../work-claim-routes.mjs";
+import { withProjectMapOverlap } from "../project-map-store.mjs";
 
 function requireRoomScope(ctx, auth, writing = false) {
   const required = writing ? "rooms:write" : "rooms:read";
@@ -56,8 +57,8 @@ export async function getRetentionDashboard(ctx) {
 export async function getWorkClaimsRead(ctx) {
   const { roomId, auth } = authenticateRead(ctx);
   const now = typeof ctx.store.now === "function" ? ctx.store.now() : Date.now();
-  return ctx.json(ctx.res, 200, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
-    auth.member.id, ctx.url.searchParams, now));
+  return ctx.json(ctx.res, 200, withProjectMapOverlap(ctx.store, roomId, buildWorkClaimPage(ctx.store.workClaims.list(roomId), roomId,
+    auth.member.id, ctx.url.searchParams, now)));
 }
 
 export async function provenanceRoute(ctx) {

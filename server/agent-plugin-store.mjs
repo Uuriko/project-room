@@ -41,6 +41,12 @@ import {
 
 export { ApiKeyError, DirectoryError, ManifestError, WebhookSubscriptionError, signPayload, verifySignature, API_KEY_PREFIX };
 
+function sameScopeSet(actual, expected) {
+  if (!Array.isArray(actual) || actual.length !== expected.length) return false;
+  const have = new Set(actual);
+  return expected.every(scope => have.has(scope));
+}
+
 // Purely additive, intentionally outside the writer fence (see
 // unfencedAdditiveTables in server/writer-fence.mjs): older writers have no
 // code path to these tables, and every row is scoped to an agent identity.
@@ -228,6 +234,9 @@ export class AgentPluginError extends Error {
 }
 
 export class AgentPluginStore {
+  #protectedOnboardingKeyIds = new Set();
+  #onboardingRotationDepth = 0;
+
   constructor(store) {
     this.store = store;
     this.db = store.db;
@@ -433,18 +442,65 @@ export class AgentPluginStore {
     }
   }
 
+  onboardingMcpScopes(roomId) {
+    // CX5-FIX: heartbeats:report/read let the saved credential run the
+    // room-scoped wake listener (createHeartbeatActor binds it to this
+    // room via the mcp:room: scope below). Without them the standard
+    // setup credential 403'd on its own listener surface.
+    return [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"];
+  }
+
   issueOnboardingMcpToken({ identityId, roomId, label }) {
     const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
     const issued = this.issueApiKey({
       identityId,
-      // CX5-FIX: heartbeats:report/read let the saved credential run the
-      // room-scoped wake listener (createHeartbeatActor binds it to this
-      // room via the mcp:room: scope below). Without them the standard
-      // setup credential 403'd on its own listener surface.
-      scopes: [`mcp:room:${roomId}`, "rooms:read", "rooms:write", "mcp:inbox", "mcp:wake", "heartbeats:report", "heartbeats:read"],
+      scopes: this.onboardingMcpScopes(roomId),
       expiresAt: this.store.now() + 30 * 86400000,
       label: host
     });
+    return this.#onboardingTokenView(issued);
+  }
+
+  // POST /api/agent-rooms/{id}/token/rotate. One transaction revokes the
+  // onboarding keys already live for this room and inserts the replacement.
+  // A key minted by an overlapping rotate is claimed before the insert
+  // returns, so this rotation does not revoke it. A wider key, or an
+  // onboarding bundle for another room, is not in the revoke set. Room-create
+  // replay does not call this.
+  rotateOnboardingMcpToken({ identityId, roomId, label }) {
+    const outermost = this.#onboardingRotationDepth === 0;
+    this.#onboardingRotationDepth += 1;
+    try {
+      return this.mutate(() => {
+        const expected = this.onboardingMcpScopes(roomId);
+        const priorIds = [];
+        for (const record of this.apiKeys.keysForIdentity(identityId)) {
+          if (record.revoked || !sameScopeSet(record.scopes, expected)) continue;
+          if (this.#protectedOnboardingKeyIds.has(record.keyId)) continue;
+          priorIds.push(record.keyId);
+        }
+        const host = typeof label === "string" && label.trim() ? label.trim().slice(0, 80) : "MCP client";
+        const issued = this.#issueProtectedOnboardingKey({
+          identityId,
+          scopes: expected,
+          expiresAt: this.store.now() + 30 * 86400000,
+          label: host
+        });
+        for (const keyId of priorIds) {
+          const current = this.keys.get(keyId);
+          if (!current || current.revoked || this.#protectedOnboardingKeyIds.has(keyId)) continue;
+          this.apiKeys.revoke(keyId);
+          this.db.prepare("UPDATE agent_api_keys SET revoked=1 WHERE key_id=?").run(keyId);
+        }
+        return this.#onboardingTokenView(issued);
+      });
+    } finally {
+      this.#onboardingRotationDepth -= 1;
+      if (outermost) this.#protectedOnboardingKeyIds.clear();
+    }
+  }
+
+  #onboardingTokenView(issued) {
     return {
       credential: API_KEY_PREFIX + issued.secret,
       scopes: [...issued.scopes],
@@ -452,6 +508,32 @@ export class AgentPluginStore {
       label: issued.label,
       keyId: issued.keyId
     };
+  }
+
+  // Claim the key id before Map.set returns. An overlapping retry that
+  // starts from that insert then sees the id and leaves the key live.
+  #issueProtectedOnboardingKey(request) {
+    const previous = this.keys.set.bind(this.keys);
+    this.keys.set = (keyId, record) => {
+      this.#protectedOnboardingKeyIds.add(keyId);
+      return previous(keyId, record);
+    };
+    try {
+      const issued = this.apiKeys.issue(request);
+      const record = this.keys.get(issued.keyId);
+      this.#persistApiKey(record);
+      return issued;
+    } finally {
+      this.keys.set = previous;
+    }
+  }
+
+  #persistApiKey(record) {
+    this.db.prepare(`INSERT INTO agent_api_keys
+      (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
+      .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
+        record.label, record.createdAt, record.expiresAt);
   }
 
   notePresentedKeyUse(keyId, { at = null, ua = null } = {}) {
@@ -470,12 +552,7 @@ export class AgentPluginStore {
   issueApiKey({ identityId, scopes, expiresAt = null, label = null }) {
     return this.mutate(() => {
       const issued = this.apiKeys.issue({ identityId, scopes, expiresAt, label });
-      const record = this.keys.get(issued.keyId);
-      this.db.prepare(`INSERT INTO agent_api_keys
-        (key_id, key_hash, identity_id, scopes_json, label, created_at, expires_at, revoked, last_used_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
-        .run(record.keyId, record.keyHash, record.identityId, JSON.stringify([...record.scopes]),
-          record.label, record.createdAt, record.expiresAt);
+      this.#persistApiKey(this.keys.get(issued.keyId));
       return issued;
     });
   }
