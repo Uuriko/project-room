@@ -4820,6 +4820,15 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     for (const { memberId } of rows) if (Object.hasOwn(members, memberId)) members[memberId] = { ...members[memberId], identityRevoked: true };
     return { ...room, state: { ...room.state, members } };
   }
+  workProjection(roomId) {
+    // Read only work-view fields. Never populate the canonical full-room cache
+    // with this partial state, and preserve work entity integrity checks.
+    const row = (this._workProjectionStmt ??= this.db.prepare("SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.agentHalts') AS fields FROM rooms WHERE id=?")).get(roomId);
+    if (!row) fail(404, "room_not_found", "Room not found");
+    const [room, members, workItems, agentHalts] = JSON.parse(row.fields);
+    const state = hydrateWorkItems(this.db, roomId, { room, members, workItems: workItems ?? {}, agentHalts: agentHalts ?? {} });
+    return { sequence: row.sequence, state: deepFreeze(state) };
+  }
   snapshot(token, roomId, expectedSessionBinding = null, view = "full", helpContext = false, offerContext = false, auditView = "full", messageLimit = null) {
     // One read transaction keeps sequence, projection, and audit tail at the same commit.
     return this.readTransaction(() => {
@@ -4828,7 +4837,7 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       if (!["full", "activity"].includes(auditView) || auditView !== "full" && view !== "full") fail(422, "invalid_snapshot_view", "Choose a supported snapshot view");
       if (typeof helpContext !== "boolean" || helpContext && view !== "work") fail(422, "invalid_help_context", "Help discovery requires the current work view");
       if (typeof offerContext !== "boolean" || offerContext && view !== "full") fail(422, "invalid_offer_context", "Browser offers require the full room view");
-      const room = this.withIdentityRevoked(roomId, this.room(roomId));
+      const room = this.withIdentityRevoked(roomId, view === "work" ? this.workProjection(roomId) : this.room(roomId));
       if (view === "work") return { snapshotView: "work", snapshotVersion: 1, roomId, sequence: room.sequence,
         ...(helpContext ? { helpContextVersion: 1, evaluatedAt: new Date(this.now()).toISOString() } : {}),
         state: { room: room.state.room, members: room.state.members,
