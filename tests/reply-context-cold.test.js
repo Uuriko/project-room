@@ -55,3 +55,13 @@ for(const body of [true,1])test(`metadata validation does not coerce entity body
 test('unrelated canonical work corruption still refuses reply preparation',t=>{
  const {store,read}=fixture(t,'inline'),owner=store.issueAccessKey('commons','owner');store.command(owner,'commons',{id:'work',type:'work.proposed',data:{workItemId:'unrelated-work',title:'Other work',definitionOfDone:'Keep canonical validation',mode:'read',accountableMemberId:'owner'}});store.migrateWorkProjections();assert.equal(store.db.prepare("SELECT count(*) AS n FROM work_entities WHERE room_id='commons'").get().n,1);store.db.prepare("UPDATE work_entities SET body='{}' WHERE room_id='commons'").run();store._dropProjectionCache();assert.throws(read,/work_projection_corrupt/);
 });
+
+for (const form of ['comment', 'trailing-comma', 'single-quoted-key']) test(`metadata reader refuses JSON5 projection ${form}`, t => {
+ const {store,read}=fixture(t,'inline');
+ const raw=store.db.prepare("SELECT projection FROM rooms WHERE id='commons'").get().projection;
+ const invalid=form==='comment' ? raw.replace('{','{/* not strict JSON */')
+   : form==='trailing-comma' ? raw.slice(0,-1)+',}' : raw.replace('"room":',"'room':");
+ assert.notEqual(invalid,raw);assert.throws(()=>JSON.parse(invalid));
+ store.db.prepare("UPDATE rooms SET projection=? WHERE id='commons'").run(invalid);store._dropProjectionCache();
+ assert.throws(read,/projection_corrupt: invalid room JSON/);
+});

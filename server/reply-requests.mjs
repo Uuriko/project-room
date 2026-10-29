@@ -53,8 +53,9 @@ export class ReplyRequests {
         if (!row) fail("room_not_found", "Room not found", 404);
         room = { sequence: row.sequence, state: { replyRequests: row.requests ? JSON.parse(row.requests) : {} } };
       } else {
-        const row = this.store.db.prepare("SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
+        const row = this.store.db.prepare("SELECT sequence,json_valid(projection) AS valid_projection,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
         if (!row) fail("room_not_found", "Room not found", 404);
+        if (row.valid_projection !== 1) throw new Error("projection_corrupt: invalid room JSON");
         const [metadata, members, workItems, replyRequests, messagesArchive] = JSON.parse(row.fields);
         const messages = liveMessageMetadata(this.store, roomId);
         if (messages === null) {
