@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { RoomStore } from "../server/store.mjs";
 import { createRoomServer } from "../server/http.mjs";
 import { AgentRooms } from "../server/agent-rooms.mjs";
+import { readBoard } from "../server/board-read.mjs";
 
 async function fixture(t) {
   const store = new RoomStore(":memory:");
@@ -46,6 +47,17 @@ test("hosted Board includes the canonical REST-created claim without changing le
   assert.equal(reply.status, 200);
   assert.equal(reply.body.result.isError, undefined);
   const board = reply.body.result.structuredContent;
+  const direct = readBoard(f.store, f.identity.secret, f.roomId);
+  const http = await f.request(`/api/rooms/${f.roomId}/board`);
+  assert.equal(http.status, 200);
+  // Evaluation timestamps may advance between calls; all content, viewer
+  // identity, halt records and read-only claim metadata must agree.
+  const shape = ({ evaluatedAt: _at, claimsPage, ...value }) => {
+    const { evaluatedAt: _claimAt, ...page } = claimsPage;
+    return { ...value, claimsPage: page };
+  };
+  assert.deepEqual(shape(board), shape(direct));
+  assert.deepEqual(shape(http.body), shape(direct));
   assert.deepEqual(board.claims, canonical.body.claims);
   const claim = board.claims.find(item => item.id === "rest-created");
   assert.equal(claim.state, "claimed");
