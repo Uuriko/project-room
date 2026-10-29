@@ -348,6 +348,9 @@ test("the event surface has not grown without this sweep noticing", () => {
   // room.starter_seeded is exercised above via seedStarter (it is not a command).
   // agent_invite.minted is exercised above via an owner-level invite mint (it is not a command).
   // dm.consent_changed is exercised on a real RoomStore in tests/dm-consent-events.test.js.
-  assert.equal(Object.values(T).length, 67,
+  // member.merged and pair.requested/approved/denied are not exercised here:
+  // they need an agent-pairing flow and two live agent members. They are
+  // covered by tests/pairing-flow.test.js and tests/pairing-reconnect.test.js.
+  assert.equal(Object.values(T).length, 71,
     "EVENT_TYPES changed: add the new type to this sweep, then update this count");
 });
