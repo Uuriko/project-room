@@ -120,7 +120,7 @@ test("explicit answer appends once, retains exact historical retries and does no
   assert.equal(request.status, "answered"); assert.equal(request.revision, 1);
   assert.equal(request.responseMessageId, command.data.messageId); assert.equal(request.terminalActorId, "agent");
   assert.equal(request.contextEventId, q.receipt.event.id); assert.equal(request.responseContextSequence, q.receipt.sequence);
-  f.post("owner", { body: "Later comment", replyToId: request.id });
+  f.post("guest", { body: "Later comment", replyToId: request.id });
   const sequence = f.store.room("commons").sequence;
   assert.equal(f.send("agent", command).event.id, saved.event.id); assert.equal(f.send("guest", q.command).duplicate, true);
   assert.equal(f.store.room("commons").sequence, sequence);
@@ -141,20 +141,22 @@ test("request bundles reject missing, null, mixed, spoofed and proposal fields w
     assert.throws(() => f.send("agent", f.answer(q, q.receipt, patch)));
   }
   const missing = f.answer(q); delete missing.data.workItemId; assert.throws(() => f.send("agent", missing));
-  assert.throws(() => f.send("reviewer", f.answer(q)), /requested participant/);
+  assert.throws(() => f.send("reviewer", f.answer(q)), /Reply must reference a message in this Room/);
   assert.equal(auditRecovery(f.store).dataSha256, after);
 });
 
+// Fresh directed-thread writes require a participant, including the Room owner.
+// These context fixtures use the requester; historical reducer replay is unchanged.
 test("ordinary clarification changes context, but independent request/work branches do not", t => {
   const f = fixture(t), q = f.open(), subject = q.command.data.messageId;
   const clarification = f.post("guest", { messageId: "clarification", body: "Consider accessibility too.", replyToId: subject });
   assert.equal(f.state().replyRequests[subject].contextEventId, clarification.event.id);
   assert.equal(f.state().replyRequests[subject].revision, 0);
   assert.throws(() => f.send("agent", f.answer(q)), /Stale reply request context/);
-  const nested = f.open("owner", { messageId: "nested", replyToId: subject });
+  const nested = f.open("guest", { messageId: "nested", replyToId: subject });
   f.post("agent", { messageId: "nested-child", body: "Different question", replyToId: nested.command.data.messageId });
   f.send("owner", { id: "work", type: "work.proposed", data: { workItemId: "other-work", title: "Independent", definitionOfDone: "Text", accountableMemberId: "agent", mode: "read" } });
-  f.post("owner", { messageId: "different-work", workItemId: "other-work", body: "Separate work", replyToId: subject });
+  f.post("guest", { messageId: "different-work", workItemId: "other-work", body: "Separate work", replyToId: subject });
   f.post("agent", { messageId: "different-work-child", body: "Still separate", replyToId: "different-work" });
   let at = Date.now();
   f.store.now = () => at;
@@ -220,7 +222,7 @@ test("request map is bounded and unsupported event policies cannot be silently i
 test("selected exchange freezes pages, exposes basis only after context is drained, and stays read-only", t => {
   const f = fixture(t), q = f.open(), id = q.command.data.messageId;
   const clarify = f.post("guest", { messageId: "context", body: "Exact clarification 🪷", replyToId: id });
-  f.open("owner", { messageId: "independent", replyToId: id });
+  f.open("guest", { messageId: "independent", replyToId: id });
   const before = auditRecovery(f.store), first = f.store.replyRequests.selected(f.keys.agent, "commons", id, { limit: 1 });
   assert.equal(first.current.answerBasis, null); assert.equal(first.page.hasMore, true);
   assert.deepEqual(first.page.items.map(row => row.kind), ["opened"]);
@@ -337,11 +339,11 @@ test("zero checkpoints, post-terminal comments and pasted-draft provenance stay 
   const f = fixture(t);
   f.send("owner", { id: "propose", type: "work.proposed", data: { workItemId: "work", title: "Agenda", definitionOfDone: "Clear agenda", accountableMemberId: "agent", mode: "read" } });
   const q = f.open("guest", { workItemId: "work" }), id = q.command.data.messageId;
-  const draft = f.post("owner", { messageId: "pasted", body: "Draft", replyToId: id, workItemId: "work", packetId: "packet", basisRevision: 0 });
+  const draft = f.post("guest", { messageId: "pasted", body: "Draft", replyToId: id, workItemId: "work", packetId: "packet", basisRevision: 0 });
   const context = f.store.replyRequests.selected(f.keys.agent, "commons", id);
   assert.deepEqual(context.page.items.at(-1).message.proposal, { packetId: "packet", basisRevision: 0, submittedAtRevision: 0, attribution: "manual-unverified" });
   f.send("agent", f.answer(q, draft));
-  f.post("owner", { messageId: "after-answer", body: "Thanks", replyToId: id });
+  f.post("guest", { messageId: "after-answer", body: "Thanks", replyToId: id });
   assert.equal(f.store.replyRequests.selected(f.keys.agent, "commons", id).page.items.at(-1).message.id, "after-answer");
   const history = f.store.replyRequests.history(f.keys.agent, "commons");
   assert.equal(history.page.items.some(row => row.message?.id === "after-answer"), false);
