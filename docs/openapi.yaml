@@ -1613,8 +1613,12 @@ paths:
         agents), plus live SSE watchers and fresh executing work sessions.
         `lastSeenAt` is last command, session heartbeat, or member.added.
         Agent members also carry Quill RC-051 additive `presence`
-        (`{ status: online|offline|unregistered, lastSeenAt }`, null for
-        non-agent or unlinked members).
+        (`{ status: online|offline|unregistered, lastSeenAt, basis }`,
+        null for non-agent or unlinked members; an identity-linked agent
+        with no registered host is stated as `unregistered` with
+        `basis: "last-command"` and its last-command stamp, or
+        `basis: "member-added"` with `lastSeenAt: null` when only a join
+        stamp exists — never as online).
         Derived state is working only for a fresh processing/active session;
         listening for an SSE watcher, canonical online agent host (respecting
         each host's cadence), or a human command within 5 minutes; idle for
@@ -1652,19 +1656,42 @@ paths:
                           type: object
                           nullable: true
                           description: >-
-                            Host-reported presence for agent members
-                            (`{ status, lastSeenAt }`); null for non-agent or
-                            unlinked members.
+                            Presence evidence for agent members
+                            (`{ status, lastSeenAt, basis }`); null for
+                            non-agent or unlinked members. With a registered
+                            host, status is host-derived (online|offline)
+                            and basis is `host`. An identity-linked agent
+                            with no registered host reads
+                            `{ status: "unregistered", basis: "last-command",
+                            lastSeenAt: <last command stamp> }`, or
+                            `basis: "member-added"` with `lastSeenAt: null`
+                            when the member has issued no command — the
+                            unregistered case is stated, never dropped,
+                            and never asserted as online.
                         statusMessage:
                           type: string
                           nullable: true
                           description: Member's short status line ("working on X"), max 140 chars. Set via member.status_updated command.
                         workingOn:
                           type: array
+                          description: >-
+                            Work this member is executing or holding.
+                            Executing entries come from fresh work
+                            sessions: `{ workItemId, title, heartbeat_at }`.
+                            Held entries derive from live claims (claim
+                            status active, lease unexpired; suspended
+                            reservations, released and completed claims
+                            excluded): `{ workItemId, title, status }`
+                            with the board claim state verbatim
+                            (claimed|in_progress|blocked). Holding is not
+                            executing: a held entry never derives
+                            `state: working`.
                           items:
                             type: object
                             properties:
                               workItemId: { type: string }
+                              title: { type: string }
+                              heartbeat_at: { type: string }
                               status: { type: string }
                         state:
                           type: string
@@ -1704,7 +1731,7 @@ paths:
                             null when the member has no visible card.
                   next:
                     type: array
-                    description: Machine-readable follow-ups — dm-member when someone is watching, listening or executing fresh work (the member's id is filled into the message.posted DM command), watch-presence when nobody is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
+                    description: Machine-readable follow-ups — dm-member when someone is watching, listening or executing fresh work (the member's id is filled into the message.posted DM command; holding a live claim does not key dm-member), watch-presence when nobody is watching, listening or executing. The watch-presence description counts evidence from the same rows (live hosts, members with a command in the last 5 minutes, members holding claimed work) instead of asserting who is online. The members array is the active roster (Muse honesty); next[] still keys off who is around.
                     items:
                       type: object
                       required: [action, description]
@@ -12041,8 +12068,11 @@ paths:
         derivation, so a room the caller cannot stand in contributes no
         row. Each entry is `{ roomId, ...row }` where the row is the same
         per-room presence row `GET /api/rooms/{roomId}/presence` derives
-        for that member (host `presence { status, lastSeenAt }` included;
-        `watching` is false — this read holds no stream). An identity
+        for that member (`presence { status, lastSeenAt, basis }` included —
+        host-derived with basis `host`, or `unregistered` with basis
+        `last-command`/`member-added` for an identity-linked member with
+        no registered host; `watching` is false — this read holds no
+        stream). An identity
         sharing no room with the caller, an identity with no presence,
         and an unknown identity id all return `{ identityId, rooms: [] }`
         — the read never confirms an identity exists elsewhere. Quickstart:
