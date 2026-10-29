@@ -6373,6 +6373,13 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Persist the message domain in the same transaction as event/receipt.
         // A failure rolls back both the entity and its projection reference.
         messageWrite.persistEntities();
+        // fo-qa-c10-202610280645: a plain shared post that addresses the room
+        // assistant starts its run server-side, so the ask never depends on the
+        // client's projection being fresh. Reply-based continuations stay
+        // client-routed. Eligible posts and their derived run commit atomically;
+        // storage failure rolls both back for an exact-command retry.
+        if (command.type === T.MESSAGE_POSTED && !command.data.toMemberId && !command.data.replyToId)
+          invokeFromPlainPost(this, roomId, state, auth.member, command.data, command.data.messageId);
         if (incoming.type === T.MESSAGE_EDITED) {
           invalidateEditedAssistantInput(this.db, roomId, incoming.data.messageId, this.now());
         }
@@ -6452,12 +6459,6 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
       // (@handles whose target is ambiguous or unknown); they ride the response below.
       let mentionWarnings = null;
       if (command.type === T.MESSAGE_POSTED) mentionWarnings = this.trackMentions(roomId, state, auth.member.id, command.data, incoming.id);
-      // fo-qa-c10-202610280645: a plain shared post that addresses the room
-      // assistant starts its run server-side, so the ask never depends on the
-      // client's projection being fresh. Reply-based continuations stay
-      // client-routed; the derivation itself is silent and never fails the post.
-      if (command.type === T.MESSAGE_POSTED && !command.data.toMemberId && !command.data.replyToId)
-        invokeFromPlainPost(this, roomId, state, auth.member, command.data, command.data.messageId);
       // Attention: write-time activity fan-out (mention/reply/thread_reply).
       // Runs in the same transaction as the triggering event.
       // Never throws: a fan-out failure must not fail the command.
