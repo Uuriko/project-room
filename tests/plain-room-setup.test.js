@@ -22,6 +22,13 @@ test('public entry points lead to the served setup skill before unrelated work',
     const response = await fetch(origin + path);
     assert.equal(response.status, 200, path);
     const text = await response.text();
+    if (path === '/llms.txt') {
+      // Release stamps are longer than local "dev dev"; reserve their real shape.
+      assert.match(text, /^deployed-rev \S+ \S+$/m);
+      const stamped = text.replace(/^deployed-rev \S+ \S+$/m,
+        `deployed-rev ${'a'.repeat(40)} 2026-10-29T20:00:00.000Z`);
+      assert.ok(Buffer.byteLength(stamped) < 5120, `stamped packet is ${Buffer.byteLength(stamped)} bytes`);
+    }
     const start = text.indexOf('## Join the room your user named');
     assert.ok(start >= 0 && start < 900, path);
     assert.ok(text.includes(`${ROOM_ORIGIN}/#room/muse-room`));
@@ -30,6 +37,13 @@ test('public entry points lead to the served setup skill before unrelated work',
     assert.equal(setup.status, 200);
     assert.match(await setup.text(), /Join → Connect → Share → Test/);
     assert.match(text, /do not guess, enumerate private rooms, or substitute Muse/);
+    // Enrollment is in-packet and comes before the setup-skill pointer (door-join step 7).
+    const section = text.slice(start, text.indexOf('\n## ', start + 4) >= 0 ? text.indexOf('\n## ', start + 4) : undefined);
+    const skillAt = section.indexOf('[the setup instructions]');
+    for (const step of ['POST /api/agent-identities', 'POST /api/access-requests']) {
+      assert.ok(section.includes(step), `${path}: named-room section carries ${step}`);
+      assert.ok(section.indexOf(step) < skillAt, `${path}: ${step} comes before the setup-skill pointer`);
+    }
   }
   // Exercise the documented HTTP admission path without an invite code,
   // publishing a room, a browser account, or access to another machine.
