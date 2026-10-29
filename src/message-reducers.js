@@ -18,7 +18,7 @@ export function isRedactedBody(data) {
   return data?.redacted === true && data.body == null;
 }
 
-export function createMessageReducers({ requireMember, knownMember, requireFields,
+export function createMessageReducers({ requireMember, knownMember, knownChannel, requireFields,
   requireWorkItem, proposalContext, validId, messageChannelId, defaultChannelId, channelArchivedCode,
   pinLimit, pinDmPartyPolicyVersion }) {
   function postMessage(state, incoming) {
@@ -54,14 +54,13 @@ export function createMessageReducers({ requireMember, knownMember, requireField
       }
       channelId = messageChannelId(root);
     }
-    const channel = state.channels[channelId];
-    if (!channel) throw new Error("Unknown channel");
+    const channel = knownChannel(state, channelId);
     if (channel.archivedAt) {
       const error = new Error("Channel is archived");
       error.code = channelArchivedCode;
       throw error;
     }
-    const proposal = proposalContext(incoming.data, state.workItems[incoming.data.workItemId]);
+    const proposal = proposalContext(incoming.data, Object.hasOwn(state.workItems, incoming.data.workItemId) && state.workItems[incoming.data.workItemId]);
     if (state.messages.some(m => m.id === (incoming.data.messageId || incoming.id))) throw new Error("Message already exists");
     state.messages.push({
       id: incoming.data.messageId || incoming.id,

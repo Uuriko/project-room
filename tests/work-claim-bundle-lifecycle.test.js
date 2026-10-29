@@ -15,9 +15,20 @@
 // transfers with the round; a delivered claim never changes hands in
 // `delivered`; and verify under a reviewed policy fails closed when no
 // delivery exists.
+// Amendment 2026-10-18 (#3753): the lease sweep itself no longer fires
+// while a review stands on the round's current basis — delivered work
+// under review survives lease expiry. F1's first test below is amended
+// to the composed rule: pause while the review is outstanding, full
+// clearing once its basis has moved.
+// Resize amendment 2026-10-18 (#3753 / CN-10): the pause now covers
+// preserved work product (a delivery, started work, a current-basis
+// review), so the sweep never fires on F1's shape at all — not even
+// after the basis moves. F1's first test is amended again: the round
+// ends via the holder's explicit release, which clears the bundle
+// exactly as the sweep did; the no-inheritance invariant is unchanged.
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createWork, claimWork, updateWork, recordReview, reassignWork, releaseWork, releaseExpired,
+import { createWork, claimWork, updateWork, recordReview, recordCi, reassignWork, releaseWork, releaseExpired,
   canCloseWork, claimHistoryLength, ClaimError } from "../server/work-claims.mjs";
 
 const throwsCode = (fn, code) => assert.throws(fn, error => error instanceof ClaimError && error.code === code);
@@ -58,17 +69,41 @@ const buildDelivered = id => {
   return item;
 };
 
-test("F1: the lease sweep clears the round's delivery state — the next owner cannot inherit the bundle", () => {
+test("F1 as amended by #3753 + its CN-10 resize: the sweep never fires on a claim carrying a delivery — the round ends only by an explicit release, which clears the bundle so the next owner cannot inherit it", () => {
   const item = buildSentBack("f1-sweep");
   const aliceDigest = item.delivery.digest;
-  const [swept] = releaseExpired([item], T0 + 25 * H);
+  // #3753 (2026-10-18): dave's changes_requested review still stands on
+  // the round's current basis, so the 24h lapse does NOT release the
+  // claim — the pre-#3753 sweep silently destroyed this delivered work
+  // mid-review. The claim, its delivery, and the review fact survive.
+  const [held] = releaseExpired([item], T0 + 25 * H);
+  assert.equal(held.state, "in_progress");
+  assert.equal(held.owner, "alice");
+  assert.equal(held.delivery.digest, aliceDigest);
+  assert.equal(held.verification?.state, "changes_requested");
+  // RESIZE (CN-10, 2026-10-18): the earlier amendment ended the pause
+  // when the review basis moved. The resize supersedes that: the claim
+  // carries a delivery and is in progress — preserved work product —
+  // so the sweep does not fire even after a new CI head moves the
+  // basis. (The basis rule still decides idle claimed-state claims:
+  // see the survival suite's stale-review control.)
+  const moved = recordCi(held, { state: "success", headSha: "c".repeat(40) }, T0 + 25 * H).item;
+  const [stillHeld] = releaseExpired([moved], T0 + 25 * H);
+  assert.equal(stillHeld.state, "in_progress");
+  assert.equal(stillHeld.owner, "alice");
+  assert.equal(stillHeld.delivery.digest, aliceDigest);
+  // F1's invariant survives the resize by moving to the round-ending
+  // path that remains: the holder's explicit release clears the round
+  // exactly as the sweep once did, so the bundle is never inherited.
+  const swept = releaseWork(stillHeld, "alice", {
+    expectedClaimedAt: stillHeld.claimedAt, expectedHistoryLength: claimHistoryLength(stillHeld), now: T0 + 25 * H });
   assert.equal(swept.state, "unclaimed");
   assert.equal(swept.owner, null);
   assert.equal(swept.delivery, null);
   assert.equal(swept.verification, null);
   assert.equal(swept.deliveryGeneration, 0);
   assert.equal(swept.ci, null);
-  // Bob claims the swept item: nothing of Alice's round rides along,
+  // Bob claims the released item: nothing of Alice's round rides along,
   // and a bundle-less finish under a reviewed policy is refused.
   let bob = claimWork(swept, "bob", { now: T0 + 25 * H, leaseHours: 24 });
   assert.equal(bob.delivery, null);

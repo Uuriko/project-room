@@ -270,10 +270,20 @@ export class ShareLinks {
   create(token, roomId, details, binding, { emailVerificationUnachievable = false } = {}) {
     const { requestId, linkToken, expiresAt, maxJoins, expectedMemberRevision, access = "guest" } = details;
     if (!LINK_ACCESS.includes(access)) fail(422, "invalid_link_access", "Choose guest, member or co_admin access");
-    if (!validId(requestId) || typeof linkToken !== "string" || !tokenPattern.test(linkToken)
-      || !Number.isSafeInteger(expiresAt) || !Number.isSafeInteger(maxJoins) || maxJoins < 1 || maxJoins > 25
-      || !Number.isSafeInteger(expectedMemberRevision) || expectedMemberRevision < 0) {
-      fail(422, "invalid_link", "Choose a join limit between 1 and 25 and a current room membership");
+    // Per-field refusals (#3960): the old bundled message named the join
+    // limit and the membership even when the malformed field was the link
+    // token, sending a first-session founder to fix settings that were
+    // already correct. Each message names only the field that failed.
+    if (!validId(requestId)) fail(422, "invalid_link", "A valid request id is required to create an invitation link");
+    if (typeof linkToken !== "string" || !tokenPattern.test(linkToken)) {
+      fail(422, "invalid_link", "The invitation link token is malformed — generate a new link and try again");
+    }
+    if (!Number.isSafeInteger(maxJoins) || maxJoins < 1 || maxJoins > 25) {
+      fail(422, "invalid_link", "Choose a join limit between 1 and 25");
+    }
+    if (!Number.isSafeInteger(expiresAt)) fail(422, "invalid_link", "Choose a link expiry");
+    if (!Number.isSafeInteger(expectedMemberRevision) || expectedMemberRevision < 0) {
+      fail(422, "invalid_link", "Refresh the room and try again — the membership this link was based on is not current");
     }
     return this.store.transaction(() => {
       const auth = this.administrator(token, roomId, binding), tokenHash = hash(linkToken);
