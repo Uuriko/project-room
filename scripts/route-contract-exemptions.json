@@ -57,11 +57,6 @@
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
     },
     {
-      "template": "/agents",
-      "class": "discovery-doc",
-      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
-    },
-    {
       "template": "/agents.json",
       "class": "discovery-doc",
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
@@ -265,11 +260,6 @@
       "template": "/r/{}/proof/og.png",
       "class": "web-asset",
       "reason": "Per-room proof page Open Graph share card: a PNG rendered from the proof document's public counts for link unfurlers and crawlers; browser furniture like the sitemap, not an API contract."
-    },
-    {
-      "template": "/receipts",
-      "class": "discovery-doc",
-      "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
     },
     {
       "template": "/receipts/{}/{}",
@@ -580,6 +570,16 @@
       "template": "/templates.json",
       "class": "discovery-doc",
       "reason": "Discovery document/packet served for agent orientation (catalogued from llms.txt and the well-known plane); it is a document, not a REST operation."
+    },
+    {
+      "template": "/templates/{}",
+      "class": "discovery-doc",
+      "reason": "Per-template detail page from the same public templates surface as /templates (server/public-rooms.mjs templatePage); it is a document, not a REST operation."
+    },
+    {
+      "template": "/templates/{}.json",
+      "class": "discovery-doc",
+      "reason": "JSON twin of the per-template detail page on the public templates surface (server/public-rooms.mjs templatePage); it is a document, not a REST operation."
     },
     {
       "template": "/tools.md",

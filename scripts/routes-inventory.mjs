@@ -168,8 +168,18 @@ function regexToTemplates(body) {
   const variants = optional
     ? ["", ...optional[1].split("|").map(part => "/" + part)].map(part => template.replace(optional[0], part))
     : [template];
+  // Optional literal suffix, e.g. the (\.json)? twin on the public proof
+  // routes (/receipts/{id}, /r/{slug}, /r/{slug}/proof in server/http.mjs):
+  // without this expansion the group is dropped with its "?" still attached
+  // and the served route is invisible to the inventory (phantom spec ops).
+  const suffix = /\(\\\.([A-Za-z0-9]+)\)\?/;
+  const expanded = variants.flatMap(variant => {
+    const match = suffix.exec(variant);
+    if (!match) return [variant];
+    return [variant.replace(match[0], ""), variant.replace(match[0], `.${match[1]}`)];
+  });
   const paths = [];
-  for (const variant of variants) {
+  for (const variant of expanded) {
     let path = variant.replace(/\(\[[^\]]+\](?:\{[^}]+\})?\)/g, "{id}");
     path = path.replace(/\([^()]*\|[^()]*\)/g, "{id}");
     path = path.replace(/\([^()]+\)/g, "{id}");
@@ -201,6 +211,23 @@ function indexRegexConsts(source) {
         grew = true;
       }
     }
+  }
+  // Boolean dispatch consts: `const acquisition = url.pathname === "/x" ||
+  // templateDetail || roomPage || ...;` — an OR of pathname literals and
+  // regex-match consts, later tested as `if (acquisition && [methods]...)`.
+  // Bind the name to the union of its members' templates so the gate's
+  // methods reach every member (roomPage is only reached this way: it has
+  // no `if (roomPage)` arm, the handler falls through to it).
+  for (const match of text.matchAll(/const (\w+) = ([^;]*\|\|[^;]*);/g)) {
+    if (consts.has(match[1])) continue;
+    const rhs = match[2];
+    if (!rhs.includes("pathname")) continue;
+    const paths = new Set();
+    for (const literal of rhs.matchAll(/pathname\s*===\s*"([^"]+)"/g)) paths.add(literal[1]);
+    for (const name of rhs.matchAll(/[A-Za-z_][A-Za-z0-9_]*/g)) {
+      for (const path of consts.get(name[0]) ?? []) paths.add(path);
+    }
+    if (paths.size) consts.set(match[1], [...paths]);
   }
   return consts;
 }

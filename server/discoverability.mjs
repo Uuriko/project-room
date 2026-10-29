@@ -229,6 +229,35 @@ export const DISCOVERABILITY_ROUTES = Object.freeze([
   route("/api/needs-me", ["GET"], "identity-secret", "What needs you, across every room.", "getNeedsMe",
     { query: NEEDS_ME_QUERY }),
   route("/api/verdict-inbox", ["GET"], "identity-secret", "Sectioned verdict inbox for this identity: needs your verdict, returned to you, waiting on a worker, and recently decided. An account session reads the same set with non-human rows omitted.", "getVerdictInbox"),
+  // Public proof surface (#3700): the read-only receipts, proof pages, room
+  // pages and directories a stranger reaches first. Shapes and params are
+  // read from the handlers in server/http.mjs and the views behind them
+  // (server/receipts-page.mjs receiptsListJson/receiptJson,
+  // server/public-read-model.mjs queryPublicReceipts/queryDirectoryEntries,
+  // server/proof-page.mjs roomProofView, server/public-rooms.mjs
+  // publicRoomView/agentDirectoryView, server/room-directory.mjs list).
+  // Every route is auth "none"; the owner public-receipts toggle and the
+  // operator unpublish still gate what each read returns.
+  route("/receipts", ["GET", "HEAD"], "none", "Public receipts list as HTML: published receipts, newest first. The JSON twin is GET /api/public/receipts.", "listPublicReceiptsPage",
+    { operationIds: { GET: "listPublicReceiptsPage", HEAD: "headPublicReceiptsPage" }, publicProof: "receipts-html" }),
+  route("/api/public/receipts", ["GET", "HEAD"], "none", "Public receipts list as JSON (project-room-public-receipt-list/1): published receipts, newest first.", "listPublicReceipts",
+    { operationIds: { GET: "listPublicReceipts", HEAD: "headPublicReceipts" }, publicProof: "receipts-json" }),
+  route("/receipts/{receiptId}", ["GET", "HEAD"], "none", "One public receipt as HTML. The JSON twin is GET /receipts/{receiptId}.json.", "getPublicReceiptPage",
+    { operationIds: { GET: "getPublicReceiptPage", HEAD: "headPublicReceiptPage" }, publicProof: "receipt-html" }),
+  route("/receipts/{receiptId}.json", ["GET", "HEAD"], "none", "One public receipt as JSON (the stored project-room-public-receipt/1 record).", "getPublicReceiptJson",
+    { operationIds: { GET: "getPublicReceiptJson", HEAD: "headPublicReceiptJson" }, publicProof: "receipt-json" }),
+  route("/r/{slug}", ["GET", "HEAD"], "none", "Public room page as HTML: title, purpose, counts, open tasks and public receipts for a publicly listed room. The JSON twin is GET /r/{slug}.json.", "getPublicRoomPage",
+    { operationIds: { GET: "getPublicRoomPage", HEAD: "headPublicRoomPage" }, publicProof: "room-html" }),
+  route("/r/{slug}.json", ["GET", "HEAD"], "none", "Public room page as JSON (project-room-public-room/1), including the agent join instructions.", "getPublicRoomJson",
+    { operationIds: { GET: "getPublicRoomJson", HEAD: "headPublicRoomJson" }, publicProof: "room-json" }),
+  route("/r/{slug}/proof", ["GET", "HEAD"], "none", "Public proof page as HTML: one listed room's published results, each labelled with what its receipt proves. The JSON twin is GET /r/{slug}/proof.json.", "getPublicRoomProofPage",
+    { operationIds: { GET: "getPublicRoomProofPage", HEAD: "headPublicRoomProofPage" }, publicProof: "proof-html" }),
+  route("/r/{slug}/proof.json", ["GET", "HEAD"], "none", "Public proof page as JSON (project-room-public-room-proof/1): counts, entries and the page's honesty lines.", "getPublicRoomProofJson",
+    { operationIds: { GET: "getPublicRoomProofJson", HEAD: "headPublicRoomProofJson" }, publicProof: "proof-json" }),
+  route("/agents", ["GET", "HEAD"], "none", "Public agent directory as HTML: agents who published a public card, with skills and public receipt/room counts.", "getAgentDirectoryPage",
+    { operationIds: { GET: "getAgentDirectoryPage", HEAD: "headAgentDirectoryPage" }, publicProof: "agents-html" }),
+  route("/api/public/rooms/directory", ["GET"], "none", "Public room directory as JSON: owner opt-in listing of discoverable rooms (roomId, title, purpose, kind, memberCount, listedAt only).", "listPublicRoomDirectory",
+    { publicProof: "room-directory" }),
   // Public contribution work: owner consent, outside claims and immutable evidence.
   route("/api/public-work/tasks", ["GET", "HEAD"], "none", "List explicitly enabled public volunteer tasks.", "listPublicWorkTasks",
     { operationIds: { HEAD: "headPublicWorkTasks" }, publicWork: "list" }),
@@ -494,6 +523,107 @@ function publicWorkOperation(entry, method) {
   return op;
 }
 
+// Public proof surface (#3700): schemas and operations for the routes above.
+// Field truth: receiptsListJson/receiptJson (server/receipts-page.mjs) over
+// queryPublicReceipts (server/public-read-model.mjs: limit 1-50, default 20;
+// room <=128 chars, agent <=80 chars, cursor = a receipt id from the list;
+// 422 invalid_receipt_query), publicRoomView/agentDirectoryView
+// (server/public-rooms.mjs), roomProofView (server/proof-page.mjs: cursor =
+// a receipt id from the page, 422 invalid_proof_query, page size 20), and
+// RoomDirectory.list (server/room-directory.mjs: after = a room id, limit
+// clamped 1-100, default 50; 422 invalid_cursor). The HTML routes and their
+// .json twins are separate operations because they answer different content
+// types; HEAD answers the GET headers with no body.
+const publicProofSchemas = {
+  PublicReceipt: {
+    type: "object", required: ["schema", "id", "title", "source", "room", "agents", "humans", "pullRequest", "mergedAt", "hashes", "at"],
+    properties: {
+      schema: { enum: ["project-room-public-receipt/1"] }, id: { type: "string" }, title: { type: "string" },
+      source: { enum: ["public-work", "work-claim", "work-item"] },
+      room: { anyOf: [{ type: "object", properties: { id: { type: "string" }, title: { type: ["string", "null"] } } }, { type: "null" }] },
+      agents: { type: "array", items: { type: "string" } }, humans: { type: "array", items: { type: "string" } },
+      pullRequest: { type: ["string", "null"] }, mergedAt: { type: ["string", "null"] },
+      verification: { type: "object", description: "Present only where the stored record carries one: the recorded verification tier on work-claim receipts, or a fresh verify-at-read result (project-room-receipt-verification/1) when ?verify=1 ran on the detail read." },
+      hashes: { type: "array", items: { type: "string" } }, at: { type: "string" },
+      state: { type: "string" }, checksReported: { type: "array", items: { type: "string" } },
+      executedChecks: { type: "array", items: { type: "string" } }, review: { type: "object" },
+      lot: { type: "object" }, lotId: { type: "string" },
+      settlement: { type: "object", required: ["lotId", "amountCredits", "lotState"], properties: { lotId: { type: "string" }, amountCredits: { type: "number" }, lotState: { type: "string" } } },
+    },
+  },
+  PublicReceiptList: { type: "object", required: ["schema", "receipts", "nextCursor"], properties: {
+    schema: { enum: ["project-room-public-receipt-list/1"] },
+    receipts: { type: "array", items: { $ref: "#/components/schemas/PublicReceipt" } },
+    nextCursor: { type: ["string", "null"], description: "A receipt id from this list; pass it back as cursor for the next page." },
+  } },
+  PublicRoomPage: { type: "object", required: ["schema", "slug", "title", "purpose", "counts", "names", "tasks", "receipts", "proofHref", "join", "agentJoin"], properties: {
+    schema: { enum: ["project-room-public-room/1"] }, contentTrust: { type: "string" }, untrusted: { const: true },
+    slug: { type: "string" }, title: { type: "string" }, purpose: { type: "string" },
+    counts: { type: "object" }, names: { type: "array", items: { type: "string" } },
+    tasks: { type: "array", items: { type: "object" } },
+    receipts: { type: "array", items: { type: "object", required: ["id", "title", "href"], properties: { id: { type: "string" }, title: { type: "string" }, href: { type: "string" } } } },
+    proofHref: { type: ["string", "null"], description: "/r/{slug}/proof when the owner has public receipts on, else null." },
+    join: { type: "object", required: ["mode", "href"], properties: { mode: { enum: ["link", "request"] }, href: { type: "string" } } },
+    agentJoin: { type: "object", description: "Agent join instructions: packet, setup skill/prompt, preview path, admission mode; executionGranted is always false on this read." },
+  } },
+  PublicRoomProof: { type: "object", required: ["schema", "slug", "title", "counts", "entries", "nextCursor", "honesty"], properties: {
+    schema: { enum: ["project-room-public-room-proof/1"] }, contentTrust: { type: "string" }, untrusted: { const: true },
+    slug: { type: "string" }, title: { type: "string" },
+    counts: { type: "object", required: ["total", "serverVerifiedMerges", "roomRecordedCompletions", "artifactHashRecorded"], properties: {
+      total: { type: "integer", minimum: 0 }, serverVerifiedMerges: { type: "integer", minimum: 0 },
+      roomRecordedCompletions: { type: "integer", minimum: 0 }, artifactHashRecorded: { type: "integer", minimum: 0 } } },
+    entries: { type: "array", items: { type: "object", required: ["id", "title", "source", "proofLevel", "proofLabel", "receiptHref", "pullRequest", "mergedAt", "agents", "humans", "hashes", "at"], properties: {
+      id: { type: "string" }, title: { type: "string" }, source: { type: "string" },
+      proofLevel: { type: "string" }, proofLabel: { type: "string" }, receiptHref: { type: "string" },
+      pullRequest: { type: ["string", "null"] }, mergedAt: { type: ["string", "null"] },
+      agents: { type: "array", items: { type: "string" } }, humans: { type: "array", items: { type: "string" } },
+      hashes: { type: "array", items: { type: "string" } }, at: { type: "string" } } } },
+    nextCursor: { type: ["string", "null"], description: "A receipt id from this page; pass it back as cursor for the next page." },
+    honesty: { type: "array", items: { type: "string" }, description: "What this page does not prove: names are as recorded, hashes are stored values, records are unsigned, no payment is proved here." },
+  } },
+  PublicRoomDirectory: { type: "object", required: ["rooms", "nextCursor"], properties: {
+    rooms: { type: "array", items: { type: "object", required: ["roomId", "title", "purpose", "kind", "memberCount", "listedAt"], properties: {
+      roomId: { type: "string" }, title: { type: "string" }, purpose: { type: ["string", "null"] },
+      kind: { type: ["string", "null"] }, memberCount: { type: "integer", minimum: 0 }, listedAt: { type: ["integer", "null"] } } } },
+    nextCursor: { type: ["string", "null"], description: "A room id; pass it back as after for the next page." },
+  } },
+};
+const proofRefParam = { name: "ref", in: "query", required: false, schema: { type: "string", maxLength: 80 }, description: "Optional referral tag carried into join/invite links." };
+const proofVerifyParam = { name: "verify", in: "query", required: false, schema: { enum: ["1"] }, description: "GET only: verify=1 re-runs the receipt's checks at read time (own rate bucket) and adds a verification block to the JSON twin; a failed run degrades to the stored record." };
+function publicProofOperation(entry, method) {
+  const kind = entry.publicProof;
+  if (!kind) return {};
+  const html = { "text/html": { schema: { type: "string", description: "Script-free HTML page." } } };
+  const json = name => ({ "application/json": { schema: { $ref: `#/components/schemas/${name}` } } });
+  const receiptsQuery = [
+    { name: "room", in: "query", required: false, schema: { type: "string", maxLength: 128 }, description: "Exact room id filter." },
+    { name: "agent", in: "query", required: false, schema: { type: "string", maxLength: 80 }, description: "Case-insensitive substring of an agent name." },
+    { name: "cursor", in: "query", required: false, schema: { type: "string" }, description: "A receipt id from this list (the prior page's nextCursor)." },
+    { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 50, default: 20 } },
+  ];
+  const proofCursor = [{ name: "cursor", in: "query", required: false, schema: { type: "string" }, description: "A receipt id from this page (the prior page's nextCursor). Page size is 20." }];
+  const kinds = {
+    "receipts-html": { content: html, queryParameters: receiptsQuery, invalid: "422 invalid_receipt_query for an invalid room, agent, cursor or limit.", description: "Public: no credential required. Cache-Control: no-store (owner-toggle controlled). The JSON twin is GET /api/public/receipts." },
+    "receipts-json": { content: json("PublicReceiptList"), queryParameters: receiptsQuery, invalid: "422 invalid_receipt_query for an invalid room, agent, cursor or limit.", description: "Public: no credential required. Cache-Control: no-store (owner-toggle controlled). The HTML twin is GET /receipts." },
+    "receipt-html": { content: html, queryParameters: [proofVerifyParam], invalid: null, description: "Public: no credential required. Unknown, unpublished and owner-hidden receipts are the same 404. Cache-Control: no-store. The JSON twin is GET /receipts/{receiptId}.json." },
+    "receipt-json": { content: json("PublicReceipt"), queryParameters: [proofVerifyParam], invalid: null, description: "Public: no credential required. Unknown, unpublished and owner-hidden receipts are the same 404. Cache-Control: no-store. The HTML twin is GET /receipts/{receiptId}." },
+    "room-html": { content: html, queryParameters: [proofRefParam], invalid: null, description: "Public: no credential required. Unknown or unpublished rooms answer 404 (styled HTML for browsers, the JSON envelope for other clients). Cache-Control: no-store. The JSON twin is GET /r/{slug}.json." },
+    "room-json": { content: json("PublicRoomPage"), queryParameters: [proofRefParam], invalid: null, description: "Public: no credential required. Unknown or unpublished rooms answer 404. Cache-Control: no-store. The HTML twin is GET /r/{slug}." },
+    "proof-html": { content: html, queryParameters: proofCursor, invalid: "422 invalid_proof_query for a cursor that is not a receipt from this page.", description: "Public: no credential required. The page exists only for a publicly listed room whose owner turned public receipts on; otherwise 404. Cache-Control: no-store. The JSON twin is GET /r/{slug}/proof.json." },
+    "proof-json": { content: json("PublicRoomProof"), queryParameters: proofCursor, invalid: "422 invalid_proof_query for a cursor that is not a receipt from this page.", description: "Public: no credential required. The document exists only for a publicly listed room whose owner turned public receipts on; otherwise 404. Cache-Control: no-store. The HTML twin is GET /r/{slug}/proof." },
+    "agents-html": { content: html, queryParameters: [...proofCursor.map(p => ({ ...p, description: "An agent id from this directory (the prior page's nextCursor). Page size is 50." })), proofRefParam], invalid: "422 invalid_cursor for a cursor that is not an agent on this list.", description: "Public: no credential required. Only agents who published a public card appear; card fields are member-supplied and untrusted." },
+    "room-directory": { content: json("PublicRoomDirectory"), queryParameters: [
+      { name: "after", in: "query", required: false, schema: { type: "string" }, description: "A room id (the prior page's nextCursor)." },
+      { name: "limit", in: "query", required: false, schema: { type: "integer", minimum: 1, maximum: 100, default: 50 }, description: "Clamped to 1-100; a non-numeric limit means the default." },
+    ], invalid: "422 invalid_cursor for an after value over 384 chars.", description: "Public: no credential required. Owner opt-in listing only; archived rooms never appear and no member, identity or invite data is carried." },
+  };
+  const spec = kinds[kind];
+  const responses = { ...operationResponses(entry, method) }; delete responses["201"];
+  responses["200"] = { description: "OK", ...(method === "HEAD" ? {} : { content: spec.content }) };
+  if (spec.invalid) responses["422"] = { description: spec.invalid };
+  return { responses, security: [], description: spec.description, queryParameters: spec.queryParameters };
+}
+
 const reviewState = { enum: ["pending", "accepted", "rejected", "revision_requested"] };
 const reviewerKind = { enum: ["human", "agent"] };
 const reviewBindingProperties = { receiptId: { type: "string" }, taskId: { type: "string" }, termsVersion: { type: "integer", minimum: 1 }, generation: { type: "integer", minimum: 1 }, artifactSha256: { type: "string", pattern: "^[a-f0-9]{64}$" } };
@@ -588,7 +718,7 @@ export function buildOpenApiJson({ origin }) {
           name: m[1], in: "path", required: true, schema: { type: "string" },
         }));
       }
-      const publicSpec = { ...publicWorkOperation(entry, method), ...publicWorkReviewOperation(entry, method) };
+      const publicSpec = { ...publicWorkOperation(entry, method), ...publicWorkReviewOperation(entry, method), ...publicProofOperation(entry, method) };
       const queryParameters = publicSpec.queryParameters; delete publicSpec.queryParameters;
       Object.assign(op, publicSpec);
       if (queryParameters) op.parameters = [...(op.parameters ?? []), ...queryParameters];
@@ -632,6 +762,7 @@ export function buildOpenApiJson({ origin }) {
       schemas: {
         ...publicWorkSchemas,
         ...publicWorkReviewSchemas,
+        ...publicProofSchemas,
         NextStep: {
           type: "object",
           description: "One machine-readable next step. At least one of tool, path, or command is present.",
