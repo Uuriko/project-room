@@ -209,7 +209,13 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
   const prefix = `test-results/${crowded ? 'crowded-' : ''}reconnect-collaboration-${touch ? 'touch' : 'desktop'}`;
   if (crowded) {
     const beforeNavigation = auditRecovery(f.store).dataSha256;
-    assert.equal(await page.locator('[data-work-record-id]').count(), 81, 'All work remains reachable');
+    assert.equal(await page.locator('[data-work-record-id]').count(), 0, 'Conversation does not dump unrelated work cards');
+    await openSearch(page);
+    await page.locator('#message-search').fill('Observation archive 79');
+    await page.locator('#search-list [data-open-work="background-79"]').click();
+    await page.locator('[data-work-record-id="background-79"]').waitFor();
+    assert.match(await page.locator('[data-work-record-id="background-79"]').textContent(), /Observation archive 79/);
+    await page.locator('#work-navigation-return').click();
     assert.match(await page.locator('#contribution-title').textContent(), /agenda/i);
     await page.screenshot({ path: `${prefix}-arrival.png` });
     await openCatchUp(page);
@@ -316,7 +322,12 @@ for (const crowded of [false, true]) for (const touch of [false, true]) test(`${
     assert.match(await page.locator('#contribution-title').textContent(), /agenda/i);
     await page.screenshot({ path: `${prefix}-ready.png` });
     await page.locator('#contribution-open').click();
-  } else await page.locator('[data-work-id="test-handoff"][data-action="decide"]').click();
+  } else {
+    await openSearch(page);
+    await page.locator('#message-search').fill('prepare an agenda');
+    await page.locator('#search-list [data-open-work="test-handoff"]').click();
+    await page.locator('[data-work-id="test-handoff"][data-action="decide"]').click();
+  }
   await page.waitForFunction(body => document.querySelector('#action-text-body').textContent === body, body);
   assert.equal(await page.locator('#action-fields [name="decision"]').inputValue(), '');
   assert.equal(await page.locator('#decision-review-label').textContent(), 'Independent check · Pass');
