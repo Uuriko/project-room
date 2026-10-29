@@ -1345,7 +1345,11 @@ $("#choose-room").addEventListener("click", () => workspaceUI.showRoomList(true)
 $("#account-rooms-more").addEventListener("click", () => loadAccountRooms(true));
 window.addEventListener("focus", () => confirmAccount());
 document.addEventListener("visibilitychange", () => { if (!document.hidden) confirmAccount(); });
-setInterval(() => { if (!document.hidden) confirmAccount(); }, 5000);
+// PERF-F-S3: the periodic confirm runs at 60s, not 5s (720 → 60 req/hr/tab).
+// Session death is still caught instantly by the stream's access-ended
+// event where a stream is held, and the focus/visibility triggers above
+// fire this immediately when the user returns to the tab.
+setInterval(() => { if (!document.hidden) confirmAccount(); }, 60000);
 const esc = value => String(value ?? "").replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
 // plan-dir-card: render a directory card inside the member chip's profile.
 // owns[] and reach{} are host-supplied from live data (never fabricated);
@@ -2900,21 +2904,41 @@ async function refreshRequestRuns({ force = false } = {}) {
   if (!openIds.length) { requestRuns = {}; requestRunsReadKey = ""; return; }
   const key = JSON.stringify([client.generation, state.room.id, session.member.id, openIds]);
   if (!force && key === requestRunsReadKey) return;
-  requestRunsReadKey = key;
   requestRunsReading = true;
   const generation = client.generation, roomId = state.room.id, viewerId = session.member.id;
   try {
-    const view = await client.request(client.path("/request-runs"));
-    if (generation !== client.generation || view.roomId !== roomId || view.viewerId !== viewerId) return;
-    requestRuns = view.runs;
+    // fresh: the prompt read must issue its own request. Joining a GET that
+    // started before the newest request arrived would resolve with stale
+    // runs, spend the dedupe key, and swallow this read entirely — no
+    // network response is ever issued for it.
+    const view = await client.request(client.path("/request-runs"), { fresh: true });
+    if (generation === client.generation && view.roomId === roomId && view.viewerId === viewerId) {
+      requestRuns = view.runs;
+      // The dedupe key is spent only by a read that actually covered it.
+      // A failed or superseded read leaves the key open, so the next
+      // unforced refresh (the 10s tick, or the next snapshot) retries it
+      // instead of waiting out the 60s forced backstop.
+      requestRunsReadKey = key;
+    }
   } catch { /* Last heartbeat still ages into unknown; never claim a new run. */ }
   finally { requestRunsReading = false; }
   if (generation !== client.generation) return;
   for (const node of document.querySelectorAll("[data-request-run]")) node.textContent = requestRunLabel(node.dataset.requestRun);
-  // A request arriving during the read still gets its initial status promptly.
-  void refreshRequestRuns();
+  // A request arriving during the read still gets its initial status promptly:
+  // re-check when the open-request set changed while this read was in flight.
+  // An unchanged key is not retried here, so a failing read waits for the
+  // next tick rather than looping.
+  const currentIds = Object.values(state.replyRequests ?? {}).filter(request => request.status === "open").map(request => request.id).sort();
+  const currentKey = currentIds.length ? JSON.stringify([client.generation, state.room.id, session.member.id, currentIds]) : "";
+  if (currentKey && currentKey !== key) void refreshRequestRuns();
 }
-setInterval(() => { void refreshRequestRuns({ force: true }); }, 10000);
+// PERF-F-S5: the 10s tick no longer forces a read — the change key in
+// refreshRequestRuns dedupes an unchanged open-request set, so this tick
+// only pays a room read when something changed. A 60s forced backstop
+// still refreshes run state while a reply request stays open
+// (360 → ≤60 forced reads/hr while a request is open).
+setInterval(() => { void refreshRequestRuns(); }, 10000);
+setInterval(() => { void refreshRequestRuns({ force: true }); }, 60000);
 function requestControls(message) {
   const request = state.replyRequests?.[message.id];
   if (!request) {

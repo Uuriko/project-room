@@ -37,6 +37,13 @@ export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // liveness, wakeability measures listener recency — the room must tell a
 // live listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
+// PERF-F-S2: poll-activity stamps are liveness bookkeeping for a consumer
+// with a 24h window (WAKEABLE_WINDOW_MS), so a stamp is rewritten only
+// once it is at least 60s old. A wake long-poll cycle stamps twice (route
+// entry + post-wait); at the default 25s wait that was 288 SQLite writes
+// per seat-hour — throttled, the same seat writes at most ~60/hr (two
+// stamp targets — global + room — stay under the 120/hr bound).
+export const POLL_STAMP_THROTTLE_MS = 60_000;
 const MAX_PENDING_WAKES = 50;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
@@ -374,11 +381,25 @@ export class AgentHeartbeats {
       check(typeof roomId === "string" && roomId.length > 0,
         422, "invalid_heartbeat", "roomId must be a non-empty string or null");
       this.ensureRoomActivitySchema();
+      // PERF-F-S2 throttle: skip the write while the room stamp is fresh.
+      const existing = this.db.prepare(
+        "SELECT last_polled_at AS lastPolledAt FROM agent_wake_room_activity WHERE agent_id=? AND room_id=?")
+        .get(agentId, roomId);
+      if (existing && at - existing.lastPolledAt < POLL_STAMP_THROTTLE_MS) return this;
       this.db.prepare(`INSERT INTO agent_wake_room_activity (agent_id, room_id, last_polled_at)
         VALUES (?, ?, ?) ON CONFLICT(agent_id, room_id) DO UPDATE SET last_polled_at=excluded.last_polled_at`)
         .run(agentId, roomId, at);
       return this;
     }
+    // PERF-F-S2 throttle: skip the write while the stamp is fresh. The
+    // read throws the same missing-table error the INSERT did on a
+    // pre-migration DB, so notePoll's best-effort catch and heartbeat's
+    // loud failure keep their existing shapes. A stamp at least
+    // POLL_STAMP_THROTTLE_MS old (or absent) always writes — no liveness
+    // starvation — and a backwards clock never regresses a newer stamp.
+    const existing = this.db.prepare(
+      "SELECT last_polled_at AS lastPolledAt FROM agent_wake_polls WHERE agent_id=?").get(agentId);
+    if (existing && at - existing.lastPolledAt < POLL_STAMP_THROTTLE_MS) return this;
     this.db.prepare(`INSERT INTO agent_wake_polls (agent_id, last_polled_at)
       VALUES (?, ?) ON CONFLICT(agent_id) DO UPDATE SET last_polled_at=excluded.last_polled_at`)
       .run(agentId, at);

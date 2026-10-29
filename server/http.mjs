@@ -1109,7 +1109,12 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
     // for the legacy full read: it detects revocation and session-binding
     // changes (access-ended), storage failure (unavailable), and any head
     // movement the stamp missed, and only then pays for a full pump.
-    const RECHECK_MS = Math.min(10000, Math.max(250, streamInterval * 8));
+    // PERF-F-S4: the multiplier reaches the existing 10s cap at the
+    // default 250ms stream interval (was streamInterval * 8 = 2s), so an
+    // idle stream pays 360 recheck probes/hr instead of 1,800.
+    // Revocation/binding detection on an idle stream slows to ~10s; a
+    // real pump still ends the stream the moment an event lands.
+    const RECHECK_MS = Math.min(10000, Math.max(250, streamInterval * 40));
     const probe = () => {
       if (res.destroyed || res.writableEnded) { cleanup(); return; }
       try {

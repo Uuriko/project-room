@@ -25,8 +25,11 @@ async function fixture(t, failPump) {
     f.store.close(); rmSync(f.directory, { recursive: true, force: true });
   });
   const origin = `http://127.0.0.1:${server.address().port}`, after = f.store.room("commons").sequence;
+  // PERF-F-S4: the idle recheck cadence at a 50ms stream interval is now
+  // 2s (multiplier 40, was 8 = 400ms), so the abort window must outlast it
+  // for the probe — the fourth authenticate call — to land.
   const open = () => fetch(`${origin}/api/rooms/commons/stream?after=${after}`, {
-    headers: { Authorization: `Bearer ${f.keys.owner}` }, signal: AbortSignal.timeout(1500)
+    headers: { Authorization: `Bearer ${f.keys.owner}` }, signal: AbortSignal.timeout(5000)
   });
   return { ...f, open };
 }
