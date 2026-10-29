@@ -39,12 +39,14 @@ export function readRoomBootstrap(ctx) {
 export function readRoomMessages(ctx) {
   const { selected, fence, roomId } = authorizeRoomRead(ctx);
   const params = ctx.url.searchParams;
-  if (singleQuery(params, ["before", "limit", "auth"])
+  if (singleQuery(params, ["before", "beforeId", "limit", "auth"])
+    || params.has("beforeId") && (!params.has("before") || !params.get("beforeId") || params.get("beforeId").length > 256)
     || params.has("limit") && !/^[1-9]\d*$/.test(params.get("limit"))
     || params.has("before") && !/^(0|[1-9]\d*)$/.test(params.get("before"))) {
     ctx.reject(422, "invalid_snapshot_view", "Choose a message page");
   }
   return ctx.json(ctx.res, 200, readMessagePage(ctx.store, selected.token, roomId, {
+    beforeId: params.get("beforeId"),
     before: params.has("before") ? Number(params.get("before")) : null,
     limit: params.has("limit") ? Number(params.get("limit")) : SNAPSHOT_WINDOW_MESSAGES,
     expectedSessionBinding: fence
@@ -68,6 +70,7 @@ export const ROOM_WINDOW_ROUTES = Object.freeze([
       params: roomIdParam,
       query: { type: "object", properties: {
         before: { type: "integer", minimum: 0 },
+        beforeId: { type: "string", minLength: 1, maxLength: 256 },
         limit: { type: "integer", minimum: 1, maximum: 100 }
       } },
       response: { type: "object" }

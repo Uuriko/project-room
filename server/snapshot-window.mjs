@@ -2,6 +2,7 @@
 // The default GET /api/rooms/{id} and ?messages=recent are this window.
 // ?full=1 is the retired unbounded document, and only while
 // ROOM_SNAPSHOT_FULL_COMPAT=1. Older history pages through /messages.
+import { messageSequences } from "./message-queries.mjs";
 import { messageRepository } from "./message-repository.mjs";
 import { messageInHistory, eventInHistory } from "./history-visibility.mjs";
 import { dmConsentEventVisible, dmEventVisibility } from "./dm-event-visibility.mjs";
@@ -18,22 +19,13 @@ const MESSAGE_BUDGET = 22 * 1024;
 const fail = (status, code, message) => { throw new ServiceError(status, code, message); };
 
 export function messageSeqs(db, roomId, ids) {
-  const seqs = new Map();
-  for (let start = 0; start < ids.length; start += 256) {
-    const slice = ids.slice(start, start + 256);
-    if (!slice.length) continue;
-    for (const row of db.prepare(`SELECT message_id AS messageId, seq FROM messages
-      WHERE room_id=? AND message_id IN (SELECT value FROM json_each(?))`).all(roomId, JSON.stringify(slice))) {
-      seqs.set(row.messageId, row.seq);
-    }
-  }
-  return seqs;
+  return messageSequences(db, roomId, ids);
 }
 
 export function messagesPageOf(messages, seqs, hasMore) {
   const oldest = messages[0];
   const before = oldest && seqs.has(oldest.id) ? seqs.get(oldest.id) : null;
-  return { before, hasMore: Boolean(hasMore) };
+  return { before, beforeId: before === null ? null : oldest.id, hasMore: Boolean(hasMore) };
 }
 
 // Newest items whose JSON fits in budget. One oversized item is kept so a
@@ -155,34 +147,35 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
   };
 }
 
-export function readMessagePage(store, token, roomId, { before = null, limit = SNAPSHOT_WINDOW_MESSAGES, expectedSessionBinding = null } = {}) {
+export function readMessagePage(store, token, roomId, { before = null, beforeId = null, limit = SNAPSHOT_WINDOW_MESSAGES, expectedSessionBinding = null } = {}) {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > SNAPSHOT_WINDOW_MESSAGES) fail(422, "invalid_snapshot_view", "Choose a page of at most 100 messages");
   if (before !== null && (!Number.isSafeInteger(before) || before < 0)) fail(422, "invalid_snapshot_view", "Choose a message cursor");
+  if (beforeId !== null && (before === null || typeof beforeId !== "string" || !beforeId || beforeId.length > 256)) fail(422, "invalid_snapshot_view", "Choose a valid message cursor");
   return store.readTransaction(() => {
     const auth = store.authenticate(token, roomId, expectedSessionBinding);
     const room = store.room(roomId);
     const repository = messageRepository(store, roomId, room.state);
-    const { dmMessageVisible } = viewerFilter(store, roomId, auth.member.id);
-    const visible = [];
-    for (const message of repository.records()) if (dmMessageVisible(message)) visible.push(message);
-    const seqs = messageSeqs(store.db, roomId, visible.map(message => message.id));
-    let end = visible.length;
-    if (before !== null) {
-      end = visible.findIndex(message => seqs.get(message.id) === before);
-      if (end < 0) end = visible.filter(message => (seqs.get(message.id) ?? Infinity) < before).length;
+    // Seek from the sequence cursor and stop after one page plus a lookahead.
+    // Filter archive visibility in SQL so private history does not require
+    // decoding unrelated message bodies. The working set keeps authority.
+    const selected = [];
+    for (const message of repository.records({ descending: true, beforeSequence: before, beforeId,
+      visibility: { viewerId: auth.member.id, floor: store.historyFloor(roomId, auth.member.id) } })) {
+      selected.push(message);
+      if (selected.length > limit) break;
     }
-    const start = Math.max(0, end - limit);
-    let messages = visible.slice(start, end).map(message => redactMessageTree(message));
-    messages = takeNewestFitting(messages, MESSAGE_BUDGET);
+    const candidates = selected.slice(0, limit).reverse().map(message => redactMessageTree(message));
+    const messages = takeNewestFitting(candidates, MESSAGE_BUDGET);
+    const seqs = messageSeqs(store.db, roomId, messages.map(message => message.id));
     const oldest = messages[0];
     const pageBefore = oldest && seqs.has(oldest.id) ? seqs.get(oldest.id) : null;
-    const hasMore = start > 0 || messages.length < (end - start);
+    const hasMore = selected.length > limit || messages.length < candidates.length;
     return {
       messagesVersion: 1,
       roomId,
       sequence: room.sequence,
       messages,
-      messagesPage: { before: pageBefore, hasMore },
+      messagesPage: { before: pageBefore, beforeId: pageBefore === null ? null : oldest.id, hasMore },
       viewerId: auth.member.id,
       viewerAccountId: auth.account?.id ?? null,
       viewerAuthEpoch: auth.account?.authEpoch ?? null,

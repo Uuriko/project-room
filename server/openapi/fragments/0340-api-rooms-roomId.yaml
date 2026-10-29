@@ -80,6 +80,10 @@
         - name: before
           in: query
           schema: { type: integer, minimum: 0 }
+        - name: beforeId
+          in: query
+          description: Message ID tie-break paired with before; continue using both cursor values returned by the previous page.
+          schema: { type: string, minLength: 1, maxLength: 256 }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
