@@ -21,9 +21,8 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   const res = await mf.dispatchFetch(origin + '/api/auth/google/start', { redirect: 'manual', headers: { 'CF-Connecting-IP': '192.0.2.1' } });
   assert.equal(res.status, 302, await res.clone().text());
   // The start response sets the account-session cookie for the slot the state
-  // is bound to; a real browser sends it back on the callback. dispatchFetch
-  // keeps no cookie jar, so propagate it explicitly (mirrors the pinned
-  // browser behavior in tests/google-oauth-http.test.js).
+  // is bound to. The browser's same-origin bridge restores Strict cookies;
+  // dispatchFetch has no cookie jar, so propagate it explicitly here.
   const startCookies = res.headers.getSetCookie().map(value => value.split(';')[0]).join('; ');
   const url = new URL(res.headers.get('Location'));
   assert.equal(url.origin, 'https://accounts.google.com');
@@ -66,6 +65,9 @@ for (const legacy of [false, true]) test(`configured Google sign-in starts on Wo
   // section 10.12) instead of adopting the state's slot.
   const unboundStart = await mf.dispatchFetch(origin + '/api/auth/google/start', {redirect: 'manual', headers: {'CF-Connecting-IP': '192.0.2.1'}});
   const unbound = await callback(new URL(unboundStart.headers.get('Location')).searchParams.get('state'));
-  assert.equal(unbound.headers.get('X-Room-Auth-Failure'), 'google_state_invalid');
+  assert.equal(unbound.headers.get('X-Room-Auth-Failure'), null);
+  assert.match(await unbound.text(), /room_oauth_resume=1/);
+  const stillUnbound = await mf.dispatchFetch(origin + '/api/auth/google/callback?state=' + new URL(unboundStart.headers.get('Location')).searchParams.get('state') + '&code=synthetic-code&room_oauth_resume=1');
+  assert.equal(stillUnbound.headers.get('X-Room-Auth-Failure'), 'google_state_invalid');
  } finally { await mf.dispose(); }
 });
