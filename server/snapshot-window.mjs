@@ -134,9 +134,17 @@ export function readRoomSnapshot(store, token, roomId, fence, { view = "full", h
   const visibleMessages = (snapshot.state.messages ?? []).filter(dmMessageVisible);
   const visibleIds = new Set(visibleMessages.map(message => message.id));
   const shown = windowed ? visibleMessages.slice(-SNAPSHOT_WINDOW_MESSAGES) : visibleMessages;
+  // Request metadata is private conversation state too, independent of whether
+  // its opening message still fits in the recent window. Match selected/list
+  // request visibility without changing canonical state or historical events.
+  const historyFloor = store.historyFloor(roomId, snapshot.viewerId);
+  const replyRequests = Object.fromEntries(Object.entries(snapshot.state.replyRequests ?? {}).filter(([, request]) =>
+    [request.requesterId, request.recipientId].includes(snapshot.viewerId)
+    && messageInHistory({ id: request.id, createdAt: request.createdAt }, historyFloor)));
   const nextState = {
     ...snapshot.state,
     messages: shown,
+    ...(snapshot.state.replyRequests === undefined ? {} : { replyRequests }),
     eventLog: (snapshot.state.eventLog ?? []).filter(roomEventVisible),
     pins: windowed ? snapshot.state.pins ?? [] : (snapshot.state.pins ?? []).filter(pin => visibleIds.has(pin.messageId))
   };
