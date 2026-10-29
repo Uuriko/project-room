@@ -1,4 +1,4 @@
-import { readConversation } from '../server/conversation-sync.mjs';
+import { readConversation, readDirectConversations } from '../server/conversation-sync.mjs';
 import { createSquad } from "../server/squads.mjs";
 // Test gate: actual HTTP + SQLite protects viewer privacy, current-record
 // reconstruction and reset semantics. Existing full snapshot tests cannot
@@ -436,4 +436,22 @@ test('private continuation public-append proof is capped at one hundred events',
   f.post('bounded-public-over', 'one beyond proof budget');
   assert.equal((await f.get({ peerMemberId: 'alice', limit: 1, since: first.checkpoint })).value.mode, 'replace');
   assert.equal((await f.get({ peerMemberId: 'alice', limit: 1, cursor: first.nextCursor })).value.mode, 'reset');
+});
+
+
+for (const storage of ['projection', 'indexed', 'archive']) test(`${storage} cold private directory never hydrates a full room`, async t => {
+  const f = await setup(t);
+  f.post('cold-directory-private', 'private body'.repeat(1000), { toMemberId: 'alice' });
+  f.post('cold-directory-public', 'public body'.repeat(1000));
+  if (storage !== 'projection') {
+    while (!f.store.backfillMessages({ limit: 1000 }).done) {}
+    f.store.checkMessagesParity();
+    if (storage === 'archive') assert.equal(f.store.archiveMessages('commons', { keepNewest: 1, dryRun: false }).ok, true);
+  }
+  await f.restart();
+  const spy = t.mock.method(f.store, 'room', () => { throw new Error('Directory must not hydrate room history'); });
+  const page = readDirectConversations(f.store, f.owner, 'commons');
+  assert.deepEqual(page.peers.map(peer => peer.memberId), ['alice']);
+  assert.ok(JSON.stringify(page).length < 2000, 'large message bodies never become directory output');
+  spy.mock.restore();
 });
