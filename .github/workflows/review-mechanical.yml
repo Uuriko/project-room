@@ -19,7 +19,7 @@ name: review-mechanical
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited]
+    types: [opened, synchronize, reopened]
   # Completed test runs provide final conclusions without occupying a runner
   # while the independent test workflow is queued or running.
   workflow_run:
@@ -43,7 +43,7 @@ jobs:
   mechanical:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:

@@ -1,0 +1,27 @@
+  /api/rooms/{roomId}/matchmaking/decisions:
+    post:
+      x-room-permission: member
+      summary: Open a question only a person can answer
+      description: |
+        A human decision entered as routable work. The response carries the
+        courier chain (fastest first), everyone set aside with the reason,
+        whether the question is `unreachable`, and the decision expressed as
+        a matchable opening so it passes through the same filter as any other
+        work. `needsAuthority` is `owner`, `verifier` or `member`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      responses:
+        '201':
+          description: The opened decision and its routing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roomId: { type: string }
+                  decision: { type: object }
+                  chain: { type: array, items: { type: object } }
+                  setAside: { type: array, items: { type: object } }
+                  unreachable: { type: boolean }
+        '401': { description: unauthenticated }
+        '422': { description: invalid_matchmaking_input }

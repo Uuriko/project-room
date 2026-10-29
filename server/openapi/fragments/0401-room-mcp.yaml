@@ -1,0 +1,31 @@
+  /room/mcp:
+    get:
+      operationId: getRoomMcpJoinDoc
+      summary: Hosted MCP join document on the www door
+      description: Same handler as GET /mcp.
+      security: []
+      responses:
+        '200': { description: "text/plain snippets, or JSON when Accept is application/json" }
+    post:
+      operationId: postRoomMcp
+      summary: Hosted MCP JSON-RPC on the www door
+      description: Same handler as POST /mcp. Invalid JSON is 400 JsonRpcError.
+      security: []
+      responses:
+        '200': { description: JSON-RPC result. Same body as POST /mcp. }
+        '400':
+          description: Invalid JSON. Body is JsonRpcError (error.code -32700), including error.data.status.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcError"
+        '401':
+          description: "Authorization was present but was not a live identity secret. Body is JsonRpcError. The response carries a WWW-Authenticate: Bearer header (RFC 7235); error data sets retryable: false."
+          headers:
+            WWW-Authenticate:
+              description: 'Bearer realm="project-room", charset="UTF-8"'
+              schema: { type: string }
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/JsonRpcError"
