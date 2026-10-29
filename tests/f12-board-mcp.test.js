@@ -122,7 +122,22 @@ test("stored Board pages preserve legacy handoff and halt with equal IDs in sepa
     nextAction: "Owner triages", limitReason: "Session ended", haltAll: true });
   seed(f, "same-id", { title: "Canonical claim" });
   const board = pageValue(await f.mcp());
-  const sdk = await new RoomAgentClient({ origin: f.origin, roomId: f.roomId, token: f.identity.secret }).board();
+  const requests = [];
+  const sdk = await new RoomAgentClient({ origin: f.origin, roomId: f.roomId, token: f.identity.secret, memberId: f.ownerId,
+    fetchImpl: async (url, options) => {
+      const parsed = new URL(url);
+      requests.push(parsed.pathname + parsed.search);
+      return fetch(url, options);
+    } }).board();
+  assert.deepEqual(requests, [`/api/rooms/${f.roomId}?view=identity`, `/api/rooms/${f.roomId}/board`]);
+  const wrongViewer = new RoomAgentClient({ origin: f.origin, roomId: f.roomId, token: f.identity.secret, memberId: f.ownerId,
+    fetchImpl: async (url, options) => {
+      const response = await fetch(url, options);
+      if (!new URL(url).pathname.endsWith('/board')) return response;
+      const value = await response.json();
+      return Response.json({ ...value, viewerId: 'another-agent' });
+    } });
+  await assert.rejects(wrongViewer.board(), error => error.code === 'identity_mismatch');
   assert.deepEqual(sdk.columns, board.columns);
   assert.deepEqual(sdk.counts, board.counts);
   assert.deepEqual(sdk.halts, board.halts);
@@ -273,8 +288,11 @@ test("ordinary REST accepts pre-F12 unbound cursor bytes while new cursors bind 
 test("stored Board reads preserve member, guest, scoped-key and read-only visibility and auth refusals", async t => {
   const f = await fixture(t);
   const path = `/api/rooms/${f.roomId}/work-claims-read`;
+  const boardPath = `/api/rooms/${f.roomId}/board`;
+  assert.equal((await f.request(boardPath, undefined, null)).status, 401);
   assert.equal((await f.request(path, undefined, null)).status, 401);
   const stranger = f.store.identities.create("Unlinked reader");
+  assert.equal((await f.request(boardPath, undefined, stranger.secret)).status, 403);
   const refused = await f.request(path, undefined, stranger.secret);
   assert.equal(refused.status, 403);
   assert.equal(refused.body.error.code, "no_access");
@@ -296,6 +314,10 @@ test("stored Board reads preserve member, guest, scoped-key and read-only visibi
     assert.equal(page.status, 200);
     assert.ok(page.body.claims.some(claim => claim.id === "starter"));
     const board = pageValue(await f.mcp({}, secret));
+    const httpBoard = await f.request(boardPath, undefined, secret);
+    assert.equal(httpBoard.status, 200);
+    assert.deepEqual(httpBoard.body.claims, board.claims);
+    assert.deepEqual(httpBoard.body.halts, board.halts);
     assert.deepEqual(board.claims, page.body.claims);
     const listed = await f.request("/mcp", { jsonrpc: "2.0", id: "catalog", method: "tools/list", params: { profile: "full" } }, secret);
     const tool = listed.body.result.tools.find(item => item.name === "room_read_board");
@@ -309,9 +331,11 @@ test("stored Board reads preserve member, guest, scoped-key and read-only visibi
     const issued = await f.request("/api/agent-keys", { scopes });
     assert.equal(issued.status, 201);
     const reply = await f.request(path, undefined, issued.body.credential);
+    assert.equal((await f.request(boardPath, undefined, issued.body.credential)).status, status);
     assert.equal(reply.status, status);
     if (status === 403) assert.equal(reply.body.error.code, "insufficient_scope");
   }
   const post = await f.request(path, {});
   assert.equal(post.status, 405);
+  assert.equal((await f.request(boardPath, {})).status, 405);
 });
