@@ -12,6 +12,7 @@ import { capabilityVisibleTo } from "./capability-visibility.mjs";
 import { withOpenWorldHint } from "./content-trust.mjs";
 import { LEAN_MCP_TOOLS, actionMetaToolDefs } from "./mcp-action-search.mjs";
 import { withMcpToolContract } from "./mcp-tool-contracts.mjs";
+import { retrieveMcpTools, MCP_TOOL_RETRIEVAL_ENABLED, RETRIEVAL_CONFIDENCE_THRESHOLD } from "./mcp-tool-retrieval.mjs";
 
 export function livePublicMcpTools() {
   return [...MCP_JOIN_TOOLS, ...anonymousPublicWorkMcpTools, ...anonymousIdentityMintMcpTools].map(withOpenWorldHint);
@@ -72,6 +73,28 @@ export function listedMcpTools(profile = "core", aliases = false, agent = null, 
   const joinTools = profile === "full" ? MCP_JOIN_TOOLS.map(entry => ({ ...entry, description: withMcpToolContract(entry.name, entry.description) })) : MCP_JOIN_TOOLS;
   const listed = [...tools, ...joinTools];
   return [...(agent ? listed.filter(tool => capabilityVisibleTo(agent, tool)) : listed), ...(profile === "full" ? publicWorkMcpDefinitions : [])].map(withOpenWorldHint);
+}
+
+// Retrieval-based discovery (G5), additive over the static profiles above:
+// a plain-words query is answered with a ranked top-5 drawn from the same
+// listing listedMcpTools serves for the requested profile. Two named,
+// countable fallback outcomes return that listing itself, byte-for-byte
+// the pre-build discovery answer: reason "disabled" (the retriever's
+// revocation switch, MCP_TOOL_RETRIEVAL_ENABLED, is off) and reason
+// "low_confidence" (the top retrieval score fell below
+// RETRIEVAL_CONFIDENCE_THRESHOLD). A fallback is a distinct returned mode,
+// never a silent widening. Callers that do not use this surface keep the
+// profile listing exactly as before; no tool is added, removed, renamed
+// or re-described by narrowing.
+export function discoverMcpTools(query, { profile = "full", aliases = false, agent = null, focus = undefined, enabled = MCP_TOOL_RETRIEVAL_ENABLED } = {}) {
+  const listing = listedMcpTools(profile, aliases, agent, focus);
+  if (!enabled) return { mode: "fallback", reason: "disabled", query, tools: listing };
+  const { matches, confidence } = retrieveMcpTools(query, { tools: listing });
+  if (confidence < RETRIEVAL_CONFIDENCE_THRESHOLD) {
+    return { mode: "fallback", reason: "low_confidence", query, confidence, tools: listing };
+  }
+  const byName = new Map(listing.map(tool => [tool.name, tool]));
+  return { mode: "narrowed", query, confidence, tools: matches.map(match => byName.get(match.name)) };
 }
 
 // The card's enrolled tier is the member catalog: the default (core) list a

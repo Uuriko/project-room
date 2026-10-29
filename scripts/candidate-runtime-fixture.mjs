@@ -65,6 +65,8 @@ export function candidateRuntimeFixture(repository, directory) {
   paths.add('src/mcp-server-card.mjs');
   paths.add('server/mcp-hosted-tools.mjs');
   paths.add('server/mcp-discovery.mjs');
+  paths.add('server/mcp-tool-retrieval.mjs'); // G5 TF-IDF retrieval over the live catalog listing (imported by server/mcp-discovery.mjs)
+  paths.add('server/mcp-discovery-synonyms.mjs'); // G5 synonym map data for the retriever (imported by server/mcp-tool-retrieval.mjs)
   paths.add('server/mcp-arg-errors.mjs'); // structured MCP tools/call errors (imported by server/mcp-http.mjs)
   paths.add('server/mcp-room-profile.mjs'); // authenticated hosted MCP room tools (imported by server/http.mjs)
   paths.add('server/spend-grants.mjs'); // spend-primitive MVP: per-agent spend grants + charge-then-forward (imported by server/routes/spend-grants.mjs, server/mcp-room-profile.mjs, server/mcp-full-profile.mjs)
