@@ -1,6 +1,8 @@
 // Internal at-rest references, never a wire format or authorization API.
 // Qualified commands may reference unchanged certified entities and their own
 // pending writes. Legacy records without reducer history remain inline.
+import { isDeepStrictEqual } from 'node:util';
+
 export const MESSAGE_ENTITY_REF = '_entity';
 export const isMessageEntityRef = value => value?._entity === 1;
 
@@ -35,6 +37,18 @@ export function messageProjectionArmingFromEnv(env = {}) {
   return { messageProjectionWindow: window, messageEntityProjection: true };
 }
 const BATCH_SIZE = 256;
+
+// Retain only references that were already authoritative before a command.
+// Unlike migration, this neither promotes inline records nor certifies history.
+export function retainMessageEntities(db, roomId, messages, ids) {
+  const retained = new Set(ids);
+  const originals = messages.filter(message => retained.has(message.id));
+  const refs = originals.map(message => ({ id: message.id, [MESSAGE_ENTITY_REF]: 1 }));
+  if (!isDeepStrictEqual(hydrateMessageEntities(db, roomId, refs), originals))
+    throw new Error('projection_corrupt: retained message entities changed');
+  return messages.map(message => retained.has(message.id)
+    ? { id: message.id, [MESSAGE_ENTITY_REF]: 1 } : message);
+}
 
 export function referenceMessageEntities(db, roomId, messages, pendingIds = []) {
   const ready = new Set(pendingIds);

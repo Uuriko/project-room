@@ -83,7 +83,9 @@ export function compactGraph(graph) {
     const source = ids.get(String(edge.from ?? edge.source ?? ''));
     const target = ids.get(String(edge.to ?? edge.target ?? ''));
     if (source === undefined || target === undefined) throw new Error('Unresolved structural Graphify edge');
-    edges.push({ source, target, relation });
+    // Existing importer aliases retain the same endpoints/relation while saving
+    // ten JSON bytes per edge. The publisher hashes these exact exported bytes.
+    edges.push({ from: source, to: target, kind: relation });
   }
   return {
     built_at_commit: graph.built_at_commit,

@@ -318,3 +318,47 @@ test("bounty_transfer with an idempotencyKey moves once and replays", async t =>
   assert.equal(store.bountyEscrow.balances(ROOM, AGENT).payable, after,
     "the replay must not move credits a second time");
 });
+
+// F-X4-1 (UT-MIXED X4, confirmed by V1): the MCP bounty face must enforce
+// the same work-permission gate as the board face and the HTTP bounty
+// face — a zero-permission (chat profile) member is refused claim and
+// submit with 403 work_claims_not_permitted, and a member whose profile
+// is revoked to [] after claiming is refused at submit. In-memory store
+// so the leg executes even where on-disk SQLite is unavailable.
+test("F-X4-1: MCP bounty_claim/bounty_submit refuse a zero-permission member (403 work_claims_not_permitted)", async t => {
+  const { store, keys } = fixture(t);
+  const addMember = (memberId, kind, permissions) => {
+    store.command(keys.owner, ROOM, { id: `add-${memberId}`, type: "member.added",
+      data: { memberId, displayName: memberId, kind, permissions } });
+    keys[memberId] = store.issueAccessKey(ROOM, memberId);
+    setTier(store.db, ROOM, memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
+  };
+  addMember("chatter", "human", []);
+  addMember("revoked", "agent", ["accept_work", "complete_work"]);
+  const posted = await call(store, keys, "bounty_post", postArgs({ idempotencyKey: "fx41-post" }));
+  assert.equal(posted.isError, false, `setup post failed: ${JSON.stringify(posted.value).slice(0, 200)}`);
+  const bountyId = posted.value.bounty.bountyId;
+  await call(store, keys, "bounty_fund", { bountyId, idempotencyKey: "fx41-fund" });
+
+  const deniedClaim = callHostedStdioTool(store, keys.chatter, "bounty_claim",
+    { roomId: ROOM, bountyId, idempotencyKey: "fx41-claim" });
+  await assert.rejects(deniedClaim,
+    err => err?.status === 403 && err?.code === "work_claims_not_permitted",
+    "a zero-permission member's MCP claim must be refused with the board's 403");
+  assert.equal(store.bountyEscrow.getBounty(ROOM, bountyId).state, "funded",
+    "a refused claim must not move the bounty");
+
+  const claimed = await callHostedStdioTool(store, keys.revoked, "bounty_claim",
+    { roomId: ROOM, bountyId, idempotencyKey: "fx41-claim2" });
+  assert.equal(claimed.isError, false, `setup claim failed: ${JSON.stringify(claimed.value).slice(0, 200)}`);
+  const member = store.roomAuthority(ROOM).members.revoked;
+  store.command(keys.owner, ROOM, { id: "revoke-revoked", type: "member.access_changed",
+    data: { memberId: "revoked", expectedMemberRevision: member.revision, permissions: [], active: true } });
+  const deniedSubmit = callHostedStdioTool(store, keys.revoked, "bounty_submit",
+    { roomId: ROOM, bountyId, evidenceUrl: "https://example.com/work", summary: "done", idempotencyKey: "fx41-submit" });
+  await assert.rejects(deniedSubmit,
+    err => err?.status === 403 && err?.code === "work_claims_not_permitted",
+    "a revoked member's MCP submit must be refused with the board's 403");
+  assert.equal(store.bountyEscrow.getBounty(ROOM, bountyId).state, "claimed",
+    "a refused submit must not move the bounty");
+});

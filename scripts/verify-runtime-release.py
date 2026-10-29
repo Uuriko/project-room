@@ -1,5 +1,6 @@
 """Verify a GitHub runtime asset against an independently built exact-source package.
 
+Use --preflight-archive before publication to check the upload filename and bytes.
 Never extracts or executes archive contents, changes a release, or uploads assets.
 """
 import argparse
@@ -72,11 +73,25 @@ def valid_runtime_tag(tag):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ("repository", "tag", "sha", "expected", "receipt"):
+    for name in ("sha", "expected"):
         parser.add_argument("--" + name, required=True)
+    for name in ("repository", "tag", "receipt"):
+        parser.add_argument("--" + name)
+    parser.add_argument("--preflight-archive", help="Read-only local upload preflight; no GitHub requests or receipt writes")
     args = parser.parse_args()
-    require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository), "invalid repository")
     require(re.fullmatch(r"[a-f0-9]{40}", args.sha), "full source SHA required")
+    if args.preflight_archive:
+        require(not any((args.repository, args.tag, args.receipt)), "local preflight cannot verify a published release")
+        archive = Path(args.preflight_archive)
+        require(archive.name == ASSET, "upload filename must be " + ASSET + "; gh #suffix sets a label, not the asset name")
+        require(not archive.is_symlink() and archive.is_file(), "upload archive must be a regular file, not a symlink")
+        subprocess.run(["node", str(Path(__file__).with_name("runtime-package.mjs")), "verify", args.expected, args.sha], check=True, capture_output=True, timeout=60)
+        verified = verify_archive(archive, args.expected)
+        print(json.dumps({"kind": "room.runtime-publication-preflight.v1", "sourceCommit": args.sha,
+                          "assetName": ASSET, **verified, "publicationVerified": False}))
+        return
+    require(all((args.repository, args.tag, args.receipt)), "remote verification requires repository, tag and receipt")
+    require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository), "invalid repository")
     require(valid_runtime_tag(args.tag), "invalid runtime tag")
     # A failed retry must not leave an earlier success available to artifact upload.
     receipt_path = Path(args.receipt)

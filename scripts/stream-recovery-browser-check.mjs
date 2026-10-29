@@ -61,6 +61,46 @@ test("native EventSource reconnects after temporary storage failure without losi
 // Expected values are fixture intent, never a production reducer or renderer.
 const messageView = messages => messages.map(({ id, body }) => ({ id, body })).sort((a, b) => a.id.localeCompare(b.id));
 const assertMessageView = (actual, expected) => assert.deepEqual(messageView(actual), messageView(expected));
+// A snapshot is one convergence path, not a requirement after contiguous SSE.
+// Keep sequence coverage and admitted event identity independent of rendered text.
+function assertHandoverEvidence({ snapshots, frames, admissions, heldSequence, horizon, finalView, expected }) {
+  assertMessageView(finalView, expected);
+  const caughtUp = snapshots.filter(snapshot => snapshot.sequence >= horizon);
+  for (const snapshot of caughtUp) assertMessageView(snapshot.messages, expected);
+  if (caughtUp.length) return "snapshot";
+  assert.ok(Number.isSafeInteger(heldSequence) && Number.isSafeInteger(horizon) && horizon > heldSequence,
+    "native proof starts before the admitted horizon");
+  for (let sequence = heldSequence + 1; sequence <= horizon; sequence++) {
+    const admitted = admissions.find(event => event.sequence === sequence);
+    assert.ok(admitted, `admitted journal covers sequence ${sequence}`);
+    assert.ok(frames.some(frame => frame.sequence === sequence && frame.id === admitted.id),
+      `native delivery covers admitted sequence ${sequence}`);
+  }
+  return "contiguous-native";
+}
+
+test("handover oracle accepts contiguous native convergence and refuses missing evidence or content", () => {
+  // Shape of Grok's actual failing d2c0dd9b trace (Room22418): snapshot11,
+  // native edit12/add13, exact final content, no redundant GET.
+  const expected = [{ id: "seed", body: "edited" }, { id: "added", body: "new" }];
+  const evidence = { snapshots: [{ sequence: 11, messages: [{ id: "seed", body: "old" }] }],
+    frames: [{ sequence: 12, id: "edit" }, { sequence: 13, id: "add" }],
+    admissions: [{ sequence: 12, id: "edit" }, { sequence: 13, id: "add" }],
+    heldSequence: 11, horizon: 13, finalView: expected, expected };
+  assert.equal(assertHandoverEvidence(evidence), "contiguous-native");
+  assert.equal(assertHandoverEvidence({ ...evidence, frames: [], snapshots: [{ sequence: 13, messages: expected }] }), "snapshot");
+  for (const corrupt of [
+    { frames: evidence.frames.slice(1) }, // missing edit, despite final horizon frame
+    { frames: evidence.frames.slice(0, 1) }, // lost final event
+    { frames: [{ sequence: 12, id: "wrong" }, evidence.frames[1]] },
+    { admissions: evidence.admissions.slice(1) }, // unproven sequence gap
+    { heldSequence: 13, frames: [] }, // cannot prove progress with an empty interval
+    { finalView: expected.slice(0, 1) },
+    { finalView: [{ id: "seed", body: "old" }, expected[1]] },
+    { snapshots: [{ sequence: 13, messages: expected.slice(1) }] }
+  ]) assert.throws(() => assertHandoverEvidence({ ...evidence, ...corrupt }), { code: "ERR_ASSERTION" });
+});
+
 const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 for (const schedule of ["initial-handover", "connected-refresh"]) {
@@ -180,10 +220,9 @@ for (const schedule of ["initial-handover", "connected-refresh"]) {
       { id: "nrc1-seed", body: "Newer admitted content" },
       { id: "nrc1-added", body: "Admitted during handover" }
     ];
-    assertMessageView(finalView, expected);
-    const caughtUp = snapshots.filter(snapshot => snapshot.sequence >= latest.sequence);
-    assert.ok(caughtUp.length > 0, "automatic catch-up fetch reached the admitted horizon");
-    for (const snapshot of caughtUp) assertMessageView(snapshot.messages, expected);
+    const convergencePath = assertHandoverEvidence({ snapshots, frames, admissions, heldSequence,
+      horizon: latest.sequence, finalView, expected });
+    record("convergence-proof", { path: convergencePath, sequence: latest.sequence });
     const heldAt = trace.findIndex(entry => entry.kind === "snapshot-held");
     const releasedAt = trace.findIndex(entry => entry.kind === "snapshot-released");
     const frameAt = trace.findIndex(entry => entry.kind === "native-frame" && entry.sequence === latest.sequence);

@@ -50,6 +50,28 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["n
     const input = page.locator("#message-input"), status = page.locator("#composer-status");
     assert.match(await input.getAttribute("placeholder"), /Message #/);
 
+    // Ordinary chat stays quiet; a real keyboard path reveals private delivery.
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    await input.fill("Keep this unfinished thought");
+    await page.locator("#composer-options-toggle").press("Enter");
+    await page.getByRole("button", { name: "Direct message…", exact: true }).press("Enter");
+    assert.equal(await page.locator("#message-to-select").evaluate(el => el === document.activeElement), true);
+    await page.locator("#message-to-select").press("Escape");
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    assert.equal(await input.inputValue(), "Keep this unfinished thought");
+    await page.locator("#composer-options-toggle").press("Enter");
+    await page.getByRole("button", { name: "Direct message…", exact: true }).press("Enter");
+    await page.locator("#message-to-select").selectOption("maya");
+    assert.equal(await page.locator("#audience-note").isVisible(), true);
+    assert.match(await page.locator("#audience-note").innerText(), /Private.*Maya/);
+    assert.equal(await input.getAttribute("placeholder"), "Private message to Maya");
+    assert.equal(await page.getByRole("textbox", { name: "Private message to Maya", exact: true }).count(), 1);
+    assert.equal(await input.inputValue(), "Keep this unfinished thought");
+    await page.screenshot({ path: `test-results/composer-private-audience-${label}.png` });
+    await page.locator("#message-to-select").selectOption("");
+    assert.equal(await page.locator("#composer-toolbar").isVisible(), false);
+    await input.fill("");
+
     // A committed write must remain visible when subsequent history reads fail.
     const failRead = route => route.fulfill({ status: 503, contentType: "application/json",
       body: JSON.stringify({ error: "service_unavailable", message: "Temporarily unavailable" }) });

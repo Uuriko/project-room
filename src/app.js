@@ -1,3 +1,4 @@
+import { stashGoogleRoom, consumeGoogleRoom } from "./google-room-return.js";
 import { roomSetupPrompt, roomSetupLink } from "./room-setup-prompt.js";
 import { createResultComparison } from "./result-comparison.js";
 import { createResultFeedback } from "./result-feedback.js";
@@ -333,7 +334,10 @@ function stashInviteForOAuth() {
 // invitation before the navigation, since the OAuth round-trip drops the
 // #invite/ fragment.
 { const googleButton = $("#google-signin");
-  if (googleButton) googleButton.addEventListener("click", stashInviteForOAuth); }
+  if (googleButton) googleButton.addEventListener("click", () => {
+    stashInviteForOAuth();
+    stashGoogleRoom(roomIdFromNext(new URLSearchParams(location.search).get("next")) || selectedRoomFromLocation());
+  }); }
 { const githubButton = $("#github-signin");
   if (githubButton) githubButton.addEventListener("click", stashInviteForOAuth); }
 let shareLinksUI = null;
@@ -357,9 +361,11 @@ let navigationBoardEpoch = 0;
 let activeChannelId = DEFAULT_CHANNEL_ID, activeChannelRoomId = null;
 let workDraftId = null, replyToId = null, busy = false;
 let workFormEpoch = 0, workRetryLocked = false;
+let confirmedWorkNavigation = null;
 let actionEpoch = 0;
 let offerContextVersion = null;
 let currentThreadId = null, conversation = null, drafts = new ConversationDrafts();
+let choosingComposerRecipient = false;
 // A message deep link whose target is older than the first (windowed)
 // snapshot cannot reveal on arrival: revealMessage no-ops while the id is
 // not held. A pending hash reveal remembers such a target until a fill or
@@ -532,6 +538,7 @@ const client = new RoomClient({
     if (!briefView.owns(briefView.chain)) loadReturnBrief();
     if (firstSnapshot) revealLocationHash();
     retryPendingHashReveal();
+    resumeConfirmedWorkNavigation();
   },
   onStatus(text) { setConnectionStatus(text); },
   onTyping(typists) { renderTyping(typists); },
@@ -541,6 +548,7 @@ const client = new RoomClient({
     const endedContext = accessEndContext;
     accessEndContext = null;
     const pendingSignout = signoutLoading;
+    if (pendingSignout) $("#google-signin").href = "/api/auth/google/start?switch=1";
     const keepAccount = !leavingPage && !pendingSignout && endedContext !== "account-switch" && accountClient.session?.authenticated;
     // E-H2: an unexpected access end (401/403 session expiry, not sign-out,
     // room/account switch, or page unload) must not destroy the in-flight
@@ -600,6 +608,7 @@ const client = new RoomClient({
     syncRoomLifecycle();
     $("#work-reuse-hint").hidden = true;
     currentThreadId = sessionExpired ? currentThreadId : null; conversation = null;
+    choosingComposerRecipient = false;
     if (!sessionExpired) {
       drafts = new ConversationDrafts();
       $("#message-input").value = "";
@@ -672,7 +681,7 @@ const client = new RoomClient({
     const openingInvitedRoom = endedContext === "invited-room-switch";
     const switchedAccount = endedContext === "account-switch";
     setFormStatus($("#auth-error"), openingAcceptedRoom || openingInvitedRoom || $("#invitation-dialog").open ? ""
-      : switchedAccount ? "The browser account changed; private Room state and drafts were cleared."
+      : switchedAccount ? uiText("room.session_changed_recovery")
         : "Session ended; private drafts were cleared.", true);
     setConnectionStatus(openingAcceptedRoom || openingInvitedRoom ? "Opening Room…" : "Not connected");
     if ($("#invitation-dialog").open && invitation.preview) {
@@ -1385,6 +1394,7 @@ const sameSession = (generation, roomId, memberId) => generation === client.gene
 const initials = text => esc(String(text ?? "").split(/\s+/).map(w => w.match(/[\p{L}\p{N}]/u)?.[0] ?? "").join("").slice(0, 2).toUpperCase() || "?");
 const timeFormat = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
 const time = value => timeFormat.format(new Date(value));
+const messageActionTimeFormat = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "medium" });
 function safeUrl(value) { try { const u = new URL(value); return u.protocol === "https:" ? esc(u.href) : "#"; } catch { return "#"; } }
 const recordDomId = (kind, id) => `pr-${kind}-record-${[...String(id)].map(character => character.charCodeAt(0).toString(16).padStart(2, "0")).join("")}`;
 // Keep application-owned fragments outside the valid record-id alphabet. Earlier
@@ -1621,18 +1631,29 @@ $("#guest-upgrade-link")?.addEventListener("click", () => {
   $("#guest-upgrade-hint").hidden = true;
   $("#create-account-button")?.click();
 });
+function composerPrivateLabel() {
+  const to = $("#message-to-select")?.value;
+  if (!to) return null;
+  const member = state?.members && Object.hasOwn(state.members, to) ? state.members[to] : null;
+  return member ? uiText("composer.privateTo", { name: member.displayName }) : uiText("composer.privateMessage");
+}
+function syncComposerAudienceLabel() {
+  $("#composer-label").textContent = composerPrivateLabel() || (currentThreadId ? "Reply in this thread" : "Message the room");
+}
 function syncComposerChrome() {
+  syncComposerAudienceLabel();
   const to = $("#message-to-select")?.value;
   const bar = $("#composer-toolbar");
-  // bu-09: the audience picker is the broadcast-vs-DM control and stays
-  // visible whenever there is someone to address. Hiding it until a
-  // recipient was already chosen made room-chat DMs undiscoverable — the
-  // hidden control was the only way to start one.
+  // Room chat is the default. Direct messaging is an explicit action in
+  // Message options; never hide an already-addressed private draft.
   if (bar) bar.hidden = !composerAudiencePickerVisible({
-    members: state?.members ? Object.values(state.members) : [],
-    selfId: session?.member?.id,
+    recipientId: to,
     requestMode: Boolean(requestMode),
+    choosingRecipient: choosingComposerRecipient,
   });
+  const startDirect = $("#composer-direct-message");
+  if (startDirect) startDirect.hidden = !Object.values(state?.members ?? {}).some(member =>
+    member.active !== false && member.identityRevoked !== true && member.id !== session?.member?.id);
   const note = $("#audience-note");
   if (note) {
     // RC-2026-09-19-070: a message addressed to one member is private to the
@@ -2230,6 +2251,8 @@ function restoreActiveChannel() {
 }
 function activeChannel() { return state?.channels?.[activeChannelId] ?? null; }
 function leaveWorkSelection() {
+  // User navigation cancels a pending destination even before its card exists.
+  confirmedWorkNavigation = null;
   if (!activeWorkNavigationId) return false;
   activeWorkNavigationId = null;
   if (/^#pr-record\/work\//.test(location.hash)) {
@@ -2417,7 +2440,7 @@ function renderMessages() {
   $("#thread-bar").hidden = !currentThreadId;
   syncThreadMuteButton();
   syncAlsoSend();
-  $("#composer-label").textContent = currentThreadId ? "Reply in this thread" : "Message the room";
+  syncComposerAudienceLabel();
   if (currentThreadId) {
     const root = conversation.byId.get(currentThreadId);
     $("#thread-title").textContent = `Thread with ${name(root.authorId)}`;
@@ -2621,7 +2644,12 @@ function messageLinksHTML(m, { linked, moderation, count, muted }) {
   const editHtml = own ? `<button class="message-to-work" data-message-action="edit" data-message-id="${esc(m.id)}" type="button">Edit message</button>` : "";
   const deleteHtml = own ? `<button class="message-to-work" data-message-action="delete" data-message-id="${esc(m.id)}" type="button">Delete message</button>` : "";
   const overflow = [saveHtml, pinHtml, markUnreadHtml, laterHtml, workHtml, decideHtml, editHtml, deleteHtml, moderation].filter(Boolean).join("");
-  const menu = overflow ? `<details class="message-more"><summary aria-label="More actions for this message" title="More actions">⋯</summary><div class="message-more-menu">${overflow}</div></details>` : "";
+  // F-U1A3-1: the overflow summary's accessible name carries the message's
+  // identity (author + time), mirroring the "Link to message by … at …"
+  // label in messageContent — a bare "More actions for this message" was
+  // character-identical on every message.
+  const actionName = esc(uiText("message.actionsAccessibleName", { author: displayName(m.authorId), time: messageActionTimeFormat.format(new Date(m.createdAt)) }));
+  const menu = overflow ? ['<details class="message-more"><summary aria-label="', actionName, '" title="More actions">⋯</summary><div class="message-more-menu">', overflow, "</div></details>"].join("") : "";
   return `<div class="message-links">${requestControls(m)}${linked.map(i => {
     const summary = session.member.kind === "human" ? (i.state === S.BLOCKED ? i.blocker?.reason : i.receipt?.summary) : null;
     return `<span class="conversation-work"><a class="work-link" href="${esc(workHref(i.id))}" data-open-work="${esc(i.id)}">${esc(i.title)}</a>${doneChip(i)}${summary ? `<span class="conversation-work-summary">${esc(clipGraphemes(summary, 240))}${summary.length > 240 ? "…" : ""}</span>` : ""}</span>`;
@@ -2889,6 +2917,7 @@ function confirmSharedSubmission({ command, fileIds }, result) {
   if (acceptedFiles.size) void refreshRoomFiles();
 }
 function restoreComposer(draft) {
+  choosingComposerRecipient = false;
   assistantDraft = draft.assistantDraft ?? null;
   queueMicrotask(() => humanExperience.syncContribution());
   composerFiles = draft.files ?? [];
@@ -2979,7 +3008,7 @@ function syncRequestComposer() {
   send.disabled = busy || requestReading || archived || composerOverLimit() || Boolean(request && request.status !== "open" && !pendingMessage);
   const action = pendingMessage && mode ? "Retry original" : mode ? mode.kind === "request" ? "Send request" : mode.kind === "answered" ? "Send answer" : label : "Send";
   send.setAttribute("aria-label", action); send.title = action;
-  input.placeholder = archived ? "This room is archived." : composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
+  input.placeholder = archived ? "This room is archived." : (!mode && composerPrivateLabel()) || composerPlaceholder({ workKind: mode?.kind ?? null, inThread: Boolean(currentThreadId), channelName: activeChannel()?.name ?? DEFAULT_CHANNEL_ID });
   if (active) $("#reply-bar").hidden = true;
   syncComposerChrome();
 }
@@ -3033,6 +3062,19 @@ async function openRequestMode(kind, id) {
   }
 }
 const composerOptions = $("#composer-options");
+const startDirectMessage = document.createElement("button");
+startDirectMessage.id = "composer-direct-message";
+startDirectMessage.type = "button";
+startDirectMessage.className = "button ghost";
+startDirectMessage.textContent = uiText("composer.directMessage");
+startDirectMessage.hidden = true;
+composerOptions.querySelector(".composer-options-panel").prepend(startDirectMessage);
+startDirectMessage.addEventListener("click", () => {
+  if (!state || busy || requestReading) return;
+  choosingComposerRecipient = true;
+  syncComposerChrome();
+  $("#message-to-select").focus();
+});
 composerOptions.addEventListener("click", event => {
   if (!event.target.closest("button")) return;
   composerOptions.open = false;
@@ -3188,6 +3230,7 @@ function syncWorkReturnControl() {
   button.textContent = origin ? `Back to ${origin.type === "updates" ? "Updates" : origin.type === "board" ? "Board" : "conversation"}` : "Back to room";
 }
 function clearWorkNavigation() {
+  confirmedWorkNavigation = null;
   navigationBoardEpoch++; resetNavigationBoard?.();
   workNavigationEpoch++; workNavigationOrigins.clear(); activeWorkNavigation = null; activeWorkNavigationId = null; workHistoryReplayKey = null;
   const button = $("#work-navigation-return");
@@ -3892,6 +3935,8 @@ $("#invitation-email").addEventListener("click", () => {
 $("#invitation-google").addEventListener("click", event => {
   if (!confirmInvitationSignin() || !signinUI.canLeave()) { event.preventDefault(); return; }
   stashInviteForOAuth();
+  // Invitation account replacement is an explicit identity choice.
+  event.currentTarget.href = "/api/auth/google/start?switch=1";
 });
 $("#invitation-signin-back").addEventListener("click", () => {
   if (!signinUI.canLeave()) return;
@@ -4172,7 +4217,10 @@ $("#signout-button").addEventListener("click", async () => {
     try {
       const ended = await accountClient.logout();
       if (operation !== signoutOperationId) return;
-      if (ended || !accountClient.session) endAccountAccess();
+      if (ended || !accountClient.session) {
+        endAccountAccess();
+        $("#google-signin").href = "/api/auth/google/start?switch=1";
+      }
     } catch {
       if (operation !== signoutOperationId) return;
       if (!accountClient.session) {
@@ -4236,7 +4284,16 @@ $("#refresh-button").addEventListener("click", async () => {
         const account = await ensureAccountSession();
         if (!account?.authenticated) throw Object.assign(new Error("Account sign-in required"), { status: 401 });
         await client.restore(requestedRoom);
-      } else await client.restore();
+      } else {
+        // Account-home recovery must confirm the browser's current account,
+        // not retry a room cookie that this screen does not own.
+        const account = await accountClient.restore();
+        if (operationId !== refreshOperationId || !account) return;
+        if (account.authenticated) {
+          setFormStatus($("#auth-error"), "");
+          showAccountWorkspace();
+        } else await client.restore();
+      }
     }
     else {
       await client.refresh();
@@ -4457,6 +4514,10 @@ $("#channel-archive-button").addEventListener("click", async e => {
 function submitRequest(form) {
   if (!state || busy || requestReading) return;
   const mode = requestMode, key = composerKey(), identity = session, generation = client.generation;
+  const request = mode?.requestMessageId && state.replyRequests?.[mode.requestMessageId];
+  // Keyboard/programmatic submission must respect the terminal-request state
+  // used by the disabled button. An uncertain command still retries unchanged.
+  if (request && request.status !== "open" && !pendingMessage) return;
   if (!$("#message-input").value.trim()) return;
   const hadPending = Boolean(pendingMessage);
   try {
@@ -4694,7 +4755,18 @@ function applyMentionMember(member) {
   input.focus(); input.setSelectionRange(next.caret, next.caret);
 }
 $("#message-input").addEventListener("input", () => { autosizeComposer(); lastComposerSelection = null; saveComposer(); renderMentions(); updateReply(); syncRequestComposer(); void client.sendTyping({ toMemberId: $("#message-to-select").value }); });
-$("#message-to-select").addEventListener("change", () => { saveComposer(); syncRequestComposer(); syncComposerChrome(); });
+$("#message-to-select").addEventListener("change", () => {
+  choosingComposerRecipient = false;
+  saveComposer(); syncRequestComposer(); syncComposerChrome();
+  $("#message-input").focus();
+});
+$("#message-to-select").addEventListener("keydown", event => {
+  if (event.key !== "Escape" || !choosingComposerRecipient) return;
+  event.preventDefault(); event.stopPropagation();
+  choosingComposerRecipient = false;
+  syncComposerChrome();
+  $("#message-input").focus();
+});
 const touchKeyboard = matchMedia("(hover: none) and (pointer: coarse)");
 function syncComposerHint() {
   const hint = touchKeyboard.matches ? "Return for a new line · ↑ to send" : "Enter to send · Shift + Enter for a new line";
@@ -6161,6 +6233,14 @@ document.addEventListener("click", async e => {
     button.disabled = false;
   }
 });
+function resumeConfirmedWorkNavigation() {
+  const pending = confirmedWorkNavigation;
+  if (!pending) return;
+  if (!pending.current()) { confirmedWorkNavigation = null; return; }
+  if (busy || !Object.hasOwn(state?.workItems ?? {}, pending.id)) return;
+  confirmedWorkNavigation = null;
+  navigateWorkRecord("work", pending.id);
+}
 function sendWorkProposal() {
   if (!state || busy || !workDraftId) return;
   const independentVerificationRequired = $("#require-verification").checked, ownerDecisionRequired = $("#require-decision").checked;
@@ -6168,7 +6248,11 @@ function sendWorkProposal() {
   if (!workRetryLocked) pendingWork = draftCommand(pendingWork, T.WORK_PROPOSED, data);
   const entry = pendingWork;
   const generation = client.generation, roomId = session.roomId, memberId = session.member.id;
-  submit($("#new-work-form"), async current => {
+  const navigationEpoch = workNavigationEpoch, originUrl = location.href;
+  const originThread = currentThreadId, originChannel = activeChannelId;
+  const operationId = submitOperationId + 1;
+  let completedFormEpoch = null;
+  void submit($("#new-work-form"), async current => {
     try {
       const receipt = await client.send(entry.command);
       if (!current() || !sameSession(generation, roomId, memberId)) return;
@@ -6179,8 +6263,21 @@ function sendWorkProposal() {
       throw error;
     }
     setWorkRetry(false);
-    closeWorkForm(); selectWorkView("work"); notice("Work proposed. The accountable member must accept it; no external action was authorized.");
-  }, { failureHint: "Your work proposal was kept; try again." });
+    closeWorkForm();
+    completedFormEpoch = workFormEpoch;
+    notice("Work proposed. The accountable member must accept it; no external action was authorized.");
+  }, { failureHint: "Your work proposal was kept; try again." }).then(() => {
+    // submit releases busy before navigation. An exact receipt is required;
+    // a late save must not move a replacement session or a newer destination.
+    if (completedFormEpoch === null) return;
+    // A confirmed command can outlive a failed refresh. Reuse the client's
+    // recovery snapshots, retaining only this destination intent, never a write.
+    confirmedWorkNavigation = { id: entry.command.data.workItemId, current: () =>
+      completedFormEpoch === workFormEpoch && operationId === submitOperationId
+      && sameSession(generation, roomId, memberId) && navigationEpoch === workNavigationEpoch
+      && location.href === originUrl && currentThreadId === originThread && activeChannelId === originChannel };
+    resumeConfirmedWorkNavigation();
+  });
 }
 const field = (name, label, type = "text") => `<label>${esc(label)}<input name="${name}" type="${type}" required maxlength="2000"></label>`;
 const area = (name, label) => `<label>${esc(label)}<textarea name="${name}" required rows="3" maxlength="4000"></textarea></label>`;
@@ -6279,6 +6376,8 @@ function openCatchUp() {
 function selectWorkView(view) {
   if (view !== "results") return;
   if ($("#settings-dialog").open) $("#settings-dialog").close();
+  $("#main").classList.remove("sidebar-open");
+  $("#sidebar-toggle").setAttribute("aria-expanded", "false");
   $("#search-form").hidden = false;
   $("#topbar-search-toggle").setAttribute("aria-expanded", "true");
   $("#message-search").value = "has:result";
@@ -7858,6 +7957,20 @@ const ready = (async () => {
     if (initialGoogleFailed) setFormStatus($("#join-link-status"), googleSigninFailureMessage, true);
     return;
   }
+  const googleReturned = new URLSearchParams(location.search).get("google") === "signed-in";
+  if (googleReturned) {
+    // This marker is navigation intent, never authentication. Restore the
+    // current account before using its remembered destination; server room
+    // restoration still checks membership for every target.
+    const account = await ensureAccountSession();
+    const explicitRoom = consumeGoogleRoom();
+    const remembered = account?.authenticated ? readMemberRoom(account.account.id)?.roomId : null;
+    const target = explicitRoom || remembered || selectedRoomFromLocation();
+    const next = new URL(location.href);
+    next.searchParams.delete("google");
+    if (target) { next.searchParams.set("room", target); next.searchParams.delete("account"); }
+    history.replaceState(history.state, "", next.pathname + next.search + next.hash);
+  }
   const requestedRoom = selectedRoomFromLocation();
   if (requestedRoom || accountHomeFromLocation() || new URLSearchParams(location.search).get("oauth") === "login") {
     // Join-flow sessions are room-cookie sessions with no account behind
@@ -7866,7 +7979,7 @@ const ready = (async () => {
     // cookie before the account gate, or a fresh joiner is stranded at the
     // sign-in panel despite holding a working session. A cookie for a
     // different room is dropped and the account flow decides as before.
-    if (requestedRoom && !accountHomeFromLocation()) {
+    if (requestedRoom && !accountHomeFromLocation() && !googleReturned) {
       try {
         const joined = await client.restore();
         if (joined?.roomId === requestedRoom) return;

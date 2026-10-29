@@ -135,6 +135,8 @@ export const ALLOWLIST = [
 // Exact non-secret tokens only. Unlike the line allowlist, these suppress
 // entropy noise without skipping credential-pattern checks or adjacent tokens.
 export const SAFE_ENTROPY_TOKENS = [
+  // Public relative documentation link embedded by wiki-build, not a credential.
+  "ROOM-COORDINATION.md#when-the-room-is-unavailable",
   // Public release artifact URLs in the herdr pin manifest; they contain no
   // credentials. Exact tokens retain scanning of all neighboring values.
   // Both releases are listed: pkg-v2 is the pin this branch introduces,

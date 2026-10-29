@@ -93,6 +93,14 @@ export function operatorStatus(store, options = {}) {
     // to repair. Operator-token gated; capped; a store without the table
     // reports [].
     messagesBackfillBlocks: messagesBackfillBlocks(store),
+    // Latest patrol findings (r67): unlike the public job heartbeat, this
+    // operator-token-gated surface names the room, event and exact detail
+    // needed to distinguish a legal-transition modelling gap from genuine
+    // claim corruption. Keep the journal bounded; patrolFindings returns
+    // newest first and parses its stored detail JSON.
+    patrolFindings: typeof store.patrolFindings === "function"
+      ? store.patrolFindings({ limit: 25 })
+      : [],
     // Rooms the patrol parked (r67): the patrol_blocks rows (room, cursor,
     // head, error class, one-line error). The public health surface carries
     // only "patrol could not process a room (<class>)" and a count, so

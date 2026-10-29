@@ -102,6 +102,7 @@ jobs:
             node ../scripts/rollback-readback.mjs --prod-id "$PROD_ID" --entry-id "$ENTRY_ID" --origin "$PROD_ORIGIN" --entry "$ENTRY_ORIGIN" --preflight "$RUNNER_TEMP/rollback-preflight.json" |
             tee "$RUNNER_TEMP/rollback-readback.json"
       - name: Smoke health, ready, legal pages
+        id: smoke
         shell: bash
         run: |
           set -euo pipefail
@@ -111,14 +112,16 @@ jobs:
         continue-on-error: true
         env:
           ROOM_RECEIPT_TOKEN: ${{ secrets.ROOM_RECEIPT_TOKEN }}
-          OUTCOME: ${{ job.status }}
+          ROLLBACK_OUTCOME: ${{ steps.rollback.outcome }}
+          STRICT_OUTCOME: ${{ steps.smoke.outcome }}
           READBACK_OUTCOME: ${{ steps.readback.outcome }}
           PREFLIGHT_OUTCOME: ${{ steps.pre.outcome }}
           PROD_WAS: ${{ steps.pre.outputs.prod }}
           ENTRY_WAS: ${{ steps.pre.outputs.entry }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "ROOM_RECEIPT_TOKEN not set; no receipt posted."; exit 0; fi
+          echo "Rollback execution: ${ROLLBACK_OUTCOME:-unknown}; readback: ${READBACK_OUTCOME:-unknown}; strict smoke: ${STRICT_OUTCOME:-unknown}; live smoke: not run by this workflow; runtime publication: not run by this workflow" >> "$GITHUB_STEP_SUMMARY"
+          if [ -z "$ROOM_RECEIPT_TOKEN" ]; then echo "WARNING: ROOM_RECEIPT_TOKEN not set; no Room receipt posted." | tee -a "$GITHUB_STEP_SUMMARY"; exit 0; fi
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             const e = process.env, s = v => (v || "?").slice(0, 8);
@@ -131,7 +134,8 @@ jobs:
             }
             const entry = e.ENTRY_ID ? `entry ${s(e.ENTRY_ID)} (was ${s(e.ENTRY_WAS)})` : "entry unchanged";
             const admission = e.PREFLIGHT_OUTCOME === "success" ? "manual compatibility review recorded" : "preflight not passed; no rollback started";
-            const body = `PROD ROLLBACK · prod ${s(e.PROD_ID)} (was ${s(e.PROD_WAS)}) · ${entry} · ${admission} · smoke ${e.OUTCOME === "success" ? "ok" : e.OUTCOME} · ${readback} · ${e.REASON.slice(0, 200)} · ${e.RUN_URL}`;
+            const outcome = value => ["success", "failure", "cancelled", "skipped"].includes(value) ? value : "unknown";
+            const body = `PROD ROLLBACK · prod ${s(e.PROD_ID)} (was ${s(e.PROD_WAS)}) · ${entry} · ${admission} · rollback execution ${outcome(e.ROLLBACK_OUTCOME)} · strict smoke ${outcome(e.STRICT_OUTCOME)} · live smoke not run · runtime publication not run · ${readback} · ${e.REASON.slice(0, 200)} · ${e.RUN_URL}`;
             const command = { id: crypto.randomUUID(), type: "message.posted", data: { messageId: crypto.randomUUID(), body } };
             const res = await fetch(`${e.PROD_ORIGIN}/api/rooms/${e.RECEIPT_ROOM}/commands`, {
               method: "POST",

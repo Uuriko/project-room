@@ -13,6 +13,11 @@
         context; `x-project-room-offer-context: 1` (full view only) adds
         offer context. Room routes accept a room bearer key, a browser room
         session, or a signed-in account session with `?auth=account`.
+        `?view=orientation` returns `snapshotView: orientation`, version 1,
+        with room metadata, members, current work records and bounded handoff
+        history for default agent orientation. Full nested current evidence
+        records are retained; messages, event history, prior receipts/checks,
+        halts and read markers are omitted. It accepts no context headers.
         The default full-view read and `?messages=recent` (no other filters)
         are the same window: the newest 100 visible messages that fit the
         byte budget, in `state.messages`, plus `messagesWindow`
@@ -39,7 +44,7 @@
         - $ref: '#/components/parameters/RoomId'
         - name: view
           in: query
-          schema: { type: string, enum: [work, identity] }
+          schema: { type: string, enum: [work, identity, orientation] }
         - name: messages
           in: query
           schema: { type: string, enum: [recent] }
@@ -80,6 +85,10 @@
         - name: before
           in: query
           schema: { type: integer, minimum: 0 }
+        - name: beforeId
+          in: query
+          description: Message ID tie-break paired with before; continue using both cursor values returned by the previous page.
+          schema: { type: string, minLength: 1, maxLength: 256 }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 100 }

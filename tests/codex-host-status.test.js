@@ -135,3 +135,23 @@ for (const mismatch of ["origin", "roomId", "memberId", "malformed", "incomplete
     assert.equal((result.stdout + result.stderr).includes(connection.token), false);
   });
 }
+
+test("capability discovery is offline and does not claim runtime readiness", () => {
+  const child = spawnSync(process.execPath, [cli, "--capabilities"], { encoding: "utf8", env: { PATH: "/unavailable" } });
+  assert.equal(child.status, 0, child.stderr);
+  const capabilities = JSON.parse(child.stdout);
+  assert.ok(capabilities.modes.includes("run-request"));
+  assert.equal(capabilities.runtimeReadiness, "unverified");
+  assert.equal(capabilities.preflight, "--preflight");
+  assert.equal(capabilities.workLifecycle, "unchanged");
+});
+
+test("single-request CLI refuses absent or plural selection before reading runtime configuration", () => {
+  for (const selection of [["owner"], ["owner,reviewer", "request"], ["owner", "one,two"]]) {
+    const child = spawnSync(process.execPath, [cli, "--run-request", "/missing/journal", "/missing/runtime.json", ...selection],
+      { encoding: "utf8", env: { PATH: "/unavailable" } });
+    assert.equal(child.status, 1);
+    assert.match(child.stderr, /exactly one requester and request ID/);
+    assert.doesNotMatch(child.stderr, /ENOENT/);
+  }
+});

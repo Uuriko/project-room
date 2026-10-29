@@ -151,3 +151,80 @@ test('actual CLI saved connection survives server restart; unknown ACK and lost 
     assert.ok(!JSON.stringify(out).includes(identity.secret));
   } finally { await new Promise(resolve=>server.close(resolve)); store.close(); rmSync(directory,{recursive:true,force:true}); }
 });
+
+test('wake transport retains rate-limit delay and transient proxy failures for the existing listener retry policy', async t => {
+  const { connection, store } = await fixture(t);
+  const { isTransientWakeError, wakeRetryDelayMs } = await import('../client/wake-retry.mjs');
+  for (const [status, body, retryAfter, expectedDelay] of [
+    [429, JSON.stringify({ error: { code: 'rate_limited' } }), '90', 90000],
+    [503, 'Temporarily unavailable', null, 1000],
+    [429, '', '120', 120000],
+    [429, '', '900', 300000],
+    [429, '', 'invalid', 1000],
+  ]) {
+    let injected = true, attempts = 0;
+    const client = new AgentWakeClient({ connection, fetchImpl: async (url, options) => {
+      if (new URL(url).pathname === '/api/agent-heartbeats' && options.method === 'POST') {
+        attempts++;
+        if (injected) return new Response(body, { status, headers: retryAfter ? { 'Retry-After': retryAfter } : {} });
+      }
+      return fetch(url, options);
+    } });
+    let failure;
+    await assert.rejects(client.setup({ hostId: `retry-${status}-${expectedDelay}`, cadenceSeconds: 60 }), error => { failure = error; return true; });
+    assert.equal(failure.status, status);
+    assert.equal(isTransientWakeError(failure), true);
+    assert.equal(wakeRetryDelayMs(0, failure), expectedDelay);
+    assert.equal(attempts, 1, 'transport does not retry a POST automatically');
+    assert.equal(store.db.prepare('SELECT count(*) n FROM agent_hosts WHERE host_id=?').get(`retry-${status}-${expectedDelay}`).n, 0);
+    injected = false;
+    const recovered = await client.setup({ hostId: `retry-${status}-${expectedDelay}`, cadenceSeconds: 60 });
+    assert.equal(recovered.status, 'registered_not_listening');
+    assert.equal(attempts, 2);
+  }
+});
+
+test('malformed successful wake response remains fatal rather than being retried as an outage', async t => {
+  const { connection } = await fixture(t);
+  const { isTransientWakeError } = await import('../client/wake-retry.mjs');
+  const client = new AgentWakeClient({ connection, fetchImpl: (url, options) =>
+    new URL(url).pathname === '/api/agent-heartbeats' && options.method === 'POST'
+      ? Promise.resolve(new Response('not JSON', { status: 200 })) : fetch(url, options) });
+  await assert.rejects(client.setup({ hostId: 'malformed', cadenceSeconds: 60 }), error =>
+    error.code === 'invalid_response' && error.status === 200 && !isTransientWakeError(error));
+});
+
+
+test('plain-text credential rejection remains fatal and does not expose response content', async t => {
+  const { connection } = await fixture(t);
+  const { isTransientWakeError } = await import('../client/wake-retry.mjs');
+  const client = new AgentWakeClient({ connection, fetchImpl: (url, options) =>
+    new URL(url).pathname === '/api/agent-heartbeats' && options.method === 'POST'
+      ? Promise.resolve(new Response('PRIVATE upstream detail', { status: 401 })) : fetch(url, options) });
+  await assert.rejects(client.setup({ hostId: 'denied', cadenceSeconds: 60 }), error =>
+    error.status === 401 && !isTransientWakeError(error) && !error.message.includes('PRIVATE'));
+});
+
+
+test('wake HTTP-date retry hints survive transport while auth status overrides timeout labels', async t => {
+  const { connection } = await fixture(t);
+  const { isTransientWakeError, wakeRetryDelayMs } = await import('../client/wake-retry.mjs');
+  const deadline = Math.floor(Date.now() / 1000) * 1000 + 120000;
+  let status = 429;
+  const client = new AgentWakeClient({ connection, fetchImpl: (url, options) =>
+    new URL(url).pathname === '/api/agent-heartbeats' && options.method === 'POST'
+      ? Promise.resolve(new Response(JSON.stringify({ error: { code: 'request_timeout' } }),
+        { status, headers: { 'Retry-After': new Date(deadline).toUTCString() } })) : fetch(url, options) });
+  const before = Date.now();
+  let failure;
+  await assert.rejects(client.setup({ hostId: 'date-hint', cadenceSeconds: 60 }), error => { failure = error; return true; });
+  const after = Date.now();
+  assert.equal(failure.status, 429);
+  assert.ok(failure.retryAfterMs >= deadline - after && failure.retryAfterMs <= deadline - before);
+  assert.ok(failure.retryAfterMs > 1000);
+  assert.equal(wakeRetryDelayMs(0, failure), failure.retryAfterMs);
+  for (status of [401, 403]) {
+    await assert.rejects(client.setup({ hostId: 'date-hint', cadenceSeconds: 60 }), error =>
+      error.status === status && error.code === 'request_timeout' && !isTransientWakeError(error));
+  }
+});

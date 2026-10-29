@@ -1418,7 +1418,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           expectedRevision = created.session.sessionRevision;
           setCookie(res, accountCookieName, slotToken, Math.max(0, Math.floor((created.session.expiresAt - store.now()) / 1000)));
         }
-        const started = signIn.begin({ slotToken, expectedRevision });
+        const started = signIn.begin({ slotToken, expectedRevision, selectAccount: url.searchParams.get("switch") === "1" });
         res.statusCode = 302;
         res.setHeader("Location", started.authorizationUrl);
         return res.end();
@@ -1480,7 +1480,7 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           // the room list, invite redemption, and "New room" creation live.
           // The error path is reserved for genuine failures (denied consent,
           // bad state), which the client surfaces with a real message.
-          return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}` : "/?account=1");
+          return finishGoogle(firstRoom ? `/?room=${encodeURIComponent(firstRoom.room_id)}&google=signed-in` : "/?account=1&google=signed-in");
         } catch (error) {
           // Log only a bounded error identifier, never callback URLs, tokens,
           // provider bodies, emails, or arbitrary exception messages.
@@ -4462,15 +4462,15 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
           || [...params.keys()].some(key => !["messages", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
-        if (params.has("view") && (params.getAll("view").length !== 1 || params.get("view") !== "work"
+        if (params.has("view") && (params.getAll("view").length !== 1 || !["work", "orientation"].includes(params.get("view"))
           || [...params.keys()].some(key => !["view", "auth"].includes(key) || params.getAll(key).length !== 1))) {
           reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         }
         const helpContext = req.headers["x-project-room-help-context"];
-        if (helpContext !== undefined && (helpContext !== "1" || !params.has("view"))) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
+        if (helpContext !== undefined && (helpContext !== "1" || params.get("view") !== "work")) reject(422, "invalid_help_context", "Choose version 1 with the current work view");
         const offerContext = req.headers["x-project-room-offer-context"];
         if (offerContext !== undefined && (offerContext !== "1" || params.has("view"))) reject(422, "invalid_offer_context", "Choose version 1 with the full room view");
-        const snapshotView = params.has("view") ? "work" : "full";
+        const snapshotView = params.get("view") ?? "full";
         const auditHeader = req.headers["x-project-room-audit-view"];
         if (auditHeader !== undefined && (auditHeader !== "activity-v1" || snapshotView !== "full")) reject(422, "invalid_snapshot_view", "Choose a supported snapshot view");
         if (fullRead) {

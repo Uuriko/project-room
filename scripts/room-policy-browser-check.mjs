@@ -1,4 +1,4 @@
-import { openComposerOptions } from "./room-chrome.mjs";
+import { openComposerOptions, openConversationWork } from "./room-chrome.mjs";
 // Simulated human journey against disposable first-party data, not human research.
 // Issue #6 A4: when the room owner makes review or approval mandatory, the new-work
 // form shows the requirement locked on with the reason, and the recorded item carries it.
@@ -185,7 +185,7 @@ for(const scenario of [
     await page.getByText('A background update.',{exact:true}).waitFor();
     assert.equal(await f.review.isChecked(),true);assert.equal(await page.locator('#assignee-select').inputValue(),'owner');
     await page.locator('#cancel-work-button').click();
-    const card=page.locator(`[data-work-record-id="${saved.id}"]`);
+    const card=await openConversationWork(page,saved.id);
     await card.locator('.work-details > summary').click();await card.locator('[data-reuse-work]').click();
     await page.locator('#work-dialog').waitFor({state:'visible'});
     assert.equal(await page.locator('#work-title-input').inputValue(),saved.title);

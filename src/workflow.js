@@ -236,13 +236,20 @@ export function presentedWorkActions(item, member, now = Date.now()) {
 export function renderWorkActions(item, member, { now = Date.now(), busy = false, esc = value => String(value ?? ""), workId = item?.id } = {}) {
   const presented = presentedWorkActions(item, member, now);
   const button = (action, label, prominence) => `<button type="button" class="button ${prominence}" data-action="${esc(action)}" data-work-id="${esc(workId)}" data-focus-key="work-action:${esc(workId)}:${esc(action)}"${busy ? " disabled" : ""}>${esc(label)}</button>`;
-  const primary = presented.primary ? button(presented.primary.action, presented.primary.label, "primary") : "";
-  const moreButtons = presented.more.map(([action, label]) => button(action, label, "secondary")).join("");
+  // Render human result entry with the card itself: selection can mount a card
+  // without another room-state sync. Keep authorization in workActions above.
+  const human = member?.kind === "human";
+  const primary = presented.primary ? button(presented.primary.action,
+    human && presented.primary.action === "complete" ? "Share result" : presented.primary.label, "primary") : "";
+  const result = human && presented.more.some(([action]) => action === "complete")
+    ? button("complete", "Share result", "secondary") : "";
+  const moreButtons = presented.more.filter(([action]) => !human || action !== "complete")
+    .map(([action, label]) => button(action, label, "secondary")).join("");
   const more = moreButtons
     ? `<details class="work-more"><summary data-focus-key="work-more:${esc(workId)}">More</summary><div class="work-more-actions">${moreButtons}</div></details>`
     : "";
   const limit = `<p class="work-begin-limit">Records the Room action. Does not invoke Begin or start a host.</p>`;
-  return primary || more ? limit + primary + more : "";
+  return primary || result || more ? limit + primary + result + more : "";
 }
 
 // Round-2 #117: done chip. Marks terminally finished work at a glance — a

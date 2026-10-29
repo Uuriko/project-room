@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 // Scripted people and MCP reviewer, isolated local data. No model or provider use.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -33,8 +34,17 @@ async function setup(t, touch = false) {
     await page.route("**/*", route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
     page.on("request", req => { if (req.method() === "POST" && req.url().endsWith("/commands")) traffic.push(req.postDataJSON()); });
     await page.goto(origin); await signInFixture(page, f.keys[actor]); await page.locator("#main").waitFor({ state: "visible" });
+    const selectWork = async () => {
+      await openSearch(page); await page.locator("#message-search").fill("A welcoming contributor guide");
+      await page.locator(`#search-list [data-open-work="${workItemId}"]`).click();
+    };
+    await selectWork();
     const card = page.locator('[data-work-record-id="' + workItemId + '"]');
     const draft = async (native = true, selected = false) => {
+      // Saving a result focuses its message; return through the visible work link.
+      if (!await card.count()) {
+        await selectWork();
+      }
       const panel = card.locator(selected ? ".work-help" : ".work-details");
       if (!await panel.evaluate(node => node.open)) await panel.locator(":scope > summary").click();
       if (native) await panel.locator('[data-portable-mode="draft"]').click();
@@ -44,7 +54,7 @@ async function setup(t, touch = false) {
       }
       await page.locator("#portable-dialog").waitFor({ state: "visible" });
     };
-    return { page, card, draft };
+    return { page, card, draft, selectWork };
   };
   const directory = join(f.directory, "reviewer");
   saveAgentConnection(directory, { version: 1, origin, roomId: "commons", memberId: "reviewer", token: f.keys.reviewer });
@@ -179,6 +189,7 @@ for (const touch of [false, true]) test("draft feedback and revised result " + (
   const original = await post("Welcome! Share a draft."), alternative = await post("An alternate introduction.");
   await guest.page.locator("#message-input").fill("My unrelated chat draft");
   await adopt(original); await label(original, "Awaiting review"); await label(alternative, "Draft");
+  await guest.selectWork();
   await guest.card.locator(".work-drafts > summary").click();
   assert.equal(await guest.card.locator(".work-drafts [data-open-message]").count(), 2);
   await row(original).locator(".draft-state").focus();
@@ -209,6 +220,7 @@ for (const touch of [false, true]) test("draft feedback and revised result " + (
   await adopt(revised); await label(original, "Earlier result"); await label(revised, "Awaiting review");
   await review("feedback-revised"); await decide("approved", "Ready to use"); await label(revised, "Approved"); await label(alternative, "Draft");
   assert.equal(await row(original).locator(".draft-feedback details").count(), 0);
+  await guest.selectWork();
   assert.equal(await guest.card.locator(".work-drafts [data-open-message]").count(), 3);
   assert.match(await guest.card.locator('[data-focus-key="work-draft-message:' + original.id + '"]').textContent(), /Earlier result/);
   assert.match(await guest.card.locator('[data-focus-key="work-draft-message:' + revised.id + '"]').textContent(), /Approved/);
