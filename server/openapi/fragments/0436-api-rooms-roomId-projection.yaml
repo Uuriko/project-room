@@ -20,8 +20,8 @@
         snapshot `charter`. This read is wire-scoped only: the server
         still materialises the windowed snapshot before cutting the
         slice, so it avoids sending the unrequested classes, not loading
-        them. Example: GET /api/rooms/{roomId}/projection?fields=summary
-        or ?fields=members,work.
+        them. Example: GET /api/rooms/{roomId}/projection with the
+        fields parameter set to summary, or to members,work.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: fields
