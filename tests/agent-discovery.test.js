@@ -60,10 +60,11 @@ test("discovery documents a ledger, not a run factory, with origin, doors and fi
   assert.match(card.description, /Members/);
   assert.match(card.description, /Not a run factory/);
   assert.match(card.description, /A2A discovery: returns the join guide; use MCP for room actions/);
-  assert.match(text, /Agent-native ledger/);
-  assert.match(text, /Work Items \+ next actions \+ receipts/);
-  assert.match(text, /Not a run factory/);
-  assert.match(text, /Compute stays separate/);
+  // agent-llms-txt pack §4 step 3d (#5154 panel): the short packet's first
+  // line is plain words now; the ledger/run-factory vocabulary stays on the
+  // card and the full packet, not in the door's opening sentence.
+  assert.match(text, /A room where agents join as members, claim work items, do the work, and leave receipts anyone can check\./);
+  assert.equal(text.includes("Not a run factory"), false);
   assert.match(text, /HTML door/);
   assert.match(text, /\/room\/llms.txt/);
   assert.equal(DISCOVERY_PATHS.includes("/room"), false);
@@ -826,6 +827,133 @@ test("llms-full.txt is a section superset of llms.txt and no smaller", () => {
     assert.ok(headings(full).includes(heading), `llms-full.txt missing section: ${heading}`);
   }
   assert.ok(full.length >= text.length, `llms-full.txt (${full.length}) must not be smaller than llms.txt (${text.length})`);
+});
+
+// HELP-100 / agent-llms-txt pack (design wave 2026-10-28, issues #5153/#5154/
+// #5155, #4448/#3634/#3635 packet halves): the short packet must be
+// self-contained for a cold agent — review policy, mint budgets, credential
+// source, named anonymous tools — inside the served 5,000 B budget.
+import { readFileSync as readFileSyncHelp100 } from "node:fs";
+import { createHash as createHashHelp100 } from "node:crypto";
+
+const REVIEW_POLICY_SENTENCE = "Claims close per their `reviewPolicy`: default `self_attested` (the holder closes in one step; recorded self-attested, never verified); `hard`-tagged claims default to `distinct_member` (deliver, then a different member closes).";
+const MINT_LIMITS_SENTENCE = "Mint budgets (rolling 24 h): 8/min per address, 20/day per address, 80/day per network, 200/day global. On `429 rate_limited`, wait per the `Retry-After` header and retry unchanged.";
+const ANON_TOOLS = ["room_join_packet", "room_join_kits", "room_join_prompt", "room_mcp_snippet", "public_work_recommend", "public_work_read_task", "room_identity_mint"];
+
+test("llms.txt as served stays within 5,000 B and 66 lines (pack §5.1)", () => {
+  // Local renders carry the placeholder rev line "dev dev"; a served packet
+  // carries a 40-char revision + an ISO build timestamp in the same line.
+  const served = llmsTxt().replace("deployed-rev dev dev",
+    `deployed-rev ${"a".repeat(40)} 2026-10-27T22:49:13.216Z`);
+  assert.ok(Buffer.byteLength(served) <= 5000, `served llms.txt is ${Buffer.byteLength(served)} bytes`);
+  assert.ok(served.split("\n").length <= 66, `llms.txt is ${served.split("\n").length} lines`);
+});
+
+test("llms.txt states review policy, mint budgets and the MCP credential source", () => {
+  const text = llmsTxt();
+  assert.ok(text.includes(REVIEW_POLICY_SENTENCE), "short packet must state the review-policy sentence");
+  assert.ok(text.includes(MINT_LIMITS_SENTENCE), "short packet must state the mint budgets + Retry-After rule");
+  assert.ok(text.includes("`<room-mcp-token>` = the `mcpToken.credential` returned by the `/api/agent-rooms` call above"),
+    "short packet must say where <room-mcp-token> comes from");
+  const full = llmsFullTxt();
+  assert.ok(full.includes("self_attested"), "full packet keeps the closing rules");
+});
+
+test("llms.txt names the seven anonymous tools and labels the member core set", () => {
+  const text = llmsTxt();
+  for (const name of ANON_TOOLS) assert.ok(text.includes(name), `short packet must name anonymous tool ${name}`);
+  assert.ok(text.includes("compact core set of 18, plus the 4 join readers (22 with a member identity)"),
+    "short packet must label the 18 as the member core set, 22 with join readers");
+});
+
+test("llms.txt first line is plain words a cold reader understands", () => {
+  const summary = llmsTxt().split("\n").find(line => line.startsWith("> "));
+  assert.equal(summary, "> A room where agents join as members, claim work items, do the work, and leave receipts anyone can check.");
+});
+
+test("llms.txt join section points at the mint step instead of only off-packet", () => {
+  const text = llmsTxt();
+  const join = text.slice(text.indexOf("## Join the room your user named"), text.indexOf("## Start here"));
+  assert.ok(join.includes("Mint first"), "join section must name the mint-first enrollment step inline");
+  assert.ok(join.includes("New agent creating a room"), "join section must cross-reference the mint curl below");
+});
+
+test("llms.txt 428 recipe says what is searched and what must match", () => {
+  const text = llmsTxt();
+  assert.ok(text.includes("search candidate proof values"), "packet must say candidates are searched");
+  assert.ok(!text.includes("nonce matches proof.nonce"), "packet must not say the nonce matches a server value");
+  assert.ok(!text.includes("proof set to that nonce"), "packet must not say proof is set to the nonce");
+});
+
+test("AGENT-START-HERE mirrors the door facts with no placeholder bearer", () => {
+  const doc = readFileSyncHelp100(new URL("../docs/AGENT-START-HERE.md", import.meta.url), "utf8");
+  assert.ok(doc.includes("self_attested"), "companion doc must state the review policy");
+  assert.ok(doc.includes("8/min"), "companion doc must state the mint budgets");
+  assert.equal(doc.includes("<redacted>"), false, "no literal <redacted> bearer in instructions");
+  const curlLines = doc.split("\n").filter(line => /(^|\s)curl\s+-sS/.test(line));
+  const flagged = curlLines.filter(line => line.includes("-A project-room-agent"));
+  assert.equal(flagged.length, curlLines.length,
+    `every curl example must carry -A project-room-agent (${flagged.length}/${curlLines.length})`);
+  assert.ok(doc.includes("createHash"), "companion doc Step 1 must carry the worked 428 snippet");
+});
+
+async function serveMemory(t) {
+  const store = new RoomStore(":memory:");
+  const server = createRoomServer({ store });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  t.after(async () => { server.closeStreams(); server.closeAllConnections(); await new Promise(resolve => server.close(resolve)); store.close(); });
+  return `http://127.0.0.1:${server.address().port}`;
+}
+
+test("the bearer the packet's MCP examples name passes tools/list and room_post_message", async t => {
+  const origin = await serveMemory(t);
+  const headers = secret => ({ "Content-Type": "application/json", Origin: origin, ...(secret ? { Authorization: `Bearer ${secret}` } : {}) });
+  const mint = await fetch(`${origin}/api/agent-identities`, { method: "POST", headers: headers(), body: JSON.stringify({ displayName: "PacketProbe" }) });
+  assert.equal(mint.status, 201);
+  const { secret } = await mint.json();
+  const roomRes = await fetch(`${origin}/api/agent-rooms`, { method: "POST", headers: headers(secret), body: JSON.stringify({ title: "Packet probe room", purpose: "credential proof" }) });
+  assert.equal(roomRes.status, 201);
+  const room = await roomRes.json();
+  const credential = room.mcpToken?.credential;
+  assert.ok(credential, "room create must return mcpToken.credential — the packet names it as the MCP bearer");
+  for (const [label, bearer] of [["mcpToken.credential", credential], ["saved identity secret", secret]]) {
+    const list = await fetch(`${origin}/mcp`, { method: "POST", headers: headers(bearer), body: JSON.stringify({ jsonrpc: "2.0", id: "1", method: "tools/list" }) });
+    assert.equal(list.status, 200, `${label}: tools/list status`);
+    const listBody = await list.json();
+    assert.equal(listBody.result.tools.length, 22, `${label}: member catalog is 22 tools`);
+    const post = await fetch(`${origin}/mcp`, { method: "POST", headers: headers(bearer), body: JSON.stringify({ jsonrpc: "2.0", id: "2", method: "tools/call", params: { name: "room_post_message", arguments: { roomId: room.roomId, body: "Hello from the packet probe" } } }) });
+    assert.equal(post.status, 200, `${label}: room_post_message status`);
+    const postBody = await post.json();
+    assert.ok(!postBody.error, `${label}: room_post_message must not error: ${JSON.stringify(postBody.error)}`);
+  }
+});
+
+test("the documented 428 recipe solves a real proof_required body", async t => {
+  const origin = await serveMemory(t);
+  const headers = { "Content-Type": "application/json", Origin: origin };
+  const name = "Recipe Agent";
+  // A well-formed but wrong proof drives the server into 428 proof_required.
+  const challenged = await fetch(`${origin}/api/agent-identities`, { method: "POST", headers, body: JSON.stringify({ displayName: name, proof: "wrongcandidate1" }) });
+  assert.equal(challenged.status, 428, `expected 428, got ${challenged.status}`);
+  const body = await challenged.json();
+  const proof = body.proof?.proof ?? body.proof;
+  assert.ok(proof?.prefix && Array.isArray(proof?.acceptBuckets), "428 body must carry proof.prefix and proof.acceptBuckets");
+  // The documented recipe, verbatim in method: search candidate values that
+  // match the proof.nonce pattern until the SHA-256 hex of
+  // {bucket}:{trimmedDisplayName}:{candidate} starts with proof.prefix.
+  const noncePattern = new RegExp(proof.nonce);
+  let winner = null;
+  outer: for (const bucket of proof.acceptBuckets) {
+    for (let i = 0; i < 200000; i++) {
+      const candidate = `cand${i}`;
+      if (!noncePattern.test(candidate)) continue;
+      const hex = createHashHelp100("sha256").update(`${bucket}:${name.trim()}:${candidate}`).digest("hex");
+      if (hex.startsWith(proof.prefix)) { winner = candidate; break outer; }
+    }
+  }
+  assert.ok(winner, "documented recipe must find a winning candidate");
+  const solved = await fetch(`${origin}/api/agent-identities`, { method: "POST", headers, body: JSON.stringify({ displayName: name, proof: winner }) });
+  assert.equal(solved.status, 201, `resend with the winning proof must mint, got ${solved.status}`);
 });
 
 test("robots.txt explicitly welcomes Google-Extended, CCBot and Applebot-Extended", async t => {
