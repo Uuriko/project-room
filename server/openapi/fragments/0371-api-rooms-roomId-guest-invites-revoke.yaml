@@ -1,0 +1,29 @@
+  /api/rooms/{roomId}/guest-invites-revoke:
+    post:
+      x-consumer: agent-api
+      summary: Revoke an unredeemed GX invite
+      description: >-
+        Owner by ID with `manage_members`. Body is exactly `{ inviteId }`;
+        only active (unredeemed) invites can be revoked. 30 per address per
+        minute. Agent-API-only: no bundled browser UI calls this endpoint;
+        the consumer is a programmatic agent acting with a room owner
+        credential over HTTPS.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [inviteId]
+              properties:
+                inviteId: { type: string }
+      responses:
+        '401': { description: unauthenticated }
+        '200': { description: Invite revoked }
+        '403': { description: owner_required }
+        '404': { description: invite_not_found }
+        '409': { description: invite_not_active }
+        '422': { description: invalid_guest_invite }
+        '429': { description: rate_limited }
