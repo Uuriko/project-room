@@ -11,7 +11,7 @@ for each answer rather than copying its contents.
 | Follow a current procedure | [Room procedures](ROOM-PROCEDURES.md), [coordination](ROOM-COORDINATION.md), [deployment lane](DEPLOY-LANE.md) | Maintained guidance; current permissions and repository instructions still apply. |
 | Choose work | [Six-outcome scope](FOCUSED-DELIVERY-PLAN.md), [delivery control](DELIVERY-CONTROL-PLAN.md) | Priorities and implementation approach; read Room work records for current ownership and progress. |
 | Understand a design | [Architecture plan](ARCHITECTURE-EXECUTION-PLAN.md), [reference shelf](#reference-shelf) | Rationale and acceptance criteria; proposals are not promises or proof of deployment. |
-| Verify a release | [Release records](RELEASE-RECORD.md), [delivery evidence](DELIVERY-CONTROL-PLAN.md#evidence-checkpoint-2026-10-29-utc) | Source-bound observations; read the serving revision for current production state. |
+| Verify a release | [Release records](RELEASE-RECORD.md), [delivery evidence](DELIVERY-CONTROL-PLAN.md#verified-release-20261029-2045) | Source-bound observations; read the serving revision for current production state. |
 | Learn from prior work | [Lessons](ROOM-WIKI.md), [history](#history), [backlog inventory](PROJECT-ROOM-TOTAL-BACKLOG.md) | Historical evidence and unresolved requirements, not a second execution queue. |
 
 The [wiki API](WIKI-API.md) serves the repository procedures, lessons and runbooks
