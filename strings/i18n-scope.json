@@ -46,6 +46,7 @@
   "src/first-room-copy.js",
   "src/friend-bond.js",
   "src/front-door.js",
+  "src/google-room-return.js",
   "src/growth-alerts.js",
   "src/growth-collector.js",
   "src/growth-compare.js",
