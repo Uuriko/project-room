@@ -162,7 +162,8 @@ export function readConversation(store, token, roomId, { limit = 50, cursor = nu
     // extra mention work and an implicit reply needs no roster/alias lookup.
     const addressing = messageId === null ? null : { explicitlyMentioned: false };
     if (addressing && typeof messages[0]?.body === "string" && messages[0].body.includes("@")) {
-      const message = messages[0], members = store.room(roomId).state.members;
+      // Mention resolution needs fresh membership, not hydrated conversation or work history.
+      const message = messages[0], members = store.roomAuthority(roomId).members;
       addressing.explicitlyMentioned = ((!message.toMemberId || message.toMemberId === auth.member.id)
         && resolveMentionTargetsInText(members, identityNamesForRoom(store.db, roomId), message.body, message.authorId).includes(auth.member.id))
         || squadMentionTargets(store.db, roomId, message.body, message.authorId, members, message.toMemberId).includes(auth.member.id);
