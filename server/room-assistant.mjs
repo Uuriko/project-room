@@ -434,7 +434,9 @@ export function invokeFromPlainPost(store, roomId, state, actor, data, messageId
     const run = { id: assistantRunId(messageId), sourceMessageId: messageId, initiatorId: actor.id,
       coordinatorMemberId: config.coordinatorMemberId, status: 'queued', revision: 0, attemptId: null,
       createdAt: store.now(), updatedAt: store.now(), hostReportedAt: null, inputs: [{ memberId: actor.id, sourceMessageId: messageId, status: 'pending' }], activity: [] };
-    store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO UPDATE SET value=excluded.value').run(roomId, run.id, JSON.stringify(run));
+    // Explicit invokes may already own this derived ID for another source.
+    // Keep their execution and history intact; a plain post still succeeds.
+    store.db.prepare('INSERT INTO room_assistant_runs VALUES(?,?,?) ON CONFLICT(room_id,run_id) DO NOTHING').run(roomId, run.id, JSON.stringify(run));
   } catch (error) {
     console.error(`assistant intent derivation failed for room ${roomId} message ${messageId}:`, error?.message ?? error);
   }

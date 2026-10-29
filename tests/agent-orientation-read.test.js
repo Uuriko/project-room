@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { readAgentOrientation } from '../server/agent-orientation.mjs';
 import { RoomStore } from '../server/store.mjs';
 import { createRoomServer } from '../server/http.mjs';
 import { initialRoom } from '../server/bootstrap.mjs';
@@ -35,6 +36,7 @@ for (const bodiesAtRest of [false, true]) test(`orientation preserves handoffs w
     { headers: { authorization: `Bearer ${token}`, ...extra } });
   const response = await get(), packet = await response.json();
   assert.equal(response.status, 200, JSON.stringify(packet));
+  assert.deepEqual(readAgentOrientation(store, token, 'commons'), packet, 'HTTP and service orientation contracts agree');
   assert.equal(packet.snapshotView, 'orientation');
   assert.deepEqual(Object.keys(packet.state).sort(), ['members', 'room', 'workItems']);
   assert.deepEqual(packet.state.members, full.state.members);

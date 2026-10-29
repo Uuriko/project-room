@@ -146,3 +146,29 @@ test('submit and derivation map one source message to one run id at the boundary
   const { runs } = await api('owner');
   assert.equal(runs.filter(run => run.sourceMessageId === longId).length, 1);
 });
+
+for (const claimed of [false, true]) {
+  test(`plain ask preserves a colliding ${claimed ? 'running' : 'queued'} request`, async t => {
+    const { f, api, message } = await setup(t);
+    await api('owner', { action: 'configure', expectedRevision: 0, name: 'Room', coordinatorMemberId: 'producer' });
+    message('owner', 'original-source', 'Existing shared request');
+    await api('owner', { action: 'invoke', runId: 'run-future-ask', sourceMessageId: 'original-source' });
+    if (claimed) {
+      await api('producer', { action: 'claim', runId: 'run-future-ask', attemptId: 'existing-host-attempt', expectedRevision: 0 });
+      await api('producer', { action: 'report', runId: 'run-future-ask', attemptId: 'existing-host-attempt', expectedRevision: 1, state: 'working', summary: 'Original execution is in progress' });
+    }
+    const saved = () => f.store.db.prepare('SELECT value FROM room_assistant_runs WHERE room_id=? AND run_id=?').get('commons', 'run-future-ask').value;
+    const before = saved();
+    if (claimed) {
+      const run = JSON.parse(before);
+      assert.equal(run.status, 'working');
+      assert.equal(run.attemptId, 'existing-host-attempt');
+      assert.equal(run.activity[0].summary, 'Original execution is in progress');
+    }
+    message('owner', 'future-ask', '@Room, please handle this new request.');
+    assert.equal(saved(), before, 'derivation must not replace prior inputs, revision, attempt or history');
+    assert.ok(f.store.room('commons').state.messages.some(entry => entry.id === 'future-ask'), 'collision must not refuse the plain post');
+    const { runs } = await api('owner');
+    assert.equal(runs.filter(run => run.sourceMessageId === 'future-ask').length, 0);
+  });
+}
