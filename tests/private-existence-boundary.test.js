@@ -141,3 +141,91 @@ test('metadata: a work item carrying a private request exposes no title or defin
   assert.equal(exposed.includes('PRIV-DOD-MARKER'), false,
     'non-participant board/list read carries the private item definition-of-done (F-S8a-5)');
 });
+
+// --- Critic follow-up on #5355 (BLOCKING, comment 6510915135): the work
+// snapshot above was the only redacted serialiser. The same private
+// work-item state also leaves through the full snapshot / bootstrap,
+// through room search, and roomContext carried the same horizon leak
+// as the reply list. The tests below pin those reads; participants
+// keep full access on each of them.
+
+function seedPrivateWorkItem(w) {
+  w.setNow(T_SEED);
+  w.store.command(w.alice.secret, w.roomId, { id: 'propose', type: 'work.proposed', data: {
+    workItemId: 'priv-container', title: 'PRIV-TITLE-MARKER', definitionOfDone: 'PRIV-DOD-MARKER',
+    accountableMemberId: w.bobId, mode: 'read'
+  } });
+  return seedThenPrivateAsk(w, { workItemId: 'priv-container' });
+}
+
+test('metadata: the full snapshot exposes no title or definition-of-done to non-participants', t => {
+  const w = world(t);
+  seedPrivateWorkItem(w);
+  const bobView = readRoomSnapshot(w.store, w.bob.secret, w.roomId, null);
+  assert.equal(bobView.state.workItems['priv-container']?.title, 'PRIV-TITLE-MARKER');
+  assert.equal(bobView.state.workItems['priv-container']?.definitionOfDone, 'PRIV-DOD-MARKER');
+  const carolView = readRoomSnapshot(w.store, w.carol.secret, w.roomId, null);
+  assert.equal(carolView.state.workItems['priv-container']?.title, null);
+  assert.equal(carolView.state.workItems['priv-container']?.definitionOfDone, null);
+  const exposed = JSON.stringify(carolView.state.workItems ?? {}) + JSON.stringify(carolView.state.eventLog ?? []);
+  assert.equal(exposed.includes('PRIV-TITLE-MARKER'), false,
+    'non-participant full-snapshot read carries the private item title (F-S8a-5)');
+  assert.equal(exposed.includes('PRIV-DOD-MARKER'), false,
+    'non-participant full-snapshot read carries the private item definition-of-done (F-S8a-5)');
+});
+
+test('metadata: room bootstrap exposes no title or definition-of-done to non-participants', async t => {
+  const { buildRoomBootstrap } = await import('../server/room-bootstrap.mjs');
+  const w = world(t);
+  seedPrivateWorkItem(w);
+  const bobBoot = buildRoomBootstrap(w.store, w.bob.secret, w.roomId, null);
+  assert.equal(bobBoot.snapshot.state.workItems['priv-container']?.title, 'PRIV-TITLE-MARKER');
+  assert.equal(bobBoot.snapshot.state.workItems['priv-container']?.definitionOfDone, 'PRIV-DOD-MARKER');
+  const carolBoot = buildRoomBootstrap(w.store, w.carol.secret, w.roomId, null);
+  assert.equal(carolBoot.snapshot.state.workItems['priv-container']?.title, null);
+  assert.equal(carolBoot.snapshot.state.workItems['priv-container']?.definitionOfDone, null);
+  const exposed = JSON.stringify(carolBoot);
+  assert.equal(exposed.includes('PRIV-TITLE-MARKER'), false,
+    'non-participant bootstrap carries the private item title (F-S8a-5)');
+  assert.equal(exposed.includes('PRIV-DOD-MARKER'), false,
+    'non-participant bootstrap carries the private item definition-of-done (F-S8a-5)');
+});
+
+test('metadata: room search neither matches on nor returns a private item title or definition-of-done to non-participants', t => {
+  const w = world(t);
+  seedPrivateWorkItem(w);
+  // Participant control: Bob finds the item by its definition-of-done
+  // and by its title, and receives the title.
+  const bobDod = w.store.search(w.bob.secret, w.roomId, 'PRIV-DOD-MARKER', 'work');
+  assert.equal(bobDod.total, 1);
+  assert.equal(bobDod.workItems[0]?.id, 'priv-container');
+  assert.equal(bobDod.workItems[0]?.title, 'PRIV-TITLE-MARKER');
+  const bobTitle = w.store.search(w.bob.secret, w.roomId, 'PRIV-TITLE-MARKER', 'all');
+  assert.equal(bobTitle.workItems.some(item => item.id === 'priv-container'), true);
+  // Non-participant: searching the private text is not a confirm-oracle
+  // and returns no title, for either kind.
+  for (const kind of ['work', 'all']) {
+    const carolDod = w.store.search(w.carol.secret, w.roomId, 'PRIV-DOD-MARKER', kind);
+    assert.equal(carolDod.total, 0, `non-participant search kind=${kind} matched the private definition-of-done`);
+    assert.equal(carolDod.workItems.length, 0);
+    const carolTitle = w.store.search(w.carol.secret, w.roomId, 'PRIV-TITLE-MARKER', kind);
+    assert.equal(carolTitle.workItems.some(item => item.id === 'priv-container'), false,
+      `non-participant search kind=${kind} returned the private item on its title`);
+    // The result's workItems/messages (not its echoed query field)
+    // must carry neither private marker.
+    assert.equal(JSON.stringify(carolTitle.workItems).includes('PRIV-TITLE-MARKER'), false);
+    assert.equal(JSON.stringify(carolDod.workItems).includes('PRIV-TITLE-MARKER'), false);
+  }
+});
+
+test('existence: roomContext evaluatedThrough stops at the non-participant visible horizon', t => {
+  const w = world(t), { visibleHorizon, privateSequence } = seedThenPrivateAsk(w);
+  assert.ok(privateSequence > visibleHorizon, 'construction: a hidden event exists past the horizon');
+  const carolContext = w.store.roomContext(w.carol.secret, w.roomId, {});
+  assert.equal(carolContext.evaluatedThrough, visibleHorizon,
+    `roomContext evaluatedThrough ${carolContext.evaluatedThrough} reveals hidden events past Carol's visible horizon ${visibleHorizon}`);
+  // Participant legs are unchanged: sender and recipient reach the
+  // private event's sequence.
+  assert.equal(w.store.roomContext(w.bob.secret, w.roomId, {}).evaluatedThrough, privateSequence);
+  assert.equal(w.store.roomContext(w.alice.secret, w.roomId, {}).evaluatedThrough, privateSequence);
+});
