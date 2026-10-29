@@ -282,8 +282,9 @@ jobs:
       - name: Smoke version, health, ready, legal pages
         id: smoke
         shell: bash
-        # Retry only verified propagation failures. Preserve the original report
-        # and observe convergence during the former 150s idle-delay budget.
+        # Retry only verified propagation or complete timeout-only readiness evidence.
+        # Preserve the original report; observe within the existing 150s budget,
+        # then require a fresh complete strict smoke. No Worker re-upload.
         run: |
           record_smoke_digest() {
             if [ -n "${GITHUB_OUTPUT:-}" ] && [ -f "$RUNNER_TEMP/prod-smoke.json" ]; then
