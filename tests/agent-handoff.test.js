@@ -11,22 +11,23 @@ import { RoomAgentClient } from "../client/room-agent.mjs";
 import { EVENT_TYPES as T } from "../src/events.js";
 import { makeTestSigner } from "../scripts/helpers/signed-evidence.mjs";
 import { setTier } from "../server/autonomy-tiers.mjs";
+import { linkWithProof } from "./helpers/link-with-proof.mjs";
 
-test("local API handoff: distinct scripted clients, revision correction, restart, review and human decision", async t => {
+test("local API handoff: cold action discovery, revision correction, restart, review and human decision", async t => {
   const directory = mkdtempSync(join(tmpdir(), "room-handoff-contract-"));
   const filename = join(directory, "fixture.sqlite");
   let store = new RoomStore(filename);
   store.initialize(initialRoom());
   const ownerKey = store.issueAccessKey("commons", "owner");
+  const identities = new Map();
   for (const [memberId, permissions] of [["producer", ["accept_work", "complete_work"]], ["reviewer", ["verify"]]]) {
-    store.command(ownerKey, "commons", { id: `add-${memberId}`, type: T.MEMBER_ADDED, data: {
-      memberId, displayName: `${memberId} (scripted fixture)`, kind: "agent", permissions, accountableHumanId: "owner"
-    } });
+    const identity = store.identities.create(`${memberId} (scripted fixture)`); identities.set(memberId, identity);
+    linkWithProof(store, ownerKey, "commons", identity, { memberId, displayName: memberId, permissions });
     // Graduated autonomy tiers: the fixture agents are operator-promoted so the
     // handoff contract exercises them as working agents.
     setTier(store.db, "commons", memberId, "t2_standard", { updatedBy: "owner", nowMs: Date.now() });
   }
-  const producerKey = store.issueAccessKey("commons", "producer"), reviewerKey = store.issueAccessKey("commons", "reviewer");
+  const producerKey = identities.get("producer").secret, reviewerKey = identities.get("reviewer").secret;
   let signEvidence = makeTestSigner(store);
   let server;
   const start = async () => {
@@ -49,7 +50,28 @@ test("local API handoff: distinct scripted clients, revision correction, restart
     ownerDecisionRequired: true, humanDecisionMakerId: "owner", sourceMessageId: "request", mode: "read"
   }));
   assert.equal((await item(producer)).next.action, "accept");
-  await mutate(producer, "accept", T.WORK_ACCEPTED);
+  // A cold agent starts with discovery rather than a preloaded lifecycle tool.
+  // Execute the returned action through the hosted transport, then continue the
+  // same persisted work through correction, review and the human decision.
+  const rpc = async (method, params) => {
+    const response = await fetch(`${origin}/room/mcp?profile=lean`, {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: `Bearer ${identities.get("producer").secret}` },
+      body: JSON.stringify({ jsonrpc: "2.0", id: "cold-handoff", method, params })
+    });
+    assert.equal(response.status, 200);
+    const body = await response.json(); assert.equal(body.error, undefined, JSON.stringify(body));
+    assert.equal(body.result.isError, undefined, JSON.stringify(body.result)); return body.result;
+  };
+  const listed = await rpc("tools/list", { profile: "lean" });
+  assert.ok(listed.tools.some(tool => tool.name === "room_search_actions"));
+  const found = await rpc("tools/call", { name: "room_search_actions", arguments: { query: "accept assigned work" } });
+  const accept = found.structuredContent.matches.find(action => action.name === "room_accept_work");
+  assert.ok(accept, "assignment acceptance is discoverable by intent");
+  assert.ok(accept.inputSchema.required.includes("workItemId"));
+  const args = { roomId: "commons", workItemId: "handoff", requestId: "accept", expectedRevision: (await item(producer)).revision };
+  const accepted = await rpc("tools/call", { name: "room_run_action", arguments: { name: accept.name, arguments: args } });
+  assert.equal(accepted.structuredContent.status, "recorded");
+  assert.equal((await item(producer)).state, "accepted", "discovered action persisted the assignment acceptance");
   await mutate(producer, "start", T.WORK_STARTED);
   assert.equal((await item(producer)).next.needsAttention, false, "running work does not repeatedly request attention");
   const version = text => `sha256:${createHash("sha256").update(text).digest("hex")}`;
@@ -100,7 +122,7 @@ test("local API handoff: distinct scripted clients, revision correction, restart
   });
   assert.equal((await item(owner)).next.action, "complete");
   assert.equal((await owner.snapshot()).state.workItems.handoff.receiptHistory.length, 1);
-  store.issueAccessKey("commons", "producer");
+  store.identities.rotate(identities.get("producer").identityId, producerKey);
   await assert.rejects(() => producer.orient(), error => error.status === 401 && error.code === "unauthenticated");
 });
 
