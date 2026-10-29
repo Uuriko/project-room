@@ -52,12 +52,34 @@ Historical patrol findings are observations, not proof of current corruption;
 sequence 806 remains unclassified without authorized operator detail. No repair
 was executed. Synthetic query-cost improvements do not establish productivity lift.
 
-At the subsequent cleanup checkpoint, main `30367102` also contains #5319–#5321:
-receipt qualifications, registry discovery, browser-fixture repairs, the controlled
-collaboration measurement protocol, reader-driven lazy history and honest owner
-metric labels. These are merged, not part of the release above. PR #5322's private
-conversation work is a separate reviewed candidate; its initial failed CI and
-repaired exact-head CI must not be confused with deployment evidence.
+### Integrated cleanup checkpoint — 2026-10-29, 22:01 UTC
+
+Main `580b380ad3416b23810fbe3544b10c9ae0f1aa85` includes #5319–#5322,
+#5329, #5331 and #5332. These changes are **merged, not deployed** in the
+verified release above. They cover receipt qualification and privacy, agent
+setup guidance, reader-driven history, private conversations, preview-image
+asset loading and failure caching, and the collaboration measurement protocol.
+
+Private conversations merged through #5322 at `b4ef7a5d`. Candidate
+`e2ce9efb5dcb95cf1066122852814c807cdf056e` passed all scheduled jobs in
+[run 40960732330](https://github.com/Uuriko/project-room/actions/runs/40960732330),
+including six browser shards. Skipped coverage is not passing coverage. Earlier
+passing candidate `cad9c55b` still failed an independent 261-message history test;
+the corrected candidate passes that test and retains the failing old-cap control.
+Private history is fetched in explicit 50-message pages; exhaustion removes the
+pager. The public timeline retains its separate display window.
+
+The OG asset composition `e0cdf21a` passed 53 focused checks and all eight
+exact-source runtime-package checks before #5332 merged. The other laptop
+independently checked all 167 committed manifest hashes at `580b380a`, with no
+mismatches, and found the frontend and DM implementation unchanged from the
+qualified candidate. That integrity comparison is not execution of the whole
+composed runtime. Production deployment and installed native adoption remain
+separate observations. Release was deferred during the ecosystem cleanup pass.
+
+Peer handoff `local-catalog-content-refresh-1030` (Room sequence 23267) supplies
+these scoped observations and four portable excerpts. Full laptop artifact bodies
+were not transferred; local inventory counts remain pinned to their older source.
 
 ## Retained checkpoint history
 
