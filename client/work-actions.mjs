@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import { EVENT_TYPES as T, validId } from "../src/events.js";
-import { replyPostMode, REPLY_POLICY_VERSION } from "../src/reply-requests.js";
+import { replyPostMode, REPLY_POLICY_VERSION, ANSWER_CREDENTIALS } from "../src/reply-requests.js";
 import { reportedProducer } from "../src/work-packet.js";
 import { agentErrorAx } from "../src/agent-error.mjs";
 import { withDerivedRequestId } from "./request-id.mjs";
@@ -231,7 +231,10 @@ export function confirmsAgentCommand(receipt, command, { roomId, memberId }) {
   const entry = receipt?.event;
   let data = command.data;
   try {
-    if (command.type === T.MESSAGE_POSTED && replyPostMode(data)) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
+    const mode = command.type === T.MESSAGE_POSTED ? replyPostMode(data) : null;
+    if (mode) data = { ...data, requestPolicyVersion: REPLY_POLICY_VERSION };
+    // The server stamps which credential answered; it is never in the command.
+    if (mode === "respond" && ANSWER_CREDENTIALS.includes(entry?.data?.answerCredential)) data = { ...data, answerCredential: entry.data.answerCredential };
   } catch { return false; }
   return Number.isSafeInteger(receipt?.sequence) && receipt.sequence > 0 && typeof receipt.duplicate === "boolean"
     && validId(entry?.id) && entry.type === command.type && entry.roomId === roomId && entry.actorId === memberId
