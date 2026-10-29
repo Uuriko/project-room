@@ -25,16 +25,23 @@ const open = (f, token) => f.store.agentInbox(token, "commons").directMentions.m
 
 test("a late ack clears a timed-out mention; an on-time ack keeps it open", t => {
   const { f, token } = enrolledAgent(t);
+  let now = f.store.now();
+  f.store.now = () => now;
   t.after(() => { f.store.close(); rmSync(f.directory, { recursive: true, force: true }); });
   say(f, f.keys.owner, { messageId: "answered-elsewhere", body: "@Scout did the deploy go out?" });
+  now += 1;
   say(f, f.keys.owner, { messageId: "acked-in-time", body: "@Scout please look at the logs" });
+  now += 1;
   say(f, f.keys.owner, { messageId: "ignored", body: "@Scout ping" });
   assert.deepEqual(open(f, token), ["ignored", "acked-in-time", "answered-elsewhere"]);
 
   // Acked before its deadline, then the deadline passes: still open.
+  const deadline = now + 1000;
+  for (const id of ["answered-elsewhere", "acked-in-time", "ignored"]) expire(f, id, deadline);
   f.store.acknowledgeMention(token, "commons", eventIdOf(f, "acked-in-time"));
-  const past = f.store.now() - 1;
-  for (const id of ["answered-elsewhere", "acked-in-time", "ignored"]) expire(f, id, past);
+  // Advance time; moving the deadline behind an existing acknowledgement
+  // would retroactively turn the on-time observation into a late one.
+  now = deadline + 1;
   assert.deepEqual(open(f, token), ["ignored", "acked-in-time", "answered-elsewhere"], "timing out alone clears nothing");
 
   // Answered in a new message, then acknowledged after the deadline: handled.
