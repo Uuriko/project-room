@@ -339,6 +339,7 @@ const AX_NAMED_RECOVERIES = {
   access_rejected: ["The access-request state machine rejected that transition — the message names the rule. Read the request's current state; do not retry the same transition.", "Read the access request's current state and follow the rule named in the message."],
   account_state_unchanged: ["The account is already in that state — nothing changed and nothing needs to happen.", "Treat it as done; read the current account state to confirm."],
   active_members: ["The room still has active human members, so this cannot proceed. Remove or transfer them first, or ask the owner.", "Remove or transfer the active human members first."],
+  agent_paused: [uiText("agentError.agentPaused.hint"), uiText("agentError.agentPaused.next")],
   artifact_integrity_failed: ["The stored submission bytes no longer match the hash the receipt was issued under, so the platform's own re-hash check failed and no PASS was recorded. Do not retry the PASS; report the receipt id and this code to the room owner — the stored artifact itself is in question.", "Report the receipt id and this code to the room owner; do not retry the PASS."],
   assign_conflict: ["The thread is already assigned. Coordinate with the current assignee, have them release it, or force the takeover explicitly.", "Ask the current assignee to release the thread, or force the takeover if that is the intent."],
   assign_not_assigned: ["Thread has no live assignment to release. Read the thread; there is nothing to release.", "Re-read the thread; no assignment exists to release."],
@@ -429,6 +430,7 @@ const AX_NAMED_RECOVERIES = {
   message_archived: ["Archived messages are read-only. Do not retry; start a new message instead of editing, deleting, reacting to, pinning or replying under it.", "Start a new message; do not retry changes against the archived one."],
   message_deleted: ["A deleted message cannot be saved. Work with a current message instead.", "Use a current, undeleted message."],
   ndjson_required: ["This route requires an NDJSON body. Resend with Content-Type application/x-ndjson.", "Resend the request as application/x-ndjson."],
+  no_access: [uiText("agentError.noAccess.hint"), uiText("agentError.noAccess.next")],
   nonprogressing_email_page: ["The sync page did not advance. Restart the sync from a fresh cursor; do not re-fetch the same page.", "Restart the sync from a fresh cursor."],
   not_declared: ["Declare what you are looking for before asking for a match.", "Declare what you are looking for, then ask for a match."],
   nothing_to_request: ["You already hold the permissions named in the message — nothing to request.", "Treat it as done; the permissions are already held."],
@@ -505,7 +507,7 @@ function axFamilyRecovery(code) {
     return ["The inviter's authority changed. Ask a current administrator or the inviter for a new invitation; do not retry this one.",
       "Ask a current administrator or the inviter for a new invitation."];
   }
-  if (/_changed$/.test(code)) {
+  if (/_changed$/.test(code) || code === "pair_closed") {
     return ["The state changed underneath this request. Re-read the current state and retry against it; do not resend against the old state.",
       "Re-read the current state and retry against it."];
   }
@@ -513,7 +515,7 @@ function axFamilyRecovery(code) {
     return ["That already exists — do not create a duplicate. Read the current state and use the existing record.",
       "Read the current state and use the existing record; do not create a duplicate."];
   }
-  if (/_expired$|_revoked$|_too_old$/.test(code) || code === "membership_ended") {
+  if (/_expired$|_revoked$|_too_old$/.test(code) || code === "membership_ended" || code === "expired_token") {
     return ["This has expired, been revoked, or ended and will not work again. Start fresh — a new invite or a new request — rather than retrying this one.",
       "Ask the owner or inviter for a fresh invite, or start a new request; do not retry this one."];
   }
@@ -542,7 +544,7 @@ function axFamilyRecovery(code) {
     return ["This is not supported here. Do not retry it; use a supported alternative named in the message or the docs.",
       "Use a supported alternative; do not retry the unsupported form."];
   }
-  if (/_not_found$/.test(code) || /^unknown_/.test(code)) {
+  if (/_not_found$/.test(code) || /^unknown_/.test(code) || code === "code_failed") {
     return ["That resource or id does not exist — nothing was changed. Re-list the resource and use a current id; do not guess ids.",
       "Re-list the resource and retry with a current id; do not guess ids."];
   }
