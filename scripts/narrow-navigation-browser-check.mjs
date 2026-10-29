@@ -58,6 +58,8 @@ test("narrow navigation: channel focus, thread room, search hands back the scree
   await ensureSidebarOpen(page);
   await page.locator('#channel-list [data-channel="general"]').click();
   await page.waitForFunction(() => document.querySelector("#conversation-title")?.textContent === "# general");
+  await page.waitForFunction(() => document.activeElement?.id === "conversation-title", null, { timeout: 5000 });
+  assert.equal(await page.locator("#sidebar-toggle").getAttribute("aria-expanded"), "false", "pointer channel selection closes the drawer without stealing heading focus");
   await ensureSidebarClosed(page);
 
   // A thread's bar is one row at 390, so replies keep most of the screen.
