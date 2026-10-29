@@ -574,24 +574,101 @@ export function replay(events) {
 //     ":channel" copy — slice the array and deep-clone just those
 //     elements, so an in-place rewrite can never reach the input state's
 //     objects.
-// Every other branch (members, channels, workItems, replyRequests, ...)
-// keeps the full structuredClone, and every other event type keeps the
-// full messages clone: handlers that range over messages (redact's
-// receipt sweep reads workItems, which stays cloned) stay safe by
-// construction. Sharing unaddressed elements is safe because no handler
-// in the light set mutates them, and any later event that does address
-// one clones it first under the same rule. The projection-write-through
-// equivalence battery pins input-state immutability for the light set.
+// Every other branch (members, channels, replyRequests, ...) keeps the
+// full structuredClone. Sharing unaddressed elements is safe because no
+// handler in the light set mutates them, and any later event that does
+// address one clones it first under the same rule. The
+// projection-write-through equivalence battery pins input-state
+// immutability for the light set. The second #3408 step below extends
+// the matrix: a messages slice for every remaining event type, and a
+// light workItems clone (shallow map, addressed item deep-cloned).
 const MESSAGE_REWRITE_TYPES = new Set([
   EVENT_TYPES.MESSAGE_EDITED, EVENT_TYPES.MESSAGE_DELETED,
   EVENT_TYPES.MESSAGE_REDACTED, EVENT_TYPES.POLL_VOTED
 ]);
 function lightMessageCloneIds(incoming) {
+  // member.merged (added on main after the #3408 audit) is a ranging
+  // writer on messages: mergeMembers rewrites authorId/toMemberId on
+  // every message by the retired member. It keeps the full clone.
+  if (incoming?.type === EVENT_TYPES.MEMBER_MERGED) return null;
   if (incoming?.type === EVENT_TYPES.MESSAGE_POSTED) return new Set();
-  if (!MESSAGE_REWRITE_TYPES.has(incoming?.type)) return null;
+  // Audited non-rewrite types (see the second-step note below) get the
+  // same empty set: slice the array, clone no elements. A rewrite type
+  // with a malformed messageId still returns null - the full clone.
+  if (!MESSAGE_REWRITE_TYPES.has(incoming?.type)) return new Set();
   const messageId = incoming.data?.messageId;
   if (typeof messageId !== "string" || !messageId) return null;
   return new Set([messageId, `${messageId}:channel`]);
+}
+// #3408 (second step), messages half: every remaining event type's
+// handler was audited for message mutation. None of them writes a
+// message object or the messages array itself - the work, member,
+// channel, room and receipt handlers only read messages (find/some in
+// the proposal, decision-source, claim-renewal and progress-check
+// helpers) or never touch the branch, and the pin/unpin handlers write
+// state.pins, not messages. So in cloneStateForApply every non-rewrite
+// type now gets the message.posted treatment for messages: a fresh
+// array slice, no element clones. The rewrite types keep their
+// addressed-element clones above, and a type whose handler ever grows
+// a message write must move back to the full clone in the same change.
+//
+// #3408 (second step), workItems half: shallow-copy the workItems map
+// per event and deep-clone only the addressed item
+// (incoming.data.workItemId). Handler audit:
+//   - every work / session / claim / verification / decision / help
+//     handler mutates only the addressed item (mutableWorkItem,
+//     setPublicTask and the work.help_updated writer all resolve
+//     exactly that one item);
+//   - work.superseded also resolves the replacement item, read-only
+//     (id/state checks only; it is never written);
+//   - claim.acquired ranges over all items via claimOverlaps,
+//     read-only; help offers read items through records(), read-only,
+//     and write the helpOffers branch only;
+//   - message handlers read items via the receipt evidence lookup,
+//     read-only - EXCEPT the receipt sweep family, which writes
+//     receipts on every item citing the addressed message:
+//     message.deleted (withdrawTextEvidence), message.redacted (its
+//     sweep) and receipt.evidence_withdrawn. Those three types are
+//     excluded here and keep the full workItems clone.
+// One ranging writer remains: ensureWorkControlDefaults runs after
+// every handler and backfills round/tool counters, the suspension
+// cause and receipt segments on ALL items. Its writes are
+// change-conditional (a normalised item receives no assignment at
+// all), a legacy item that predates the defaults would be rewritten
+// in place, so the light clone also deep-clones any item that is not
+// already in the normalised shape (workItemNeedsDefaults), and any
+// item that is frozen — the store returns deep-frozen projections,
+// and an assignment to a frozen object throws even when it would
+// assign the value already present (#3408 cure). The backfill can
+// therefore never reach the input state's objects.
+// member.merged is in this set for the same reason as the receipt
+// sweep family: mergeMembers ranges over every item and rewrites
+// accountable/verifier/claim-holder ids for the retired member, so it
+// keeps the full workItems clone too.
+const WORK_SWEEP_TYPES = new Set([
+  EVENT_TYPES.MESSAGE_DELETED, EVENT_TYPES.MESSAGE_REDACTED,
+  EVENT_TYPES.RECEIPT_EVIDENCE_WITHDRAWN, EVENT_TYPES.MEMBER_MERGED
+]);
+function workItemNeedsDefaults(item) {
+  if (!item || typeof item !== "object") return false;
+  if (!Number.isSafeInteger(item.round_count) || item.round_count < 0) return true;
+  if (!Number.isSafeInteger(item.tool_calls) || item.tool_calls < 0) return true;
+  if (item.suspended_by !== "round_limit" && item.suspended_by !== null) return true;
+  const history = item.receiptHistory;
+  if (history != null && !Array.isArray(history)) return true;
+  for (const receipt of [item.receipt, ...(history ?? [])]) {
+    if (receipt && typeof receipt === "object" && !("segments" in receipt)) return true;
+  }
+  return false;
+}
+function lightWorkItemsClone(current, incoming) {
+  if (WORK_SWEEP_TYPES.has(incoming?.type)) return null;
+  const items = current.workItems;
+  if (!items || typeof items !== "object" || Array.isArray(items)) return null;
+  const addressedId = typeof incoming?.data?.workItemId === "string" ? incoming.data.workItemId : null;
+  return Object.fromEntries(Object.entries(items).map(([id, item]) => [
+    id, id === addressedId || workItemNeedsDefaults(item) || Object.isFrozen(item) ? structuredClone(item) : item
+  ]));
 }
 function cloneStateForApply(current, incoming, journal = null) {
   const state = { ...current, ...(journal ?? {}) };
@@ -603,12 +680,17 @@ function cloneStateForApply(current, incoming, journal = null) {
     state.seenIdempotencyKeys = { ...current.seenIdempotencyKeys };
   }
   const lightMessages = lightMessageCloneIds(incoming);
+  const lightWork = lightWorkItemsClone(current, incoming);
   for (const key of Object.keys(state)) {
     if (key === "eventLog" || key === "seenEvents" || key === "seenIdempotencyKeys") continue;
     if (key === "messages" && lightMessages !== null && Array.isArray(current.messages)) {
       state.messages = lightMessages.size === 0
         ? current.messages.slice()
         : current.messages.map(message => (message && lightMessages.has(message.id) ? structuredClone(message) : message));
+      continue;
+    }
+    if (key === "workItems" && lightWork !== null) {
+      state.workItems = lightWork;
       continue;
     }
     state[key] = structuredClone(current[key]);

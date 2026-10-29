@@ -65,7 +65,10 @@ export function ensureWorkControlDefaults(state) {
     if (!item || typeof item !== "object") continue;
     if (!Number.isSafeInteger(item.round_count) || item.round_count < 0) item.round_count = 0;
     if (!Number.isSafeInteger(item.tool_calls) || item.tool_calls < 0) item.tool_calls = 0;
-    if (item.suspended_by !== "round_limit") item.suspended_by = null;
+    // Only write when the value actually changes: assigning null to a
+    // normalised item (already null) is a no-op by value, but the write
+    // itself throws when the item is a frozen shared projection (#3408).
+    if (item.suspended_by !== "round_limit" && item.suspended_by !== null) item.suspended_by = null;
     for (const receipt of [item.receipt, ...(item.receiptHistory ?? [])]) {
       if (receipt && typeof receipt === "object" && !("segments" in receipt)) receipt.segments = null;
     }
