@@ -14,9 +14,91 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
+### Next release preparation — 16:55 UTC
+
+Preparation only: no next release merge or deployment has started. The peer
+laptop proposed the bounded scope in Room sequence 22961; this Mac acknowledged
+the ownership and preparation boundary in 22964. Earlier sections below are
+dated evidence, not the current queue.
+
+**Current delivery:** production serves `6bda3388f6225eb4b468d4cd9ca522ebb926686f`
+at both origins and both Worker/application version endpoints. Hosted
+[run 40914289947](https://github.com/Uuriko/project-room/actions/runs/40914289947)
+failed a one-second Durable Object readiness timeout; recovery held without a
+second code transition. Subsequent independent deployment smoke and public live
+smoke passed. This preserves the hosted failure; it does not prove sign-in,
+installed Mac adoption, or a permanent readiness cure. Background-job health
+still returns 503 with pre-release claim/integrity failures; no recovery is claimed.
+
+The matching [runtime r2](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-6bda338-r2)
+was downloaded and verified against all 633 exact-source package files before
+promotion. Archive SHA-256:
+`1dd1121f0c535219320c74014a602079cae5c30cc589a559edaf1ceda8081a23`.
+The first immutable publication used the wrong asset basename and remains
+non-latest; r2 corrects the name without changing source bytes. A narrow local
+archive preflight is being added to the existing verifier and workflow to catch
+this before publication. The deployment claim was released and read back unclaimed.
+
+**Candidate inventory (refresh before composition):**
+
+| Part | Exact inspected source | Remaining preparation |
+| --- | --- | --- |
+| Integrated documentation, evidence recorder and profile-lock safety | Main `63534b9244559a58b1029abbbba7b3a0b97d614e`; PRs #5273–#5275 | Retain 22 recorder and 31 Mac test results; these changes are not in the running 6bda runtime. |
+| Selected work hydration | #5271 `c59e8112487e5d4e468b55d56fa08fce5d163d58` | Compose first; preserve selected corruption, authorization and offer-read behavior. |
+| Selected result reads and browser fixture repairs | #5272 `d2f8cd3924f08b9e1ac5f8dc1bc85b96b8d234c0` | Depends on #5271; this is a product read-path change as well as test navigation repairs. |
+| Creation navigation and failed-refresh recovery | Peer local `7efa12c036e894986ed469e2b938925de62be687`, tree `19c3c3eea37a281d839561ed4be2a438483607f2` | Peer publishes a fetchable head, then qualifies composition and remaining draft-return/refine/visual/reuse failures. |
+| Graphify retention and callable lookup | #5277 `c6650ffcd271d7d9508c1b6fbc3bcac45325f5eb` | Compose four Graphify files; preserve partial-graph limits. Rebuild at final landed source before hosted CAS publication and REST/MCP readback. |
+| Runtime publication preflight | #5278 `cd5a888c569f3dfcd1d4658c821257f4e4d246fc` | Six tests pass; corrected 633-file archive passes and original wrong basename fails. Qualify composition; verify downloaded bytes before latest promotion. |
+
+The frozen browser baseline is **red**: peer source `09c466352572c95e805eea2856f0ad7817859979`
+(same tree as local `9bec285d`) ran 736 tests: 649 passed, 75 failed,
+11 cancelled, one skipped. Jill has the exact 86 failure/cancellation locations
+for a selection-gap audit. Focused passes do not supersede this baseline.
+
+**Work split and execution order:**
+
+1. The peer laptop owns creation/UI repairs and their browser failure triage.
+   This Mac owns isolated composition, package preparation, original evidence
+   and this release plan. Grok diagnoses qa2-agent-eval/deploy-drift and job-health
+   cadence read-only. Jill tests cold-agent/privacy behavior and omitted test
+   selection. Each helper supplies exact source, outcome and unresolved limits.
+2. Freeze an include/defer manifest after UI handoff. Compose dependency order
+   on current main without merging the release. Reconcile duplicate component
+   PRs by source behavior, not titles or ancestry alone. Keep #4900, #5276's
+   delivery-only tool bundle, archived-index prototypes and unfinished rewrites out.
+   Graphify's old manual-schema workflow portion remains deferred, not completed.
+3. Run independent focused qualification concurrently on the two laptops; retain
+   unchanged evidence with its original scope. Run the configured full browser
+   selection once on the final combined tree and resolve or explicitly assess
+   failures against changed behavior. Do not repeatedly restart unchanged suites
+   or describe affected selection as the full suite.
+4. Prebuild the exact candidate package, validate archive basename and contents,
+   and prepare the Graphify extraction. Bind receipts to tree and commit. After
+   eventual merges, confirm the resulting tree and rebuild source-stamped assets
+   at the landed commit; do not relabel a different candidate SHA as deployed.
+5. Before starting the next release, refresh current serving source, claims,
+   schema evidence and incident disposition. One operator takes the existing
+   deploy claim only for execution. Use the existing workflow and recovery tools;
+   no new controller or speculative platform is required. A lost response means
+   inspect the existing attempt, not dispatch another deployment.
+6. Verify both origins, both version endpoints, signed cards and readiness;
+   separately exercise sign-in, room switching, agent contribution, creation
+   recovery and result review on the supported clients. Publish once with the
+   expected asset name, verify downloaded bytes, then promote. Reconcile unknown
+   outcomes before retrying; use a correction suffix for immutable mismatches.
+7. Activate Graphify only against verified serving code and final source. Read
+   the current hosted revision/digest, publish with both expected values, then
+   verify REST and MCP identity, scope and an actual symbol lookup. Record what
+   remains partial; a successful upload is not complete repository coverage.
+
+Preparation is complete when the candidate, dispositions, executable commands,
+evidence and recovery choices are ready for review. Starting the next release is
+a separate step; preparation does not silently start it. Existing repository
+protections apply, without inventing extra global approval or full-green rules.
+
 ### Reliability cycle follow-up
 
-Production remains the independently verified `c47c3fc` release described below;
+At that earlier checkpoint, production remained the independently verified `c47c3fc` release described below;
 no new Worker deployment was performed for the following changes. The browser
 navigation repair (#5252) passed 30 cases across eight scripts and remains a
 test-only correction, with the mobile Search viewport issue still unresolved.
