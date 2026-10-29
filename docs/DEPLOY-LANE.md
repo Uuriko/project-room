@@ -152,3 +152,20 @@ extended attributes and macOS AppleDouble metadata are never archived. The
 output is deterministic for identical content and executable bits within the
 same Python/zlib implementation. This verifies content consistency, not source
 provenance or deployment readiness. Workflow integration is separate.
+
+
+### Publishing an older runtime target or a corrected archive
+
+The runtime publication job checks out tooling at `github.workflow_sha`, the
+immutable commit containing the running workflow. Its package source remains
+`needs.gate.outputs.sha`, the exact deployed commit. The package manifest and
+release verifier must match that target even when it predates the tooling.
+
+For a corrected archive, dispatch with `runtime_revision: r2` (or a later
+integer revision). This chooses `runtime-YYYY-MM-DD-SHORT-r2`; an empty value
+keeps the original tag convention. The suffix is validated before deployment.
+Existing assets are never replaced: an existing selected tag must pass target
+and content verification before promotion, and a new corrected release is
+verified before being marked latest. An invalid original release does not
+silently trigger a new revision. This input selects publication identity; it
+does not bypass deployment policy or change the deployed commit.

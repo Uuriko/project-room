@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
+import { spawnSync } from "node:child_process";
 import { runInNewContext } from "node:vm";
 
 const source = readFileSync(new URL("../.github/workflows/deploy-prod.yml", import.meta.url), "utf8");
@@ -19,13 +20,13 @@ test("a successful prod deploy publishes the runtime from the deployed SHA", () 
   assert.match(job.if, /needs\.deploy\.result == 'success'/);
   assert.equal(job.permissions.contents, "write");
   const checkout = job.steps.find(step => String(step.uses).startsWith("actions/checkout@"));
-  assert.equal(checkout.with.ref, "${{ needs.gate.outputs.sha }}");
+  assert.equal(checkout.with.ref, "${{ github.workflow_sha }}");
   assert.equal(checkout.with["fetch-depth"], 0);
   const pack = job.steps.find(step => step.name === "Package the deployed runtime").run;
   assert.match(pack, /runtime-package\.mjs create "\$GITHUB_WORKSPACE" "\$SHA"/);
   assert.match(pack, /project-room-runtime\.tar\.gz/);
   const publish = job.steps.find(step => step.name === "Publish the runtime release").run;
-  assert.match(publish, /TAG="runtime-\$\{DATE\}-\$\{SHORT\}"/);
+  assert.match(publish, /TAG="runtime-\$\{DATE\}-\$\{SHORT\}\$\{REVISION:\+-\$\{REVISION\}\}"/);
   assert.match(publish, /gh release create "\$TAG"/);
   assert.match(publish, /--latest/);
   assert.match(publish, /gh release edit "\$TAG"/);
@@ -65,4 +66,29 @@ test("runtime publication still refuses cancellation, failed deployment and a cl
     assert.equal(releaseEligible({ gate: result }), false, `gate ${result}`);
     assert.equal(releaseEligible({ deploy: result }), false, `deploy ${result}`);
   }
+});
+
+
+test("runtime correction suffix is validated before deployment and builds an immutable tag", () => {
+  const validate = workflow.jobs.gate.steps.find(step => step.name === "Validate runtime correction suffix");
+  assert.ok(workflow.jobs.gate.steps.indexOf(validate) < workflow.jobs.gate.steps.findIndex(step => step.id === "gate"));
+  assert.equal(validate.env.REVISION, "${{ inputs.runtime_revision }}");
+  const publish = job.steps.find(step => step.name === "Publish the runtime release");
+  assert.equal(publish.env.REVISION, validate.env.REVISION);
+  const tagShell = publish.run.slice(0, publish.run.indexOf("verify_release()"));
+  for (const revision of ["", "r2", "r3", "r10"]) {
+    const env = { ...process.env, REVISION: revision, SHA: "a".repeat(40) };
+    const check = spawnSync("bash", ["-c", validate.run], {env,encoding:"utf8"});
+    assert.equal(check.status,0,check.stderr);
+    const tag = spawnSync("bash", ["-c", "date() { echo 2026-10-29; }\n" + tagShell + '\nprintf "%s" "$TAG"'], {env,encoding:"utf8"});
+    assert.equal(tag.status,0,tag.stderr);
+    assert.equal(tag.stdout, `runtime-2026-10-29-aaaaaaa${revision ? `-${revision}` : ""}`);
+  }
+  for (const revision of ["r0", "r1", "r02", "latest", "r2/other", "r2; echo bad", "r2\n"]) {
+    assert.notEqual(spawnSync("bash", ["-c", validate.run], {env:{...process.env,REVISION:revision}}).status,0,revision);
+  }
+  const pack = job.steps.find(step => step.name === "Package the deployed runtime");
+  assert.equal(pack.env.SHA, "${{ needs.gate.outputs.sha }}");
+  assert.match(pack.run, /runtime-archive\.py.*--expected-commit "\$SHA"/);
+  assert.doesNotMatch(pack.run, /tar -/);
 });

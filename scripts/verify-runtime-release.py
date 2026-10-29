@@ -66,6 +66,10 @@ def release_identity(release, commit, sha):
     return {"releaseId": release["id"], "assetId": asset["id"], "assetBytes": asset["size"], "updatedAt": asset.get("updated_at")}
 
 
+def valid_runtime_tag(tag):
+    return re.fullmatch(r"runtime-\d{4}-\d{2}-\d{2}-[a-f0-9]{7}(?:-r(?:[2-9]|[1-9][0-9]+))?", tag) is not None
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("repository", "tag", "sha", "expected", "receipt"):
@@ -73,7 +77,7 @@ def main():
     args = parser.parse_args()
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository), "invalid repository")
     require(re.fullmatch(r"[a-f0-9]{40}", args.sha), "full source SHA required")
-    require(re.fullmatch(r"runtime-\d{4}-\d{2}-\d{2}-[a-f0-9]{7}", args.tag), "invalid runtime tag")
+    require(valid_runtime_tag(args.tag), "invalid runtime tag")
     # A failed retry must not leave an earlier success available to artifact upload.
     receipt_path = Path(args.receipt)
     receipt_path.unlink(missing_ok=True)
