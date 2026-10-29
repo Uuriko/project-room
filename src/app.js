@@ -2704,7 +2704,6 @@ function renderMessages() {
   if (!sameView) {
     list.scrollTop = viewPositions.get(view) ?? list.scrollHeight; newVisibleMessages = 0;
     if (viewPositions.has(view)) timelinePin.clear(); else timelinePin.set(view, list);
-    scheduleHorizonAdvance();
   } else if ((nearBottom || ownArrival) && !focused) {
     if (pinOnly && !ownArrival) { stickPinnedTimeline(list); if (newCount > 0) scheduleHorizonAdvance(); }
     else { list.scrollTop = list.scrollHeight; timelinePin.set(view, list); }
