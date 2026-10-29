@@ -6512,14 +6512,16 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         // Same agent.wake path as room mentions: queue a signal, then journal
         // it through deliverWakePing. Event-push (wakeUrl fan-out) lives
         // inside that function when present; this command does not POST.
-        const { woken, signal } = wakeForAgent(this, {
+        const { woken, enqueued, signal } = wakeForAgent(this, {
           agentId: incoming.data.toIdentityId, kind: "dm", roomId, messageId: incoming.data.messageId ?? incoming.id
         });
         if (woken && signal) this.agentPlugin.deliverWakePing({ identityId: incoming.data.toIdentityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription (the inbox pull carries the
         // body). Fire-and-forget; never fails the command.
-        if (woken) this.agentHeartbeats.pushNotify({ identityId: incoming.data.toIdentityId,
+        // #3910 F4: no doorbell for a coalesced wake - the first post of
+        // this message already rang it.
+        if (woken && enqueued) this.agentHeartbeats.pushNotify({ identityId: incoming.data.toIdentityId,
           eventType: "dm.posted", roomId, id: incoming.data.messageId ?? incoming.id, ts: this.now() });
       }
       // RC-2026-09-24-203: push doorbell for bond proposals. Both parties
@@ -6534,9 +6536,11 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
         const { agentAId, agentBId, proposerIdentityId, bondId } = bondEffect.data;
         for (const partyId of [agentAId, agentBId]) {
           if (typeof partyId === "string" && partyId.length > 0 && partyId !== proposerIdentityId) {
-            this.agentHeartbeats.enqueueWake({ agentId: partyId, kind: "bond",
+            const { enqueued } = this.agentHeartbeats.enqueueWake({ agentId: partyId, kind: "bond",
               roomId, messageId: typeof bondId === "string" ? bondId : incoming.id });
-            this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
+            // #3910 F4: same doorbell gate as mentions/DMs - no re-ring
+            // when the bond wake coalesced onto an existing signal.
+            if (enqueued) this.agentHeartbeats.pushNotify({ identityId: partyId, eventType: "bond.proposed",
               roomId, id: typeof bondId === "string" ? bondId : incoming.id, ts: this.now() });
           }
         }
@@ -6789,14 +6793,18 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
           event: "suppressed_no_identity", kind, subjectId: memberId, reason: "no_identity_link" });
         continue;
       }
-      const { woken, signal } = wakeForAgent(this, {
+      const { woken, enqueued, signal } = wakeForAgent(this, {
         agentId: identityId, kind, roomId, messageId: data.messageId ?? eventId });
       if (woken && signal) {
         this.agentPlugin.deliverWakePing({ identityId: identityId, signal });
         // RC-2026-09-24-203: push doorbell — a pointer-only POST for the
         // offline agent's push subscription; the inbox pull carries the body.
         // Targeted DMs (kind "dm") ride dm.posted, @mentions ride message.posted.
-        this.agentHeartbeats.pushNotify({ identityId: identityId,
+        // #3910 F4: the doorbell rings only when this call enqueued a new
+        // signal - a coalesced wake (e.g. a second member resolving to the
+        // same identity for the same message) must not ring twice. The
+        // wake ping journal above is idempotent per signal and still runs.
+        if (enqueued) this.agentHeartbeats.pushNotify({ identityId: identityId,
           eventType: kind === "dm" ? "dm.posted" : "message.posted",
           roomId, id: data.messageId ?? eventId, ts: this.now() });
       }

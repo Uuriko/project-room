@@ -37,6 +37,15 @@ export const HEARTBEAT_STALE_AFTER_MS = 180000;
 // liveness, wakeability measures listener recency — the room must tell a
 // live listener from an idle agent whose queue merely looks empty.
 export const WAKEABLE_WINDOW_MS = 24 * 60 * 60 * 1000;
+// #3910 F3: wake-signal retention, modelled on pruneWebhookDeliveries'
+// window + keep-newest shape. Acked signals (delivered_at set) are pruned
+// only when they are BOTH older than the retention window AND outside the
+// newest WAKE_SIGNAL_KEEP acked signals for their agent; pending signals
+// are undelivered work and are never pruned here (the room/identity purge
+// registry remains the only other deletion path).
+export const WAKE_SIGNAL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+export const WAKE_SIGNAL_KEEP = 100;
+export const WAKE_SIGNAL_PRUNE_BATCH = 500;
 const MAX_PENDING_WAKES = 50;
 const AGENT_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const HOST_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
@@ -904,6 +913,48 @@ export class AgentHeartbeats {
         acknowledged.push(signalId);
       }
       return Object.freeze({ acknowledged: Object.freeze(acknowledged) });
+    });
+  }
+
+  // #3910 F3: prune acked wake signals past retention (see the constants
+  // above). Claim rows for pruned signals are deleted with them; claims on
+  // surviving signals stay. Returns the webhook-prune receipt shape.
+  pruneWakeSignals({ now = this.now(), keep = WAKE_SIGNAL_KEEP,
+    retentionMs = WAKE_SIGNAL_RETENTION_MS, limit = WAKE_SIGNAL_PRUNE_BATCH } = {}) {
+    check(Number.isSafeInteger(now) && Number.isSafeInteger(keep) && keep >= 0
+      && Number.isSafeInteger(retentionMs) && retentionMs >= 0
+      && Number.isSafeInteger(limit) && limit > 0,
+      422, "invalid_heartbeat", "pruneWakeSignals requires integer bounds");
+    const cutoff = now - retentionMs;
+    return this.store.transaction(() => {
+      const doomed = this.db.prepare(
+        `SELECT signal_id FROM (
+           SELECT signal_id, delivered_at,
+                  ROW_NUMBER() OVER (
+                    PARTITION BY agent_id
+                    ORDER BY delivered_at DESC, created_at DESC, signal_id DESC
+                  ) AS rn
+           FROM agent_wake_signals
+           WHERE delivered_at IS NOT NULL
+         )
+         WHERE rn > ? AND delivered_at < ?
+         ORDER BY delivered_at ASC, signal_id ASC
+         LIMIT ?`
+      ).all(keep, cutoff, limit);
+      let claimsDeleted = 0;
+      const hasClaims = this.db.prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='agent_wake_signal_claims'").get();
+      const removeClaim = hasClaims
+        ? this.db.prepare("DELETE FROM agent_wake_signal_claims WHERE signal_id=?") : null;
+      const remove = this.db.prepare(
+        "DELETE FROM agent_wake_signals WHERE signal_id=? AND delivered_at IS NOT NULL");
+      let deleted = 0;
+      for (const { signal_id } of doomed) {
+        if (removeClaim) claimsDeleted += removeClaim.run(signal_id).changes;
+        deleted += remove.run(signal_id).changes;
+      }
+      return Object.freeze({ deleted, claimsDeleted,
+        moreMayRemain: doomed.length === limit, batchLimit: limit });
     });
   }
 
