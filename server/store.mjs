@@ -1,5 +1,5 @@
 import { isWriteSql } from './sql-write-classification.mjs';
-import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems } from "./work-repository.mjs";
+import { WORK_REPOSITORY_SCHEMA, configureWorkRepository, hydrateWorkItems, readWorkItem } from "./work-repository.mjs";
 import { MESSAGE_REPLAY_SNAPSHOT_SCHEMA, migrateMessageReplaySnapshots, discardMessageReplaySnapshot } from './message-replay-snapshot.mjs';
 import { prepareMessageCommand, assertMessageCommandReferences, prepareMessageWrite, refusePausedAgentWrite } from "./message-command-service.mjs";
 import { selectedMessageRecord, messageRepository } from "./message-repository.mjs";
@@ -5676,14 +5676,21 @@ this.slaBreachAlerts = new SlaBreachAlertJournal(this); // Task 26: durable in-a
     return this.readTransaction(() => {
       const auth = this.authenticate(token, roomId, expectedSessionBinding);
       if (!validId(workItemId) || typeof includeSource !== "boolean" || typeof includeOffers !== "boolean") fail(422, "invalid_work_context", "Choose one work ID and boolean context options");
-      // Select the supporting aggregates without materializing conversation bodies.
-      // Offers validate cross-work references, so retain the full work aggregate
-      // until that repository migrates; this is not a bounded-work-storage claim.
-      const row = this.db.prepare("SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.helpOffers','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
+      // Default selected reads hydrate only the selected work payload. Offers
+      // validate cross-work references and still require the broader aggregate.
+      // Both paths scan legacy room JSON; neither is a bounded SQL-work claim.
+      const row = this.db.prepare(includeOffers
+        ? "SELECT sequence,json_extract(projection,'$.room','$.members','$.workItems','$.replyRequests','$.helpOffers','$.messagesArchive') AS fields FROM rooms WHERE id=?"
+        : "SELECT sequence,json_extract(projection,'$.room','$.members','$.replyRequests','$.messagesArchive') AS fields FROM rooms WHERE id=?").get(roomId);
       if (!row) fail(404, "room_not_found", "Room not found");
-      const [metadata, members, workItems, replyRequests, helpOffers, messagesArchive] = JSON.parse(row.fields);
-      const state = hydrateWorkItems(this.db, roomId, { room: metadata, members, workItems,
-        ...(replyRequests ? { replyRequests } : {}), ...(helpOffers ? { helpOffers } : {}) });
+      const fields = JSON.parse(row.fields);
+      const [metadata, members] = fields;
+      const selected = includeOffers ? null : readWorkItem(this.db, roomId, workItemId);
+      const [workItems, replyRequests, helpOffers, messagesArchive] = includeOffers ? fields.slice(2)
+        : [selected ? { [workItemId]: selected } : {}, fields[2], null, fields[3]];
+      const state = includeOffers ? hydrateWorkItems(this.db, roomId, { room: metadata, members, workItems,
+        ...(replyRequests ? { replyRequests } : {}), ...(helpOffers ? { helpOffers } : {}) })
+        : { room: metadata, members, workItems, ...(replyRequests ? { replyRequests } : {}) };
       const room = { sequence: row.sequence, state }, now = this.now();
       if (!Object.hasOwn(room.state.workItems, workItemId)) fail(404, "work_not_found", "Work item not found in this Room");
       return { ...selectedWorkContext({ state: room.state, workItemId, viewerId: auth.member.id, sequence: room.sequence, now, includeSource, includeOffers, messageRecords: { get: id => selectedMessageRecord(this, roomId, id, Boolean(messagesArchive)) },
