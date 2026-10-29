@@ -30,7 +30,7 @@ const definitions = [
     checksClaimed: { type: "array", maxItems: 64, items: { ...text, maxLength: 512 } }
   }, ["summary", "nextAction", "evidenceMessageId", "evidenceMessageEventId", "evidenceVersion", "previousCompletionEventId", "producerId"]],
   ["propose_work", "Propose work", T.WORK_PROPOSED, "Propose a new assigned task. Requires steer permission; ordinary enrolled agents do not receive it. This neither accepts nor starts work.", {
-    title: text, definitionOfDone: text, accountableMemberId: id, mode: { type: "string", enum: ["read", "write"] },
+    title: text, definitionOfDone: text, accountableMemberId: id, dependsOn: { type: "array", maxItems: 16, items: { type: "string", pattern: "^[A-Za-z0-9_-]{1,128}$" }, description: "Existing same-room Board claim IDs, not message/session IDs. Every prerequisite must be done before claiming or starting. Read dependencies on room_read_work; acceptance rechecks existence." }, mode: { type: "string", enum: ["read", "write"] },
     independentVerificationRequired: bool, ownerDecisionRequired: bool, verifierMemberId: id, humanDecisionMakerId: id, sourceMessageId: id
   }, ["title", "definitionOfDone", "accountableMemberId", "mode", "independentVerificationRequired", "ownerDecisionRequired"]],
   ["accept_work", "Accept assignment", T.WORK_ACCEPTED, "Accept your assigned proposed task. Requires accept_work. Does not grant outside access or start a runtime.", {}],
