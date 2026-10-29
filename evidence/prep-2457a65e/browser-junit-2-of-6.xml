@@ -1,0 +1,215 @@
+<?xml version="1.0" encoding="utf-8"?>
+<testsuites>
+	<testcase name="message composer is axe-clean (serious/critical)" time="1.019014" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/a11y-composer-browser-check.mjs"/>
+	<testcase name="Delete account requires the email, posts with CSRF, and confirms on the landing page" time="0.931343" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/account-deletion-browser-check.mjs"/>
+	<testcase name="owner lets a link-joined agent take work, then assigns it" time="0.908538" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/agent-work-access-browser-check.mjs"/>
+	<testcase name="authenticated desktop: conversation, drafts, retries, literal text, search, source work, and revocation" time="31.376887" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/browser-check.mjs" failure="locator.click: Timeout 30000ms exceeded.&#10;Call log:&#10;[2m  - waiting for locator('#thread-back')[22m&#10;[2m    - locator resolved to &lt;button type=&amp;quot;button&amp;quot; id=&amp;quot;thread-back&amp;quot; class=&amp;quot;button ghost&amp;quot;>← Back&lt;/button>[22m&#10;[2m  - attempting click action[22m&#10;[2m    2 × waiting for element to be visible, enabled and stable[22m&#10;[2m      - element is not visible[22m&#10;[2m    - retrying click action[22m&#10;[2m    - waiting 20ms[22m&#10;[2m    2 × waiting for element to be visible, enabled and stable[22m&#10;[2m      - element is not visible[22m&#10;[2m    - retrying click action[22m&#10;[2m      - waiting 100ms[22m&#10;[2m    58 × waiting for element to be visible, enabled and stable[22m&#10;[2m       - element is not visible[22m&#10;[2m     - retrying click action[22m&#10;[2m       - waiting 500ms[22m&#10;">
+		<failure type="testCodeFailure" message="locator.click: Timeout 30000ms exceeded.&#10;Call log:&#10;[2m  - waiting for locator('#thread-back')[22m&#10;[2m    - locator resolved to &lt;button type=&amp;quot;button&amp;quot; id=&amp;quot;thread-back&amp;quot; class=&amp;quot;button ghost&amp;quot;>← Back&lt;/button>[22m&#10;[2m  - attempting click action[22m&#10;[2m    2 × waiting for element to be visible, enabled and stable[22m&#10;[2m      - element is not visible[22m&#10;[2m    - retrying click action[22m&#10;[2m    - waiting 20ms[22m&#10;[2m    2 × waiting for element to be visible, enabled and stable[22m&#10;[2m      - element is not visible[22m&#10;[2m    - retrying click action[22m&#10;[2m      - waiting 100ms[22m&#10;[2m    58 × waiting for element to be visible, enabled and stable[22m&#10;[2m       - element is not visible[22m&#10;[2m     - retrying click action[22m&#10;[2m       - waiting 500ms[22m">
+[Error [ERR_TEST_FAILURE]: locator.click: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#thread-back')[22m
+[2m    - locator resolved to &lt;button type="button" id="thread-back" class="button ghost">← Back&lt;/button>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is not visible[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is not visible[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    58 × waiting for element to be visible, enabled and stable[22m
+[2m       - element is not visible[22m
+[2m     - retrying click action[22m
+[2m       - waiting 500ms[22m
+] {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: locator.click: Timeout 30000ms exceeded.
+  Call log:
+  [2m  - waiting for locator('#thread-back')[22m
+  [2m    - locator resolved to &lt;button type="button" id="thread-back" class="button ghost">← Back&lt;/button>[22m
+  [2m  - attempting click action[22m
+  [2m    2 × waiting for element to be visible, enabled and stable[22m
+  [2m      - element is not visible[22m
+  [2m    - retrying click action[22m
+  [2m    - waiting 20ms[22m
+  [2m    2 × waiting for element to be visible, enabled and stable[22m
+  [2m      - element is not visible[22m
+  [2m    - retrying click action[22m
+  [2m      - waiting 100ms[22m
+  [2m    58 × waiting for element to be visible, enabled and stable[22m
+  [2m       - element is not visible[22m
+  [2m     - retrying click action[22m
+  [2m       - waiting 500ms[22m
+  
+      at TestContext.&lt;anonymous> (/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/browser-check.mjs:164:40) {
+    name: 'TimeoutError',
+    log: [ "  - waiting for locator('#thread-back')", '    - locator resolved to &lt;button type="button" id="thread-back" class="button ghost">← Back&lt;/button>', '  - attempting click action', '    2 × waiting for element to be visible, enabled and stable', '      - element is not visible', '    - retrying click action', '    - waiting 20ms', '    2 × waiting for element to be visible, enabled and stable', '      - element is not visible', '    - retrying click action', '      - waiting 100ms', '    58 × waiting for element to be visible, enabled and stable', '       - element is not visible', '     - retrying click action', '       - waiting 500ms' ]
+  }
+}
+		</failure>
+	</testcase>
+	<testcase name="authenticated mobile: conversation, drafts, retries, literal text, search, source work, and revocation" time="31.366833" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/browser-check.mjs" failure="locator.click: Timeout 30000ms exceeded.&#10;Call log:&#10;[2m  - waiting for locator('#thread-back')[22m&#10;[2m    - locator resolved to &lt;button type=&amp;quot;button&amp;quot; id=&amp;quot;thread-back&amp;quot; class=&amp;quot;button ghost&amp;quot;>← Back&lt;/button>[22m&#10;[2m  - attempting click action[22m&#10;[2m    2 × waiting for element to be visible, enabled and stable[22m&#10;[2m      - element is not visible[22m&#10;[2m    - retrying click action[22m&#10;[2m    - waiting 20ms[22m&#10;[2m    2 × waiting for element to be visible, enabled and stable[22m&#10;[2m      - element is not visible[22m&#10;[2m    - retrying click action[22m&#10;[2m      - waiting 100ms[22m&#10;[2m    58 × waiting for element to be visible, enabled and stable[22m&#10;[2m       - element is not visible[22m&#10;[2m     - retrying click action[22m&#10;[2m       - waiting 500ms[22m&#10;">
+		<failure type="testCodeFailure" message="locator.click: Timeout 30000ms exceeded.&#10;Call log:&#10;[2m  - waiting for locator('#thread-back')[22m&#10;[2m    - locator resolved to &lt;button type=&amp;quot;button&amp;quot; id=&amp;quot;thread-back&amp;quot; class=&amp;quot;button ghost&amp;quot;>← Back&lt;/button>[22m&#10;[2m  - attempting click action[22m&#10;[2m    2 × waiting for element to be visible, enabled and stable[22m&#10;[2m      - element is not visible[22m&#10;[2m    - retrying click action[22m&#10;[2m    - waiting 20ms[22m&#10;[2m    2 × waiting for element to be visible, enabled and stable[22m&#10;[2m      - element is not visible[22m&#10;[2m    - retrying click action[22m&#10;[2m      - waiting 100ms[22m&#10;[2m    58 × waiting for element to be visible, enabled and stable[22m&#10;[2m       - element is not visible[22m&#10;[2m     - retrying click action[22m&#10;[2m       - waiting 500ms[22m">
+[Error [ERR_TEST_FAILURE]: locator.click: Timeout 30000ms exceeded.
+Call log:
+[2m  - waiting for locator('#thread-back')[22m
+[2m    - locator resolved to &lt;button type="button" id="thread-back" class="button ghost">← Back&lt;/button>[22m
+[2m  - attempting click action[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is not visible[22m
+[2m    - retrying click action[22m
+[2m    - waiting 20ms[22m
+[2m    2 × waiting for element to be visible, enabled and stable[22m
+[2m      - element is not visible[22m
+[2m    - retrying click action[22m
+[2m      - waiting 100ms[22m
+[2m    58 × waiting for element to be visible, enabled and stable[22m
+[2m       - element is not visible[22m
+[2m     - retrying click action[22m
+[2m       - waiting 500ms[22m
+] {
+  code: 'ERR_TEST_FAILURE',
+  failureType: 'testCodeFailure',
+  cause: locator.click: Timeout 30000ms exceeded.
+  Call log:
+  [2m  - waiting for locator('#thread-back')[22m
+  [2m    - locator resolved to &lt;button type="button" id="thread-back" class="button ghost">← Back&lt;/button>[22m
+  [2m  - attempting click action[22m
+  [2m    2 × waiting for element to be visible, enabled and stable[22m
+  [2m      - element is not visible[22m
+  [2m    - retrying click action[22m
+  [2m    - waiting 20ms[22m
+  [2m    2 × waiting for element to be visible, enabled and stable[22m
+  [2m      - element is not visible[22m
+  [2m    - retrying click action[22m
+  [2m      - waiting 100ms[22m
+  [2m    58 × waiting for element to be visible, enabled and stable[22m
+  [2m       - element is not visible[22m
+  [2m     - retrying click action[22m
+  [2m       - waiting 500ms[22m
+  
+      at TestContext.&lt;anonymous> (/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/browser-check.mjs:164:40) {
+    name: 'TimeoutError',
+    log: [ "  - waiting for locator('#thread-back')", '    - locator resolved to &lt;button type="button" id="thread-back" class="button ghost">← Back&lt;/button>', '  - attempting click action', '    2 × waiting for element to be visible, enabled and stable', '      - element is not visible', '    - retrying click action', '    - waiting 20ms', '    2 × waiting for element to be visible, enabled and stable', '      - element is not visible', '    - retrying click action', '      - waiting 100ms', '    58 × waiting for element to be visible, enabled and stable', '       - element is not visible', '     - retrying click action', '       - waiting 500ms' ]
+  }
+}
+		</failure>
+	</testcase>
+	<testcase name="return brief desktop: rail entry, frozen-horizon paging, live current, explicit ack" time="1.189639" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/browser-check.mjs"/>
+	<testcase name="return brief mobile: rail entry, frozen-horizon paging, live current, explicit ack" time="1.130997" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/browser-check.mjs"/>
+	<testcase name="late success: catch-up and form results cannot affect a replacement session" time="0.946152" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/browser-check.mjs"/>
+	<testcase name="late failure: catch-up and form results cannot affect a replacement session" time="0.990149" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/browser-check.mjs"/>
+	<testcase name="contribution journey desktop: join, answer, return, review" time="1.549308" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/contribution-journey-check.mjs"/>
+	<testcase name="contribution journey touch: join, answer, return, review" time="1.579887" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/contribution-journey-check.mjs"/>
+	<testcase name="deleted messages render a tombstone, never crash, and leave search" time="0.744571" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/deleted-message-browser-check.mjs"/>
+	<testcase name="a deleted proposal draft does not poison the work card or lock the room" time="0.421526" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/deleted-message-browser-check.mjs"/>
+	<testcase name="an owner deleting another member's draft does not poison the work card" time="0.416612" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/deleted-message-browser-check.mjs"/>
+	<testcase name="a draft redacted by the account-deletion machinery does not poison the work card" time="0.427820" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/deleted-message-browser-check.mjs"/>
+	<testcase name="deleting a work item's only draft is safe (control)" time="0.413646" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/deleted-message-browser-check.mjs"/>
+	<testcase name="shared tokens, focus, and settings sections render together" time="1.067131" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/design-cohesion-browser-check.mjs"/>
+	<testcase name="message, pinned and work-fact text stays readable through light/dark changes" time="4.720563" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/design-cohesion-browser-check.mjs"/>
+	<testcase name="entry recovery and room search at 1280" time="1.331036" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="entry recovery and room search at 390" time="1.304788" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="startup at 390: scripting delayed" time="0.308913" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="startup at 390: scripting disabled" time="0.262521" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="startup at 1280: scripting delayed" time="0.314135" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="startup at 1280: scripting disabled" time="0.307963" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="a failed entry.js can recover after its download resumes" time="0.265191" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="a failed browser-session.js can recover after its download resumes" time="0.250422" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="a failed signin-entry.js can recover after its download resumes" time="0.296391" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/entry-simplification-browser-check.mjs"/>
+	<testcase name="Google sign-in returns from a committed cross-site account chooser with Strict cookies" time="0.314925" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/google-callback-browser-check.mjs"/>
+	<testcase name="Google link returns from a committed cross-site account chooser with Strict cookies" time="0.285822" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/google-callback-browser-check.mjs"/>
+	<testcase name="human + agent offers desktop" time="1.513515" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="human + agent offers mobile" time="1.423709" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="human offer draft stays pinned across request changes and explicit review keeps the text" time="0.637368" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="human offer lost-response retries the original after request withdrawal" time="0.680572" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="human offer wrong-receipt retries the original after request withdrawal" time="0.682408" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="human selection refuses a concurrent winner without silently taking over" time="0.976445" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="human offers do not infer support from legacy snapshots" time="0.572164" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="human offers do not infer support from malformed snapshots" time="0.584676" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="human offer text stays literal and a pending contribution can be withdrawn" time="0.671358" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="a selected helper remains visible when time expires without a new event" time="5.327393" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="incoming agent offers preserve a human plan and focus" time="0.552677" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/help-offer-browser-check.mjs"/>
+	<testcase name="compact login and signup remain usable in both themes and small windows" time="5.052791" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/login-polish-browser-check.mjs"/>
+	<testcase name="a real virtual-authenticator passkey can be enrolled, used after logout, and replay is refused" time="4.165146" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/login-polish-browser-check.mjs"/>
+	<testcase name="signup reconciles a committed account when its response body is interrupted" time="0.963306" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/login-polish-browser-check.mjs"/>
+	<testcase name="sign-in offers email recovery only after invalid credentials and keeps no-room joining discoverable" time="1.078250" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/login-polish-browser-check.mjs"/>
+	<testcase name="own messages can be edited and deleted from the overflow menu" time="0.927699" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/message-edit-delete-browser-check.mjs"/>
+	<testcase name="edit and delete dialogs: long edits are bounded by the server limit, Delete is destructive, previews do not split emoji" time="0.720162" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/message-edit-delete-browser-check.mjs"/>
+	<testcase name="long message preview desktop: accessible expansion, complete safe text and retained reading state" time="1.080837" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/message-preview-browser-check.mjs"/>
+	<testcase name="long message preview mobile: accessible expansion, complete safe text and retained reading state" time="0.968953" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/message-preview-browser-check.mjs"/>
+	<testcase name="selected helper to reviewed native result desktop" time="1.432728" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/native-draft-browser-check.mjs"/>
+	<testcase name="selected helper to reviewed native result mobile" time="1.343530" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/native-draft-browser-check.mjs"/>
+	<testcase name="native drafts and copied AI returns keep separate private drafts and original basis across reopening" time="0.977719" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/native-draft-browser-check.mjs"/>
+	<testcase name="native unknown save retains exact input through scope changes and retry" time="0.769876" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/native-draft-browser-check.mjs"/>
+	<testcase name="draft feedback and revised result desktop" time="2.324056" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/native-draft-browser-check.mjs"/>
+	<testcase name="draft feedback and revised result mobile" time="2.355818" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/native-draft-browser-check.mjs"/>
+	<testcase name="notification feed desktop: badge counts unread items, list opens the message, Mark read moves only the cursor" time="3.387452" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/notification-feed-browser-check.mjs"/>
+	<testcase name="notification feed mobile: badge counts unread items, list opens the message, Mark read moves only the cursor" time="3.353545" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/notification-feed-browser-check.mjs"/>
+	<testcase name="older notification paging finds a buried mention without acknowledging unseen history" time="1.047034" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/notification-feed-browser-check.mjs"/>
+	<testcase name="returning Google member keeps a friend's join link through sign-in" time="0.598524" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/oauth-return-invite-browser-check.mjs"/>
+	<testcase name="returning Google member keeps a friend's invite link through sign-in" time="0.550598" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/oauth-return-invite-browser-check.mjs"/>
+	<testcase name="returning Google member keeps a friend's code link through sign-in" time="0.523238" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/oauth-return-invite-browser-check.mjs"/>
+	<testcase name="returning Google member keeps a friend's code-stale link through sign-in" time="0.532613" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/oauth-return-invite-browser-check.mjs"/>
+	<testcase name="section summaries share one anatomy: chevron, label, flex row, 44px target" time="0.423115" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/progressive-disclosure-check.mjs"/>
+	<testcase name="chevron direction reflects open state identically across sections" time="0.651044" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/progressive-disclosure-check.mjs"/>
+	<testcase name="keyboard toggling never moves focus off the summary" time="0.515886" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/progressive-disclosure-check.mjs"/>
+	<testcase name="trailing chips align to the summary's right edge" time="0.607061" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/progressive-disclosure-check.mjs"/>
+	<testcase name="the same anatomy holds on mobile" time="0.458500" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/progressive-disclosure-check.mjs"/>
+	<testcase name="owner enables scoped public work and anonymous visitor finds it at 1280px" time="1.781420" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/public-work-matching-browser-check.mjs"/>
+	<testcase name="owner enables scoped public work and anonymous visitor finds it at 320px" time="1.728580" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/public-work-matching-browser-check.mjs"/>
+	<testcase name="an empty bounded recommendation page recovers failed fresh and continuation searches" time="1.455250" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/public-work-matching-browser-check.mjs"/>
+	<testcase name="edge-host copied instructions use the real prefixed API without inventing an offers mount" time="0.659764" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/public-work-matching-browser-check.mjs"/>
+	<testcase name="editing preferences fences an older real match response and starts a fresh search without its cursor" time="0.578138" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/public-work-matching-browser-check.mjs"/>
+	<testcase name="a completed native clipboard write cannot restore old match feedback after interests change" time="0.583555" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/public-work-matching-browser-check.mjs"/>
+	<testcase name="quiet design desktop: disclosure, keyboard sending, modal focus and reflow" time="1.279659" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/quiet-design-check.mjs"/>
+	<testcase name="quiet design touch: disclosure, keyboard sending, modal focus and reflow" time="1.172594" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/quiet-design-check.mjs"/>
+	<testcase name="A3/A4: keyboard disclosures, narrow composer, composer-local failure + retry, explicit disconnect state" time="0.687384" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/quiet-focus-a34-check.mjs"/>
+	<testcase name="A4: a stream that cannot connect is labeled reconnecting, never silently operational" time="0.349426" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/quiet-focus-a34-check.mjs"/>
+	<testcase name="simultaneous attention desktop: stable choices and independent resolution" time="1.217819" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/reconnect-collaboration-browser-check.mjs"/>
+	<testcase name="simultaneous attention touch: stable choices and independent resolution" time="1.164133" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/reconnect-collaboration-browser-check.mjs"/>
+	<testcase name="reconnect collaboration desktop: clarify, restart, contribute and review" time="1.988886" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/reconnect-collaboration-browser-check.mjs"/>
+	<testcase name="reconnect collaboration touch: clarify, restart, contribute and review" time="1.966156" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/reconnect-collaboration-browser-check.mjs"/>
+	<testcase name="crowded reconnect collaboration desktop: clarify, restart, contribute and review" time="5.210300" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/reconnect-collaboration-browser-check.mjs"/>
+	<testcase name="crowded reconnect collaboration touch: clarify, restart, contribute and review" time="5.562632" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/reconnect-collaboration-browser-check.mjs"/>
+	<testcase name="saved navigation desktop dark: palette and button open the same bookmarks" time="0.641766" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="saved navigation desktop light: palette and button open the same bookmarks" time="0.575710" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="saved navigation mobile dark: palette and button open the same bookmarks" time="0.557921" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="saved navigation mobile light: palette and button open the same bookmarks" time="0.549900" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions desktop: quiet entry, draft preservation, no implicit writes" time="0.497602" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions mobile: quiet entry, draft preservation, no implicit writes" time="0.568839" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions filter by intent, support keyboard selection, empty state and focus wrapping" time="0.583766" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions open existing work and catch-up flows; shortcuts do not interrupt another dialog" time="0.985470" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions offer only the current member's available flows" time="0.421235" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions recheck stale controls and clear the menu when room access ends" time="0.445548" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions ignore composition and held Enter without changing drafts" time="0.397721" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions reach work, invitation, agent and instructions without creating anything" time="0.899096" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions on a phone: People and How to add an agent leave the drawer open with focus inside it" time="0.769338" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room actions fit a small touch viewport and keep the last action reachable" time="0.480859" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="channel finder keyboard: bounded destinations, scoped drafts and stale refusal" time="1.296136" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<!-- 30-channel local fixture open+filter 10ms; browser orchestration included -->
+	<testcase name="channel finder touch: bounded destinations, scoped drafts and stale refusal" time="1.301630" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<!-- 30-channel local fixture open+filter 80ms; browser orchestration included -->
+	<testcase name="task finder keyboard: typed destinations preserve their conversation origin" time="1.116205" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="task finder touch: typed destinations preserve their conversation origin" time="0.967817" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="phone 390: tapping a person in People shows the composer with their mention" time="0.857297" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-actions-browser-check.mjs"/>
+	<testcase name="room lifecycle desktop: create from Rooms, archive as owner, archived rooms are read-only switcher entries" time="1.043460" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-lifecycle-browser-check.mjs"/>
+	<testcase name="room lifecycle mobile: create from Rooms, archive as owner, archived rooms are read-only switcher entries" time="1.045954" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-lifecycle-browser-check.mjs"/>
+	<testcase name="room lifecycle: a member leaves from About, the room leaves the switcher, and a conversation-only account cannot create rooms" time="0.807871" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/room-lifecycle-browser-check.mjs"/>
+	<testcase name="discovery to contribution desktop: reuse, fresh authority and changed evidence" time="1.799746" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/discovery-contribution-browser-check.mjs"/>
+	<testcase name="discovery to contribution touch: reuse, fresh authority and changed evidence" time="1.688965" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/discovery-contribution-browser-check.mjs"/>
+	<testcase name="work search desktop: return to outcomes without losing context" time="1.628490" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/work-search-browser-check.mjs"/>
+	<testcase name="work search touch: return to outcomes without losing context" time="1.814994" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/work-search-browser-check.mjs"/>
+	<testcase name="workflow desktop: lighter checks, exact retries, truthful status and later findings" time="2.644057" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/workflow-browser-check.mjs"/>
+	<testcase name="workflow mobile: lighter checks, exact retries, truthful status and later findings" time="8.491154" classname="test" file="/Users/potter/Documents/Codex/2026-10-22/you-x20/work/work-creation-navigation/scripts/workflow-browser-check.mjs"/>
+	<!-- tests 110 -->
+	<!-- suites 0 -->
+	<!-- pass 108 -->
+	<!-- fail 2 -->
+	<!-- cancelled 0 -->
+	<!-- skipped 0 -->
+	<!-- todo 0 -->
+	<!-- duration_ms 205844.03925 -->
+</testsuites>

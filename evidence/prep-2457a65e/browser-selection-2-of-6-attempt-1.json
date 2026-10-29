@@ -1,0 +1,580 @@
+{
+  "schemaVersion": 1,
+  "revision": "2457a65e01f0849917cb174f4f41b7d11fbff145",
+  "planHash": "50f1dcd0d7380a78c1fdfc18d0eb260c47e7750282fcb2a852e02787f0100b82",
+  "scope": "full",
+  "base": null,
+  "changed": [],
+  "budgetMs": null,
+  "selected": [
+    {
+      "test": "scripts/a11y-composer-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/a11y-login-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/a11y-room-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/about-receipt-honesty-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/access-preview-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/accessibility-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/account-deletion-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/account-settings-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/accountless-join-restore-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/acquisition-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/action-dialog-focus-scroll-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/action-recovery-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/activity-feed-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/agent-connect-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/agent-pause-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/agent-signin-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/agent-work-access-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/assisted-work-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/auth-journeys-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/auth-return-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/board-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/calm-return-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/channels-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/chat-performance-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/chat-suggestions-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/claim-overlap-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/composer-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/composer-live-files-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/connect-agent-first-screen-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/contribution-journey-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/credit-question-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/decision-register-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/deep-link-reveal-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/deleted-message-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/design-cohesion-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/desktop-google-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/disclosure-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/discovery-contribution-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/dm-consent-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/dogfood-return-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/draft-return-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/drawer-scrim-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/email-password-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/entry-simplification-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/fallback-draft-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/first-result-journey-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/first-use-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/friend-bond-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/google-callback-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/growth-invite-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/guest-upgrade-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/help-contribution-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/help-invitation-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/help-offer-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/human-conversation-work-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/human-experience-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/human-push-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/icon-scale-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/identity-revoked-people-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/invitation-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/invitation-note-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/invitation-recovery-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/invite-signup-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/join-next-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/layout-simplification-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/lazy-boards-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/live-upgrade-draft-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/login-polish-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/loop-warning-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/magic-link-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/member-perms-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/message-edit-delete-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/message-menu-phone-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/message-preview-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/mobile-header-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/mobile-signin-history-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/moderation-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/narrow-navigation-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/native-draft-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/native-result-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/native-wake-bridge-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/notification-feed-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/oauth-return-invite-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/operator-console-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/owner-project-offers-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/password-reset-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/people-rail-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/person-remove-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/pinned-messages-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/portable-work-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/progressive-disclosure-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/project-map-signed-in-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/project-offers-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/public-pages-polish-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/public-work-matching-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/public-work-mcp-journey-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/public-work-results-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/purpose-invite-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/pwa-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/quiet-attribution-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/quiet-copy-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/quiet-design-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/quiet-focus-a34-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/quiet-focus-final-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/quiet-invites-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/receipts-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/reconnect-collaboration-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/recovery-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/refine-draft-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/release-polish-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/reminders-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/reply-request-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/result-copy-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/result-diff-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-actions-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-door-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-export-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-instructions-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-lifecycle-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-only-workspace-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-overview-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-policy-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-results-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/room-trust-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/selfhost-onboarding-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/session-boundary-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/spend-allowance-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/start-room-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/stream-recovery-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/thread-options-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/unified-journey-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/updates-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/visual-regression-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/work-attempts-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/work-changes-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/work-creation-navigation-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/work-recipes-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/work-resume-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/work-reuse-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/work-search-browser-check.mjs",
+      "via": "full suite"
+    },
+    {
+      "test": "scripts/workflow-browser-check.mjs",
+      "via": "full suite"
+    }
+  ],
+  "omitted": []
+}
