@@ -437,6 +437,8 @@ optional.push("server/room-shard-copy.mjs"); // operator copy of one room's room
 // Retired UI files remain recognized only when an historical commit contains them.
 // They are not advertised or required by the current runtime.
 const historicalAssets = ["bounty-board", "referral-board", "squads-ui", "retention-ui", "open-questions-ui", "work-recipes", "land-queue-board"].map(name => `src/${name}.js`);
+optional.push("server/board-read.mjs"); // Shared authenticated Board reader used by HTTP and hosted MCP.
+
 export const allowed = new Set([...required, ...optional, ...historicalAssets]);
 const sha256 = bytes => createHash("sha256").update(bytes).digest("hex");
 // The contract stays exact: any mismatch fails. Each failure now names the
