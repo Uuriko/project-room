@@ -40,6 +40,19 @@ One plan accepts at most 20 targets and 200,000 rows to delete. Split anything l
 
 A room with more than one active human member is refused unless the plan set `allowActiveMembers: true`. The warning names the count. `invite-only-pilot` and any id in `ROOM_OPERATOR_PROTECTED_ROOMS` are refused.
 
+**Money/proof clearance (G-1).** A room with any rows in the money/proof tables — the `bounty_*` family, the `public_work_*` proof family, `public_receipts`, the `spend_*` tables, `work_claims` / `work_claim_history` / `work_claim_config`, `stitch_receipts`, `room_vetting_receipts`, `external_receipts`, `demigod_contracts` / `demigod_contract_requests` — is refused at plan and re-checked at execute, for every caller of the purge machinery (console, panel, or direct API call), with 422 `money_bearing_room`. Purge would delete the ledger and receipts those rows are proof of. There is no override. What happens to a money-bearing room's history before it may die is decision DB-1, not an operator act.
+
+## Panel delete — archived rooms only (Path A)
+
+The console's **Delete an archived room** section is the panel wrapper over the same purge machinery, restricted to one room at a time:
+
+- `POST /api/operator/rooms/{roomId}/purge/plan` with a `reason`. The server verifies the room is lifecycle-archived (`rooms.archived_at` set — its owner closed its writes) before it plans; a room that is not lifecycle-archived answers 422 `room_not_archived`. There is no panel path that deletes a live room.
+- `POST /api/operator/rooms/{roomId}/purge/execute` with `planId`, `confirmToken`, `confirmTitle`, and `confirmId`. The server verifies the typed title and id against the room row before forwarding (422 `confirmation_mismatch` when they differ; the title falls back to the id for a room with no title). Execute also requires a per-room export on record (`room_export` audit row, result `ok`) no older than 24 hours, or it answers 409 `export_required`.
+
+After a purge the room id becomes available again. Old links to the room and its receipts stop working, and a future room could reuse the id. Copies in backups taken before the purge survive until those backups expire.
+
+**Use-gate (MF-12 / DB-2): no production purge of a non-test room — through the panel or the generic flow — until John has decided the deleted-id reuse question (DB-2) or accepted id reuse on the record.** Test and fixture purges are unaffected.
+
 ## QA2 leftovers
 
 Find first. Do not type ids from memory into this doc. Prefixes are enough to locate the leftovers:
@@ -78,7 +91,7 @@ The table counts leave out Cloudflare's internal `_cf_*` tables. A table that re
 
 ## Console
 
-`/operator.html` is a small page over these endpoints. Room Settings → Room health (owner only) links to it. It asks for the operator token once and keeps it in `sessionStorage` for that tab only, never in `localStorage` or a cookie. **Forget token** clears it, and a refused token is cleared too. The page shows status and drift, runs find, builds a plan from find results or ids, and shows the per-table counts. **Execute purge** stays disabled until you type the room title (for a one-room plan) or `purge N targets`. It also lists the latest operator actions. Each page load makes two operator calls (status and actions), so stay inside the 10-per-minute limit.
+`/operator.html` is a small page over these endpoints. Room Settings → Room health (owner only) links to it. It asks for the operator token once and keeps it in `sessionStorage` for that tab only, never in `localStorage` or a cookie. **Forget token** clears it, and a refused token is cleared too. The page shows status and drift, runs find, builds a plan from find results or ids, and shows the per-table counts. **Execute purge** stays disabled until you type the room title (for a one-room plan) or `purge N targets`. It also has an **Archive old messages** section (dry run first, then run on the dry run's numbers — the room stays open; this is not lifecycle archive) and a **Delete an archived room** section (panel Path A above). It also lists the latest operator actions. Each page load makes two operator calls (status and actions), so stay inside the 10-per-minute limit.
 
 ## Audit
 

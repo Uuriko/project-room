@@ -88,6 +88,48 @@
         </div>
       </section>
 
+      <section aria-labelledby="op-archive-heading">
+        <h2 id="op-archive-heading">Archive old messages</h2>
+        <p class="op-note">Moves older messages out of live storage. The room stays open; members can keep writing; nothing is deleted — messages remain readable in search, threads and exports, and the move is reversible. This is message archive, not lifecycle archive: a room's lifecycle state (open / archived, writes closed) is the room owner's act and is not changed here. Take an export of the room first.</p>
+        <form id="op-archive-form" class="op-grid">
+          <label for="op-archive-room">Room id</label>
+          <input id="op-archive-room" name="roomId" spellcheck="false" required>
+          <label for="op-archive-keep">Keep newest messages</label>
+          <input id="op-archive-keep" name="keepNewest" type="number" min="100" max="100000" step="1" value="2000" required>
+          <label for="op-archive-reason">Reason (kept in the audit log)</label>
+          <textarea id="op-archive-reason" name="reason" rows="2" maxlength="200" required></textarea>
+          <button type="submit" id="op-archive-dry">Dry run archive</button>
+          <button type="button" id="op-archive-run" disabled>Run archive</button>
+        </form>
+        <p id="op-archive-result" class="op-state"></p>
+      </section>
+
+      <section aria-labelledby="op-panel-delete-heading">
+        <h2 id="op-panel-delete-heading">Delete an archived room</h2>
+        <p class="op-note">Panel delete is Path A only: it purges a room that is already lifecycle-archived (its owner closed its writes). A room that is still open cannot be deleted from this panel. A room with any money or proof rows (bounty ledger, settlements, receipts, work claims) cannot be purged at all — the purge core refuses it for every caller. After this purge the room id becomes available again. Old links to this room and its receipts will stop working, and a future room could reuse the id. Copies in backups taken before today survive until those backups expire.</p>
+        <form id="op-panel-plan-form" class="op-grid">
+          <label for="op-panel-room">Room id</label>
+          <input id="op-panel-room" name="roomId" spellcheck="false" required>
+          <label for="op-panel-reason">Reason (kept in the audit log)</label>
+          <textarea id="op-panel-reason" name="reason" rows="2" maxlength="500" required></textarea>
+          <button type="submit" id="op-panel-plan-button">Plan panel purge</button>
+        </form>
+        <div id="op-panel-plan" hidden>
+          <p id="op-panel-summary"></p>
+          <p id="op-panel-money"></p>
+          <p id="op-panel-export"></p>
+          <table id="op-panel-counts"><caption>Rows this plan deletes or keeps</caption><thead><tr><th scope="col">Table</th><th scope="col">Action</th><th scope="col">Rows</th></tr></thead><tbody></tbody></table>
+          <form id="op-panel-execute-form" class="op-grid">
+            <label for="op-panel-confirm-title">Type the room title (the room id if it has no title)</label>
+            <input id="op-panel-confirm-title" name="confirmTitle" autocomplete="off" spellcheck="false">
+            <label for="op-panel-confirm-id">Type the room id</label>
+            <input id="op-panel-confirm-id" name="confirmId" autocomplete="off" spellcheck="false">
+            <label class="op-check"><input type="checkbox" id="op-panel-export-held"> I hold the export file for this room (export recorded — confirm you hold the file)</label>
+            <button type="submit" id="op-panel-execute" disabled>Execute panel purge</button>
+          </form>
+        </div>
+      </section>
+
       <section aria-labelledby="op-actions-heading">
         <h2 id="op-actions-heading">Recent operator actions</h2>
         <button type="button" id="op-actions-refresh">Refresh actions</button>

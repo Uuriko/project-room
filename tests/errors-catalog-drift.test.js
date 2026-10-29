@@ -334,15 +334,22 @@ const REGISTRY_FIXTURES = [
       assert.match(ax.hint, /SHA-256/);
       assert.match(nextTextOf(ax), /agent-invites\/redeem/);
     }],
+  // MGMT-PANEL Slice 2: operator-purge codes are registry-born here.
+  ...["money_bearing_room", "export_required", "room_not_archived", "confirmation_mismatch"].map(code => [code, { httpStatus: ERROR_REGISTRY[code].catalog.http }, ax => {
+    assert.equal(ax.reason, code);
+    assert.equal(ax.status, "action_required");
+    assert.doesNotMatch(ax.hint, /^Unknown error/);
+    assert.match(nextTextOf(ax), /.+/);
+  }]),
 ];
 
 test("registry-migrated codes: shipped envelope equals the registry resolution (E4-REG)", () => {
   assert.ok(ERROR_REGISTRY && typeof ERROR_REGISTRY === "object", "ERROR_REGISTRY must be exported from src/agent-error.mjs");
   assert.ok(typeof errorRegistryAx === "function", "errorRegistryAx must be exported from src/agent-error.mjs");
   const migrated = Object.keys(ERROR_REGISTRY);
-  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "dry_run_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "proof_required",
-    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "stale_card", "stale_public_claim", "stale_public_work"],
-    "the migrated set is the joining-path set; growing it is a deliberate edit here too");
+  assert.deepEqual(migrated.sort(), ["agent_not_registered", "archive_not_ready", "confirmation_mismatch", "dry_run_required", "export_required", "guest_invite_account_session_required", "guest_scope_denied", "invalid_archive_request", "invalid_keep_newest", "invalid_room_id", "invalid_wake_poll", "money_bearing_room", "proof_required",
+    "public_work_already_submitted", "public_work_claim_conflict", "public_work_claim_limit", "public_work_deadline_passed", "public_work_renewal_limit", "read_only", "reason_required", "referral_invites_parked", "room_not_archived", "stale_card", "stale_public_claim", "stale_public_work"],
+    "the migrated set is the joining-path set; growing it is a deliberate edit here too (MGMT-PANEL Slice 2 added the four operator-purge codes)");
   for (const [code, ctx, check] of REGISTRY_FIXTURES) {
     const shipped = agentErrorAx({ code, ...ctx });
     const registered = errorRegistryAx(code, ctx);

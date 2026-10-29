@@ -4,6 +4,7 @@
 
 import { configuredOperatorTokenHash, presentedOperatorToken, operatorTokenMatches, carriesRoomOrAccountCookie } from "./operator-auth.mjs";
 import { createOperatorPurge } from "./operator-purge.mjs";
+import { createOperatorRoomPurge } from "./operator-room-purge.mjs";
 import { operatorStatus, operatorDrift } from "./operator-status.mjs";
 import { listOperatorActions } from "./operator-actions.mjs";
 import { operatorArchive } from "./operator-archive.mjs";
@@ -25,6 +26,7 @@ const ROUTES = Object.freeze({
 
 export function createOperatorRoutes({ store, json, reject, body, rate }) {
   const purge = createOperatorPurge(store);
+  const roomPurge = createOperatorRoomPurge(store);
   return async function operatorRoutes(req, res, { url, remoteAddress, requestId }) {
     const path = url.pathname;
     if (path !== "/api/operator" && !path.startsWith("/api/operator/")) return false;
@@ -33,6 +35,20 @@ export function createOperatorRoutes({ store, json, reject, body, rate }) {
     const token = presentedOperatorToken(req.headers.authorization);
     if (carriesRoomOrAccountCookie(req.headers.cookie) && !token) reject(404, "not_found", "Not found");
     if (!operatorTokenMatches(token)) reject(404, "not_found", "Not found");
+    // MGMT-PANEL Slice 2 (scope: write): the one parameterised operator
+    // route family — panel Path-A purge plan/execute for a single room.
+    const roomPurgeMatch = /^\/api\/operator\/rooms\/([^/]+)\/purge\/(plan|execute)$/.exec(path);
+    if (roomPurgeMatch) {
+      if (req.method !== POST) reject(405, "method_not_allowed", "Method not allowed");
+      res.setHeader("Cache-Control", "no-store");
+      let roomId = roomPurgeMatch[1];
+      try { roomId = decodeURIComponent(roomId); } catch { /* wrapper refuses a malformed id */ }
+      const data = await body(req);
+      json(res, 200, roomPurgeMatch[2] === "plan"
+        ? roomPurge.plan(roomId, data, requestId)
+        : roomPurge.execute(roomId, data, requestId));
+      return true;
+    }
     const expected = ROUTES[path];
     if (!expected) reject(404, "not_found", "Not found");
     if (req.method !== expected) reject(405, "method_not_allowed", "Method not allowed");
