@@ -716,6 +716,7 @@ const nodeStorage = {
 const work = "workItemId expectedRevision";
 
 const shapes = {
+  [T.ROOM_TITLE_SET]: "title purpose",
   [T.ROOM_CHARTER_UPDATED]: "expectedRevision purpose outputs boundaries escalation",
   [T.ROOM_POLICY_SET]: ROOM_POLICY_FIELDS.join(" "),
   [T.ROOM_SPEND_ALLOWANCE_SET]: "allowanceCents periodDays",

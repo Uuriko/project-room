@@ -379,9 +379,22 @@ function optedInRows(store, state) {
 function replaceOptedInReceipts(store, state) {
   const roomId = state?.room?.id;
   if (!roomId) return;
+  // Issuance wins for receipts that already exist (RRC-CURE D1): this
+  // re-derivation refreshes a receipt's facts on every publication sync,
+  // but an issued receipt keeps the room_title it was issued under — a
+  // later rename (or any other title change) must not rewrite stored
+  // proof. Capture the stored titles before the delete below; a row
+  // with no stored twin is genuinely new and takes the title current
+  // at its own issuance.
+  const issuedTitles = new Map(store.db.prepare(
+    "SELECT id, room_title FROM public_receipts WHERE origin_room_id=? AND source IN ('work-claim','work-item')"
+  ).all(roomId).map(row => [row.id, row.room_title]));
   store.db.prepare("DELETE FROM public_receipts WHERE origin_room_id=? AND source IN ('work-claim','work-item')").run(roomId);
   if (publicReceipts(state).enabled !== true) return;
-  for (const row of optedInRows(store, state)) insertReceipt(store, row);
+  for (const row of optedInRows(store, state)) {
+    if (issuedTitles.has(row.id)) row.roomTitle = issuedTitles.get(row.id);
+    insertReceipt(store, row);
+  }
 }
 
 function touchPublicWorkListing(store, state) {

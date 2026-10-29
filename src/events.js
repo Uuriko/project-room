@@ -18,6 +18,11 @@ export const MAX_MESSAGE_COMMAND_BYTES = 512 * 1024;
 
 export const EVENT_TYPES = Object.freeze({
   ROOM_CREATED: "room.created",
+  // RRC: title/purpose are labels, not identity (roomId is the identity);
+  // the owner renames with room.title_set in the same *_set family as every
+  // other mutable room attribute. Prior values stay on the projection
+  // (room.titleSet / room.titleHistory) and in the event log.
+  ROOM_TITLE_SET: "room.title_set",
   ROOM_CHARTER_UPDATED: CHARTER_TYPE,
   ROOM_POLICY_SET: "room.policy_set",
   ROOM_SPEND_ALLOWANCE_SET: "room.spend_allowance_set",
@@ -171,6 +176,74 @@ function ensureDefaultChannel(state, at) {
 // is event-sourced (room.policy_set) and lives on the projection; work recorded
 // before a flip keeps the requirements it was recorded with. Off is the default
 // and the pre-policy behaviour: the proposer chooses per item.
+// Room title and purpose (RRC): written once by room.created, changeable by
+// the owner afterwards via room.title_set. A rename is an identity act, not
+// an edit stream, so sets are paced: at most one per minute per room,
+// judged on event timestamps so replay reaches the same verdict as the
+// live command path. Limits mirror the creation contract in
+// server/agent-rooms.mjs (title 1-120, purpose 1-1000). Surfaces that read
+// the projection (room read, directory, /r/ face, activation pack) follow a
+// rename; issued proof does not follow: this handler writes no receipt
+// rows, and the store-level publication sync that re-derives the
+// public_receipts mirror preserves the stored room_title of every
+// receipt id that already exists (issuance wins — see
+// replaceOptedInReceipts in server/public-read-model.mjs), so a receipt
+// keeps the title it was issued under.
+export const ROOM_TITLE_LIMITS = Object.freeze({ title: 120, purpose: 1000 });
+export const ROOM_TITLE_SET_COOLDOWN_MS = 60_000;
+
+export function roomTitleSet(state) {
+  const stored = state?.room?.titleSet;
+  if (!stored) return null;
+  return {
+    revision: Number.isSafeInteger(stored.revision) ? stored.revision : 0,
+    setById: typeof stored.setById === "string" ? stored.setById : null,
+    setAt: typeof stored.setAt === "string" ? stored.setAt : null,
+    previousTitle: typeof stored.previousTitle === "string" ? stored.previousTitle : null,
+    previousPurpose: typeof stored.previousPurpose === "string" ? stored.previousPurpose : null
+  };
+}
+
+export function roomTitleHistory(state) {
+  const stored = state?.room?.titleHistory;
+  if (!Array.isArray(stored)) return [];
+  return stored.filter(entry => entry && typeof entry.title === "string");
+}
+
+function setRoomTitle(state, incoming) {
+  const actor = requireMember(state, incoming.actorId);
+  if (actor.id !== state.room.ownerId) throw new Error("Only the Room owner may set the room title");
+  const { title, purpose } = incoming.data ?? {};
+  if (title === undefined && purpose === undefined) throw new Error("Room title set requires title or purpose");
+  if (title !== undefined && (typeof title !== "string" || !title.trim() || title.length > ROOM_TITLE_LIMITS.title)) {
+    throw new Error(`title must be 1 to ${ROOM_TITLE_LIMITS.title} characters`);
+  }
+  if (purpose !== undefined && (typeof purpose !== "string" || !purpose.trim() || purpose.length > ROOM_TITLE_LIMITS.purpose)) {
+    throw new Error(`purpose must be 1 to ${ROOM_TITLE_LIMITS.purpose} characters`);
+  }
+  const previous = state.room.titleSet ?? null;
+  if (previous?.setAt) {
+    const waitMs = ROOM_TITLE_SET_COOLDOWN_MS - (Date.parse(incoming.at) - Date.parse(previous.setAt));
+    if (waitMs > 0) throw new Error(`Room title can be set at most once per minute; try again in ${Math.ceil(waitMs / 1000)} seconds`);
+  }
+  const previousTitle = state.room.title;
+  const previousPurpose = state.room.purpose;
+  if (title !== undefined) state.room.title = title.trim();
+  if (purpose !== undefined) state.room.purpose = purpose.trim();
+  const revision = (previous?.revision ?? 0) + 1;
+  state.room.titleSet = {
+    revision,
+    setById: incoming.actorId,
+    setAt: incoming.at,
+    previousTitle,
+    previousPurpose
+  };
+  state.room.titleHistory = [
+    ...(Array.isArray(state.room.titleHistory) ? state.room.titleHistory : []),
+    { title: previousTitle, purpose: previousPurpose, replacedById: incoming.actorId, replacedAt: incoming.at, revision }
+  ];
+}
+
 export const ROOM_POLICY_FIELDS = Object.freeze(["requireIndependentReview", "requireOwnerDecision"]);
 
 export function roomPolicy(state) {
@@ -658,6 +731,7 @@ function applyEventWithJournal(current, incoming, journal = null) {
 
   const handlers = {
     [EVENT_TYPES.ROOM_CREATED]: createRoom,
+    [EVENT_TYPES.ROOM_TITLE_SET]: setRoomTitle,
     [EVENT_TYPES.ROOM_CHARTER_UPDATED]: updateCharter,
     [EVENT_TYPES.ROOM_POLICY_SET]: setRoomPolicy,
     [EVENT_TYPES.ROOM_SPEND_ALLOWANCE_SET]: setSpendAllowance,
