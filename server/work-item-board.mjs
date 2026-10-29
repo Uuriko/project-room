@@ -587,6 +587,12 @@ export function boardClaimForWorkItem(item, facts = null, { nowMs = Date.now(), 
     verification: existing?.verification ?? null,
     claimRound: Number.isSafeInteger(existing?.claimRound) && existing.claimRound > 0 ? existing.claimRound : 0,
     deliveryGeneration: Number.isSafeInteger(existing?.deliveryGeneration) && existing.deliveryGeneration > 0 ? existing.deliveryGeneration : 0,
+    // #3545 claimGeneration is the same shape again (the claim round's
+    // fencing token; the codec defaults it to 0): the work item cannot
+    // express it, so an existing row's token is preserved verbatim —
+    // resetting it here would both unbind the round's fencing and keep
+    // the board diff from ever converging.
+    claimGeneration: Number.isSafeInteger(existing?.claimGeneration) && existing.claimGeneration > 0 ? existing.claimGeneration : 0,
   };
   if (historyOmitted > 0) row.historyOmitted = historyOmitted;
   if (existing?.deploy !== undefined && existing?.deploy !== null) row.deploy = existing.deploy;
@@ -691,6 +697,7 @@ function phantomSuccessorCard({ targetId, title, at, by, dependsOn }) {
     delivery: null,
     verification: null,
     deliveryGeneration: 0,
+    claimGeneration: 0,
   };
 }
 

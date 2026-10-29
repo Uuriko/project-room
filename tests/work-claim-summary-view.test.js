@@ -1,5 +1,7 @@
 // Work-claims ?view=summary: the board list gains a compact projection
-// (id, title, state, owner, leaseExpiresAt) for the 331+ item muse-room
+// (id, title, state, owner, leaseExpiresAt, claimGeneration — the #3545
+// fencing token, so board consumers can bind writes to the round they
+// read without a full claim read) for the 331+ item muse-room
 // list, while the default view stays byte-identical.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -54,7 +56,7 @@ async function fixture(t) {
   return { ownerKey, coordKey, owner, coord, call };
 }
 
-const COMPACT_KEYS = ["id", "leaseExpiresAt", "owner", "state", "title"];
+const COMPACT_KEYS = ["claimGeneration", "id", "leaseExpiresAt", "owner", "state", "title"];
 
 test("?view=summary returns compact per-claim projections without heavy fields", async t => {
   const { owner, ownerKey, call } = await fixture(t);
