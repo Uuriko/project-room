@@ -1,3 +1,4 @@
+import { openSearch } from "./room-chrome.mjs";
 // Real browser + local HTTP service; all identities, messages, and keys are disposable fixtures.
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -161,6 +162,9 @@ for (const [label, viewport] of [["desktop", { width: 1440, height: 1000 }], ["m
     const work = Object.values(store.snapshot(owner, "commons").state.workItems);
     assert.equal(work.length, 1); assert.equal(work[0].sourceMessageId, posted[0].id);
     await page.locator("#thread-back").click();
+    await openSearch(page);
+    await page.locator("#message-search").fill("Pick our first book");
+    await page.locator("#search-list [data-open-work]").filter({ hasText: "Pick our first book" }).click();
     await page.locator('#message-list [data-work-timeline] .work-details > summary').click();
     await page.locator('#message-list [data-work-timeline] [data-open-message]').click();
     assert.equal(await page.evaluate(() => document.activeElement.dataset.messageRecordId), posted[0].id);
