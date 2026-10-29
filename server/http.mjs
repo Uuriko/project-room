@@ -6,6 +6,7 @@ import { publicPageCsp } from "./public-search.mjs";
 import { acceptPrefersHtml, publicHtmlNotFoundPath, publicSearchAssets, publicSearchCanonical, publicSearchMarketingPolicy, publicSearchPageCsp, publicSearchSitemap, PUBLIC_NOT_FOUND_HTML, PUBLIC_PAGE_LASTMOD, reviewedPublicSearchPaths } from "./public-search.mjs";
 import { readConversation } from "./conversation-sync.mjs";
 import { readRoomSnapshot } from "./snapshot-window.mjs";
+import { snapshotValidator, ifNoneMatchMatches, SNAPSHOT_CACHE_CONTROL } from "./conditional-get.mjs";
 import { OutsideAgents } from "./outside-agents.mjs";
 import { GmailMailbox } from './gmail-mailbox.mjs';
 import { publicAssetPaths, generatedAgentPages } from "./public-assets.mjs";
@@ -4449,6 +4450,25 @@ export function createRoomServer({ store, origin, assetRoot = new URL("../", imp
         if (fullRead) {
           res.setHeader("Deprecation", "true");
           res.setHeader("Link", `</api/rooms/${encodeURIComponent(roomId)}>; rel="successor-version"`);
+        }
+        // RR-D5 conditional GET: the validator head (server/conditional-get.mjs)
+        // is checked before the snapshot is built — a matching If-None-Match
+        // answers 304 with no payload and the snapshot is never materialised.
+        const conditional = snapshotValidator(store, selected.token, roomId, fence, {
+          view: snapshotView,
+          helpContext: helpContext === "1",
+          offerContext: offerContext === "1",
+          auditView: auditHeader ? "activity" : "full",
+          windowed: snapshotView === "full" && !fullRead
+        });
+        if (conditional) {
+          res.setHeader("ETag", conditional.etag);
+          res.setHeader("Cache-Control", SNAPSHOT_CACHE_CONTROL);
+          if (ifNoneMatchMatches(req.headers["if-none-match"], conditional.etag)) {
+            res.writeHead(304);
+            res.end();
+            return;
+          }
         }
         return json(res, 200, readRoomSnapshot(store, selected.token, roomId, fence, {
           view: snapshotView,

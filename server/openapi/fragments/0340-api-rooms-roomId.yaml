@@ -28,6 +28,13 @@
         appear in the projection). The response declares
         `auditView: activity` and `auditVersion: 1`. Omit the header for
         the default audit tail. Older servers may ignore it.
+        Conditional GET: every 200 response carries a strong `ETag` and
+        `Cache-Control: private, no-cache`. Send the tag back as
+        `If-None-Match` on a repeat read; when the room, your cursor, and
+        the view are unchanged the server answers `304` with no body and
+        never builds the snapshot. The tag is per member and per view
+        variant. The work view with `x-project-room-help-context: 1` is
+        never cacheable (its payload is time-stamped) and carries no ETag.
       parameters:
         - $ref: '#/components/parameters/RoomId'
         - name: view
@@ -39,8 +46,12 @@
         - name: X-Project-Room-Audit-View
           in: header
           schema: { type: string, enum: [activity-v1] }
+        - name: If-None-Match
+          in: header
+          schema: { type: string }
       responses:
         '200': { description: Snapshot }
+        '304': { description: "Not modified — If-None-Match matches the current ETag; no snapshot body" }
         '401': { description: unauthenticated }
         '422': { description: "invalid_snapshot_view, invalid_help_context or invalid_offer_context" }
   /api/rooms/{roomId}/bootstrap:

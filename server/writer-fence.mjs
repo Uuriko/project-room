@@ -39,6 +39,7 @@ export const unfencedAdditiveTables = Object.freeze([
   "room_trial_tasks", "room_trial_requests", "room_vetting_keys", "room_vetting_receipts", "demigod_offer_profiles", "demigod_offer_requests", "demigod_contracts", "demigod_contract_requests", "buyer_signoff_loops", "buyer_signoff_requests", // Additive private record-only rails; older writers have no routes.
   "request_runs", // Permanent host reservations; older writers have no execution route.
   "private_inbox_reads",
+  "room_read_versions", // RR-D5 conditional GET: per-room read-version counter maintained by the rooms-update trigger in server/conditional-get.mjs; purely additive and intentionally NOT fenced — older writers have no code path to it, and the trigger keeps it exact under every writer.
   "access_requests",
   // room_access_auto_approve (standing auto-approve rule, RC-2026-09-29-3603):
   // purely additive and intentionally NOT fenced — older writers have no code
