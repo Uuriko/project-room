@@ -82,6 +82,21 @@ preservation, documentation contradictions and independent hosted journeys.
 Live room ownership supersedes these dated assignments. Research can proceed
 concurrently, but implementation still uses the bounded active slices below.
 
+### Cleanup follow-ups observed on 2026-10-29
+
+The [integrated cleanup checkpoint](DELIVERY-CONTROL-PLAN.md#integrated-cleanup-checkpoint--2026-10-29-2201-utc)
+records the private-history paging repair; do not reopen that exact old-cap defect
+from an earlier plan. Hosted rollout and broader private-thread journeys still
+need their own evidence. Directory query/refresh cost, first-attempt Google sign-in
+reliability, readiness recovery, installed native adoption/signing and storage
+migration remain separate follow-ups under F1–F6.
+
+The other laptop reproduced a floating message toolbar overlapping a date/unread
+divider at 320 CSS pixels in a desktop-pointer fixture. This is a narrow layout
+finding, not evidence about a touch phone. Its isolated follow-up belongs to the
+peer; the release candidate was left unchanged. Room ownership supersedes this
+dated assignment. Source: `local-catalog-content-refresh-1030`, sequence 23267.
+
 ### Archived handbook decisions retained in this plan
 
 The other laptop supplied sanitized revision-33 excerpts on 2026-10-29 (room

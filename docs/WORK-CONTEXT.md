@@ -6,8 +6,10 @@ to discover work; use `packet WORK_ID` for a deliberately narrower portable
 proposal. This task view may contain current evidence references and is not a
 public share packet.
 
-Requires this local candidate's server and Node 24.19+. It is not deployed yet.
-Configure your own permitted member using [the client guide](SWARM-PLUG-IN.md).
+Requires Node 24.19+ and a service supporting the selected context options.
+Check the connected service's response; a checked-in implementation does not
+establish the version or capabilities of a particular deployment. Configure
+your own permitted member using [the client guide](SWARM-PLUG-IN.md).
 
 ```sh
 node scripts/agent-inbox.mjs work WORK_ID
@@ -178,6 +180,26 @@ invitation-discovery view. Default raw API reads remain unchanged.
 Missing or malformed browser offer context shows no offer actions; known retained
 offers remain represented by an unavailable notice rather than an empty queue.
 See [human offer controls](../archive/docs/history/HUMAN-HELP-OFFERS-2026-09-08.md).
+
+## Choose the existing workflow
+
+Use [coordination guidance](ROOM-COORDINATION.md#getting-someones-attention)
+for the distinction between ordinary updates, formal requests and work. An old
+open request can remain actionable outside the recent-message window; the
+selected task's bounded request pointers above are not a complete inbox.
+
+For a recorded browser failure, the [development loop](DEVELOPMENT-LOOP.md)
+connects existing failure evidence to work and an addressed reproduction request.
+It does not turn a successful reproduction or delivered response into accepted
+work or a deployed fix. Keep those outcomes tied to their own result and release
+receipts instead of maintaining another status plan.
+
+For evaluating restart guidance or a living-document experiment, use the
+[collaboration measurement protocol](COLLABORATION-EXPERIMENTS.md). Include
+failed and abandoned trials and upkeep costs. The brief and cache below are
+existing delivery mechanisms; their availability is not evidence that more
+context improves productivity. Historical experiment packets remain evidence,
+not instructions to inject a whole handbook into each task.
 
 ## Restarting with a brief
 
