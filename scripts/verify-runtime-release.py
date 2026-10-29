@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -73,6 +74,9 @@ def main():
     require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repository), "invalid repository")
     require(re.fullmatch(r"[a-f0-9]{40}", args.sha), "full source SHA required")
     require(re.fullmatch(r"runtime-\d{4}-\d{2}-\d{2}-[a-f0-9]{7}", args.tag), "invalid runtime tag")
+    # A failed retry must not leave an earlier success available to artifact upload.
+    receipt_path = Path(args.receipt)
+    receipt_path.unlink(missing_ok=True)
     # The expected directory must itself satisfy the existing runtime contract.
     subprocess.run(["node", str(Path(__file__).with_name("runtime-package.mjs")), "verify", args.expected, args.sha], check=True, capture_output=True, timeout=60)
     root = "repos/" + args.repository
@@ -90,7 +94,17 @@ def main():
     receipt = {"kind": "room.runtime-publication-verification.v1", "checkedAt": datetime.now(timezone.utc).isoformat(), "repository": args.repository,
                "tag": args.tag, "sourceCommit": args.sha, **before, **verified, "verified": True,
                "publicationPromoted": False}
-    Path(args.receipt).write_text(json.dumps(receipt, indent=2) + "\n")
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=receipt_path.parent, delete=False) as output:
+            temporary = Path(output.name)
+            output.write(json.dumps(receipt, indent=2) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, receipt_path)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     print(json.dumps(receipt))
 
 

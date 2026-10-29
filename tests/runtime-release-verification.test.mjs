@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory() as d:
   if args[:3]==['gh','release','download']:
    shutil.copyfile(source,pathlib.Path(args[args.index('--dir')+1])/m.ASSET)
  for changed in [False,True]:
-  receipt.unlink(missing_ok=True);calls=[0]
+  receipt.write_text('{"verified":true,"stale":true}');calls=[0]
   def read(args,**kwargs):
    calls[0]+=1
    if '/commits/' in args[-1]: return json.dumps({'sha':sha}).encode()
