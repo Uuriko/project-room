@@ -14,9 +14,188 @@ inspectable chain from intent to tested source, artifact, deployment and outcome
 
 ### Evidence checkpoint: 2026-10-29 UTC
 
+### Preparation candidate frozen — 2026-10-29, after 17:13 UTC
+
+The fetchable preparation branch `codex/release-prepared-candidate-1029` is now
+`2457a65e01f0849917cb174f4f41b7d11fbff145`, tree
+`89ce10fa446c0dec4621b9236035836dd64139c1`. Main and production are unchanged.
+It composes #5271, #5272, #5277, #5278, #5280, #5281, #5282, #5283,
+#5284 and #5285 while preserving their ancestry. Earlier candidate packages below
+are historical evidence and must not be called the final package.
+
+- #5280 repairs agent discovery of work claim/update lifecycle operations; 39
+  discovery and QA2 checks passed on composition.
+- #5281 and #5283 contain the peer's creation recovery and contextual navigation
+  fixture repairs. Peer reports 12 creation plus 62 related browser passes and
+  32 draft-return/reuse/refine passes. These are focused results, not full coverage.
+- #5282 closes outsider injection into private formal-request threads, including
+  owner outsiders and public descendants. Participant replies and ordinary public
+  conversation remain supported; 63 combined boundary/reply/work/result tests passed.
+- #5284 repairs served-client affected-test dependencies and writes selected and
+  omitted coverage into existing browser artifacts. 26 checks passed. An app-only
+  affected probe accounts for all seven families: two selected and five explicitly
+  omitted by budget; omitted checks are not passes.
+- #5285 preserves #5231 dependency changes and aligns the Sharp workspace override.
+  Frozen installs with pnpm 10 and 11, relay npm ci, registry integrity, 38 checks
+  and both Worker dry runs passed. Three additional relay advisories (body-parser,
+  zod and ip-address) require exposure assessment; this is not an all-clean audit.
+
+Full browser qualification is dispatched using the existing six shards and all
+142 scripts. This Mac runs shards 1/3/5; the peer is requested to run 2/4/6,
+sequentially per host. Source is the full SHA above, run ID
+`prep-2457a65e-20261029`, attempt 1, and `CI_BROWSER_SCOPE` is unset.
+Expected plan hash:
+`50f1dcd0d7380a78c1fdfc18d0eb260c47e7750282fcb2a852e02787f0100b82`.
+Results remain pending. Keep each host's toolchain, selection, receipts, logs and
+JUnit; do not overwrite visual baselines to conceal platform differences.
+
+Local backup and restore rehearsals passed on the earlier addb03aa composition:
+byte equality for nine events, two members, one work item and one file; stale
+restore authority is identified while canonical work and retry receipts survive.
+These scripted assertions are not a production restore rehearsal. Candidate and
+serving source both declare schema 42 and matching writer definitions; current
+provider allocation and full stored-data rollback compatibility remain unproven.
+
+The 17:00 claim-prs tick recovered (zero checked/updated, three invalid skipped,
+current failure count zero). Integrity still reports messages parity failures and
+patrol separately reports a claim-legality transition. Public summaries do not
+identify enough detail to justify a repair; obtain bounded operator diagnostics
+before changing data or weakening checks. The old statement below about current
+claim failure is superseded by this checkpoint; integrity is still unresolved.
+
+The frozen candidate runtime package now verifies 632 source files and 134 assets,
+schema 42, manifest `7fc27afde765301e78a9f5bd992c78c6cd06eddae368f5c820a2f56e87dd4f9f`.
+The 633-file archive passes local publication preflight with the correct basename;
+archive SHA-256 `230cec3b6a68ab61453a3a5c1f766dd8ad1a3409bf69c3778fb8f71b19d421f7`.
+It has not been published. Additional relay advisory assessment found SDK test
+paths only: Zod is reached by tests with local fixture responses; Express/body-parser
+and express-rate-limit/ip-address are not imported by relay runtime/client paths.
+Both Worker bundles exclude these packages. No live Worker exposure was demonstrated;
+a separate dependency cleanup remains worthwhile.
+
+### Qualification progress — 2026-10-29, 17:23 UTC
+
+The peer accepted and started even browser shards (Room 23003/23006). Local shard
+1 passed 23 tests; shard 3 passed 147, failed zero and skipped one. Shard 5 is
+complete: 162 passed, zero failed. All three local receipts match the frozen
+source/run/plan and report success: 332 passed, zero failed, one skipped,
+542,467 ms sequential runtime. The skip is the old large-history DOM bound test in
+`scripts/chat-performance-browser-check.mjs`, marked pending windowing since
+October 7. Read-only source review confirms initial root windowing now exists;
+the same test explicitly enabled on frozen source passed separately (27 initial
+DOM items, 2,000 server-side historical messages retained). The original shard
+result still contains one skip. This test does not prove permanent virtualization,
+client full-history bounds, or total sign-in latency. A test-only follow-up removes
+the obsolete opt-in. Original receipts, JUnit, selection and logs are retained.
+
+The candidate Graphify server map was rebuilt at 2457a65e: 416 files, 7,912 nodes,
+14,290 edges, zero model calls. Artifact size 1,479,235 bytes; SHA-256
+`d78ed5dc09a80dd48579e89010e128e106c59b13f402a87b008392864fa0f8a6`.
+Local callable lookup finds `workItemHistory` at server/store.mjs:4930. The result
+reports server scope, partial semantics and truncation; this is not hosted
+activation or repository-wide completeness.
+
+Separate follow-up #5286 (`bb338ca57186356c5bc7dab99af9a534623f974f`) changes only
+three relay lockfile records on #5285: body-parser 2.4.0, ip-address 10.7.5 and
+zod 4.6.7. Fresh install, 21 relay tests and dry-run passed; that relay audit has
+zero advisories. Upstream patches may contain non-security fixes. This follow-up
+is not part of the frozen browser candidate; its bounded evidence is separate.
+
+### Next release preparation — 16:55 UTC
+
+Preparation only: no next release merge or deployment has started. The peer
+laptop proposed the bounded scope in Room sequence 22961; this Mac acknowledged
+the ownership and preparation boundary in 22964. Earlier sections below are
+dated evidence, not the current queue.
+
+**Current delivery:** production serves `6bda3388f6225eb4b468d4cd9ca522ebb926686f`
+at both origins and both Worker/application version endpoints. Hosted
+[run 40914289947](https://github.com/Uuriko/project-room/actions/runs/40914289947)
+failed a one-second Durable Object readiness timeout; recovery held without a
+second code transition. Subsequent independent deployment smoke and public live
+smoke passed. This preserves the hosted failure; it does not prove sign-in,
+installed Mac adoption, or a permanent readiness cure. Background-job health
+still returns 503 with pre-release claim/integrity failures; no recovery is claimed.
+
+The matching [runtime r2](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-6bda338-r2)
+was downloaded and verified against all 633 exact-source package files before
+promotion. Archive SHA-256:
+`1dd1121f0c535219320c74014a602079cae5c30cc589a559edaf1ceda8081a23`.
+The first immutable publication used the wrong asset basename and remains
+non-latest; r2 corrects the name without changing source bytes. A narrow local
+archive preflight is being added to the existing verifier and workflow to catch
+this before publication. The deployment claim was released and read back unclaimed.
+
+**Candidate inventory (refresh before composition):**
+
+| Part | Exact inspected source | Remaining preparation |
+| --- | --- | --- |
+| Integrated documentation, evidence recorder and profile-lock safety | Main `63534b9244559a58b1029abbbba7b3a0b97d614e`; PRs #5273–#5275 | Retain 22 recorder and 31 Mac test results; these changes are not in the running 6bda runtime. |
+| Selected work hydration | #5271 `c59e8112487e5d4e468b55d56fa08fce5d163d58` | Compose first; preserve selected corruption, authorization and offer-read behavior. |
+| Selected result reads and browser fixture repairs | #5272 `d2f8cd3924f08b9e1ac5f8dc1bc85b96b8d234c0` | Depends on #5271; this is a product read-path change as well as test navigation repairs. |
+| Creation navigation and failed-refresh recovery | Peer local `7efa12c036e894986ed469e2b938925de62be687`, tree `19c3c3eea37a281d839561ed4be2a438483607f2` | Peer publishes a fetchable head, then qualifies composition and remaining draft-return/refine/visual/reuse failures. |
+| Graphify retention and callable lookup | #5277 `c6650ffcd271d7d9508c1b6fbc3bcac45325f5eb` | Compose four Graphify files; preserve partial-graph limits. Rebuild at final landed source before hosted CAS publication and REST/MCP readback. |
+| Runtime publication preflight | #5278 `cd5a888c569f3dfcd1d4658c821257f4e4d246fc` | Six tests pass; corrected 633-file archive passes and original wrong basename fails. Qualify composition; verify downloaded bytes before latest promotion. |
+
+The frozen browser baseline is **red**: peer source `09c466352572c95e805eea2856f0ad7817859979`
+(same tree as local `9bec285d`) ran 736 tests: 649 passed, 75 failed,
+11 cancelled, one skipped. Jill has the exact 86 failure/cancellation locations
+for a selection-gap audit. Focused passes do not supersede this baseline.
+
+The first preparation composition (`codex/release-prepared-candidate-1029`) is
+`fb37bae66e458d379156c4a5702819fd6a862ce0`, tree
+`45b0ea1a443cee21a69231b18e97ce23f98d72ec`: main plus #5271, #5272,
+#5277 and #5278 merge locally without conflicts. Its 55 focused work/result/map/
+publication tests passed with clean unchanged source before and after execution.
+Runtime packaging verified 632 source files, 134 assets and schema 42, manifest
+`86f64163e887b3a999dcdb713e33215b877bf6e4071da17cb8f797e8e6bca3b3`.
+This is a preparation branch, not a main merge, final UI candidate, published
+runtime or full-suite result. Rebuild after the outstanding UI composition.
+
+**Work split and execution order:**
+
+1. The peer laptop owns creation/UI repairs and their browser failure triage.
+   This Mac owns isolated composition, package preparation, original evidence
+   and this release plan. Grok diagnoses qa2-agent-eval/deploy-drift and job-health
+   cadence read-only. Jill tests cold-agent/privacy behavior and omitted test
+   selection. Each helper supplies exact source, outcome and unresolved limits.
+2. Freeze an include/defer manifest after UI handoff. Compose dependency order
+   on current main without merging the release. Reconcile duplicate component
+   PRs by source behavior, not titles or ancestry alone. Keep #4900, #5276's
+   delivery-only tool bundle, archived-index prototypes and unfinished rewrites out.
+   Graphify's old manual-schema workflow portion remains deferred, not completed.
+3. Run independent focused qualification concurrently on the two laptops; retain
+   unchanged evidence with its original scope. Run the configured full browser
+   selection once on the final combined tree and resolve or explicitly assess
+   failures against changed behavior. Do not repeatedly restart unchanged suites
+   or describe affected selection as the full suite.
+4. Prebuild the exact candidate package, validate archive basename and contents,
+   and prepare the Graphify extraction. Bind receipts to tree and commit. After
+   eventual merges, confirm the resulting tree and rebuild source-stamped assets
+   at the landed commit; do not relabel a different candidate SHA as deployed.
+5. Before starting the next release, refresh current serving source, claims,
+   schema evidence and incident disposition. One operator takes the existing
+   deploy claim only for execution. Use the existing workflow and recovery tools;
+   no new controller or speculative platform is required. A lost response means
+   inspect the existing attempt, not dispatch another deployment.
+6. Verify both origins, both version endpoints, signed cards and readiness;
+   separately exercise sign-in, room switching, agent contribution, creation
+   recovery and result review on the supported clients. Publish once with the
+   expected asset name, verify downloaded bytes, then promote. Reconcile unknown
+   outcomes before retrying; use a correction suffix for immutable mismatches.
+7. Activate Graphify only against verified serving code and final source. Read
+   the current hosted revision/digest, publish with both expected values, then
+   verify REST and MCP identity, scope and an actual symbol lookup. Record what
+   remains partial; a successful upload is not complete repository coverage.
+
+Preparation is complete when the candidate, dispositions, executable commands,
+evidence and recovery choices are ready for review. Starting the next release is
+a separate step; preparation does not silently start it. Existing repository
+protections apply, without inventing extra global approval or full-green rules.
+
 ### Reliability cycle follow-up
 
-Production remains the independently verified `c47c3fc` release described below;
+At that earlier checkpoint, production remained the independently verified `c47c3fc` release described below;
 no new Worker deployment was performed for the following changes. The browser
 navigation repair (#5252) passed 30 cases across eight scripts and remains a
 test-only correction, with the mobile Search viewport issue still unresolved.
