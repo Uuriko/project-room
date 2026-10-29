@@ -1,0 +1,189 @@
+main aaa74906: 374 considered, 161 not green, 0 already on main, 213 candidates
+
+Batch 1 (10)
+  #1898 9281a2d2 fix(mcp): room_create honors starter like POST /api/agent-rooms (#1566
+  #3400 2aeaa340 Bump astral-sh/setup-uv from 6.8.0 to 10.3.2
+  #3556 659f196c Fence core work claims: claimGeneration round token + state-machine le
+  #3593 e2f66f90 fix(boot): instance lock binds holder identity (pid + start ticks) — r
+  #3604 3aa3e2a0 fix(supply-chain): skill installer copies from the checkout, never fet
+  #3611 3a6d8c94 Board actions: unconfirmed-outcome copy on transport failure (fixes #3
+  #3620 250e3710 fix(feedback): redact first-party credential prefixes (pri_/rak_/ga1.)
+  #3621 d667b220 fix(account-deletion): tear down a sole-owned room's public footprint 
+  #3638 37d8eb16 fix(supply-chain): align sharp override at 0.35.5; pin runbook wrangle
+  #3647 bf2ba43b Discovery metadata: MCP Registry description names the work loop (serv
+
+Batch 2 (10)
+  #3663 da9414b6 fix(wake): cadence-aware wakeability window (#3592)
+  #3665 409fd866 Human error copy: dedicated strings for 5 fragment-copy codes (census   [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #3690 212dd8c3 docs(quickstart): name the accountable-member rule for work.completed
+  #3691 3f052987 fix(public-work): versioned walk cursor — board pagination exactly-onc
+  #3734 a0a0819b fix(board): stop projecting lapsed work-item leases onto board rows (#
+  #3735 6d76c9b9 Ready queue applies the AvailableWork eligibility rule (#3713)
+  #3737 b9df0286 fix(public-work): board claimability accounts for live path fences (#3
+  #3748 153f954c fix(events): resolve channels through an own-key helper (#3694)  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #3752 4ff34eaa fix(sessions): work-session idempotency matcher covers usage figures a
+  #3815 bbcb447b perf(ci): refresh unit shard durations from hosted receipts (+ duratio
+
+Batch 3 (10)
+  #3841 88ada4e0 WORKOF-GUARD: validate mapped rows in syncWorkItemClaim (#3465 parity,
+  #3952 4a69e29f fix(escrow): finalizeBounty pays an approved bounty through the per-bo
+  #3990 41aac90f fix(invites): #3960 name the email-verification remedy; split share-li
+  #4004 0e959ece fix(offers): board-level statement that offers are agent-claimed (#374
+  #4006 8df4e98f docs: best-of-N bounty attempts spec (#3527)
+  #4007 169cfbf6 fix(join): announce the post-sign-in name step, repair focus, trap Tab  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #4013 f2e14719 fix(share-links): agent-facing copy states the access actually granted
+  #4015 0c190ec3 feat(records): decision records get a >=4y legal-hold retention class 
+  #4016 6ba62c83 feat(receipts): receipt replay front end — timeline first, proof one c
+  #4020 4054cfbd fix(escrow): served ledger reads provision outstanding genesis first (
+
+Batch 4 (10)
+  #4022 d966c618 COMP-DEEP #1: verdict inbox — attention set + sectioned read (server)
+  #4023 3ccd228d perf(escrow): closeEpoch due-filter — skip the isolated transaction fo
+  #4034 6c76da71 fix(board): focus repair on the Close-button and refused-claim paths (  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #4066 b1dc980b fix(claim-reputation): close open positions on closed/deleted terminal
+  #4072 069da71c Practice room (#602): well-known self-join room with chat scope
+  #4129 9f673402 C1: relationship-scoped verification attestation (HUNT-ADVERSARY P1)  [regenerate: plugins/project-room/skills/project-room/references/errors-catalog.md, skills/project-room/references/errors-catalog.md]
+  #4131 417d228c Recovery audit: name unreadable rooms instead of leaking bare TypeErro
+  #4150 873d2f7a Purge completeness: public_work_requests + analytics room shadow (ORPH
+  #4153 6443b471 PERF2-MEASURE: deterministic statement/ops budget suite (scripts/perf-
+  #4157 8d74cee9 U1: work-noun mapping corpus — golden fixtures + §2.3 mapping as execu
+
+Batch 5 (10)
+  #4163 4993bb0e Disable the hourly analytics NDJSON export (unclassified raw-identifie
+  #4165 6914e0f1 Calibration rulings v1: versioned reviewer/decider rulings, split-figu
+  #4169 ac3886d3 fix(http): public-work write address bucket becomes a coarse backstop 
+  #4193 a868e44e fix(spend-pricing): run the sibling write-defense chain on the kill-sw
+  #4219 97acefc6 CI: never cancel merge-group (composed head) runs of the test workflow
+  #4221 9e774924 CI: delete zero-bug-quarantine (no permissions block, no stated purpos
+  #4235 0217ab1a Two-AGENTS.md pointer, repo side (Docs Programme D-12b)
+  #4257 81e18438 Mutation pins: settle gate SR-03, wake discharge WD-01/WD-03, verifyHi
+  #4274 44083399 fix(work-claims): restart a lapsed lease when reassignWork reopens a d
+  #4278 a4b43f9c Keeper stuck-state census: unreachable bounties surface in summary + j
+
+Batch 6 (10)
+  #4279 8e8a286c fix(boot): quarantine corrupt rooms on the legacy upgrade path too (#4
+  #4295 1a1306c5 Record a resolvable source pointer on public-work receipts
+  #4307 91def1b7 chore: delete orphaned one-shot chaos/claim.mjs (DC-DEL)
+  #4472 e88d6294 CHALLENGE.md: remove promise pointing at a missing README section
+  #4495 5337501b test(mcp): pin the structured 401 for stale room tokens at /mcp (#4493
+  #4501 e27f8c52 Lot receipts on the stranger receipts index (#3958)
+  #4510 aacdceb1 Access review: surface owner-delegate grants (#3779)
+  #4512 4765f2bd claim-autolink: superseded matches, repo-case webhook freshness, syste
+  #4513 5de3c30a fix(escrow): poster cannot dispute a bounty whose acceptance is their 
+  #4516 fd98e743 public-read-model backfill: skip channel with record ids (#4088)
+
+Batch 7 (10)
+  #4524 75e267ce Fix #3778: journal wake pings for wakeUrl-only hosts via an agent.wake
+  #4535 b90b8dfb Fix #3907 (money settlement): payout lot id named lotId in the settlem
+  #4721 2c913f4f SEC-SANITIZE-1: sanitize-html 2.18.1 (GHSA-c9rx-x947-fp3h) + regenerat  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #4739 a3ff6567 fix: AX recoveries for buyer_signoff_required + receipt_replayed; dige
+  #4741 d2547c16 ci: report-only perf-budget workflow — slice 1 of #3294
+  #4743 fa58ad34 unit-ci: keep the deliberate fail-probe fixture out of shard receipts
+  #4744 0496ae1f tests: derive claim scope expiry from the runtime clock, not 2027-01-0
+  #4746 d3b4976b MCP identity mint: honour decorated errors as structured refusals, not
+  #4747 15f1e909 auditRecovery: canonicalize BLOB cells as blob:<sha256> tokens
+  #4748 394c5be5 access requests: persist the decider's note on plain approve
+
+Batch 8 (10)
+  #4759 174a0f4a Invite redeem: signal the mint-vs-link fork (identityMinted) in the 20
+  #4760 20be4b8b docs: front-door cluster — 428 PoW snippet, production-only rehearsal 
+  #4761 d27ee29f docs: RECEIPTS-PAGE — name the owner commands behind the public-receip
+  #4763 f098b33d Hosted MCP: enumerate tools/list profile+focus in initialize instructi
+  #4767 fa33e049 docs(discovery): llms packet text fixes — payment honesty, claim body,
+  #4770 6f3bffca docs(agent-start-here): claim straight from the list packet — full tas
+  #4776 312ddb7b Board UI: mirror the kernel on reviews, renew, claim cap, write gate,   [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #4778 f6ac62eb fix(ci): ignore install scripts in secret-bearing workflows (#3578)  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #4779 da3475f9 fix(tmp-hygiene): clean up secret-scan-diff probe dirs; browser-check 
+  #4780 e9e2b1fa Wake fabric honesty (#3910): leased-enqueue drop receipt, wake-signal 
+
+Batch 9 (10)
+  #4784 e90f9a78 Remove served-but-never-loaded pwa-install and push-ask modules (#3718
+  #4789 d814eb70 Open the message overflow menu before Save-as-result in helper-owner-e
+  #4790 015be6f5 Restore growth kit invite URL when a share-link result clears (#4473)  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #4791 c1f9a467 fix(#1609): add seeAlso pointer to the public-work pool in /api/opport
+  #4797 a13bba7a feat(discoverability): inventory the public proof surface in served Op
+  #4798 918ca914 fix(escrow): acceptWork refuses at the deadline — #3591 accept-vs-fina
+  #4799 f741505b fix(work-sessions): next hint points at work.proposed commands path, n
+  #4800 f344dda9 Retire legacy v1 agent-invite codes: 410 invite_format_retired (#3672)
+  #4803 7f47c42d Measure the activation funnel's saw-board stage: record board views wi
+  #4805 973fda82 feat(routes): publication declarations for public routes + registry ga
+
+Batch 10 (10)
+  #4809 4178d69f Errors catalog integrity: regenerated rows, HTTP fixes, status-first d  [regenerate: plugins/project-room/skills/project-room/references/errors-catalog.md, skills/project-room/references/errors-catalog.md]
+  #4810 f28819c7 test(conformance): PR-0 shared infra for #3676/#3677 harness family — 
+  #4811 bd5aa58a Serve the Agent Skills discovery index at /.well-known/agent-skills/
+  #4816 7abb0c27 perf(events): light-clone workItems + messages slice in cloneStateForA
+  #4856 e6f445d0 Label and mask the join agent key
+  #4883 d023e747 fix(ci): onboarding-probe publish opens a PR instead of pushing to mai
+  #4923 ff2710ad F-4: stop naming unpublished receipts on the public lot face
+  #4972 2b3cfa23 Surface rowsRead + projection-cache counters per request in DO logs (S  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #4973 13a944ec store: expression index for the work-item history scan (events_room_wo
+  #4979 e936b221 W-39: govern .agents/skills as a deliberate, checked second skill home
+
+Batch 11 (10)
+  #4991 eefb0de1 docs(openapi): make CreditReceipt.before nullable (genesis receipts) —
+  #4993 ac3c4d5b PIN B1-3: bonds + escrow distinguishing tests (24 bond groups, 33 escr
+  #4994 87253c95 Wake accounting: production reader on the operator counter surface + c
+  #4998 2f2ca14d fix(public): lot reads consult the authoritative recorded receipts set
+  #5001 31b16201 docs(openapi): spec-repair tranche — guard set, nullable, requiredness  [regenerate: docs/openapi.yaml]
+  #5002 78feed1e fix(jobs): due probes surface store errors instead of fabricating "not  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5008 66839606 Wake accounting: isolated transaction runner registry (stacks under #4
+  #5013 29bfe6fe ci: raise browser-shards timeout to 30 minutes
+  #5018 9ef07a88 DISPUTE-CORE: make bounty disputability a posting-time property
+  #5019 18b6e3cb Disclose the 1% room-pool fee on bounty views, attribution, Terms and 
+
+Batch 12 (10)
+  #5049 2907ee12 fix: preserve patrol verification across deadline cutoffs
+  #5052 a2cee624 Make local Room checks portable and inspect host continuity safely
+  #5053 8074ac0d fix: give overlap disclosures a 44px touch target  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5064 392b6de8 Human panel: refresh on room events, slow the fallback poll
+  #5066 9a57f7df Resolve retained Graphify callable aliases and explain incomplete miss
+  #5068 f7aca833 Delivery bundle: refuse unknown fields by name (UT2 candidate 7)
+  #5076 d0370d00 MCP: state bounty_accept's true attestation shape; stop anonymous tool
+  #5078 159ca2bf MCP: add directory-card publish/edit/withdraw verbs over the signed HT
+  #5084 a8aafa74 Qualify manual deployment schema inline at the exact commit
+  #5085 243e82af fix(chat): preserve selected reply request recipient  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+
+Batch 13 (10)
+  #5096 f4140d87 B2: Bloom + HyperLogLog counters (approximate reads only)
+  #5099 bb2a6454 F1: fee-credit expiry boundary pins (behaviour unchanged)
+  #5100 024df9fa room open: skip the redundant first-open room re-read
+  #5106 b6727431 perf(canonicalJson): presort + stringify internals, single-Buffer boun
+  #5107 5a022e14 Slim room_search_actions responses: drop embedded inputSchemas (PERF-5
+  #5110 0497cbef perf(mcp): re-key the MCP door rate limit per identity, address backst
+  #5111 312da348 fix(deploy): honest ~90s smoke verifying this run's stamped build + pr  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5113 3d4740e2 Join kit: auto-solve mint proof-of-work on 428 and retry once (E5-b)
+  #5114 15fdbffe perf(check): in-process acorn syntax stage (PERF-50 G-S2)
+  #5116 5ad736c6 C4-1: bodies-at-rest for hot rooms — per-room selection (list + auto a
+
+Batch 14 (10)
+  #5117 b3ebb6af fix(public): grade public-work share metadata by its recorded verifica
+  #5118 3094d773 docs(meta): package metadata names the current product; LISTINGS EvoMa  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5121 3b026172 room screen: hide "Connected" while connected; one Invite entry in the
+  #5122 c8581c35 Reject mixed authorization context in agent preflight
+  #5124 a1ea66a7 G5: MCP retrieval-based tool discovery (TF-IDF top-5 + synonym map + f
+  #5125 fc77bef4 ATT: needs-me bountyAttention — decider/poster/worker legs for bounty 
+  #5126 8a554f9c Share overlapping scheduled jobs through outcome commit  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5128 f2cbdd4a Public proof residuals: honest 404 scope for disabled agent pages and 
+  #5129 e6e6dc77 FTS5 inbox search (unicode61) over the private inbox engine
+  #5130 402b57bd MCP room discovery: non-member room_check_access leg at public-face pa
+
+Batch 15 (10)
+  #5134 3ae19896 RRC: room.title_set rename verb + room-create budget honesty  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5135 4815725f room sidebar: Members header with an avatar stack; list who is around   [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5138 a09fb37a Search coherence (Option A): newest-first ordering + parameter honesty  [regenerate: docs/openapi.yaml]
+  #5139 d10de5ce rooms page: visible New room / Account disclosure rows; tidy Join room
+  #5140 846bbf50 styles: use type-scale tokens where raw sizes already equal them (no v  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5141 2f429788 feat(cli): room setup recipes for 5 more coding CLIs (reason-take-2, M
+  #5144 f3372825 feat(cli): room join, one-line agent-first join ending in an invite li
+  #5146 58dfe47a reply requests: server stamps which credential answered (ask_owner par
+  #5147 e0aeefb1 feat(room): person/session and repo:name addressing, read-at-next-paus
+  #5149 f983d59a room files: attachment_quota 409 names the limit, used, max and remain
+
+Batch 16 (4)
+  #5157 1208b8d0 Icons grow with the reader's text size  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5158 223504c6 Plainer account menu and Go to dialog copy  [regenerate: scripts/CANDIDATE-MANIFEST.json]
+  #5161 17f1bd3c Mentions: a late ack clears a timed-out mention from the open list
+  #5162 ca8f79df Teach untested-modules lint to scan .test.mjs test files
+
+Conflict with an earlier batch or main: #3951 #3974 #4050 #4051 #4052 #4054 #4561 #4723 #4728 #4730 #4745 #4752 #4781 #4806 #4876 #4885 #4912 #4938 #4940 #4954 #4969 #4974 #4975 #4980 #4982 #4983 #4984 #4985 #4996 #5004 #5007 #5009 #5017 #5021 #5024 #5026 #5029 #5031 #5032 #5036 #5037 #5039 #5040 #5041 #5044 #5047 #5062 #5087 #5093 #5097 #5098 #5108 #5109 #5112 #5127 #5132 #5136 #5137 #5145
