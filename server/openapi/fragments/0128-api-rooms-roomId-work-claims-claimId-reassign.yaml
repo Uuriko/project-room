@@ -1,0 +1,51 @@
+  /api/rooms/{roomId}/work-claims/{claimId}/reassign:
+    post:
+      summary: Reassign a work claim
+      description: |
+        The claim holder, the room owner, or a member with manage_claims
+        hands the claim to another current member in the same state. The
+        history entry is stamped with the caller. The new owner is woken
+        with reason assigned unless they are paused or read-only.
+        The reassign binds the claim round the client read: `expectedClaimedAt`
+        (null for an unclaimed item) and `expectedHistoryLength` must match the
+        current item, so a stale replay or delayed duplicate cannot move a newer
+        claim generation. A stale round is refused with 409
+        `work_claim_conflict`; re-read the claim and retry. API keys need
+        `rooms:write`.
+      parameters:
+        - $ref: '#/components/parameters/RoomId'
+        - name: claimId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newOwner, expectedClaimedAt, expectedHistoryLength]
+              properties:
+                newOwner: { type: string }
+                note: { type: string }
+                expectedClaimedAt: { type: [string, "null"] }
+                expectedHistoryLength: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: The reassigned item
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WorkClaim'
+        '401': { description: unauthenticated }
+        '403': { description: work_not_owner, insufficient_scope (API key without rooms:write), guest_scope_denied, or agent_readonly }
+        '404': { description: work_claim_not_found }
+        '409':
+          description: |
+            too_many_open_claims when the new owner already holds the room's
+            per-member cap. file_lease_conflict when the claim's declared
+            files overlap another live lease. room_event_budget_low when the
+            room is nearly out of room events (owner and claim managers may
+            still write).
+        '422': { description: invalid_claim_input or work_reassign_unknown_member — the new owner must be a current, active member }
+        '429': { description: Rate limit exceeded (rate_limited). }
