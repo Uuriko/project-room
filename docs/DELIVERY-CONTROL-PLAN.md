@@ -12,6 +12,45 @@ to do next without reconstructing chat history. A disconnected laptop resumes
 useful work without duplicating a deployment. Each production change has an
 inspectable chain from intent to tested source, artifact, deployment and outcome.
 
+### Evidence checkpoint: 2026-10-29 UTC
+
+### Verified release checkpoint — 2026-10-29, 18:26 UTC
+
+[PR #5292](https://github.com/Uuriko/project-room/pull/5292) landed
+`4fe3f5189b1dda9cdae0c917c8579129ea4a8338`.
+[Deployment 40929536373](https://github.com/Uuriko/project-room/actions/runs/40929536373)
+passed its exact-source schema gate, deployment smoke, live smoke and verified
+runtime publication (`runtime-2026-10-29-4fe3f51`). Mixed Worker/room-service
+versions during propagation converged without another upload or reset. An
+independent saved-identity read verified all four version endpoints before and
+after bootstrap/selected-request checks. Both bootstraps returned 179 participant
+requests and no nonparticipant entries for that viewer; this is not a global
+privacy proof or a completed human sign-in journey.
+
+Graphify was published for the same release, digest
+`df444a943e46478704a84ac5fb3fb446fe2c8542df96b916aab902a461e9cd1a`.
+Three REST and three fresh MCP reads matched. It covers server code and remains
+partial/truncated; source-revision provenance is not an authenticated source
+attestation. Existing Board overlap hooks consume it.
+
+All six canonical browser shards passed on the 209f5941 composition in
+[run 40928737023](https://github.com/Uuriko/project-room/actions/runs/40928737023).
+Later changes were test expectations, the exact entropy exception and generated
+manifest pins. The broad local suite was stopped after 13 minutes with partial
+failures retained; no full-suite green claim. Test-only [PR #5294](https://github.com/Uuriko/project-room/pull/5294)
+subsequently merged as `52dcbfb0656e1834828a0d3666608c588cd4ab41`, fixing
+the composer CSS parser and missing browser timing; 16 focused checks passed.
+That follow-up required no Worker upload. Operator-only parity details
+remain unavailable; no speculative data repair was attempted. A fresh connector
+read confirmed the supposedly unconfirmed answer was recorded: the old long-lived
+connector process lacked current answer-stamp support. Updating its configuration
+alone had not restarted that session.
+
+This checkpoint supersedes the preparation-only status below. It is a dated
+release observation, not a live deployment dashboard. The handbook consolidation
+uses the existing [index](INDEX.md); archived handbook material is not considered
+fully migrated until its surviving content has been reconciled.
+
 ### Current release execution — 2026-10-29, after 18:00 UTC
 
 John authorized completion of the qualified release, final-source Graphify
@@ -45,8 +84,6 @@ its server-only truncated map is not repository-wide coverage.
 Earlier checkpoints below are historical, including their pending-results and
 preparation-only statements. Preserve original receipts rather than rewriting
 failed attempts as passes.
-
-### Evidence checkpoint: 2026-10-29 UTC
 
 ### Preparation candidate frozen — 2026-10-29, after 17:13 UTC
 
