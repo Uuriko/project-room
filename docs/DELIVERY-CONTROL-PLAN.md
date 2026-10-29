@@ -5,6 +5,12 @@ Project Room owning its development and maintenance workflow. It complements
 [the product architecture plan](ARCHITECTURE-EXECUTION-PLAN.md); it does not
 replace that backlog or make its unfinished work complete.
 
+Read the [latest recorded release](#verified-release-20261029-2023),
+[active priorities](FOCUSED-DELIVERY-PLAN.md), or
+[retained checkpoint history](#retained-checkpoint-history).
+Use [Room coordination](ROOM-COORDINATION.md) for live ownership; dated assignments
+in this document do not establish current claims.
+
 ## Outcome and current evidence
 
 A person or agent can ask what is ready, what is running, what failed, and what
@@ -13,6 +19,42 @@ useful work without duplicating a deployment. Each production change has an
 inspectable chain from intent to tested source, artifact, deployment and outcome.
 
 ### Evidence checkpoint: 2026-10-29 UTC
+
+<a id="verified-release-20261029-2023"></a>
+
+### Verified release checkpoint — 2026-10-29, 20:23 UTC
+
+Production is `eb2c12a1d777ff042fb446b840aacc82e4e98664` (PR #5316, including
+#5314). [Deployment 40947450056](https://github.com/Uuriko/project-room/actions/runs/40947450056)
+passed its first strict smoke, live smoke and runtime publication. No rollback,
+second Worker upload or readiness retry was needed. Independent authenticated
+checks at 20:22:47 UTC found the exact revision at all four version doors before
+and after; both bootstrap and selected participant reads returned 200, with 182
+participant requests and zero nonparticipant requests exposed. Prior mixed-version
+observations remain retained failures of convergence, not successful auth probes.
+
+The [verified runtime](https://github.com/Uuriko/project-room/releases/tag/runtime-2026-10-29-eb2c12a)
+contains 635 files, 3,345,449 bytes, SHA-256
+`516388f3b08e118434a1ae475d524170ea68e41b98e9c2f229b1bb8fc31f9ed4`.
+A separate latest-release read confirmed the tag after publication verification.
+Matching Graphify publication and three REST plus three fresh MCP reads passed
+with digest `549256f1fb45977c249be93a019a28e977cfd0c19a3579a434e33b525a472ee8`;
+coverage remains server-only and truncated.
+
+This ships claim-history guidance, honest receipt outcomes, designated dispute
+decider disclosure, accessible action names, agent enrollment/setup ordering,
+correct API-key recovery hints and separate deployment-phase reporting. The
+patrol detail and `.test.mjs` lint fixes merged afterward are not in this release.
+DM navigation and selected-run performance experiments remain separate candidates.
+Real screen-reader use, physical sleep/wake and universal first-attempt Google
+sign-in reliability remain unverified. The full deployment-record/signing project
+is not completed by these narrower reporting improvements.
+
+## Retained checkpoint history
+
+The dated observations below are retained as evidence. Words such as “current,”
+“pending,” and “owns” describe their recorded time, not today's release or live
+ownership. They do not override the latest checkpoint or active priorities above.
 
 ### Verified release checkpoint — 2026-10-29, 20:04 UTC
 
@@ -677,6 +719,11 @@ ownership. Shared production deployment remains serialized, while tests and
 read-only observations run independently. Each handoff names commit, tree,
 changed paths, tests, failures and next action; chat is notification, not the
 only place the evidence exists.
+
+The numbered implementation proposal below is retained for its design and
+acceptance criteria, not as a current queue. The verification-record adapter is
+implemented; use [its current contract](RELEASE-RECORD.md). Broader merge,
+deployment/publication adapters, controller and signing work remain incomplete.
 
 ## 1. Finish the current delivery without coupling it to this overhaul
 
