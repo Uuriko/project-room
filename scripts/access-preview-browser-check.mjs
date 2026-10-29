@@ -181,7 +181,8 @@ for (const pending of [26, 60]) test(`owner attention pages ${pending} pending r
   assert.deepEqual(await rows.locator(".attention-title").allTextContents(), first);
   await next.click();
   await page.waitForFunction(() => document.querySelector("#attention-range").textContent.includes("Showing 26"));
-  await rows.first().getByRole("button", { name: "Deny", exact: true }).click();
+  const deniedTitle = (await rows.first().locator(".attention-title").textContent()).trim();
+  await rows.first().getByRole("button", { name: `Deny — ${deniedTitle}`, exact: true }).click();
   await page.waitForFunction(total => document.querySelector("#attention-count").textContent === String(total), pending - 1);
   assert.match(await page.locator("#attention-range").textContent(), new RegExp(`Showing 1[–-]25 of ${pending - 1}`));
   assert.equal(await previous.isDisabled(), true, "a decision returns to refreshed first page");
