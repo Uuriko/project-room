@@ -79,6 +79,56 @@ test("needs-attention: Approve/Deny buttons carry the item's title in their acce
   assert.match(html, /aria-label="Decline — Sam asks to join"/, "Decline names its item");
 });
 
+test("needs-me rows: two Review buttons on different items have distinct accessible names containing their titles", () => {
+  const me = "ai_me", other = "ai_other";
+  const members = { [me]: { id: me, displayName: "Codex QA", kind: "agent" }, [other]: { id: other, displayName: "Jill", kind: "agent" } };
+  const review = (id, title) => ({ id, title, state: "claimed", owner: other, tags: [`rev-${me}`], reviews: [], updatedAt: iso(NOW - 5 * 60000), leaseExpiresAt: iso(NOW + 5 * 3600000) });
+  const html = needsMeHtml([review("wc_a", "Fix the roof"), review("wc_b", "Paint the door")], { id: me, write: true }, members, NOW);
+  const labels = [...html.matchAll(/data-needs-me-open="[^"]*" aria-label="([^"]*)"/g)].map(m => m[1]);
+  assert.equal(labels.length, 2, "both review rows render a Review button with an aria-label");
+  assert.deepEqual(labels, ["Review — Fix the roof", "Review — Paint the door"]);
+});
+
+test("needs-attention partial mode: the Cancel button carries the item's title in its accessible name", async t => {
+  const elements = {
+    "#attention-list": stubElement(), "#attention-count": stubElement(), "#attention-status": stubElement(),
+    "#attention-refresh": stubElement(), "#attention-pages": stubElement(), "#attention-range": stubElement(),
+    "#attention-previous": stubElement(), "#attention-next": stubElement(),
+  };
+  const partialButton = { dataset: {}, disabled: false, _click: null,
+    addEventListener(event, fn) { if (event === "click") this._click = fn; },
+    closest: () => ({ dataset: { itemIndex: "0" } }) };
+  const list = elements["#attention-list"];
+  list.querySelector = () => null;
+  list.querySelectorAll = sel => sel === ".attention-partial" ? [partialButton] : [];
+  const section = { hidden: true, querySelector: sel => elements[sel] ?? stubElement(), _elements: elements };
+  const client = {
+    session: { id: "sess-1" }, generation: 1,
+    needsAttention: async () => ({
+      items: [{
+        kind: "access_request", id: "ar_1", severity: "action", requestKind: "permissions",
+        title: "Sam asks to join", detail: "Wants in.",
+        requestedPermissions: ["accept_work", "complete_work"],
+        actions: [
+          { action: "approve", method: "POST", body: { decision: "approve" } },
+          { action: "deny", method: "POST", body: { decision: "deny" } },
+        ],
+      }],
+      itemCount: 1, pageOffset: 0,
+    }),
+  };
+  const card = createNeedsAttentionCard({ client, section });
+  const prevDocument = globalThis.document;
+  globalThis.document = { activeElement: null };
+  t.after(() => { if (prevDocument === undefined) delete globalThis.document; else globalThis.document = prevDocument; });
+  await card.refresh();
+  assert.match(list.innerHTML, /aria-label="Approve partial — Sam asks to join"/, "partial entry point names its item");
+  assert.ok(partialButton._click, "the Approve partial button is wired");
+  partialButton._click();
+  assert.match(list.innerHTML, /class="button ghost attention-cancel" aria-label="Cancel — Sam asks to join"/, "Cancel names its item");
+  assert.match(list.innerHTML, /aria-label="Approve selected — Sam asks to join"/, "Approve selected names its item");
+});
+
 test("timeline overflow: the message-more summary names the message (author identity), not a bare generic label", () => {
   // src/app.js is browser-wired and not unit-importable; the check is on the
   // rendered template's source shape — the summary's aria-label must be

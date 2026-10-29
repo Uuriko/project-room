@@ -48,7 +48,7 @@ test("one primary action per row: Renew, Review, Hand off; titles escaped", () =
   ], { id: me, write: true }, members, now);
   assert.match(html, /<h3 id="needs-me-heading">3 need you<\/h3>/);
   assert.match(html, /data-claim-action="renew" data-claim-id="soon"[^>]*>Renew</);
-  assert.match(html, /data-needs-me-open="r">Review</);
+  assert.match(html, /data-needs-me-open="r" aria-label="Review — Title r">Review</);
   assert.match(html, /data-claim-action="release" data-claim-id="q"[^>]*>Hand off</);
   assert.match(html, /Your lease ends in 20m/);
   assert.match(html, /You are tagged to review · @Jill/);
