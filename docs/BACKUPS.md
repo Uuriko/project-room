@@ -91,6 +91,26 @@ Results of each drill are recorded in `ops/STATE.md`.
 
 ## Byte equality (REL-14)
 
+For local SQLite backups, `backupRoom` also records `snapshot.bytes` and
+`snapshot.sha256` for the complete standalone file, after closing its verification
+connection. `backup-verify` checks those bytes before and after its semantic reads,
+rejects a non-empty WAL, and detects file identity/size/timestamp changes during
+hashing. This catches changes outside the event and attachment tables, including
+account rows. It does not change the hosted NDJSON backup format.
+
+Verify a private, quiescent backup, never the live database. Do not open the backup
+for writes, checkpoint it, or replace it during verification. The repeated checks
+detect observed changes; they are not an atomic lock against a concurrent writer.
+Keep the watermark with the snapshot and protect both: a checksum is evidence of
+byte equality to that watermark, not authentication of whoever supplied it. An
+actor who can replace both can create a matching checksum. Authority reconciliation
+against a current reference is still a separate check.
+
+The report names its coverage: `snapshot-bytes`, `events-and-attachments` for an
+older digest watermark, or `counts-only` for the oldest format. Legacy backups
+remain readable; a legacy `ok: true` does not prove equality of every table.
+Malformed snapshot metadata fails rather than silently downgrading coverage.
+
 - `backupRoom` writes content digests into the watermark (`digests.events`, `digests.attachments`): a sha256 over every event row and every `room_attachments` row, including a hash of each file's bytes. `scripts/backup-verify.mjs` recomputes them on the restored copy, so a same-count edit or a flipped file byte fails verification. Watermarks written before this carry counts only and still verify (the check says so).
 - The NDJSON export (the nightly backup's format) writes BLOB cells as `{"$base64": "..."}` and replay decodes them. Before this, any room holding a room file produced an export that replay refused.
 - On the Durable Object, SQL returns BLOB cells as `ArrayBuffer`, which `JSON.stringify` turns into `{}`. Until 2026-10-08 the export only encoded `Uint8Array` (what Node returns), so the first production backup carried every `room_attachments.bytes` cell as `{}` and replay refused it. The export now encodes `ArrayBuffer` and typed views too, and the KV manifest is version 2. A version 1 manifest is not trusted as that day's backup: if the job runs again on the same UTC day it rewrites it. The job itself is due 24 hours after its last run, so in practice the first version 2 copy is the next day's key, and the version 1 copy simply expires.
